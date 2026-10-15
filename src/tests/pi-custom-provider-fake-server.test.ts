@@ -302,6 +302,76 @@ describe("PiMonoAdapter sessions against fake OpenAI-compatible servers", () => 
     { timeout: 30_000 },
   );
 
+  test(
+    "an OpenRouter gateway session never leaks its endpoint into a concurrent default session",
+    async () => {
+      const a = startFakeServer("pong");
+      const b = startFakeServer("pong");
+      servers.push(a, b);
+      const keyA = `example-openrouter-a-${randomToken(16)}`;
+      const keyB = `example-openrouter-b-${randomToken(16)}`;
+      const sharedPath = join(agentDir, "models.json");
+      // The operator's hand-authored gateway, used by every default session.
+      const shared = JSON.stringify({ providers: { openrouter: { baseUrl: b.url } } });
+      await Bun.write(sharedPath, shared);
+
+      // Hold session A on its first write into the shared agent dir (the old
+      // code wrote models.json, then the marker: this pauses between them)
+      // and run session B in that window. Without such a write A runs first.
+      const originalWrite = Bun.write;
+      const sharedWrites: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let held!: () => void;
+      const heldA = new Promise<void>((resolve) => {
+        held = resolve;
+      });
+      Bun.write = (async (...args: Parameters<typeof Bun.write>) => {
+        const path = String(args[0]);
+        if (path.startsWith(`${agentDir}/`) && !path.startsWith(join(agentDir, "sessions"))) {
+          sharedWrites.push(path);
+          if (path.endsWith(".agent-swarm-openrouter-override.json")) {
+            held();
+            await gate;
+          }
+        }
+        return originalWrite(...args);
+      }) as typeof Bun.write;
+      const model = "openrouter/deepseek/deepseek-v4.1-flash";
+      let sharedAfter: string;
+      try {
+        const runA = runSession("or-a", model, {
+          OPENROUTER_API_KEY: keyA,
+          OPENROUTER_BASE_URL: a.url,
+        });
+        await Promise.race([heldA, runA]);
+        const second = await runSession("or-b", model, { OPENROUTER_API_KEY: keyB });
+        release();
+        const first = await runA;
+        expect(first.result.isError).toBe(false);
+        expect(second.result.isError).toBe(false);
+      } finally {
+        release();
+        Bun.write = originalWrite;
+        sharedAfter = readFileSync(sharedPath, "utf-8");
+        rmSync(sharedPath, { force: true });
+      }
+
+      const chatA = a.seen.filter((r) => r.path.endsWith("/chat/completions"));
+      const chatB = b.seen.filter((r) => r.path.endsWith("/chat/completions"));
+      expect(chatA.length).toBeGreaterThanOrEqual(1);
+      expect(chatB.length).toBeGreaterThanOrEqual(1);
+      expect(new Set(chatA.map((r) => r.authorization))).toEqual(new Set([`Bearer ${keyA}`]));
+      expect(new Set(chatB.map((r) => r.authorization))).toEqual(new Set([`Bearer ${keyB}`]));
+      // Nothing wrote the shared config: it is still the operator's file.
+      expect(sharedWrites).toEqual([]);
+      expect(sharedAfter).toBe(shared);
+    },
+    { timeout: 30_000 },
+  );
+
   // Opaque keys: no token-shape regex matches them, and none is in process.env.
   const cases: Array<{
     label: string;

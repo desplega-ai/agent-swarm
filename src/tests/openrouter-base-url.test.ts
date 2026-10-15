@@ -2,16 +2,17 @@
  * OPENROUTER_BASE_URL gateway routing — unit tests.
  *
  * Covers the shared resolver (`src/utils/openrouter-base-url.ts`), the pi
- * models.json override writer (`ensureOpenRouterModelsOverride`) including
- * its composition through pi-coding-agent's ModelRuntime, and attribution host gating.
+ * per-session models.json composer (`writeSessionModelsJson`) for every shared
+ * starting state, its composition through pi-coding-agent's ModelRuntime, and
+ * attribution host gating.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { ensureOpenRouterModelsOverride } from "../providers/pi-mono-adapter";
+import { writeSessionModelsJson } from "../providers/pi-mono-adapter";
 import {
   DEFAULT_OPENROUTER_BASE_URL,
   getOpenRouterAttributionHeaders,
@@ -47,160 +48,109 @@ describe("getOpenRouterBaseUrl", () => {
   });
 });
 
-describe("ensureOpenRouterModelsOverride (pi)", () => {
-  let agentDir: string;
+describe("writeSessionModelsJson — OpenRouter gateway (pi)", () => {
+  const MARKER = ".agent-swarm-openrouter-override.json";
+  const LEGACY = "https://legacy-gateway.example/v1";
+  const USER = "https://user.example/v1";
+  const userOpenRouter = { baseUrl: USER, compat: { supportsTools: true } };
+  const custom = { baseUrl: "https://custom.example/v1", api: "openai-completions" };
 
-  beforeAll(() => {
-    agentDir = mkdtempSync(join(tmpdir(), "pi-or-override-"));
-  });
+  /** Starting states of the shared agent dir; the marker ones are left by earlier versions. */
+  const states: Record<string, Record<string, string>> = {
+    "no models.json": {},
+    "hand-authored baseUrl": {
+      "models.json": JSON.stringify({ providers: { openrouter: userOpenRouter, custom } }),
+    },
+    "legacy override over a user baseUrl": {
+      "models.json": JSON.stringify({
+        providers: { openrouter: { ...userOpenRouter, baseUrl: LEGACY }, custom },
+      }),
+      [MARKER]: JSON.stringify({ baseUrl: LEGACY, previous: USER }),
+    },
+    "legacy override alone": {
+      "models.json": JSON.stringify({ providers: { openrouter: { baseUrl: LEGACY } } }),
+      [MARKER]: JSON.stringify({ baseUrl: LEGACY }),
+    },
+    "legacy marker, baseUrl edited by hand since": {
+      "models.json": JSON.stringify({ providers: { openrouter: { baseUrl: USER } } }),
+      [MARKER]: JSON.stringify({ baseUrl: LEGACY }),
+    },
+    "corrupt models.json": { "models.json": "{not json" },
+  };
 
-  afterAll(() => {
-    rmSync(agentDir, { recursive: true, force: true });
-  });
+  // The openrouter block the session's runtime loads, per state, for the
+  // default gateway and for OPENROUTER_BASE_URL=GATEWAY. `null`: no copy, and
+  // the session loads the shared file as it is.
+  const expected: Record<string, [defaultGateway: unknown, gateway: unknown]> = {
+    "no models.json": [null, { baseUrl: GATEWAY }],
+    "hand-authored baseUrl": [null, { ...userOpenRouter, baseUrl: GATEWAY }],
+    "legacy override over a user baseUrl": [
+      userOpenRouter,
+      { ...userOpenRouter, baseUrl: GATEWAY },
+    ],
+    "legacy override alone": [undefined, { baseUrl: GATEWAY }],
+    "legacy marker, baseUrl edited by hand since": [{ baseUrl: USER }, { baseUrl: GATEWAY }],
+    "corrupt models.json": [null, { baseUrl: GATEWAY }],
+  };
 
-  test("no-op when OPENROUTER_BASE_URL is unset", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-or-noop-"));
-    try {
-      await ensureOpenRouterModelsOverride(dir, {});
-      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  function snapshot(dir: string): Record<string, string> {
+    return Object.fromEntries(
+      readdirSync(dir)
+        .sort()
+        .map((name) => [name, readFileSync(join(dir, name), "utf-8")]),
+    );
+  }
 
-  test("writes providers.openrouter.baseUrl when the env is set", async () => {
-    await ensureOpenRouterModelsOverride(agentDir, { OPENROUTER_BASE_URL: GATEWAY });
-    const written = JSON.parse(await Bun.file(join(agentDir, "models.json")).text());
-    expect(written).toEqual({ providers: { openrouter: { baseUrl: GATEWAY } } });
-  });
-
-  test("reverts a written override when the env returns to default (file we created is removed)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-or-revert-"));
-    try {
-      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
-      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(true);
-      await ensureOpenRouterModelsOverride(dir, {});
-      // The override was ALL the file contained — both it and the marker go.
-      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
-      expect(await Bun.file(join(dir, ".agent-swarm-openrouter-override.json")).exists()).toBe(
-        false,
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("revert restores a displaced user baseUrl and keeps sibling keys", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-or-restore-"));
-    try {
-      await Bun.write(
-        join(dir, "models.json"),
-        JSON.stringify({
-          providers: {
-            openrouter: { baseUrl: "https://user.example/v1", compat: { supportsTools: true } },
-            custom: { baseUrl: "https://custom.example/v1", api: "openai-completions" },
-          },
-        }),
-      );
-      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
-      // Re-run with the gateway still set — displaced value must survive.
-      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
-      await ensureOpenRouterModelsOverride(dir, {});
-      const restored = JSON.parse(await Bun.file(join(dir, "models.json")).text());
-      expect(restored.providers.openrouter).toEqual({
-        baseUrl: "https://user.example/v1",
-        compat: { supportsTools: true },
+  for (const [state, files] of Object.entries(states)) {
+    for (const [i, env] of [{}, { OPENROUTER_BASE_URL: GATEWAY }].entries()) {
+      const label = i === 0 ? "default gateway" : "session gateway";
+      test(`${state}, ${label}: composed privately, shared dir untouched`, async () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-or-session-"));
+        try {
+          for (const [name, text] of Object.entries(files)) await Bun.write(join(dir, name), text);
+          const before = snapshot(dir);
+          const session = await writeSessionModelsJson(dir, env);
+          try {
+            const want = expected[state]?.[i];
+            if (want === null) {
+              expect(session.modelsPath).toBeUndefined();
+            } else {
+              expect(session.modelsPath).toBeDefined();
+              expect(session.modelsPath?.startsWith(dir)).toBe(false);
+              const copy = JSON.parse(readFileSync(session.modelsPath as string, "utf-8"));
+              expect(copy.providers?.openrouter).toEqual(want);
+              if (files["models.json"]?.includes("custom.example")) {
+                expect(copy.providers.custom).toEqual(custom);
+              }
+            }
+          } finally {
+            await session.dispose();
+          }
+          expect(snapshot(dir)).toEqual(before);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
       });
-      expect(restored.providers.custom).toEqual({
-        baseUrl: "https://custom.example/v1",
-        api: "openai-completions",
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
     }
-  });
-
-  test("revert leaves a user-edited baseUrl alone (marker mismatch) and drops the marker", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-or-user-edit-"));
-    try {
-      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
-      // User hand-edits the file after we wrote it.
-      await Bun.write(
-        join(dir, "models.json"),
-        JSON.stringify({ providers: { openrouter: { baseUrl: "https://mine.example/v1" } } }),
-      );
-      await ensureOpenRouterModelsOverride(dir, {});
-      const kept = JSON.parse(await Bun.file(join(dir, "models.json")).text());
-      expect(kept.providers.openrouter.baseUrl).toBe("https://mine.example/v1");
-      expect(await Bun.file(join(dir, ".agent-swarm-openrouter-override.json")).exists()).toBe(
-        false,
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("default env never touches a hand-authored models.json (no marker)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-or-hands-off-"));
-    try {
-      const userConfig = {
-        providers: { openrouter: { baseUrl: "https://mine.example/v1" } },
-      };
-      await Bun.write(join(dir, "models.json"), JSON.stringify(userConfig));
-      await ensureOpenRouterModelsOverride(dir, {});
-      expect(JSON.parse(await Bun.file(join(dir, "models.json")).text())).toEqual(userConfig);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("merge-preserves existing providers and openrouter keys", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-or-merge-"));
-    try {
-      await Bun.write(
-        join(dir, "models.json"),
-        JSON.stringify({
-          providers: {
-            openrouter: { baseUrl: "https://old.example/v1", compat: { supportsTools: true } },
-            custom: { baseUrl: "https://custom.example/v1", api: "openai-completions" },
-          },
-        }),
-      );
-      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
-      const written = JSON.parse(await Bun.file(join(dir, "models.json")).text());
-      expect(written.providers.openrouter.baseUrl).toBe(GATEWAY);
-      expect(written.providers.openrouter.compat).toEqual({ supportsTools: true });
-      expect(written.providers.custom).toEqual({
-        baseUrl: "https://custom.example/v1",
-        api: "openai-completions",
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("overwrites a corrupt models.json with just the override", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-or-corrupt-"));
-    try {
-      await Bun.write(join(dir, "models.json"), "{not json");
-      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
-      const written = JSON.parse(await Bun.file(join(dir, "models.json")).text());
-      expect(written).toEqual({ providers: { openrouter: { baseUrl: GATEWAY } } });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  }
 
   test("ModelRuntime composes the override onto built-in OpenRouter models", async () => {
     // The whole point of the lever: built-in model IDs resolved through the
     // runtime's composed store carry the gateway baseUrl.
-    const runtime = await ModelRuntime.create({
-      authPath: join(agentDir, "auth.json"),
-      modelsPath: join(agentDir, "models.json"),
-    });
-    expect(runtime.getError()).toBeUndefined();
-    const model = runtime.getModel("openrouter", "anthropic/claude-sonnet-5");
-    expect(model?.baseUrl).toBe(GATEWAY);
+    const dir = mkdtempSync(join(tmpdir(), "pi-or-runtime-"));
+    const session = await writeSessionModelsJson(dir, { OPENROUTER_BASE_URL: GATEWAY });
+    try {
+      const runtime = await ModelRuntime.create({
+        authPath: join(dir, "auth.json"),
+        modelsPath: session.modelsPath,
+      });
+      expect(runtime.getError()).toBeUndefined();
+      const model = runtime.getModel("openrouter", "anthropic/claude-sonnet-5");
+      expect(model?.baseUrl).toBe(GATEWAY);
+    } finally {
+      await session.dispose();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("ModelRuntime keeps the default baseUrl when no models.json exists", async () => {

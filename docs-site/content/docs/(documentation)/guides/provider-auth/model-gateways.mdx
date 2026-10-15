@@ -250,7 +250,7 @@ OPENROUTER_BASE_URL=https://gateway.example.com/v1
 MODEL_OVERRIDE=openrouter/moonshotai/kimi-k2.5
 ```
 
-The adapter writes the override to pi-mono's `~/.pi/agent/models.json` before its per-session model runtime loads. Clearing the variable reverts that file to whatever it held before the swarm wrote the override.
+Each pi session loads its own copy of pi-mono's `~/.pi/agent/models.json` with the override added, so concurrent tasks with different gateways never share one. The adapter never writes `~/.pi/agent/models.json` itself, and clearing the variable takes the override out of the next session. A gateway that an earlier version wrote into that file is left out of sessions that run without the variable.
 
 `OPENROUTER_BASE_URL` does not affect Claude Code, Codex, Devin, or Claude Managed Agents. Claude Code uses `ANTHROPIC_BASE_URL` instead ([above](#claude-code-through-a-gateway-or-cloud-provider)). It also cannot adapt a Responses-only gateway into the chat-completions shape expected by these OpenRouter-backed paths.
 
@@ -281,7 +281,7 @@ MODEL_OVERRIDE=openrouter/anthropic/claude-opus-4.7
 Two details differ from OrcaRouter's own OpenCode and pi guides, which configure a dedicated `orcarouter` provider entry in `opencode.json` / `models.json`:
 
 - **Keep the `openrouter/` harness prefix.** Agent Swarm reuses the harness's built-in OpenRouter provider and redirects it, rather than registering a second provider. `MODEL_OVERRIDE` is therefore `openrouter/` followed by the full OrcaRouter model ID — including that ID's own provider prefix. OrcaRouter's routing alias becomes `openrouter/orcarouter/auto`.
-- **Do not hand-edit the harness config files.** Both adapters generate their gateway configuration per task from `OPENROUTER_BASE_URL`; a manual `opencode.json` or `~/.pi/agent/models.json` provider block is not the supported path here and the pi-mono adapter actively manages its own override in that file.
+- **Do not hand-edit the harness config files.** Both adapters generate their gateway configuration per task from `OPENROUTER_BASE_URL`; a manual `opencode.json` or `~/.pi/agent/models.json` provider block is not the supported path here, and `OPENROUTER_BASE_URL` wins over a hand-written OpenRouter `baseUrl`.
 
 <Callout type="info">
   These OrcaRouter values are taken from its public documentation

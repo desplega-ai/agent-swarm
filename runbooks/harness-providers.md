@@ -37,9 +37,9 @@ on `pi`, `opencode` and the ACP `opencode` target only; `claude` and `codex` rej
 - **pi `models.json`**: each pi session loads its own copy, written to a temp
   dir from the shared `<agentDir>/models.json` plus that session's env
   (registry provider blocks, `<ID>_BASE_URL`, the OpenRouter gateway), and
-  removed when the session ends. Concurrent sessions never read each other's
-  endpoints. A `providers.<id>` block already in the shared file is
-  user-authored and wins.
+  removed when the session ends. Nothing writes the shared file, so
+  concurrent sessions never read each other's endpoints. A `providers.<id>`
+  block already in the shared file is user-authored and wins.
 - **Scrubbing**: per-task keys exist only in the task env, so the runner and
   the pi adapter register them with the scrubber. pi's error events, failure
   reason, adapter log and native `sessions/*.jsonl` are scrubbed.

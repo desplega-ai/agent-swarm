@@ -16,7 +16,6 @@ import { configureHttpResolver, resetHttpResolver } from "../prompts/resolver";
 import {
   checkPiMonoCredentials,
   createPiRuntimeAuth,
-  ensureOpenRouterModelsOverride,
   extractPiAssistantText,
   PiMonoAdapter,
   resolveModel,
@@ -165,8 +164,8 @@ describe("PiMonoAdapter.createSession — OPENROUTER_BASE_URL gateway", () => {
     const model = capturedOptions?.model as { baseUrl?: string; id?: string } | undefined;
     expect(model?.id).toBe("google/gemini-3-flash-preview");
     expect(model?.baseUrl).toBe(GATEWAY);
-    // The override was materialized for the runtime to load.
-    expect(existsSync(join(agentDir, "models.json"))).toBe(true);
+    // The override lives in the session's own copy, never the shared file.
+    expect(existsSync(join(agentDir, "models.json"))).toBe(false);
   });
 
   test("session model keeps the default openrouter.ai baseUrl when env is unset", async () => {
@@ -688,14 +687,19 @@ describe("writeSessionModelsJson (pi)", () => {
           $schema: "https://pi.dev/schemas/models.schema.json",
           providers: {
             custom: { baseUrl: "https://custom.example/v1", api: "openai-completions" },
+            openrouter: { baseUrl: gateway },
           },
         }),
       );
-      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: gateway });
+      // An earlier version wrote that gateway into the shared file.
+      await Bun.write(
+        join(dir, ".agent-swarm-openrouter-override.json"),
+        JSON.stringify({ baseUrl: gateway }),
+      );
       const sharedBefore = readFileSync(join(dir, "models.json"), "utf-8");
       await withSessionModels(dir, NAN_ENV, undefined, async (s) => {
-        // This session uses the default gateway: the other session's override
-        // recorded in the marker is reverted in its copy.
+        // This session uses the default gateway: the leftover override
+        // recorded in the legacy marker is reverted in its copy.
         const written = await readModelsJson(s.modelsPath);
         expect(written.$schema).toBe("https://pi.dev/schemas/models.schema.json");
         expect(written.providers.openrouter).toBeUndefined();

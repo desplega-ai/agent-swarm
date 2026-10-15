@@ -515,11 +515,12 @@ export async function createPiRuntimeAuth(
 }
 
 /**
- * Sidecar marker recording the gateway `baseUrl` WE wrote into models.json
- * (and any user value we displaced). Lets `ensureOpenRouterModelsOverride`
- * revert precisely when the env returns to default, without ever touching a
- * hand-authored override it didn't create. Lives next to models.json; NOT
- * part of pi's config surface.
+ * Legacy sidecar marker. Earlier versions wrote the OpenRouter gateway into
+ * the shared `<agentDir>/models.json` and recorded here the `baseUrl` they
+ * wrote (and any user value they displaced). Nothing writes it any more;
+ * `writeSessionModelsJson` reads it to keep such a leftover gateway out of a
+ * default-gateway session. Lives next to models.json; NOT part of pi's config
+ * surface.
  */
 const OPENROUTER_OVERRIDE_MARKER = ".agent-swarm-openrouter-override.json";
 
@@ -540,144 +541,6 @@ async function readJsonFile(path: string): Promise<Record<string, unknown> | und
   } catch {
     return undefined;
   }
-}
-
-/**
- * Materialize (or revert) the OpenRouter gateway override in
- * `<agentDir>/models.json` so pi-coding-agent's `ModelRuntime` (which loads
- * that file at create time) composes every built-in OpenRouter model with
- * the gateway `baseUrl` — see `src/utils/openrouter-base-url.ts` for the
- * env contract.
- *
- * Gateway set (non-default): merge-preserving write — existing provider
- * entries and other openrouter keys are kept, only
- * `providers.openrouter.baseUrl` is set; a displaced user value is recorded
- * in a sidecar marker. A corrupt existing file is overwritten with just the
- * override — for gateway deployments, guaranteed rerouting wins over
- * preserving unparseable config.
- *
- * Gateway unset/default: reverts a PREVIOUSLY WRITTEN override (marker
- * present and models.json still carries the marker's value) — restoring the
- * displaced user baseUrl or deleting the key, dropping now-empty objects,
- * and removing models.json entirely if the override was all it contained.
- * The env value in a shared worker isn't per-task in practice, but reverts
- * make rollback = "unset the env" and keep repo-scoped/self-hosted setups
- * from inheriting a stale gateway (PR #1010 review). Without a marker the
- * function never touches models.json, so hand-authored overrides survive.
- */
-export async function ensureOpenRouterModelsOverride(
-  agentDir: string,
-  env: Record<string, string | undefined> = process.env,
-): Promise<void> {
-  const baseUrl = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
-  const modelsPath = join(agentDir, "models.json");
-  const markerPath = join(agentDir, OPENROUTER_OVERRIDE_MARKER);
-
-  if (baseUrl === DEFAULT_OPENROUTER_BASE_URL) {
-    await revertOpenRouterModelsOverride(modelsPath, markerPath);
-    return;
-  }
-
-  let existing: Record<string, unknown> = {};
-  try {
-    const file = Bun.file(modelsPath);
-    if (await file.exists()) {
-      existing = JSON.parse(await file.text()) as Record<string, unknown>;
-    }
-  } catch (err) {
-    console.warn(
-      `[pi-mono] ${modelsPath} is unreadable/invalid (${err instanceof Error ? err.message : err}); rewriting with the OpenRouter gateway override`,
-    );
-    existing = {};
-  }
-
-  const providers =
-    typeof existing.providers === "object" && existing.providers !== null
-      ? (existing.providers as Record<string, unknown>)
-      : {};
-  const openrouter =
-    typeof providers.openrouter === "object" && providers.openrouter !== null
-      ? (providers.openrouter as Record<string, unknown>)
-      : {};
-
-  // Record what we displace, once — re-runs with the marker already present
-  // keep the ORIGINAL displaced value (the current baseUrl is then ours).
-  const priorMarker = (await readJsonFile(markerPath)) as OpenRouterOverrideMarker | undefined;
-  const currentBaseUrl = typeof openrouter.baseUrl === "string" ? openrouter.baseUrl : undefined;
-  const previous = priorMarker
-    ? priorMarker.previous
-    : currentBaseUrl !== baseUrl
-      ? currentBaseUrl
-      : undefined;
-
-  const next = {
-    ...existing,
-    providers: {
-      ...providers,
-      openrouter: { ...openrouter, baseUrl },
-    },
-  };
-  await Bun.write(modelsPath, `${JSON.stringify(next, null, 2)}\n`);
-  const marker: OpenRouterOverrideMarker = {
-    baseUrl,
-    ...(previous !== undefined ? { previous } : {}),
-  };
-  await Bun.write(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
-}
-
-/**
- * Undo a marker-recorded gateway override. Only acts when the marker exists
- * AND models.json's `providers.openrouter.baseUrl` still equals the value
- * the marker says we wrote — anything else means the user edited the file
- * since, and we leave it alone (the stale marker is dropped either way).
- */
-async function revertOpenRouterModelsOverride(
-  modelsPath: string,
-  markerPath: string,
-): Promise<void> {
-  const marker = (await readJsonFile(markerPath)) as OpenRouterOverrideMarker | undefined;
-  if (!marker) return;
-  const removeMarker = () => Bun.file(markerPath).delete();
-
-  const existing = await readJsonFile(modelsPath);
-  if (!existing) {
-    await removeMarker();
-    return;
-  }
-  const providers =
-    typeof existing.providers === "object" && existing.providers !== null
-      ? { ...(existing.providers as Record<string, unknown>) }
-      : undefined;
-  const openrouter =
-    providers && typeof providers.openrouter === "object" && providers.openrouter !== null
-      ? { ...(providers.openrouter as Record<string, unknown>) }
-      : undefined;
-  if (!providers || !openrouter || openrouter.baseUrl !== marker.baseUrl) {
-    await removeMarker();
-    return;
-  }
-
-  if (marker.previous !== undefined) {
-    openrouter.baseUrl = marker.previous;
-  } else {
-    delete openrouter.baseUrl;
-  }
-  if (Object.keys(openrouter).length === 0) {
-    delete providers.openrouter;
-  } else {
-    providers.openrouter = openrouter;
-  }
-  const next: Record<string, unknown> = { ...existing, providers };
-  if (Object.keys(providers).length === 0) {
-    delete next.providers;
-  }
-
-  if (Object.keys(next).length === 0) {
-    await Bun.file(modelsPath).delete();
-  } else {
-    await Bun.write(modelsPath, `${JSON.stringify(next, null, 2)}\n`);
-  }
-  await removeMarker();
 }
 
 /**
@@ -736,13 +599,15 @@ export interface SessionModelsJson {
  * `<agentDir>/models.json` plus this session's env, and write it to a private
  * temp dir. Concurrent sessions in one worker share `<agentDir>`, so writing
  * per-task values into the shared file lets one session load another's
- * endpoint (and send its key there).
+ * endpoint (and send its key there). The shared file is only ever read: it
+ * holds what the operator wrote by hand.
  *
  * The private copy keeps every top-level key and provider of the shared file
  * and adds, from `env` only:
- * - `providers.openrouter.baseUrl`: the session's OpenRouter gateway. With the
- *   default gateway, a value `ensureOpenRouterModelsOverride` recorded in its
- *   marker is reverted, so another session's gateway never leaks in.
+ * - `providers.openrouter.baseUrl`: the session's OpenRouter gateway, over a
+ *   hand-authored one. With the default gateway, a value an earlier version
+ *   wrote into the shared file (recorded in the legacy marker) is reverted, so
+ *   a stale gateway never leaks in.
  * - one block per registry provider (`nan`, `helmcode`) whose key (canonical
  *   var or alias) is set, at its `<ID>_BASE_URL` or the registry default. A
  *   block already in the shared file is user-authored and wins.
@@ -1920,12 +1785,10 @@ export class PiMonoAdapter implements ProviderAdapter {
     registerEnvSecrets(sessionEnv);
 
     // 3. Resolve model
-    // Write the gateway override BEFORE ModelRuntime.create — the runtime
-    // loads models.json exactly once at creation.
-    await ensureOpenRouterModelsOverride(getAgentDir(), sessionEnv);
     // This session's own models.json: the shared file plus the gateway and
-    // the registry's custom provider blocks from sessionEnv. Concurrent
-    // sessions never read each other's endpoints.
+    // the registry's custom provider blocks from sessionEnv. Written BEFORE
+    // ModelRuntime.create, which loads it exactly once. Nothing writes the
+    // shared file, so concurrent sessions never read each other's endpoints.
     const sessionModels = await writeSessionModelsJson(getAgentDir(), sessionEnv, config.model);
     try {
       return await this.createSessionWithModels(config, sessionEnv, sessionModels, {
