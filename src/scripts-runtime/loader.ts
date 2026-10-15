@@ -1,4 +1,5 @@
 import { getApiKey } from "../utils/api-key";
+import { getMcpBaseUrl } from "../utils/constants";
 import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "./api-types";
 import type { FailedCredentialBinding } from "./credential-broker";
@@ -66,7 +67,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
       apiKey: { value: apiKey, isSecret: true },
       agentId: { value: input.agentId, isSecret: false },
       mcpBaseUrl: {
-        value: input.mcpBaseUrl ?? process.env.MCP_BASE_URL ?? "http://localhost:3013",
+        value: input.mcpBaseUrl ?? getMcpBaseUrl(),
         isSecret: false,
       },
       ...(input.runtimeInstanceId

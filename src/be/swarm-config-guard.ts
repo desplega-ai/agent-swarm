@@ -1,3 +1,4 @@
+import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
@@ -25,11 +26,34 @@ import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
  * rejected at every write path (DB helpers, HTTP routes, MCP tools).
  */
 // Lead activation is also deployment-only: leads can write ordinary global config.
+// CHAT_SDK_API_URL_OVERRIDES points Chat SDK adapters (and the secrets they carry)
+// at another host, so it must never come from a config row.
+/**
+ * Teams SDK env fallbacks; a config row must not redirect the bot token.
+ * `@microsoft/teams.apps` reads these from `process.env`. Operators may still
+ * store them (they are not reserved), they just never reach env through
+ * `getInjectableGlobalConfigs`.
+ */
+export const TEAMS_SDK_ENV_KEYS = [
+  "SERVICE_URL",
+  "TENANT_ID",
+  "CLIENT_ID",
+  "CLIENT_SECRET",
+  "MANAGED_IDENTITY_CLIENT_ID",
+  "CLOUD",
+] as const;
+
+/** SQL literal list for the `NOT IN (...)` injection denylist in db.ts. */
+export function teamsSdkEnvKeysSql(): string {
+  return TEAMS_SDK_ENV_KEYS.map((key) => `'${key}'`).join(", ");
+}
+
 const RESERVED_KEYS = new Set([
   "API_KEY",
   "SECRETS_ENCRYPTION_KEY",
   "CORS_ALLOW_ANY_ORIGIN",
   "EXTENSION_ALLOW_LEAD_ACTIVATION",
+  "CHAT_SDK_API_URL_OVERRIDES",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over
@@ -266,6 +290,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ["RUNTIME_WAKE_GRACE_SEC", "RUNTIME_WAKE_REROUTE_SEC", "RUNTIME_ROUTING_INTERVAL_MS"],
     0,
   ),
+  CHAT_SDK_ADAPTERS: validateChatSdkAdaptersValue,
   TASK_TOOL_MANIFESTS: (value) => {
     try {
       if (typeof value !== "string") throw new Error("Expected JSON string");
@@ -392,6 +417,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "OPENROUTER_APP_ATTRIBUTION",
     "CURSOR_NATIVE_SYSTEM_PROMPT",
     "SLACK_DISABLE",
+    "CHAT_SDK_ENABLED",
     "SLACK_RENDER_V2",
     "SLACK_RENDER_V2_DELEGATION",
     "SLACK_BLOCK_EXTERNAL_CHANNELS",
@@ -486,6 +512,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...integerValidators(["APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS"], 0),
   // 0 turns the shutdown drain off; the shutdown path clamps to the same limit.
   ...boundedIntegerValidators(["API_DRAIN_MAX_MS"], 0, API_DRAIN_MAX_MS_LIMIT),
+  // Chat SDK thread buffer window. 0 or an invalid value falls back to the 10 s
+  // default in thread-buffer.ts; above 10 minutes a
+  // reply waits longer than any operator expects.
+  ...boundedIntegerValidators(["CHAT_SDK_BUFFER_MS"], 1, 600_000),
   // Below ~100 tokens the preamble can't fit a useful summary; above 20000
   // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
   // the cap exists to prevent (see context-preamble.ts).

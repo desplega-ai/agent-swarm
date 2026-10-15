@@ -47,10 +47,12 @@ curl -s "$MCP_BASE_URL/api/extensions/type-defs" \
 | `pre.task.create` | before any task is stored (REST, MCP, Slack, schedule, workflow, webhook, follow-up) | `block(reason)`, `modify({ priority, agentId, tags, description, ... })`, or nothing |
 | `pre.task.followUp` | before the lead follow-up task for a finished worker task | `block`, `modify({ description, priority, agentId })`, or nothing |
 | `pre.slack.route` | before a Slack message becomes a task | `modify({ target: { kind: "agent", agentId } })`, `{ kind: "lead" }`, `{ kind: "broadcast" }` |
+| `pre.chat.route` | before buffered Chat SDK messages (Telegram, Slack, Discord, Teams) become a task | `block(reason)`, or `modify({ target: { kind: "agent", agentId } })`, `{ kind: "lead" }`, `{ kind: "broadcast" }`, `{ kind: "workflow", workflowId }` |
 | `pre.heartbeat.remediate` | after the heartbeat sweep finds a stalled task | `modify({ proposedAction: "record" | "fail" | "supersede-resume" })` |
 | `pre.tool.call` | before an agent MCP tool call runs | `block(reason)` or `modify({ args })` |
 | `post.task.created`, `post.task.completed`, `post.task.failed`, `post.task.cancelled`, `post.task.superseded`, `post.task.progress` | after the change is committed | none |
 | `post.slack.message`, `post.tool.call` | after the message or tool call finished | none |
+| `post.chat.message` | after a Chat SDK message is received (before buffering) or sent; `direction` is `inbound` or `outbound` | none |
 | `post.approval.resolved` | after a person answers an approval request, workflow or standalone (not on timeout or cancel) | none |
 | `post.task.budgetRefused` | after a task is refused by a daily spend budget | none |
 | `post.email.received`, `post.kapso.message` | after an inbound AgentMail or Kapso message is received | none |

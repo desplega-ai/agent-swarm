@@ -126,7 +126,8 @@ describe("pi Bash tool env", () => {
     try {
       const out = await shell(
         session,
-        'echo "admitted=$SHELL_ADMITTED_CANARY revoked=$SHELL_REVOKED_CANARY."; cat /proc/$$/environ | tr "\\0" "\\n" | grep -c "^SHELL_REVOKED_CANARY=" || true',
+        // The shell's own environment: /proc on Linux, `env` on macOS (no procfs).
+        'echo "admitted=$SHELL_ADMITTED_CANARY revoked=$SHELL_REVOKED_CANARY."; { if [ -r /proc/$$/environ ]; then tr "\\0" "\\n" < /proc/$$/environ; else env; fi; } | grep -c "^SHELL_REVOKED_CANARY=" || true',
       );
       expect(out).toContain("admitted=row-admitted revoked=.");
       expect(out.split("\n").at(-1)).toBe("0");

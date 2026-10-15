@@ -1,0 +1,352 @@
+---
+title: Chat SDK
+description: One channel for Telegram, Slack, Discord and Microsoft Teams through Vercel's Chat SDK. Mentions and DMs become tasks, and results post back to the thread.
+---
+
+Agent Swarm can use [Chat SDK](https://chat-sdk.dev) as an input and output channel. One API process runs one Chat SDK instance for each configured adapter: Telegram, Slack, Discord and Microsoft Teams. The bespoke [Slack](/docs/integrations/slack), [AgentMail](/docs/integrations/agentmail) and [Kapso](/docs/integrations/kapso) integrations do not change.
+
+<Callout type="info">
+The channel is off by default. A configuration change saved on the dashboard applies within a few seconds: the API restarts the adapters, with no API restart. Only a change to a boot-time environment value needs an API restart.
+</Callout>
+
+## What it does
+
+- **Inbound on mention or DM.** A bot mention or a direct message creates a task with `source: "chat"`. By default the Lead gets it.
+- **Thread follow-ups.** A reply in the same thread steers the running task, or becomes a follow-up task.
+- **Results back in the thread.** When a task ends, the swarm posts its output to the thread it came from.
+- **Attachments.** Files sent with a message become task attachments.
+- **Tools and a skill.** Agents use the `chat-*` MCP tools and the built-in `chat-sdk` skill.
+- **Extension hooks.** `pre.chat.route` can change the routing target, and `post.chat.message` observes traffic.
+
+Each adapter has its own state. When one adapter fails to start, the other adapters keep running.
+
+<Callout type="warn">
+Telegram and Discord ran against real bots. **Slack and Microsoft Teams are experimental:** they ran only against fixtures. The setup steps below may differ from what the platform shows. [Issue #2149](https://github.com/desplega-ai/agent-swarm/issues/2149) tracks the real-app verification.
+</Callout>
+
+## Configuration
+
+The fastest path is the dashboard: **Settings → Integrations → Chat SDK**. The card has one panel for each adapter. It saves each secret as its own secret config row named `CHAT_SDK_<ADAPTER>_<FIELD>` (for example `CHAT_SDK_TELEGRAM_BOT_TOKEN`). The JSON in `CHAT_SDK_ADAPTERS` then holds a reference to the row, not the secret. The card also shows the setup steps for each adapter, each webhook URL with a copy button, the adapter health, and a **Register webhook** button for Telegram. The setup steps start expanded, and collapse when the adapter already runs healthy.
+
+The channel reads these keys from the environment or from global swarm config:
+
+| Key | Value |
+|---|---|
+| `CHAT_SDK_ENABLED` | `true` to start the channel. Default `false`. A saved change applies within a few seconds. |
+| `CHAT_SDK_ADAPTERS` | JSON object. Each key is an adapter name (`telegram`, `slack`, `discord`, `teams`), each value is the adapter config. A saved change applies within a few seconds. |
+| `CHAT_SDK_BUFFER_MS` | How long a thread collects messages before it creates one task. Default `10000` (10 s), 1 to 600000. No restart needed. |
+| `CHAT_SDK_API_URL_OVERRIDES` | Environment only, for development and tests. JSON of platform API base URLs by adapter name, for example `{"telegram":"http://127.0.0.1:8081"}`. Never set it in production. |
+
+### Secrets by reference
+
+A value in `CHAT_SDK_ADAPTERS` can reference another config key as `{"$config": "KEY"}`:
+
+```json
+{
+  "telegram": {
+    "botToken": { "$config": "CHAT_SDK_TELEGRAM_BOT_TOKEN" },
+    "secretToken": { "$config": "CHAT_SDK_TELEGRAM_SECRET_TOKEN" },
+    "mode": "webhook"
+  }
+}
+```
+
+- The API resolves references at boot from the global swarm config rows, secrets included.
+- It never reads a reference from the process environment.
+- It rejects reserved keys such as `API_KEY`.
+- `CHAT_SDK_*` rows are server-only by default (`exportToEnv: false`): the API reads them, agent shells never see the bot tokens.
+- A missing row keeps that adapter off, with the status `incomplete` and the row name in the error. The other adapters start.
+
+### Switching an adapter off
+
+The panel switch writes `"enabled": false` into the adapter's entry instead of removing it. The adapter stops, the values and the secret rows stay, and the card shows **Off, configuration kept**. Switch it on again to start it with the same values. **Remove configuration** deletes the entry (the secret rows stay, and are reused when the adapter is set up again).
+
+### Partial saves
+
+An adapter entry may lack required fields. The card saves it, marks the adapter **Incomplete, not running** with the missing field, and starts the other adapters. This lets you store the bot token first and add the rest later. A wrong value format (a Discord public key that is not 64 hex characters, a forbidden key such as `apiUrl`) is still rejected on save.
+
+For env-only deployments, put the raw values in `CHAT_SDK_ADAPTERS`.
+
+The API refuses `apiUrl`, `apiBaseUrl`, `webhookVerifier` and `allowUnverifiedWebhooks` in this JSON. These keys could send secrets to another host or skip the signature check.
+
+### Webhook URLs
+
+Each adapter has its own public URL:
+
+```
+{PUBLIC_MCP_BASE_URL}/api/integrations/chat/{adapter}/webhook
+```
+
+The adapter checks the platform signature on every request (Telegram secret token, Slack signing secret, Discord Ed25519 key, Teams Bot Framework token). Set `PUBLIC_MCP_BASE_URL` to the public HTTPS address of the API.
+
+The API rejects a webhook body above 1 MiB with `413` before the adapter reads it. Platform payloads are a few KB, and files arrive as URLs.
+
+#### Local development with a tunnel
+
+A platform cannot reach `localhost`. When the webhook URL on the card starts with `localhost`, `127.0.0.1` or `[::1]`, the card shows a tunnel hint. To receive webhooks on a local API:
+
+1. Expose the API port with a tunnel, for example `ngrok http 3013`.
+2. Set `PUBLIC_MCP_BASE_URL` to the HTTPS tunnel URL, for example `https://abc123.ngrok-free.app`, in the API environment. Then restart the API.
+3. Check that the card shows the tunnel URL, then register the webhook: click **Register webhook** for Telegram, or paste the URL in the platform settings.
+
+When the tunnel URL changes, do steps 2 and 3 again. Telegram polling and Slack socket mode need no public URL, so they need no tunnel.
+
+## Platform setup
+
+### Telegram
+
+1. Create a bot with [BotFather](https://t.me/BotFather) (`/newbot`) and copy the token.
+2. Pick a random secret token (letters, digits, `_` and `-`, up to 256 characters).
+3. On the Chat SDK card, turn on **Telegram**, enter both values, and save. The adapter starts within a few seconds.
+4. Click **Register webhook**. The API calls the Bot API `setWebhook` with the public webhook URL and the secret token. Then it shows the `getWebhookInfo` result.
+
+The bot answers the [slash commands](#slash-commands) `/help`, `/status`, `/cancel` and `/reset`. The adapter publishes the list to Telegram (`setMyCommands`) each time it starts, so the client shows the command menu. No BotFather step is needed.
+
+For local development without a public URL, set `mode` to `polling`. The adapter then reads updates with long polling, and no webhook is needed. Do not register a webhook in polling mode: while a webhook is set, Telegram does not deliver updates to a poller.
+
+| Field | Required | Notes |
+|---|---|---|
+| `botToken` | yes | The token from BotFather. |
+| `secretToken` | in webhook mode | Telegram sends it in the `X-Telegram-Bot-Api-Secret-Token` header. |
+| `mode` | no | `webhook` (default) or `polling`. |
+| `allowedUserIds` | no | Telegram user ids allowed to use the bot. Everyone is allowed when empty. |
+| `userName` | no | The bot username for mention detection. Default: the name from `getMe`. |
+
+In a group with BotFather privacy mode on (the default), Telegram sends the bot only commands and messages that mention it. To let the bot see every group message, send `/setprivacy` to BotFather, turn privacy off, then remove the bot from the group and add it again.
+
+### Slack
+
+<Callout type="warn">
+Experimental. The Chat SDK Slack adapter has not run against a real workspace yet ([#2149](https://github.com/desplega-ai/agent-swarm/issues/2149)). The built-in [Slack](/docs/integrations/slack) integration stays the verified path.
+</Callout>
+
+The Chat SDK Slack adapter and the built-in [Slack](/docs/integrations/slack) integration cannot run together. Set `SLACK_DISABLE=true` to use this adapter. Without it, the API logs the conflict at boot and starts no Chat SDK adapter. The Integrations card shows a **Slack conflict** banner.
+
+1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps).
+2. Add the bot scopes `app_mentions:read`, `channels:history`, `channels:read`, `chat:write`, `groups:history`, `groups:read`, `im:history`, `im:read`, `im:write`, `mpim:history`, `mpim:read`, `users:read` and `files:read`.
+3. Subscribe to the bot events `app_mention`, `message.channels`, `message.groups`, `message.im` and `message.mpim`.
+4. Pick a transport:
+   - **Webhook mode:** set the Event Subscriptions request URL to the Slack webhook URL. The adapter answers Slack's `url_verification` challenge. Copy the signing secret.
+   - **Socket mode:** turn on Socket Mode and create an app-level token (`xapp-...`) with `connections:write`. No public URL is needed.
+5. Install the app to the workspace and copy the bot token (`xoxb-...`).
+6. Optional: under **Slash Commands**, create `/help`, `/status`, `/cancel` and `/reset`. In webhook mode the request URL is the Slack webhook URL. In socket mode the commands arrive over the socket. See [Slash commands](#slash-commands).
+
+To create the app from a manifest (**Create New App**, then **From a manifest**), start from this minimal one. Replace `${PUBLIC_MCP_BASE_URL}` with the public URL of your API.
+
+<Callout type="warn">
+This manifest is unverified against a real app. Adjust the scopes to your needs.
+</Callout>
+
+```yaml
+display_information:
+  name: Agent Swarm
+features:
+  bot_user:
+    display_name: swarm
+    always_online: true
+  # Optional. Webhook mode only: each url is the Slack webhook URL. In socket mode, remove the url lines.
+  slash_commands:
+    - command: /help
+      description: List the commands
+      url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
+    - command: /status
+      description: Show the latest task of this chat
+      url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
+    - command: /cancel
+      description: Cancel the running task of this chat
+      url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
+    - command: /reset
+      description: "Start over: the next message gets no earlier context"
+      url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - channels:read
+      - chat:write
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - im:write
+      - mpim:history
+      - mpim:read
+      - users:read
+      - files:read
+settings:
+  event_subscriptions:
+    # Webhook mode only. In socket mode, remove request_url.
+    request_url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.im
+      # Add message.groups and message.mpim for private channels and group DMs (step 3).
+  # Socket mode: set this to true and create an app-level token with connections:write.
+  socket_mode_enabled: false
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `botToken` | yes | The bot token (`xoxb-...`). |
+| `mode` | no | `webhook` (default) or `socket`. |
+| `signingSecret` | in webhook mode | The app signing secret. |
+| `appToken` | in socket mode | The app-level token (`xapp-...`). |
+| `userName` | no | The bot name. Default: the name from `auth.test`. |
+
+### Discord
+
+1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications). Copy the **Application ID** and the **Public Key** (64 hex characters).
+2. On the **Bot** page, copy the bot token and turn on the **Message Content** privileged intent.
+3. Invite the bot to your server. The card shows the invite link once the Application ID is entered. By hand, open this URL with your application id:
+
+   ```text
+   https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot+applications.commands&permissions=326417632320
+   ```
+
+   The permissions integer `326417632320` is View Channels, Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read Message History, Add Reactions, Attach Files and Embed Links. A bot that is connected but in no server never receives a message; the card says "Running, in no server" in that case and lists the servers otherwise.
+4. Optional, for [slash commands](#slash-commands): set **Interactions Endpoint URL** to the Discord webhook URL. Discord sends slash commands only to this URL, never over the Gateway. Then register the commands once. Replace the application id and the bot token:
+
+   ```bash
+   curl -X PUT "https://discord.com/api/v10/applications/${APPLICATION_ID}/commands" \
+     -H "Authorization: Bot ${BOT_TOKEN}" -H "Content-Type: application/json" \
+     -d '[
+       {"name":"help","description":"List the commands"},
+       {"name":"status","description":"Show the latest task of this chat"},
+       {"name":"cancel","description":"Cancel the running task of this chat"},
+       {"name":"reset","description":"Start over: the next message gets no earlier context"}
+     ]'
+   ```
+
+   Global commands can take up to an hour to appear in the client. Without the endpoint URL the bot still answers messages and mentions.
+
+| Field | Required | Notes |
+|---|---|---|
+| `botToken` | yes | The bot token. |
+| `publicKey` | yes | The application public key, 64 hex characters. |
+| `applicationId` | yes | The application id. |
+| `respondToChannelIds` | no | Channel ids where the bot answers every message, not only mentions. |
+| `respondToGlobalMentions` | no | `true` to answer `@everyone` and `@here`. |
+| `mentionRoleIds` | no | Role ids that count as a mention of the bot. |
+| `userName` | no | The bot name. |
+
+Discord sends channel messages and mentions only over the Gateway WebSocket, not over the webhook. The API runs a Gateway listener for the whole life of the process. See [Limits](#limits) for the gaps.
+
+### Microsoft Teams
+
+<Callout type="warn">
+Experimental. The Teams adapter has not run against a real tenant yet ([#2149](https://github.com/desplega-ai/agent-swarm/issues/2149)).
+</Callout>
+
+1. Create an **Azure Bot** resource. Pick **Multi Tenant** or **Single Tenant**.
+2. Copy the Microsoft App ID, and create a client secret for it.
+3. For a single-tenant bot, copy the tenant id.
+4. Set the bot's **Messaging endpoint** to the Teams webhook URL.
+5. Add the **Microsoft Teams** channel to the bot, and install the bot in Teams.
+6. Optional: to let agents read thread history with `chat-read-thread`, grant the app a Microsoft Graph `Chat.Read.*` permission (see [Limits](#limits)).
+
+| Field | Required | Notes |
+|---|---|---|
+| `appId` | yes | The Azure Bot app (client) id. |
+| `appPassword` | yes | The app client secret. |
+| `appType` | no | `MultiTenant` (default) or `SingleTenant`. |
+| `appTenantId` | for `SingleTenant` | The Entra tenant id. |
+| `userName` | no | The bot name. |
+
+A Teams thread id contains the service URL of the conversation, and the adapter sends the bot token to that URL. The swarm sends only to Bot Framework service hosts: `smba.trafficmanager.net`, `smba.infra.gcc.teams.microsoft.com`, `smba.infra.gov.teams.microsoft.us`, `smba.infra.dod.teams.microsoft.us` and `msteams.botframework.azure.cn`, over HTTPS. The webhook refuses an activity with a different `serviceUrl` (HTTP 403). `chat-post`, `chat-reply`, `chat-read-thread`, `chat-open-dm` and the result relay refuse such an id and send nothing. In tests, the origin of the `teams` entry in `CHAT_SDK_API_URL_OVERRIDES` is also allowed.
+
+## How it works
+
+1. **Buffer.** A mention or a DM opens a thread buffer. More messages in the same thread join it for `CHAT_SDK_BUFFER_MS` (10 s by default). A message that starts with `!now` flushes the buffer at once. One flush creates one task.
+2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent, or a workflow when the message mentions the bot or is a DM, so a plain reply in a subscribed thread never starts a second run), the agent that owns the thread, and then the Lead. A `pre.chat.route` extension can change the target.
+3. **Task.** The task gets `source: "chat"` and a context key `task:chat-sdk:{adapter}:{encoded thread id}`. Later tasks in the same thread share the key. The task text includes the recent thread messages.
+4. **Steer or follow up.** When the Lead's task for the thread is in progress, a new plain reply steers that task, and the bot posts a short acknowledgement. Otherwise the reply waits in the buffer and becomes a follow-up task that depends on the previous one.
+5. **Attachments.** Files are downloaded once per flush and attached to each new task. Files larger than 50 MB are skipped, and the task text says so.
+6. **Relay.** When a task ends (completed, failed or cancelled), a database trigger records a relay obligation. A watcher posts the task output to the thread and marks the row delivered. Lead follow-up tasks on the same thread are relayed too, so delegated results reach the user. When a Lead task is resumed after a shutdown or a crash, the resume task relays the final answer. A worker task, or its resume, does not relay: its result reaches the thread through the Lead follow-up. A failed post retries with backoff, up to 10 minutes between tries. After 24 hours the swarm stops and records the last error. Delivery is at least once: a crash between the post and the record can send a message twice.
+7. **Typing.** The bot shows the typing indicator from the first buffered message until it posts the reply. The indicator stops when the flush creates no task, and it stops after 15 minutes at most.
+8. **Shutdown.** On API shutdown the channel stops inside one 10 s budget. First, webhooks answer `503` and refuse new work. Then the relay watcher stops claiming rows. Next, in-flight handlers finish and every waiting thread buffer becomes its task. Then the swarm waits for a relay post that is still in flight. Last, the adapters shut down. Each step gets only the time that is left. A step that runs out of time is abandoned and logged as `Shutdown budget spent, abandoned: ...`.
+   - **Relay post.** An abandoned post keeps its claimed row, which stays pending. After the restart, the row is sent again after the normal backoff (up to 10 minutes), within the 24 hour limit. If the platform did accept the abandoned post, the user can see the message twice.
+   - **Buffered messages.** Thread buffers exist only in API memory, not in the Chat SDK tables. The platform already got its webhook acknowledgement, so it does not send those messages again. If the flush runs out of time, the threads not yet turned into tasks are lost, and the log line says so.
+
+Long output is split into several messages at the platform limit.
+
+## Slash commands
+
+One handler answers the commands on every adapter that delivers them: Telegram, Slack and Discord. Teams has no slash commands. A command creates no task and is not part of the thread context. An unknown command (`/deploy`) gets the command list back, so no `/word` message is dropped.
+
+| Command | What it does |
+|---|---|
+| `/help` | Lists the commands. |
+| `/status` | Shows the latest task of the chat: short id, status, and the agent it is assigned to. |
+| `/cancel` | Cancels every pending or in-progress task of the chat, newest first, up to 20. The relay posts the cancellation like any other task end. |
+| `/reset` | Starts a new conversation. The next message creates a task with no parent task and no thread history older than the reset. A running task keeps running: send `/cancel` to stop it. The mark lives in the swarm database for 30 days. |
+
+The command acts on the chat it is typed in: a Telegram private chat or group, a Slack channel or DM, a Discord channel. In Slack and Discord the command is not tied to a thread inside the channel.
+
+Each platform learns the list in its own way. Telegram: the adapter calls `setMyCommands` at every start. Slack: the app manifest (or the **Slash Commands** page) lists the commands. Discord: a one-time application-command registration plus the **Interactions Endpoint URL**. The platform steps above show each one.
+
+## Tools
+
+Agents get these tools when the channel is on (capability `chat-sdk`). The parameters are in `MCP.md` in the repository.
+
+| Tool | What it does |
+|---|---|
+| `chat-reply` | Post to the thread of the current chat task. Use it for a question or a progress note. The final output posts by itself. |
+| `chat-post` | Lead only. Post to any thread or channel id (for example `telegram:12345`). |
+| `chat-read-thread` | Read the recent messages of a thread, oldest first. Every agent can read the thread of its current task. Other threads are lead only. |
+| `chat-open-dm` | Lead only. Open or find the direct-message thread with a user. |
+| `register-chat-channel` | Lead only. Route a channel to a fixed agent or workflow. |
+| `unregister-chat-channel` | Lead only. Remove that mapping. |
+
+A worker gets thread access only through a chat task that it is assigned or created. `send-task` and `POST /api/tasks` refuse a `parentTaskId` that a non-lead agent neither owns nor created, so a child task cannot inherit a foreign thread.
+
+The `chat-sdk` skill is seeded for every agent, so there is nothing to install. It covers formatting per platform, reply etiquette and thread ids.
+
+## Extensions
+
+| Event | When | Use |
+|---|---|---|
+| `pre.chat.route` | A thread buffer flushes, before task creation. | Change the target to an agent, the Lead, a broadcast or a workflow. Block it to drop the messages. |
+| `post.chat.message` | A message is received (before buffering) or sent. | Observe traffic. `direction` is `inbound` or `outbound`. |
+
+Payloads and examples: [Extensions guide](/docs/guides/extensions).
+
+## Limits
+
+| Platform | Message length | History for `chat-read-thread` |
+|---|---|---|
+| Telegram | 4096 characters | No history API. The swarm keeps the last 100 messages of a thread for 7 days in its database. |
+| Slack | 4000 characters | Platform history. |
+| Discord | 2000 characters | Platform history. |
+| Teams | 20000 characters | Microsoft Graph, needs the `Chat.Read.*` permission. |
+
+Platform notes:
+
+- **Discord Gateway gaps.** The Gateway listener runs in windows of 6 hours and re-arms itself after each window. Discord does not replay messages from a gap. A message sent during a re-arm, or while the listener waits 30 s after a failure, is lost. A bad bot token keeps the adapter health `ok` (the interactions webhook still works), and the Gateway state shows `backoff`.
+- **Telegram.** A bot can message a user only after the user started a chat with it. A webhook needs a public HTTPS URL on port 443, 80, 88 or 8443.
+- **Slack.** No rich rendering (blocks, cards, streaming edits) in this version.
+- **Teams.** The Teams SDK writes its own logs, which do not go through the swarm secret scrubber. The adapter has no slash commands.
+- **Unsubscribed group threads.** In a group thread, the bot subscribes when the first task is created. A reply without a mention inside the first buffer window is not seen.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| The card shows **Not running** for a saved adapter. | The adapter is still starting, or the last save is still applying. Refresh in a few seconds. |
+| The card shows **Failed to start** with an error. | The adapter failed to initialize (bad token, network error). Fix the value and save. A save with no change does not restart the adapter, so restart the API to retry a network error. |
+| **Configuration error** on the card. | `CHAT_SDK_ADAPTERS` is not valid JSON, fails the schema, or references a missing or reserved `$config` key. |
+| **Slack conflict** on the card, and no adapter starts. | `CHAT_SDK_ADAPTERS` has `slack` and `SLACK_DISABLE` is not `true`. Set `SLACK_DISABLE=true` or remove the Slack adapter. |
+| The webhook answers `404`. | The channel is off, the adapter is not in `CHAT_SDK_ADAPTERS`, or the adapter is still initializing after a restart or a save. |
+| The webhook answers `503`. | The adapter failed to start, a save is restarting the adapters, or the API is shutting down. Check the card or the API boot log (`[chat-sdk]` lines). |
+| The Slack webhook answers `405`. | The Slack adapter runs in socket mode, which needs no request URL. Remove the URL from the Slack app, or switch to webhook mode. |
+| Telegram gets no updates. | In webhook mode, click **Register webhook** and check `last_error_message` in the result. In polling mode, make sure no webhook is registered. |
+| Discord mentions create no task. | Turn on the **Message Content** intent, and check the Gateway state on the card. |
+| Discord slash commands do nothing. | Set the **Interactions Endpoint URL** and register the commands (Discord step 4). Global commands can take up to an hour to show up. |
+| A follow-up task has no thread context after a restart or a save. | Fixed: the swarm merges the history it persisted with the adapter's memory. If it still happens on Telegram, check that the `chat_lists` table holds `msg-history:` rows for the thread. |
+
+## Reference
+
+- [Chat SDK](https://chat-sdk.dev) and its [repository](https://github.com/vercel/chat).
+- Status API: `GET /api/integrations/chat/status`. Telegram registration: `POST /api/integrations/chat/telegram/register-webhook` (Lead or dashboard user).
+- Seeded skill: `templates/skills/chat-sdk/content.md` in this repository.

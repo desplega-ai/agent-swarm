@@ -44,13 +44,24 @@ export const ENV_EXPORT_DEFAULT_OFF_KEYS: ReadonlySet<string> = new Set([
 /** Script connection secrets (`connection.<slug>.secret`) are brokered server-side. */
 const CONNECTION_SECRET_KEY = /^connection\..+\.secret$/;
 
+/**
+ * Key prefixes whose rows start with the flag off: the API server reads them
+ * (Chat SDK bot tokens and adapter JSON), agents never need them in a shell.
+ */
+const ENV_EXPORT_DEFAULT_OFF_PREFIXES = ["CHAT_SDK_"];
+
 export function isEnvExportRestrictedKey(key: string): boolean {
   return ENV_EXPORT_RESTRICTED_KEYS.has(key.toUpperCase()) || CONNECTION_SECRET_KEY.test(key);
 }
 
 /** The flag a new row gets when the caller does not send one. */
 export function defaultExportToEnv(key: string): boolean {
-  return !isEnvExportRestrictedKey(key) && !ENV_EXPORT_DEFAULT_OFF_KEYS.has(key.toUpperCase());
+  const upper = key.toUpperCase();
+  return (
+    !isEnvExportRestrictedKey(key) &&
+    !ENV_EXPORT_DEFAULT_OFF_KEYS.has(upper) &&
+    !ENV_EXPORT_DEFAULT_OFF_PREFIXES.some((prefix) => upper.startsWith(prefix))
+  );
 }
 
 export function envExportRestrictedError(key: string): string {

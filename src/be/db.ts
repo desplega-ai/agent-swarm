@@ -211,7 +211,12 @@ import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
-import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
+import {
+  isInternalConfigKey,
+  isReservedConfigKey,
+  reservedKeyError,
+  teamsSdkEnvKeysSql,
+} from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
 import { publishWorkerConfigNudge, publishWorkerNudge } from "./worker-nudges";
 import { defineWorkflowPayload, type WorkflowPayloadView } from "./workflow-replay";
@@ -298,17 +303,21 @@ export {
   findTaskByGitHub,
   findTaskByVcs,
   getAgentCurrentTask,
+  getAgentWorkingOnContextKey,
   getAgentWorkingOnThread,
   getAllTasks,
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
   getInProgressTasksByContextKey,
+  getLatestActiveTaskByContextKey,
   getLatestActiveTaskInThread,
+  getLatestLeadTaskByContextKey,
   getLatestLeadTaskInThread,
   getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
   getMostRecentTaskInThread,
+  getPendingChatRelayTasks,
   getPendingSlackRelayTasks,
   getRecentlyFinishedWorkerTasks,
   getSlackTasksMissingTree,
@@ -319,13 +328,19 @@ export {
   getTasksByAgentId,
   getTasksByStatus,
   getTasksCount,
+  giveUpStaleChatRelays,
   hasNonTerminalRerouteDecisionChild,
   hasNonTerminalResumeChild,
   isLinearTrackerContextKey,
+  markChatRelayAttempted,
+  markChatRelayDelivered,
+  markChatRelayGivenUp,
   markFinalizedSlackRelaysDelivered,
   markSlackRelayAttempted,
   markSlackRelayDelivered,
   markTasksNotified,
+  type PendingChatRelay,
+  recordChatRelayError,
   resetTasksNotified,
   type TaskFilters,
 } from "./db/tasks/read";
@@ -6560,7 +6575,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
   const rows = await getDbClient().query<SwarmConfigRow>(
     `SELECT * FROM swarm_config
        WHERE scope = 'global'
-         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION')
+         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${teamsSdkEnvKeysSql()})
        ORDER BY key ASC`,
   );
   return rows.filter((row) => !isInternalConfigKey(row.key)).map(rowToSwarmConfig);

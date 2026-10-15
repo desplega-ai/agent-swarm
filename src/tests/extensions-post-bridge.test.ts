@@ -33,6 +33,7 @@ const NEW_EVENTS = [
   "post.task.budgetRefused",
   "post.email.received",
   "post.kapso.message",
+  "post.chat.message",
   "post.vcs.event",
 ] as const satisfies readonly (keyof SwarmEventMap)[];
 
@@ -355,6 +356,56 @@ describe("extension post bridge: new events", () => {
           },
         },
       ]);
+    });
+  });
+
+  describe("post.chat.message", () => {
+    test("chat.message.received dispatches an inbound event", async () => {
+      await registerCapture("capture");
+      workflowEventBus.emit("chat.message.received", {
+        adapter: "telegram",
+        channelId: "telegram:555001",
+        threadId: "telegram:555001",
+        userId: "555001",
+        text: "hello swarm",
+        messageId: "555001:11",
+      });
+      await waitForEvents(1);
+      expect(received).toEqual([
+        {
+          extension: "capture",
+          event: "post.chat.message",
+          payload: {
+            adapter: "telegram",
+            channelId: "telegram:555001",
+            threadId: "telegram:555001",
+            userId: "555001",
+            text: "hello swarm",
+            direction: "inbound",
+            messageId: "555001:11",
+          },
+        },
+      ]);
+    });
+
+    test("chat.message.sent dispatches an outbound event", async () => {
+      await registerCapture("capture");
+      workflowEventBus.emit("chat.message.sent", {
+        adapter: "telegram",
+        channelId: "telegram:555001",
+        threadId: "telegram:555001",
+        text: "done",
+        taskId: "task-1",
+      });
+      await waitForEvents(1);
+      expect(received[0]?.payload).toEqual({
+        adapter: "telegram",
+        channelId: "telegram:555001",
+        threadId: "telegram:555001",
+        text: "done",
+        direction: "outbound",
+        taskId: "task-1",
+      });
     });
   });
 
