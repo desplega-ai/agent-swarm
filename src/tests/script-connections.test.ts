@@ -626,6 +626,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "207_runtime_session_tokens.sql");
       // 213 rebuilds script_connections with the post-117 columns this fixture skips.
       markMigrationApplied(database, "213_script_connections_sql.sql");
+      // 215 alters swarm_config, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "215_swarm_config_export_to_env.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
