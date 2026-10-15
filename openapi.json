@@ -375,6 +375,17 @@
           "modelAlias": {
             "type": "string"
           },
+          "resolvedEffort": {
+            "type": "string",
+            "enum": [
+              "off",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          },
           "scheduleId": {
             "type": "string"
           },
@@ -29772,6 +29783,17 @@
                                   "max"
                                 ]
                               },
+                              "resolvedEffort": {
+                                "type": "string",
+                                "enum": [
+                                  "off",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              },
                               "provider": {
                                 "type": "string",
                                 "enum": [
@@ -30268,6 +30290,21 @@
                       },
                       "model": {
                         "type": "string"
+                      },
+                      "effort": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "off",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          null
+                        ]
                       },
                       "providerMeta": {
                         "type": "object",

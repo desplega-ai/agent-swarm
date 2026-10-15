@@ -6,7 +6,12 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
-import type { AgentStatus, AgentWithTasks } from "@/api/types";
+import {
+  type AgentStatus,
+  type AgentWithTasks,
+  REASONING_EFFORT_LEVELS,
+  type ReasoningEffortLevel,
+} from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelCell } from "@/components/shared/agent-model-cell";
 import { DataGrid } from "@/components/shared/data-grid";
@@ -47,21 +52,26 @@ export default function AgentsPage() {
     return filtered.sort((a, b) => (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0));
   }, [agents, statusFilter]);
 
-  const configuredModelByAgentId = useMemo(() => {
+  // The saved runtime settings, which the next task runs on. The last-reported
+  // model and effort (`credStatus.latestModel`) are the fallback only: they lag
+  // a change until the agent runs again.
+  const { configuredModelByAgentId, configuredEffortByAgentId } = useMemo(() => {
     const visibleIds = new Set(filteredAgents.map((agent) => agent.id));
     const modelByAgentId = new Map<string, string>();
+    const effortByAgentId = new Map<string, ReasoningEffortLevel>();
     for (const config of agentConfigs ?? []) {
-      if (
-        config.scope === "agent" &&
-        config.scopeId &&
-        visibleIds.has(config.scopeId) &&
-        config.key === "MODEL_OVERRIDE" &&
-        config.value.trim()
+      if (config.scope !== "agent" || !config.scopeId || !visibleIds.has(config.scopeId)) continue;
+      const value = config.value.trim();
+      if (config.key === "MODEL_OVERRIDE" && value) {
+        modelByAgentId.set(config.scopeId, value);
+      } else if (
+        config.key === "REASONING_EFFORT_OVERRIDE" &&
+        (REASONING_EFFORT_LEVELS as readonly string[]).includes(value)
       ) {
-        modelByAgentId.set(config.scopeId, config.value.trim());
+        effortByAgentId.set(config.scopeId, value as ReasoningEffortLevel);
       }
     }
-    return modelByAgentId;
+    return { configuredModelByAgentId: modelByAgentId, configuredEffortByAgentId: effortByAgentId };
   }, [agentConfigs, filteredAgents]);
 
   const modelSearchText = useCallback(
@@ -69,14 +79,14 @@ export default function AgentsPage() {
       const display = getAgentModelDisplay(
         configuredModelByAgentId.get(agent.id),
         agent.credStatus?.latestModel?.model,
-        agent.credStatus?.latestModel?.reasoningEffort,
+        configuredEffortByAgentId.get(agent.id) ?? agent.credStatus?.latestModel?.reasoningEffort,
       );
       const primary = getAgentModelPresentation(display.primary, modelsCatalog?.providers);
       return [primary?.label, primary?.raw, primary?.provider, display.configured, display.lastUsed]
         .filter(Boolean)
         .join(" ");
     },
-    [configuredModelByAgentId, modelsCatalog?.providers],
+    [configuredModelByAgentId, configuredEffortByAgentId, modelsCatalog?.providers],
   );
 
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(() => {
@@ -91,7 +101,7 @@ export default function AgentsPage() {
         const display = getAgentModelDisplay(
           configuredModelByAgentId.get(agent.id),
           agent.credStatus?.latestModel?.model,
-          agent.credStatus?.latestModel?.reasoningEffort,
+          configuredEffortByAgentId.get(agent.id) ?? agent.credStatus?.latestModel?.reasoningEffort,
         );
         return <AgentModelCell display={display} liveCatalog={modelsCatalog?.providers} />;
       },
@@ -175,6 +185,7 @@ export default function AgentsPage() {
     ];
   }, [
     configuredModelByAgentId,
+    configuredEffortByAgentId,
     modelColumnGate.supported,
     modelSearchText,
     modelsCatalog?.providers,

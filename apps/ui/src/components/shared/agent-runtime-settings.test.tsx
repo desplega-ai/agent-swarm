@@ -76,6 +76,7 @@ mock.module("@/api/hooks/use-models-catalog", () => ({
 mock.module("@/api/types", () => require("../../api/types"));
 mock.module("@/components/shared/harness-icon", () => require("./harness-icon"));
 mock.module("@/components/shared/model-combobox", () => require("./model-combobox"));
+mock.module("@/components/shared/model-effort-label", () => require("./model-effort-label"));
 mock.module("@/components/shared/provider-icon", () => require("./provider-icon"));
 mock.module("@/components/shared/reasoning-effort-icon", () => require("./reasoning-effort-icon"));
 mock.module("@/components/ui/alert-callout", () => require("../ui/alert-callout"));
@@ -93,6 +94,7 @@ mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
 mock.module("@/lib/acp-target-catalog", () => require("../../lib/acp-target-catalog"));
 mock.module("@/lib/agent-runtime-models", () => require("../../lib/agent-runtime-models"));
 mock.module("@/lib/cost-format", () => require("../../lib/cost-format"));
+mock.module("@/lib/model-vendor", () => require("../../lib/model-vendor"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { TooltipProvider } = await import("../ui/tooltip");

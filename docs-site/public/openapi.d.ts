@@ -11704,6 +11704,8 @@ export interface paths {
                                 /** @enum {string} */
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
+                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                 requestedByUserId?: string;
                                 progress?: string;
@@ -11928,6 +11930,8 @@ export interface paths {
                         /** @enum {string} */
                         provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                         model?: string;
+                        /** @enum {string|null} */
+                        effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
                         providerMeta?: {
                             /** @enum {string} */
                             transport?: "cli" | "sdk";
@@ -24411,6 +24415,8 @@ export interface components {
             resolvedModel?: string;
             modelSource?: string;
             modelAlias?: string;
+            /** @enum {string} */
+            resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;

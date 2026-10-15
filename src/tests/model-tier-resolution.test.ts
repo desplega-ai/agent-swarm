@@ -267,6 +267,99 @@ describe("claim-time resolution via /api/poll", () => {
   });
 });
 
+// A row that already ran carries that run's model: the session report wrote it
+// into `model`, and the claim wrote `resolvedModel`/`modelSource`. Re-claiming
+// it must resolve from the config in force NOW, not replay the previous run.
+describe("re-claim after a previous run", () => {
+  async function markRan(
+    taskId: string,
+    fields: { model: string; resolvedModel?: string; modelSource?: string },
+  ): Promise<void> {
+    await getDbClient().run(
+      `UPDATE agent_tasks SET model = ?, resolvedModel = ?, modelSource = ?,
+         claudeSessionId = 'previous-session', status = 'pending' WHERE id = ?`,
+      [fields.model, fields.resolvedModel ?? null, fields.modelSource ?? null, taskId],
+    );
+  }
+
+  test("an unpinned task drops the previous run's model, so the agent's current config applies", async () => {
+    const worker = await createAgent({
+      name: "rerun-unpinned",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "claude",
+    });
+    const task = await createTaskExtended("plain work", { agentId: worker.id });
+    // First run: no pin, MODEL_OVERRIDE was opus, the session reported it.
+    await markRan(task.id, { model: "claude-opus-5-5" });
+
+    const trigger = await callPoll(worker.id);
+
+    expect(trigger?.type).toBe("task_assigned");
+    // No `model` in the trigger: the worker falls through to MODEL_OVERRIDE.
+    expect(trigger?.task.model).toBeUndefined();
+    expect(trigger?.task.resolvedModel).toBeUndefined();
+    expect(await taskRow(task.id)).toEqual({
+      resolvedModel: null,
+      modelSource: null,
+      modelAlias: null,
+    });
+  });
+
+  test("a tier task re-resolves the tier after the tier config changed", async () => {
+    const worker = await createAgent({
+      name: "rerun-tier",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "claude",
+    });
+    const task = await createTaskExtended("smart work", { agentId: worker.id, modelTier: "smart" });
+    await markRan(task.id, {
+      model: "claude-opus-5-5",
+      resolvedModel: "claude-opus-5-5",
+      modelSource: "tier-config",
+    });
+    process.env.MODEL_TIER_CLAUDE_SMART = "claude-sonnet-5-5";
+
+    const trigger = await callPoll(worker.id, header({}));
+
+    expect(trigger?.task.model).toBeUndefined();
+    expect(trigger?.task.resolvedModel).toBe("claude-sonnet-5-5");
+    expect(await taskRow(task.id)).toEqual({
+      resolvedModel: "claude-sonnet-5-5",
+      modelSource: "tier-config",
+      modelAlias: null,
+    });
+  });
+
+  test("a task-pinned model stays pinned on re-claim", async () => {
+    const worker = await createAgent({
+      name: "rerun-pinned",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "claude",
+    });
+    const task = await createTaskExtended("pinned work", {
+      agentId: worker.id,
+      model: "claude-sonnet-5-5",
+    });
+    await markRan(task.id, {
+      model: "claude-sonnet-5-5",
+      resolvedModel: "claude-sonnet-5-5",
+      modelSource: "model",
+    });
+
+    const trigger = await callPoll(worker.id);
+
+    expect(trigger?.task.model).toBe("claude-sonnet-5-5");
+    expect(trigger?.task.resolvedModel).toBe("claude-sonnet-5-5");
+    expect((await taskRow(task.id))?.modelSource).toBe("model");
+  });
+});
+
 describe("claim-time harness guard", () => {
   test("a directed task pinning an Anthropic model on a Codex worker fails fast with a tagged reason", async () => {
     const worker = await createAgent({

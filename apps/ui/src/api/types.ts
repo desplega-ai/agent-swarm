@@ -389,7 +389,10 @@ export interface AgentTask {
   modelSource?: ModelSource;
   /** The `latest:` alias `resolvedModel` came from, when any. */
   modelAlias?: string;
+  /** Effort the task asked for; usually unset, the agent's setting applies. */
   effort?: ReasoningEffortLevel;
+  /** Effort the session ran at (task effort, else the agent's setting). */
+  resolvedEffort?: ReasoningEffortLevel;
   scheduleId?: string;
   parentTaskId?: string;
   dir?: string;

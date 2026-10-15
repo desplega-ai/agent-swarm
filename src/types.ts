@@ -681,6 +681,10 @@ export const AgentTaskSchema = z
     resolvedModel: z.string().optional(),
     modelSource: z.string().optional(),
     modelAlias: z.string().optional(),
+    // The effort the session ran at (task effort, else the agent's
+    // REASONING_EFFORT_OVERRIDE, dropped when the harness/model cannot take
+    // it). Reported at session start; unset when the harness default applied.
+    resolvedEffort: ReasoningEffortSchema.optional(),
 
     // Schedule linking (optional — set when task was created by a schedule).
     // z.string(): also reachable verbatim from the create-task query param.
@@ -2629,6 +2633,7 @@ export type AgentTaskSummary = Pick<
   | "modelSource"
   | "modelAlias"
   | "effort"
+  | "resolvedEffort"
   | "provider"
   | "requestedByUserId"
   | "progress"

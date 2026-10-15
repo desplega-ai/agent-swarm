@@ -29,6 +29,7 @@ import {
   type ModelsDevCatalog,
   parseAlias,
 } from "@desplega/model-catalog";
+import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
 import { ampModelError, ampPinCatalogError, ampPinProviderError } from "../utils/amp-models";
 import { getAgentById, getAllAgents } from "./db";
 import { loadModelsCatalog } from "./model-catalog-store";
@@ -99,10 +100,12 @@ export async function harnessModelErrorFor(
  * stays sync and catalog-free; this runs next to it.
  */
 export async function poolTaskRunsOnHarness(
-  task: { model?: string | null } | null | undefined,
+  task: TaskModelPinFields | null | undefined,
   harness: string | null | undefined,
 ): Promise<boolean> {
-  const model = task?.model?.trim();
+  // Only the task's own pin restricts harnesses; a model a previous run
+  // reported into `model` does not.
+  const model = taskModelPin(task ?? {})?.trim();
   if (!model) return true;
   return (await harnessModelErrorFor(model, harness)) === null;
 }

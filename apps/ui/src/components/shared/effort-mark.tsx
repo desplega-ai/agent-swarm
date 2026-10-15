@@ -6,10 +6,11 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * The effort level's signal icon, shown next to the model when the task sets
- * one. "off" gets no icon, the same as the agents list (`agent-model-cell`).
+ * The effort level's signal icon, shown next to a model. The level's name is
+ * screen-reader text; callers put it in their tooltip. Unset and "off" render
+ * nothing: the harness default applies, so there is no level to show.
  */
-export function TaskEffortMark({
+export function EffortMark({
   effort,
   className,
 }: {

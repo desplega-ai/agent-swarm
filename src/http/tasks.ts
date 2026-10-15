@@ -110,6 +110,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   modelSource: true,
   modelAlias: true,
   effort: true,
+  resolvedEffort: true,
   provider: true,
   requestedByUserId: true,
   progress: true,
@@ -357,6 +358,8 @@ const updateSession = route({
       claudeSessionId: z.string().min(1),
       provider: ProviderNameSchema.exclude(["devin"]).optional(),
       model: z.string().optional(),
+      // Effort the session runs at; null when the harness default applies.
+      effort: ReasoningEffortSchema.nullable().optional(),
       providerMeta: z.object({ transport: z.enum(["cli", "sdk"]).optional() }).optional(),
       harnessVariant: z.string().optional(),
       harnessVariantMeta: z.record(z.string(), z.unknown()).optional(),
@@ -1083,6 +1086,7 @@ export async function handleTasks(
       parsed.body.model,
       "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
       "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
+      "effort" in parsed.body ? parsed.body.effort : undefined,
     );
     if (!task) {
       jsonError(res, "Task not found", 404);

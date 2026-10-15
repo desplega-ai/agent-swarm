@@ -87,6 +87,7 @@ export type AgentTaskRow = {
   model: string | null;
   modelTier: string | null;
   effort: string | null;
+  resolvedEffort?: string | null;
   resolvedModel?: string | null;
   modelSource?: string | null;
   modelAlias?: string | null;
@@ -154,6 +155,7 @@ type AgentTaskSummaryRow = Pick<
   | "modelSource"
   | "modelAlias"
   | "effort"
+  | "resolvedEffort"
   | "provider"
   | "requestedByUserId"
   | "progress"
@@ -207,6 +209,7 @@ const LIST_COLUMNS = {
     agent_tasks.offeredTo, agent_tasks.acceptedAt, agent_tasks.parentTaskId,
     agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier,
     agent_tasks.resolvedModel, agent_tasks.modelSource, agent_tasks.modelAlias, agent_tasks.effort,
+    agent_tasks.resolvedEffort,
     agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
     agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
     agent_tasks.peakContextPercent`,
@@ -315,6 +318,9 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     effort: ReasoningEffortSchema.safeParse(row.effort).success
       ? (row.effort as ReasoningEffort)
       : undefined,
+    resolvedEffort: ReasoningEffortSchema.safeParse(row.resolvedEffort).success
+      ? (row.resolvedEffort as ReasoningEffort)
+      : undefined,
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
@@ -380,6 +386,9 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
     modelAlias: row.modelAlias ?? undefined,
     effort: ReasoningEffortSchema.safeParse(row.effort).success
       ? (row.effort as ReasoningEffort)
+      : undefined,
+    resolvedEffort: ReasoningEffortSchema.safeParse(row.resolvedEffort).success
+      ? (row.resolvedEffort as ReasoningEffort)
       : undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,

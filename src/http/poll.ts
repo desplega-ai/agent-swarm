@@ -37,6 +37,7 @@ import { poolTaskRunsOnHarness } from "../be/model-validation";
 import { getRuntimeInstanceById, touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
+import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
 import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
 import {
   AgentTaskSchema,
@@ -256,16 +257,31 @@ async function attachmentsForTrigger(
 /**
  * Claim-time model resolution (runbooks/model-tiers.md). Never blocks a claim:
  * a resolution failure leaves the worker on its own local resolution.
+ *
+ * The trigger's `model` is the task's own pin, not the column: a re-claimed
+ * row carries the model its previous session reported, and the worker treats
+ * `task.model` as a pin that beats the agent's current MODEL_OVERRIDE. The
+ * previous claim record is overwritten for the same reason.
  */
 async function claimModelFields(
-  task: { id: string; model?: string | null; modelTier?: string | null },
+  task: TaskModelPinFields & { id: string },
   agent: Parameters<typeof recordClaimModelResolution>[1],
-): Promise<Awaited<ReturnType<typeof recordClaimModelResolution>>> {
+): Promise<Awaited<ReturnType<typeof recordClaimModelResolution>> & { model: string | undefined }> {
+  const pin = taskModelPin(task);
+  const cleared = {
+    model: pin,
+    resolvedModel: undefined,
+    modelSource: undefined,
+    modelAlias: undefined,
+  };
   try {
-    return await recordClaimModelResolution(task, agent);
+    return {
+      ...cleared,
+      ...(await recordClaimModelResolution({ ...task, model: pin }, agent)),
+    };
   } catch (error) {
     console.warn(`[/api/poll] model resolution failed for task ${task.id}:`, error);
-    return {};
+    return cleared;
   }
 }
 

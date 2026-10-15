@@ -28,6 +28,7 @@ import {
   ModelCombobox,
   ModelStatusBadge,
 } from "@/components/shared/model-combobox";
+import { ModelEffortLabel } from "@/components/shared/model-effort-label";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import {
   AUTO_DESCRIPTION,
@@ -236,6 +237,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     [harness, model, liveCatalog],
   );
   const shownEffort: EffortValue = effort && effortLevels.includes(effort) ? effort : "";
+  const shownConfiguredModel = devinSelected ? configuredModel(configs) : model;
   const acpModelGroups = useMemo(
     () => modelGroupsForAcpTarget(acpTarget, liveCatalog),
     [acpTarget, liveCatalog],
@@ -693,36 +695,34 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       ) : null}
 
       <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-        <span>
-          Configured: <code>{(devinSelected ? configuredModel(configs) : model) || "unset"}</code>
+        <span className="flex min-w-0 items-center gap-1.5">
+          Configured:{" "}
+          {shownConfiguredModel ? (
+            <ModelEffortLabel
+              model={shownConfiguredModel}
+              effort={modelSelectionEnabled ? shownEffort || null : null}
+              catalog={liveCatalog ?? undefined}
+              className="text-foreground"
+              title={shownConfiguredModel}
+            />
+          ) : (
+            <code>unset</code>
+          )}
         </span>
-        <span>
-          Last used: <code>{latestModel?.model ?? "not reported"}</code>
+        <span className="flex min-w-0 items-center gap-1.5">
+          Last used:{" "}
+          {latestModel?.model ? (
+            <ModelEffortLabel
+              model={latestModel.model}
+              effort={latestModel.reasoningEffort}
+              catalog={liveCatalog ?? undefined}
+              className="text-foreground"
+              title={latestModel.model}
+            />
+          ) : (
+            <code>not reported</code>
+          )}
         </span>
-        {modelSelectionEnabled ? (
-          <>
-            <span className="flex items-center gap-1.5">
-              Effort:{" "}
-              <ReasoningEffortIcon
-                level={shownEffort || undefined}
-                className="text-muted-foreground"
-              />{" "}
-              <code>{shownEffort ? REASONING_EFFORT_LABEL[shownEffort] : AUTO_LABEL}</code>
-            </span>
-            <span className="flex items-center gap-1.5">
-              Last effort:{" "}
-              <ReasoningEffortIcon
-                level={latestModel?.reasoningEffort}
-                className="text-muted-foreground"
-              />{" "}
-              <code>
-                {latestModel?.reasoningEffort
-                  ? REASONING_EFFORT_LABEL[latestModel.reasoningEffort]
-                  : "not reported"}
-              </code>
-            </span>
-          </>
-        ) : null}
       </div>
 
       {!devinSelected && (modelOption?.cost || modelOption?.status || modelOption?.releaseDate) ? (

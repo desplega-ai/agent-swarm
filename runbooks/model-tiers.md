@@ -98,6 +98,10 @@ It writes `resolvedModel`, `modelSource` and `modelAlias` (the `latest:` alias, 
 
 `GET /api/models-catalog/tiers` previews layers 3 and 4 for every provider and tier, with `latest:` aliases resolved against the current catalog and without recording a resolution. It ignores per-worker overrides and per-task models. The dashboard Configuration page uses it for the `MODEL_TIER_*` rows.
 
+A claim reads the task's own pin (`taskModelPin` in `src/tasks/model-pin.ts`), not the `model` column: the session report overwrites `model` with the model that ran, so a row claimed again (or a paused task resumed after a restart) would otherwise replay its previous run's model over the agent's current `MODEL_OVERRIDE`. Without a pin the trigger carries no `model`, and a claim that resolves nothing clears the previous run's `resolvedModel`, `modelSource` and `modelAlias`.
+
+The session report also records `resolvedEffort`: the reasoning effort the session ran at (task `effort`, else the agent's `REASONING_EFFORT_OVERRIDE`, null when the harness or model cannot take it). `effort` stays the requested value.
+
 The worker still runs `resolveTaskModelSelection` locally. When the server sent a `resolvedModel`, the worker uses it; if its local result differs (for example a stale override sent before a restart, or a tier-config value the worker does not read), it logs `model resolution mismatch ... using server value`. Without a server value (older API) the worker keeps the local order: task `model`, `modelTier` with its env overrides, `MODEL_OVERRIDE`, then the adapter default.
 
 This is deliberate: pool claims, delegations, workflow fan-out, and schedules resolve against the worker that actually runs the task, not the agent or API process that created it. Schedules and workflow steps store only `model`/`modelTier`; each spawned task records its own resolution.

@@ -40,6 +40,7 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import { effectiveReasoningEffort } from "../providers/reasoning-effort.ts";
 import {
   createSkillInvokeTracker,
   isSkillLoaderCall,
@@ -48,6 +49,7 @@ import {
 } from "../providers/skill-invoke.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { WorkerRealtimeClient } from "../realtime/worker-client";
+import { resumedTaskModelSelection, type TaskModelPinFields } from "../tasks/model-pin.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import { mapTriggerSurface } from "../telemetry-context.ts";
 import {
@@ -2826,10 +2828,13 @@ async function saveProviderSessionId(
   model?: string,
   harnessVariant?: string,
   harnessVariantMeta?: Record<string, unknown>,
+  effort?: ReasoningEffort | null,
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const body: Record<string, unknown> = { claudeSessionId };
+  // Devin's body variant has no effort field.
+  if (effort !== undefined && provider !== "devin") body.effort = effort;
   if (provider !== undefined) body.provider = provider;
   if (providerMeta !== undefined) body.providerMeta = providerMeta;
   if (model !== undefined && model !== "") body.model = model;
@@ -4149,6 +4154,9 @@ async function spawnProviderProcess(
   }
   if (spawnModel.warning) console.warn(spawnModel.warning);
   const model = spawnModel.model;
+  // Recorded on the task at session start, like the model: what the adapter
+  // applies, not just what was asked for.
+  const sessionEffort = effectiveReasoningEffort(adapter.name, model, reasoningEffortOverride);
 
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
   // can pass codexSlot through and the adapter writes token refreshes back to
@@ -4452,6 +4460,7 @@ async function spawnProviderProcess(
               model,
               event.harnessVariant,
               event.harnessVariantMeta,
+              sessionEffort,
             ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
           } else {
             // Pool task: save provider session ID on active session so it can be
@@ -6727,10 +6736,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               runnerSessionId: resumeRunnerSessionId,
               iteration,
               taskId: task.id,
-              model: (task as { model?: string }).model,
+              // Only the task's own pin carries over. `model` and the claim
+              // record describe the run before the pause; without a pin the
+              // resumed run resolves from the agent's current config.
+              ...resumedTaskModelSelection(task as TaskModelPinFields),
               modelTier: (task as { modelTier?: string }).modelTier,
-              resolvedModel: (task as { resolvedModel?: string }).resolvedModel,
-              modelSource: (task as { modelSource?: string }).modelSource,
               effort: (task as { effort?: ReasoningEffort }).effort,
               harnessProvider: state.harnessProvider,
               cwd: resumeCwd,

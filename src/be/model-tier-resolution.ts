@@ -509,6 +509,8 @@ export type ClaimModelFields = Partial<TaskModelResolution> & {
 /**
  * Resolve and record the model for a task the given agent is claiming. Runs
  * inside the claim transaction. Returns the fields to merge into the trigger.
+ * `task.model` must be the task's own pin (`taskModelPin`), never the model a
+ * previous session reported into the column.
  */
 export async function recordClaimModelResolution(
   task: { id: string; model?: string | null; modelTier?: string | null },
@@ -521,7 +523,16 @@ export async function recordClaimModelResolution(
     harnessProvider,
     workerOverrides: await getAgentModelTierOverrides(agent.id),
   });
-  if (!resolved) return {};
+  if (!resolved) {
+    // A re-claimed row keeps the claim record of its previous run; drop it so
+    // the trigger and the row do not replay that run's model.
+    await getDbClient().run(
+      `UPDATE agent_tasks SET resolvedModel = NULL, modelSource = NULL, modelAlias = NULL
+         WHERE id = ? AND (resolvedModel IS NOT NULL OR modelSource IS NOT NULL OR modelAlias IS NOT NULL)`,
+      [task.id],
+    );
+    return {};
+  }
   if ("harnessMismatch" in resolved) return { modelUnsupported: resolved.harnessMismatch };
   const checked = await applyCliSupport(
     resolved,
