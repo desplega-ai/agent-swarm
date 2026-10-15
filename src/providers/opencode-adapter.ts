@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   baseUrlOverride,
+  ignoredBaseUrlVar,
   type OpenAICompatibleProvider,
   openAICompatibleKeyVars,
   openAICompatibleProvider,
@@ -348,9 +349,9 @@ function pickProviderKey(
  * `process.env`, and that value beats `options.apiKey`. The entrypoint exports
  * a credential pool there as a raw comma list, and a key saved from the
  * dashboard after boot never reaches `process.env` at all, so both 401 without
- * this splice. For `openrouter` and the built-in registry providers (`nan`)
- * it sets `env: []` plus `options.apiKey` (and `options.baseURL` when
- * `<ID>_BASE_URL` is set); for registry providers OpenCode does not ship
+ * this splice. For `openrouter` and the built-in registry providers (`nan`,
+ * `vercel`) it sets `env: []` plus `options.apiKey` (and `options.baseURL`
+ * when `<ID>_BASE_URL` is set; a `baseUrlLocked` provider gets none); for registry providers OpenCode does not ship
  * (`helmcode`) it writes the full custom provider block at
  * `<ID>_BASE_URL` or the registry default. No splice when the key is absent
  * (credStatus reports that).
@@ -397,13 +398,20 @@ export function applyProviderKeySplice(
   if (!picked) return undefined;
   const direct = openAICompatibleProvider(providerId);
   const baseURL = direct ? baseUrlOverride(direct, env) : undefined;
+  const options = { ...existing?.options, ...(baseURL ? { baseURL } : {}), apiKey: picked.key };
+  if (direct?.baseUrlLocked) {
+    // OpenCode's built-in SDK (AI Gateway) knows its endpoint; any URL here is wrong.
+    const ignored = ignoredBaseUrlVar(direct, env);
+    if (ignored || options.baseURL !== undefined) {
+      console.warn(
+        `[opencode] ${ignored ?? `provider.${providerId}.options.baseURL`} is ignored: ${direct.displayName} uses its built-in endpoint`,
+      );
+    }
+    delete options.baseURL;
+  }
   opencodeConfig.provider = {
     ...opencodeConfig.provider,
-    [providerId]: {
-      ...existing,
-      env: [],
-      options: { ...existing?.options, ...(baseURL ? { baseURL } : {}), apiKey: picked.key },
-    },
+    [providerId]: { ...existing, env: [], options },
   };
   return picked;
 }

@@ -17,7 +17,7 @@
  * NO database imports (worker-safe). Every lookup is synchronous; the HTTP
  * refresh is TTL-cached and never throws, so hot paths stay cheap.
  */
-import { withRegistryCatalogSections } from "@desplega/model-catalog";
+import { type CatalogChatRow, withRegistryCatalogSections } from "@desplega/model-catalog";
 import modelsDevSnapshot from "../be/modelsdev-cache.json";
 
 export interface RuntimeCatalogModel {
@@ -41,6 +41,14 @@ export type RuntimeCatalog = Record<string, RuntimeCatalogProvider | undefined>;
 
 // Plus the registry-synthesized sections models.dev does not list (`helmcode`).
 const SNAPSHOT = withRegistryCatalogSections(modelsDevSnapshot as RuntimeCatalog);
+
+/**
+ * One section's full snapshot rows (output limit, modalities, tool calling),
+ * which the slim live catalog drops. Harness config blocks read these.
+ */
+export function snapshotCatalogRows(provider: string): Record<string, CatalogChatRow> {
+  return (SNAPSHOT[provider]?.models ?? {}) as Record<string, CatalogChatRow>;
+}
 
 /** Default freshness window for the worker-side HTTP pull. */
 export const RUNTIME_CATALOG_TTL_MS = 10 * 60_000;

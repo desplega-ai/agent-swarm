@@ -374,6 +374,22 @@ describe("grok harness models", () => {
   });
 });
 
+describe("Vercel AI Gateway on the open harnesses", () => {
+  for (const harness of ["pi", "opencode"] as const) {
+    test(`${harness}: the snapshot group lists every chat model and no embedding model`, () => {
+      const groups = modelGroupsForHarness(harness, [], { AI_GATEWAY_API_KEY: true });
+      const vercel = groups.find((g) => g.provider === "Vercel AI Gateway");
+      expect(vercel).toMatchObject({ requiredKey: "AI_GATEWAY_API_KEY", enabled: true });
+      const ids = vercel?.models.map((m) => m.id) ?? [];
+      expect(ids.length).toBeGreaterThan(200);
+      expect(ids).toContain("vercel/zai/glm-5.3");
+      expect(ids).toContain("vercel/anthropic/claude-sonnet-4.6");
+      expect(ids).not.toContain("vercel/voyage/voyage-code-3");
+      expect(vercel?.models.every((m) => m.providerId === "vercel")).toBe(true);
+    });
+  }
+});
+
 describe("NaN and Helmcode on the open harnesses", () => {
   const catalog = live({
     nan: { "glm5.3-flash": { name: "GLM 5.3 Flash" }, "qwen3.6": { name: "Qwen 3.6" } },

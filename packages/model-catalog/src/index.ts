@@ -24,6 +24,10 @@ export {
 export {
   baseUrlEnvVar,
   baseUrlOverride,
+  type CatalogChatRow,
+  catalogChatModels,
+  ignoredBaseUrlVar,
+  isAgentChatModel,
   openAICompatibleBaseUrlVars,
   openAICompatibleKeyVars,
   openAICompatibleProvider,
@@ -32,10 +36,12 @@ export {
   providerBaseUrl,
   providerForKeyVar,
   providerForModel,
+  providerHarnessModels,
   providerKeyFromEnv,
   providerKeyVars,
   type RegistryCatalogSection,
   registryCatalogSections,
+  withAgentChatRegistrySections,
   withRegistryCatalogSections,
 } from "./openai-compatible-registry.ts";
 export {

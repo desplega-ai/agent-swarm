@@ -23,10 +23,11 @@ describe("Sonnet 5.5 registry", () => {
             .filter((row) => row.provider === provider && row.model === model)
             .map((row) => [row.tokenClass, row.pricePerMillionUsd]),
         );
+        // Sonnet 5.5 cache hits cost 0.05x input, not the usual 0.1x.
         expect(rates).toEqual({
           input: 2,
           output: 10,
-          cached_input: 0.2,
+          cached_input: 0.1,
           cache_write: 2.5,
           cache_write_1h: 4,
         });
@@ -40,5 +41,12 @@ describe("Sonnet 5.5 registry", () => {
         )?.pricePerMillionUsd,
       ).toBe(2);
     }
+  });
+
+  test("the shortname fallback seeds the same cache-read rate when the snapshot lacks the model", () => {
+    const row = buildModelsDevSeedRows({ anthropic: { models: {} } }).find(
+      (r) => r.provider === "claude" && r.model === "sonnet" && r.tokenClass === "cached_input",
+    );
+    expect(row?.pricePerMillionUsd).toBe(0.1);
   });
 });

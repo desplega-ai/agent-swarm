@@ -18,6 +18,7 @@ import {
   ListTodo,
   Mail,
   MessageCircleReply,
+  MessageSquare,
   MessagesSquare,
   Plug,
   Search,
@@ -133,6 +134,7 @@ const SOURCE_ICON: Record<string, IconCmp> = {
   linear: Code2,
   jira: Globe,
   comb: FolderOpen,
+  chat: MessageSquare,
 };
 
 function SourcePill({ value }: { value: string | undefined }) {

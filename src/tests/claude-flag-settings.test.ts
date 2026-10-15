@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ClaudeSettingsConfigError,
   mergeClaudeSettingsArgs,
+  userClaudeMdExclude,
   WORKSPACE_CLAUDE_MD_EXCLUDE,
 } from "../providers/claude-flag-settings";
 
@@ -22,7 +23,9 @@ describe("mergeClaudeSettingsArgs", () => {
   test("no caller settings: args pass through, only the workspace exclusion", () => {
     const merged = mergeClaudeSettingsArgs([["--max-turns", "3"]], directory);
     expect(merged.argLists).toEqual([["--max-turns", "3"]]);
-    expect(merged.settings).toEqual({ claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE] });
+    expect(merged.settings).toEqual({
+      claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
+    });
   });
 
   test("strips both flag forms, keeps caller keys, unions and dedupes claudeMdExcludes", async () => {
@@ -44,7 +47,12 @@ describe("mergeClaudeSettingsArgs", () => {
     expect(merged.settings).toEqual({
       model: "file",
       env: { X: "kept" },
-      claudeMdExcludes: ["/a/CLAUDE.md", WORKSPACE_CLAUDE_MD_EXCLUDE, "/b/CLAUDE.md"],
+      claudeMdExcludes: [
+        "/a/CLAUDE.md",
+        WORKSPACE_CLAUDE_MD_EXCLUDE,
+        "/b/CLAUDE.md",
+        userClaudeMdExclude(),
+      ],
     });
   });
 
@@ -100,7 +108,7 @@ describe("mergeClaudeSettingsArgs", () => {
     expect(merged.settings).toEqual({
       model: "b",
       env: {},
-      claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE],
+      claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
     });
   });
 });

@@ -24,6 +24,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { useChatSdkStatus } from "@/api/hooks/use-chat-sdk";
 import {
   useConfigs,
   useDeleteConfigsBatch,
@@ -194,7 +195,10 @@ function IntegrationDetailInner({
   ) : (
     <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
   );
-  const status = deriveIntegrationStatus(def, configs, envPresence);
+  const chatSdkStatus = useChatSdkStatus({ enabled: def.id === "chat-sdk", poll: false });
+  const status = deriveIntegrationStatus(def, configs, envPresence, {
+    chatSdkEnabled: chatSdkStatus.data?.enabled,
+  });
   const allFields = useMemo(() => getIntegrationFields(def), [def]);
 
   const [state, setState] = useState<DirtyState>(initialState);

@@ -171,6 +171,13 @@ export function runContext(event: keyof SwarmEventMap, payload: unknown): RunCon
     case "post.kapso.message":
       subject = `number ${stringField(payload, "phoneNumberId") ?? "?"}: message ${stringField(payload, "messageId") ?? "?"}`;
       break;
+    // Ids only: a chat message text is personal content.
+    case "pre.chat.route":
+    case "post.chat.message": {
+      const taskId = stringField(payload, "taskId");
+      subject = `${stringField(payload, "adapter") ?? "?"} thread ${stringField(payload, "threadId") ?? "?"}${taskId ? `: task ${taskId}` : ""}`;
+      break;
+    }
     case "post.vcs.event": {
       const number = field(payload, "number");
       subject = `${stringField(payload, "provider") ?? "?"} ${stringField(payload, "kind") ?? "?"}.${stringField(payload, "action") ?? "?"}: ${stringField(payload, "repo") ?? "?"}${typeof number === "number" ? `#${number}` : ""}`;

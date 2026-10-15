@@ -34,8 +34,10 @@ fi
 
 run_full_suite() {
   # Mirror merge-gate's shard boundaries so local load matches CI.
-  bun run test:root -- --timeout 10000 --parallel=4 --shard=1/2
-  exec bun run test:root -- --timeout 10000 --parallel=4 --shard=2/2
+  bun run test:root -- --timeout 10000 --parallel=4 --shard=1/4
+  bun run test:root -- --timeout 10000 --parallel=4 --shard=2/4
+  bun run test:root -- --timeout 10000 --parallel=4 --shard=3/4
+  exec bun run test:root -- --timeout 10000 --parallel=4 --shard=4/4
 }
 
 probe_file=$(mktemp)

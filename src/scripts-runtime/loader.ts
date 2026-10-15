@@ -1,5 +1,6 @@
 import { getApiKey } from "../utils/api-key";
-import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { getMcpBaseUrl } from "../utils/constants";
+import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "./api-types";
 import type { FailedCredentialBinding } from "./credential-broker";
 import { buildEgressSecrets } from "./egress-secrets";
@@ -66,7 +67,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
       apiKey: { value: apiKey, isSecret: true },
       agentId: { value: input.agentId, isSecret: false },
       mcpBaseUrl: {
-        value: input.mcpBaseUrl ?? process.env.MCP_BASE_URL ?? "http://localhost:3013",
+        value: input.mcpBaseUrl ?? getMcpBaseUrl(),
         isSecret: false,
       },
       ...(input.runtimeInstanceId
@@ -94,12 +95,21 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     };
   }
 
+  // The global scrubber skips values under its length floor, so this run's own
+  // secret config is redacted here at any length before the global pass. Built
+  // before the import check: its diagnostic quotes source, which can hold a value.
+  const runSecrets = createValueScrubber(
+    Object.entries(input.userConfig ?? {})
+      .filter(([, entry]) => entry.isSecret)
+      .map(([key, entry]) => ({ value: entry.value, name: `config:${key}` })),
+  );
+
   const imports = validateScriptImports(input.source);
   if (!imports.ok) {
     return {
       result: undefined,
       stdout: "",
-      stderr: imports.diagnostic,
+      stderr: scrubSecrets(runSecrets.text(imports.diagnostic)),
       truncated: { stdout: false, stderr: false },
       durationMs: 0,
       exitCode: 1,
@@ -133,9 +143,11 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
 
   return {
     ...output,
-    result: scrubObject(output.result),
-    stdout: scrubSecrets(output.stdout),
-    stderr: scrubSecrets(output.stderr),
-    ...(output.runtimeError ? { runtimeError: scrubObject(output.runtimeError) } : {}),
+    result: scrubObject(runSecrets.object(output.result)),
+    stdout: scrubSecrets(runSecrets.text(output.stdout)),
+    stderr: scrubSecrets(runSecrets.text(output.stderr)),
+    ...(output.runtimeError
+      ? { runtimeError: scrubObject(runSecrets.object(output.runtimeError)) }
+      : {}),
   };
 }

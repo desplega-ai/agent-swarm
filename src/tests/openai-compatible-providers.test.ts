@@ -11,8 +11,6 @@ import {
 } from "@desplega/model-catalog";
 import { loadModelsDevCache } from "../be/modelsdev-cache";
 import snapshot from "../be/modelsdev-cache.json";
-import { applyProviderKeySplice, type OpencodeConfig } from "../providers/opencode-adapter";
-import { customProviderModelsBlock } from "../providers/pi-mono-adapter";
 import { normalizeProviderKeyAliases } from "../utils/credentials";
 
 type SnapshotModel = {
@@ -30,23 +28,6 @@ type SnapshotProvider = {
 };
 
 describe("openai-compatible provider table", () => {
-  test("Vercel preserves gateway model namespaces and uses the picked key in both harnesses", () => {
-    const model = "vercel/zai/glm-5.3";
-    const provider = providerForModel(model);
-    expect(provider?.id).toBe("vercel");
-    if (!provider) throw new Error("Vercel provider missing");
-    const key = crypto.randomUUID();
-    const config: OpencodeConfig = { model };
-    expect(applyProviderKeySplice(config, model, { AI_GATEWAY_API_KEY: key })?.key).toBe(key);
-    expect(config.provider?.vercel).toEqual({ env: [], options: { apiKey: key } });
-    // Keep OpenCode's built-in Gateway SDK endpoint; pi needs the OpenAI endpoint.
-    const pi = customProviderModelsBlock(provider);
-    expect(pi.baseUrl).toBe("https://ai-gateway.vercel.sh/v1");
-    expect(pi.api).toBe("openai-completions");
-    expect(pi.apiKey).toBe("$AI_GATEWAY_API_KEY");
-    expect(pi.models.map((m) => m.id)).toEqual(["zai/glm-5.3", "moonshotai/kimi-k3"]);
-  });
-
   test("providerForModel routes by exact prefix only", () => {
     expect(providerForModel("nan/glm5.3-flash")?.id).toBe("nan");
     expect(providerForModel("helmcode/gemma4")?.id).toBe("helmcode");
@@ -124,8 +105,9 @@ describe("openai-compatible provider table", () => {
       const section = merged[id];
       expect(section).toBeDefined();
       if (!section) return;
-      // Built-in SDK providers such as Vercel can omit an OpenAI API URL.
-      if (section.api) expect(section.api).toBe(entry.baseUrl);
+      // OpenCode's built-in AI Gateway SDK has no OpenAI-compatible `api` URL.
+      if (entry.npm === "@ai-sdk/gateway") expect(section.api).toBeUndefined();
+      else expect(section.api).toBe(entry.baseUrl);
       expect(section.env).toEqual([entry.envVar]);
       expect(section.npm).toBe(entry.npm);
       for (const model of entry.models) {

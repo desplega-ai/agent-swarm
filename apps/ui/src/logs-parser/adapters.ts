@@ -41,9 +41,15 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
     const message = isRecord(ev.message) ? ev.message : undefined;
     const rawContent = message?.content;
     const role = roleFromAnthropicEvent(ev, message);
+    // Set on the events a sub-agent emits: the id of the Agent/Task call
+    // that spawned it.
+    const parentToolUseId =
+      typeof ev.parent_tool_use_id === "string" && ev.parent_tool_use_id
+        ? ev.parent_tool_use_id
+        : undefined;
 
     if (typeof rawContent === "string") {
-      items.push(makeItem(d, "text", { role, text: rawContent }));
+      items.push(makeItem(d, "text", { role, text: rawContent, parentToolUseId }));
       continue;
     }
 
@@ -57,6 +63,7 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
       continue;
     }
 
+    const firstBlockItem = items.length;
     for (const block of rawContent) {
       if (!isRecord(block)) {
         items.push(makeItem(d, "unknown", { role: "system", raw: block }));
@@ -109,6 +116,10 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
           break;
         }
       }
+    }
+    if (parentToolUseId) {
+      for (let i = firstBlockItem; i < items.length; i++)
+        items[i].parentToolUseId = parentToolUseId;
     }
   }
 

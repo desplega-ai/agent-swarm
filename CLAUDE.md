@@ -327,7 +327,7 @@ bun run check
 bun run lint           # whole lint scope; NOT lint:fix — CI runs `lint` (read-only)
 bun run lint:slop      # anti-slop Oxlint rule subset
 bun run tsc:check:tsc  # tsc 5, the CI authority (`tsc:check` runs tsgo)
-bun run test:root -- --parallel=4     # CI: 2 shards x --parallel=4, balanced by cached --timings
+bun run test:root -- --parallel=4     # CI: 4 shards x --parallel=4, balanced by cached --timings
 bun run e2e                          # black-box contract suite: boots the API on a free port, no Docker, no LLM
 bun run e2e:ui                       # Playwright UI suite: seeded API per worker, headless Chromium, needs Node 22+
 bun run check:bun-version             # Dockerfile oven/bun tags == package.json packageManager

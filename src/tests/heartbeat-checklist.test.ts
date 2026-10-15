@@ -524,7 +524,8 @@ describe("Heartbeat Checklist", () => {
             buildCredentials: () => {
               setupStarted.resolve();
               return new Promise((resolve) => {
-                releaseSetup = () => resolve({ egressSecrets: [], failedBindings: [] });
+                releaseSetup = () =>
+                  resolve({ egressSecrets: [], failedBindings: [], userConfig: {} });
               });
             },
           });
@@ -561,7 +562,7 @@ describe("Heartbeat Checklist", () => {
         {
           buildCredentials: async () => {
             controller.abort();
-            return { egressSecrets: [], failedBindings: [] };
+            return { egressSecrets: [], failedBindings: [], userConfig: {} };
           },
         },
       );

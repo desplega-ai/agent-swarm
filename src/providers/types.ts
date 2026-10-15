@@ -33,7 +33,11 @@ export interface CostData {
   cacheWrite1hTokens?: number;
   /** Migration 063: codex reasoning_output_tokens (and similar) for reasoning models. */
   reasoningOutputTokens?: number;
-  /** Migration 063: claude extended-thinking tokens from CLI's `usage.thinking_input_tokens`. */
+  /**
+   * Migration 063: claude extended-thinking tokens from the result line's
+   * `usage.output_tokens_details.thinking_tokens`. Informational: they are a
+   * subset of `outputTokens` and already priced there.
+   */
   thinkingTokens?: number;
   /** Complete per-model usage, including sidechain/subagent tokens when available. */
   models?: CostModelUsage[];

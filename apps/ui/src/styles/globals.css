@@ -452,7 +452,8 @@ summary {
 /* Shimmer text, used by the inline "chain of thought" indicator on
  * in-progress agent turns. A linear gradient slides across the text via
  * background-clip:text, giving a subtle "live / streaming" pulse. */
-.shimmer-text {
+.shimmer-text,
+[data-slot="trace-line"][data-status="running"] > [data-slot="trace-title"] {
   background: linear-gradient(
     90deg,
     var(--color-muted-foreground) 0%,
@@ -464,6 +465,13 @@ summary {
   background-clip: text;
   -webkit-text-fill-color: transparent;
   animation: shimmer-slide 2s linear infinite;
+}
+
+/* A dimmed part of a running title (a tool's detail, a thinking preview) gets
+ * its own layer from `opacity`, which the clipped gradient cannot paint into:
+ * it renders invisible. The shimmer already dims, so drop the opacity. */
+[data-slot="trace-line"][data-status="running"] > [data-slot="trace-title"] * {
+  opacity: 1;
 }
 
 @keyframes shimmer-slide {
@@ -495,7 +503,8 @@ summary {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shimmer-text {
+  .shimmer-text,
+  [data-slot="trace-line"][data-status="running"] > [data-slot="trace-title"] {
     animation: none;
     -webkit-text-fill-color: var(--color-foreground);
     color: var(--color-foreground);

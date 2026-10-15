@@ -99,8 +99,9 @@ const ANTHROPIC_SHORTNAME_TO_MODELSDEV: Record<string, string> = {
 const ANTHROPIC_SHORTNAME_PRICING_FALLBACKS: Record<string, ModelsDevCostBlock> = {
   // https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-09-22)
   "claude-opus-5-5": { input: 4, output: 20, cache_read: 0.2, cache_write: 5 },
-  // https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-09-28)
-  "claude-sonnet-5-5": { input: 2, output: 10, cache_read: 0.2, cache_write: 2.5 },
+  // https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-10-15):
+  // cache hits on Sonnet 5.5 cost 0.05x input, not the usual 0.1x.
+  "claude-sonnet-5-5": { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 },
   "claude-fable-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
   "claude-mythos-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
 };

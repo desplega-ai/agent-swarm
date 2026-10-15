@@ -1,6 +1,6 @@
 /**
  * The registry of OpenAI-compatible LLM providers that pi and opencode reach
- * with one API key and a base URL (`nan/*`, `helmcode/*`).
+ * with one API key and a base URL (`nan/*`, `helmcode/*`, `vercel/*`).
  *
  * This table is the only place a provider is declared. The API server, the
  * worker and the dashboard all derive from it through the helpers in
@@ -37,8 +37,14 @@ export interface OpenAICompatibleProvider {
   displayName: string;
   /** One sentence for the dashboard integration card. */
   description: string;
-  /** Default OpenAI-compatible API root; `/models` and `/chat/completions` hang off it. `<ID>_BASE_URL` overrides it. */
+  /** Default OpenAI-compatible API root; `/models` and `/chat/completions` hang off it. `<ID>_BASE_URL` overrides it unless `baseUrlLocked`. */
   baseUrl: string;
+  /**
+   * The provider has exactly one endpoint, so `baseUrl` is the only URL it is
+   * ever reached at: no `<ID>_BASE_URL` override is read, forwarded or offered
+   * in the dashboard, and pi gets `baseUrl` even over a hand-written block.
+   */
+  baseUrlLocked?: boolean;
   /** Vendor docs, shown as the catalog section's `doc`. */
   docsUrl: string;
   /** The env var the harnesses and the credential pool read. */
@@ -61,10 +67,16 @@ export interface OpenAICompatibleProvider {
    *   custom provider block.
    */
   catalog: "models.dev" | "registry";
-  /** AI SDK package opencode loads for a custom provider block. */
+  /** AI SDK package opencode loads for the provider (`@ai-sdk/gateway` is OpenCode's built-in Vercel provider). */
   npm: "@ai-sdk/openai-compatible" | "@ai-sdk/gateway";
   /** Tool-calling chat models pi and opencode get in their config blocks. */
   models: readonly OpenAICompatibleModel[];
+  /**
+   * pi also gets every tool-calling chat model of the provider's models.dev
+   * section (`catalogChatModels`), so a gateway with hundreds of models needs
+   * no hand-kept list. Requires `catalog: "models.dev"`.
+   */
+  modelsFromCatalog?: boolean;
 }
 
 const DEVELOPER_ROLE = { supportsDeveloperRole: true } as const;
@@ -230,39 +242,24 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
   vercel: {
     id: "vercel",
     displayName: "Vercel AI Gateway",
-    description: "GLM 5.3 and Kimi K3 through Vercel AI Gateway, including Token Pass.",
+    description:
+      "Every AI Gateway chat model (GLM, Kimi, Claude, GPT, Gemini and more), including Token Pass.",
+    // OpenAI Chat Completions endpoint:
+    // vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions
     baseUrl: "https://ai-gateway.vercel.sh/v1",
+    baseUrlLocked: true,
     docsUrl: "https://vercel.com/docs/ai-gateway/token-pass",
     envVar: "AI_GATEWAY_API_KEY",
     aliasEnvVars: [],
     keyNote: "Use a Token Pass API key for Token Pass credit; regular keys use AI Gateway credit.",
     catalog: "models.dev",
-    // Reuse OpenCode's built-in Vercel provider; pi uses OpenAI Chat Completions.
+    // OpenCode ships Vercel built in (models.dev `vercel`, AI Gateway SDK);
+    // pi reaches the OpenAI Chat Completions endpoint above.
     npm: "@ai-sdk/gateway",
-    // IDs: vercel.com/docs/ai-gateway/token-pass. Limits and modalities
-    // match the existing models.dev Vercel catalog section.
-    models: [
-      {
-        id: "zai/glm-5.3",
-        name: "GLM 5.3",
-        contextWindow: 1000000,
-        maxOutputTokens: 1000000,
-        input: TEXT_ONLY,
-        reasoning: true,
-        compat: DEVELOPER_ROLE,
-      },
-      {
-        id: "moonshotai/kimi-k3",
-        name: "Kimi K3",
-        contextWindow: 1000000,
-        maxOutputTokens: 131072,
-        input: TEXT_IMAGE,
-        reasoning: true,
-        compat: DEVELOPER_ROLE,
-      },
-    ],
+    models: [],
+    modelsFromCatalog: true,
   },
 } satisfies Record<string, OpenAICompatibleProvider>;
 
-/** Registry ids (`"nan" | "helmcode"`); a new entry extends this union. */
+/** Registry ids (`"nan" | "helmcode" | "vercel"`); a new entry extends this union. */
 export type OpenAICompatibleProviderId = keyof typeof OPENAI_COMPATIBLE_PROVIDERS;

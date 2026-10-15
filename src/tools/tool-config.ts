@@ -121,6 +121,14 @@ export const DEFERRED_TOOLS = new Set([
   "send-whatsapp-message",
   "reply-whatsapp-message",
 
+  // Chat SDK (6)
+  "chat-reply",
+  "chat-post",
+  "chat-open-dm",
+  "chat-read-thread",
+  "register-chat-channel",
+  "unregister-chat-channel",
+
   // Tracker (7)
   "tracker-status",
   "get-oauth-access-token",

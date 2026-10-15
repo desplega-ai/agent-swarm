@@ -5,6 +5,7 @@ import {
   azureDevOpsContextKey,
   azureDevOpsWorkItemContextKey,
   buildJiraContextKey,
+  chatSdkContextKey,
   githubContextKey,
   gitlabContextKey,
   linearContextKey,
@@ -164,6 +165,24 @@ describe("parseContextKey", () => {
       family: "slack",
       parts: { channelId: "C0A4J7GB0UD", threadTs: "1776800534.257079" },
     });
+  });
+
+  test("round-trips chat-sdk keys whose thread id contains colons", () => {
+    const threadId = "telegram:-1001234567890:42";
+    const key = chatSdkContextKey(threadId);
+    expect(key).toBe("task:chat-sdk:telegram:-1001234567890%3A42");
+    expect(key.split(":")).toHaveLength(4);
+    expect(parseContextKey(key)).toEqual({
+      family: "chat-sdk",
+      parts: { adapter: "telegram", threadId },
+    });
+  });
+
+  test("chat-sdk keys reject thread ids without an adapter prefix", () => {
+    expect(() => chatSdkContextKey("no-adapter")).toThrow(/<adapter>:<id>/);
+    expect(() => chatSdkContextKey(":123")).toThrow(/<adapter>:<id>/);
+    expect(() => chatSdkContextKey("telegram:")).toThrow(/<adapter>:<id>/);
+    expect(() => parseContextKey("task:chat-sdk:telegram")).toThrow(/malformed chat-sdk/);
   });
 
   test("round-trips agentmail keys", () => {

@@ -542,7 +542,12 @@ describe("harness compatibility at every create entry point", () => {
   });
 
   test("send-task: the parent auto-route target is judged", async () => {
-    const parent = await createTaskExtended("codex parent", { agentId: codexId, source: "mcp" });
+    // The worker created the parent, so it may continue it (task.parent.attach).
+    const parent = await createTaskExtended("codex parent", {
+      agentId: codexId,
+      creatorAgentId: workerId,
+      source: "mcp",
+    });
     const refused = await sendTaskHandler(ownerCtx({ agentId: workerId }), {
       task: "child of a codex task",
       parentTaskId: parent.id,

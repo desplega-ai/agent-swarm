@@ -137,8 +137,10 @@ describe("task tool ctx", () => {
     });
     await updateAgentProfile(lead.id, { capabilities: ["merge"] });
     await updateAgentProfile(underprivilegedLead.id, { capabilities: ["typescript"] });
+    // The sender created the parent, so it may continue it (task.parent.attach).
     const parent = await createTaskExtended("privileged parent", {
       agentId: lead.id,
+      creatorAgentId: sender.id,
       routingAffinity: { capabilities: ["merge"], leadOnly: true },
     });
 

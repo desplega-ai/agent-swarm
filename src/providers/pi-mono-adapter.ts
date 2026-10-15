@@ -18,12 +18,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ignoredBaseUrlVar,
   type OpenAICompatibleProvider,
   openAICompatibleKeyVars,
   openAICompatibleProvider,
   openAICompatibleProviders,
   providerBaseUrl,
   providerForModel,
+  providerHarnessModels,
   providerKeyFromEnv,
   providerKeyVars,
 } from "@desplega/model-catalog";
@@ -66,6 +68,7 @@ import { parseEnvFlag } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
+import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerEnvSecrets, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
@@ -550,8 +553,10 @@ async function readJsonFile(path: string): Promise<Record<string, unknown> | und
  * `apiKey` is always the `"$VAR"` interpolation of the canonical env var, never
  * a key value: pi reads a bare name as a literal key. The key a session really
  * uses arrives as a runtime key (`createPiRuntimeAuth`), which beats this field.
- * Costs are 0: these are flat-rate subscriptions (the server prices them at $0).
- * A `modelId` missing from the table (a catalog id outside it) gets a bare
+ * Costs are 0: the server reprices every session from the pricing table.
+ * A `modelsFromCatalog` provider (`vercel`) lists every agent chat model of its
+ * catalog snapshot section (`providerHarnessModels`).
+ * A `modelId` missing from the list (a catalog id outside it) gets a bare
  * entry so pi still resolves it instead of falling back to its default model;
  * pi fills the omitted limits with its own defaults.
  */
@@ -561,7 +566,8 @@ export function customProviderModelsBlock(
   baseUrl: string = provider.baseUrl,
 ) {
   const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  const models: Record<string, unknown>[] = provider.models.map((m) => ({
+  const listed = providerHarnessModels(provider, snapshotCatalogRows(provider.id));
+  const models: Record<string, unknown>[] = listed.map((m) => ({
     id: m.id,
     name: m.name,
     reasoning: m.reasoning,
@@ -571,7 +577,7 @@ export function customProviderModelsBlock(
     cost: { ...zeroCost },
     compat: { ...m.compat },
   }));
-  if (modelId && !provider.models.some((m) => m.id === modelId)) {
+  if (modelId && !listed.some((m) => m.id === modelId)) {
     models.push({ id: modelId, name: modelId, cost: { ...zeroCost } });
   }
   return {
@@ -608,9 +614,11 @@ export interface SessionModelsJson {
  *   hand-authored one. With the default gateway, a value an earlier version
  *   wrote into the shared file (recorded in the legacy marker) is reverted, so
  *   a stale gateway never leaks in.
- * - one block per registry provider (`nan`, `helmcode`) whose key (canonical
- *   var or alias) is set, at its `<ID>_BASE_URL` or the registry default. A
- *   block already in the shared file is user-authored and wins.
+ * - one block per registry provider (`nan`, `helmcode`, `vercel`) whose key
+ *   (canonical var or alias) is set, at its `<ID>_BASE_URL` or the registry
+ *   default. A block already in the shared file is user-authored and wins,
+ *   except that a `baseUrlLocked` provider (`vercel`) always gets its one
+ *   endpoint and API, with a warning when the shared block named another.
  * - `model` (the task's model) adds a bare entry to its provider's block when
  *   its id is outside the table.
  *
@@ -664,7 +672,35 @@ export async function writeSessionModelsJson(
   const modelProvider = providerForModel(model);
   const modelId = modelProvider && model ? model.slice(modelProvider.id.length + 1) : undefined;
   for (const provider of wanted) {
-    if (providers[provider.id] !== undefined) {
+    const ignored = ignoredBaseUrlVar(provider, env);
+    if (ignored) {
+      console.warn(
+        scrubSecrets(
+          `[pi-mono] ${ignored} is ignored: ${provider.displayName} is only reached at ${provider.baseUrl}`,
+        ),
+      );
+    }
+    const existing = providers[provider.id];
+    if (provider.baseUrlLocked && isPlainObject(existing)) {
+      if (existing.baseUrl !== provider.baseUrl || existing.api !== "openai-completions") {
+        console.warn(
+          scrubSecrets(
+            `[pi-mono] ${sharedPath} providers.${provider.id} points at ${String(existing.baseUrl)}; using ${provider.baseUrl}`,
+          ),
+        );
+      }
+      providers[provider.id] = {
+        ...customProviderModelsBlock(
+          provider,
+          modelProvider?.id === provider.id ? modelId : undefined,
+        ),
+        ...existing,
+        baseUrl: provider.baseUrl,
+        api: "openai-completions",
+      };
+      continue;
+    }
+    if (existing !== undefined) {
       console.warn(
         scrubSecrets(
           `[pi-mono] ${sharedPath} already has a providers.${provider.id} block; using it as is`,
