@@ -220,6 +220,8 @@ opencode checks credentials in this priority order:
 | **OpenRouter API key** (recommended) | `OPENROUTER_API_KEY` | Access 100+ models via [openrouter.ai](https://openrouter.ai) |
 | **Anthropic API key** | `ANTHROPIC_API_KEY` | Direct Anthropic API billing |
 | **OpenAI API key** | `OPENAI_API_KEY` | Direct OpenAI API billing |
+| **NaN API key** | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Flat-rate NaN models. See [NaN and Helmcode](#nan-and-helmcode) |
+| **Helmcode API key** | `HELMCODE_API_KEY` | Flat-rate Helmcode models. See [NaN and Helmcode](#nan-and-helmcode) |
 | **Auth file** | `~/.local/share/opencode/auth.json` | Native opencode CLI auth file |
 
 At least one credential source is required. The Docker entrypoint validates this on startup.
@@ -233,9 +235,11 @@ At least one credential source is required. The Docker entrypoint validates this
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Route OpenRouter provider and session-summary traffic through an OpenAI-compatible gateway |
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
+| `NAN_API_KEY` | One of* | — | NaN API key for `nan/<id>` models. `HELMCODE_API_NAN` is accepted as an alias; `NAN_API_KEY` wins when both are set. Comma-separated values form a pool |
+| `HELMCODE_API_KEY` | One of* | — | Helmcode API key for `helmcode/<id>` models. Comma-separated values form a pool |
 | `OPENCODE_SDK_PATH` | No | Global npm root | Absolute path to `@opencode/sdk/dist/index.js`, when it is not under `/usr/lib/node_modules` or `/usr/local/lib/node_modules` |
 
-\* At least one credential source is required (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `~/.local/share/opencode/auth.json`).
+\* At least one credential source is required (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `NAN_API_KEY`, `HELMCODE_API_KEY`, or `~/.local/share/opencode/auth.json`).
 
 ### Model Selection
 
@@ -246,6 +250,8 @@ The default model is `openrouter/qwen/qwen3-coder-flash`. Set `MODEL_OVERRIDE` t
 | OpenRouter | `openrouter/qwen/qwen3-coder-flash` | Default. See [OpenRouter model catalog](https://openrouter.ai/models) |
 | Anthropic | `anthropic/claude-sonnet-4-6` | Requires `ANTHROPIC_API_KEY` |
 | OpenAI | `openai/gpt-4o` | Requires `OPENAI_API_KEY` |
+| NaN | `nan/glm5.3-flash` | Requires `NAN_API_KEY` (or `HELMCODE_API_NAN`) |
+| Helmcode | `helmcode/deepseek-v4-flash` | Requires `HELMCODE_API_KEY` |
 
 ### Reasoning / Effort
 
@@ -274,6 +280,8 @@ pi-mono supports several authentication methods depending on which model provide
 | **OpenRouter** | `OPENROUTER_API_KEY` | Access 100+ models via OpenRouter |
 | **OpenAI** | `OPENAI_API_KEY` | Direct OpenAI API access |
 | **Google** | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Direct Google AI API access (only honored when `MODEL_OVERRIDE` starts with `google/`) |
+| **NaN** | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Flat-rate NaN models. See [NaN and Helmcode](#nan-and-helmcode) |
+| **Helmcode** | `HELMCODE_API_KEY` | Flat-rate Helmcode models. See [NaN and Helmcode](#nan-and-helmcode) |
 | **Auth file** | `~/.pi/agent/auth.json` | Pre-configured auth file |
 
 At least one of these must be available. The Docker entrypoint validates this on startup. When `MODEL_OVERRIDE` starts with a provider prefix, only the matching key is required; when it's unset, any one of `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` suffices.
@@ -288,6 +296,8 @@ At least one of these must be available. The Docker entrypoint validates this on
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Route OpenRouter model and session-summary traffic through an OpenAI-compatible gateway |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
 | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | When prefixed | — | Google AI API key — required only when `MODEL_OVERRIDE` uses a `google/` prefix |
+| `NAN_API_KEY` | One of* | — | NaN API key for `nan/<id>` models. `HELMCODE_API_NAN` is accepted as an alias; `NAN_API_KEY` wins when both are set. Comma-separated values form a pool |
+| `HELMCODE_API_KEY` | One of* | — | Helmcode API key for `helmcode/<id>` models. Comma-separated values form a pool |
 
 \* At least one credential source is required (API key or `~/.pi/agent/auth.json`).
 
@@ -310,6 +320,8 @@ The prefix before the first `/` selects the provider and the matching credential
 | `openrouter/<id>` | `openrouter/moonshotai/kimi-k2.5` ([OpenRouter catalog](https://openrouter.ai/models)) | `OPENROUTER_API_KEY` |
 | `openai/<id>` | `openai/gpt-4o` | `OPENAI_API_KEY` |
 | `google/<id>` | `google/gemini-2.5-pro` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
+| `nan/<id>` | `nan/mimo-v2.6-flash` | `NAN_API_KEY` (or `HELMCODE_API_NAN`) |
+| `helmcode/<id>` | `helmcode/glm5.3-flash` | `HELMCODE_API_KEY` |
 
 ### Reasoning / Effort
 
@@ -323,6 +335,51 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) v
 - **MCP tool discovery**: pi-mono discovers swarm MCP tools at session creation via HTTP and registers them as custom tools. This is handled automatically — no `.mcp.json` needed for the swarm connection (though installed MCP servers are also discovered).
 - **Skills sync**: The worker mirrors skills into `~/.claude/skills/`, `~/.pi/agent/skills/`, `~/.codex/skills/`, `~/.opencode/skills/`, and `~/.agents/skills/` so local harnesses share the same skill inventory.
 - **Per-task hot-reload**: between tasks the worker polls a cheap `GET /api/agents/:id/skills/signature` (hash) endpoint and only re-syncs the filesystem when the installed-skill set actually changes. Newly installed / uninstalled skills appear on the next task without restarting the worker, while unchanged sessions skip the work. Foreign skills (`~/.claude/skills/<name>/SKILL.md` files not owned by the swarm) are preserved across re-syncs. See `src/utils/skills-refresh.ts`.
+
+---
+
+## NaN and Helmcode
+
+[NaN](https://nan.builders) and [Helmcode](https://helmcode.com) are OpenAI-compatible model providers billed at a flat rate per key. Their models run on the **pi** and **opencode** harnesses only. The `claude` and `codex` harnesses reject `nan/*` and `helmcode/*` models with the usual harness mismatch error.
+
+| Provider | Env var | Model ids |
+|----------|---------|-----------|
+| NaN | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | `nan/<id>`, using the ids in the `nan` section of models.dev, for example `nan/glm5.3-flash`, `nan/mimo-v2.6-flash`, `nan/qwen3.6` |
+| Helmcode | `HELMCODE_API_KEY` | `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`, `helmcode/qwen3.6`, `helmcode/gemma4` |
+
+- **Entering keys**: use the NaN and Helmcode cards on the dashboard Integrations page, or set the env vars on the worker. A key saved on the dashboard needs no restart.
+- **Alias**: `HELMCODE_API_NAN` is accepted for the NaN key. When both `NAN_API_KEY` and `HELMCODE_API_NAN` are set, `NAN_API_KEY` wins.
+- **Catalog**: Helmcode is not on models.dev. The swarm ships its five models as a hand-written section of the vendored catalog snapshot. Helmcode's resold Claude, GPT and Gemini models are not in the catalog.
+- **Pricing**: both providers are flat-rate per key. Sessions record $0 marginal cost with `costSource: "pricing-table"`. See [Cost and context computation](/docs/guides/cost-and-context-computation).
+- **`latest:` aliases** do not cover these providers. Use concrete model ids.
+
+### Per-key limits
+
+Both providers cap each key. One key shared across a fleet of workers hits these caps fast. Put several keys in a comma-separated pool (see [pi and opencode API-key pools](#pi-and-opencode-api-key-pools)); each task gets one key from the pool.
+
+| Provider | Requests per minute | Concurrency | Tokens per minute |
+|----------|---------------------|-------------|-------------------|
+| NaN | 60 | 7 concurrent requests in total on the base plan, 10 on premium; 5 per model on `qwen3.6`, `gemma4` and the `mimo` models | Not documented |
+| Helmcode | 100 | 5 concurrent requests per model; 10 on the GLM family, DeepSeek V4 Flash and Qwen 3.8 Flash | 2M |
+
+### Default harness and model tiers
+
+When `HARNESS_PROVIDER` is unset and a NaN or Helmcode key is the worker's only LLM credential, the worker defaults to `pi`.
+
+The built-in `pi` and `opencode` tier defaults still point at `openrouter/...` models. On a swarm whose only LLM credential is a NaN or Helmcode key, a `modelTier` task resolves to an OpenRouter model and fails because `OPENROUTER_API_KEY` is missing. Set the global tier config keys (`swarm_config`, written with `set-config` or `PUT /api/config`) to models you can run, for example:
+
+```bash
+MODEL_TIER_PI_SMOL=nan/glm5.3-flash
+MODEL_TIER_PI_REGULAR=nan/glm5.3-flash
+MODEL_TIER_PI_SMART=nan/qwen3.6
+MODEL_TIER_PI_ULTRA=nan/qwen3.6
+MODEL_TIER_OPENCODE_SMOL=nan/glm5.3-flash
+MODEL_TIER_OPENCODE_REGULAR=nan/glm5.3-flash
+MODEL_TIER_OPENCODE_SMART=nan/qwen3.6
+MODEL_TIER_OPENCODE_ULTRA=nan/qwen3.6
+```
+
+A task with neither `model` nor `modelTier` runs the agent's `MODEL_OVERRIDE`, else the adapter default (an OpenRouter model). Set `MODEL_OVERRIDE` to a `nan/` or `helmcode/` model on those agents too. See [Model tiers](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/model-tiers.md).
 
 ---
 
@@ -595,7 +652,7 @@ ACU usage.
 | Consideration | Claude Code | Codex | opencode | pi-mono | Claude Managed | ACP |
 |---------------|-------------|-------|----------|---------|----------------|-----|
 | **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Minimal — CLI plus OpenRouter key | Requires API key(s) | One-time `claude-managed-setup` CLI; HTTPS-public `MCP_BASE_URL` | Depends entirely on the target agent |
-| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via OpenRouter/Anthropic/OpenAI | Pay-per-token via API | Anthropic API tokens + $0.08/session-hour runtime fee | Owned by the target process; swarm reports `costSource: "unpriced"` |
+| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via OpenRouter/Anthropic/OpenAI, or flat-rate NaN/Helmcode keys | Pay-per-token via API, or flat-rate NaN/Helmcode keys | Anthropic API tokens + $0.08/session-hour runtime fee | Owned by the target process; swarm reports `costSource: "unpriced"` |
 | **Model flexibility** | Claude models only | Codex/OpenAI models | 100+ models via OpenRouter | Any provider via OpenRouter | Claude models only | Whatever the target agent supports |
 | **Follow-up continuity** | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble |
 | **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | Auto-wired per-task via config file | HTTP-based tool discovery | Server-side on the Anthropic Agent | Passed via ACP `newSession.mcpServers`; target must honor it |
@@ -669,6 +726,17 @@ curl -X PATCH "$MCP_BASE_URL/api/keys/plan" \
   -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H "Content-Type: application/json" \
   -d '{"keyType":"CLAUDE_CODE_OAUTH_TOKEN","keySuffix":"TJAAA","plan":"claude_team_standard"}'
 ```
+
+### pi and opencode API-key pools
+
+On the `pi` and `opencode` harnesses, `OPENROUTER_API_KEY`, `NAN_API_KEY` (or its alias `HELMCODE_API_NAN`) and `HELMCODE_API_KEY` also accept comma-separated values. Each task gets one key from the pool, chosen by the model's provider prefix (`openrouter/`, `nan/`, `helmcode/`).
+
+```bash
+NAN_API_KEY=nan-key1,nan-key2,nan-key3
+HELMCODE_API_KEY=helmcode-key1,helmcode-key2
+```
+
+On opencode, the adapter passes the picked key to the provider config for the task's model. An `OPENROUTER_API_KEY` pool therefore also works on opencode. Earlier versions passed the whole comma-separated value and the provider answered 401.
 
 ### Codex OAuth Pool
 

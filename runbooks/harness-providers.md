@@ -8,8 +8,8 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 |----------|--------------------|---------|-------|
 | Claude Code | `claude` | `ClaudeAdapter` | CLI by default; optional Agent SDK transport |
 | Codex | `codex` | `CodexAdapter` | Starts a fresh `codex app-server` for each task. OpenAI/ChatGPT OAuth |
-| opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary; agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) |
-| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
+| opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary, plus NaN (`nan/*`) and Helmcode (`helmcode/*`); agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) and [NaN and Helmcode](#nan-and-helmcode-pi-opencode) below |
+| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, NaN (`nan/*`), Helmcode (`helmcode/*`), or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode`, `gemini`, `copilot`, `qwen`, `kiro` and `goose` presets or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
@@ -17,6 +17,41 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
+
+## NaN and Helmcode (pi, opencode)
+
+NaN and Helmcode are OpenAI-compatible, flat-rate providers. Their models run
+on `pi` and `opencode` only; `claude` and `codex` reject `nan/*` and
+`helmcode/*` with the existing harness mismatch error.
+
+- **Keys**: `NAN_API_KEY` (alias `HELMCODE_API_NAN`; `NAN_API_KEY` wins when
+  both are set) and `HELMCODE_API_KEY`. Operators enter them on the dashboard
+  Integrations page (NaN and Helmcode cards); no restart is needed. The runner
+  copies the alias into `NAN_API_KEY` once per task, so downstream code reads
+  only `NAN_API_KEY`.
+- **Pools**: both vars take comma-separated values. Each task gets one key,
+  routed by model prefix (`nan/*` → `NAN_API_KEY`, `helmcode/*` →
+  `HELMCODE_API_KEY`). On opencode the adapter hands the picked key to the
+  provider config of the active model's provider, `openrouter` included, so
+  an `OPENROUTER_API_KEY` pool also works there.
+- **Model ids**: `nan/<id>` from the models.dev `nan` section (for example
+  `nan/glm5.3-flash`, `nan/mimo-v2.6-flash`, `nan/qwen3.6`);
+  `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`,
+  `helmcode/qwen3.6`, `helmcode/gemma4`. Helmcode is not on models.dev; it
+  ships as a hand-written section of `src/be/modelsdev-cache.json`.
+- **Per-key caps**: NaN allows 60 RPM and 7 concurrent requests in total on
+  the base plan (10 on premium), 5 per model on `qwen3.6`, `gemma4` and the
+  `mimo` models. Helmcode allows 100 RPM, 2M TPM, and 5 concurrent requests
+  per model (10 on the GLM family, DeepSeek V4 Flash and Qwen 3.8 Flash). One
+  shared key across a fleet hits these fast; use a pool.
+- **Pricing**: $0 rows under `pi` and `opencode`, so sessions record $0 with
+  `costSource: "pricing-table"`. See `src/providers/pricing-sources.md`.
+- **Default harness**: with no `HARNESS_PROVIDER` and no Anthropic
+  credential, a NaN or Helmcode key makes the worker default to `pi`. Tier
+  defaults still point at `openrouter/...`; NaN- or Helmcode-only swarms set
+  `MODEL_TIER_PI_*` and `MODEL_TIER_OPENCODE_*` (see
+  [model-tiers.md](./model-tiers.md)).
+- **`latest:` aliases** do not cover these providers.
 
 ## Grok (`grok`)
 

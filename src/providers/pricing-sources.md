@@ -22,8 +22,8 @@ rate by hand should also update this file.
 - **Runtime module**: `src/be/models-catalog.ts`; route in
   `src/http/models-catalog.ts`.
 - Every successful models.dev fetch in the runtime refresh above also updates
-  an in-memory slim catalog (openrouter / anthropic / openai / amazon-bedrock
-  only, picker-relevant fields only). The UI model picker
+  an in-memory slim catalog (openrouter / anthropic / openai / amazon-bedrock /
+  nan / helmcode only, picker-relevant fields only). The UI model picker
   (`apps/ui/src/lib/agent-runtime-models.ts` via `useModelsCatalog()`) prefers
   this over its build-time snapshot, so new models appear without a deploy.
 - Pinned limited-availability entries (`PINNED_MODELSDEV_ENTRIES`) are
@@ -84,6 +84,21 @@ rate by hand should also update this file.
     `inputTokens`, clamped to zero, so fresh input is priced separately.
     Cursor's own models are not in models.dev: see
     `CURSOR_FIRST_PARTY_PRICING` below.
+  - NaN models (models.dev `nan` section) and Helmcode models (the
+    hand-written `helmcode` section, below) → rows under `provider='pi'` and
+    `provider='opencode'`, keyed `nan/<id>` and `helmcode/<id>`, at $0 input
+    and $0 output. Both providers bill a flat rate per key, so a session's
+    marginal cost is $0. `buildModelsDevSeedRows()` projects them, so the rows
+    land at boot seed and on refresh, and sessions record $0 with
+    `costSource: "pricing-table"` rather than `unpriced`.
+
+- **Hand-written `helmcode` section**: Helmcode is not on models.dev. The
+  vendored snapshot carries a `helmcode` provider section with its five agent
+  models (`deepseek-v4-flash`, `glm5.3`, `glm5.3-flash`, `qwen3.6`, `gemma4`),
+  and `PINNED_MODELSDEV_ENTRIES` lists them, so the snapshot refresh script
+  and the live catalog merge keep the section. Model limits are copied from
+  Helmcode's own opencode and pi config pages. Helmcode's resold Claude, GPT
+  and Gemini models are not included.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the
