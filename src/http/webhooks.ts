@@ -316,7 +316,8 @@ export async function handleWebhooks(
       return true;
     }
 
-    console.log(`[GitHub] Received ${eventType} event`);
+    const deliveryId = req.headers["x-github-delivery"] as string | undefined;
+    console.log(`[GitHub] Received ${eventType} event (delivery ${deliveryId ?? "unknown"})`);
 
     let result: WebhookDispatchResult = { created: false };
 

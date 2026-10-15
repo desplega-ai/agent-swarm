@@ -1,4 +1,5 @@
-import { createPageVersion, getPage, getPageVersions } from "../be/db";
+import { createPageVersion, getPage } from "../be/db";
+import { getPageEditCounter } from "../be/db/page-versions";
 import type { PageSnapshot, PageVersion } from "../types";
 
 /**
@@ -8,7 +9,7 @@ import type { PageSnapshot, PageVersion } from "../types";
  * Mirrors `snapshotWorkflow` (src/workflows/version.ts:13-44).
  *
  * 1. Load current page state
- * 2. Get max version number for this page (page_versions ORDER BY version DESC)
+ * 2. Get max version number for this page (MAX(page_versions.version))
  * 3. Insert page_versions row with version+1 and the pre-update snapshot
  *
  * Throws on missing parent. Callers in HTTP handlers wrap this in a try/catch
@@ -24,9 +25,7 @@ export async function snapshotPage(
     throw new Error(`Page ${pageId} not found — cannot create snapshot`);
   }
 
-  const existingVersions = await getPageVersions(pageId);
-  const maxVersion = existingVersions.length > 0 ? existingVersions[0]!.version : 0;
-  const nextVersion = maxVersion + 1;
+  const nextVersion = await getPageEditCounter(pageId);
 
   const snapshot: PageSnapshot = {
     title: page.title,

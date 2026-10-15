@@ -159,6 +159,24 @@ describe("create_page MCP tool", () => {
     // Parent now holds the new body.
     const row = await getPageBySlug(agentId, "upsert");
     expect(row?.body).toBe("v1");
+
+    // The counter and the next snapshot number keep climbing from MAX(version).
+    const third = (await tool.handler(
+      {
+        title: "Upsert Page",
+        slug: "upsert",
+        body: "v2",
+        contentType: "text/html",
+        authMode: "public",
+      },
+      fakeMeta,
+    )) as { structuredContent: { version: number } };
+    expect(third.structuredContent.version).toBe(3);
+    const after = await getPageVersions(first.structuredContent.id);
+    expect(after.map((v) => [v.version, v.snapshot.body])).toEqual([
+      [2, "v1"],
+      [1, "v0"],
+    ]);
   });
 
   test("missing X-Agent-ID returns an error result", async () => {
