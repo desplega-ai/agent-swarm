@@ -6,6 +6,7 @@ import type {
   AgentAvatar,
   AgentWithTasks,
   ClaudeRuntimeConfig,
+  ProviderName,
   ReasoningEffortLevel,
 } from "../types";
 
@@ -113,6 +114,21 @@ export function useUpdateAgentProfile() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       queryClient.invalidateQueries({ queryKey: ["agent"] });
+    },
+  });
+}
+
+/** Switches only the harness (PATCH /harness-provider); for harnesses the runtime editor cannot configure. */
+export function useSetAgentHarnessProvider() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { id: string; harnessProvider: ProviderName }) =>
+      api.setAgentHarnessProvider(data.id, data.harnessProvider),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["agent"] });
+      queryClient.invalidateQueries({ queryKey: ["configs"] });
     },
   });
 }

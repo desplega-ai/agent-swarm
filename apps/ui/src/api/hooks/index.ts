@@ -17,6 +17,7 @@ export {
   useAgentRuntime,
   useAgentRuntimeInstances,
   useAgents,
+  useSetAgentHarnessProvider,
   useUpdateAgentMaxTasks,
   useUpdateAgentName,
   useUpdateAgentProfile,
