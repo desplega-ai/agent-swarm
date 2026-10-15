@@ -209,3 +209,19 @@ export async function taskProfileError(check: {
   }
   return null;
 }
+
+/**
+ * An agent's default model profile (MODEL_PROFILE) beats its MODEL_OVERRIDE and
+ * REASONING_EFFORT_OVERRIDE at claim. A change to either override, by any path,
+ * drops the profile default, so a stale default never beats a fresh override.
+ */
+export async function clearAgentModelProfileOnOverrideChange(
+  agentId: string,
+  key: string,
+): Promise<void> {
+  if (key !== "MODEL_OVERRIDE" && key !== "REASONING_EFFORT_OVERRIDE") return;
+  await getDbClient().run(
+    "DELETE FROM swarm_config WHERE scope = 'agent' AND scopeId = ? AND key = ?",
+    [agentId, MODEL_PROFILE_CONFIG_KEY],
+  );
+}
