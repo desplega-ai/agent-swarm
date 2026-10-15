@@ -221,28 +221,34 @@ describe("wait_for_api_ready: immediate success", () => {
 
 describe("wait_for_api_ready: transient failure then success", () => {
   test("retries roughly once per second until the server recovers", async () => {
-    let requestCount = 0;
+    // A per-test path prefix: an ephemeral port can be reused from another test
+    // process whose poller still hits /health, and those stray requests used
+    // to count as retries (3 requests in 1033 ms on CI).
+    const prefix = `/${crypto.randomUUID()}`;
+    const requestTimes: number[] = [];
     server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       fetch(req) {
         const url = new URL(req.url);
-        if (url.pathname !== "/health") return new Response("not found", { status: 404 });
-        requestCount += 1;
-        if (requestCount < 3) return new Response("unavailable", { status: 503 });
+        if (url.pathname !== `${prefix}/health`) return new Response("not found", { status: 404 });
+        requestTimes.push(performance.now());
+        if (requestTimes.length < 3) return new Response("unavailable", { status: 503 });
         return new Response("ok", { status: 200 });
       },
     });
 
-    const result = await runWaitForApiReady(server.url.toString(), {
+    const result = await runWaitForApiReady(`${server.url.origin}${prefix}/`, {
       WORKER_API_READY_TIMEOUT_SECONDS: "10",
     });
 
     expect(result.exitCode).toBe(0);
-    expect(requestCount).toBeGreaterThanOrEqual(3);
+    expect(requestTimes).toHaveLength(3);
     expect(result.stdout).toContain("API ready at");
-    // Two ~1s retries before success — bounded, not instant, not stalled.
-    expect(result.durationMs).toBeGreaterThanOrEqual(1500);
+    // Each retry waits out `sleep 1` after the previous response, so the
+    // server-side gap cannot shrink under load: paced, not a hot loop.
+    expect(requestTimes[1]! - requestTimes[0]!).toBeGreaterThanOrEqual(900);
+    expect(requestTimes[2]! - requestTimes[1]!).toBeGreaterThanOrEqual(900);
     expect(result.durationMs).toBeLessThan(15000);
   }, 20000);
 });

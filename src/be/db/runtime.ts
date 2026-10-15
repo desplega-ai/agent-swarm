@@ -104,7 +104,34 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   db = new Database(dbPath, { create: true });
   console.log(`Database initialized at ${dbPath}`);
 
-  const database = db;
+  // Boot must finish before getDb() hands this handle out. A step below can
+  // throw SQLITE_BUSY while another connection holds the file, and the
+  // db-client retries BUSY by calling getDb() again. With `db` still assigned,
+  // that retry got a connection whose encryption key was never resolved, and
+  // the server died on "Encryption key not resolved yet". Drop the handle so
+  // the retry runs boot again.
+  const opened = db;
+  try {
+    return bootOpenedDb(opened, dbPath, resolvePromptTemplate, autoEncryptLegacyPlaintextSecrets);
+  } catch (error) {
+    if (db === opened) {
+      db = null;
+      try {
+        opened.close();
+      } catch {
+        // Already closed by the step that failed.
+      }
+    }
+    throw error;
+  }
+}
+
+function bootOpenedDb(
+  database: Database,
+  dbPath: string,
+  resolvePromptTemplate: typeof import("../db").resolvePromptTemplate,
+  autoEncryptLegacyPlaintextSecrets: typeof import("../db").autoEncryptLegacyPlaintextSecrets,
+): Database {
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA busy_timeout = 5000;");
   database.run("PRAGMA foreign_keys = ON;");
@@ -140,7 +167,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // Old databases have CHECK(status IN ('pending','in_progress','completed','failed'))
   // which blocks 'cancelled', 'paused', 'offered', 'unassigned' statuses
   try {
-    const taskSchemaInfo = db
+    const taskSchemaInfo = database
       .prepare<{ sql: string | null }, []>(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_tasks'",
       )
@@ -153,7 +180,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
     if (needsStatusMigration) {
       console.log("[Migration] Removing restrictive CHECK constraint on agent_tasks.status");
-      db.run("PRAGMA foreign_keys=off");
+      database.run("PRAGMA foreign_keys=off");
 
       // Migrations run before this compatibility guard, so a legacy table now
       // carries every current column. Rebuilding from an old hard-coded column
@@ -169,12 +196,12 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       if (rebuiltSchemaSql === schemaSql || !/agent_tasks_new/i.test(rebuiltSchemaSql)) {
         throw new Error("Could not derive agent_tasks schema without legacy status CHECK");
       }
-      const columns = db
+      const columns = database
         .prepare<{ name: string }, []>('PRAGMA table_info("agent_tasks")')
         .all()
         .map((column) => `"${column.name.replaceAll('"', '""')}"`)
         .join(", ");
-      const schemaObjects = db
+      const schemaObjects = database
         .prepare<{ sql: string }, []>(
           `SELECT sql FROM sqlite_master
            WHERE tbl_name = 'agent_tasks'
@@ -194,13 +221,13 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
         for (const sql of schemaObjects) database.run(sql);
       })();
 
-      db.run("PRAGMA foreign_keys=on");
+      database.run("PRAGMA foreign_keys=on");
       console.log("[Migration] Successfully removed CHECK constraint on agent_tasks.status");
     }
   } catch (e) {
     console.error("[Migration] Failed to update agent_tasks CHECK constraint:", e);
     try {
-      db.run("PRAGMA foreign_keys=on");
+      database.run("PRAGMA foreign_keys=on");
     } catch (cleanupError) {
       console.error("[Migration] Failed to re-enable SQLite foreign_keys pragma:", cleanupError);
     }
@@ -291,7 +318,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     throw err;
   }
 
-  return db;
+  return database;
 }
 
 export function getDb(path?: string): Database {
