@@ -1,0 +1,175 @@
+---
+title: Email Domain Health
+description: A daily monitor for the domains you send mail from. One saved script checks SPF, DKIM, DMARC, MX, provider records and blocklists on two DNS-over-HTTPS resolvers, sends one test email and captures its score, counts bounces, writes history to a Swarm App, and alerts only when something gets worse.
+---
+
+Use this playbook when a team sends mail from its own domains (founder outreach, product mail, support) and wants to know before recipients do that a record broke, a key was rotated, or a domain landed on a blocklist.
+
+The seeded `email-domain-health` skill drives the build. It asks for requirements first, then builds the parts below with the `swarm-scripts`, `apps`, `scheduling` and `composio-gmail` skills. This page explains how those parts work and what went wrong the first time.
+
+<Mermaid title="Email domain health: a send schedule mails one test message to a test inbox; a check schedule runs DNS, blocklist, score and bounce checks, writes rows to a Swarm App, and alerts only on a new red or a score drop." chart={`flowchart LR
+  S1["Schedule<br/>send"] --> SC["Script<br/>mode send"]
+  SC --> TI["Test inbox<br/>mail-tester or seed"]
+  S2["Schedule<br/>check, +10 min"] --> CK["Script<br/>mode check"]
+  CK --> DNS["DoH x2<br/>SPF DKIM DMARC MX"]
+  CK --> BL["Blocklists<br/>with test-entry controls"]
+  CK --> TI
+  CK --> GM["Mailbox<br/>24h sent / bounces"]
+  CK --> APP["Swarm App<br/>run / check / current"]
+  CK -->|"new red or score drop"| AL["Alert"]
+`} />
+
+## What it does
+
+- **Authentication**: SPF, DKIM and DMARC for every monitored domain, judged from DNS and from the receiver's verdict on a real test email.
+- **Reputation**: domain blocklists (Spamhaus DBL, SURBL, URIBL), each trusted only when its own control passes.
+- **Delivery**: MX records, provider records (ESP bounce subdomains, DKIM CNAMEs), and the 24-hour bounce rate of the sending mailbox.
+- **History**: every run and every check is a row in a Swarm App, so a person sees what changed and since when.
+- **Quiet alerts**: one message when a check turns red or the score drops below the floor. Steady-state warnings never page anyone.
+
+## Agents
+
+- **[Lead](https://templates.agent-swarm.dev/official/lead)**: collects the requirements, owns the schedules, and posts alerts to channels that only it can write to.
+- **[Coder](https://templates.agent-swarm.dev/official/coder)**: builds and maintains the script and the app.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **`email-domain-health`** (seeded skill): the requirements interview and the build order on this page.
+- **`swarm-scripts`**: authoring the saved script, scope, connections and secrets.
+- **`apps`**: the history models, the named queries and the per-domain pages.
+- **`scheduling`**: two `targetType: "script"` schedules.
+- **`composio-gmail`**: the test send and the bounce search when the mailbox is Gmail. Any integration that can send as the real From address works.
+- **KV storage**: the pending test id and a per-day send marker.
+
+### Third-party services
+
+- **Public DNS-over-HTTPS resolvers**, for example `dns.google` and Cloudflare's JSON endpoint.
+- **[mail-tester](https://www.mail-tester.com)** or a seed inbox the user owns, for the test-send score.
+
+## Requirements the skill asks for
+
+| Requirement | Example | Used by |
+|---|---|---|
+| Domains, plus which one is the envelope (bounce) domain | `example.com`, `example.org` | every DNS check |
+| Sending providers and DKIM selectors per domain | Google Workspace `google`, an ESP selector | SPF includes, DKIM lookups |
+| From address and the integration that sends it | `founder@example.com` via Gmail | send mode |
+| Test inbox | mail-tester, or a seed inbox | score capture |
+| Schedule and timezone | weekdays 08:30, the user's zone | schedules |
+| Alert channel and thresholds | score under 6/10, bounces at 5% or more on 10+ sends | alert step |
+| History retention | 90 days | pruning |
+
+DKIM selectors cannot be discovered from DNS, so the skill asks instead of guessing.
+
+## Architecture
+
+One saved script with three modes:
+
+- **`send`** builds one realistic message (same template and links as real outreach), sends it to a fresh test address through the user's integration, reads the sent copy back to confirm the From header kept the requested address, and stores the pending test id in KV under a per-day key. A second `send` on the same day is a no-op.
+- **`check`** runs every check, collects the pending test result, reads the mailbox counts, writes rows, and decides whether to alert.
+- **`backfill`** (optional) rebuilds derived views from stored runs after a schema change.
+
+Two schedules with `targetType: "script"`: `send`, then `check` 10 to 15 minutes later in the user's timezone. A script target is cheaper and more predictable than an agent task told to "run the script and sleep".
+
+### DNS: two resolvers, one verdict
+
+Each record is fetched from both resolvers, with a per-request timeout and a cache keyed on `(resolver, name, type)` so SPF recursion and repeated lookups cost one request each.
+
+| Resolver answers | Result |
+|---|---|
+| Both agree | that verdict |
+| They disagree | `warn`, "resolvers disagree" (usually propagation) |
+| One failed (SERVFAIL, REFUSED, timeout) | the other one's verdict, with a note |
+| Both failed | `unknown` |
+
+NOERROR and NXDOMAIN count as answers. SERVFAIL and REFUSED do not.
+
+## Checks and verdicts
+
+| Check | `ok` | `warn` | `red` |
+|---|---|---|---|
+| SPF | one `v=spf1`, provider includes present, at most 8 lookups, `~all`/`-all` | 9 or 10 lookups, or no `~all`/`-all` | missing, several records, a missing provider include, more than 10 lookups |
+| DKIM (per selector) | key present, 1024-bit or longer | key shorter than 1024 bits | missing for the primary sender, or empty `p=` (revoked) |
+| DMARC | one record with `p=` and `rua=` | no `rua=` (no aggregate reports) | missing, duplicated, or no `p=` |
+| MX | present, expected provider | unexpected provider, or resolvers disagree | none |
+| Provider records | as the ESP documents them | partly configured | n/a |
+| Blocklist | not listed, control passed | ambiguous answer | listed |
+| Test send | score 8 or more | score 6 to 8 | score under 6, or no result one hour after sending |
+| Test send SPF/DKIM/DMARC | `pass` | soft SPF result | `fail`, `permerror` |
+| Bounce rate (24h) | under 2% | 2% or more | 5% or more on 10+ sends |
+
+`unknown` means the check could not be read this run. It ranks between `ok` and `warn` for the overall status and is never displayed as clean. Overall status is the worst check.
+
+A missing DKIM selector for a secondary provider is a `warn`, not a `red`: the domain still signs through its primary sender.
+
+### Score
+
+The domain that receives the test send uses the test-send score. Every other domain gets a computed score:
+
+```text
+score = 10 × (ok + 0.5 × warn) / (ok + warn + red)
+capped at 5 when any check is red; unknown checks are left out
+```
+
+## Controls
+
+A clean result is only worth something if the same run proves it could have seen a dirty one.
+
+- **Blocklists**: before trusting a list, the script queries its documented test entry on each resolver: `dbltest.com.dbl.spamhaus.org`, `test.surbl.org.multi.surbl.org`, `test.uribl.com.multi.uribl.com`. A list is queried only on a resolver where the test entry answers "listed". When no resolver passes, every domain on that list is `unknown`.
+- **Bounce rate**: alongside the sent and bounce searches, the script counts all mail in the mailbox in the last 24 hours. Zero means the search failed, so the result is `unknown`, not "0 bounces".
+- **Test result**: a results page with no score is `unknown` for the first hour after the send, then `red`. A slow inbox is not a pass.
+- **The run itself** returns a `controls.ok` flag, false when it read no checks or failed to write rows, so a run that measured nothing cannot report green.
+
+## The app
+
+Minimum models:
+
+| Model | One row per | Columns |
+|---|---|---|
+| `run` | run | time, overall, red / warn / unknown counts, score, sent, bounces |
+| `check` | check per run | run id, domain, check, status, raw detail |
+| `current` | `domain\|check` | status, detail, checked at, `since` (last status change) |
+
+`current` is updated in place, which is what makes "turned red" detectable and lets the page show "red since Tuesday". Optional per-domain views (`domainRun`, `domainCheck`) keep the per-domain tabs to one named query each. The script writes rows through the app row endpoints and prunes `run` and `check` rows older than the retention window.
+
+Page layout that worked: one tab per domain, checks grouped as Auth / Reputation / Delivery, problems first, the raw DNS record on hover, a score trend from `run`, and a collapsed "How it works" section.
+
+## Alerts
+
+The check run compares every check with its `current` row:
+
+- alert when a check **turns** red (it was not red last run);
+- alert when the score drops below the floor and the previous run was at or above it;
+- never alert on a steady-state warning, a steady red, or an unknown.
+
+The message lists each new red with its raw detail, the test-result link when the score dropped, and a link to the app. Slack posting can be lead-only. When the script's identity cannot post, it hands the message to an agent that can.
+
+## Pitfalls we hit
+
+**Public resolvers are refused by some blocklists.** Spamhaus answers queries that arrive through public resolvers with a refusal code in `127.255.255.x`, and URIBL answers `127.0.0.1` when it blocks a resolver. A naive check reads both as "not listed". The test-entry control catches it: on our first runs, Spamhaus DBL and URIBL failed their controls on both public resolvers, so they report `unknown` until the deployment queries them through an allowed path (Spamhaus DQS with a free key, or your own resolver).
+
+**Parsing the mail-tester results page.** The score is in `<span class="score">N / 10</span>`; fetch the page with a browser user agent. The raw headers on the page are HTML-escaped, so decode entities before matching. There are several `Received-SPF` and `Authentication-Results` headers: use the `Received-SPF` line with `identity=mailfrom` written by the test inbox's server, and skip `Authentication-Results` blocks added by your own provider's outbound hops. SPF is evaluated on the envelope domain, which can differ from the From domain when the From address is an alias. The free tier allows only a few tests per day, which is why the send mode keeps a per-day marker.
+
+**DNS propagation lag.** Right after a record is fixed, the two resolvers can disagree for up to the old TTL, and a record that was missing stays cached as NXDOMAIN for the zone's negative-cache TTL (the SOA minimum). That is why disagreement is a `warn` and never triggers an alert. Re-run the check after the TTL instead of chasing a phantom regression. The test-send score only moves after the next send, so a fix shows up in DNS checks first.
+
+**The From alias.** A mail provider can silently rewrite an alias From to the mailbox's primary address when the alias is not configured for sending. The send mode reads the sent message back and returns the actual From header, so a misconfigured alias shows up on day one.
+
+**Runtime budget.** A run makes dozens of DoH requests. Run checks in parallel, cache by `(resolver, name, type)`, and put a timeout on every request so one slow resolver yields `unknown` instead of killing the run.
+
+## Tips for new swarm users
+
+- **Start with one domain and one provider.** Add blocklists and the bounce rate once the DNS checks are green.
+- **Keep ids in one config block.** Domains, selectors, app id and thresholds at the top of the script make the next domain a one-line change.
+- **Treat `unknown` as work.** A permanent unknown means a control is failing; fix the path or remove the check.
+- **Do not alert on warnings.** People stop reading a channel that pings daily about a missing `rua=`.
+
+## References
+
+- [RFC 7208](https://www.rfc-editor.org/rfc/rfc7208): SPF, including the 10 DNS-lookup limit.
+- [RFC 6376](https://www.rfc-editor.org/rfc/rfc6376): DKIM signatures and selectors.
+- [RFC 7489](https://www.rfc-editor.org/rfc/rfc7489): DMARC policy and aggregate reports.
+- [RFC 2308](https://www.rfc-editor.org/rfc/rfc2308): negative caching of DNS answers.
+- [Spamhaus DBL](https://www.spamhaus.org/blocklists/domain-blocklist/) and the free [Spamhaus Data Query Service](https://www.spamhaus.com/free-trial/sign-up-for-a-free-data-query-service-account/) for queries that public resolvers cannot make.
+- [URIBL usage](https://uribl.com/about.shtml) and [SURBL lists](https://www.surbl.org/lists).
+- [Google Public DNS JSON API](https://developers.google.com/speed/public-dns/docs/doh/json) and [Cloudflare DNS over HTTPS](https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/dns-json/).
