@@ -288,6 +288,21 @@ from the predefined catalog. Workers stay catalog-only. The value is read on eve
 restart. An enabled extension is trusted code in the API process, and a lead can change this key, so
 read [inline install](/docs/guides/extensions#inline-install) before turning it on.
 
+## Secrets in agent shells
+
+Workers keep secret config entries out of the environment their harness and its shell inherit, so
+`env`, `printenv`, and `/proc/<pid>/environ` in an agent shell do not list them. Boot steps and the
+startup script still see every entry. Harness credentials (Claude, Codex, pi, OpenCode, and the other
+providers), `GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`, `AZURE_DEVOPS_TOKEN`, and the agent's own
+`AGENT_FS_API_KEY` stay available, because the harness, `gh`, `glab`, `az`, and the git credential
+helpers read them from the environment. Agents read any other secret on demand with `get-config`, or
+use it through a script credential binding.
+
+`HARNESS_ENV_SECRET_PASSTHROUGH` takes a comma-separated list of extra secret keys to keep in the
+environment, for example `VERCEL_TOKEN,SENTRY_AUTH_TOKEN`. `*` keeps every secret. Workers apply it to
+each new task; a container restart applies it to the worker process as well. Environment variables set
+on the container itself are not filtered.
+
 ## Access control
 
 Reading configuration requires dashboard access (API key). Writes go through the config API's RBAC gate (`config.write.any`): operator and user tokens can save, and agent principals are restricted to lead agents.

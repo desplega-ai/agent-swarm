@@ -101,7 +101,10 @@ describe("fetchResolvedEnv", () => {
         testUrl,
         "key",
         agentId,
-        { BOOT_CREDENTIAL: "working-boot-secret" },
+        {
+          BOOT_CREDENTIAL: "working-boot-secret",
+          HARNESS_ENV_SECRET_PASSTHROUGH: "ALLOWED_CREDENTIAL",
+        },
         undefined,
         { repoId: crypto.randomUUID() },
       );
@@ -120,6 +123,76 @@ describe("fetchResolvedEnv", () => {
       warning.mockRestore();
     }
   });
+  test("secret rows no harness needs stay out of the harness env", async () => {
+    const agentId = crypto.randomUUID();
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "SLACK_BOT_TOKEN", value: "row-slack", isSecret: true },
+          { key: "VERCEL_TOKEN", value: "row-vercel", isSecret: true },
+          { key: "GITHUB_TOKEN", value: "row-github", isSecret: true },
+          { key: "CLAUDE_CODE_OAUTH_TOKEN", value: "row-oauth", isSecret: true },
+          { key: "AGENT_FS_API_KEY", value: "row-agent-fs", isSecret: true },
+          { key: "PUBLIC_SETTING", value: "visible", isSecret: false },
+        ],
+      },
+    });
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      // SLACK_BOT_TOKEN in the base env stands for a copy an older
+      // entrypoint exported at boot; it must not survive either.
+      const result = await fetchResolvedEnv(testUrl, "key", agentId, {
+        SLACK_BOT_TOKEN: "boot-slack",
+      });
+      expect(result.env.SLACK_BOT_TOKEN).toBeUndefined();
+      expect(result.env.VERCEL_TOKEN).toBeUndefined();
+      expect(result.env.GITHUB_TOKEN).toBe("row-github");
+      expect(result.env.CLAUDE_CODE_OAUTH_TOKEN).toBe("row-oauth");
+      expect(result.env.AGENT_FS_API_KEY).toBe("row-agent-fs");
+      expect(result.env.PUBLIC_SETTING).toBe("visible");
+      const logged = log.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("SLACK_BOT_TOKEN, VERCEL_TOKEN");
+      expect(logged).not.toContain("row-slack");
+      expect(logged).not.toContain("boot-slack");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  test("HARNESS_ENV_SECRET_PASSTHROUGH lets named secrets or every secret through", async () => {
+    const agentId = crypto.randomUUID();
+    const configs = [
+      { key: "SLACK_BOT_TOKEN", value: "row-slack", isSecret: true },
+      { key: "VERCEL_TOKEN", value: "row-vercel", isSecret: true },
+    ];
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          ...configs,
+          { key: "HARNESS_ENV_SECRET_PASSTHROUGH", value: " VERCEL_TOKEN ,", isSecret: false },
+        ],
+      },
+    });
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const named = await fetchResolvedEnv(testUrl, "key", agentId, {});
+      expect(named.env.VERCEL_TOKEN).toBe("row-vercel");
+      expect(named.env.SLACK_BOT_TOKEN).toBeUndefined();
+
+      // A row wins over the container value; the container value applies without one.
+      mockResponsesByAgentId.set(agentId, { status: 200, body: { configs } });
+      const all = await fetchResolvedEnv(testUrl, "key", agentId, {
+        HARNESS_ENV_SECRET_PASSTHROUGH: "*",
+      });
+      expect(all.env.VERCEL_TOKEN).toBe("row-vercel");
+      expect(all.env.SLACK_BOT_TOKEN).toBe("row-slack");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   test("repository scope requires the requested repository identity", async () => {
     const repoId = crypto.randomUUID();
     let url = "https://github.com/another-owner/fixture";

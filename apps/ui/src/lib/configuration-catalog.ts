@@ -1311,6 +1311,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "30",
       },
       {
+        key: "HARNESS_ENV_SECRET_PASSTHROUGH",
+        label: "Secrets exposed to agent shells",
+        description:
+          "Comma-separated secret config keys workers keep in the harness environment, on top of harness, git, and agent-fs credentials. Other secrets stay out of env and /proc. * keeps every secret.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "VERCEL_TOKEN,SENTRY_AUTH_TOKEN",
+        docsUrl: `${DOCS}ui/configuration#secrets-in-agent-shells`,
+      },
+      {
         key: "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
         label: "Allow private hosts in MCP OAuth",
         description:

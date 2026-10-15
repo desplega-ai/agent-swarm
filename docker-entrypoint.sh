@@ -511,6 +511,32 @@ echo "[entrypoint] Claude Code auto-updater disabled: DISABLE_AUTOUPDATER=${DISA
 echo "=========================="
 
 # ---- Fetch swarm config from API ----
+# BEGIN withheld_secret_env_keys (extracted verbatim by src/tests/harness-env-secrets.test.ts — keep markers stable)
+# Secret swarm_config rows a harness or its tools still read from their own
+# environment. Mirrors HARNESS_SECRET_ENV_ALLOWLIST in
+# src/utils/harness-env-secrets.ts; the test asserts both lists match.
+HARNESS_SECRET_ENV_ALLOWLIST="CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY OPENROUTER_API_KEY OPENAI_API_KEY CODEX_OAUTH DEVIN_API_KEY DEEPSEEK_API_KEY AMP_API_KEY CURSOR_API_KEY XAI_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_FOUNDRY_API_KEY ANTHROPIC_FOUNDRY_AUTH_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_BEARER_TOKEN_BEDROCK GEMINI_API_KEY GOOGLE_API_KEY GITHUB_TOKEN GH_TOKEN GITLAB_TOKEN AZURE_DEVOPS_TOKEN AGENT_FS_API_KEY"
+
+# Print the secret config keys the runner must not inherit, one per line.
+# HARNESS_ENV_SECRET_PASSTHROUGH (row first, then env) adds keys to the
+# allowlist; "*" keeps every secret. Keys that are not shell identifiers are
+# never exported, so they are not listed.
+withheld_secret_env_keys() {
+    jq -r --arg allow "$HARNESS_SECRET_ENV_ALLOWLIST" --arg envPass "${HARNESS_ENV_SECRET_PASSTHROUGH:-}" '
+      ([.configs[] | select(.key == "HARNESS_ENV_SECRET_PASSTHROUGH") | .value][0] // $envPass) as $raw
+      | ($raw | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))) as $pass
+      | ($allow | split(" ") | map(select(. != ""))) as $allowed
+      | if ($pass | any(.[]; . == "*")) then empty else
+          .configs[]
+          | select(.isSecret == true)
+          | .key
+          | select(test("^[A-Za-z_][A-Za-z0-9_]*$"))
+          | select(. as $k | (($allowed + $pass) | any(.[]; . == $k)) | not)
+        end
+    ' "$1"
+}
+# END withheld_secret_env_keys
+
 if [ -n "$AGENT_ID" ]; then
     echo "Fetching swarm config from API..."
     if curl -s -f -H "Authorization: Bearer ${API_KEY}" \
@@ -551,6 +577,15 @@ if [ -n "$AGENT_ID" ]; then
                 . /tmp/swarm_config.env
                 set +a
                 rm -f /tmp/swarm_config.env
+            fi
+            # Boot steps below (git auth, repo clones, setup scripts) still see
+            # every row. The worker bootstrap unsets these names right before
+            # it execs the runner, so the long-lived process and every harness
+            # shell under it never inherit them. Names only, no values.
+            AGENT_SWARM_WITHHELD_ENV=$(withheld_secret_env_keys /tmp/swarm_config.json 2>/dev/null | tr '\n' ' ' || true)
+            export AGENT_SWARM_WITHHELD_ENV
+            if [ -n "${AGENT_SWARM_WITHHELD_ENV// /}" ]; then
+                echo "[entrypoint] Keeping $(echo "$AGENT_SWARM_WITHHELD_ENV" | wc -w) secret config entries out of the worker env (allow more with HARNESS_ENV_SECRET_PASSTHROUGH)"
             fi
         fi
         rm -f /tmp/swarm_config.json
@@ -1189,6 +1224,14 @@ run_startup_script() {
 }
 
 run_startup_script
+
+# Secret config rows the startup script could use but the runner must not
+# inherit (computed by docker-entrypoint.sh). The runner re-resolves config
+# per task and hands each harness only the secrets it needs.
+for withheld_key in ${AGENT_SWARM_WITHHELD_ENV:-}; do
+    unset "$withheld_key"
+done
+unset AGENT_SWARM_WITHHELD_ENV withheld_key
 
 role="${AGENT_ROLE:-worker}"
 echo "Starting $role..."
