@@ -1586,7 +1586,7 @@ Delete a skill. Only the owning agent or lead can delete.
 
 **Get Skill**
 
-Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global. In swarm scope the ownerless skill wins, then your own, then the only agent-owned one; when several other agents own that name, it errors with their IDs: pass skillId instead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

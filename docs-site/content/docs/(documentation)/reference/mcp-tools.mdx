@@ -928,7 +928,7 @@ Create a personal skill from SKILL.md content. Parses frontmatter for name, desc
 
 ### skill-get
 
-Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global. In swarm scope the ownerless skill wins, then your own, then the only agent-owned one; when several other agents own that name, it errors with their IDs: pass skillId instead.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
