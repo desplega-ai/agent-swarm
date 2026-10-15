@@ -68,6 +68,14 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/runtime-pool-bind-agent.ts": "proxies to HTTP routes enforcing runtime_pool.bind",
   "src/tools/runtime-pool-create-agent.ts": "proxies to HTTP routes enforcing runtime_pool.bind",
   "src/tools/app-list.ts": "app summaries are list-level; per-app filtering is future work",
+  "src/tools/chat-reply.ts":
+    "own-scoped: posts only to the chat thread of a task the caller owns or created",
+  "src/tools/chat-post.ts":
+    "open to all agents per the Chat SDK plan (2026-10-13); Slack's equivalent `slack-post` / `slack-read` is lead-gated, parity is an open decision for the operator",
+  "src/tools/chat-open-dm.ts":
+    "open to all agents per the Chat SDK plan (2026-10-13); Slack's equivalent `slack-post` / `slack-read` is lead-gated, parity is an open decision for the operator",
+  "src/tools/chat-read-thread.ts":
+    "open to all agents per the Chat SDK plan (2026-10-13); Slack's equivalent `slack-post` / `slack-read` is lead-gated, parity is an open decision for the operator",
   "src/tools/create-channel.ts": PIN_REASON,
   "src/tools/create-metric.ts": PIN_REASON,
   "src/tools/create-page.ts": PIN_REASON,

@@ -45,3 +45,8 @@ model_alias_resolutions
 connector_codes        # ephemeral single-use connect codes; attribution via actor_kind/actor_id + token_minted identity event (197)
 harness_model_support
 codex_oauth_device_flows
+chat_state_kv          # Chat SDK StateAdapter rows, no user attribution (213)
+chat_subscriptions     # Chat SDK StateAdapter rows, no user attribution (213)
+chat_locks             # Chat SDK StateAdapter rows, no user attribution (213)
+chat_lists             # Chat SDK StateAdapter rows, no user attribution (213)
+chat_queue             # Chat SDK StateAdapter rows, no user attribution (213)

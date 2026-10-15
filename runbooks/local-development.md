@@ -74,6 +74,10 @@ Full guides:
 
 OAuth token refresh behavior and local smoke testing: [runbooks/oauth-tokens.md](./oauth-tokens.md).
 
+## Chat SDK channel
+
+With `CHAT_SDK_ENABLED=true`, the API starts the Chat SDK adapters in `CHAT_SDK_ADAPTERS` at boot, in the background. Each adapter calls its platform API while it initializes (Telegram `getMe`, Slack `auth.test`, Discord Gateway login), so the API host needs outbound network to those platforms. Webhook-mode adapters also need a public HTTPS `PUBLIC_MCP_BASE_URL`; point it at a tunnel in dev. Telegram `mode: "polling"` and Slack `mode: "socket"` need no public URL. For tests and local QA without real platforms, set the env-only `CHAT_SDK_API_URL_OVERRIDES` (for example `{"telegram":"http://127.0.0.1:<port>"}` with `bun scripts/dev/telegram-bot-api-mock.ts`). Full guide: [docs-site/.../integrations/chat-sdk.mdx](../docs-site/content/docs/(documentation)/integrations/chat-sdk.mdx).
+
 ## Secrets encryption
 
 `swarm_config` secret rows are encrypted at rest with AES-256-GCM. Key resolution order, backup requirements, and plaintext-migration notes: [docs-site/.../guides/secrets-encryption.mdx](../docs-site/content/docs/(documentation)/guides/secrets-encryption.mdx).

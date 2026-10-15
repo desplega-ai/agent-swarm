@@ -391,6 +391,7 @@ export const AgentTaskSourceSchema = z.enum([
   "linear",
   "jira",
   "comb",
+  "chat",
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
@@ -446,7 +447,7 @@ export const SteeringStatusSchema = z.enum([
 ]);
 export type SteeringStatus = z.infer<typeof SteeringStatusSchema>;
 
-export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api"]);
+export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api", "chat"]);
 export type SteeringSource = z.infer<typeof SteeringSourceSchema>;
 
 export const SteeringMessageSchema = z

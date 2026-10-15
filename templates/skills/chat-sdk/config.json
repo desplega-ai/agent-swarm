@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "chat-sdk",
+  "displayName": "Chat SDK",
+  "slug": "chat-sdk",
+  "title": "Chat SDK",
+  "description": "Chat threads from Telegram, Slack (Chat SDK), Discord, and Teams. Use when a task carries a task:chat-sdk contextKey or a user asked through Telegram, Slack, Discord, or Teams. Covers what the swarm posts for you, `chat-reply`, markdown and length per platform, attachments, `chat-read-thread` limits, and channel routes with `register-chat-channel`.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": false,
+  "tags": ["chat", "telegram", "discord", "teams", "slack", "communication"]
+}

@@ -1154,6 +1154,49 @@ describe("ui logs parser", () => {
     ]);
   });
 
+  test("keeps a Claude sub-agent's parent_tool_use_id on its messages", () => {
+    const messages = parseSessionLogs([
+      log("spawn", "claude", 1, {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "toolu_agent_1", name: "Agent", input: {} }],
+        },
+      }),
+      log("child-call", "claude", 2, {
+        type: "assistant",
+        parent_tool_use_id: "toolu_agent_1",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Look at the fixtures." },
+            { type: "tool_use", id: "toolu_read_1", name: "Read", input: { file_path: "a.ts" } },
+          ],
+        },
+      }),
+      log("child-result", "claude", 3, {
+        type: "user",
+        parent_tool_use_id: "toolu_agent_1",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_read_1", content: "ok" }],
+        },
+      }),
+      log("main-text", "claude", 4, {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { role: "assistant", content: [{ type: "text", text: "Done." }] },
+      }),
+    ]);
+
+    expect(messages.map((m) => [m.id, m.parentToolUseId])).toEqual([
+      ["spawn", undefined],
+      ["child-call", "toolu_agent_1"],
+      ["child-result", "toolu_agent_1"],
+      ["main-text", undefined],
+    ]);
+  });
+
   test("extracts a completed Claude foreground Agent run from its paired result", () => {
     const runs = extractSubagentRuns([
       log("spawn", "claude", 1, {

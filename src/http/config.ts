@@ -118,6 +118,28 @@ export async function ensureConfigAdmin(
   res: ServerResponse,
   verb: Extract<PermissionVerb, "config.write.any" | "config.delete.any">,
 ): Promise<boolean> {
+  return ensureHttpPermission(
+    req,
+    res,
+    verb,
+    verb === "config.write.any"
+      ? "Writing swarm config requires the lead agent"
+      : "Deleting swarm config requires the lead agent",
+  );
+}
+
+/**
+ * The general form of `ensureConfigAdmin`: operators and users pass, guests
+ * get a plain 403, and an agent principal (session identity first, then the
+ * legacy X-Agent-ID header) must hold `verb`. On denial it writes a 403 with
+ * `forbiddenMessage` and returns false.
+ */
+export async function ensureHttpPermission(
+  req: IncomingMessage,
+  res: ServerResponse,
+  verb: PermissionVerb,
+  forbiddenMessage: string,
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
   if (auth?.kind === "guest") {
@@ -133,13 +155,7 @@ export async function ensureConfigAdmin(
     source: "http",
   });
   if (!decision.allow) {
-    jsonError(
-      res,
-      verb === "config.write.any"
-        ? "Writing swarm config requires the lead agent"
-        : "Deleting swarm config requires the lead agent",
-      403,
-    );
+    jsonError(res, forbiddenMessage, 403);
     return false;
   }
   return true;
