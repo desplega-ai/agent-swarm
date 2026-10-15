@@ -101,6 +101,25 @@ describe("swarm_config exportToEnv", () => {
     expect(on.exportToEnv).toBe(true);
   });
 
+  test("default-off keys start off on create but accept an explicit true", async () => {
+    const created = await upsertSwarmConfig({
+      scope: "global",
+      key: "KAPSO_WEBHOOK_HMAC_SECRET",
+      value: "k",
+      isSecret: true,
+    });
+    expect(created.exportToEnv).toBe(false);
+
+    const optedIn = await upsertSwarmConfig({
+      scope: "global",
+      key: "X_CLIENT_SECRET",
+      value: "x",
+      isSecret: true,
+      exportToEnv: true,
+    });
+    expect(optedIn.exportToEnv).toBe(true);
+  });
+
   test("restricted keys store false and reject true through DB, HTTP, and MCP", async () => {
     const key = "SLACK_SIGNING_SECRET";
     const stored = await upsertSwarmConfig({ scope: "global", key, value: "s", isSecret: true });

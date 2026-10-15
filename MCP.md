@@ -489,7 +489,7 @@ Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use
 | `isSecret` | `boolean` | No | - | If true, value is masked in API responses (default: false). |
 | `envPath` | `string` | No | - | Optional: file path to write the value as KEY=VALUE in a .env file. |
 | `description` | `string` | No | - | Optional human-readable description of this config entry. |
-| `exportToEnv` | `boolean` | No | - | Export this row into agent process env (default true on create; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. |
+| `exportToEnv` | `boolean` | No | - | Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. |
 
 ### get-config
 

@@ -281,7 +281,7 @@ const upsertConfig = route({
       .boolean()
       .optional()
       .describe(
-        "Export this row into agent process env (default true on create; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads.",
+        "Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads.",
       ),
   }),
   responses: {

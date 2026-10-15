@@ -4815,7 +4815,7 @@ export interface paths {
                         isSecret?: boolean;
                         envPath?: string | null;
                         description?: string | null;
-                        /** @description Export this row into agent process env (default true on create; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
+                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
                         exportToEnv?: boolean;
                     };
                 };

@@ -933,6 +933,11 @@ export async function fetchResolvedEnv(
             if (config.exportToEnv === false || isEnvExportRestrictedKey(config.key)) {
               if (config.isSecret) registerSensitiveKeyName(config.key);
               delete env[config.key];
+              // Several adapters build the child env as
+              // `{ ...process.env, ...config.env }`, so a boot-time export
+              // revoked later must leave process.env too. It stays out until
+              // the worker restarts, even if the row is deleted afterwards.
+              if (baseEnv === process.env) delete process.env[config.key];
               withheldEnvKeys.push(config.key);
               continue;
             }

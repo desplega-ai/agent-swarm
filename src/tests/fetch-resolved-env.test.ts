@@ -161,6 +161,28 @@ describe("fetchResolvedEnv", () => {
     }
   });
 
+  test("a row revoked after boot leaves process.env, so merged adapter envs lose it", async () => {
+    const agentId = crypto.randomUUID();
+    const key = "REVOKED_AFTER_BOOT_SECRET";
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: { configs: [{ key, value: "row-value", isSecret: true, exportToEnv: false }] },
+    });
+    // The entrypoint exported the row at boot, before it was switched off.
+    process.env[key] = "boot-export";
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const result = await fetchResolvedEnv(testUrl, "key", agentId);
+      expect(result.env[key]).toBeUndefined();
+      expect(process.env[key]).toBeUndefined();
+      // The amp, dsh, grok, cursor and claude adapters spawn with this shape.
+      expect({ ...process.env, ...result.env }[key]).toBeUndefined();
+    } finally {
+      delete process.env[key];
+      log.mockRestore();
+    }
+  });
+
   test("a masked row keeps its boot value only when the row is exported", async () => {
     const agentId = crypto.randomUUID();
     mockResponsesByAgentId.set(agentId, {

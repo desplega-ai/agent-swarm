@@ -8,7 +8,8 @@ ALTER TABLE swarm_config ADD COLUMN exportToEnv INTEGER NOT NULL DEFAULT 1;
 
 -- Deny list: rows only the API server reads. The first block matches
 -- ENV_EXPORT_RESTRICTED_KEYS in src/utils/config-env-export.ts (never
--- exportable); the second block is off by default but operators may turn it
+-- exportable); the second block (ENV_EXPORT_DEFAULT_OFF_KEYS, also the insert
+-- default for new rows) is off by default but operators may turn it
 -- back on per row.
 UPDATE swarm_config SET exportToEnv = 0
 WHERE upper(key) IN (

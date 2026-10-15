@@ -27,11 +27,30 @@ export const ENV_EXPORT_RESTRICTED_KEYS: ReadonlySet<string> = new Set([
   "API_AGENT_FS_API_KEY",
 ]);
 
+/**
+ * Server-side secrets an operator may still export per row. A new row for one
+ * of these keys starts with the flag off unless the caller sends
+ * `exportToEnv: true`. Migration 215 applies the same default to rows that
+ * already existed.
+ */
+export const ENV_EXPORT_DEFAULT_OFF_KEYS: ReadonlySet<string> = new Set([
+  "KAPSO_WEBHOOK_HMAC_SECRET",
+  "SENTRY_TEST_APP_WEBHOOK_SECRET",
+  "TELEMETRY_CH_AUTH",
+  "HACK_AGENT_FS_ADMIN_KEY",
+  "X_CLIENT_SECRET",
+]);
+
 /** Script connection secrets (`connection.<slug>.secret`) are brokered server-side. */
 const CONNECTION_SECRET_KEY = /^connection\..+\.secret$/;
 
 export function isEnvExportRestrictedKey(key: string): boolean {
   return ENV_EXPORT_RESTRICTED_KEYS.has(key.toUpperCase()) || CONNECTION_SECRET_KEY.test(key);
+}
+
+/** The flag a new row gets when the caller does not send one. */
+export function defaultExportToEnv(key: string): boolean {
+  return !isEnvExportRestrictedKey(key) && !ENV_EXPORT_DEFAULT_OFF_KEYS.has(key.toUpperCase());
 }
 
 export function envExportRestrictedError(key: string): string {

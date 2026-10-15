@@ -137,6 +137,7 @@ import {
   codexAuthBenchMarkerKey,
 } from "../utils/codex-auth-failure";
 import {
+  defaultExportToEnv,
   effectiveExportToEnv,
   envExportRestrictedError,
   isEnvExportRestrictedKey,
@@ -6613,7 +6614,7 @@ export async function upsertSwarmConfig(data: {
   isSecret?: boolean;
   envPath?: string | null;
   description?: string | null;
-  /** Omitted: an update keeps the stored flag; an insert exports unless the key is restricted. */
+  /** Omitted: an update keeps the stored flag; an insert uses `defaultExportToEnv`. */
   exportToEnv?: boolean;
 }): Promise<SwarmConfig> {
   if (isReservedConfigKey(data.key)) {
@@ -6676,7 +6677,7 @@ export async function upsertSwarmConfig(data: {
     }
 
     const id = crypto.randomUUID();
-    const exportToEnv = restricted ? 0 : data.exportToEnv === false ? 0 : 1;
+    const exportToEnv = restricted ? 0 : (data.exportToEnv ?? defaultExportToEnv(data.key)) ? 1 : 0;
     return await getDbClient().get<SwarmConfigRow>(
       `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
