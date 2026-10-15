@@ -427,6 +427,7 @@ declare module "swarm-sdk" {
       scope?: "global" | "agent" | "repo";
       scopeId?: string;
       isSecret?: boolean;
+      exportToEnv?: boolean;
     }): Promise<unknown>;
     config_delete(args: { id: string }): Promise<unknown>;
 

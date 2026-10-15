@@ -228,6 +228,7 @@ Set or update a configuration value. Upserts by (scope, scopeId, key).
 | `scopeId` | uuid | No | Agent ID or repo ID (required for `agent`/`repo` scopes) |
 | `isSecret` | boolean | No | Mask value in API responses |
 | `description` | string | No | Human-readable description |
+| `exportToEnv` | boolean | No | Export the row into agent process env (default `true` on create; omitted on update keeps the stored flag). See [Config rows in agent env](/docs/ui/configuration#config-rows-in-agent-env) |
 
 ### get-config
 

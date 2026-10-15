@@ -1305,6 +1305,8 @@ export interface SwarmConfig {
   // True when the row's value is stored as ciphertext server-side. Plaintext
   // rows return encrypted=false. Mirrors SwarmConfigSchema in src/types.ts.
   encrypted: boolean;
+  // Whether workers export this row into agent process env.
+  exportToEnv: boolean;
 }
 
 export interface SwarmConfigsResponse {

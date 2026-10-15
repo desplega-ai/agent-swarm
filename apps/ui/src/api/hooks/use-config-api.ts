@@ -57,6 +57,7 @@ export function useUpsertConfig() {
       isSecret?: boolean;
       envPath?: string | null;
       description?: string | null;
+      exportToEnv?: boolean;
     }) => api.upsertConfig(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["configs"] });

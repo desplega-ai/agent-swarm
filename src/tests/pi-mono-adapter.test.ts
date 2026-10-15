@@ -310,7 +310,7 @@ describe("PiMonoAdapter.createSession — MCP setup", () => {
       const adapter = new PiMonoAdapter();
       await adapter.createSession(makeMcpConfig(`http://localhost:${server.port}`));
       const options = createAgentSessionSpy.mock.calls[0]?.[0];
-      expect(options?.customTools?.map((tool) => tool.name)).toEqual(["get-tasks"]);
+      expect(options?.customTools?.map((tool) => tool.name)).toEqual(["get-tasks", "bash"]);
       expect(initializeSessions).toEqual([null, null]);
       expect(new Set(seen)).toEqual(new Set(["pi-retry-runtime"]));
     } finally {
@@ -330,7 +330,9 @@ describe("PiMonoAdapter.createSession — MCP setup", () => {
       await adapter.createSession(makeMcpConfig(`http://localhost:${server.port}`));
       expect(initializeSessions).toEqual([null, null, null]);
       expect(failures).toEqual(["initialize"]);
-      expect(createAgentSessionSpy.mock.calls[0]?.[0]?.customTools).toEqual([]);
+      expect(
+        createAgentSessionSpy.mock.calls[0]?.[0]?.customTools?.map((tool) => tool.name),
+      ).toEqual(["bash"]);
     } finally {
       server.stop(true);
     }

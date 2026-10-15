@@ -66,6 +66,7 @@ import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { ensure, initialize } from "../utils/business-use";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
+import { isEnvExportRestrictedKey } from "../utils/config-env-export.ts";
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
@@ -76,11 +77,6 @@ import {
 } from "../utils/credentials.ts";
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
-import {
-  HARNESS_ENV_SECRET_PASSTHROUGH_KEY,
-  isSecretInheritable,
-  parseSecretPassthrough,
-} from "../utils/harness-env-secrets.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
@@ -840,16 +836,16 @@ const deploymentMemoryRaters = process.env.MEMORY_RATERS;
  */
 const rowOverriddenBootEnv = new Map<string, string | undefined>();
 
-let lastWithheldSecretKeys = "";
+let lastWithheldEnvKeys = "";
 
 /** Names only, and only when the set changes, so per-spawn reloads stay quiet. */
-function logWithheldSecretKeys(keys: string[]): void {
+function logWithheldEnvKeys(keys: string[]): void {
   const summary = [...keys].sort().join(", ");
-  if (summary === lastWithheldSecretKeys) return;
-  lastWithheldSecretKeys = summary;
+  if (summary === lastWithheldEnvKeys) return;
+  lastWithheldEnvKeys = summary;
   if (!summary) return;
   console.log(
-    `[env-reload] Kept ${keys.length} secret config entries out of the harness env (add a key to ${HARNESS_ENV_SECRET_PASSTHROUGH_KEY} to expose it): ${summary}`,
+    `[env-reload] Kept ${keys.length} config entries with exportToEnv=false out of the harness env: ${summary}`,
   );
 }
 
@@ -902,7 +898,12 @@ export async function fetchResolvedEnv(
         console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
       } else {
         const data = (await response.json()) as {
-          configs: Array<{ key: string; value: string; isSecret?: boolean }>;
+          configs: Array<{
+            key: string;
+            value: string;
+            isSecret?: boolean;
+            exportToEnv?: boolean;
+          }>;
         };
 
         // A deleted row restores the deployment value (including unset), while
@@ -921,12 +922,20 @@ export async function fetchResolvedEnv(
           scriptsOnlyConfigValue = data.configs.find(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
-          const secretPassthrough = parseSecretPassthrough(
-            data.configs.find((config) => config.key === HARNESS_ENV_SECRET_PASSTHROUGH_KEY)
-              ?.value ?? baseEnv[HARNESS_ENV_SECRET_PASSTHROUGH_KEY],
-          );
-          const withheldSecretKeys: string[] = [];
+          const withheldEnvKeys: string[] = [];
           for (const config of data.configs) {
+            // Every harness and its shell tool inherit this env. A row with
+            // exportToEnv=false stays out of it, and so does a copy of it in
+            // the base env (container env, or an older entrypoint's export).
+            // Checked before the masked-value fallback so a masked response
+            // can never keep a withheld boot value alive. An API without the
+            // field (pre-215) leaves it undefined, which keeps exporting.
+            if (config.exportToEnv === false || isEnvExportRestrictedKey(config.key)) {
+              if (config.isSecret) registerSensitiveKeyName(config.key);
+              delete env[config.key];
+              withheldEnvKeys.push(config.key);
+              continue;
+            }
             if (config.isSecret && config.value === MASKED_SECRET_VALUE) {
               skippedSecretKeys.push(config.key);
               continue;
@@ -936,14 +945,6 @@ export async function fetchResolvedEnv(
             // Lets the scrubber redact `KEY=value` dumps of secret rows whose
             // name matches no sensitive-suffix rule.
             if (config.isSecret) registerSensitiveKeyName(config.key);
-            // Every harness and its shell tool inherit this env. Secret rows
-            // no harness needs stay out of it, including a copy an older
-            // entrypoint exported into process.env at boot.
-            if (config.isSecret && !isSecretInheritable(config.key, secretPassthrough)) {
-              delete env[config.key];
-              withheldSecretKeys.push(config.key);
-              continue;
-            }
             // A blank swarm_config value for a BLANK_ROW_IS_STRAY_KEYS entry
             // (the model-control keys) must not silently blank out a
             // genuinely-set container/boot env value — that key exists
@@ -977,7 +978,7 @@ export async function fetchResolvedEnv(
               scrubSecrets(`[env-reload] Skipped masked secrets: ${skippedSecretKeys.join(", ")}`),
             );
           }
-          logWithheldSecretKeys(withheldSecretKeys);
+          logWithheldEnvKeys(withheldEnvKeys);
           console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
         }
         // Non-secret stand-in for the pool rows skipped above, so credential

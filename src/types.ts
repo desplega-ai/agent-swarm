@@ -1834,6 +1834,10 @@ export const SwarmConfigSchema = z
     // auto-encrypted during initDb; if that fails, boot aborts before normal API
     // reads occur.
     encrypted: z.boolean(),
+    // Whether workers export this row into agent process env. False keeps it
+    // server-side (connections, script credential bindings). Always false for
+    // keys only the API server reads (src/utils/config-env-export.ts).
+    exportToEnv: z.boolean(),
   })
   .openapi("SwarmConfig");
 

@@ -2,6 +2,7 @@ import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-po
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
+import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
 import { parseEnabledTools } from "../utils/enabled-tools";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
@@ -494,4 +495,14 @@ export function validateConfigValue(key: string, value: unknown): string | null 
   if (isTierConfigKey(key)) return validateTierConfigValue(key.toUpperCase(), value);
   const validator = VALIDATED_KEYS[key.toUpperCase()];
   return validator ? validator(value) : null;
+}
+
+/**
+ * Rejects `exportToEnv: true` for keys only the API server reads. Omitting the
+ * flag is fine: the write path stores false for those keys.
+ */
+export function validateExportToEnv(key: string, exportToEnv: boolean | undefined): string | null {
+  return exportToEnv === true && isEnvExportRestrictedKey(key)
+    ? envExportRestrictedError(key)
+    : null;
 }

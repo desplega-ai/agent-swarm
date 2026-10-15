@@ -57,6 +57,11 @@ export function ConfigDetailDialog({
                   secret
                 </Badge>
               )}
+              {!config.exportToEnv && (
+                <Badge variant="outline" size="tag">
+                  not in agent env
+                </Badge>
+              )}
             </div>
 
             {config.scope !== "global" && config.scopeId && (

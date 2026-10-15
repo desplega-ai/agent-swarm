@@ -105,6 +105,23 @@ export function SwarmConfigSection() {
         },
       },
       {
+        field: "exportToEnv",
+        headerName: "Agent env",
+        width: 120,
+        minWidth: 100,
+        cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
+          const cfg = params.data;
+          if (!cfg) return null;
+          return cfg.exportToEnv ? (
+            <span className="text-muted-foreground">exported</span>
+          ) : (
+            <Badge variant="outline" size="tag">
+              server-only
+            </Badge>
+          );
+        },
+      },
+      {
         field: "description",
         headerName: "Description",
         flex: 1,

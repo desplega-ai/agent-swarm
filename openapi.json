@@ -1399,6 +1399,9 @@
           },
           "encrypted": {
             "type": "boolean"
+          },
+          "exportToEnv": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1412,7 +1415,8 @@
           "description",
           "createdAt",
           "lastUpdatedAt",
-          "encrypted"
+          "encrypted",
+          "exportToEnv"
         ]
       },
       "ContextSnapshot": {
@@ -15645,6 +15649,10 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "exportToEnv": {
+                    "type": "boolean",
+                    "description": "Export this row into agent process env (default true on create; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads."
                   }
                 },
                 "required": [

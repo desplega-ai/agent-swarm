@@ -52,6 +52,7 @@ describe("Slack transport credential status", () => {
       createdAt: "",
       lastUpdatedAt: "",
       encrypted: false,
+      exportToEnv: true,
     };
     const presence = { SLACK_BOT_TOKEN: true, SLACK_SIGNING_SECRET: true };
     expect(deriveIntegrationStatus(slack, [http], presence)).toBe("configured");

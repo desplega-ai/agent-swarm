@@ -1229,6 +1229,7 @@ class ApiClient {
     isSecret?: boolean;
     envPath?: string | null;
     description?: string | null;
+    exportToEnv?: boolean;
   }): Promise<SwarmConfig> {
     const url = `${this.getBaseUrl()}/api/config?includeSecrets=true`;
     const cleaned = Object.fromEntries(Object.entries(data).filter(([_, v]) => v !== null));

@@ -33,6 +33,7 @@ function makeConfig(key: string, value: string, opts: Partial<SwarmConfig> = {})
     createdAt: "2026-04-21T00:00:00.000Z",
     lastUpdatedAt: "2026-04-21T00:00:00.000Z",
     encrypted: false,
+    exportToEnv: true,
     ...opts,
   };
 }

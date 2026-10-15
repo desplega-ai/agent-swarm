@@ -101,10 +101,7 @@ describe("fetchResolvedEnv", () => {
         testUrl,
         "key",
         agentId,
-        {
-          BOOT_CREDENTIAL: "working-boot-secret",
-          HARNESS_ENV_SECRET_PASSTHROUGH: "ALLOWED_CREDENTIAL",
-        },
+        { BOOT_CREDENTIAL: "working-boot-secret" },
         undefined,
         { repoId: crypto.randomUUID() },
       );
@@ -123,72 +120,69 @@ describe("fetchResolvedEnv", () => {
       warning.mockRestore();
     }
   });
-  test("secret rows no harness needs stay out of the harness env", async () => {
+
+  test("exportToEnv=false rows stay out of the harness env, even over a boot copy", async () => {
     const agentId = crypto.randomUUID();
     mockResponsesByAgentId.set(agentId, {
       status: 200,
       body: {
         configs: [
-          { key: "SLACK_BOT_TOKEN", value: "row-slack", isSecret: true },
-          { key: "VERCEL_TOKEN", value: "row-vercel", isSecret: true },
-          { key: "GITHUB_TOKEN", value: "row-github", isSecret: true },
-          { key: "CLAUDE_CODE_OAUTH_TOKEN", value: "row-oauth", isSecret: true },
-          { key: "AGENT_FS_API_KEY", value: "row-agent-fs", isSecret: true },
-          { key: "PUBLIC_SETTING", value: "visible", isSecret: false },
+          { key: "VERCEL_TOKEN", value: "row-vercel", isSecret: true, exportToEnv: false },
+          { key: "GITHUB_TOKEN", value: "row-github", isSecret: true, exportToEnv: true },
+          { key: "PUBLIC_SETTING", value: "visible", isSecret: false, exportToEnv: true },
+          { key: "HIDDEN_SETTING", value: "hidden", isSecret: false, exportToEnv: false },
+          // A pre-215 API sends no flag: the row keeps exporting.
+          { key: "LEGACY_SECRET", value: "row-legacy", isSecret: true },
+          // Restricted keys never export, whatever the row says.
+          { key: "SLACK_APP_TOKEN", value: "row-xapp", isSecret: true, exportToEnv: true },
         ],
       },
     });
     const log = spyOn(console, "log").mockImplementation(() => {});
     try {
-      // SLACK_BOT_TOKEN in the base env stands for a copy an older
-      // entrypoint exported at boot; it must not survive either.
+      // The base env stands for the container env or an older entrypoint's
+      // boot export; a withheld row must remove those copies too.
       const result = await fetchResolvedEnv(testUrl, "key", agentId, {
-        SLACK_BOT_TOKEN: "boot-slack",
+        VERCEL_TOKEN: "boot-vercel",
+        SLACK_APP_TOKEN: "boot-xapp",
       });
-      expect(result.env.SLACK_BOT_TOKEN).toBeUndefined();
       expect(result.env.VERCEL_TOKEN).toBeUndefined();
+      expect(result.env.HIDDEN_SETTING).toBeUndefined();
+      expect(result.env.SLACK_APP_TOKEN).toBeUndefined();
       expect(result.env.GITHUB_TOKEN).toBe("row-github");
-      expect(result.env.CLAUDE_CODE_OAUTH_TOKEN).toBe("row-oauth");
-      expect(result.env.AGENT_FS_API_KEY).toBe("row-agent-fs");
       expect(result.env.PUBLIC_SETTING).toBe("visible");
+      expect(result.env.LEGACY_SECRET).toBe("row-legacy");
       const logged = log.mock.calls.map((call) => String(call[0])).join("\n");
-      expect(logged).toContain("SLACK_BOT_TOKEN, VERCEL_TOKEN");
-      expect(logged).not.toContain("row-slack");
-      expect(logged).not.toContain("boot-slack");
+      expect(logged).toContain("HIDDEN_SETTING, SLACK_APP_TOKEN, VERCEL_TOKEN");
+      expect(logged).not.toContain("row-vercel");
+      expect(logged).not.toContain("boot-vercel");
     } finally {
       log.mockRestore();
     }
   });
 
-  test("HARNESS_ENV_SECRET_PASSTHROUGH lets named secrets or every secret through", async () => {
+  test("a masked row keeps its boot value only when the row is exported", async () => {
     const agentId = crypto.randomUUID();
-    const configs = [
-      { key: "SLACK_BOT_TOKEN", value: "row-slack", isSecret: true },
-      { key: "VERCEL_TOKEN", value: "row-vercel", isSecret: true },
-    ];
     mockResponsesByAgentId.set(agentId, {
       status: 200,
       body: {
         configs: [
-          ...configs,
-          { key: "HARNESS_ENV_SECRET_PASSTHROUGH", value: " VERCEL_TOKEN ,", isSecret: false },
+          { key: "EXPORTED_BOOT", value: MASKED_SECRET_VALUE, isSecret: true, exportToEnv: true },
+          { key: "WITHHELD_BOOT", value: MASKED_SECRET_VALUE, isSecret: true, exportToEnv: false },
         ],
       },
     });
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
     const log = spyOn(console, "log").mockImplementation(() => {});
     try {
-      const named = await fetchResolvedEnv(testUrl, "key", agentId, {});
-      expect(named.env.VERCEL_TOKEN).toBe("row-vercel");
-      expect(named.env.SLACK_BOT_TOKEN).toBeUndefined();
-
-      // A row wins over the container value; the container value applies without one.
-      mockResponsesByAgentId.set(agentId, { status: 200, body: { configs } });
-      const all = await fetchResolvedEnv(testUrl, "key", agentId, {
-        HARNESS_ENV_SECRET_PASSTHROUGH: "*",
+      const result = await fetchResolvedEnv(testUrl, "key", agentId, {
+        EXPORTED_BOOT: "boot-exported",
+        WITHHELD_BOOT: "boot-withheld",
       });
-      expect(all.env.VERCEL_TOKEN).toBe("row-vercel");
-      expect(all.env.SLACK_BOT_TOKEN).toBe("row-slack");
+      expect(result.env.EXPORTED_BOOT).toBe("boot-exported");
+      expect(result.env.WITHHELD_BOOT).toBeUndefined();
     } finally {
+      warning.mockRestore();
       log.mockRestore();
     }
   });

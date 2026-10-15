@@ -288,20 +288,35 @@ from the predefined catalog. Workers stay catalog-only. The value is read on eve
 restart. An enabled extension is trusted code in the API process, and a lead can change this key, so
 read [inline install](/docs/guides/extensions#inline-install) before turning it on.
 
-## Secrets in agent shells
+## Config rows in agent env
 
-Workers keep secret config entries out of the environment their harness and its shell inherit, so
-`env`, `printenv`, and `/proc/<pid>/environ` in an agent shell do not list them. Boot steps and the
-startup script still see every entry. Harness credentials (Claude, Codex, pi, OpenCode, and the other
-providers), `GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`, `AZURE_DEVOPS_TOKEN`, and the agent's own
-`AGENT_FS_API_KEY` stay available, because the harness, `gh`, `glab`, `az`, and the git credential
-helpers read them from the environment. Agents read any other secret on demand with `get-config`, or
-use it through a script credential binding.
+Every config row has an **Export to agent env** flag (`exportToEnv`). Workers copy a row into the
+environment their harness and its shell tools inherit only when the flag is on. A row with the flag
+off never appears in `env`, `printenv`, or `/proc/<pid>/environ` in an agent shell, and a copy set
+on the container itself is dropped too.
 
-`HARNESS_ENV_SECRET_PASSTHROUGH` takes a comma-separated list of extra secret keys to keep in the
-environment, for example `VERCEL_TOKEN,SENTRY_AUTH_TOKEN`. `*` keeps every secret. Workers apply it to
-each new task; a container restart applies it to the worker process as well. Environment variables set
-on the container itself are not filtered.
+- **Default.** New rows export. Rows that existed before the flag shipped kept exporting, except a
+  short deny list of keys only the API server reads (integration webhook and signing secrets, OAuth
+  client secrets, the API's own agent-fs key, script connection secrets).
+- **Always restricted.** Some keys can never export: `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`,
+  `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITLAB_WEBHOOK_SECRET`,
+  `LINEAR_CLIENT_SECRET`, `LINEAR_SIGNING_SECRET`, `JIRA_CLIENT_SECRET`, `JIRA_WEBHOOK_TOKEN`,
+  `AZURE_DEVOPS_WEBHOOK_SECRET`, `AGENTMAIL_WEBHOOK_SECRET`, `API_AGENT_FS_API_KEY`, and every
+  `connection.<slug>.secret`. The config API rejects `exportToEnv: true` for them.
+- **Keep harness keys on.** Harness credentials (`CLAUDE_CODE_OAUTH_TOKEN`, `OPENROUTER_API_KEY`,
+  and the other providers), `GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`, `AZURE_DEVOPS_TOKEN`, and the
+  agent's own `AGENT_FS_API_KEY` are read from the environment by the harness, `gh`, `glab`, `az`,
+  and git. Turning them off breaks auth.
+- **When it applies.** Workers re-read the flag for every new task, so a change reaches the next
+  harness session without a restart. The worker process itself picks it up on its next restart.
+
+The flag controls the environment only. It does not change who may read the value through
+`get-config` or the API. An agent that needs a row kept out of its env uses it server-side: a script
+connection or a script credential binding sends the secret on the agent's behalf, so the value never
+enters the agent's context.
+
+Set the flag in the dashboard (the **Export to agent env** switch on a config entry), with
+`set-config` (`exportToEnv: false`), or with `PUT /api/config`.
 
 ## Access control
 
