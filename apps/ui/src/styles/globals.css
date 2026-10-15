@@ -467,6 +467,13 @@ summary {
   animation: shimmer-slide 2s linear infinite;
 }
 
+/* A dimmed part of a running title (a tool's detail, a thinking preview) gets
+ * its own layer from `opacity`, which the clipped gradient cannot paint into:
+ * it renders invisible. The shimmer already dims, so drop the opacity. */
+[data-slot="trace-line"][data-status="running"] > [data-slot="trace-title"] * {
+  opacity: 1;
+}
+
 @keyframes shimmer-slide {
   0% {
     background-position: 200% 0;

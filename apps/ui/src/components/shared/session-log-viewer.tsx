@@ -182,7 +182,8 @@ function shortDetail(input: unknown): string {
   return truncate(`${k}: ${String(v).replace(/\s+/g, " ")}`, 60);
 }
 
-function classifyTool(
+/** A tool call's kind, title and one-line detail. The Sessions activity trace reuses it. */
+export function classifyTool(
   name: string,
   input: unknown,
 ): {
