@@ -39,14 +39,22 @@ async function renderDiagram(id: string, source: string, theme: CodeTheme): Prom
   return run;
 }
 
-/** Draw the SVG at its natural width; the wrapper scrolls when it is wider than the column. */
-function naturalSize(host: HTMLElement) {
+/**
+ * Shrink a wide diagram to the column, but never below this share of its
+ * natural width: past that the labels get too small, and the wrapper scrolls.
+ */
+const MIN_SCALE = 0.6;
+
+function fitWidth(host: HTMLElement) {
   const svg = host.querySelector("svg");
-  if (!svg) return;
-  const width = svg.viewBox?.baseVal?.width;
-  svg.style.maxWidth = "none";
-  if (width) svg.setAttribute("width", String(width));
+  const width = svg?.viewBox?.baseVal?.width;
+  if (!svg || !width) return;
+  svg.setAttribute("width", "100%");
   svg.removeAttribute("height");
+  svg.style.maxWidth = `${width}px`;
+  svg.style.minWidth = `${Math.round(width * MIN_SCALE)}px`;
+  svg.style.display = "block";
+  svg.style.margin = "0 auto";
 }
 
 type Status =
@@ -91,7 +99,7 @@ export function MermaidBlock({
     const host = hostRef.current;
     if (!host || status.kind !== "ready") return;
     host.innerHTML = status.svg;
-    naturalSize(host);
+    fitWidth(host);
   }, [status]);
 
   if (status.kind === "ready") {
