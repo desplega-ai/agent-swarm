@@ -30,6 +30,7 @@ export {
   handlePullRequestCommented,
   handlePullRequestCreated,
 } from "./handlers";
+export { initAzureDevOpsOutbound, teardownAzureDevOpsOutbound } from "./outbound";
 export type {
   AzureDevOpsWebhookEvent,
   PullRequestCommentedEvent,

@@ -29,7 +29,9 @@ import {
   handleWorkItemRestored,
   handleWorkItemUpdated,
   isAzureDevOpsEnabled,
+  updatedPayloadOf,
   verifyAzureDevOpsWebhook,
+  workItemOf,
 } from "../azure-devops";
 import type {
   CheckRunEvent,
@@ -613,6 +615,35 @@ export async function handleWebhooks(
             number: pr.pullRequestId,
             action: "commented",
             user_login: comment.author.uniqueName ?? comment.author.id,
+          });
+          break;
+        }
+        case "workitem.updated": {
+          const update = updatedPayloadOf(body as WorkItemUpdatedEvent);
+          const change = update?.fields?.["System.AssignedTo"];
+          if (!update || !change) break;
+          workflowEventBus.emit("azure-devops.work_item.assigned", {
+            work_item_id: update.workItemId,
+            title: update.revision.fields["System.Title"],
+            project: update.revision.fields["System.TeamProject"],
+            action: "assigned",
+            assigned_to: change.newValue,
+            previous_assignee: change.oldValue,
+            user_login: update.revisedBy?.uniqueName ?? update.revisedBy?.id,
+          });
+          break;
+        }
+        case "workitem.commented": {
+          const item = workItemOf(body as WorkItemCommentedEvent);
+          // Edits re-fire the event with a higher version; only a new comment counts.
+          if (!item || (item.commentVersionRef && item.commentVersionRef.version > 1)) break;
+          workflowEventBus.emit("azure-devops.work_item.commented", {
+            work_item_id: item.id,
+            title: item.fields["System.Title"],
+            project: item.fields["System.TeamProject"],
+            action: "commented",
+            comment: item.fields["System.History"],
+            user_login: item.fields["System.ChangedBy"],
           });
           break;
         }

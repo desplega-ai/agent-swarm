@@ -350,6 +350,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
 | `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
 | `AZURE_DEVOPS_ALLOWED_ACTORS` | Comma-separated sign-in names allowed to trigger Azure Boards work item tasks without a linked swarm user |
+| `AZURE_DEVOPS_WORKITEM_STATE_STARTED` | Work item state to set when its swarm task starts (process-specific, e.g. `Doing`); unset = no change |
+| `AZURE_DEVOPS_WORKITEM_STATE_DONE` | Work item state to set when its swarm task completes (e.g. `Done`); unset = no change |
 | `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
 | `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
 | `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |

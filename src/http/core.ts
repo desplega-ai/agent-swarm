@@ -3,9 +3,11 @@ import { z } from "zod";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
   initAzureDevOps,
+  initAzureDevOpsOutbound,
   isAzureDevOpsEnabled,
   resetAzureDevOps,
   resetAzureDevOpsBotIdCache,
+  teardownAzureDevOpsOutbound,
 } from "../azure-devops";
 import {
   getAgentById,
@@ -234,6 +236,8 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
   resetAzureDevOpsBotIdCache();
   initAzureDevOps();
   if (isAzureDevOpsEnabled()) integrations.push("azure-devops");
+  teardownAzureDevOpsOutbound();
+  if (isAzureDevOpsEnabled()) initAzureDevOpsOutbound();
 
   resetLinear();
   if (await initLinear()) integrations.push("linear");

@@ -41,6 +41,12 @@ AZURE_DEVOPS_BOT_ID=00000000-0000-0000-0000-000000000000
 # without a linked swarm user
 AZURE_DEVOPS_ALLOWED_ACTORS=alex@your-company.com
 
+# Optional: move the linked work item when its task starts or completes.
+# State names depend on the project process (Agile: Active/Closed,
+# Scrum: Committed/Done, Basic: Doing/Done). Unset means no state change.
+AZURE_DEVOPS_WORKITEM_STATE_STARTED=Doing
+AZURE_DEVOPS_WORKITEM_STATE_DONE=Done
+
 # Optional: name for plain-text @mentions (default: agent-swarm-bot)
 AZURE_DEVOPS_BOT_NAME=agent-swarm-bot
 
@@ -91,6 +97,10 @@ Use **Test** on the subscription to check the connection. The test payload has n
 | Work item deleted | Cancels the linked task if it is still active |
 | Work item restored | If the task was cancelled by the delete and the item is still assigned to the bot, creates a follow-up task. If the item was never linked, behaves like created |
 
+### Work item state transitions
+
+Set `AZURE_DEVOPS_WORKITEM_STATE_STARTED` and/or `AZURE_DEVOPS_WORKITEM_STATE_DONE` to move the linked work item when its task starts or completes. The value must be a state of the work item type in your project's process. If Azure DevOps rejects it, the error is logged and the task is unaffected. Unset (the default) never changes a state. This needs the **Work Items: Read & write** scope.
+
 Work item mentions work as the picker mention (`data-vss-mention` with the bot's identity GUID) or typed `@agent-swarm-bot` / `@<bot sign-in name before the @>`. Each delivery is deduplicated on its service-hook notification id, so retries create no second task. The swarm ignores work item events caused by the bot itself and comment edits.
 
 Mentions work in two forms. A mention picked from the identity picker is stored as `@<GUID>` and matches the bot's identity. A typed `@agent-swarm-bot` matches `AZURE_DEVOPS_BOT_NAME`. The swarm ignores comments written by the bot itself, system comments, and edits to existing comments, so fixing a typo does not create a second task.
@@ -127,6 +137,10 @@ Azure DevOps events can trigger [workflows](/docs/concepts/workflows):
 
 - `azure-devops.pull_request.created`
 - `azure-devops.pull_request.commented`
+- `azure-devops.work_item.assigned`: `Assigned To` changed on a work item (`assigned_to`, `previous_assignee`)
+- `azure-devops.work_item.commented`: a new work item comment (`comment` is its HTML)
+
+Work item events fire for every matching service-hook delivery, whether or not the bot is involved. Both carry `work_item_id`, `title`, `project`, `action` and `user_login`.
 
 ## Troubleshooting
 
