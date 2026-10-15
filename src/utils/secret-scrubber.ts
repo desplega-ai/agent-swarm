@@ -1005,6 +1005,52 @@ export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
   return out as T;
 }
 
+export type ValueScrubber = {
+  text(text: string): string;
+  object<T>(value: T): T;
+};
+
+/**
+ * Redact exact occurrences of the given values, at any length, in one output
+ * boundary that knows which secrets it handed out (a script run's secret
+ * config). The global passes above keep their MIN_VALUE_LENGTH floor; this
+ * one never registers anything swarm-wide. All forms match in a single regex
+ * pass, longest first, so one value's marker is never rewritten by another
+ * value's pass. Object keys are redacted too.
+ */
+export function createValueScrubber(
+  entries: Array<{ value: string; name: string }>,
+): ValueScrubber {
+  const names = new Map<string, string>();
+  for (const { value, name } of entries) {
+    if (!value) continue;
+    for (const form of escapedForms(value)) if (!names.has(form)) names.set(form, name);
+  }
+  if (names.size === 0) return { text: (text) => text, object: (value) => value };
+
+  const pattern = [...names.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
+  const re = new RegExp(pattern, "g");
+  const text = (input: string) =>
+    input.replace(re, (match) => `[REDACTED:${names.get(match) ?? "secret"}]`);
+  const object = <T>(value: T, seen = new WeakSet<object>()): T => {
+    if (typeof value === "string") return text(value) as T;
+    if (value === null || typeof value !== "object") return value;
+    if (seen.has(value)) return "[Circular]" as T;
+    seen.add(value);
+    if (Array.isArray(value)) return value.map((item) => object(item, seen)) as T;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+        text(key),
+        object(child, seen),
+      ]),
+    ) as T;
+  };
+  return { text, object: (value) => object(value) };
+}
+
 /**
  * Force the env-value cache to rebuild on the next scrub call. Callers should
  * invoke this whenever the swarm_config is reloaded (`/internal/reload-config`

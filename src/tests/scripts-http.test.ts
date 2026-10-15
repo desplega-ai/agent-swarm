@@ -16,6 +16,7 @@ import {
 } from "../utils/secret-scrubber";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { randomToken } from "./synthetic-secret-helpers";
+import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
@@ -743,6 +744,9 @@ describe("script source with an embedded secret is refused at write", () => {
 // through the real POST /api/scripts/run route, not an injected payload.
 describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
   const secretValue = `cfg-secret-${randomToken(32)}`;
+  // Under the global scrubber's 12-char floor, so only the run's own
+  // output boundary can redact it.
+  const shortSecretValue = randomToken(10);
   const readerSource = `
     import type { ScriptContext } from "swarm-sdk";
     export default async (_args: unknown, ctx: ScriptContext) => {
@@ -765,6 +769,7 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
         missingIsUndefined: ctx.swarm.config.get("SCRIPT_CFG_NOT_SET") === undefined,
         fallback: read("SCRIPT_CFG_NOT_SET") ?? "fallback",
         apiOnly: read("SLACK_SIGNING_SECRET"),
+        proto: read("__proto__"),
       };
     };`;
 
@@ -777,6 +782,7 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
     missingIsUndefined: boolean;
     fallback: string;
     apiOnly: string | null;
+    proto: string | null;
   };
 
   beforeAll(async () => {
@@ -796,6 +802,13 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
     });
     await upsertSwarmConfig({
       scope: "global",
+      key: "SCRIPT_CFG_SHORT_SECRET",
+      value: shortSecretValue,
+      isSecret: true,
+    });
+    await upsertSwarmConfig({ scope: "global", key: "__proto__", value: "proto-global" });
+    await upsertSwarmConfig({
+      scope: "global",
       key: "SLACK_SIGNING_SECRET",
       value: `signing-${randomToken(24)}`,
       isSecret: true,
@@ -804,7 +817,7 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
 
   afterAll(async () => {
     await getDbClient().run(
-      "DELETE FROM swarm_config WHERE key LIKE 'SCRIPT_CFG_%' OR key = 'SLACK_SIGNING_SECRET'",
+      "DELETE FROM swarm_config WHERE key LIKE 'SCRIPT_CFG_%' OR key IN ('SLACK_SIGNING_SECRET', '__proto__')",
     );
     clearVolatileSecretsForTesting();
   });
@@ -819,34 +832,85 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
     return (await response.json()) as { result: Reader; stdout: string; error?: string };
   }
 
-  skip("inline run reads existing keys, agent scope over global, and undefined for a missing key", async () => {
-    const out = await run({ source: readerSource, intent: "config get regression" }, workerId);
-    expect(out.error).toBeUndefined();
-    expect(out.result).toEqual({
-      plain: "plain-global",
-      override: "from-worker",
-      secretMatches: true,
-      secretIsSecret: true,
-      secretStringified: "<redacted>",
-      missingIsUndefined: true,
-      fallback: "fallback",
-      apiOnly: null,
-    });
-    // The unwrapped secret is scrubbed from everything the run returns.
-    expect(out.stdout).toContain("secret:");
-    expect(JSON.stringify(out)).not.toContain(secretValue);
-  });
+  skip(
+    "inline run reads existing keys, agent scope over global, and undefined for a missing key",
+    async () => {
+      const out = await run({ source: readerSource, intent: "config get regression" }, workerId);
+      expect(out.error).toBeUndefined();
+      expect(out.result).toEqual({
+        plain: "plain-global",
+        override: "from-worker",
+        secretMatches: true,
+        secretIsSecret: true,
+        secretStringified: "<redacted>",
+        missingIsUndefined: true,
+        fallback: "fallback",
+        apiOnly: null,
+        proto: "proto-global",
+      });
+      // The unwrapped secret is scrubbed from everything the run returns.
+      expect(out.stdout).toContain("secret:");
+      expect(JSON.stringify(out)).not.toContain(secretValue);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
-  skip("named run resolves config for the invoking agent", async () => {
-    expect((await upsert({ name: "config-reader", source: readerSource }, leadId)).status).toBe(
-      200,
-    );
-    const out = await run({ name: "config-reader" }, leadId);
-    expect(out.error).toBeUndefined();
-    // The worker's agent-scope override does not leak to another agent.
-    expect(out.result.override).toBe("from-global");
-    expect(out.result.plain).toBe("plain-global");
-    expect(out.result.secretMatches).toBe(true);
-    expect(out.result.missingIsUndefined).toBe(true);
-  });
+  skip(
+    "named run resolves config for the invoking agent",
+    async () => {
+      expect((await upsert({ name: "config-reader", source: readerSource }, leadId)).status).toBe(
+        200,
+      );
+      const out = await run({ name: "config-reader" }, leadId);
+      expect(out.error).toBeUndefined();
+      // The worker's agent-scope override does not leak to another agent.
+      expect(out.result.override).toBe("from-global");
+      expect(out.result.plain).toBe("plain-global");
+      expect(out.result.secretMatches).toBe(true);
+      expect(out.result.missingIsUndefined).toBe(true);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  skip(
+    "a short secret the run read stays out of stdout, result and the stored run row",
+    async () => {
+      // No `secret:` label in the log line: that prefix triggers structural
+      // masking and would hide a missing value-level redaction.
+      const source = `
+      import type { ScriptContext } from "swarm-sdk";
+      export default async (_args: unknown, ctx: ScriptContext) => {
+        const raw = ctx.stdlib.Redacted.value(ctx.swarm.config.get("SCRIPT_CFG_SHORT_SECRET")!);
+        console.log("read:", raw);
+        return { leaked: raw, length: raw.length, [raw]: "as-key" };
+      };`;
+      const response = await dispatch("/api/scripts/run", {
+        method: "POST",
+        agentId: workerId,
+        body: JSON.stringify({ source, intent: "short config secret redaction" }),
+      });
+      expect(response.status).toBe(200);
+      const out = (await response.json()) as {
+        result: Record<string, unknown>;
+        stdout: string;
+        error?: string;
+      };
+      expect(out.error).toBeUndefined();
+      // The script really read the value: only its rendering is redacted.
+      expect(out.result.length).toBe(shortSecretValue.length);
+      expect(out.stdout).toContain("read: [REDACTED:config:SCRIPT_CFG_SHORT_SECRET]");
+      expect(out.stdout).not.toContain(shortSecretValue);
+      expect(out.result.leaked).toBe("[REDACTED:config:SCRIPT_CFG_SHORT_SECRET]");
+      expect(JSON.stringify(out.result)).not.toContain(shortSecretValue);
+
+      const row = await getDbClient().get<{ output: string | null }>(
+        "SELECT output FROM script_runs WHERE agentId = ? AND source = ?",
+        [workerId, source],
+      );
+      expect(row?.output).toBeTruthy();
+      expect(row?.output).toContain("[REDACTED:config:SCRIPT_CFG_SHORT_SECRET]");
+      expect(row?.output).not.toContain(shortSecretValue);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });

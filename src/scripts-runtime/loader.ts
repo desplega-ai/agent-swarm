@@ -1,5 +1,5 @@
 import { getApiKey } from "../utils/api-key";
-import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "./api-types";
 import type { FailedCredentialBinding } from "./credential-broker";
 import { buildEgressSecrets } from "./egress-secrets";
@@ -131,11 +131,20 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     output = await getScriptExecutor().run(executorInput);
   }
 
+  // The global scrubber skips values under its length floor, so this run's own
+  // secret config is redacted here at any length before the global pass.
+  const runSecrets = createValueScrubber(
+    Object.entries(input.userConfig ?? {})
+      .filter(([, entry]) => entry.isSecret)
+      .map(([key, entry]) => ({ value: entry.value, name: `config:${key}` })),
+  );
   return {
     ...output,
-    result: scrubObject(output.result),
-    stdout: scrubSecrets(output.stdout),
-    stderr: scrubSecrets(output.stderr),
-    ...(output.runtimeError ? { runtimeError: scrubObject(output.runtimeError) } : {}),
+    result: scrubObject(runSecrets.object(output.result)),
+    stdout: scrubSecrets(runSecrets.text(output.stdout)),
+    stderr: scrubSecrets(runSecrets.text(output.stderr)),
+    ...(output.runtimeError
+      ? { runtimeError: scrubObject(runSecrets.object(output.runtimeError)) }
+      : {}),
   };
 }

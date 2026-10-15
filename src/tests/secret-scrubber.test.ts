@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   clearVolatileSecretsForTesting,
+  createValueScrubber,
   isSensitiveKey,
   refreshSecretScrubberCache,
   registerSensitiveKeyName,
@@ -888,4 +889,42 @@ describe("scrubSecrets — over-redaction guards", () => {
     },
     { retry: 2 },
   );
+});
+
+describe("createValueScrubber (per-run exact values)", () => {
+  test("redacts values under the global floor without registering them swarm-wide", () => {
+    const short = randomToken(5);
+    const scrub = createValueScrubber([{ value: short, name: "config:SHORT" }]);
+    expect(scrub.text(`got ${short}!`)).toBe("got [REDACTED:config:SHORT]!");
+    expect(scrubSecrets(`got ${short}!`)).toBe(`got ${short}!`);
+  });
+
+  test("a one-char value is redacted everywhere in the run's output", () => {
+    const scrub = createValueScrubber([{ value: "x", name: "config:ONE" }]);
+    expect(scrub.text("x+x")).toBe("[REDACTED:config:ONE]+[REDACTED:config:ONE]");
+  });
+
+  test("one pass, longest first: a marker is never rewritten by another value", () => {
+    const scrub = createValueScrubber([
+      { value: "RED", name: "config:A" },
+      { value: "REDACT", name: "config:B" },
+    ]);
+    expect(scrub.text("RED REDACT")).toBe("[REDACTED:config:A] [REDACTED:config:B]");
+  });
+
+  test("covers JSON-escaped forms, object keys and nested values", () => {
+    const value = 'a"b';
+    const scrub = createValueScrubber([{ value, name: "config:Q" }]);
+    expect(scrub.text(JSON.stringify({ v: value }))).toBe('{"v":"[REDACTED:config:Q]"}');
+    expect(scrub.object({ [value]: [value, 1, null] })).toEqual({
+      "[REDACTED:config:Q]": ["[REDACTED:config:Q]", 1, null],
+    });
+  });
+
+  test("no values and empty values are a no-op", () => {
+    const scrub = createValueScrubber([{ value: "", name: "config:EMPTY" }]);
+    expect(scrub.text("unchanged")).toBe("unchanged");
+    const obj = { a: 1 };
+    expect(scrub.object(obj)).toBe(obj);
+  });
 });

@@ -34,15 +34,19 @@ export type ScriptUserConfig = Record<string, { value: string; isSecret: boolean
  * values are registered with the scrubber so they never leave in run output.
  */
 function toScriptUserConfig(configs: Awaited<ReturnType<typeof getResolvedConfig>>) {
-  const userConfig: ScriptUserConfig = {};
-  for (const config of configs) {
-    if (isApiOnlyConfigKey(config.key) || isInternalConfigKey(config.key)) continue;
-    userConfig[config.key] = { value: config.value, isSecret: config.isSecret };
+  const exposed = configs.filter(
+    (config) => !isApiOnlyConfigKey(config.key) && !isInternalConfigKey(config.key),
+  );
+  for (const config of exposed) {
     if (config.isSecret && config.value) {
       registerVolatileSecret(config.value, `config:${config.key}`);
     }
   }
-  return userConfig;
+  // fromEntries defines own properties, so a `__proto__` key survives
+  // (assigning it into `{}` would hit the prototype setter instead).
+  return Object.fromEntries(
+    exposed.map((config) => [config.key, { value: config.value, isSecret: config.isSecret }]),
+  ) as ScriptUserConfig;
 }
 
 /**

@@ -32,6 +32,7 @@ import {
 } from "../workflows/executors/swarm-script";
 import { interpolate } from "../workflows/template";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
@@ -371,37 +372,41 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.result).toEqual({ apiKeys: ["workflowVendor"] });
   });
 
-  skip("swarm-script node reads swarm config through ctx.swarm.config.get", async () => {
-    await upsertSwarmConfig({ scope: "global", key: "WORKFLOW_CFG_PLAIN", value: "node-value" });
-    await saveScript(
-      "ctx-config-get",
-      `export default async (_args, ctx) => {
+  skip(
+    "swarm-script node reads swarm config through ctx.swarm.config.get",
+    async () => {
+      await upsertSwarmConfig({ scope: "global", key: "WORKFLOW_CFG_PLAIN", value: "node-value" });
+      await saveScript(
+        "ctx-config-get",
+        `export default async (_args, ctx) => {
         const value = ctx.swarm.config.get("WORKFLOW_CFG_PLAIN");
         return {
           value: value === undefined ? null : ctx.stdlib.Redacted.value(value),
           missing: ctx.swarm.config.get("WORKFLOW_CFG_NOT_SET") ?? "fallback",
         };
       };`,
-    );
+      );
 
-    const executor = new SwarmScriptExecutor(deps);
-    const wf = await makeWorkflow({ nodes: [] });
-    const result = await executor.run({
-      config: { scriptName: "ctx-config-get" },
-      context: {},
-      meta: {
-        runId: crypto.randomUUID(),
-        stepId: crypto.randomUUID(),
-        nodeId: "script",
-        workflowId: wf.id,
-        dryRun: false,
-      },
-    });
-    await getDbClient().run("DELETE FROM swarm_config WHERE key = 'WORKFLOW_CFG_PLAIN'");
+      const executor = new SwarmScriptExecutor(deps);
+      const wf = await makeWorkflow({ nodes: [] });
+      const result = await executor.run({
+        config: { scriptName: "ctx-config-get" },
+        context: {},
+        meta: {
+          runId: crypto.randomUUID(),
+          stepId: crypto.randomUUID(),
+          nodeId: "script",
+          workflowId: wf.id,
+          dryRun: false,
+        },
+      });
+      await getDbClient().run("DELETE FROM swarm_config WHERE key = 'WORKFLOW_CFG_PLAIN'");
 
-    expect(result.status).toBe("success");
-    expect(result.output?.result).toEqual({ value: "node-value", missing: "fallback" });
-  });
+      expect(result.status).toBe("success");
+      expect(result.output?.result).toEqual({ value: "node-value", missing: "fallback" });
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   skip("pinHash correctly resolves to a historic script_versions row", async () => {
     const first = await saveScript("versioned", `export default async () => ({ version: "old" });`);
