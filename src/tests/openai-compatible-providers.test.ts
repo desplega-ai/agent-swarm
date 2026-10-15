@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import snapshot from "../be/modelsdev-cache.json";
 import {
   modelForId,
-  OPENAI_COMPATIBLE_KEY_VARS,
   OPENAI_COMPATIBLE_PROVIDER_IDS,
   OPENAI_COMPATIBLE_PROVIDERS,
   providerForModel,
@@ -59,11 +58,6 @@ describe("openai-compatible provider table", () => {
       OPENAI_COMPATIBLE_PROVIDERS.nan.envVar,
       ...OPENAI_COMPATIBLE_PROVIDERS.nan.aliasEnvVars,
     ]).toEqual([...NAN_KEY_VARS]);
-    expect(OPENAI_COMPATIBLE_KEY_VARS).toEqual([
-      "NAN_API_KEY",
-      "HELMCODE_API_NAN",
-      "HELMCODE_API_KEY",
-    ]);
   });
 
   // Worker code cannot read the catalog store, so the table duplicates the

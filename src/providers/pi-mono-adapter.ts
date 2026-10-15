@@ -54,6 +54,7 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_IDS,
   OPENAI_COMPATIBLE_PROVIDERS,
   type OpenAICompatibleProvider,
+  providerForModel,
   providerKeyFromEnv,
 } from "./openai-compatible-providers";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
@@ -479,15 +480,11 @@ const PI_RUNTIME_API_KEYS = [
  * into `process.env` because that would freeze rotation globally. pi-mono runs
  * in-process, so pass selected keys through pi's runtime auth override instead
  * of relying on environment lookup.
- *
- * `options` is forwarded to `ModelRuntime.create` (tests point it at a temp
- * agent dir); production uses pi's default agent dir.
  */
 export async function createPiRuntimeAuth(
   env: Record<string, string | undefined> = process.env,
-  options?: Parameters<typeof ModelRuntime.create>[0],
 ): Promise<ModelRuntime> {
-  const modelRuntime = await ModelRuntime.create(options);
+  const modelRuntime = await ModelRuntime.create();
   for (const [envKey, provider] of PI_RUNTIME_API_KEYS) {
     const apiKey = env[envKey];
     if (apiKey) {
@@ -685,22 +682,30 @@ interface CustomProvidersMarker {
  * a key value: pi reads a bare name as a literal key. The key a session really
  * uses arrives as a runtime key (`createPiRuntimeAuth`), which beats this field.
  * Costs are 0: these are flat-rate subscriptions (the server prices them at $0).
+ * A `modelId` missing from the table (a catalog id outside it) gets a bare
+ * entry so pi still resolves it instead of falling back to its default model;
+ * pi fills the omitted limits with its own defaults.
  */
-export function customProviderModelsBlock(provider: OpenAICompatibleProvider) {
+export function customProviderModelsBlock(provider: OpenAICompatibleProvider, modelId?: string) {
+  const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const models: Record<string, unknown>[] = provider.models.map((m) => ({
+    id: m.id,
+    name: m.name,
+    reasoning: m.reasoning,
+    input: [...m.input],
+    contextWindow: m.contextWindow,
+    maxTokens: m.maxOutputTokens,
+    cost: { ...zeroCost },
+    compat: { ...m.compat },
+  }));
+  if (modelId && !provider.models.some((m) => m.id === modelId)) {
+    models.push({ id: modelId, name: modelId, cost: { ...zeroCost } });
+  }
   return {
     baseUrl: provider.baseUrl,
     api: "openai-completions",
     apiKey: `$${provider.envVar}`,
-    models: provider.models.map((m) => ({
-      id: m.id,
-      name: m.name,
-      reasoning: m.reasoning,
-      input: [...m.input],
-      contextWindow: m.contextWindow,
-      maxTokens: m.maxOutputTokens,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      compat: { ...m.compat },
-    })),
+    models,
   };
 }
 
@@ -724,13 +729,18 @@ function jsonEqual(a: unknown, b: unknown): boolean {
  *   our blocks were all they held.
  * - A corrupt models.json is rewritten with our blocks only when a key is
  *   present (pi cannot load it either way); without a key it is never touched.
+ * - `model` (the task's model) adds a bare entry to its provider's block when
+ *   its id is outside the table; the entry is part of our block and marker.
  */
 export async function ensureCustomProvidersModelsJson(
   agentDir: string,
   env: Record<string, string | undefined> = process.env,
+  model?: string,
 ): Promise<void> {
   const modelsPath = join(agentDir, "models.json");
   const markerPath = join(agentDir, CUSTOM_PROVIDERS_MARKER);
+  const modelProvider = providerForModel(model);
+  const modelId = modelProvider && model ? model.slice(modelProvider.id.length + 1) : undefined;
 
   const wanted = OPENAI_COMPATIBLE_PROVIDER_IDS.filter(
     (id) => providerKeyFromEnv(OPENAI_COMPATIBLE_PROVIDERS[id], env) !== undefined,
@@ -785,7 +795,10 @@ export async function ensureCustomProvidersModelsJson(
       jsonEqual(current, priorWritten[id]);
     if (wanted.includes(id)) {
       if (current === undefined || ours) {
-        const block = customProviderModelsBlock(OPENAI_COMPATIBLE_PROVIDERS[id]);
+        const block = customProviderModelsBlock(
+          OPENAI_COMPATIBLE_PROVIDERS[id],
+          modelProvider?.id === id ? modelId : undefined,
+        );
         providers[id] = block;
         written[id] = block;
       } else {
@@ -1875,7 +1888,7 @@ export class PiMonoAdapter implements ProviderAdapter {
     // loads `<agentDir>/models.json` exactly once at creation.
     await ensureOpenRouterModelsOverride(getAgentDir(), sessionEnv);
     // Same file: the nan/helmcode custom provider blocks (key-gated).
-    await ensureCustomProvidersModelsJson(getAgentDir(), sessionEnv);
+    await ensureCustomProvidersModelsJson(getAgentDir(), sessionEnv, config.model);
     // The runtime is created before resolving so custom providers, which only
     // exist in its composed store, can resolve.
     const modelRuntime = await createPiRuntimeAuth(sessionEnv);

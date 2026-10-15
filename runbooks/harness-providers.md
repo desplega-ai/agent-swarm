@@ -21,7 +21,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 ## NaN and Helmcode (pi, opencode)
 
 NaN and Helmcode are OpenAI-compatible, flat-rate providers. Their models run
-on `pi` and `opencode` only; `claude` and `codex` reject `nan/*` and
+on `pi`, `opencode` and the ACP `opencode` target only; `claude` and `codex` reject `nan/*` and
 `helmcode/*` with the existing harness mismatch error.
 
 - **Keys**: `NAN_API_KEY` (alias `HELMCODE_API_NAN`; `NAN_API_KEY` wins when
@@ -34,9 +34,11 @@ on `pi` and `opencode` only; `claude` and `codex` reject `nan/*` and
   `HELMCODE_API_KEY`). On opencode the adapter hands the picked key to the
   provider config of the active model's provider, `openrouter` included, so
   an `OPENROUTER_API_KEY` pool also works there.
-- **Model ids**: `nan/<id>` from the models.dev `nan` section (for example
-  `nan/glm5.3-flash`, `nan/mimo-v2.6-flash`, `nan/qwen3.6`);
-  `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`,
+- **Model ids**: NaN ids known to support tool calls are the seven in
+  `src/providers/openai-compatible-providers.ts` (`nan/deepseek-v4-flash`,
+  `nan/glm5.3`, `nan/glm5.3-flash`, `nan/qwen3.6`, `nan/qwen3.8-flash`,
+  `nan/gemma4`, `nan/mimo-v2.6-flash`); other `nan/<id>` catalog ids are
+  accepted but untested. Helmcode: `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`,
   `helmcode/qwen3.6`, `helmcode/gemma4`. Helmcode is not on models.dev; it
   ships as a hand-written section of `src/be/modelsdev-cache.json`.
 - **Per-key caps**: NaN allows 60 RPM and 7 concurrent requests in total on

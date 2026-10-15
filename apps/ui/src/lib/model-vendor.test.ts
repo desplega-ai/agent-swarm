@@ -16,6 +16,9 @@ describe("modelVendor: NaN and Helmcode are routes, the maker keeps its mark", (
     expect(modelVendor("nan/mimo-v2.6-flash")).toBeNull();
     expect(modelVendor("nan")).toBeNull();
     expect(modelVendor("helmcode")).toBeNull();
+    // A look-alike prefix is an unknown route: not stripped, so no maker mark.
+    expect(modelVendor("nanx/glm5.3-flash")).toBe(modelVendor("acme/glm5.3-flash"));
+    expect(modelVendor("nanx/glm5.3-flash")).toBeNull();
   });
 
   test("existing ids keep their maker", () => {

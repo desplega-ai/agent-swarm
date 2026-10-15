@@ -38,11 +38,14 @@ describe("pi SDK + helmcode custom provider against a fake OpenAI-compatible ser
   let server: ReturnType<typeof Bun.serve>;
   let dir: string;
   const originalPoolVar = process.env.HELMCODE_API_KEY;
+  const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "pi-helmcode-fake-"));
     // The shared process env holds the raw pool, as the entrypoint exports it.
     process.env.HELMCODE_API_KEY = POOL;
+    // pi's own agent-dir env var: the runtime loads <dir>/models.json.
+    process.env.PI_CODING_AGENT_DIR = dir;
     server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
@@ -97,6 +100,8 @@ describe("pi SDK + helmcode custom provider against a fake OpenAI-compatible ser
     server?.stop(true);
     if (originalPoolVar === undefined) delete process.env.HELMCODE_API_KEY;
     else process.env.HELMCODE_API_KEY = originalPoolVar;
+    if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -114,10 +119,7 @@ describe("pi SDK + helmcode custom provider against a fake OpenAI-compatible ser
       written.providers.helmcode.baseUrl = `http://127.0.0.1:${server.port}/v1`;
       await Bun.write(modelsPath, JSON.stringify(written));
 
-      const modelRuntime = await createPiRuntimeAuth(taskEnv, {
-        authPath: join(dir, "auth.json"),
-        modelsPath,
-      });
+      const modelRuntime = await createPiRuntimeAuth(taskEnv);
       const model = resolveModel("helmcode/glm5.3", taskEnv, modelRuntime);
       expect(model?.provider).toBe("helmcode");
       expect(model?.id).toBe("glm5.3");

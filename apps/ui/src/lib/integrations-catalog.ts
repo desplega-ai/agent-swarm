@@ -847,7 +847,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     category: "llm",
     iconKey: "route",
     providerIconKey: "nan",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration#nan-and-helmcode",
     restartRequired: false,
     fields: [
       {
@@ -872,7 +872,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     category: "llm",
     iconKey: "route",
     providerIconKey: "helmcode",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration#nan-and-helmcode",
     restartRequired: false,
     fields: [
       {
@@ -883,7 +883,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         isSecret: true,
         placeholder: "sk-...",
         helpText:
-          "Helmcode API key for `helmcode/<model>` on pi and opencode. Each org key carries its own concurrency cap (5, 15 or 40): comma-separate several org keys to form a credential pool.",
+          "Helmcode API key for `helmcode/<model>` on pi and opencode. Helmcode org plans include 5, 15 or 40 keys; paste them comma-separated as a credential pool.",
         credentialPool: true,
       },
     ],

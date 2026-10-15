@@ -321,6 +321,12 @@ describe("getModelAwareCredentialVars", () => {
       expect(getModelAwareCredentialVars(provider, "helmcode/glm5.3")).toEqual([
         "HELMCODE_API_KEY",
       ]);
+      // Only the exact prefix routes: a look-alike is any other provider/model.
+      const other = getModelAwareCredentialVars(provider, "other/x");
+      expect(getModelAwareCredentialVars(provider, "helmcodex/x")).toEqual(other);
+      expect(getModelAwareCredentialVars(provider, "nanx/y")).toEqual(other);
+      expect(other).not.toContain("NAN_API_KEY");
+      expect(other).not.toContain("HELMCODE_API_KEY");
     }
   });
 

@@ -755,16 +755,22 @@ describe("createPiRuntimeAuth — NaN and Helmcode", () => {
     "HELMCODE_API_NAN alone sets the nan runtime key; NAN_API_KEY wins when both are set",
     withTempDir("pi-custom-auth-", async (dir) => {
       await ensureCustomProvidersModelsJson(dir, { NAN_API_KEY: "x", HELMCODE_API_KEY: "y" });
-      const opts = { authPath: join(dir, "auth.json"), modelsPath: join(dir, "models.json") };
+      // pi's own agent-dir env var points the runtime at the temp dir.
+      const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+      process.env.PI_CODING_AGENT_DIR = dir;
+      try {
+        const aliasOnly = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a" });
+        await expect(aliasOnly.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "a" } });
 
-      const aliasOnly = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a" }, opts);
-      await expect(aliasOnly.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "a" } });
+        const both = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a", NAN_API_KEY: "b" });
+        await expect(both.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "b" } });
 
-      const both = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a", NAN_API_KEY: "b" }, opts);
-      await expect(both.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "b" } });
-
-      const helm = await createPiRuntimeAuth({ HELMCODE_API_KEY: "h" }, opts);
-      await expect(helm.getAuth("helmcode")).resolves.toMatchObject({ auth: { apiKey: "h" } });
+        const helm = await createPiRuntimeAuth({ HELMCODE_API_KEY: "h" });
+        await expect(helm.getAuth("helmcode")).resolves.toMatchObject({ auth: { apiKey: "h" } });
+      } finally {
+        if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = origAgentDir;
+      }
 
       // Runtime keys never land in auth.json.
       const auth = (await Bun.file(join(dir, "auth.json")).exists())
@@ -793,6 +799,34 @@ describe("resolveModel — models.json custom providers", () => {
       expect(helm?.provider).toBe("helmcode");
       expect(helm?.id).toBe("glm5.3");
       expect(helm?.baseUrl).toBe(OPENAI_COMPATIBLE_PROVIDERS.helmcode.baseUrl);
+    }),
+  );
+
+  test(
+    "a nan/<id> outside the table (nan/glm5.2) gets a bare entry and resolves",
+    withTempDir("pi-custom-bare-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, NAN_ENV, "nan/glm5.2");
+      const written = await readModelsJson(dir);
+      const ids = written.providers.nan.models.map((m: { id: string }) => m.id);
+      expect(ids).toContain("glm5.2");
+      expect(ids).toContain("glm5.3");
+      const runtime = await piCodingAgent.ModelRuntime.create({
+        authPath: join(dir, "auth.json"),
+        modelsPath: join(dir, "models.json"),
+      });
+      const model = resolveModel("nan/glm5.2", NAN_ENV, runtime);
+      expect(model?.provider).toBe("nan");
+      expect(model?.id).toBe("glm5.2");
+      expect(model?.baseUrl).toBe(OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl);
+
+      // The bare entry is part of our block: the next task's model replaces it.
+      await ensureCustomProvidersModelsJson(dir, NAN_ENV, "nan/glm5.3");
+      const next = await readModelsJson(dir);
+      expect(next.providers.nan.models.map((m: { id: string }) => m.id)).not.toContain("glm5.2");
+      // And a key removal still reverts the whole block.
+      await ensureCustomProvidersModelsJson(dir, NAN_ENV, "nan/glm5.2");
+      await ensureCustomProvidersModelsJson(dir, {});
+      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
     }),
   );
 

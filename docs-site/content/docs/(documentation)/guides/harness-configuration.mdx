@@ -340,11 +340,11 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) v
 
 ## NaN and Helmcode
 
-[NaN](https://nan.builders) and [Helmcode](https://helmcode.com) are OpenAI-compatible model providers billed at a flat rate per key. Their models run on the **pi** and **opencode** harnesses only. The `claude` and `codex` harnesses reject `nan/*` and `helmcode/*` models with the usual harness mismatch error.
+[NaN](https://nan.builders) and [Helmcode](https://helmcode.com) are OpenAI-compatible model providers billed at a flat rate per key. Their models run on the **pi** and **opencode** harnesses only, plus the ACP `opencode` target (`HARNESS_PROVIDER=acp`, `ACP_TARGET=opencode`). The `claude` and `codex` harnesses reject `nan/*` and `helmcode/*` models with the usual harness mismatch error.
 
 | Provider | Env var | Model ids |
 |----------|---------|-----------|
-| NaN | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | `nan/<id>`, using the ids in the `nan` section of models.dev, for example `nan/glm5.3-flash`, `nan/mimo-v2.6-flash`, `nan/qwen3.6` |
+| NaN | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Known to support tool calls: `nan/deepseek-v4-flash`, `nan/glm5.3`, `nan/glm5.3-flash`, `nan/qwen3.6`, `nan/qwen3.8-flash`, `nan/gemma4`, `nan/mimo-v2.6-flash`. Other `nan/<id>` catalog ids are accepted but untested |
 | Helmcode | `HELMCODE_API_KEY` | `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`, `helmcode/qwen3.6`, `helmcode/gemma4` |
 
 - **Entering keys**: use the NaN and Helmcode cards on the dashboard Integrations page, or set the env vars on the worker. A key saved on the dashboard needs no restart.
@@ -736,7 +736,7 @@ NAN_API_KEY=nan-key1,nan-key2,nan-key3
 HELMCODE_API_KEY=helmcode-key1,helmcode-key2
 ```
 
-On opencode, the adapter passes the picked key to the provider config for the task's model. An `OPENROUTER_API_KEY` pool therefore also works on opencode. Earlier versions passed the whole comma-separated value and the provider answered 401.
+On opencode, the adapter passes the picked key to the provider config for the task's model. An `OPENROUTER_API_KEY` pool therefore also works on opencode.
 
 ### Codex OAuth Pool
 

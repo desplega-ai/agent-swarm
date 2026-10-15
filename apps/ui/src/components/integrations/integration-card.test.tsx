@@ -37,14 +37,19 @@ const BASE: IntegrationDef = {
 };
 
 describe("IntegrationCard icon", () => {
-  test("a provider glyph renders an svg and no logo mask", () => {
+  test("a provider glyph renders the NaN glyph, not the lucide icon or a logo mask", () => {
     const html = render({ ...BASE, providerIconKey: "nan" });
-    expect(html).toContain("<svg");
+    // The struck-through bar only the NaN glyph draws.
+    expect(html).toContain('y="-1.5" width="2" height="27" rx="1" transform="rotate(45 12 12)"');
+    expect(html).not.toContain("lucide-route");
     expect(html).not.toContain("mask-image");
   });
 
   test("the glyph wins over a logo file", () => {
     const html = render({ ...BASE, providerIconKey: "helmcode", logoSrc: "/provider-logos/x.svg" });
+    // The wheel spoke only the Helmcode glyph draws.
+    expect(html).toContain('transform="rotate(135 12 12)"');
+    expect(html).not.toContain("lucide-route");
     expect(html).not.toContain("mask-image");
   });
 
@@ -65,7 +70,9 @@ describe("IntegrationCard icon", () => {
       expect(def?.providerIconKey).toBe(id);
       expect(def?.logoSrc).toBeUndefined();
       expect(def?.restartRequired).toBe(false);
-      expect(render(def as IntegrationDef)).not.toContain("mask-image");
+      const html = render(def as IntegrationDef);
+      expect(html).not.toContain("mask-image");
+      expect(html).not.toContain(`lucide-${def?.iconKey}`);
     }
   });
 });
