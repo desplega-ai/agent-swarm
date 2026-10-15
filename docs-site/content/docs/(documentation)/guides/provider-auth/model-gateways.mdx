@@ -29,6 +29,23 @@ There is no per-vendor gateway adapter in Agent Swarm, and adding one is not req
 
 For the standard harness credentials, model defaults, and Docker examples, see [Harness Configuration](/docs/guides/harness-configuration). For the contributor-facing adapter contract, see [Harness Providers](/docs/guides/harness-providers).
 
+## Vercel AI Gateway (Token Pass)
+
+OpenCode and pi-mono accept `AI_GATEWAY_API_KEY` natively. Use a [Token Pass API key](https://vercel.com/docs/ai-gateway/token-pass/getting-started) for Token Pass credit, or a regular AI Gateway key for usage billed to your AI Gateway balance.
+
+```bash
+HARNESS_PROVIDER=pi # or opencode
+AI_GATEWAY_API_KEY=<your-token-pass-api-key>
+MODEL_OVERRIDE=vercel/zai/glm-5.3
+# Also supported: vercel/moonshotai/kimi-k3
+```
+
+The `vercel/` prefix selects the harness provider; the full gateway model ID follows it. pi uses OpenAI Chat Completions at `https://ai-gateway.vercel.sh/v1`; OpenCode reuses its built-in Vercel AI Gateway provider. Both adapters generate their configuration per task.
+
+[Token Pass routing](https://vercel.com/docs/ai-gateway/token-pass/models-and-routing) automatically selects the `token-pass` provider for featured models when you supply a Token Pass key. No extra header or provider option is required. OIDC cannot spend Token Pass credit. When credit runs out, requests fail rather than falling back to paid usage. Token Pass includes ZDR; regional inference is opt-in through gateway request options or team settings, with no region header. This entry does not pin a region.
+
+The existing onboarding Vercel preset is for embeddings and uses the same API base URL. Token Pass keys cannot use embedding models, so keep a regular key for that preset.
+
 ## OpenRouter
 
 OpenCode and pi-mono have first-class OpenRouter support in the stock image. Both use the same key and the same model slug after the harness-specific prefix.

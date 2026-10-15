@@ -62,7 +62,7 @@ export interface OpenAICompatibleProvider {
    */
   catalog: "models.dev" | "registry";
   /** AI SDK package opencode loads for a custom provider block. */
-  npm: "@ai-sdk/openai-compatible";
+  npm: "@ai-sdk/openai-compatible" | "@ai-sdk/gateway";
   /** Tool-calling chat models pi and opencode get in their config blocks. */
   models: readonly OpenAICompatibleModel[];
 }
@@ -224,6 +224,41 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
         compat: DEVELOPER_ROLE,
         family: "gemma",
         reasoningEfforts: EFFORTS_WITH_NONE,
+      },
+    ],
+  },
+  vercel: {
+    id: "vercel",
+    displayName: "Vercel AI Gateway",
+    description: "GLM 5.3 and Kimi K3 through Vercel AI Gateway, including Token Pass.",
+    baseUrl: "https://ai-gateway.vercel.sh/v1",
+    docsUrl: "https://vercel.com/docs/ai-gateway/token-pass",
+    envVar: "AI_GATEWAY_API_KEY",
+    aliasEnvVars: [],
+    keyNote: "Use a Token Pass API key for Token Pass credit; regular keys use AI Gateway credit.",
+    catalog: "models.dev",
+    // Reuse OpenCode's built-in Vercel provider; pi uses OpenAI Chat Completions.
+    npm: "@ai-sdk/gateway",
+    // IDs: vercel.com/docs/ai-gateway/token-pass. Limits and modalities
+    // match the existing models.dev Vercel catalog section.
+    models: [
+      {
+        id: "zai/glm-5.3",
+        name: "GLM 5.3",
+        contextWindow: 1000000,
+        maxOutputTokens: 1000000,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: DEVELOPER_ROLE,
+      },
+      {
+        id: "moonshotai/kimi-k3",
+        name: "Kimi K3",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_IMAGE,
+        reasoning: true,
+        compat: DEVELOPER_ROLE,
       },
     ],
   },

@@ -102,8 +102,8 @@ describe("scrubSecrets — env-based replacement", () => {
       version: SCRUBBER_RULES_VERSION,
       keyVars: [...openAICompatibleKeyVars()].sort(),
     }).toEqual({
-      version: 7,
-      keyVars: ["HELMCODE_API_KEY", "HELMCODE_API_NAN", "NAN_API_KEY"],
+      version: 8,
+      keyVars: ["AI_GATEWAY_API_KEY", "HELMCODE_API_KEY", "HELMCODE_API_NAN", "NAN_API_KEY"],
     });
   });
 

@@ -80,10 +80,20 @@ function HelmcodeIcon(props: IconProps) {
   );
 }
 
+function VercelIcon(props: IconProps) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, provider label provides accessible name
+    <svg aria-hidden {...ICON_BASE} {...props}>
+      <path d="M12 3 24 24H0L12 3z" />
+    </svg>
+  );
+}
+
 const ICON_BY_PROVIDER: Record<ProviderIconKey, (p: IconProps) => ReactElement> = {
   anthropic: AnthropicIcon,
   openai: OpenAIIcon,
   openrouter: OpenRouterIcon,
+  vercel: VercelIcon,
   "amazon-bedrock": AmazonBedrockIcon,
   amp: AmpMark,
   nan: NanIcon,
