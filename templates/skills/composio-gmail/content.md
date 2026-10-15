@@ -62,6 +62,13 @@ agent-swarm x composio POST /tools/execute/GMAIL_SEND_EMAIL \
 - `recipient_email` is the primary; add more via `extra_recipients` / `cc` / `bcc`.
 - **Sending is a write action** — only do it when the task explicitly asks.
 
+## Sender (From) and footer
+
+- A draft defaults to the connected account's primary address. Before you create drafts, list the account's verified send-as aliases and set From to the alias the requester prefers (requester profile or brief). Take the footer and signature domain from the same source.
+- Never set From to an alias that is not verified. Gmail rewrites it to the primary address.
+- After you create the drafts, check From as well as To and Subject on each one.
+- To fix existing drafts, update each draft in place with the alias. Draft ids stay the same, so there is no need to delete and recreate.
+
 ## Reply in a thread
 
 ```bash

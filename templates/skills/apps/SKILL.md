@@ -740,3 +740,10 @@ Create this with `app-upsert`:
 ```
 
 The tool returns `{ appId, url: "/apps/<id>" }`. Open that URL to verify the live UI, then continue with the read-patch-validate loop above.
+
+## View and screenshot a live app
+
+- An app renders at `<dashboard>/apps/<id>`. Two view modes are set by query string: `?mode=full` (full-viewport overlay with a slim header) and `?mode=chromeless` (only the rendered page, the embed surface). `app.navigate` keeps only `?mode`.
+- Logged-in browser: a fresh dashboard has no connection and redirects to /setup. Seed the localStorage key `agent-swarm-connections` with `{connections:[{id,name,apiUrl,apiKey}],activeId}`. Build the value from an env var and pipe it to `agent-browser eval --stdin`, so the key never reaches a command line. Reload, then pick a user in the "Who are you?" dialog.
+- Apps scroll inside an inner canvas, so a full-page screenshot captures only the viewport. Scroll the canvas or raise the viewport height. For mobile, set a 375px-wide viewport before the screenshot.
+- App definitions: `GET /api/apps` and `GET /api/apps/<id>` with the API key as Bearer.
