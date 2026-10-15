@@ -242,7 +242,7 @@ A Teams thread id contains the service URL of the conversation, and the adapter 
 ## How it works
 
 1. **Buffer.** A mention or a DM opens a thread buffer. More messages in the same thread join it for `CHAT_SDK_BUFFER_MS` (10 s by default). A message that starts with `!now` flushes the buffer at once. One flush creates one task.
-2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent or a workflow), the agent that owns the thread, and then the Lead. A `pre.chat.route` extension can change the target.
+2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent, or a workflow when the message mentions the bot or is a DM, so a plain reply in a subscribed thread never starts a second run), the agent that owns the thread, and then the Lead. A `pre.chat.route` extension can change the target.
 3. **Task.** The task gets `source: "chat"` and a context key `task:chat-sdk:{adapter}:{encoded thread id}`. Later tasks in the same thread share the key. The task text includes the recent thread messages.
 4. **Steer or follow up.** When the Lead's task for the thread is in progress, a new plain reply steers that task, and the bot posts a short acknowledgement. Otherwise the reply waits in the buffer and becomes a follow-up task that depends on the previous one.
 5. **Attachments.** Files are downloaded once per flush and attached to each new task. Files larger than 50 MB are skipped, and the task text says so.

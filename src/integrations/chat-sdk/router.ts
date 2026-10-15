@@ -98,9 +98,9 @@ async function leadMatch(reachable: Agent[], matchedText: string): Promise<ChatA
 
 /**
  * Port of `src/slack/router.ts` for Chat SDK threads. Order: `swarm#<uuid>`,
- * `swarm#all`, KV channel mapping (agent or workflow), the thread owner (lead
- * when the owner is offline), the lead for a mention or DM. Returns null when
- * the message is not addressed to the swarm.
+ * `swarm#all`, KV channel mapping (agent, or workflow for a mention or DM), the
+ * thread owner (lead when the owner is offline), the lead for a mention or DM.
+ * Returns null when the message is not addressed to the swarm.
  */
 export async function routeChatMessage(
   text: string,
@@ -128,7 +128,11 @@ export async function routeChatMessage(
   if (matches.length > 0) return { kind: "agents", matches };
 
   const mapping = await getChatChannelMapping(ctx.adapter, ctx.channelId);
-  if (mapping?.workflowId) return { kind: "workflow", workflowId: mapping.workflowId };
+  // A workflow run has no continuity: an unaddressed reply in the subscribed
+  // thread must not start another run. It still reaches a thread owner below.
+  if (mapping?.workflowId && (ctx.botMentioned || ctx.isDirectMessage)) {
+    return { kind: "workflow", workflowId: mapping.workflowId };
+  }
   if (mapping?.agentId) {
     const agent = await getAgentById(mapping.agentId);
     if (agent) {

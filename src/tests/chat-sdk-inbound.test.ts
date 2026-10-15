@@ -13,7 +13,7 @@ import {
 } from "../be/db";
 import { resetFileStorageProviderForTests } from "../fs/registry";
 import { drainBackground } from "../integrations/chat-sdk/background";
-import { CHAT_CHANNELS_NAMESPACE } from "../integrations/chat-sdk/router";
+import { CHAT_CHANNELS_NAMESPACE, routeChatMessage } from "../integrations/chat-sdk/router";
 import { getChatInstance } from "../integrations/chat-sdk/runtime";
 import { isChatThreadBuffered } from "../integrations/chat-sdk/thread-buffer";
 import { chatSdkContextKey } from "../tasks/context-key";
@@ -159,6 +159,30 @@ describe("Chat SDK inbound pipeline", () => {
     expect(tasks).toHaveLength(1);
     expect(tasks[0]!.agentId).toBe(worker.id);
     expect(tasks[0]!.routingReason).toBe("human_pinned");
+  });
+
+  test("a workflow channel mapping fires only for a mention or DM, not a subscribed reply", async () => {
+    await upsertKv({
+      namespace: CHAT_CHANNELS_NAMESPACE,
+      key: "telegram:-2008",
+      value: { workflowId: "wf-mapped" },
+      valueType: "json",
+    });
+    const ctx = {
+      adapter: "telegram" as const,
+      channelId: "telegram:-2008",
+      threadId: "telegram:-2008",
+    };
+    expect(
+      await routeChatMessage("run it", { ...ctx, botMentioned: true, isDirectMessage: false }),
+    ).toEqual({ kind: "workflow", workflowId: "wf-mapped" });
+    expect(
+      await routeChatMessage("run it", { ...ctx, botMentioned: false, isDirectMessage: true }),
+    ).toEqual({ kind: "workflow", workflowId: "wf-mapped" });
+    // A plain reply in the subscribed thread after the first run: no owner, no mention.
+    expect(
+      await routeChatMessage("thanks", { ...ctx, botMentioned: false, isDirectMessage: false }),
+    ).toBeNull();
   });
 
   async function steeringRows(taskId: string) {

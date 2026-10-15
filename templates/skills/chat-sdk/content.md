@@ -74,7 +74,7 @@ register-chat-channel { adapter: "slack", channelId: "slack:C123", workflowId: "
 unregister-chat-channel { adapter: "telegram", channelId: "telegram:-100123" }
 ```
 
-Give exactly one of `agentId` or `workflowId`. A `swarm#<agentId>` token in a message still wins over the route. Only the lead can call these tools.
+Give exactly one of `agentId` or `workflowId`. A `swarm#<agentId>` token in a message still wins over the route. A workflow mapping fires only for a bot mention or a DM; a plain reply in the subscribed thread does not start another run. Only the lead can call these tools.
 
 ## Etiquette
 
