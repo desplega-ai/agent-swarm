@@ -62,7 +62,7 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^2.3.10",
-        "@desplega.ai/slack-mock": "^0.4.0",
+        "@desplega.ai/slack-mock": "^0.4.1",
         "@desplega/model-catalog": "workspace:*",
         "@desplega/model-routing": "workspace:*",
         "@faker-js/faker": "^10.4.0",
@@ -440,7 +440,7 @@
 
     "@desplega.ai/business-use": ["@desplega.ai/business-use@0.4.2", "", { "dependencies": { "zod": "^3.24.1" } }, "sha512-Rd/H/EzfKjylxaKwJulhoclfK9q0QFg8HjHrLrAVNY3YGlEaDzSFDR2uDjynDy+MLl7jxr/e+xzUNTR87tr0EA=="],
 
-    "@desplega.ai/slack-mock": ["@desplega.ai/slack-mock@0.4.0", "", { "bin": { "slack-mock": "dist/cli.js" } }, "sha512-2wGXzipl94S4+czfLLjyoNmOEwmhE4XgX7QflU+mTqHoJL9c8eKciygeoQLYhfgpfa2DyfCR+mhbmsV8s8khhQ=="],
+    "@desplega.ai/slack-mock": ["@desplega.ai/slack-mock@0.4.1", "", { "bin": { "slack-mock": "dist/cli.js" } }, "sha512-72tBDOdc2Zv/SINGU8Oyf/IVrGUhSwyG0mfynXIMl64HJky9zmZGUg3vN7gbHC0FdOygDIIFUpgu1CyUsDFtsg=="],
 
     "@desplega/model-catalog": ["@desplega/model-catalog@workspace:packages/model-catalog"],
 

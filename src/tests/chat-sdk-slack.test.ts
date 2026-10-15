@@ -3,10 +3,6 @@ import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { unlink } from "node:fs/promises";
 import { SlackMock } from "@desplega.ai/slack-mock";
-import {
-  type SlackMarkdownTextShim,
-  startSlackMarkdownTextShim,
-} from "../../scripts/dev/slack-markdown-text-shim";
 import { closeDb, completeTask, createAgent, getDbClient, initDb } from "../be/db";
 import { watchSocketConnection } from "../integrations/chat-sdk/adapters";
 import { drainBackground } from "../integrations/chat-sdk/background";
@@ -23,8 +19,6 @@ const SIGNING_SECRET = "mock-signing-secret";
 const CHANNEL_ID = "C0GENERAL0";
 
 let slack: SlackMock;
-// slack-mock 0.4.0 rejects the adapter's `markdown_text` posts; the shim maps it to `text`.
-let shim: SlackMarkdownTextShim;
 let leadId: string;
 const restoreEnv = snapshotChatSdkEnv();
 
@@ -74,7 +68,7 @@ async function startSlackAdapter(mode: "socket" | "webhook"): Promise<void> {
         : { signingSecret: SIGNING_SECRET }),
     },
   });
-  process.env.CHAT_SDK_API_URL_OVERRIDES = JSON.stringify({ slack: shim.apiUrl });
+  process.env.CHAT_SDK_API_URL_OVERRIDES = JSON.stringify({ slack: slack.env.SLACK_API_URL });
   await startChatSdk();
   // Relay ticks are driven by the tests.
   await stopChatRelayWatcher();
@@ -106,14 +100,12 @@ beforeAll(async () => {
     port: 0,
     manifest: `${import.meta.dir}/../../slack-manifest.json`,
   });
-  shim = startSlackMarkdownTextShim(slack.env.SLACK_API_URL!);
   process.env.SLACK_DISABLE = "true";
   process.env.CHAT_SDK_BUFFER_MS = "60000";
 });
 
 afterAll(async () => {
   await stopChatSdk();
-  await shim.stop();
   await slack.stop();
   restoreEnv();
   closeDb();
