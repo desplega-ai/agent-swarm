@@ -181,6 +181,32 @@ export interface SlackRouteModify {
   target: { kind: "agent"; agentId: string } | { kind: "lead" } | { kind: "broadcast" };
 }
 
+/** A Chat SDK message after its thread buffer flushed, before routing. */
+export interface ChatRouteEvent {
+  /** Adapter name, such as `telegram` or `slack`. */
+  adapter: string;
+  channelId: string;
+  /** The Chat SDK thread id, prefixed with the adapter name. */
+  threadId: string;
+  /** The first buffered sender. */
+  userId: string;
+  userName?: string;
+  /** The buffered messages, joined. */
+  text: string;
+  botMentioned: boolean;
+  isDirectMessage: boolean;
+  /** Set when earlier swarm tasks exist in this thread. */
+  threadContext?: { adapter: string; threadId: string };
+}
+
+export interface ChatRouteModify {
+  target:
+    | { kind: "agent"; agentId: string }
+    | { kind: "lead" }
+    | { kind: "broadcast" }
+    | { kind: "workflow"; workflowId: string };
+}
+
 export type HeartbeatClassification = "no-session" | "stale-session" | "fresh-stalled";
 export type HeartbeatAction = "supersede-resume" | "fail" | "record";
 
@@ -234,6 +260,19 @@ export interface SlackMessageEvent {
   text: string;
   threadTs?: string;
   taskId?: string;
+}
+
+/** A Chat SDK message the swarm received or sent. */
+export interface ChatMessageEvent {
+  adapter: string;
+  channelId: string;
+  threadId: string;
+  /** The sender, for an inbound message. */
+  userId?: string;
+  text: string;
+  direction: "inbound" | "outbound";
+  taskId?: string;
+  messageId?: string;
 }
 
 /**
@@ -352,6 +391,11 @@ export interface SwarmEventMap {
     modify: SlackRouteModify;
     result: PreResult<SlackRouteModify>;
   };
+  "pre.chat.route": {
+    event: ChatRouteEvent;
+    modify: ChatRouteModify;
+    result: PreResult<ChatRouteModify>;
+  };
   "pre.heartbeat.remediate": {
     event: HeartbeatRemediateEvent;
     modify: HeartbeatRemediateModify;
@@ -369,6 +413,7 @@ export interface SwarmEventMap {
   "post.task.superseded": { event: TaskSupersededEvent; modify: never; result: void };
   "post.task.progress": { event: TaskProgressEvent; modify: never; result: void };
   "post.slack.message": { event: SlackMessageEvent; modify: never; result: void };
+  "post.chat.message": { event: ChatMessageEvent; modify: never; result: void };
   "post.approval.resolved": { event: ApprovalResolvedEvent; modify: never; result: void };
   "post.task.budgetRefused": { event: TaskBudgetRefusedEvent; modify: never; result: void };
   "post.email.received": { event: EmailReceivedEvent; modify: never; result: void };

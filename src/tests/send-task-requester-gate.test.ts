@@ -2,6 +2,7 @@
  * A task's requester drives attribution, cost reporting and admission. A non-lead agent may omit
  * `requestedByUserId` or pass the requester of its own current task. Only a lead, the operator or
  * a user may name any other registered user. Covers the send-task tool and POST /api/tasks.
+ * POST /api/tasks also refuses an agent a foreign parent or a chat thread it does not own.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
@@ -18,6 +19,7 @@ import {
   initDb,
 } from "../be/db";
 import { handleTasks } from "../http/tasks";
+import { chatSdkContextKey } from "../tasks/context-key";
 import { registerSendTaskTool } from "../tools/send-task";
 import { type HttpRequestAuth, setRequestAuth } from "../utils/request-auth-context";
 
@@ -256,5 +258,61 @@ describe("POST /api/tasks with an X-Agent-ID on the swarm key", () => {
     const lead = await postTask({ agentId: LEAD_ID }, { requestedByUserId: userBId });
     expect(lead.status).toBe(201);
     expect(lead.body.requestedByUserId).toBe(userBId);
+  });
+});
+
+describe("POST /api/tasks parent and chat-thread binding for an agent caller", () => {
+  test("a worker cannot attach a child to a task it neither owns nor created", async () => {
+    const foreign = await createTaskExtended("lead chat task (http)", {
+      agentId: LEAD_ID,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:552222"),
+    });
+    const before = await taskCount();
+    const result = await postTask(
+      { agentId: WORKER_ID },
+      { parentTaskId: foreign.id, agentId: WORKER_ID, routingReason: "skill" },
+    );
+    expect(result.status).toBe(403);
+    expect(await taskCount()).toBe(before);
+  });
+
+  test("a worker cannot bind a new task to a chat thread by contextKey", async () => {
+    const before = await taskCount();
+    const result = await postTask(
+      { agentId: WORKER_ID },
+      {
+        contextKey: chatSdkContextKey("telegram:552222"),
+        agentId: WORKER_ID,
+        routingReason: "skill",
+      },
+    );
+    expect(result.status).toBe(403);
+    expect(await taskCount()).toBe(before);
+  });
+
+  test("a worker may attach under its own task, and the operator and a lead keep access", async () => {
+    const own = await createTaskExtended("worker chat task (http)", {
+      agentId: WORKER_ID,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:551111"),
+    });
+    const child = await postTask(
+      { agentId: WORKER_ID },
+      { parentTaskId: own.id, agentId: OTHER_WORKER_ID, routingReason: "skill" },
+    );
+    expect(child.status).toBe(201);
+
+    const foreign = await createTaskExtended("lead chat task (http, open)", {
+      agentId: LEAD_ID,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:553333"),
+    });
+    expect((await postTask({}, { parentTaskId: foreign.id })).status).toBe(201);
+    expect((await postTask({ agentId: LEAD_ID }, { parentTaskId: foreign.id })).status).toBe(201);
+    expect(
+      (await postTask({ agentId: LEAD_ID }, { contextKey: chatSdkContextKey("telegram:554444") }))
+        .status,
+    ).toBe(201);
   });
 });

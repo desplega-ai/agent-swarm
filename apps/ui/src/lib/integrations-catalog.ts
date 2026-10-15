@@ -57,7 +57,8 @@ export type IntegrationSpecialFlow =
   | "jira-oauth"
   | "codex-cli"
   | "claude-managed-cli"
-  | "memory-embeddings";
+  | "memory-embeddings"
+  | "chat-sdk";
 
 /** Which agent role(s) the swarm needs to have a given skill installed on. */
 export type AgentRole = "lead" | "worker";
@@ -305,6 +306,37 @@ export const INTEGRATIONS: IntegrationDef[] = [
         advanced: true,
         placeholder: "https://api.kapso.ai",
         helpText: "Override the Kapso API base URL. Leave blank to use https://api.kapso.ai.",
+      },
+    ],
+  },
+
+  // ------------------------------------------- Chat SDK (Telegram, Slack, ...)
+  {
+    id: "chat-sdk",
+    name: "Chat SDK",
+    description:
+      "Chat with the swarm on Telegram, Slack, Discord, or Microsoft Teams. Mentions and DMs become tasks, results post back to the thread. Agents use the built-in chat-sdk skill (no install).",
+    category: "comm",
+    iconKey: "message-square",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/chat-sdk",
+    specialFlow: "chat-sdk",
+    // No recommendedSkills: the chat-sdk skill is seeded for every agent.
+    fields: [
+      {
+        key: "CHAT_SDK_ENABLED",
+        label: "Enabled",
+        type: "boolean",
+        helpText: "Start the Chat SDK channel. A change applies within a few seconds.",
+      },
+      {
+        key: "CHAT_SDK_ADAPTERS",
+        label: "Adapters (JSON)",
+        type: "textarea",
+        advanced: true,
+        placeholder:
+          '{"telegram":{"botToken":{"$config":"CHAT_SDK_TELEGRAM_BOT_TOKEN"},"secretToken":{"$config":"CHAT_SDK_TELEGRAM_SECRET_TOKEN"},"mode":"webhook"}}',
+        helpText:
+          'One entry per adapter (telegram, slack, discord, teams). Reference secrets as {"$config": "KEY"}, where KEY is a global swarm_config row. Saving replaces the whole object.',
       },
     ],
   },

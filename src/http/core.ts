@@ -29,6 +29,7 @@ import { getUserGrant } from "../be/rbac-roles";
 import { syncTelemetryEnabled } from "../be/telemetry-enable";
 import { initGitHub, resetGitHub } from "../github";
 import { initGitLab, isGitLabEnabled, resetGitLab } from "../gitlab";
+import { restartChatSdkIfConfigChanged } from "../integrations/chat-sdk/runtime";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { can, decideAdmission, isRbacEnabled } from "../rbac";
@@ -242,6 +243,9 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
   if (await initJira()) integrations.push("jira");
 
   if (await startSlackApp()) integrations.push("slack");
+
+  // After Slack: the Chat SDK Slack clash check reads SLACK_DISABLE.
+  if (await restartChatSdkIfConfigChanged()) integrations.push("chat-sdk");
 
   return {
     configsLoaded: updated.length,
