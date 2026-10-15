@@ -1,3 +1,5 @@
+import { openAICompatibleBaseUrlVars, openAICompatibleKeyVars } from "@desplega/model-catalog";
+
 export const ACP_TARGET_IDS = [
   "opencode",
   "gemini",
@@ -40,9 +42,10 @@ export const ACP_TARGET_CATALOG: readonly AcpTargetCatalogEntry[] = [
       "OPENAI_API_KEY",
       "OPENROUTER_API_KEY",
       "OPENROUTER_BASE_URL",
-      "NAN_API_KEY",
-      "HELMCODE_API_NAN",
-      "HELMCODE_API_KEY",
+      // OpenAI-compatible registry providers: keys (canonical and alias),
+      // then their `<ID>_BASE_URL` overrides.
+      ...openAICompatibleKeyVars(),
+      ...openAICompatibleBaseUrlVars(),
       "GOOGLE_API_KEY",
       "GEMINI_API_KEY",
       "OPENCODE_CONFIG",

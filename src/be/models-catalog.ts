@@ -1,3 +1,4 @@
+import { openAICompatibleProviderIds, registryCatalogSections } from "@desplega/model-catalog";
 import { loadModelsDevCache, type ModelsDevCache, type ModelsDevModel } from "./modelsdev-cache";
 
 /**
@@ -15,15 +16,18 @@ import { loadModelsDevCache, type ModelsDevCache, type ModelsDevModel } from "./
  * same snapshot as its own fallback while the request is in flight.
  */
 
-/** Mirrors the provider groups used by the direct harness and ACP model pickers. */
+/**
+ * Mirrors the provider groups used by the direct harness and ACP model
+ * pickers, plus every OpenAI-compatible registry provider
+ * (`@desplega/model-catalog`).
+ */
 export const CATALOG_PROVIDER_IDS = [
   "openrouter",
   "anthropic",
   "openai",
   "amazon-bedrock",
   "opencode",
-  "nan",
-  "helmcode",
+  ...openAICompatibleProviderIds(),
 ] as const;
 
 export type CatalogProviderId = (typeof CATALOG_PROVIDER_IDS)[number];
@@ -51,14 +55,6 @@ export const PINNED_MODELSDEV_ENTRIES = [
   "openai/gpt-5.1-codex-max",
   "openai/gpt-5.1-codex-mini",
   "openai/gpt-5.2-codex",
-  // Not on models.dev; hand-written `helmcode` section copied from Helmcode's
-  // own opencode/pi blocks (helmcode.com/docs), 2026-10-15. Pinning keeps the
-  // section through snapshot refreshes and the live catalog.
-  "helmcode/deepseek-v4-flash",
-  "helmcode/glm5.3",
-  "helmcode/glm5.3-flash",
-  "helmcode/qwen3.6",
-  "helmcode/gemma4",
 ] as const;
 
 export interface CatalogReasoningOption {
@@ -168,13 +164,26 @@ function mergePinnedEntries(catalog: ModelsCatalog): void {
     if (catalog[providerId]?.models[modelId]) continue;
     const pinned = snapshot[providerId]?.models[modelId];
     if (!pinned) continue;
-    const snapshotProvider = snapshot[providerId];
-    catalog[providerId] ??= {
-      id: snapshotProvider?.id ?? providerId,
-      ...(snapshotProvider?.name !== undefined ? { name: snapshotProvider.name } : {}),
-      models: {},
-    };
+    catalog[providerId] ??= { id: providerId, models: {} };
     catalog[providerId].models[modelId] = pinned;
+  }
+}
+
+/**
+ * Registry-synthesized sections (`catalog: "registry"` entries such as
+ * `helmcode`) are never on models.dev, so the live catalog built from it
+ * lacks them. Fill them from the bundled snapshot, which carries them
+ * (`loadModelsDevCache`); models already present (an overlay row) win.
+ */
+function mergeRegistrySections(catalog: ModelsCatalog): void {
+  const snapshot = bundledSnapshotCatalog();
+  for (const providerId of Object.keys(registryCatalogSections()) as CatalogProviderId[]) {
+    const section = snapshot[providerId];
+    if (!section) continue;
+    catalog[providerId] ??= { ...section, models: {} };
+    for (const [modelId, model] of Object.entries(section.models)) {
+      catalog[providerId].models[modelId] ??= model;
+    }
   }
 }
 
@@ -185,6 +194,7 @@ function mergePinnedEntries(catalog: ModelsCatalog): void {
  */
 export function setLiveModelsCatalog(catalog: ModelsCatalog, updatedAt: number | null): void {
   mergePinnedEntries(catalog);
+  mergeRegistrySections(catalog);
   liveCatalog = catalog;
   liveUpdatedAt = updatedAt;
 }

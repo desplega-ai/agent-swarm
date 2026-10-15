@@ -349,7 +349,8 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) v
 
 - **Entering keys**: use the NaN and Helmcode cards on the dashboard Integrations page, or set the env vars on the worker. A key saved on the dashboard needs no restart.
 - **Alias**: `HELMCODE_API_NAN` is accepted for the NaN key. When both `NAN_API_KEY` and `HELMCODE_API_NAN` are set, `NAN_API_KEY` wins.
-- **Catalog**: Helmcode is not on models.dev. The swarm ships its five models as a hand-written section of the vendored catalog snapshot. Helmcode's resold Claude, GPT and Gemini models are not in the catalog.
+- **Base URL**: `NAN_BASE_URL` and `HELMCODE_BASE_URL` override the default API roots (`https://api.nan.builders/v1`, `https://api.helmcode.com/v1`), for example to go through a proxy. They are not secrets. Set them on the provider's Integrations card (under Advanced) or as env vars; the pi and opencode config blocks and the key check read them per task.
+- **Catalog**: Helmcode is not on models.dev. The swarm builds its catalog section from the five models in the provider registry (see [Adding a provider](#adding-a-provider)). Helmcode's resold Claude, GPT and Gemini models are not in the catalog.
 - **Pricing**: both providers are flat-rate per key. Sessions record $0 marginal cost with `costSource: "pricing-table"`. See [Cost and context computation](/docs/guides/cost-and-context-computation).
 - **`latest:` aliases** do not cover these providers. Use concrete model ids.
 
@@ -380,6 +381,28 @@ MODEL_TIER_OPENCODE_ULTRA=nan/qwen3.6
 ```
 
 A task with neither `model` nor `modelTier` runs the agent's `MODEL_OVERRIDE`, else the adapter default (an OpenRouter model). Set `MODEL_OVERRIDE` to a `nan/` or `helmcode/` model on those agents too. See [Model tiers](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/model-tiers.md).
+
+### Adding a provider
+
+NaN and Helmcode are entries in one registry: `packages/model-catalog/src/openai-compatible-providers.ts` (`OPENAI_COMPATIBLE_PROVIDERS`). The API server, the worker and the dashboard all derive from it. To add another OpenAI-compatible provider (for example an AI gateway), change two places:
+
+1. **The registry entry.** Add one entry with these fields:
+
+   | Field | Meaning |
+   |-------|---------|
+   | `id` | Model prefix (`<id>/<model>`), catalog section id and provider block id |
+   | `displayName`, `description` | Card, picker and label text |
+   | `baseUrl` | Default API root. `<ID>_BASE_URL` (the id in upper case) overrides it |
+   | `docsUrl` | Vendor docs |
+   | `envVar`, `aliasEnvVars` | Canonical key var, and other names the runner copies into it |
+   | `keyNote` | Optional extra sentence for the key field |
+   | `catalog` | `"models.dev"` when models.dev lists the provider (opencode then ships it built in), else `"registry"` (the catalog section is built from `models`, and opencode gets a custom provider block) |
+   | `npm` | `@ai-sdk/openai-compatible` |
+   | `models` | Tool-calling models: id, name, context and output limits, input modalities, reasoning, `compat`. `family` and `reasoningEfforts` feed a `"registry"` catalog section |
+
+2. **The glyph.** Add an icon component for the id to `ICON_BY_PROVIDER` in `apps/ui/src/components/shared/provider-icon.tsx`. The type check fails until you do.
+
+Nothing else changes. These surfaces derive from the entry: credential routing and pools, key aliases, the default harness, the opencode credential check, secret scrubbing, E2B and ACP env forwarding, the live key check, the pi `models.json` block, the opencode provider block, $0 pricing rows, the model catalog, and on the dashboard the Integrations card (key plus base URL), the API keys and usage labels, the setup card and the model picker. The `docker-entrypoint.sh` boot warning still names NaN and Helmcode only; it is a warning, not a gate.
 
 ---
 

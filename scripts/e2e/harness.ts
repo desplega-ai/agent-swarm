@@ -1,3 +1,9 @@
+import {
+  openAICompatibleBaseUrlVars,
+  openAICompatibleKeyVars,
+  providerForModel,
+  providerKeyVars,
+} from "@desplega/model-catalog";
 import type { ApiClient } from "./http";
 import { asRecord, expect, expectStatus, pollUntil } from "./http";
 import { knownSecrets, redactSecrets } from "./redact";
@@ -18,24 +24,19 @@ const DEFAULT_MODELS: Record<string, string> = {
   // xAI's cheapest model (`grok models` with an API key).
   grok: "grok-build-0.1",
 };
-// NaN (canonical + alias) and Helmcode keys, forwarded to pi/opencode workers.
-const OPENAI_COMPATIBLE_KEYS = ["NAN_API_KEY", "HELMCODE_API_NAN", "HELMCODE_API_KEY"];
+// OpenAI-compatible registry providers: keys (canonical and alias) and their
+// `<ID>_BASE_URL` overrides, forwarded to pi/opencode workers.
+const OPENAI_COMPATIBLE_KEYS = [...openAICompatibleKeyVars(), ...openAICompatibleBaseUrlVars()];
 
-/** Key requirement for a `nan/*` or `helmcode/*` model on pi/opencode, else null. */
+/** Key requirement for a registry `<id>/*` model on pi/opencode, else null. */
 function openAICompatibleKeyRequirement(model: string): { ok: boolean; message: string } | null {
-  if (model.startsWith("nan/")) {
-    return {
-      ok: !!(process.env.NAN_API_KEY || process.env.HELMCODE_API_NAN),
-      message: "nan/* models require NAN_API_KEY or HELMCODE_API_NAN",
-    };
-  }
-  if (model.startsWith("helmcode/")) {
-    return {
-      ok: !!process.env.HELMCODE_API_KEY,
-      message: "helmcode/* models require HELMCODE_API_KEY",
-    };
-  }
-  return null;
+  const provider = providerForModel(model);
+  if (!provider) return null;
+  const names = providerKeyVars(provider);
+  return {
+    ok: names.some((name) => !!process.env[name]),
+    message: `${provider.id}/* models require ${names.join(" or ")}`,
+  };
 }
 
 const PROVIDER_CREDENTIAL_KEYS = {

@@ -155,6 +155,8 @@ Which credentials you need depends on your selected harness provider:
 | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | When `MODEL_OVERRIDE` starts with `google/` | — | Google AI API key for direct Google models. Either name is accepted |
 | `NAN_API_KEY` | One of* | — | NaN API key for `nan/<id>` models (pi and opencode only). `HELMCODE_API_NAN` is accepted as an alias; `NAN_API_KEY` wins when both are set. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
 | `HELMCODE_API_KEY` | One of* | — | Helmcode API key for `helmcode/<id>` models (pi and opencode only). Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `NAN_BASE_URL` | No | `https://api.nan.builders/v1` | Overrides the NaN API root for pi, opencode and the key check. Not a secret. Every [registry provider](/docs/guides/harness-configuration#adding-a-provider) reads `<ID>_BASE_URL` the same way |
+| `HELMCODE_BASE_URL` | No | `https://api.helmcode.com/v1` | Overrides the Helmcode API root for pi, opencode and the key check. Not a secret |
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used for OpenRouter model and summarizer traffic. Any chat-completions gateway works — see [Model Gateways](/docs/guides/provider-auth/model-gateways) |
 | `BEDROCK_AUTH_MODE` | No | inferred from `MODEL_OVERRIDE` | Optional Bedrock mode override. `sdk` uses the AWS SDK credential chain; `bearer` requires `AWS_BEARER_TOKEN_BEDROCK`. Both probe credentials and enumerate models |
 | `AWS_BEARER_TOKEN_BEDROCK` | In Bedrock bearer mode | — | Bedrock API key required when `BEDROCK_AUTH_MODE=bearer` |
@@ -209,6 +211,8 @@ See [Provider Auth: Grok](/docs/guides/provider-auth/grok) for models, isolation
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
 | `NAN_API_KEY` | One of* | — | NaN API key for `nan/<id>` models (pi and opencode only). `HELMCODE_API_NAN` is accepted as an alias; `NAN_API_KEY` wins when both are set. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
 | `HELMCODE_API_KEY` | One of* | — | Helmcode API key for `helmcode/<id>` models (pi and opencode only). Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `NAN_BASE_URL` | No | `https://api.nan.builders/v1` | Overrides the NaN API root for pi, opencode and the key check. Not a secret. Every [registry provider](/docs/guides/harness-configuration#adding-a-provider) reads `<ID>_BASE_URL` the same way |
+| `HELMCODE_BASE_URL` | No | `https://api.helmcode.com/v1` | Overrides the Helmcode API root for pi, opencode and the key check. Not a secret |
 | `OPENCODE_SDK_PATH` | No | Global npm root | Absolute path to `@opencode/sdk/dist/index.js`, when it is not under `/usr/lib/node_modules` or `/usr/local/lib/node_modules` |
 | `OPENCODE_SKILLS_DIR` | No | `~/.opencode/skills` | Directory used by the OpenCode inline resolver for `/<skill>` prompts |
 | `MODEL_OVERRIDE` | No | `openrouter/qwen/qwen3-coder-flash` | Model string passed to opencode. Use `provider/model-id` format (e.g. `anthropic/claude-sonnet-4-6`, `openai/gpt-4o`) |

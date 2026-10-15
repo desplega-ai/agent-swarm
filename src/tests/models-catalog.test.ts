@@ -131,8 +131,8 @@ describe("getModelsCatalog", () => {
 });
 
 describe("nan and helmcode sections", () => {
-  test("the hand-written helmcode section survives a live payload that lacks it", () => {
-    // LIVE_CACHE has no helmcode provider: the pins recreate the section.
+  test("the registry-synthesized helmcode section survives a live payload that lacks it", () => {
+    // LIVE_CACHE has no helmcode provider: the registry section is refilled.
     updateLiveModelsCatalog(LIVE_CACHE);
     const helmcode = getModelsCatalog().providers.helmcode;
     expect(helmcode?.id).toBe("helmcode");

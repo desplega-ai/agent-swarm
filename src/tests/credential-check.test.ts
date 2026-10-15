@@ -1,9 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
+import { OPENAI_COMPATIBLE_PROVIDERS } from "@desplega/model-catalog";
 import {
   buildCredStatusReport,
   CREDENTIAL_PROVIDER_CHECKERS,
-  checkHelmcode,
-  checkNan,
+  checkOpenAICompatibleProvider,
   checkProviderCredentials,
   isBedrockMode,
   isCredCheckDisabled,
@@ -987,10 +987,18 @@ describe("NaN and Helmcode live probes", () => {
   }
 
   for (const [name, probe] of [
-    ["checkNan", checkNan],
-    ["checkHelmcode", checkHelmcode],
+    [
+      "nan",
+      (key: string, url: string) =>
+        checkOpenAICompatibleProvider(OPENAI_COMPATIBLE_PROVIDERS.nan, key, url),
+    ],
+    [
+      "helmcode",
+      (key: string, url: string) =>
+        checkOpenAICompatibleProvider(OPENAI_COMPATIBLE_PROVIDERS.helmcode, key, url),
+    ],
   ] as const) {
-    test(`${name} lists models with a Bearer key at the injected base URL`, async () => {
+    test(`${name} probe lists models with a Bearer key at the injected base URL`, async () => {
       const ok = fakeProvider(200);
       const bad = fakeProvider(401);
       try {
@@ -1011,8 +1019,13 @@ describe("NaN and Helmcode live probes", () => {
       [{ NAN_API_KEY: "fixture-nan" }, "https://api.nan.builders/v1/models"],
       [{ HELMCODE_API_NAN: "fixture-nan" }, "https://api.nan.builders/v1/models"],
       [{ HELMCODE_API_KEY: "fixture-helm" }, "https://api.helmcode.com/v1/models"],
+      // `<ID>_BASE_URL` moves the probe with the provider.
+      [
+        { NAN_API_KEY: "fixture-nan", NAN_BASE_URL: "https://nan-gw.example.test/v1/" },
+        "https://nan-gw.example.test/v1/models",
+      ],
     ] as const) {
-      test(`${provider}: ${Object.keys(env)[0]} is probed at ${url}`, async () => {
+      test(`${provider}: ${Object.keys(env).join("+")} is probed at ${url}`, async () => {
         const realFetch = globalThis.fetch;
         const fetchMock = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
           return new Response("{}", { status: 200 });

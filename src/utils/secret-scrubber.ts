@@ -21,6 +21,7 @@
  * API↔worker DB boundary (scripts/check-db-boundary.sh).
  */
 
+import { openAICompatibleKeyVars } from "@desplega/model-catalog";
 import { GITLEAKS_RULES } from "./secret-rules.generated";
 
 /**
@@ -52,10 +53,9 @@ const SENSITIVE_KEY_EXACT = new Set<string>([
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
-  "NAN_API_KEY",
-  // NaN key alias. Matches no SENSITIVE_KEY_SUFFIXES entry, so list it here.
-  "HELMCODE_API_NAN",
-  "HELMCODE_API_KEY",
+  // OpenAI-compatible registry key vars, canonical and alias. An alias such
+  // as `HELMCODE_API_NAN` matches no SENSITIVE_KEY_SUFFIXES entry.
+  ...openAICompatibleKeyVars(),
   "SLACK_BOT_TOKEN",
   "SLACK_SIGNING_SECRET",
   "SLACK_CLIENT_SECRET",

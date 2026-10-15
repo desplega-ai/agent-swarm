@@ -16,6 +16,29 @@ export {
 export { type ModelsDevOverlay, mergeCatalog } from "./merge.ts";
 export { type AliasSourceModel, buildClaudeAliasMap, resolveClaudeAlias } from "./model-alias.ts";
 export {
+  OPENAI_COMPATIBLE_PROVIDERS,
+  type OpenAICompatibleModel,
+  type OpenAICompatibleProvider,
+  type OpenAICompatibleProviderId,
+} from "./openai-compatible-providers.ts";
+export {
+  baseUrlEnvVar,
+  baseUrlOverride,
+  openAICompatibleBaseUrlVars,
+  openAICompatibleKeyVars,
+  openAICompatibleProvider,
+  openAICompatibleProviderIds,
+  openAICompatibleProviders,
+  providerBaseUrl,
+  providerForKeyVar,
+  providerForModel,
+  providerKeyFromEnv,
+  providerKeyVars,
+  type RegistryCatalogSection,
+  registryCatalogSections,
+  withRegistryCatalogSections,
+} from "./openai-compatible-registry.ts";
+export {
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,

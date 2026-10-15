@@ -10,9 +10,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OPENAI_COMPATIBLE_PROVIDERS } from "@desplega/model-catalog";
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import { configureHttpResolver, resetHttpResolver } from "../prompts/resolver";
-import { OPENAI_COMPATIBLE_PROVIDERS } from "../providers/openai-compatible-providers";
 import {
   checkPiMonoCredentials,
   createPiRuntimeAuth,

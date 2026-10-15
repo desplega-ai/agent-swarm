@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { openAICompatibleProviders, withRegistryCatalogSections } from "@desplega/model-catalog";
 import {
   findKnownModel,
   type LiveModelsCatalog,
@@ -19,7 +20,9 @@ import modelsCache from "./modelsdev-cache.json";
 // update the default / pattern, do not loosen the test.
 
 type Snapshot = Record<string, { models: Record<string, { name?: string }> } | undefined>;
-const snapshot = modelsCache as unknown as Snapshot;
+// The bundled snapshot plus the registry-synthesized sections (`helmcode`),
+// as the picker reads it.
+const snapshot = withRegistryCatalogSections(modelsCache as unknown as Snapshot);
 
 const ENV_PRESENCE = { ANTHROPIC_API_KEY: true, OPENAI_API_KEY: true, OPENROUTER_API_KEY: true };
 
@@ -89,11 +92,10 @@ describe("vendor patterns against the bundled catalog", () => {
   });
 });
 
-describe("NaN and Helmcode routes against the bundled catalog", () => {
-  for (const [providerId, label] of [
-    ["nan", "NaN"],
-    ["helmcode", "Helmcode"],
-  ] as const) {
+describe("OpenAI-compatible registry routes (NaN, Helmcode) against the bundled catalog", () => {
+  for (const [providerId, label] of openAICompatibleProviders().map(
+    (p) => [p.id, p.displayName] as const,
+  )) {
     test(`the snapshot has a ${providerId} section`, () => {
       expect(Object.keys(snapshot[providerId]?.models ?? {}).length).toBeGreaterThan(0);
     });

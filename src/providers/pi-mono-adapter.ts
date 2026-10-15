@@ -9,6 +9,16 @@
 import { existsSync, lstatSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type OpenAICompatibleProvider,
+  openAICompatibleKeyVars,
+  openAICompatibleProvider,
+  openAICompatibleProviders,
+  providerBaseUrl,
+  providerForModel,
+  providerKeyFromEnv,
+  providerKeyVars,
+} from "@desplega/model-catalog";
+import {
   getBuiltinModel as getModel,
   getBuiltinModels as getModels,
 } from "@earendil-works/pi-ai/providers/all";
@@ -43,20 +53,12 @@ import "../commands/templates";
 import { resolveTemplateAsync } from "../prompts/resolver";
 import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
-import { NAN_KEY_VARS } from "../utils/credentials";
 import { parseEnvFlag } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
-import {
-  OPENAI_COMPATIBLE_PROVIDER_IDS,
-  OPENAI_COMPATIBLE_PROVIDERS,
-  type OpenAICompatibleProvider,
-  providerForModel,
-  providerKeyFromEnv,
-} from "./openai-compatible-providers";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient, type McpTool } from "./pi-mono-mcp-client";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
@@ -102,10 +104,10 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
     if (provider === "openai") return ["OPENAI_API_KEY"];
     if (provider === "google") return ["GOOGLE_API_KEY", "GEMINI_API_KEY"];
     // models.json custom providers (`ensureCustomProvidersModelsJson`). The
-    // runner normalizes the HELMCODE_API_NAN alias into NAN_API_KEY, but a
+    // runner normalizes key aliases (HELMCODE_API_NAN → NAN_API_KEY), but a
     // worker without that step (or a boot-time check) may only see the alias.
-    if (provider === "nan") return [...NAN_KEY_VARS];
-    if (provider === "helmcode") return ["HELMCODE_API_KEY"];
+    const direct = openAICompatibleProvider(provider);
+    if (direct) return providerKeyVars(direct);
   }
   // Bare model name with no provider prefix — adapter falls through to a
   // best-effort resolution against multiple providers, so the boot loop
@@ -319,22 +321,25 @@ export async function checkPiMonoCredentials(
     };
   }
 
-  // Permissive case: any one supported key works. A NaN or Helmcode key only
-  // serves `nan/*` / `helmcode/*` models, but it is still a usable pi
+  // Permissive case: any one supported key works. A registry provider key
+  // (NaN, Helmcode) only serves `<id>/*` models, but it is still a usable pi
   // credential (the task's explicit model is checked above once it is set).
   if (
     env.ANTHROPIC_API_KEY ||
     env.OPENROUTER_API_KEY ||
     env.OPENAI_API_KEY ||
-    NAN_KEY_VARS.some((k) => env[k]) ||
-    env.HELMCODE_API_KEY
+    openAICompatibleKeyVars().some((k) => env[k])
   ) {
     return { ready: true, missing: [], satisfiedBy: "env" };
   }
   return {
     ready: false,
     missing: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", authFile],
-    hint: "Set one of ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY (any one suffices; NAN_API_KEY or HELMCODE_API_KEY serve only nan/* or helmcode/* models), or run `pi auth login` to create ~/.pi/agent/auth.json.",
+    hint: `Set one of ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY (any one suffices; ${openAICompatibleProviders()
+      .map((p) => p.envVar)
+      .join(" or ")} serve only ${openAICompatibleProviders()
+      .map((p) => `${p.id}/*`)
+      .join(" or ")} models), or run \`pi auth login\` to create ~/.pi/agent/auth.json.`,
   };
 }
 
@@ -457,21 +462,21 @@ function envHasAnthropicCred(env: Record<string, string | undefined>): boolean {
   return !!(env.ANTHROPIC_API_KEY || env.ANTHROPIC_OAUTH_TOKEN);
 }
 
-const PI_RUNTIME_API_KEYS = [
+const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string])[] = [
   ["OPENROUTER_API_KEY", "openrouter"],
   ["ANTHROPIC_API_KEY", "anthropic"],
   ["OPENAI_API_KEY", "openai"],
   ["GEMINI_API_KEY", "google"],
   ["GOOGLE_API_KEY", "google"],
-  // models.json custom providers. A runtime key beats the file's
-  // `apiKey: "$NAN_API_KEY"`, which pi would otherwise read from the shared
-  // process.env, where a credential pool is still the raw comma list. Later
-  // rows overwrite earlier ones, so the canonical NAN_API_KEY wins over the
-  // HELMCODE_API_NAN alias when both are set.
-  ["HELMCODE_API_NAN", "nan"],
-  ["NAN_API_KEY", "nan"],
-  ["HELMCODE_API_KEY", "helmcode"],
-] as const;
+  // models.json custom providers (the registry). A runtime key beats the
+  // file's `apiKey: "$NAN_API_KEY"`, which pi would otherwise read from the
+  // shared process.env, where a credential pool is still the raw comma list.
+  // Later rows overwrite earlier ones, so each provider's aliases come first
+  // and the canonical var (NAN_API_KEY over HELMCODE_API_NAN) wins.
+  ...openAICompatibleProviders().flatMap((p) =>
+    [...p.aliasEnvVars, p.envVar].map((name) => [name, p.id] as const),
+  ),
+];
 
 /**
  * Build pi-coding-agent auth services from the runner's per-task resolved env.
@@ -663,7 +668,7 @@ async function revertOpenRouterModelsOverride(
 
 /**
  * Sidecar marker recording the exact `providers.<id>` blocks WE wrote into
- * models.json for the OpenAI-compatible providers (`nan`, `helmcode`). A block
+ * models.json for the OpenAI-compatible registry providers (`nan`, `helmcode`). A block
  * counts as ours only while models.json still carries it byte-for-byte equal
  * (as JSON) to the marker copy; anything else is user-authored and left alone.
  * Lives next to models.json; NOT part of pi's config surface.
@@ -676,7 +681,8 @@ interface CustomProvidersMarker {
 }
 
 /**
- * The models.json `providers.<id>` block for one OpenAI-compatible provider.
+ * The models.json `providers.<id>` block for one OpenAI-compatible registry
+ * provider, at `baseUrl` (the `<ID>_BASE_URL` override or the registry default).
  *
  * `apiKey` is always the `"$VAR"` interpolation of the canonical env var, never
  * a key value: pi reads a bare name as a literal key. The key a session really
@@ -686,7 +692,11 @@ interface CustomProvidersMarker {
  * entry so pi still resolves it instead of falling back to its default model;
  * pi fills the omitted limits with its own defaults.
  */
-export function customProviderModelsBlock(provider: OpenAICompatibleProvider, modelId?: string) {
+export function customProviderModelsBlock(
+  provider: OpenAICompatibleProvider,
+  modelId?: string,
+  baseUrl: string = provider.baseUrl,
+) {
   const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const models: Record<string, unknown>[] = provider.models.map((m) => ({
     id: m.id,
@@ -702,7 +712,7 @@ export function customProviderModelsBlock(provider: OpenAICompatibleProvider, mo
     models.push({ id: modelId, name: modelId, cost: { ...zeroCost } });
   }
   return {
-    baseUrl: provider.baseUrl,
+    baseUrl,
     api: "openai-completions",
     apiKey: `$${provider.envVar}`,
     models,
@@ -714,9 +724,10 @@ function jsonEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Materialize (or remove) the `nan` / `helmcode` custom providers in
- * `<agentDir>/models.json` so pi's `ModelRuntime` (which loads that file at
- * create time) can resolve `nan/<id>` and `helmcode/<id>`; pi ships neither.
+ * Materialize (or remove) the registry's custom providers (`nan`, `helmcode`)
+ * in `<agentDir>/models.json` so pi's `ModelRuntime` (which loads that file at
+ * create time) can resolve `<id>/<model>`; pi ships none of them. Each block
+ * points at the provider's `<ID>_BASE_URL` from `env`, else its default.
  *
  * Same guarantees as `ensureOpenRouterModelsOverride`, per provider:
  * - Key present (canonical var or alias): write our block when the provider is
@@ -742,9 +753,8 @@ export async function ensureCustomProvidersModelsJson(
   const modelProvider = providerForModel(model);
   const modelId = modelProvider && model ? model.slice(modelProvider.id.length + 1) : undefined;
 
-  const wanted = OPENAI_COMPATIBLE_PROVIDER_IDS.filter(
-    (id) => providerKeyFromEnv(OPENAI_COMPATIBLE_PROVIDERS[id], env) !== undefined,
-  );
+  const registry = openAICompatibleProviders();
+  const wanted = registry.filter((p) => providerKeyFromEnv(p, env) !== undefined).map((p) => p.id);
   const priorMarker = (await readJsonFile(markerPath)) as CustomProvidersMarker | undefined;
   const priorWritten =
     priorMarker && typeof priorMarker.written === "object" && priorMarker.written !== null
@@ -787,7 +797,8 @@ export async function ensureCustomProvidersModelsJson(
       : {};
   const written: Record<string, unknown> = {};
 
-  for (const id of OPENAI_COMPATIBLE_PROVIDER_IDS) {
+  for (const provider of registry) {
+    const id = provider.id;
     const current = providers[id];
     const ours =
       current !== undefined &&
@@ -796,8 +807,9 @@ export async function ensureCustomProvidersModelsJson(
     if (wanted.includes(id)) {
       if (current === undefined || ours) {
         const block = customProviderModelsBlock(
-          OPENAI_COMPATIBLE_PROVIDERS[id],
+          provider,
           modelProvider?.id === id ? modelId : undefined,
+          providerBaseUrl(provider, env),
         );
         providers[id] = block;
         written[id] = block;
@@ -842,7 +854,7 @@ export async function ensureCustomProvidersModelsJson(
  * weekly-fire pattern (2026-04-13 → 2026-05-11) tracked in HEARTBEAT.md.
  *
  * `provider/id` strings that pi-ai's builtin catalog does not know (the
- * models.json custom providers `nan` / `helmcode`) fall back to
+ * models.json custom providers of the registry, `nan` / `helmcode`) fall back to
  * `modelRuntime.getModel(provider, id)` when a runtime is passed. When nothing
  * resolves, a scrubbed warning names the model: the session then silently runs
  * pi's own default model, which is otherwise invisible.
@@ -1887,7 +1899,7 @@ export class PiMonoAdapter implements ProviderAdapter {
     // Write the gateway override BEFORE ModelRuntime.create — the runtime
     // loads `<agentDir>/models.json` exactly once at creation.
     await ensureOpenRouterModelsOverride(getAgentDir(), sessionEnv);
-    // Same file: the nan/helmcode custom provider blocks (key-gated).
+    // Same file: the registry's custom provider blocks (key-gated).
     await ensureCustomProvidersModelsJson(getAgentDir(), sessionEnv, config.model);
     // The runtime is created before resolving so custom providers, which only
     // exist in its composed store, can resolve.

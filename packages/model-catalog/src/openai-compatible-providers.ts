@@ -1,18 +1,19 @@
 /**
- * Worker-side table of the OpenAI-compatible LLM providers that pi and
- * opencode reach through a custom provider block (`nan`, `helmcode`).
+ * The registry of OpenAI-compatible LLM providers that pi and opencode reach
+ * with one API key and a base URL (`nan/*`, `helmcode/*`).
  *
- * Worker code may not import `src/be/*`, so it cannot read the catalog store.
- * This table is the single worker-side source for base URLs, key env vars and
- * model limits: the pi models.json writer, the opencode provider block, and
- * the live credential probe all read it. The model limits mirror the vendors'
- * own opencode/pi config blocks and the `nan` / `helmcode` sections of
- * `src/be/modelsdev-cache.json`; a drift test keeps the two in sync.
+ * This table is the only place a provider is declared. The API server, the
+ * worker and the dashboard all derive from it through the helpers in
+ * `openai-compatible-registry.ts`: credential routing and pools, the runner's
+ * alias normalization, env forwarding (E2B, ACP), secret scrubbing, the live
+ * key probe, the pi models.json block, the opencode provider block, $0 pricing
+ * rows, the model catalog section, integration cards, picker groups and label
+ * maps. Adding a provider takes one entry here plus its glyph in the
+ * dashboard's `provider-icon.tsx`.
  *
- * Keep this module free of `src/be` imports and runtime dependencies.
+ * Data only: helpers live in `openai-compatible-registry.ts` and read this
+ * table at call time.
  */
-
-export type OpenAICompatibleProviderId = "nan" | "helmcode";
 
 export interface OpenAICompatibleModel {
   /** Model id without the provider prefix (`glm5.3-flash`, not `nan/glm5.3-flash`). */
@@ -24,39 +25,65 @@ export interface OpenAICompatibleModel {
   input: readonly ("text" | "image")[];
   reasoning: boolean;
   compat: { supportsDeveloperRole: boolean };
+  /** Catalog family (`glm`, `qwen`). Read only when `catalog` is `"registry"`. */
+  family?: string;
+  /** `reasoning_options` effort levels. Read only when `catalog` is `"registry"`. */
+  reasoningEfforts?: readonly string[];
 }
 
 export interface OpenAICompatibleProvider {
-  id: OpenAICompatibleProviderId;
+  /** Model prefix (`<id>/<model>`), catalog section id and provider block id. */
+  id: string;
   displayName: string;
-  /** OpenAI-compatible API root; `/models` and `/chat/completions` hang off it. */
+  /** One sentence for the dashboard integration card. */
+  description: string;
+  /** Default OpenAI-compatible API root; `/models` and `/chat/completions` hang off it. `<ID>_BASE_URL` overrides it. */
   baseUrl: string;
+  /** Vendor docs, shown as the catalog section's `doc`. */
+  docsUrl: string;
   /** The env var the harnesses and the credential pool read. */
   envVar: string;
   /**
    * Other env var names an operator may have used for the same key. The
-   * runner copies the first alias into `envVar` when `envVar` is empty, so
-   * downstream code only ever sees the canonical name.
+   * runner copies the first set alias into `envVar` when `envVar` is empty,
+   * so per-task code only ever sees the canonical name.
    */
   aliasEnvVars: readonly string[];
+  /** Extra sentence for the key field on the integration card. */
+  keyNote?: string;
+  /**
+   * Where the model catalog section comes from.
+   * - `"models.dev"`: models.dev lists the provider, so the snapshot carries
+   *   its section and opencode ships it built in (the picked key is spliced
+   *   into opencode's own provider).
+   * - `"registry"`: models.dev does not list it. The section is synthesized
+   *   from `models` (`registryCatalogSections`), and opencode gets a full
+   *   custom provider block.
+   */
+  catalog: "models.dev" | "registry";
   /** AI SDK package opencode loads for a custom provider block. */
   npm: "@ai-sdk/openai-compatible";
+  /** Tool-calling chat models pi and opencode get in their config blocks. */
   models: readonly OpenAICompatibleModel[];
 }
 
 const DEVELOPER_ROLE = { supportsDeveloperRole: true } as const;
 const TEXT_IMAGE = ["text", "image"] as const;
 const TEXT_ONLY = ["text"] as const;
+const EFFORTS = ["low", "medium", "high", "max"] as const;
+const EFFORTS_WITH_NONE = ["none", "low", "medium", "high", "max"] as const;
 
-export const OPENAI_COMPATIBLE_PROVIDERS: Readonly<
-  Record<OpenAICompatibleProviderId, OpenAICompatibleProvider>
-> = {
+export const OPENAI_COMPATIBLE_PROVIDERS = {
   nan: {
     id: "nan",
     displayName: "NaN",
+    description:
+      "Open-weight models such as GLM, Qwen and DeepSeek for the pi and opencode harnesses.",
     baseUrl: "https://api.nan.builders/v1",
+    docsUrl: "https://nan.builders/docs/models",
     envVar: "NAN_API_KEY",
     aliasEnvVars: ["HELMCODE_API_NAN"],
+    catalog: "models.dev",
     npm: "@ai-sdk/openai-compatible",
     // Tool-calling chat models listed upstream on models.dev. Excludes the
     // image model `qwen-image-2.1` (no tool calls) and delisted ids that the
@@ -131,12 +158,17 @@ export const OPENAI_COMPATIBLE_PROVIDERS: Readonly<
   helmcode: {
     id: "helmcode",
     displayName: "Helmcode",
+    description: "Open-weight models through Helmcode for the pi and opencode harnesses.",
     baseUrl: "https://api.helmcode.com/v1",
+    docsUrl: "https://helmcode.com/docs",
     envVar: "HELMCODE_API_KEY",
     aliasEnvVars: [],
+    keyNote: "Helmcode org plans include 5, 15 or 40 keys.",
+    catalog: "registry",
     npm: "@ai-sdk/openai-compatible",
-    // Helmcode's own agent models (its opencode/pi config blocks). The resold
-    // frontier models (Claude, GPT, Gemini on prepaid credit) are out of scope.
+    // Helmcode's own agent models, copied from its opencode/pi config blocks
+    // (helmcode.com/docs), 2026-10-15. The resold frontier models (Claude,
+    // GPT, Gemini on prepaid credit) are out of scope.
     models: [
       {
         id: "deepseek-v4-flash",
@@ -146,6 +178,8 @@ export const OPENAI_COMPATIBLE_PROVIDERS: Readonly<
         input: TEXT_IMAGE,
         reasoning: true,
         compat: DEVELOPER_ROLE,
+        family: "deepseek-flash",
+        reasoningEfforts: EFFORTS_WITH_NONE,
       },
       {
         id: "glm5.3",
@@ -155,6 +189,8 @@ export const OPENAI_COMPATIBLE_PROVIDERS: Readonly<
         input: TEXT_IMAGE,
         reasoning: true,
         compat: DEVELOPER_ROLE,
+        family: "glm",
+        reasoningEfforts: EFFORTS,
       },
       {
         id: "glm5.3-flash",
@@ -164,6 +200,8 @@ export const OPENAI_COMPATIBLE_PROVIDERS: Readonly<
         input: TEXT_IMAGE,
         reasoning: true,
         compat: DEVELOPER_ROLE,
+        family: "glm-flash",
+        reasoningEfforts: EFFORTS,
       },
       {
         id: "qwen3.6",
@@ -173,6 +211,8 @@ export const OPENAI_COMPATIBLE_PROVIDERS: Readonly<
         input: TEXT_IMAGE,
         reasoning: true,
         compat: DEVELOPER_ROLE,
+        family: "qwen",
+        reasoningEfforts: EFFORTS_WITH_NONE,
       },
       {
         id: "gemma4",
@@ -182,53 +222,12 @@ export const OPENAI_COMPATIBLE_PROVIDERS: Readonly<
         input: TEXT_IMAGE,
         reasoning: true,
         compat: DEVELOPER_ROLE,
+        family: "gemma",
+        reasoningEfforts: EFFORTS_WITH_NONE,
       },
     ],
   },
-};
+} satisfies Record<string, OpenAICompatibleProvider>;
 
-export const OPENAI_COMPATIBLE_PROVIDER_IDS = Object.keys(
-  OPENAI_COMPATIBLE_PROVIDERS,
-) as OpenAICompatibleProviderId[];
-
-/** Every env var (canonical and alias) that can carry a key for these providers. */
-export const OPENAI_COMPATIBLE_KEY_VARS: readonly string[] = OPENAI_COMPATIBLE_PROVIDER_IDS.flatMap(
-  (id) => [OPENAI_COMPATIBLE_PROVIDERS[id].envVar, ...OPENAI_COMPATIBLE_PROVIDERS[id].aliasEnvVars],
-);
-
-/**
- * Provider entry for a `<provider>/<model>` id by exact prefix, or `undefined`
- * (`nan/glm5.3` → nan; `openrouter/nan/x` and bare `glm5.3` → undefined).
- */
-export function providerForModel(model: string | undefined): OpenAICompatibleProvider | undefined {
-  if (!model) return undefined;
-  const slash = model.indexOf("/");
-  if (slash <= 0) return undefined;
-  const prefix = model.slice(0, slash);
-  return Object.hasOwn(OPENAI_COMPATIBLE_PROVIDERS, prefix)
-    ? OPENAI_COMPATIBLE_PROVIDERS[prefix as OpenAICompatibleProviderId]
-    : undefined;
-}
-
-/** Model entry for a `<provider>/<model>` id, or `undefined` when either part is unknown. */
-export function modelForId(model: string | undefined): OpenAICompatibleModel | undefined {
-  const provider = providerForModel(model);
-  if (!provider || !model) return undefined;
-  const id = model.slice(provider.id.length + 1);
-  return provider.models.find((m) => m.id === id);
-}
-
-/**
- * First non-empty key value for a provider from `env`, canonical var first,
- * then aliases. Returns `undefined` when none is set.
- */
-export function providerKeyFromEnv(
-  provider: OpenAICompatibleProvider,
-  env: Record<string, string | undefined>,
-): string | undefined {
-  for (const name of [provider.envVar, ...provider.aliasEnvVars]) {
-    const value = env[name]?.trim();
-    if (value) return value;
-  }
-  return undefined;
-}
+/** Registry ids (`"nan" | "helmcode"`); a new entry extends this union. */
+export type OpenAICompatibleProviderId = keyof typeof OPENAI_COMPATIBLE_PROVIDERS;

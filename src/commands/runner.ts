@@ -75,6 +75,7 @@ import { getContextWindowSize } from "../utils/context-window.ts";
 import {
   type CredentialSelection,
   ModelWindowExhaustedError,
+  normalizeProviderKeyAliases,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
@@ -998,13 +999,11 @@ export async function fetchResolvedEnv(
     }
   }
 
-  // `HELMCODE_API_NAN` is an alias for the canonical NaN key var. Normalize
-  // it once here so pooling, credential checks, pi's runtime key and the
-  // opencode key splice only ever read `NAN_API_KEY`. An explicit
-  // `NAN_API_KEY` wins.
-  if (!env.NAN_API_KEY?.trim() && env.HELMCODE_API_NAN?.trim()) {
-    env.NAN_API_KEY = env.HELMCODE_API_NAN;
-  }
+  // Registry key aliases (`HELMCODE_API_NAN` for `NAN_API_KEY`) are copied
+  // into their canonical var once here, so pooling, credential checks, pi's
+  // runtime key and the opencode key splice only ever read the canonical
+  // name. An explicit canonical value wins.
+  normalizeProviderKeyAliases(env);
 
   // A task already has an adapter. Repository configuration must not select
   // credentials or configure hooks for a different harness.

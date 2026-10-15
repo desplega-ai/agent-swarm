@@ -9,6 +9,16 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  baseUrlOverride,
+  type OpenAICompatibleProvider,
+  openAICompatibleKeyVars,
+  openAICompatibleProvider,
+  openAICompatibleProviders,
+  providerBaseUrl,
+  providerForKeyVar,
+  providerKeyVars,
+} from "@desplega/model-catalog";
 import type { OpenCode, OpenCodeEvent } from "@opencode/sdk";
 import {
   CONTEXT_FORMULA,
@@ -16,7 +26,7 @@ import {
   getContextWindowSize,
 } from "../utils/context-window";
 import {
-  NAN_KEY_VARS,
+  openAICompatibleKeyLabels,
   splitCredentialPool,
   validateOpencodeCredentials,
 } from "../utils/credentials";
@@ -31,10 +41,6 @@ import {
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
-import {
-  OPENAI_COMPATIBLE_PROVIDERS,
-  type OpenAICompatibleProvider,
-} from "./openai-compatible-providers";
 import { OpenRouterBilling } from "./opencode-billing";
 import { createOpencodeSwarmPlugin, type OpencodeToolLister } from "./opencode-swarm-plugin";
 import {
@@ -92,19 +98,21 @@ function opencodeModelToCredKey(modelStr: string | undefined): string | null {
     if (provider === "anthropic") return "ANTHROPIC_API_KEY";
     if (provider === "openrouter") return "OPENROUTER_API_KEY";
     if (provider === "openai") return "OPENAI_API_KEY";
-    if (provider === "nan") return "NAN_API_KEY";
-    if (provider === "helmcode") return "HELMCODE_API_KEY";
+    // OpenAI-compatible registry providers (`nan`, `helmcode`).
+    const direct = openAICompatibleProvider(provider);
+    if (direct) return direct.envVar;
   }
   return null;
 }
 
 /**
- * Env var names that satisfy `requiredKey`. The runner copies the
- * `HELMCODE_API_NAN` alias into `NAN_API_KEY` per task, but a check that reads
- * `process.env` directly sees only the alias.
+ * Env var names that satisfy `requiredKey`. The runner copies a registry
+ * key alias (`HELMCODE_API_NAN`) into its canonical var per task, but a
+ * check that reads `process.env` directly sees only the alias.
  */
 function credKeyNames(requiredKey: string): readonly string[] {
-  return requiredKey === "NAN_API_KEY" ? NAN_KEY_VARS : [requiredKey];
+  const direct = providerForKeyVar(requiredKey);
+  return direct ? providerKeyVars(direct) : [requiredKey];
 }
 
 /** Keys that satisfy opencode when no model pins a provider. */
@@ -112,18 +120,18 @@ const OPENCODE_ANY_KEY_VARS = [
   "OPENROUTER_API_KEY",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
-  ...NAN_KEY_VARS,
-  "HELMCODE_API_KEY",
-] as const;
+  ...openAICompatibleKeyVars(),
+];
 
 /**
  * Opencode is satisfied by ANY of:
  *   1. `~/.local/share/opencode/auth.json` exists (the file `opencode auth login`
  *      writes; OpenCode 2 imports it into its credential store on start).
  *   2. `MODEL_OVERRIDE` resolves to a provider-prefixed model — only that
- *      provider's key is required (`nan/*` also accepts `HELMCODE_API_NAN`).
+ *      provider's key is required (a registry provider also accepts its key
+ *      aliases: `nan/*` takes `HELMCODE_API_NAN`).
  *   3. Otherwise any one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY /
- *      OPENAI_API_KEY / NAN_API_KEY (or HELMCODE_API_NAN) / HELMCODE_API_KEY
+ *      OPENAI_API_KEY / a registry provider key (canonical or alias)
  *      suffices.
  */
 export function checkOpencodeCredentials(
@@ -158,11 +166,17 @@ export function checkOpencodeCredentials(
       "OPENROUTER_API_KEY",
       "ANTHROPIC_API_KEY",
       "OPENAI_API_KEY",
-      "NAN_API_KEY",
-      "HELMCODE_API_KEY",
+      ...openAICompatibleProviders().map((p) => p.envVar),
       authFile,
     ],
-    hint: "Set one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / NAN_API_KEY (or HELMCODE_API_NAN) / HELMCODE_API_KEY (any one suffices), or run `opencode auth login` to create ~/.local/share/opencode/auth.json.",
+    hint: `Set one of ${[
+      "OPENROUTER_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      ...openAICompatibleKeyLabels(),
+    ].join(
+      " / ",
+    )} (any one suffices), or run \`opencode auth login\` to create ~/.local/share/opencode/auth.json.`,
   };
 }
 
@@ -258,17 +272,20 @@ export function applyOpenRouterBaseUrlOverride(
 }
 
 /**
- * OpenCode provider block for a custom OpenAI-compatible provider from the
- * worker-side table (`helmcode`). `apiKey` is a literal key (embedded host) or
- * an `{env:NAME}` reference (ACP subprocess). `env: []` keeps OpenCode from
- * reading a key out of `process.env`. A `modelId` missing from the table
- * (accepted through `allowCustomModel`) gets a bare entry so OpenCode still
- * resolves it instead of falling back to its default model.
+ * OpenCode provider block for an OpenAI-compatible registry provider that
+ * OpenCode does not ship (`catalog: "registry"`, e.g. `helmcode`). `apiKey` is
+ * a literal key (embedded host) or an `{env:NAME}` reference (ACP
+ * subprocess). `baseUrl` is the `<ID>_BASE_URL` override or the registry
+ * default. `env: []` keeps OpenCode from reading a key out of `process.env`.
+ * A `modelId` missing from the registry (accepted through `allowCustomModel`)
+ * gets a bare entry so OpenCode still resolves it instead of falling back to
+ * its default model.
  */
 export function buildOpenAICompatibleProviderBlock(
   provider: OpenAICompatibleProvider,
   apiKey: string,
   modelId?: string,
+  baseUrl: string = provider.baseUrl,
 ): NonNullable<OpencodeConfig["provider"]>[string] {
   const models: Record<string, Record<string, unknown>> = {};
   for (const m of provider.models) {
@@ -284,21 +301,27 @@ export function buildOpenAICompatibleProviderBlock(
     npm: provider.npm,
     name: provider.displayName,
     env: [],
-    options: { baseURL: provider.baseUrl, apiKey },
+    options: { baseURL: baseUrl, apiKey },
     models,
   };
 }
 
-/** Built-in OpenCode providers whose key OpenCode reads from `process.env`. */
-const ENV_BOUND_KEY_VARS: Readonly<Record<string, readonly string[]>> = {
-  openrouter: ["OPENROUTER_API_KEY"],
-  nan: [OPENAI_COMPATIBLE_PROVIDERS.nan.envVar, ...OPENAI_COMPATIBLE_PROVIDERS.nan.aliasEnvVars],
-};
+/**
+ * Built-in OpenCode providers whose key OpenCode reads from `process.env`:
+ * `openrouter` plus every registry provider models.dev lists
+ * (`catalog: "models.dev"`, e.g. `nan`), which OpenCode ships built in.
+ */
+function envBoundKeyVars(providerId: string): readonly string[] | undefined {
+  if (providerId === "openrouter") return ["OPENROUTER_API_KEY"];
+  const direct = openAICompatibleProvider(providerId);
+  return direct?.catalog === "models.dev" ? providerKeyVars(direct) : undefined;
+}
 
-/** Providers OpenCode does not ship; they get a full custom block. */
-const CUSTOM_BLOCK_PROVIDERS: Readonly<Record<string, OpenAICompatibleProvider>> = {
-  helmcode: OPENAI_COMPATIBLE_PROVIDERS.helmcode,
-};
+/** Registry providers OpenCode does not ship (`catalog: "registry"`); they get a full custom block. */
+function customBlockProvider(providerId: string): OpenAICompatibleProvider | undefined {
+  const direct = openAICompatibleProvider(providerId);
+  return direct?.catalog === "registry" ? direct : undefined;
+}
 
 /**
  * One key from the first non-empty var in `names`. The runner's per-task env
@@ -325,9 +348,12 @@ function pickProviderKey(
  * `process.env`, and that value beats `options.apiKey`. The entrypoint exports
  * a credential pool there as a raw comma list, and a key saved from the
  * dashboard after boot never reaches `process.env` at all, so both 401 without
- * this splice. For `openrouter` and `nan` it sets `env: []` plus
- * `options.apiKey`; for `helmcode` it writes the full custom provider block.
- * No splice when the key is absent (credStatus reports that).
+ * this splice. For `openrouter` and the built-in registry providers (`nan`)
+ * it sets `env: []` plus `options.apiKey` (and `options.baseURL` when
+ * `<ID>_BASE_URL` is set); for registry providers OpenCode does not ship
+ * (`helmcode`) it writes the full custom provider block at
+ * `<ID>_BASE_URL` or the registry default. No splice when the key is absent
+ * (credStatus reports that).
  *
  * The key lives only in the in-memory config string handed to the SDK.
  * Mutates `opencodeConfig` in place and returns the env var the key came from,
@@ -343,11 +369,16 @@ export function applyProviderKeySplice(
   const providerId = model.slice(0, slash);
   const existing = opencodeConfig.provider?.[providerId];
 
-  const custom = CUSTOM_BLOCK_PROVIDERS[providerId];
+  const custom = customBlockProvider(providerId);
   if (custom) {
-    const picked = pickProviderKey(env, [custom.envVar, ...custom.aliasEnvVars]);
+    const picked = pickProviderKey(env, providerKeyVars(custom));
     if (!picked) return undefined;
-    const block = buildOpenAICompatibleProviderBlock(custom, picked.key, model.slice(slash + 1));
+    const block = buildOpenAICompatibleProviderBlock(
+      custom,
+      picked.key,
+      model.slice(slash + 1),
+      providerBaseUrl(custom, env),
+    );
     opencodeConfig.provider = {
       ...opencodeConfig.provider,
       [providerId]: {
@@ -360,16 +391,18 @@ export function applyProviderKeySplice(
     return picked;
   }
 
-  const names = ENV_BOUND_KEY_VARS[providerId];
+  const names = envBoundKeyVars(providerId);
   if (!names) return undefined;
   const picked = pickProviderKey(env, names);
   if (!picked) return undefined;
+  const direct = openAICompatibleProvider(providerId);
+  const baseURL = direct ? baseUrlOverride(direct, env) : undefined;
   opencodeConfig.provider = {
     ...opencodeConfig.provider,
     [providerId]: {
       ...existing,
       env: [],
-      options: { ...existing?.options, apiKey: picked.key },
+      options: { ...existing?.options, ...(baseURL ? { baseURL } : {}), apiKey: picked.key },
     },
   };
   return picked;

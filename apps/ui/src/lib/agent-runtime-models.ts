@@ -7,8 +7,12 @@ import {
   harnessModelIds,
   isReasoningHarness,
   modelDisplayName,
+  type OpenAICompatibleProviderId,
+  openAICompatibleProviderIds,
+  openAICompatibleProviders,
   type ReasoningEffortLevel,
   reasoningLevelsFor,
+  withRegistryCatalogSections,
 } from "@desplega/model-catalog";
 import type { AcpTarget, ProviderName, SwarmConfig } from "@/api/types";
 import modelsCache from "./modelsdev-cache.json";
@@ -58,14 +62,14 @@ export interface ModelOption {
   reasoningLevels?: ReadonlyArray<ReasoningEffortLevel>;
 }
 
+/** Every glyph `ProviderIcon` draws; each OpenAI-compatible registry id needs one. */
 export type ProviderIconKey =
   | "anthropic"
   | "openai"
   | "openrouter"
   | "amazon-bedrock"
   | "amp"
-  | "nan"
-  | "helmcode";
+  | OpenAICompatibleProviderId;
 
 export interface ModelGroup {
   provider: string;
@@ -86,8 +90,7 @@ export type SnapshotProviderId =
   | "anthropic"
   | "openai"
   | "amazon-bedrock"
-  | "nan"
-  | "helmcode";
+  | OpenAICompatibleProviderId;
 
 type CatalogProviderId = SnapshotProviderId | "opencode" | "deepseek";
 
@@ -122,7 +125,11 @@ interface CachedProvider {
  */
 export type LiveModelsCatalog = Partial<Record<CatalogProviderId, CachedProvider>>;
 
-const CACHE = modelsCache as unknown as Record<string, CachedProvider | undefined>;
+// The bundled snapshot plus the registry-synthesized sections models.dev does
+// not list (`helmcode`), as the server merges them.
+const CACHE = withRegistryCatalogSections(
+  modelsCache as unknown as Record<string, CachedProvider | undefined>,
+);
 
 /** A provider section of `source`, or undefined for a key it does not own (never a prototype member). */
 function sectionOf(
@@ -368,11 +375,27 @@ const DIRECT_HARNESS_ACCEPTED_KEYS: Record<"claude" | "codex", string[]> = {
 
 const SNAPSHOT_ORDER: SnapshotProviderId[] = [
   "openrouter",
-  "nan",
-  "helmcode",
+  // OpenAI-compatible registry providers, in declaration order.
+  ...openAICompatibleProviderIds(),
   "anthropic",
   "openai",
 ];
+
+/** Picker meta for every OpenAI-compatible registry provider: its label, key and glyph. */
+function registrySnapshotMeta(): Record<
+  OpenAICompatibleProviderId,
+  { label: string; requiredKey: string; iconKey: ProviderIconKey }
+> {
+  return Object.fromEntries(
+    openAICompatibleProviders().map((p) => [
+      p.id,
+      { label: p.displayName, requiredKey: p.envVar, iconKey: p.id as OpenAICompatibleProviderId },
+    ]),
+  ) as Record<
+    OpenAICompatibleProviderId,
+    { label: string; requiredKey: string; iconKey: ProviderIconKey }
+  >;
+}
 
 /** Bedrock-specific snapshot ID — kept separate from SNAPSHOT_ORDER since it is
  *  only shown for the pi harness, not for opencode. */
@@ -389,8 +412,7 @@ const SNAPSHOT_META: Record<
   },
   anthropic: { label: "Anthropic", requiredKey: "ANTHROPIC_API_KEY", iconKey: "anthropic" },
   openai: { label: "OpenAI", requiredKey: "OPENAI_API_KEY", iconKey: "openai" },
-  nan: { label: "NaN", requiredKey: "NAN_API_KEY", iconKey: "nan" },
-  helmcode: { label: "Helmcode", requiredKey: "HELMCODE_API_KEY", iconKey: "helmcode" },
+  ...registrySnapshotMeta(),
   /**
    * Amazon Bedrock — credentials come from the AWS SDK default chain, not a
    * single env var. `requiredKey` is a human label (not an env key); the group's
@@ -436,13 +458,14 @@ function hasCodexOAuthSlot(configs: SwarmConfig[] | undefined): boolean {
 }
 
 /**
- * Other names a credential is accepted under. The runner copies
- * `HELMCODE_API_NAN` into `NAN_API_KEY` when only the alias is set
- * (`NAN_KEY_VARS` in `src/utils/credentials.ts`), so the alias unlocks NaN.
+ * Other names a credential is accepted under: each registry provider's key
+ * aliases. The runner copies an alias into the canonical var when only the
+ * alias is set (`normalizeProviderKeyAliases` in `src/utils/credentials.ts`),
+ * so `HELMCODE_API_NAN` unlocks NaN.
  */
-const KEY_ALIASES: Partial<Record<string, readonly string[]>> = {
-  NAN_API_KEY: ["HELMCODE_API_NAN"],
-};
+const KEY_ALIASES: Partial<Record<string, readonly string[]>> = Object.fromEntries(
+  openAICompatibleProviders().map((p) => [p.envVar, p.aliasEnvVars]),
+);
 
 export function hasRuntimeCredential(
   key: string,
@@ -977,8 +1000,7 @@ function liveModelOption(
     openai: "openai",
     openrouter: "openrouter",
     "amazon-bedrock": "amazon-bedrock",
-    nan: "nan",
-    helmcode: "helmcode",
+    ...Object.fromEntries(openAICompatibleProviderIds().map((id) => [id, id])),
   };
   return {
     id,

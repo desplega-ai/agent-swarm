@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import { OPENAI_COMPATIBLE_PROVIDERS } from "@desplega/model-catalog";
 import {
   CREDENTIAL_POOL_VARS,
   deriveProviderFromKeyType,
   getModelAwareCredentialVars,
-  NAN_KEY_VARS,
   resolveCredentialPools,
   selectRandomCredential,
   validateClaudeCredentials,
@@ -234,7 +234,7 @@ describe("CREDENTIAL_POOL_VARS", () => {
   });
 
   it("pools only the canonical NaN var; the alias is normalized by the runner", () => {
-    expect(NAN_KEY_VARS).toEqual(["NAN_API_KEY", "HELMCODE_API_NAN"]);
+    expect(OPENAI_COMPATIBLE_PROVIDERS.nan.aliasEnvVars).toEqual(["HELMCODE_API_NAN"]);
     expect(CREDENTIAL_POOL_VARS as readonly string[]).not.toContain("HELMCODE_API_NAN");
   });
 });

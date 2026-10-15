@@ -34,13 +34,14 @@ on `pi`, `opencode` and the ACP `opencode` target only; `claude` and `codex` rej
   `HELMCODE_API_KEY`). On opencode the adapter hands the picked key to the
   provider config of the active model's provider, `openrouter` included, so
   an `OPENROUTER_API_KEY` pool also works there.
-- **Model ids**: NaN ids known to support tool calls are the seven in
-  `src/providers/openai-compatible-providers.ts` (`nan/deepseek-v4-flash`,
+- **Model ids**: NaN ids known to support tool calls are the seven in the
+  provider registry, `packages/model-catalog/src/openai-compatible-providers.ts` (`nan/deepseek-v4-flash`,
   `nan/glm5.3`, `nan/glm5.3-flash`, `nan/qwen3.6`, `nan/qwen3.8-flash`,
   `nan/gemma4`, `nan/mimo-v2.6-flash`); other `nan/<id>` catalog ids are
   accepted but untested. Helmcode: `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`,
-  `helmcode/qwen3.6`, `helmcode/gemma4`. Helmcode is not on models.dev; it
-  ships as a hand-written section of `src/be/modelsdev-cache.json`.
+  `helmcode/qwen3.6`, `helmcode/gemma4`. Helmcode is not on models.dev; its
+  catalog section is synthesized from the registry (`catalog: "registry"`).
+  To add a provider, see "Adding a provider" in the harness configuration guide.
 - **Per-key caps**: NaN allows 60 RPM and 7 concurrent requests in total on
   the base plan (10 on premium), 5 per model on `qwen3.6`, `gemma4` and the
   `mimo` models. Helmcode allows 100 RPM, 2M TPM, and 5 concurrent requests

@@ -84,21 +84,25 @@ rate by hand should also update this file.
     `inputTokens`, clamped to zero, so fresh input is priced separately.
     Cursor's own models are not in models.dev: see
     `CURSOR_FIRST_PARTY_PRICING` below.
-  - NaN models (models.dev `nan` section) and Helmcode models (the
-    hand-written `helmcode` section, below) → rows under `provider='pi'` and
+  - OpenAI-compatible registry providers: NaN models (models.dev `nan`
+    section) and Helmcode models (the registry-synthesized `helmcode`
+    section, below) → rows under `provider='pi'` and
     `provider='opencode'`, keyed `nan/<id>` and `helmcode/<id>`, at $0 input
     and $0 output. Both providers bill a flat rate per key, so a session's
     marginal cost is $0. `buildModelsDevSeedRows()` projects them, so the rows
     land at boot seed and on refresh, and sessions record $0 with
     `costSource: "pricing-table"` rather than `unpriced`.
 
-- **Hand-written `helmcode` section**: Helmcode is not on models.dev. The
-  vendored snapshot carries a `helmcode` provider section with its five agent
-  models (`deepseek-v4-flash`, `glm5.3`, `glm5.3-flash`, `qwen3.6`, `gemma4`),
-  and `PINNED_MODELSDEV_ENTRIES` lists them, so the snapshot refresh script
-  and the live catalog merge keep the section. Model limits are copied from
-  Helmcode's own opencode and pi config pages. Helmcode's resold Claude, GPT
-  and Gemini models are not included.
+- **Registry-synthesized `helmcode` section**: Helmcode is not on models.dev.
+  Its five agent models (`deepseek-v4-flash`, `glm5.3`, `glm5.3-flash`,
+  `qwen3.6`, `gemma4`) live in the provider registry
+  (`packages/model-catalog/src/openai-compatible-providers.ts`,
+  `catalog: "registry"`). `withRegistryCatalogSections` adds the section,
+  at $0, to the snapshot loader (`loadModelsDevCache`), the worker runtime
+  catalog and the dashboard bundle, and the live catalog refills it
+  (`setLiveModelsCatalog`). Model limits are copied from Helmcode's own
+  opencode and pi config pages. Helmcode's resold Claude, GPT and Gemini
+  models are not included.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the

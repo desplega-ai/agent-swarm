@@ -1,3 +1,8 @@
+import {
+  type OpenAICompatibleProviderId,
+  openAICompatibleProviders,
+  providerKeyVars,
+} from "@desplega/model-catalog";
 import type { ColDef } from "ag-grid-community";
 import {
   AlertTriangle,
@@ -82,10 +87,16 @@ const KEY_TYPE_META: Record<string, KeyTypeMeta> = {
   OPENROUTER_API_KEY: { label: "OpenRouter API Key", icon: "openrouter" },
   OPENAI_API_KEY: { label: "OpenAI API Key", icon: "openai" },
   CODEX_OAUTH: { label: "Codex OAuth", icon: "openai" },
-  NAN_API_KEY: { label: "NaN API Key", icon: "nan" },
-  // The alias the runner copies into NAN_API_KEY when only it is set.
-  HELMCODE_API_NAN: { label: "NaN API Key", icon: "nan" },
-  HELMCODE_API_KEY: { label: "Helmcode API Key", icon: "helmcode" },
+  // OpenAI-compatible registry providers. An alias (HELMCODE_API_NAN) is
+  // labelled as its provider's key: the runner copies it into the canonical var.
+  ...Object.fromEntries(
+    openAICompatibleProviders().flatMap((p) =>
+      providerKeyVars(p).map((name) => [
+        name,
+        { label: `${p.displayName} API Key`, icon: p.id as OpenAICompatibleProviderId },
+      ]),
+    ),
+  ),
 };
 
 function getKeyTypeMeta(keyType: string): KeyTypeMeta {

@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import snapshot from "../be/modelsdev-cache.json";
 import {
-  modelForId,
-  OPENAI_COMPATIBLE_PROVIDER_IDS,
+  baseUrlEnvVar,
   OPENAI_COMPATIBLE_PROVIDERS,
+  openAICompatibleProviderIds,
+  providerBaseUrl,
+  providerForKeyVar,
   providerForModel,
   providerKeyFromEnv,
-} from "../providers/openai-compatible-providers";
-import { NAN_KEY_VARS } from "../utils/credentials";
+  withRegistryCatalogSections,
+} from "@desplega/model-catalog";
+import { loadModelsDevCache } from "../be/modelsdev-cache";
+import snapshot from "../be/modelsdev-cache.json";
+import { normalizeProviderKeyAliases } from "../utils/credentials";
 
 type SnapshotModel = {
   name: string;
@@ -34,11 +38,23 @@ describe("openai-compatible provider table", () => {
     expect(providerForModel(undefined)).toBeUndefined();
   });
 
-  test("modelForId finds table models and rejects unknown ids", () => {
-    expect(modelForId("helmcode/qwen3.6")?.contextWindow).toBe(262144);
-    expect(modelForId("nan/glm5.3-flash")?.maxOutputTokens).toBe(131072);
-    expect(modelForId("helmcode/qwen3.8-flash")).toBeUndefined();
-    expect(modelForId("nan/not-a-model")).toBeUndefined();
+  test("providerForKeyVar finds canonical and alias key vars", () => {
+    expect(providerForKeyVar("NAN_API_KEY")?.id).toBe("nan");
+    expect(providerForKeyVar("HELMCODE_API_NAN")?.id).toBe("nan");
+    expect(providerForKeyVar("HELMCODE_API_KEY")?.id).toBe("helmcode");
+    expect(providerForKeyVar("OPENROUTER_API_KEY")).toBeUndefined();
+  });
+
+  test("<ID>_BASE_URL overrides the default base URL", () => {
+    const nan = OPENAI_COMPATIBLE_PROVIDERS.nan;
+    const helmcode = OPENAI_COMPATIBLE_PROVIDERS.helmcode;
+    expect(baseUrlEnvVar(nan)).toBe("NAN_BASE_URL");
+    expect(baseUrlEnvVar(helmcode)).toBe("HELMCODE_BASE_URL");
+    expect(providerBaseUrl(nan, {})).toBe("https://api.nan.builders/v1");
+    expect(providerBaseUrl(nan, { NAN_BASE_URL: "  " })).toBe("https://api.nan.builders/v1");
+    expect(providerBaseUrl(helmcode, { HELMCODE_BASE_URL: "http://127.0.0.1:9/v1/" })).toBe(
+      "http://127.0.0.1:9/v1",
+    );
   });
 
   test("providerKeyFromEnv prefers the canonical var, then the alias", () => {
@@ -53,19 +69,40 @@ describe("openai-compatible provider table", () => {
     );
   });
 
-  test("key vars agree with the credential module", () => {
-    expect([
-      OPENAI_COMPATIBLE_PROVIDERS.nan.envVar,
-      ...OPENAI_COMPATIBLE_PROVIDERS.nan.aliasEnvVars,
-    ]).toEqual([...NAN_KEY_VARS]);
+  test("normalizeProviderKeyAliases copies an alias only into an empty canonical var", () => {
+    const aliasOnly: Record<string, string | undefined> = { HELMCODE_API_NAN: "alias" };
+    normalizeProviderKeyAliases(aliasOnly);
+    expect(aliasOnly.NAN_API_KEY).toBe("alias");
+    const both: Record<string, string | undefined> = {
+      NAN_API_KEY: "canon",
+      HELMCODE_API_NAN: "alias",
+    };
+    normalizeProviderKeyAliases(both);
+    expect(both.NAN_API_KEY).toBe("canon");
   });
 
-  // Worker code cannot read the catalog store, so the table duplicates the
-  // snapshot sections. Keep the two from drifting.
-  for (const id of OPENAI_COMPATIBLE_PROVIDER_IDS) {
-    test(`${id} matches its modelsdev-cache.json section`, () => {
+  test("registry-sourced sections are synthesized, never hand-written in the snapshot", () => {
+    const raw = snapshot as unknown as Record<string, unknown>;
+    for (const id of openAICompatibleProviderIds()) {
       const entry = OPENAI_COMPATIBLE_PROVIDERS[id];
-      const section = (snapshot as unknown as Record<string, SnapshotProvider | undefined>)[id];
+      if (entry.catalog === "registry") expect(raw[id]).toBeUndefined();
+      else expect(raw[id]).toBeDefined();
+    }
+    // The server loader carries the synthesized sections.
+    expect(loadModelsDevCache()?.helmcode?.models?.["glm5.3"]?.limit?.context).toBe(1048576);
+  });
+
+  // The registry duplicates the models.dev sections of `catalog: "models.dev"`
+  // entries (the pi/opencode blocks need limits the worker cannot read from
+  // the catalog store); keep the two from drifting. Registry-sourced sections
+  // are built from the registry, so they agree by construction.
+  const merged = withRegistryCatalogSections(
+    snapshot as unknown as Record<string, SnapshotProvider | undefined>,
+  );
+  for (const id of openAICompatibleProviderIds()) {
+    test(`${id} matches its catalog section`, () => {
+      const entry = OPENAI_COMPATIBLE_PROVIDERS[id];
+      const section = merged[id];
       expect(section).toBeDefined();
       if (!section) return;
       expect(section.api).toBe(entry.baseUrl);

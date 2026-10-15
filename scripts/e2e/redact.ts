@@ -8,6 +8,9 @@
  *
  *   bun scripts/e2e/redact.ts --out <dir> <file>...   # writes redacted copies
  */
+
+import { openAICompatibleKeyVars } from "@desplega/model-catalog";
+
 const REDACTED = "[REDACTED]";
 
 const PATTERNS: RegExp[] = [
@@ -33,9 +36,8 @@ const CREDENTIAL_ENV_KEYS = [
   "AMP_API_KEY",
   "CURSOR_API_KEY",
   "XAI_API_KEY",
-  "NAN_API_KEY",
-  "HELMCODE_API_NAN",
-  "HELMCODE_API_KEY",
+  // OpenAI-compatible registry provider keys, canonical and alias.
+  ...openAICompatibleKeyVars(),
   "CODEX_OAUTH",
 ];
 

@@ -10,6 +10,11 @@
 //
 // See plan: thoughts/taras/plans/2026-04-21-integrations-ui.md (Phase 1).
 
+import {
+  baseUrlEnvVar,
+  type OpenAICompatibleProviderId,
+  openAICompatibleProviders,
+} from "@desplega/model-catalog";
 import type { ProviderIconKey } from "./agent-runtime-models";
 
 export type IntegrationFieldType = "text" | "password" | "textarea" | "select" | "boolean";
@@ -156,6 +161,57 @@ export function getIntegrationFields(def: IntegrationDef): IntegrationField[] {
     fields.push(field);
   }
   return fields;
+}
+
+/** Docs section that covers every OpenAI-compatible registry provider. */
+const OPENAI_COMPATIBLE_DOCS_URL =
+  "https://docs.agent-swarm.dev/docs/guides/harness-configuration#nan-and-helmcode";
+
+/**
+ * One integration card per OpenAI-compatible registry provider
+ * (`@desplega/model-catalog`): its key (a credential pool) and its optional
+ * `<ID>_BASE_URL`. No restart: pi and opencode read both from the per-task
+ * env the runner fetches before each task, so a saved value applies on the
+ * next task.
+ */
+function openAICompatibleIntegrations(): IntegrationDef[] {
+  return openAICompatibleProviders().map((p) => {
+    const aliases =
+      p.aliasEnvVars.length > 0 ? ` ${p.aliasEnvVars.join(" and ")} is accepted as an alias.` : "";
+    return {
+      id: p.id,
+      name: p.displayName,
+      description: p.description,
+      category: "llm",
+      iconKey: "route",
+      providerIconKey: p.id as OpenAICompatibleProviderId,
+      docsUrl: OPENAI_COMPATIBLE_DOCS_URL,
+      restartRequired: false,
+      fields: [
+        {
+          key: p.envVar,
+          label: "API key",
+          type: "password",
+          required: true,
+          isSecret: true,
+          placeholder: "sk-...",
+          helpText: `${p.displayName} API key for \`${p.id}/<model>\` on pi and opencode.${aliases}${
+            p.keyNote ? ` ${p.keyNote}` : ""
+          } Comma-separate multiple keys to form a credential pool.`,
+          credentialPool: true,
+        },
+        {
+          key: baseUrlEnvVar(p),
+          label: "Base URL",
+          type: "text",
+          isSecret: false,
+          placeholder: p.baseUrl,
+          helpText: `OpenAI-compatible API root. Leave blank for ${p.baseUrl}.`,
+          advanced: true,
+        },
+      ],
+    };
+  });
 }
 
 export const INTEGRATIONS: IntegrationDef[] = [
@@ -836,58 +892,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
 
-  // ------------------------------------------------------------------- NaN
-  // No restart: pi and opencode read these keys from the per-task env the
-  // runner fetches before each task, so a saved key applies on the next task.
-  {
-    id: "nan",
-    name: "NaN",
-    description:
-      "Open-weight models such as GLM, Qwen and DeepSeek for the pi and opencode harnesses.",
-    category: "llm",
-    iconKey: "route",
-    providerIconKey: "nan",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration#nan-and-helmcode",
-    restartRequired: false,
-    fields: [
-      {
-        key: "NAN_API_KEY",
-        label: "API key",
-        type: "password",
-        required: true,
-        isSecret: true,
-        placeholder: "sk-...",
-        helpText:
-          "NaN API key for `nan/<model>` on pi and opencode. HELMCODE_API_NAN is accepted as an alias. Comma-separate multiple keys to form a credential pool.",
-        credentialPool: true,
-      },
-    ],
-  },
-
-  // -------------------------------------------------------------- Helmcode
-  {
-    id: "helmcode",
-    name: "Helmcode",
-    description: "Open-weight models through Helmcode for the pi and opencode harnesses.",
-    category: "llm",
-    iconKey: "route",
-    providerIconKey: "helmcode",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration#nan-and-helmcode",
-    restartRequired: false,
-    fields: [
-      {
-        key: "HELMCODE_API_KEY",
-        label: "API key",
-        type: "password",
-        required: true,
-        isSecret: true,
-        placeholder: "sk-...",
-        helpText:
-          "Helmcode API key for `helmcode/<model>` on pi and opencode. Helmcode org plans include 5, 15 or 40 keys; paste them comma-separated as a credential pool.",
-        credentialPool: true,
-      },
-    ],
-  },
+  // ------------------------------------- OpenAI-compatible registry providers
+  // NaN, Helmcode, ...: one card per `@desplega/model-catalog` registry entry.
+  ...openAICompatibleIntegrations(),
 
   // ---------------------------------------------------------------- OpenAI
   {
