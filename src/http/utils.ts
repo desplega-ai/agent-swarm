@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { getActiveTaskCount } from "../be/db";
 import type { SwarmSpan } from "../otel";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { getNodeEnv } from "../utils/node-env";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export function duplicateGuardedQueryKey(query: URLSearchParams): string | undefined {
@@ -49,7 +50,7 @@ function getAllowedOrigins(): string[] {
  * and the Docker image run without NODE_ENV, so this never applies there.
  */
 function isDevLoopbackOrigin(origin: string): boolean {
-  if (process.env.NODE_ENV !== "development") return false;
+  if (getNodeEnv() !== "development") return false;
   return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$/.test(origin);
 }
 
