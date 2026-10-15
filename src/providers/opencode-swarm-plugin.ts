@@ -40,7 +40,7 @@ const OPENCODE_SHELL_ENV_KEYS = ["TERM", "OPENCODE_TERMINAL"] as const;
  * plus the keys OpenCode set for the call. Nothing else from the process env
  * gets through.
  */
-export function applyOpencodeShellEnv(
+function applyOpencodeShellEnv(
   callEnv: Record<string, string | undefined>,
   sessionEnv: Record<string, string | undefined>,
 ): void {

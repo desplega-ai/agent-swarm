@@ -13,10 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OpenCode } from "@opencode/sdk";
 import { fetchResolvedEnv } from "../commands/runner";
-import {
-  applyOpencodeShellEnv,
-  createOpencodeSwarmPlugin,
-} from "../providers/opencode-swarm-plugin";
+import { createOpencodeSwarmPlugin } from "../providers/opencode-swarm-plugin";
 
 /**
  * OpenCode runs in-process, so its shell tool would spawn with the worker's
@@ -145,27 +142,4 @@ describe("OpenCode shell env (real OpenCode host)", () => {
     },
     SHELL_TIMEOUT_MS * 2,
   );
-});
-
-describe("applyOpencodeShellEnv", () => {
-  test("keeps the session env and only OpenCode's per-call keys from the call env", () => {
-    const callEnv: Record<string, string | undefined> = {
-      PROCESS_ONLY: "leak",
-      HOME: "/root",
-      TERM: "xterm-256color",
-      OPENCODE_TERMINAL: "1",
-    };
-    applyOpencodeShellEnv(callEnv, {
-      HOME: "/home/worker",
-      TASK_ONLY: "yes",
-      UNSET: undefined,
-      TERM: "dumb",
-    });
-    expect(callEnv).toEqual({
-      HOME: "/home/worker",
-      TASK_ONLY: "yes",
-      TERM: "xterm-256color",
-      OPENCODE_TERMINAL: "1",
-    });
-  });
 });
