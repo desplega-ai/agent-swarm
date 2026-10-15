@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import type { ChatSdkAdapterName } from "@/lib/chat-sdk-fields";
+import { DISCORD_INVITE_PERMISSIONS } from "@/lib/chat-sdk-form";
 import { cn } from "@/lib/utils";
 
 // Setup steps for each Chat SDK adapter panel. The docs page
@@ -75,7 +76,13 @@ function chipList(items: string[]): ReactNode {
   ));
 }
 
-function steps(adapter: ChatSdkAdapterName, docsUrl: string | undefined): ReactNode[] {
+interface StepContext {
+  docsUrl: string | undefined;
+  /** Discord: the OAuth2 invite link, once an application id is known. */
+  inviteUrl: string | undefined;
+}
+
+function steps(adapter: ChatSdkAdapterName, { docsUrl, inviteUrl }: StepContext): ReactNode[] {
   const docsLink = (label: string) =>
     docsUrl ? (
       <ExternalLink href={`${docsUrl}#${DOCS_ANCHOR[adapter]}`}>{label}</ExternalLink>
@@ -168,9 +175,17 @@ function steps(adapter: ChatSdkAdapterName, docsUrl: string | undefined): ReactN
           intent: without it, mentions create no task.
         </>,
         <>
-          Invite the bot with the <CodeChip>bot</CodeChip> scope and these permissions: Send
-          Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read Message
-          History, Add Reactions, Attach Files.
+          Invite the bot to your server:{" "}
+          {inviteUrl ? (
+            <ExternalLink href={inviteUrl}>open the invite link</ExternalLink>
+          ) : (
+            <>enter the Application ID above to get the invite link</>
+          )}
+          . It uses the <CodeChip>bot</CodeChip> and <CodeChip>applications.commands</CodeChip>{" "}
+          scopes with permissions <CodeChip>{DISCORD_INVITE_PERMISSIONS}</CodeChip> (View Channels,
+          Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read
+          Message History, Add Reactions, Attach Files, Embed Links). Until the bot is in a server
+          it never receives a message.
         </>,
         <>
           Optional, for <CodeChip>/help</CodeChip>, <CodeChip>/status</CodeChip>,{" "}
@@ -218,16 +233,18 @@ function steps(adapter: ChatSdkAdapterName, docsUrl: string | undefined): ReactN
 interface ChatSdkSetupProps {
   adapter: ChatSdkAdapterName;
   docsUrl: string | undefined;
-  /** Collapsed by default when the adapter already runs healthy. */
+  /** Open by default while the adapter is off; collapsed once it is turned on. */
   defaultOpen: boolean;
+  /** Discord only: the invite link for the entered application id. */
+  inviteUrl?: string;
 }
 
-export function ChatSdkSetup({ adapter, docsUrl, defaultOpen }: ChatSdkSetupProps) {
+export function ChatSdkSetup({ adapter, docsUrl, defaultOpen, inviteUrl }: ChatSdkSetupProps) {
   return (
     <CollapsibleSection title="Setup" heading="h3" defaultOpen={defaultOpen}>
       <div className="space-y-2 pt-1">
         <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-5 text-muted-foreground marker:text-muted-foreground">
-          {steps(adapter, docsUrl).map((step, index) => (
+          {steps(adapter, { docsUrl, inviteUrl }).map((step, index) => (
             // The step list is static per adapter, so the index is a stable key.
             <li key={index} className="pl-1">
               {step}

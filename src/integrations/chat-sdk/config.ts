@@ -4,9 +4,11 @@ import { isReservedConfigKey } from "@/be/swarm-config-guard";
 import { isEnvFlagEnabled } from "@/utils/env-flag";
 import {
   CHAT_SDK_ADAPTER_NAMES,
+  CHAT_SDK_ADAPTER_SCHEMAS,
   type ChatSdkAdapterName,
   type ChatSdkAdapters,
-  ChatSdkAdaptersSchema,
+  ChatSdkAdaptersDraftSchema,
+  firstIssueText,
 } from "./schema";
 
 export {
@@ -32,7 +34,15 @@ export type ResolvedAdapterConfig = Record<string, unknown>;
 
 export interface ChatSdkConfig {
   enabled: boolean;
+  /** Adapters that are complete and resolved. Only these start. */
   adapters: Partial<Record<ChatSdkAdapterName, ResolvedAdapterConfig>>;
+  /**
+   * Adapters present in `CHAT_SDK_ADAPTERS` that cannot start: a required
+   * field is missing (a partial dashboard save) or a `$config` reference does
+   * not resolve. The text names the field. The other adapters still start.
+   */
+  incomplete?: Partial<Record<ChatSdkAdapterName, string>>;
+  /** A problem with the whole value (bad JSON, unknown adapter, forbidden key): nothing starts. */
   error?: string;
 }
 
@@ -85,8 +95,10 @@ function toResolvedAdapterConfig(raw: Record<string, unknown>): ResolvedAdapterC
 }
 
 /**
- * Parse, validate and resolve the Chat SDK config. Config problems are
- * returned in `error` with no adapters, so boot can log it and continue. Other
+ * Parse, validate and resolve the Chat SDK config. A problem with the whole
+ * value is returned in `error` with no adapters, so boot can log it and
+ * continue. A problem with one adapter (missing field, unresolvable `$config`)
+ * lands in `incomplete[name]` and the other adapters still resolve. Other
  * errors (for example DB errors) propagate.
  */
 export async function getChatSdkConfig(): Promise<ChatSdkConfig> {
@@ -99,37 +111,45 @@ export async function getChatSdkConfig(): Promise<ChatSdkConfig> {
       error: "CHAT_SDK_ENABLED is true but CHAT_SDK_ADAPTERS is empty",
     };
   }
+  let parsed: unknown;
   try {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(adaptersJson);
-    } catch {
-      // Fixed text: the parser message can quote the input, which may hold an inline token.
-      throw new ChatSdkConfigError("CHAT_SDK_ADAPTERS is not valid JSON");
-    }
-    const validated = ChatSdkAdaptersSchema.safeParse(parsed);
-    if (!validated.success) {
-      const issue = validated.error.issues[0];
-      throw new ChatSdkConfigError(
-        `CHAT_SDK_ADAPTERS.${issue?.path.join(".") || "(root)"}: ${issue?.message ?? "invalid"}`,
-      );
-    }
-    const resolved = resolveConfigRefs<ChatSdkAdapters>(
-      validated.data,
-      await buildSwarmConfigLookup(),
-    );
-    const adapters: ChatSdkConfig["adapters"] = {};
-    for (const name of CHAT_SDK_ADAPTER_NAMES) {
-      const raw = resolved[name];
-      if (raw) adapters[name] = toResolvedAdapterConfig(raw as Record<string, unknown>);
-    }
-    return { enabled, adapters };
-  } catch (error) {
-    if (error instanceof ChatSdkConfigError || error instanceof ConfigRefError) {
-      return { enabled, adapters: {}, error: error.message };
-    }
-    throw error;
+    parsed = JSON.parse(adaptersJson);
+  } catch {
+    // Fixed text: the parser message can quote the input, which may hold an inline token.
+    return { enabled, adapters: {}, error: "CHAT_SDK_ADAPTERS is not valid JSON" };
   }
+  // The draft shape guards the whole value: unknown adapters and forbidden
+  // keys stop everything. Required fields are checked per adapter below.
+  const draft = ChatSdkAdaptersDraftSchema.safeParse(parsed);
+  if (!draft.success) return { enabled, adapters: {}, error: firstIssueText(draft.error) };
+
+  const lookup = await buildSwarmConfigLookup();
+  const adapters: ChatSdkConfig["adapters"] = {};
+  const incomplete: NonNullable<ChatSdkConfig["incomplete"]> = {};
+  for (const name of CHAT_SDK_ADAPTER_NAMES) {
+    const entry = draft.data[name];
+    if (entry === undefined) continue;
+    const validated = CHAT_SDK_ADAPTER_SCHEMAS[name].safeParse(entry);
+    if (!validated.success) {
+      incomplete[name] = firstIssueText(validated.error, `CHAT_SDK_ADAPTERS.${name}`, entry);
+      continue;
+    }
+    try {
+      const resolved = resolveConfigRefs<ChatSdkAdapters[typeof name]>(
+        validated.data as ChatSdkAdapters[typeof name],
+        lookup,
+      );
+      adapters[name] = toResolvedAdapterConfig(resolved as Record<string, unknown>);
+    } catch (error) {
+      if (!(error instanceof ChatSdkConfigError || error instanceof ConfigRefError)) throw error;
+      incomplete[name] = error.message;
+    }
+  }
+  return {
+    enabled,
+    adapters,
+    ...(Object.keys(incomplete).length > 0 ? { incomplete } : {}),
+  };
 }
 
 /**

@@ -54,7 +54,11 @@ A value in `CHAT_SDK_ADAPTERS` can reference another config key as `{"$config": 
 - The API resolves references at boot from the global swarm config rows, secrets included.
 - It never reads a reference from the process environment.
 - It rejects reserved keys such as `API_KEY`.
-- A missing row stops the channel at boot. The Integrations card shows the error.
+- A missing row keeps that adapter off, with the status `incomplete` and the row name in the error. The other adapters start.
+
+### Partial saves
+
+An adapter entry may lack required fields. The card saves it, marks the adapter **Incomplete, not running** with the missing field, and starts the other adapters. This lets you store the bot token first and add the rest later. A wrong value format (a Discord public key that is not 64 hex characters, a forbidden key such as `apiUrl`) is still rejected on save.
 
 For env-only deployments, put the raw values in `CHAT_SDK_ADAPTERS`.
 
@@ -188,7 +192,13 @@ settings:
 
 1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications). Copy the **Application ID** and the **Public Key** (64 hex characters).
 2. On the **Bot** page, copy the bot token and turn on the **Message Content** privileged intent.
-3. Invite the bot to your server with the `bot` scope and these permissions: Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read Message History, Add Reactions, Attach Files.
+3. Invite the bot to your server. The card shows the invite link once the Application ID is entered. By hand, open this URL with your application id:
+
+   ```text
+   https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot+applications.commands&permissions=326417632320
+   ```
+
+   The permissions integer `326417632320` is View Channels, Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read Message History, Add Reactions, Attach Files and Embed Links. A bot that is connected but in no server never receives a message; the card says "Running, in no server" in that case and lists the servers otherwise.
 4. Optional, for [slash commands](#slash-commands): set **Interactions Endpoint URL** to the Discord webhook URL. Discord sends slash commands only to this URL, never over the Gateway. Then register the commands once. Replace the application id and the bot token:
 
    ```bash

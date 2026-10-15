@@ -20995,7 +20995,8 @@
                             "enum": [
                               "ok",
                               "error",
-                              "disabled"
+                              "disabled",
+                              "incomplete"
                             ]
                           },
                           "error": {
@@ -21029,6 +21030,24 @@
                               "state",
                               "since",
                               "restarts"
+                            ]
+                          },
+                          "guilds": {
+                            "type": "object",
+                            "properties": {
+                              "count": {
+                                "type": "number"
+                              },
+                              "names": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "count",
+                              "names"
                             ]
                           }
                         },

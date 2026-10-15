@@ -7587,7 +7587,7 @@ export interface paths {
                                 name: "telegram" | "slack" | "discord" | "teams";
                                 configured: boolean;
                                 /** @enum {string} */
-                                health: "ok" | "error" | "disabled";
+                                health: "ok" | "error" | "disabled" | "incomplete";
                                 error?: string;
                                 webhookUrl: string;
                                 mode?: string;
@@ -7596,6 +7596,10 @@ export interface paths {
                                     state: "running" | "backoff" | "stopped";
                                     since: string;
                                     restarts: number;
+                                };
+                                guilds?: {
+                                    count: number;
+                                    names: string[];
                                 };
                             }[];
                         };

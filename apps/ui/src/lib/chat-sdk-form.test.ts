@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { CHAT_SDK_ADAPTER_DEFS } from "./chat-sdk-fields";
 import {
   buildAll,
+  DISCORD_INVITE_PERMISSIONS,
+  discordInviteUrl,
   initialDrafts,
   localTunnelPort,
   MASKED_SECRET,
@@ -112,5 +114,59 @@ describe("Chat SDK form: local webhook URL detection", () => {
     expect(localTunnelPort("https://localhost.example.com/api")).toBe(undefined);
     expect(localTunnelPort("not a url")).toBe(undefined);
     expect(localTunnelPort("")).toBe(undefined);
+  });
+});
+
+describe("Chat SDK form: partial saves", () => {
+  test("missing required fields do not block the save; they are listed as missing", () => {
+    const drafts = initialDrafts({});
+    drafts.discord.included = true;
+    drafts.discord.secrets.botToken = "token-only";
+    const built = buildAll(drafts, {});
+    expect(built.problems).toEqual([]);
+    expect(built.missing).toEqual(["Discord: Public key", "Discord: Application ID"]);
+    expect(Object.keys(built.adapters)).toEqual(["discord"]);
+    expect(built.secretRows.map((row) => row.key)).toEqual(["CHAT_SDK_DISCORD_BOT_TOKEN"]);
+  });
+
+  test("a mode-dependent field counts as missing only in that mode", () => {
+    const drafts = initialDrafts({});
+    drafts.telegram.included = true;
+    drafts.telegram.secrets.botToken = "t";
+    drafts.telegram.values.mode = "webhook";
+    expect(buildAll(drafts, {}).missing).toEqual(["Telegram: Webhook secret token"]);
+    drafts.telegram.values.mode = "polling";
+    expect(buildAll(drafts, {}).missing).toEqual([]);
+  });
+
+  test("a format problem still blocks, even on a partial entry", () => {
+    const drafts = initialDrafts({});
+    drafts.discord.included = true;
+    drafts.discord.values.publicKey = "not-hex";
+    const built = buildAll(drafts, {});
+    expect(built.problems).toEqual(["Discord: Public key must be 64 hex characters"]);
+  });
+});
+
+describe("Chat SDK form: Discord invite link", () => {
+  test("builds the OAuth2 URL with both scopes and the permissions integer", () => {
+    const url = discordInviteUrl("1560241123685965894");
+    expect(url).toBeDefined();
+    const params = new URL(url ?? "").searchParams;
+    expect(params.get("client_id")).toBe("1560241123685965894");
+    expect(params.get("scope")).toBe("bot applications.commands");
+    expect(params.get("permissions")).toBe(DISCORD_INVITE_PERMISSIONS);
+  });
+
+  test("the permissions integer is the documented bit set", () => {
+    const bits = [10, 11, 38, 35, 34, 16, 6, 15, 14];
+    const sum = bits.reduce((acc, bit) => acc + 2n ** BigInt(bit), 0n);
+    expect(DISCORD_INVITE_PERMISSIONS).toBe(sum.toString());
+  });
+
+  test("no link without a plausible snowflake id", () => {
+    expect(discordInviteUrl(undefined)).toBeUndefined();
+    expect(discordInviteUrl("")).toBeUndefined();
+    expect(discordInviteUrl("abc")).toBeUndefined();
   });
 });

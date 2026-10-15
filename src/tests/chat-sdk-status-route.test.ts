@@ -157,6 +157,7 @@ interface StatusBody {
     error?: string;
     webhookUrl: string;
     mode?: string;
+    guilds?: { count: number; names: string[] };
   }>;
 }
 
@@ -232,17 +233,47 @@ describe("GET /api/integrations/chat/status", () => {
     );
   });
 
-  test("a config error blocks boot: Not started with the config error, bounded", async () => {
+  test("a missing $config row makes that adapter incomplete; the others keep running", async () => {
     const discord = { ...DISCORD_ENTRY, botToken: { $config: "CHAT_SDK_DISCORD_STATUS_MISSING" } };
     await withEnv(
       { CHAT_SDK_ADAPTERS: JSON.stringify({ ...BOOT_ADAPTERS, discord }) },
       async () => {
         const body = await getStatus();
-        expect(body.error).toContain("CHAT_SDK_DISCORD_STATUS_MISSING");
+        expect(body.error).toBeUndefined();
+        const entry = body.adapters.find((a) => a.name === "discord");
+        expect(entry).toMatchObject({ configured: true, health: "incomplete" });
+        expect(entry?.error).toContain("CHAT_SDK_DISCORD_STATUS_MISSING");
+        expect(entry?.error?.length ?? 0).toBeLessThanOrEqual(300);
+        expect(body.adapters.find((a) => a.name === "telegram")?.health).toBe("ok");
+      },
+    );
+  });
+
+  test("a partial save (required field missing) is incomplete and names the field", async () => {
+    await withEnv(
+      { CHAT_SDK_ADAPTERS: JSON.stringify({ ...BOOT_ADAPTERS, discord: { botToken: "x" } }) },
+      async () => {
+        const body = await getStatus();
+        expect(body.error).toBeUndefined();
+        const entry = body.adapters.find((a) => a.name === "discord");
+        expect(entry).toMatchObject({ configured: true, health: "incomplete" });
+        expect(entry?.error).toBe("CHAT_SDK_ADAPTERS.discord.publicKey: required");
+        expect(entry?.guilds).toBeUndefined();
+      },
+    );
+  });
+
+  test("a forbidden key blocks boot: Not started with the config error, bounded", async () => {
+    const discord = { ...DISCORD_ENTRY, apiUrl: "http://evil.example" };
+    await withEnv(
+      { CHAT_SDK_ADAPTERS: JSON.stringify({ ...BOOT_ADAPTERS, discord }) },
+      async () => {
+        const body = await getStatus();
+        expect(body.error).toContain("discord.apiUrl");
         expect(body.error?.length ?? 0).toBeLessThanOrEqual(300);
         const entry = body.adapters.find((a) => a.name === "discord");
         expect(entry?.error).toStartWith("Not started: ");
-        expect(entry?.error).toContain("CHAT_SDK_DISCORD_STATUS_MISSING");
+        expect(entry?.error).toContain("discord.apiUrl");
       },
     );
   });

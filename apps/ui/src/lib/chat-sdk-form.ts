@@ -151,13 +151,10 @@ export function secretFieldProblem(
   return rule.pattern.test(value) ? undefined : rule.message;
 }
 
-/** Problems that would make the API reject the entry, or the platform reject a value. */
+/** Problems that make the API reject the write, or the platform reject a value. */
 function adapterProblems(def: ChatSdkAdapterDef, draft: AdapterDraft, entry: JsonObject): string[] {
   const problems: string[] = [];
   for (const field of def.fields) {
-    if (isRequired(field, draft) && entry[field.key] === undefined) {
-      problems.push(`${def.label}: ${field.label} is required`);
-    }
     if (field.kind === "secret") {
       const problem = secretFieldProblem(def.name, field, draft.secrets[field.key] ?? "");
       if (problem) problems.push(`${def.label}: ${field.label}: ${problem}`);
@@ -174,13 +171,30 @@ function adapterProblems(def: ChatSdkAdapterDef, draft: AdapterDraft, entry: Jso
   return problems;
 }
 
-export function buildAll(
-  drafts: Drafts,
-  stored: JsonObject,
-): { adapters: JsonObject; secretRows: SecretRow[]; problems: string[] } {
+/**
+ * Required fields the entry lacks. A save still goes through: the API stores
+ * the entry, reports the adapter as incomplete and starts the other adapters.
+ */
+function missingFields(def: ChatSdkAdapterDef, draft: AdapterDraft, entry: JsonObject): string[] {
+  return def.fields
+    .filter((field) => isRequired(field, draft) && entry[field.key] === undefined)
+    .map((field) => `${def.label}: ${field.label}`);
+}
+
+export interface BuiltAdapters {
+  adapters: JsonObject;
+  secretRows: SecretRow[];
+  /** Block the save. */
+  problems: string[];
+  /** Allowed to save; the adapter stays off until these are filled in. */
+  missing: string[];
+}
+
+export function buildAll(drafts: Drafts, stored: JsonObject): BuiltAdapters {
   const adapters: JsonObject = {};
   const secretRows: SecretRow[] = [];
   const problems: string[] = [];
+  const missing: string[] = [];
   for (const def of CHAT_SDK_ADAPTER_DEFS) {
     const draft = drafts[def.name];
     if (!draft.included) continue;
@@ -188,8 +202,30 @@ export function buildAll(
     adapters[def.name] = result.entry;
     secretRows.push(...result.secretRows);
     problems.push(...adapterProblems(def, draft, result.entry));
+    missing.push(...missingFields(def, draft, result.entry));
   }
-  return { adapters, secretRows, problems };
+  return { adapters, secretRows, problems, missing };
+}
+
+/**
+ * Bot permissions for the Discord invite link: View Channels, Send Messages,
+ * Send Messages in Threads, Create Public Threads, Manage Threads, Read Message
+ * History, Add Reactions, Attach Files, Embed Links. The adapter README lists
+ * the same set (minus View Channels and Embed Links, which the bot needs to see
+ * a channel and to render link previews).
+ */
+export const DISCORD_INVITE_PERMISSIONS = "326417632320";
+
+/** The OAuth2 invite URL for the application, or undefined without an id. */
+export function discordInviteUrl(applicationId: string | undefined): string | undefined {
+  const id = applicationId?.trim();
+  if (!id || !/^\d{15,25}$/.test(id)) return undefined;
+  const params = new URLSearchParams({
+    client_id: id,
+    scope: "bot applications.commands",
+    permissions: DISCORD_INVITE_PERMISSIONS,
+  });
+  return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }
 
 /**

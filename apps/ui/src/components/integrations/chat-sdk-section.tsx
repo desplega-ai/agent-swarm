@@ -41,6 +41,7 @@ import {
   buildAll,
   configRefKey,
   type Drafts,
+  discordInviteUrl,
   initialDrafts,
   isObject,
   isRequired,
@@ -209,6 +210,14 @@ function ChatSdkForm({
     rowMessage = <span className="text-status-error-strong">{saveError}</span>;
   } else if (blocked) {
     rowMessage = <span className="text-status-error-strong">{built.problems.join(". ")}</span>;
+  } else if (built.missing.length > 0) {
+    // A partial save is allowed: the adapter stays off until it is complete.
+    rowMessage = (
+      <span className="text-status-warning-strong">
+        {dirty ? "Saves as incomplete. " : "Incomplete. "}
+        Still missing: {built.missing.join(", ")}. The adapter stays off until these are filled in.
+      </span>
+    );
   } else if (dirty) {
     rowMessage = <span className="text-muted-foreground">Unsaved changes</span>;
   }
@@ -294,6 +303,9 @@ function healthView(
   if (status.health === "error") {
     return { tone: "error", label: "Failed to start", description: status.error };
   }
+  if (status.health === "incomplete") {
+    return { tone: "neutral", label: "Incomplete, not running", description: status.error };
+  }
   if (status.health === "disabled") {
     return { tone: "neutral", label: "Not running", description: status.error };
   }
@@ -307,11 +319,25 @@ function healthView(
         "The Gateway listener retries on its own. Messages sent meanwhile are lost.",
     };
   }
-  return {
-    tone: "success",
-    label: "Running",
-    description: gateway ? `Gateway restarts: ${gateway.restarts}` : undefined,
-  };
+  // A connected Discord bot that is in no server never gets a message: the
+  // invite step was skipped.
+  if (status.guilds?.count === 0) {
+    return {
+      tone: "active",
+      label: "Running, in no server",
+      description:
+        "The bot is connected but was not invited anywhere. Use the invite link in the setup steps.",
+    };
+  }
+  let description: string | undefined;
+  if (status.guilds) {
+    const names = status.guilds.names.join(", ");
+    const more = status.guilds.count - status.guilds.names.length;
+    description = `In ${status.guilds.count} server${status.guilds.count === 1 ? "" : "s"}: ${names}${more > 0 ? ` and ${more} more` : ""}`;
+  } else if (gateway) {
+    description = `Gateway restarts: ${gateway.restarts}`;
+  }
+  return { tone: "success", label: "Running", description };
 }
 
 const WEBHOOK_LABEL: Record<ChatSdkAdapterName, string> = {
@@ -382,10 +408,22 @@ function AdapterPanel({
       />
       {statusKnown && (
         <OAuthSectionRow>
+          {/* Remounted when the switch flips, so the steps fold away once the adapter is on. */}
           <ChatSdkSetup
+            key={showDetails ? "on" : "off"}
             adapter={def.name}
             docsUrl={docsUrl}
-            defaultOpen={view.tone !== "success"}
+            defaultOpen={!showDetails}
+            inviteUrl={
+              def.name === "discord"
+                ? discordInviteUrl(
+                    draft.values.applicationId ||
+                      (typeof storedEntry?.applicationId === "string"
+                        ? storedEntry.applicationId
+                        : undefined),
+                  )
+                : undefined
+            }
           />
         </OAuthSectionRow>
       )}

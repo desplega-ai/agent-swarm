@@ -4,6 +4,7 @@ import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { resolveAdapterApiUrl } from "./adapters";
 import { CHAT_SDK_ADAPTER_NAMES, type ChatSdkAdapterName, getChatSdkConfig } from "./config";
+import { fetchDiscordGuilds } from "./discord-api";
 import { getChatSdkHealth } from "./runtime";
 import { callTelegramBotApi, TelegramBotApiError } from "./telegram-api";
 
@@ -22,7 +23,8 @@ export const ChatSdkStatusSchema = z.object({
     z.object({
       name: z.enum(CHAT_SDK_ADAPTER_NAMES),
       configured: z.boolean(),
-      health: z.enum(["ok", "error", "disabled"]),
+      /** `incomplete`: present in `CHAT_SDK_ADAPTERS` with a missing field or an unresolvable `$config`; `error` names it. */
+      health: z.enum(["ok", "error", "disabled", "incomplete"]),
       error: z.string().optional(),
       webhookUrl: z.string(),
       mode: z.string().optional(),
@@ -33,6 +35,8 @@ export const ChatSdkStatusSchema = z.object({
           restarts: z.number(),
         })
         .optional(),
+      /** Discord only, while the Gateway runs: the servers the bot was invited to. */
+      guilds: z.object({ count: z.number(), names: z.array(z.string()) }).optional(),
     }),
   ),
 });
@@ -87,6 +91,22 @@ export function chatSdkWebhookUrl(name: ChatSdkAdapterName): string {
   return `${getPublicMcpBaseUrl()}/api/integrations/chat/${name}/webhook`;
 }
 
+/**
+ * The Discord bot's servers, only while its Gateway runs (a bot that is in no
+ * server is the usual "it does not answer" cause). The token comes from the
+ * resolved config, never from the status payload.
+ */
+async function discordGuildsFor(
+  config: Awaited<ReturnType<typeof getChatSdkConfig>>,
+  health: ReturnType<typeof getChatSdkHealth>["discord"],
+): Promise<ChatSdkAdapterStatus["guilds"]> {
+  if (health?.status !== "ok" || health.gateway?.state !== "running") return undefined;
+  const raw = config.adapters.discord?.botToken;
+  const token = typeof raw === "function" ? await (raw as () => Promise<unknown>)() : raw;
+  if (typeof token !== "string" || token.length === 0) return undefined;
+  return fetchDiscordGuilds(token);
+}
+
 export async function getChatSdkStatus(): Promise<ChatSdkStatus> {
   const config = await getChatSdkConfig();
   const raw = readRawAdapters();
@@ -95,9 +115,11 @@ export async function getChatSdkStatus(): Promise<ChatSdkStatus> {
   // A config error or a Slack clash stops `startChatSdk` before any adapter.
   const blockedCause =
     config.error ?? (config.enabled && slackClash ? SLACK_CLASH_CAUSE : undefined);
+  const discordGuilds = await discordGuildsFor(config, runtimeHealth.discord);
   const adapters = CHAT_SDK_ADAPTER_NAMES.map((name): ChatSdkAdapterStatus => {
     const configured = raw[name] !== undefined;
     const current = runtimeHealth[name];
+    const incomplete = config.incomplete?.[name];
     const rawMode = raw[name]?.mode;
     const mode =
       typeof rawMode === "string" ? rawMode : configured ? DEFAULT_MODES[name] : undefined;
@@ -109,6 +131,10 @@ export async function getChatSdkStatus(): Promise<ChatSdkStatus> {
       // works); its last warning says why the listener keeps failing.
       const showWarning = current.status === "error" || current.gateway?.state === "backoff";
       error = current.error ?? (showWarning ? current.lastWarning : undefined);
+    } else if (incomplete) {
+      // Saved with a missing field, or a `$config` row that does not exist.
+      health = "incomplete";
+      error = incomplete;
     } else if (config.enabled && configured) {
       error = blockedCause ? `Not started: ${blockedCause}` : NOT_RUNNING;
     }
@@ -120,6 +146,7 @@ export async function getChatSdkStatus(): Promise<ChatSdkStatus> {
       webhookUrl: chatSdkWebhookUrl(name),
       ...(mode ? { mode } : {}),
       ...(current?.gateway ? { gateway: current.gateway } : {}),
+      ...(name === "discord" && discordGuilds ? { guilds: discordGuilds } : {}),
     };
   });
   return {

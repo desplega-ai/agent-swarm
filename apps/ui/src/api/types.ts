@@ -608,11 +608,14 @@ export interface McpUserConfigResponse {
 export interface ChatSdkAdapterStatus {
   name: "telegram" | "slack" | "discord" | "teams";
   configured: boolean;
-  health: "ok" | "error" | "disabled";
+  /** `incomplete`: saved with a missing field or an unresolvable `$config`; `error` names it. */
+  health: "ok" | "error" | "disabled" | "incomplete";
   error?: string;
   webhookUrl: string;
   mode?: string;
   gateway?: { state: "running" | "backoff" | "stopped"; since: string; restarts: number };
+  /** Discord only, while the Gateway runs: the servers the bot was invited to. */
+  guilds?: { count: number; names: string[] };
 }
 
 export interface ChatSdkStatusResponse {

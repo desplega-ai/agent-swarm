@@ -166,6 +166,20 @@ describe("CHAT_SDK_ADAPTERS validator", () => {
     expect(badKey).toContain("64 hex characters");
   });
 
+  test("accepts a partial entry (a dashboard save with fields still missing)", () => {
+    expect(
+      validateConfigValue("CHAT_SDK_ADAPTERS", JSON.stringify({ discord: { botToken: "x" } })),
+    ).toBeNull();
+    expect(validateConfigValue("CHAT_SDK_ADAPTERS", JSON.stringify({ slack: {} }))).toBeNull();
+    // Formats and forbidden keys still apply to a partial entry.
+    expect(
+      validateConfigValue("CHAT_SDK_ADAPTERS", JSON.stringify({ discord: { publicKey: "nope" } })),
+    ).toContain("64 hex");
+    expect(
+      validateConfigValue("CHAT_SDK_ADAPTERS", JSON.stringify({ telegram: { mode: "auto" } })),
+    ).toContain("telegram.mode");
+  });
+
   test("accepts a valid value without resolving refs", () => {
     expect(validateConfigValue("CHAT_SDK_ADAPTERS", JSON.stringify(BRAINSTORM_EXAMPLE))).toBeNull();
   });
@@ -202,7 +216,8 @@ describe("getChatSdkConfig", () => {
       setAdapters({ telegram: { botToken: { $config: key }, secretToken: "s" } });
       const config = await getChatSdkConfig();
       expect(config.adapters).toEqual({});
-      expect(config.error).toContain(`reserved key '${key}'`);
+      expect(config.error).toBeUndefined();
+      expect(config.incomplete?.telegram).toContain(`reserved key '${key}'`);
     }
   });
 
@@ -211,7 +226,30 @@ describe("getChatSdkConfig", () => {
     setAdapters({ telegram: { botToken: { $config: "CHAT_TEST_ENV_ONLY" }, secretToken: "s" } });
     const config = await getChatSdkConfig();
     expect(config.adapters).toEqual({});
-    expect(config.error).toContain("CHAT_TEST_ENV_ONLY");
+    expect(config.error).toBeUndefined();
+    expect(config.incomplete?.telegram).toContain("CHAT_TEST_ENV_ONLY");
+  });
+
+  test("an adapter with a missing required field is incomplete; the others still resolve", async () => {
+    setAdapters({
+      telegram: { botToken: { $config: "TG_TOKEN" }, secretToken: "s" },
+      discord: { botToken: { $config: "TG_TOKEN" } },
+      teams: { appId: "a", appPassword: "p", appType: "SingleTenant" },
+    });
+    const config = await getChatSdkConfig();
+    expect(config.error).toBeUndefined();
+    expect(Object.keys(config.adapters)).toEqual(["telegram"]);
+    expect(config.incomplete?.discord).toBe("CHAT_SDK_ADAPTERS.discord.publicKey: required");
+    expect(config.incomplete?.teams).toBe("CHAT_SDK_ADAPTERS.teams.appTenantId: required");
+  });
+
+  test("a forbidden key or an unknown adapter still fails the whole value", async () => {
+    setAdapters({ telegram: { botToken: "x" }, discord: { apiUrl: "http://evil.example" } });
+    const config = await getChatSdkConfig();
+    expect(config.adapters).toEqual({});
+    expect(config.error).toContain("discord.apiUrl");
+    setAdapters({ telegram: { botToken: "x" }, whatsapp: {} });
+    expect((await getChatSdkConfig()).error).toContain("whatsapp");
   });
 
   test("reports invalid JSON and schema errors without throwing", async () => {
