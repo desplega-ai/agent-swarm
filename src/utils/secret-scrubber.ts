@@ -52,6 +52,10 @@ const SENSITIVE_KEY_EXACT = new Set<string>([
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
+  "NAN_API_KEY",
+  // NaN key alias. Matches no SENSITIVE_KEY_SUFFIXES entry, so list it here.
+  "HELMCODE_API_NAN",
+  "HELMCODE_API_KEY",
   "SLACK_BOT_TOKEN",
   "SLACK_SIGNING_SECRET",
   "SLACK_CLIENT_SECRET",

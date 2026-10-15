@@ -18,15 +18,35 @@ const DEFAULT_MODELS: Record<string, string> = {
   // xAI's cheapest model (`grok models` with an API key).
   grok: "grok-build-0.1",
 };
+// NaN (canonical + alias) and Helmcode keys, forwarded to pi/opencode workers.
+const OPENAI_COMPATIBLE_KEYS = ["NAN_API_KEY", "HELMCODE_API_NAN", "HELMCODE_API_KEY"];
+
+/** Key requirement for a `nan/*` or `helmcode/*` model on pi/opencode, else null. */
+function openAICompatibleKeyRequirement(model: string): { ok: boolean; message: string } | null {
+  if (model.startsWith("nan/")) {
+    return {
+      ok: !!(process.env.NAN_API_KEY || process.env.HELMCODE_API_NAN),
+      message: "nan/* models require NAN_API_KEY or HELMCODE_API_NAN",
+    };
+  }
+  if (model.startsWith("helmcode/")) {
+    return {
+      ok: !!process.env.HELMCODE_API_KEY,
+      message: "helmcode/* models require HELMCODE_API_KEY",
+    };
+  }
+  return null;
+}
+
 const PROVIDER_CREDENTIAL_KEYS = {
   claude: { keys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"], fallbackKeys: [] },
   codex: { keys: ["CODEX_OAUTH", "OPENAI_API_KEY"], fallbackKeys: [] },
   pi: {
-    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
+    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", ...OPENAI_COMPATIBLE_KEYS],
     fallbackKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   },
   opencode: {
-    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
+    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", ...OPENAI_COMPATIBLE_KEYS],
     fallbackKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   },
   dsh: {
@@ -130,7 +150,13 @@ function workerEnv(
 }
 
 function requireCredential(provider: string): void {
-  if (provider === "claude") {
+  const directKey =
+    provider === "pi" || provider === "opencode"
+      ? openAICompatibleKeyRequirement(modelFor(provider))
+      : null;
+  if (directKey) {
+    expect(directKey.ok, directKey.message);
+  } else if (provider === "claude") {
     expect(
       process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY,
       "Claude requires CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY",

@@ -14,7 +14,18 @@ export const CREDENTIAL_POOL_VARS = [
   "AMP_API_KEY",
   "CURSOR_API_KEY",
   "XAI_API_KEY",
+  "NAN_API_KEY",
+  "HELMCODE_API_KEY",
 ] as const;
+
+/**
+ * Env var names that can carry a NaN (nan.builders) key. `NAN_API_KEY` is the
+ * canonical name (models.dev, opencode's built-in provider);
+ * `HELMCODE_API_NAN` is an alias some deployments already store. The runner
+ * copies the alias into `NAN_API_KEY` per task (`fetchResolvedEnv`), so only
+ * surfaces that read `process.env` or config rows directly need both names.
+ */
+export const NAN_KEY_VARS = ["NAN_API_KEY", "HELMCODE_API_NAN"] as const;
 
 /**
  * Which credential env vars are relevant for each harness provider. The
@@ -76,6 +87,10 @@ export function getModelAwareCredentialVars(provider: string, model?: string): r
     return model.startsWith("openrouter/") ? ["OPENROUTER_API_KEY"] : ["XAI_API_KEY"];
   }
   if (!SLASH_MODEL_PROVIDERS.has(provider) || !model) return base;
+  // Direct OpenAI-compatible providers own their key: `nan/<id>` and
+  // `helmcode/<id>` never pool an OpenRouter or Anthropic key.
+  if (model.startsWith("nan/")) return ["NAN_API_KEY"];
+  if (model.startsWith("helmcode/")) return ["HELMCODE_API_KEY"];
   if (model.includes("/")) {
     return base.filter((v) => v !== "OPENAI_API_KEY");
   }
@@ -96,6 +111,9 @@ export function deriveProviderFromKeyType(keyType: string): string {
     case "ANTHROPIC_API_KEY":
       return "claude";
     case "OPENROUTER_API_KEY":
+    case "NAN_API_KEY":
+    case "HELMCODE_API_NAN":
+    case "HELMCODE_API_KEY":
       return "pi";
     case "OPENAI_API_KEY":
     case "CODEX_OAUTH":
@@ -313,19 +331,29 @@ export function validateClaudeCredentials(env: Record<string, string | undefined
 
 /**
  * Validate that at least one opencode credential is available.
- * Priority: OPENROUTER_API_KEY → ANTHROPIC_API_KEY → OPENAI_API_KEY → ~/.local/share/opencode/auth.json.
+ * Priority: OPENROUTER_API_KEY → ANTHROPIC_API_KEY → OPENAI_API_KEY →
+ * NAN_API_KEY (or its HELMCODE_API_NAN alias) → HELMCODE_API_KEY →
+ * ~/.local/share/opencode/auth.json.
  * Returns the credential type found, or throws if none are available.
  */
 export function validateOpencodeCredentials(
   env: Record<string, string | undefined>,
-): "openrouter_api_key" | "anthropic_api_key" | "openai_api_key" | "auth_file" {
+):
+  | "openrouter_api_key"
+  | "anthropic_api_key"
+  | "openai_api_key"
+  | "nan_api_key"
+  | "helmcode_api_key"
+  | "auth_file" {
   if (env.OPENROUTER_API_KEY) return "openrouter_api_key";
   if (env.ANTHROPIC_API_KEY) return "anthropic_api_key";
   if (env.OPENAI_API_KEY) return "openai_api_key";
+  if (NAN_KEY_VARS.some((name) => env[name])) return "nan_api_key";
+  if (env.HELMCODE_API_KEY) return "helmcode_api_key";
   const authFile = `${process.env.HOME ?? "/root"}/.local/share/opencode/auth.json`;
   if (existsSync(authFile)) return "auth_file";
   throw new Error(
-    "No opencode credentials found. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or provide ~/.local/share/opencode/auth.json.",
+    "No opencode credentials found. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, NAN_API_KEY (or HELMCODE_API_NAN), HELMCODE_API_KEY, or provide ~/.local/share/opencode/auth.json.",
   );
 }
 

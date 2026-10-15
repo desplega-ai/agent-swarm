@@ -43,7 +43,7 @@ type ProviderStateKey =
   | "awsProfile";
 
 const ACCEPTED_CREDENTIALS =
-  "Set one of: CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (Claude Code); OPENAI_API_KEY (OpenAI); OPENROUTER_API_KEY (OpenRouter); or AWS_REGION plus AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE and a Bedrock MODEL_OVERRIDE.";
+  "Set one of: CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (Claude Code); OPENAI_API_KEY (OpenAI); OPENROUTER_API_KEY (OpenRouter); or AWS_REGION plus AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE and a Bedrock MODEL_OVERRIDE. NaN (NAN_API_KEY or HELMCODE_API_NAN) and Helmcode (HELMCODE_API_KEY) keys for pi/opencode are added from the dashboard.";
 
 const DEFERRED_CREDENTIAL_LABEL = "no credential yet";
 

@@ -77,6 +77,20 @@ describe("scrubSecrets — env-based replacement", () => {
     expect(out).toBe("key=[REDACTED:FOO_SERVICE_API_KEY] tail");
   });
 
+  test("redacts NaN and Helmcode keys, including the suffix-less HELMCODE_API_NAN alias", () => {
+    const values = {
+      NAN_API_KEY: `example-nan-${randomToken(24)}`,
+      HELMCODE_API_NAN: `example-nanalias-${randomToken(24)}`,
+      HELMCODE_API_KEY: `example-helm-${randomToken(24)}`,
+    };
+    for (const [name, value] of Object.entries(values)) process.env[name] = value;
+    refreshSecretScrubberCache();
+    for (const [name, value] of Object.entries(values)) {
+      expect(isSensitiveKey(name)).toBe(true);
+      expect(scrubSecrets(`Bearer ${value} tail`)).toBe(`Bearer [REDACTED:${name}] tail`);
+    }
+  });
+
   test("redacts any key with _TOKEN suffix", () => {
     process.env.WEIRD_SERVICE_TOKEN = "example-weirdserviceTOKENvalue_1234567890";
     refreshSecretScrubberCache();
