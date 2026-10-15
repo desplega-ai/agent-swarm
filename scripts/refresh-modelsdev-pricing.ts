@@ -44,9 +44,21 @@ interface ModelEntry {
 
 interface ProviderEntry {
   models?: Record<string, ModelEntry>;
+  [key: string]: unknown;
 }
 
 type Cache = Record<string, ProviderEntry>;
+
+/**
+ * Empty provider section for a provider models.dev no longer lists (or never
+ * listed, like the hand-written `helmcode` section). Keeps the previous
+ * snapshot's metadata (`id`, `name`, `api`, `env`, `npm`, `doc`) so a restored
+ * provider is not reduced to a bare `models` map.
+ */
+function restoredProviderShell(prevEntry: ProviderEntry | undefined): ProviderEntry {
+  const { models: _models, ...meta } = prevEntry ?? {};
+  return { ...meta, models: {} };
+}
 
 function loadCurrent(): Cache | null {
   try {
@@ -125,7 +137,7 @@ function applyPinnedEntries(prev: Cache | null, next: Cache): void {
       );
     }
 
-    next[provider] ??= {};
+    next[provider] ??= restoredProviderShell(prev[provider]);
     next[provider].models ??= {};
     next[provider].models[modelId] = pinnedEntry;
   }
@@ -145,7 +157,7 @@ export function carryForwardDelistedModels(prev: Cache | null, next: Cache): num
   for (const [provider, block] of Object.entries(prev)) {
     for (const [id, entry] of Object.entries(block?.models ?? {})) {
       if (next[provider]?.models?.[id]) continue;
-      next[provider] ??= {};
+      next[provider] ??= restoredProviderShell(block);
       next[provider].models ??= {};
       next[provider].models[id] = entry;
       carried += 1;

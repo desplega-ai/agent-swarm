@@ -34,6 +34,23 @@ describe("carryForwardDelistedModels", () => {
     expect(next.legacyprov?.models?.m1).toEqual({ id: "m1" });
   });
 
+  test("a restored provider keeps its metadata, not just the models map", () => {
+    // The hand-written `helmcode` section is never on models.dev: a refresh
+    // must not reduce it to `{ models }` and drop `env` / `api` / `name`.
+    const prev = {
+      helmcode: {
+        id: "helmcode",
+        name: "Helmcode",
+        api: "https://api.helmcode.com/v1",
+        env: ["HELMCODE_API_KEY"],
+        models: { "glm5.3": { id: "glm5.3" } },
+      },
+    };
+    const next: Record<string, { models?: Record<string, { id?: string }> }> = {};
+    expect(carryForwardDelistedModels(prev, next)).toBe(1);
+    expect(next.helmcode).toEqual(prev.helmcode);
+  });
+
   test("no previous snapshot or empty model blocks carry nothing", () => {
     expect(carryForwardDelistedModels(null, {})).toBe(0);
     expect(carryForwardDelistedModels({ p: {} }, { p: { models: {} } })).toBe(0);

@@ -86,7 +86,7 @@ export const registerModelCatalogOverlayUpsertTool = (server: McpServer) => {
           .string()
           .min(1)
           .describe(
-            "models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode.",
+            "models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, nan, helmcode.",
           ),
         modelId: z
           .string()

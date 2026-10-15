@@ -22,6 +22,8 @@ export const CATALOG_PROVIDER_IDS = [
   "openai",
   "amazon-bedrock",
   "opencode",
+  "nan",
+  "helmcode",
 ] as const;
 
 export type CatalogProviderId = (typeof CATALOG_PROVIDER_IDS)[number];
@@ -49,6 +51,14 @@ export const PINNED_MODELSDEV_ENTRIES = [
   "openai/gpt-5.1-codex-max",
   "openai/gpt-5.1-codex-mini",
   "openai/gpt-5.2-codex",
+  // Not on models.dev; hand-written `helmcode` section copied from Helmcode's
+  // own opencode/pi blocks (helmcode.com/docs), 2026-10-15. Pinning keeps the
+  // section through snapshot refreshes and the live catalog.
+  "helmcode/deepseek-v4-flash",
+  "helmcode/glm5.3",
+  "helmcode/glm5.3-flash",
+  "helmcode/qwen3.6",
+  "helmcode/gemma4",
 ] as const;
 
 export interface CatalogReasoningOption {
@@ -158,7 +168,12 @@ function mergePinnedEntries(catalog: ModelsCatalog): void {
     if (catalog[providerId]?.models[modelId]) continue;
     const pinned = snapshot[providerId]?.models[modelId];
     if (!pinned) continue;
-    catalog[providerId] ??= { id: providerId, models: {} };
+    const snapshotProvider = snapshot[providerId];
+    catalog[providerId] ??= {
+      id: snapshotProvider?.id ?? providerId,
+      ...(snapshotProvider?.name !== undefined ? { name: snapshotProvider.name } : {}),
+      models: {},
+    };
     catalog[providerId].models[modelId] = pinned;
   }
 }
