@@ -20,6 +20,9 @@ const PAY_AS_YOU_GO_LABELS: Record<string, string> = {
   OPENAI_API_KEY: "OpenAI API key",
   OPENROUTER_API_KEY: "OpenRouter API key",
   DEEPSEEK_API_KEY: "DeepSeek API key",
+  NAN_API_KEY: "NaN API key",
+  HELMCODE_API_NAN: "NaN API key",
+  HELMCODE_API_KEY: "Helmcode API key",
   DEVIN_API_KEY: "Devin API key",
 };
 

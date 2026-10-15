@@ -43,6 +43,7 @@ import { SPECIAL_FLOWS } from "@/components/integrations/special-flows";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -185,7 +186,10 @@ function IntegrationDetailInner({
   envPresence,
 }: InnerProps) {
   const Icon = resolveIcon(def.iconKey);
-  const logo = def.logoSrc ? (
+  // A provider glyph (`ProviderIcon`) wins, then a logo file, then the lucide icon.
+  const logo = def.providerIconKey ? (
+    <ProviderIcon provider={def.providerIconKey} className="h-6 w-6 text-foreground opacity-100" />
+  ) : def.logoSrc ? (
     <BrandLogo src={def.logoSrc} className="size-6 text-foreground" />
   ) : (
     <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />

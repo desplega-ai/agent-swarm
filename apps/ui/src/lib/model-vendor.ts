@@ -4,7 +4,7 @@ import { getAgentModelPresentation } from "./agents-list-model-display";
 /**
  * Who makes a model, read from its id, so a model shows its maker's mark
  * (Anthropic, OpenAI, DeepSeek, Z.ai, ...) and not the route it runs through
- * (OpenRouter). The logos live in `public/provider-logos/`.
+ * (OpenRouter, NaN, Helmcode). The logos live in `public/provider-logos/`.
  */
 export type ModelVendor = "anthropic" | "openai" | "deepseek" | "zai" | "google" | "xai" | "amp";
 
@@ -22,19 +22,21 @@ const VENDOR_PATTERNS: ReadonlyArray<[RegExp, ModelVendor]> = [
   [/^(anthropic\/|claude|opus|sonnet|haiku|fable)/, "anthropic"],
   [/^(openai\/|gpt-|chatgpt-|o\d|text-embedding-)/, "openai"],
   [/^(deepseek\/|deepseek-)/, "deepseek"],
-  [/^(z-ai\/|glm-)/, "zai"],
-  [/^(google\/|gemini)/, "google"],
+  // NaN and Helmcode spell GLM without the dash (`glm5.3-flash`).
+  [/^(z-ai\/|glm-|glm\d)/, "zai"],
+  [/^(google\/|gemini|gemma)/, "google"],
   [/^(x-ai\/|grok)/, "xai"],
   // An Amp mode (`AMP_MODES`) lets Amp pick the model, so it carries Amp's mark.
   [/^(low|medium|high|ultra)$/, "amp"],
 ];
 
 export function modelVendor(model: string | null | undefined): ModelVendor | null {
-  // A router prefix says how the model is reached, not who makes it.
+  // A router prefix says how the model is reached, not who makes it. NaN and
+  // Helmcode are routes too: they get no maker mark of their own.
   const id = (model ?? "")
     .trim()
     .toLowerCase()
-    .replace(/^openrouter\//, "");
+    .replace(/^(openrouter|nan|helmcode)\//, "");
   if (!id) return null;
   return VENDOR_PATTERNS.find(([pattern]) => pattern.test(id))?.[1] ?? null;
 }

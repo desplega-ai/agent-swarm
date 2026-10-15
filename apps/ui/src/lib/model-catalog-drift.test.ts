@@ -89,6 +89,37 @@ describe("vendor patterns against the bundled catalog", () => {
   });
 });
 
+describe("NaN and Helmcode routes against the bundled catalog", () => {
+  for (const [providerId, label] of [
+    ["nan", "NaN"],
+    ["helmcode", "Helmcode"],
+  ] as const) {
+    test(`the snapshot has a ${providerId} section`, () => {
+      expect(Object.keys(snapshot[providerId]?.models ?? {}).length).toBeGreaterThan(0);
+    });
+
+    for (const harness of ["pi", "opencode"] as const) {
+      test(`${harness} lists every ${providerId} snapshot model under ${label}`, () => {
+        const group = modelGroupsForHarness(harness, [], {}, null, null).find(
+          (g) => g.provider === label,
+        );
+        const ids = Object.keys(snapshot[providerId]?.models ?? {}).map(
+          (id) => `${providerId}/${id}`,
+        );
+        expect(group?.models.map((m) => m.id).sort()).toEqual(ids.sort());
+        expect(group?.models.every((m) => m.providerId === providerId)).toBe(true);
+      });
+    }
+
+    test(`every ${providerId} route resolves to a known model with its glyph`, () => {
+      const stray = Object.keys(snapshot[providerId]?.models ?? {}).filter(
+        (id) => findKnownModel(`${providerId}/${id}`)?.providerId !== providerId,
+      );
+      expect(stray).toEqual([]);
+    });
+  }
+});
+
 describe("the live catalog wins over the bundled snapshot", () => {
   const liveAnthropic = live({
     anthropic: {

@@ -3,6 +3,7 @@ import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-sec
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SecretKeyField, TextField } from "./fields";
 import { type AiCardProps, baseUrlError, globalConfigValue } from "./model";
@@ -13,6 +14,10 @@ type OpenMode = "openrouter" | "gateway";
 const OR_KEY = "OPENROUTER_API_KEY";
 const BASE_URL = "OPENROUTER_BASE_URL";
 const DS_KEY = "DEEPSEEK_API_KEY";
+const NAN_KEY = "NAN_API_KEY";
+// The runner reads this alias as NAN_API_KEY when only it is set.
+const NAN_ALIAS = "HELMCODE_API_NAN";
+const HELMCODE_KEY = "HELMCODE_API_KEY";
 
 // Gateway keys have no fixed shape: any value of 16+ characters.
 const GATEWAY_RULE: SecretRule = {};
@@ -37,6 +42,7 @@ function OpenHarnessIcon() {
 
 export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardProps) {
   const { save, isSaved } = useSetupSave(presence);
+  const nanSaved = isSaved(NAN_KEY) || isSaved(NAN_ALIAS);
   const [mode, setMode] = useState<OpenMode | null>(null);
 
   const gatewaySet = Boolean(presence[BASE_URL]);
@@ -75,7 +81,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
       icon={<OpenHarnessIcon />}
       title="Open harnesses: opencode, pi, DeepSeek"
       subtitle="Model-agnostic harnesses. One OpenRouter key runs all three."
-      saved={isSaved(OR_KEY) || isSaved(DS_KEY)}
+      saved={isSaved(OR_KEY) || isSaved(DS_KEY) || nanSaved || isSaved(HELMCODE_KEY)}
     >
       <Tabs value={activeMode} onValueChange={(v) => setMode(v as OpenMode)}>
         <TabsList>
@@ -124,6 +130,45 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
             onSave={async (value) => {
               await save([{ key: DS_KEY, value, isSecret: true }]);
               onSaved("deepseek");
+            }}
+          />
+        </div>
+      </CollapsibleSection>
+
+      {/* No onboarding method names these routes: a verified pi/opencode worker completes the step. */}
+      <CollapsibleSection title="NaN and Helmcode keys">
+        <div className="space-y-3 pt-1.5">
+          <SecretKeyField
+            id="setup-ai-nan-key"
+            envKey={NAN_KEY}
+            placeholder="sk-..."
+            saved={nanSaved}
+            rule={GATEWAY_RULE}
+            info={
+              <>
+                Runs <code className="font-mono">nan/&lt;model&gt;</code> on pi and opencode.
+              </>
+            }
+            logo={<ProviderIcon provider="nan" className="size-3.5" />}
+            onSave={async (value) => {
+              await save([{ key: NAN_KEY, value, isSecret: true }]);
+            }}
+          />
+          <SecretKeyField
+            id="setup-ai-helmcode-key"
+            envKey={HELMCODE_KEY}
+            placeholder="sk-..."
+            saved={isSaved(HELMCODE_KEY)}
+            rule={GATEWAY_RULE}
+            info={
+              <>
+                Runs <code className="font-mono">helmcode/&lt;model&gt;</code> on pi and opencode.
+                Comma-separate several org keys to pool their concurrency.
+              </>
+            }
+            logo={<ProviderIcon provider="helmcode" className="size-3.5" />}
+            onSave={async (value) => {
+              await save([{ key: HELMCODE_KEY, value, isSecret: true }]);
             }}
           />
         </div>

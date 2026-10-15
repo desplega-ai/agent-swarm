@@ -10,6 +10,8 @@
 //
 // See plan: thoughts/taras/plans/2026-04-21-integrations-ui.md (Phase 1).
 
+import type { ProviderIconKey } from "./agent-runtime-models";
+
 export type IntegrationFieldType = "text" | "password" | "textarea" | "select" | "boolean";
 
 export interface IntegrationField {
@@ -113,6 +115,11 @@ export interface IntegrationDef {
   iconKey: string;
   /** Optional brand/logo asset path. Falls back to iconKey when unset. */
   logoSrc?: string;
+  /**
+   * Optional `ProviderIcon` glyph (an original drawing, not a vendor mark).
+   * Wins over `logoSrc` and `iconKey` when set.
+   */
+  providerIconKey?: ProviderIconKey;
   /** External docs URL or in-repo docs path. */
   docsUrl: string;
   fields: IntegrationField[];
@@ -825,6 +832,59 @@ export const INTEGRATIONS: IntegrationDef[] = [
         helpText: "OpenRouter API key. Comma-separate multiple keys to form a credential pool.",
         credentialPool: true,
         affectsRestart: true,
+      },
+    ],
+  },
+
+  // ------------------------------------------------------------------- NaN
+  // No restart: pi and opencode read these keys from the per-task env the
+  // runner fetches before each task, so a saved key applies on the next task.
+  {
+    id: "nan",
+    name: "NaN",
+    description:
+      "Open-weight models such as GLM, Qwen and DeepSeek for the pi and opencode harnesses.",
+    category: "llm",
+    iconKey: "route",
+    providerIconKey: "nan",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
+    restartRequired: false,
+    fields: [
+      {
+        key: "NAN_API_KEY",
+        label: "API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        placeholder: "sk-...",
+        helpText:
+          "NaN API key for `nan/<model>` on pi and opencode. HELMCODE_API_NAN is accepted as an alias. Comma-separate multiple keys to form a credential pool.",
+        credentialPool: true,
+      },
+    ],
+  },
+
+  // -------------------------------------------------------------- Helmcode
+  {
+    id: "helmcode",
+    name: "Helmcode",
+    description: "Open-weight models through Helmcode for the pi and opencode harnesses.",
+    category: "llm",
+    iconKey: "route",
+    providerIconKey: "helmcode",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
+    restartRequired: false,
+    fields: [
+      {
+        key: "HELMCODE_API_KEY",
+        label: "API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        placeholder: "sk-...",
+        helpText:
+          "Helmcode API key for `helmcode/<model>` on pi and opencode. Each org key carries its own concurrency cap (5, 15 or 40): comma-separate several org keys to form a credential pool.",
+        credentialPool: true,
       },
     ],
   },

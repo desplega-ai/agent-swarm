@@ -58,7 +58,14 @@ export interface ModelOption {
   reasoningLevels?: ReadonlyArray<ReasoningEffortLevel>;
 }
 
-export type ProviderIconKey = "anthropic" | "openai" | "openrouter" | "amazon-bedrock" | "amp";
+export type ProviderIconKey =
+  | "anthropic"
+  | "openai"
+  | "openrouter"
+  | "amazon-bedrock"
+  | "amp"
+  | "nan"
+  | "helmcode";
 
 export interface ModelGroup {
   provider: string;
@@ -74,7 +81,13 @@ export interface ModelGroup {
   disabledReason?: string;
 }
 
-export type SnapshotProviderId = "openrouter" | "anthropic" | "openai" | "amazon-bedrock";
+export type SnapshotProviderId =
+  | "openrouter"
+  | "anthropic"
+  | "openai"
+  | "amazon-bedrock"
+  | "nan"
+  | "helmcode";
 
 type CatalogProviderId = SnapshotProviderId | "opencode" | "deepseek";
 
@@ -353,7 +366,13 @@ const DIRECT_HARNESS_ACCEPTED_KEYS: Record<"claude" | "codex", string[]> = {
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
 };
 
-const SNAPSHOT_ORDER: SnapshotProviderId[] = ["openrouter", "anthropic", "openai"];
+const SNAPSHOT_ORDER: SnapshotProviderId[] = [
+  "openrouter",
+  "nan",
+  "helmcode",
+  "anthropic",
+  "openai",
+];
 
 /** Bedrock-specific snapshot ID — kept separate from SNAPSHOT_ORDER since it is
  *  only shown for the pi harness, not for opencode. */
@@ -370,6 +389,8 @@ const SNAPSHOT_META: Record<
   },
   anthropic: { label: "Anthropic", requiredKey: "ANTHROPIC_API_KEY", iconKey: "anthropic" },
   openai: { label: "OpenAI", requiredKey: "OPENAI_API_KEY", iconKey: "openai" },
+  nan: { label: "NaN", requiredKey: "NAN_API_KEY", iconKey: "nan" },
+  helmcode: { label: "Helmcode", requiredKey: "HELMCODE_API_KEY", iconKey: "helmcode" },
   /**
    * Amazon Bedrock — credentials come from the AWS SDK default chain, not a
    * single env var. `requiredKey` is a human label (not an env key); the group's
@@ -414,13 +435,24 @@ function hasCodexOAuthSlot(configs: SwarmConfig[] | undefined): boolean {
   return Boolean(configs?.some((c) => CODEX_OAUTH_SLOT_RE.test(c.key) && c.value !== ""));
 }
 
+/**
+ * Other names a credential is accepted under. The runner copies
+ * `HELMCODE_API_NAN` into `NAN_API_KEY` when only the alias is set
+ * (`NAN_KEY_VARS` in `src/utils/credentials.ts`), so the alias unlocks NaN.
+ */
+const KEY_ALIASES: Partial<Record<string, readonly string[]>> = {
+  NAN_API_KEY: ["HELMCODE_API_NAN"],
+};
+
 export function hasRuntimeCredential(
   key: string,
   configs: SwarmConfig[] | undefined,
   envPresence: Record<string, boolean> | undefined,
 ): boolean {
-  if (envPresence?.[key]) return true;
-  if (hasConfigKey(configs, key)) return true;
+  for (const name of [key, ...(KEY_ALIASES[key] ?? [])]) {
+    if (envPresence?.[name]) return true;
+    if (hasConfigKey(configs, name)) return true;
+  }
   if (key === "CODEX_OAUTH") return hasCodexOAuthSlot(configs);
   return false;
 }
@@ -945,6 +977,8 @@ function liveModelOption(
     openai: "openai",
     openrouter: "openrouter",
     "amazon-bedrock": "amazon-bedrock",
+    nan: "nan",
+    helmcode: "helmcode",
   };
   return {
     id,

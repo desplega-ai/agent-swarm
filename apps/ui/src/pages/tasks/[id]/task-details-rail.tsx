@@ -48,6 +48,9 @@ const API_KEY_LABELS: Record<string, string> = {
   CLAUDE_CODE_OAUTH_TOKEN: "OAuth",
   ANTHROPIC_API_KEY: "Anthropic",
   OPENROUTER_API_KEY: "OpenRouter",
+  NAN_API_KEY: "NaN",
+  HELMCODE_API_NAN: "NaN",
+  HELMCODE_API_KEY: "Helmcode",
 };
 
 /** The first time the task went to `in_progress` (a resume does not count). */

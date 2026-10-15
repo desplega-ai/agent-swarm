@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/select";
 import { StatPanel } from "@/components/ui/stat-panel";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import type { ProviderIconKey } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { cn, formatSmartTime } from "@/lib/utils";
 
@@ -73,7 +74,7 @@ function KeyStatusBadge({ status }: { status: ApiKeyStatusType }) {
   );
 }
 
-type KeyTypeMeta = { label: string; icon: "anthropic" | "openai" | "openrouter" | null };
+type KeyTypeMeta = { label: string; icon: ProviderIconKey | null };
 
 const KEY_TYPE_META: Record<string, KeyTypeMeta> = {
   ANTHROPIC_API_KEY: { label: "Anthropic API Key", icon: "anthropic" },
@@ -81,6 +82,10 @@ const KEY_TYPE_META: Record<string, KeyTypeMeta> = {
   OPENROUTER_API_KEY: { label: "OpenRouter API Key", icon: "openrouter" },
   OPENAI_API_KEY: { label: "OpenAI API Key", icon: "openai" },
   CODEX_OAUTH: { label: "Codex OAuth", icon: "openai" },
+  NAN_API_KEY: { label: "NaN API Key", icon: "nan" },
+  // The alias the runner copies into NAN_API_KEY when only it is set.
+  HELMCODE_API_NAN: { label: "NaN API Key", icon: "nan" },
+  HELMCODE_API_KEY: { label: "Helmcode API Key", icon: "helmcode" },
 };
 
 function getKeyTypeMeta(keyType: string): KeyTypeMeta {
