@@ -32,6 +32,27 @@ export interface OpencodeSwarmPluginOptions {
   onOpenRouterResponse?: (response: Response) => void;
 }
 
+/** Keys OpenCode sets on each shell call, on top of its base env. */
+const OPENCODE_SHELL_ENV_KEYS = ["TERM", "OPENCODE_TERMINAL"] as const;
+
+/**
+ * Rewrites one OpenCode shell call's env, in place, to the session's own env
+ * plus the keys OpenCode set for the call. Nothing else from the process env
+ * gets through.
+ */
+export function applyOpencodeShellEnv(
+  callEnv: Record<string, string | undefined>,
+  sessionEnv: Record<string, string | undefined>,
+): void {
+  const keep = new Set<string>(OPENCODE_SHELL_ENV_KEYS);
+  for (const key of Object.keys(callEnv)) {
+    if (!keep.has(key)) delete callEnv[key];
+  }
+  for (const [key, value] of Object.entries(sessionEnv)) {
+    if (value !== undefined && !keep.has(key)) callEnv[key] = value;
+  }
+}
+
 export function createOpencodeSwarmPlugin(
   config: SwarmHooksConfig,
   options: OpencodeSwarmPluginOptions = {},
@@ -40,6 +61,16 @@ export function createOpencodeSwarmPlugin(
     id: "agent-swarm",
     async setup(ctx) {
       options.onToolRegistry?.(() => ctx.tool.list());
+
+      // OpenCode runs in-process, so its shell tool spawns with process.env,
+      // which every concurrent session shares and which never sees this
+      // task's env (rows admitted or withheld by fetchResolvedEnv after boot).
+      const sessionEnv = config.env;
+      if (sessionEnv) {
+        await ctx.shell.hook("create.before", (event) => {
+          applyOpencodeShellEnv(event.env, sessionEnv);
+        });
+      }
 
       // A throw blocks the tool; OpenCode hands the message back to the model.
       await ctx.tool.hook("execute.before", async (event) => {
