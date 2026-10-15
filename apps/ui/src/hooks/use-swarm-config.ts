@@ -154,6 +154,7 @@ export interface ConfigFormData {
   value: string;
   isSecret: boolean;
   description: string;
+  exportToEnv: boolean;
 }
 
 export const emptyConfigForm: ConfigFormData = {
@@ -163,6 +164,7 @@ export const emptyConfigForm: ConfigFormData = {
   value: "",
   isSecret: false,
   description: "",
+  exportToEnv: true,
 };
 
 type SwarmConfigScopeFilter = SwarmConfigScope | "all";
@@ -239,6 +241,7 @@ export function useSwarmConfigTable() {
       value: data.value,
       isSecret: data.isSecret,
       description: data.description || null,
+      exportToEnv: data.exportToEnv,
     });
     setEditEntry(null);
   }

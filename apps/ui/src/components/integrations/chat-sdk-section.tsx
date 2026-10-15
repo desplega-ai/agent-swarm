@@ -183,8 +183,9 @@ function ChatSdkForm({
     // Batch 1: the secret rows. CHAT_SDK_ADAPTERS references them, so it is
     // written only after every row is stored. On a failure the draft stays.
     if (built.secretRows.length > 0) {
+      // Server-only: the API reads bot tokens, agent shells never need them.
       const secrets = await upsert.mutateAsync(
-        built.secretRows.map((row) => ({ ...row, isSecret: true })),
+        built.secretRows.map((row) => ({ ...row, isSecret: true, exportToEnv: false })),
       );
       if (secrets.failureCount > 0) {
         setSaveError(`Secrets not saved, nothing else changed. ${batchErrorText(secrets.errors)}`);
@@ -207,10 +208,17 @@ function ChatSdkForm({
     }
     const settings = [
       ...(mergedJson !== undefined
-        ? [{ key: "CHAT_SDK_ADAPTERS", value: mergedJson, isSecret: false }]
+        ? [{ key: "CHAT_SDK_ADAPTERS", value: mergedJson, isSecret: false, exportToEnv: false }]
         : []),
       ...(enabled !== storedEnabled
-        ? [{ key: "CHAT_SDK_ENABLED", value: enabled ? "true" : "false", isSecret: false }]
+        ? [
+            {
+              key: "CHAT_SDK_ENABLED",
+              value: enabled ? "true" : "false",
+              isSecret: false,
+              exportToEnv: false,
+            },
+          ]
         : []),
     ];
     if (settings.length > 0) {

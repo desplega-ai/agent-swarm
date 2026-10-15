@@ -136,6 +136,12 @@ import {
   CODEX_AUTH_WATCH_NAMESPACE,
   codexAuthBenchMarkerKey,
 } from "../utils/codex-auth-failure";
+import {
+  defaultExportToEnv,
+  effectiveExportToEnv,
+  envExportRestrictedError,
+  isEnvExportRestrictedKey,
+} from "../utils/config-env-export";
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
@@ -6358,6 +6364,7 @@ type SwarmConfigRow = {
   createdAt: string;
   lastUpdatedAt: string;
   encrypted: number; // SQLite boolean: 0 = plaintext, 1 = AES-256-GCM ciphertext
+  exportToEnv?: number; // SQLite boolean; absent only on pre-215 test schemas
 };
 
 type SwarmConfigLookupRow = {
@@ -6386,6 +6393,7 @@ function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
       createdAt: row.createdAt,
       lastUpdatedAt: row.lastUpdatedAt,
       encrypted: isEncrypted,
+      exportToEnv: effectiveExportToEnv(row.key, row.exportToEnv !== 0),
     };
   }
 
@@ -6412,6 +6420,7 @@ function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     encrypted: isEncrypted,
+    exportToEnv: effectiveExportToEnv(row.key, row.exportToEnv !== 0),
   };
 }
 
@@ -6620,10 +6629,16 @@ export async function upsertSwarmConfig(data: {
   isSecret?: boolean;
   envPath?: string | null;
   description?: string | null;
+  /** Omitted: an update keeps the stored flag; an insert uses `defaultExportToEnv`. */
+  exportToEnv?: boolean;
 }): Promise<SwarmConfig> {
   if (isReservedConfigKey(data.key)) {
     throw reservedKeyError(data.key);
   }
+  if (data.exportToEnv === true && isEnvExportRestrictedKey(data.key)) {
+    throw new Error(envExportRestrictedError(data.key));
+  }
+  const restricted = isEnvExportRestrictedKey(data.key);
 
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
@@ -6657,17 +6672,30 @@ export async function upsertSwarmConfig(data: {
           );
 
     if (existing) {
+      // COALESCE keeps the stored flag when the caller did not send one.
       return await getDbClient().get<SwarmConfigRow>(
-        `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?
+        `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?,
+           exportToEnv = CASE WHEN ? THEN 0 ELSE COALESCE(?, exportToEnv) END
          WHERE id = ? RETURNING *`,
-        [storedValue, isSecret, envPath, description, encryptedFlag, now, existing.id],
+        [
+          storedValue,
+          isSecret,
+          envPath,
+          description,
+          encryptedFlag,
+          now,
+          restricted ? 1 : 0,
+          data.exportToEnv === undefined ? null : data.exportToEnv ? 1 : 0,
+          existing.id,
+        ],
       );
     }
 
     const id = crypto.randomUUID();
+    const exportToEnv = restricted ? 0 : (data.exportToEnv ?? defaultExportToEnv(data.key)) ? 1 : 0;
     return await getDbClient().get<SwarmConfigRow>(
-      `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         data.scope,
@@ -6680,6 +6708,7 @@ export async function upsertSwarmConfig(data: {
         now,
         now,
         encryptedFlag,
+        exportToEnv,
       ],
     );
   });

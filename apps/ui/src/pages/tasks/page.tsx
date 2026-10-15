@@ -529,7 +529,7 @@ export default function TasksPage() {
   // brings them back. Only applies before the first saved column choice.
   const tasksColumns = useTasksColumns({
     storageKey: "tasks-page",
-    defaultHiddenColumns: ["source", "effort", "deps", "tags"],
+    defaultHiddenColumns: ["source", "deps", "tags"],
   });
   const isMobile = useIsMobile();
 

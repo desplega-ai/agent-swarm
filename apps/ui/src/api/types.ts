@@ -390,7 +390,10 @@ export interface AgentTask {
   modelSource?: ModelSource;
   /** The `latest:` alias `resolvedModel` came from, when any. */
   modelAlias?: string;
+  /** Effort the task asked for; usually unset, the agent's setting applies. */
   effort?: ReasoningEffortLevel;
+  /** Effort the session ran at (task effort, else the agent's setting). */
+  resolvedEffort?: ReasoningEffortLevel;
   scheduleId?: string;
   parentTaskId?: string;
   dir?: string;
@@ -1342,6 +1345,8 @@ export interface SwarmConfig {
   // True when the row's value is stored as ciphertext server-side. Plaintext
   // rows return encrypted=false. Mirrors SwarmConfigSchema in src/types.ts.
   encrypted: boolean;
+  // Whether workers export this row into agent process env.
+  exportToEnv: boolean;
 }
 
 export interface SwarmConfigsResponse {

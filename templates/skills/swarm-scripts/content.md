@@ -102,6 +102,8 @@ export default async function main(args: { status?: string; limit?: number } | u
 
 ## Secrets
 
+A config row reaches your shell env only when its `exportToEnv` flag is on. If `$KEY` is empty in your shell but `get-config` or `list-config` shows the row marked `not in agent env`, the row stays server-side on purpose: do not copy the value into a file, an env var, or a command. Use it from a script instead, through one of the paths below. Harness, git, and agent-fs credentials stay exported. Keys only the API server reads (Slack app token and signing secret, GitHub App private key, webhook and OAuth client secrets) can never be exported. If a recipe genuinely needs the variable in a shell, ask the lead to turn `exportToEnv` on for that row (`set-config` with `exportToEnv: true`); it applies to your next task.
+
 Order of preference:
 
 1. A registered connection: `ctx.api.<slug>.<operationId>({ path, query, header, body })` (OpenAPI), `ctx.api.<slug>.graphql(query, variables)` (GraphQL), `ctx.mcp.<slug>.<toolName>(args)` (MCP, proxied server-side, returns the raw MCP envelope: read `res.structuredContent ?? res.content?.[0]?.text`). Credentials attach at egress. The script never sees them. OAuth tokens refresh on their own.

@@ -40,6 +40,7 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import { effectiveReasoningEffort } from "../providers/reasoning-effort.ts";
 import {
   createSkillInvokeTracker,
   isSkillLoaderCall,
@@ -48,6 +49,7 @@ import {
 } from "../providers/skill-invoke.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { WorkerRealtimeClient } from "../realtime/worker-client";
+import { resumedTaskModelSelection, type TaskModelPinFields } from "../tasks/model-pin.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import { mapTriggerSurface } from "../telemetry-context.ts";
 import {
@@ -66,6 +68,7 @@ import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { ensure, initialize } from "../utils/business-use";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
+import { isEnvExportRestrictedKey } from "../utils/config-env-export.ts";
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
@@ -835,6 +838,19 @@ const deploymentMemoryRaters = process.env.MEMORY_RATERS;
  */
 const rowOverriddenBootEnv = new Map<string, string | undefined>();
 
+let lastWithheldEnvKeys = "";
+
+/** Names only, and only when the set changes, so per-spawn reloads stay quiet. */
+function logWithheldEnvKeys(keys: string[]): void {
+  const summary = [...keys].sort().join(", ");
+  if (summary === lastWithheldEnvKeys) return;
+  lastWithheldEnvKeys = summary;
+  if (!summary) return;
+  console.log(
+    `[env-reload] Kept ${keys.length} config entries with exportToEnv=false out of the harness env: ${summary}`,
+  );
+}
+
 export async function fetchResolvedEnv(
   apiUrl: string,
   apiKey: string,
@@ -884,7 +900,12 @@ export async function fetchResolvedEnv(
         console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
       } else {
         const data = (await response.json()) as {
-          configs: Array<{ key: string; value: string; isSecret?: boolean }>;
+          configs: Array<{
+            key: string;
+            value: string;
+            isSecret?: boolean;
+            exportToEnv?: boolean;
+          }>;
         };
 
         // A deleted row restores the deployment value (including unset), while
@@ -903,7 +924,25 @@ export async function fetchResolvedEnv(
           scriptsOnlyConfigValue = data.configs.find(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
+          const withheldEnvKeys: string[] = [];
           for (const config of data.configs) {
+            // Every harness and its shell tool inherit this env. A row with
+            // exportToEnv=false stays out of it, and so does a copy of it in
+            // the base env (container env, or an older entrypoint's export).
+            // Checked before the masked-value fallback so a masked response
+            // can never keep a withheld boot value alive. An API without the
+            // field (pre-215) leaves it undefined, which keeps exporting.
+            if (config.exportToEnv === false || isEnvExportRestrictedKey(config.key)) {
+              if (config.isSecret) registerSensitiveKeyName(config.key);
+              delete env[config.key];
+              // Several adapters build the child env as
+              // `{ ...process.env, ...config.env }`, so a boot-time export
+              // revoked later must leave process.env too. It stays out until
+              // the worker restarts, even if the row is deleted afterwards.
+              if (baseEnv === process.env) delete process.env[config.key];
+              withheldEnvKeys.push(config.key);
+              continue;
+            }
             if (config.isSecret && config.value === MASKED_SECRET_VALUE) {
               skippedSecretKeys.push(config.key);
               continue;
@@ -946,6 +985,7 @@ export async function fetchResolvedEnv(
               scrubSecrets(`[env-reload] Skipped masked secrets: ${skippedSecretKeys.join(", ")}`),
             );
           }
+          logWithheldEnvKeys(withheldEnvKeys);
           console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
         }
         // Non-secret stand-in for the pool rows skipped above, so credential
@@ -2788,10 +2828,13 @@ async function saveProviderSessionId(
   model?: string,
   harnessVariant?: string,
   harnessVariantMeta?: Record<string, unknown>,
+  effort?: ReasoningEffort | null,
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const body: Record<string, unknown> = { claudeSessionId };
+  // Devin's body variant has no effort field.
+  if (effort !== undefined && provider !== "devin") body.effort = effort;
   if (provider !== undefined) body.provider = provider;
   if (providerMeta !== undefined) body.providerMeta = providerMeta;
   if (model !== undefined && model !== "") body.model = model;
@@ -4111,6 +4154,9 @@ async function spawnProviderProcess(
   }
   if (spawnModel.warning) console.warn(spawnModel.warning);
   const model = spawnModel.model;
+  // Recorded on the task at session start, like the model: what the adapter
+  // applies, not just what was asked for.
+  const sessionEffort = effectiveReasoningEffort(adapter.name, model, reasoningEffortOverride);
 
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
   // can pass codexSlot through and the adapter writes token refreshes back to
@@ -4414,6 +4460,7 @@ async function spawnProviderProcess(
               model,
               event.harnessVariant,
               event.harnessVariantMeta,
+              sessionEffort,
             ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
           } else {
             // Pool task: save provider session ID on active session so it can be
@@ -6689,10 +6736,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               runnerSessionId: resumeRunnerSessionId,
               iteration,
               taskId: task.id,
-              model: (task as { model?: string }).model,
+              // Only the task's own pin carries over. `model` and the claim
+              // record describe the run before the pause; without a pin the
+              // resumed run resolves from the agent's current config.
+              ...resumedTaskModelSelection(task as TaskModelPinFields),
               modelTier: (task as { modelTier?: string }).modelTier,
-              resolvedModel: (task as { resolvedModel?: string }).resolvedModel,
-              modelSource: (task as { modelSource?: string }).modelSource,
               effort: (task as { effort?: ReasoningEffort }).effort,
               harnessProvider: state.harnessProvider,
               cwd: resumeCwd,

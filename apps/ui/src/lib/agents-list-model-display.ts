@@ -12,7 +12,7 @@ export interface AgentModelDisplay {
   lastUsed: string | null;
   primary: string | null;
   diverged: boolean;
-  /** Last-reported reasoning/effort level (`cred_status.latestModel.reasoningEffort`). Absent when unset (harness-native default). */
+  /** Effort the next task runs at: the saved REASONING_EFFORT_OVERRIDE, else the last-reported level. Absent when unset (harness default). */
   reasoningEffort?: ReasoningEffortLevel;
 }
 

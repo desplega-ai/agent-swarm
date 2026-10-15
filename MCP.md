@@ -485,7 +485,7 @@ Capability: `config` (enabled by default)
 
 **Set Config**
 
-Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use scope='global' for server-wide settings, 'agent' for agent-specific, or 'repo' for repo-specific. Set isSecret=true to mask the value in API responses.
+Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use scope='global' for server-wide settings, 'agent' for agent-specific, or 'repo' for repo-specific. Set isSecret=true to mask the value in API responses. Set exportToEnv=false to keep the row out of agent process env (agents then reach it through a connection or script credential binding).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -496,6 +496,7 @@ Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use
 | `isSecret` | `boolean` | No | - | If true, value is masked in API responses (default: false). |
 | `envPath` | `string` | No | - | Optional: file path to write the value as KEY=VALUE in a .env file. |
 | `description` | `string` | No | - | Optional human-readable description of this config entry. |
+| `exportToEnv` | `boolean` | No | - | Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. |
 
 ### get-config
 

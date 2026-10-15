@@ -399,6 +399,9 @@
     },
     "modelAlias": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "resolvedEffort": {
+      "exempt": "enum"
     }
   },
   "agentmail_inbox_mappings": {

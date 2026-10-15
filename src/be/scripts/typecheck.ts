@@ -281,7 +281,7 @@ export interface SwarmSdk {
   task_action(args: Record<string, unknown>): Promise<unknown>;
 
   // --- write: config ---
-  config_set(args: { key: string; value: unknown; scope?: "global" | "agent" | "repo"; scopeId?: string; isSecret?: boolean }): Promise<unknown>;
+  config_set(args: { key: string; value: unknown; scope?: "global" | "agent" | "repo"; scopeId?: string; isSecret?: boolean; exportToEnv?: boolean }): Promise<unknown>;
   config_delete(args: { id: string }): Promise<unknown>;
 
   // --- write: model catalog ---

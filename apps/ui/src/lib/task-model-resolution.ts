@@ -21,6 +21,16 @@ type TaskModelFields = Pick<
 >;
 
 /**
+ * The effort a task ran at, else the effort it asked for. Undefined on rows
+ * from before effort was recorded, and when the harness default applied.
+ */
+export function taskDisplayEffort(
+  task: Pick<AgentTask, "effort" | "resolvedEffort">,
+): AgentTask["effort"] {
+  return task.resolvedEffort ?? task.effort;
+}
+
+/**
  * The model a task ran (or will run) on: the server's claim-time resolution
  * when there is one, else what was requested. Null when the task named neither
  * a model nor a tier.

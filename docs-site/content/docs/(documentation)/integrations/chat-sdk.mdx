@@ -54,6 +54,7 @@ A value in `CHAT_SDK_ADAPTERS` can reference another config key as `{"$config": 
 - The API resolves references at boot from the global swarm config rows, secrets included.
 - It never reads a reference from the process environment.
 - It rejects reserved keys such as `API_KEY`.
+- `CHAT_SDK_*` rows are server-only by default (`exportToEnv: false`): the API reads them, agent shells never see the bot tokens.
 - A missing row keeps that adapter off, with the status `incomplete` and the row name in the error. The other adapters start.
 
 ### Switching an adapter off

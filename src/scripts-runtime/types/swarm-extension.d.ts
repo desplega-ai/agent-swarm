@@ -193,6 +193,7 @@ declare module "swarm-extension" {
     resolvedModel?: string | undefined;
     modelSource?: string | undefined;
     modelAlias?: string | undefined;
+    resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | null | undefined;
     workflowRunStepId?: string | null | undefined;

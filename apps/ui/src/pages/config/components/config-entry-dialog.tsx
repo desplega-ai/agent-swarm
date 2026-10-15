@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { type ConfigFormData, emptyConfigForm } from "@/hooks/use-swarm-config";
+import { isEnvExportRestrictedKey } from "../../../../../../src/utils/config-env-export";
 
 export function ConfigEntryDialog({
   open,
@@ -44,13 +45,15 @@ export function ConfigEntryDialog({
           value: editEntry.isSecret ? "" : editEntry.value,
           isSecret: editEntry.isSecret,
           description: editEntry.description ?? "",
+          exportToEnv: editEntry.exportToEnv,
         }
       : emptyConfigForm,
   );
+  const exportRestricted = isEnvExportRestrictedKey(form.key);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSubmit(form);
+    onSubmit(exportRestricted ? { ...form, exportToEnv: false } : form);
     onOpenChange(false);
   }
 
@@ -169,6 +172,24 @@ export function ConfigEntryDialog({
                 onCheckedChange={(checked) => setForm({ ...form, isSecret: checked })}
               />
               <Label htmlFor="config-secret">Secret value</Label>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="config-export-to-env"
+                  checked={form.exportToEnv && !exportRestricted}
+                  disabled={exportRestricted}
+                  onCheckedChange={(checked) => setForm({ ...form, exportToEnv: checked })}
+                />
+                <Label htmlFor="config-export-to-env">Export to agent env</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {exportRestricted
+                  ? "Only the API server reads this key, so it never reaches agent shells."
+                  : form.exportToEnv
+                    ? "Agent shells see this value in their environment."
+                    : "Kept out of agent shells. Agents use it through a connection or script credential binding."}
+              </p>
             </div>
           </div>
           <DialogFooter>

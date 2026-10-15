@@ -72,7 +72,7 @@ export async function processPendingChatRelays(
     if (signal?.aborted) return;
     const { task } = pending;
     const target = chatThreadOfContextKey(task.contextKey);
-    // `created_at` is ISO text with a `Z` suffix (migration 214 default).
+    // `created_at` is ISO text with a `Z` suffix (migration 217 default).
     const createdAtMs = Date.parse(pending.createdAt);
 
     if (Number.isFinite(createdAtMs) && now - createdAtMs >= RELAY_GIVE_UP_AFTER_MS) {

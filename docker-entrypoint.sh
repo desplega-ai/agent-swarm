@@ -511,6 +511,29 @@ echo "[entrypoint] Claude Code auto-updater disabled: DISABLE_AUTOUPDATER=${DISA
 echo "=========================="
 
 # ---- Fetch swarm config from API ----
+# BEGIN swarm_config_env (extracted verbatim by src/tests/entrypoint-export-to-env.test.ts — keep markers stable)
+# KEY='value' lines for every config row the worker env may carry. Skipped:
+#   - codex_oauth and codex_oauth_<n>: provider auth blobs with live refresh
+#     tokens, read on demand. Exporting them puts a replayable refresh token in
+#     every process env, and a replay revokes the whole token family. Mirrors
+#     isCodexOAuthConfigKey in src/providers/codex-oauth/env-keys.ts.
+#   - HARNESS_PROVIDER / CLAUDE_TRANSPORT: read by the runner from
+#     /api/config/resolved on each iteration; a boot copy would go stale.
+#   - keys that are not POSIX shell identifiers (e.g. CF-Access-Client-Id):
+#     sourcing one runs it as a command. The runner still resolves them per
+#     request via headerConfigKeys.
+#   - rows with exportToEnv=false: they stay server-side (connections, script
+#     credential bindings). An API without the field exports everything.
+swarm_config_env_lines() {
+    jq -r '.configs[] | select((.key | test("^codex_oauth(_[0-9]+)?$") | not) and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) | select(.exportToEnv != false) | "\(.key)=" + (.value | @sh)' "$1"
+}
+
+# Names of exportToEnv=false rows, so a copy in the container env is dropped too.
+swarm_config_withheld_keys() {
+    jq -r '.configs[] | select(.exportToEnv == false) | .key | select(test("^[A-Za-z_][A-Za-z0-9_]*$"))' "$1"
+}
+# END swarm_config_env
+
 if [ -n "$AGENT_ID" ]; then
     echo "Fetching swarm config from API..."
     if curl -s -f -H "Authorization: Bearer ${API_KEY}" \
@@ -521,37 +544,26 @@ if [ -n "$AGENT_ID" ]; then
         CONFIG_COUNT=$(jq '.configs | length' /tmp/swarm_config.json 2>/dev/null || echo "0")
         if [ "$CONFIG_COUNT" -gt 0 ]; then
             echo "Found $CONFIG_COUNT config entries, exporting as env vars..."
-            # Skip keys whose value is read dynamically by the runner from
-            # /api/config/resolved on each iteration. Baking them into env at
-            # boot would persist a stale value if the operator later deletes
-            # the swarm_config row (env would shadow the now-missing config).
-            #   - codex_oauth and codex_oauth_<n>: provider auth blobs with
-            #     live refresh tokens, read on demand. Exporting them puts a
-            #     replayable refresh token in every process env, and a replay
-            #     revokes the whole token family. Mirrors isCodexOAuthConfigKey
-            #     in src/providers/codex-oauth/env-keys.ts.
-            #   - HARNESS_PROVIDER: live-reconciled by runner.ts poll loop;
-            #     baking it would also defeat the precedence invariant
-            #     (swarm_config > env > "claude")
-            #   - CLAUDE_TRANSPORT: resolved for each session; clearing an
-            #     agent override must restore the deployment default.
-            # Also skip keys that are not valid POSIX shell identifiers
-            # (e.g. CF-Access-Client-Id). Sourcing such a key causes the shell
-            # to parse "CF-Access-Client-Id=value" as a command invocation →
-            # "command not found", aborting the rest of the export. These keys
-            # are still available to the runner via headerConfigKeys (resolved
-            # per-request), so skipping them here is safe.
             SKIPPED_NONIDENT=$(jq -r '.configs[] | select((.key | test("^codex_oauth(_[0-9]+)?$") | not) and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$") | not) | .key' /tmp/swarm_config.json 2>/dev/null || true)
             if [ -n "$SKIPPED_NONIDENT" ]; then
                 echo "[entrypoint] debug: skipping non-identifier config keys (not valid POSIX shell variable names, still available via headerConfigKeys): $(echo "$SKIPPED_NONIDENT" | tr '\n' ' ')"
             fi
-            jq -r '.configs[] | select((.key | test("^codex_oauth(_[0-9]+)?$") | not) and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
+            swarm_config_env_lines /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
             if [ -f /tmp/swarm_config.env ]; then
                 set -a
                 . /tmp/swarm_config.env
                 set +a
                 rm -f /tmp/swarm_config.env
             fi
+            WITHHELD_COUNT=0
+            for withheld_key in $(swarm_config_withheld_keys /tmp/swarm_config.json 2>/dev/null || true); do
+                unset "$withheld_key"
+                WITHHELD_COUNT=$((WITHHELD_COUNT + 1))
+            done
+            if [ "$WITHHELD_COUNT" -gt 0 ]; then
+                echo "[entrypoint] Kept $WITHHELD_COUNT config entries with exportToEnv=false out of the worker env"
+            fi
+            unset withheld_key WITHHELD_COUNT
         fi
         rm -f /tmp/swarm_config.json
     else
@@ -1189,6 +1201,14 @@ run_startup_script() {
 }
 
 run_startup_script
+
+# Secret config rows the startup script could use but the runner must not
+# inherit (computed by docker-entrypoint.sh). The runner re-resolves config
+# per task and hands each harness only the secrets it needs.
+for withheld_key in ${AGENT_SWARM_WITHHELD_ENV:-}; do
+    unset "$withheld_key"
+done
+unset AGENT_SWARM_WITHHELD_ENV withheld_key
 
 role="${AGENT_ROLE:-worker}"
 echo "Starting $role..."

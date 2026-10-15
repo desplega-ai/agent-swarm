@@ -23,11 +23,14 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
+  type BashSpawnContext,
   createAgentSession,
+  createBashToolDefinition,
   createCodemodeExtension,
   createMcpExtension,
   createToolSearchExtension,
   DefaultResourceLoader,
+  defineTool,
   getAgentDir,
   ModelRuntime,
   SessionManager,
@@ -1504,6 +1507,32 @@ export function piDefaultToolAdditions(features: PiSessionFeatures): string[] {
   return additions;
 }
 
+/** Keys pi computes for each Bash call (PATH carries pi's managed `rg`/`fd` bin dir). */
+const PI_SPAWN_ENV_KEYS = [
+  "PATH",
+  "PI_SESSION_ID",
+  "PI_SESSION_FILE",
+  "PI_PROVIDER",
+  "PI_MODEL",
+  "PI_REASONING_LEVEL",
+] as const;
+
+/**
+ * The env one pi Bash call runs with: the session's own env plus the keys pi
+ * computed for the call. Nothing else from the process env gets through.
+ */
+export function buildPiShellEnv(
+  sessionEnv: Record<string, string | undefined>,
+  spawnEnv: BashSpawnContext["env"],
+): BashSpawnContext["env"] {
+  const env: BashSpawnContext["env"] = { ...sessionEnv };
+  for (const key of PI_SPAWN_ENV_KEYS) {
+    if (spawnEnv[key] !== undefined) env[key] = spawnEnv[key];
+    else if (key !== "PATH") delete env[key];
+  }
+  return env;
+}
+
 /**
  * Builds and loads the resource loader for a pi SDK session.
  *
@@ -1684,10 +1713,22 @@ export class PiMonoAdapter implements ProviderAdapter {
       reasoningApplication.kind === "pi-session" ? reasoningApplication.sessionOptions : {};
     const appliedReasoningEffort =
       reasoningApplication.kind === "pi-session" ? (config.reasoningEffort ?? null) : null;
+    // pi's built-in Bash tool spawns with a copy of process.env, which is
+    // shared by every concurrent session and never sees this task's env (rows
+    // admitted or withheld by fetchResolvedEnv after boot). A custom tool
+    // named "bash" replaces the built-in, so every shell call, including
+    // codemode's executeTool("bash"), runs with this session's env.
+    const bashTool = defineTool(
+      createBashToolDefinition(config.cwd, {
+        commandPrefix: settingsManager.getShellCommandPrefix(),
+        shellPath: settingsManager.getShellPath(),
+        spawnHook: (context) => ({ ...context, env: buildPiShellEnv(sessionEnv, context.env) }),
+      }),
+    );
     const sessionOptions: CreateAgentSessionOptions = {
       cwd: config.cwd,
       model,
-      customTools,
+      customTools: [...customTools, bashTool],
       resourceLoader,
       settingsManager,
       modelRuntime,

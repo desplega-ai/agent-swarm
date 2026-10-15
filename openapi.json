@@ -376,6 +376,17 @@
           "modelAlias": {
             "type": "string"
           },
+          "resolvedEffort": {
+            "type": "string",
+            "enum": [
+              "off",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          },
           "scheduleId": {
             "type": "string"
           },
@@ -1400,6 +1411,9 @@
           },
           "encrypted": {
             "type": "boolean"
+          },
+          "exportToEnv": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1413,7 +1427,8 @@
           "description",
           "createdAt",
           "lastUpdatedAt",
-          "encrypted"
+          "encrypted",
+          "exportToEnv"
         ]
       },
       "ContextSnapshot": {
@@ -15649,6 +15664,10 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "exportToEnv": {
+                    "type": "boolean",
+                    "description": "Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads."
                   }
                 },
                 "required": [
@@ -30010,6 +30029,17 @@
                                   "max"
                                 ]
                               },
+                              "resolvedEffort": {
+                                "type": "string",
+                                "enum": [
+                                  "off",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              },
                               "provider": {
                                 "type": "string",
                                 "enum": [
@@ -30517,6 +30547,21 @@
                       },
                       "model": {
                         "type": "string"
+                      },
+                      "effort": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "off",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          null
+                        ]
                       },
                       "providerMeta": {
                         "type": "object",

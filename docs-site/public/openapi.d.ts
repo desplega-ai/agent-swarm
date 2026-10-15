@@ -4815,6 +4815,8 @@ export interface paths {
                         isSecret?: boolean;
                         envPath?: string | null;
                         description?: string | null;
+                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
+                        exportToEnv?: boolean;
                     };
                 };
             };
@@ -11844,6 +11846,8 @@ export interface paths {
                                 /** @enum {string} */
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
+                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                 requestedByUserId?: string;
                                 progress?: string;
@@ -12077,6 +12081,8 @@ export interface paths {
                         /** @enum {string} */
                         provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                         model?: string;
+                        /** @enum {string|null} */
+                        effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
                         providerMeta?: {
                             /** @enum {string} */
                             transport?: "cli" | "sdk";
@@ -24633,6 +24639,8 @@ export interface components {
             resolvedModel?: string;
             modelSource?: string;
             modelAlias?: string;
+            /** @enum {string} */
+            resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;
@@ -24888,6 +24896,7 @@ export interface components {
             createdAt: string;
             lastUpdatedAt: string;
             encrypted: boolean;
+            exportToEnv: boolean;
         };
         ContextSnapshot: {
             /** Format: uuid */
