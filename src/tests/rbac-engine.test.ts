@@ -99,6 +99,7 @@ const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "approval.respond",
   "runtime_controller.write",
   "runtime_pool.write",
+  "models.profiles.write",
 ];
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];

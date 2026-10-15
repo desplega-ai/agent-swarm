@@ -193,6 +193,7 @@ import {
   createContextVersion,
   getLatestContextVersion,
 } from "./db/context-versions";
+import { MODEL_PROFILE_CONFIG_KEY } from "./db/model-profiles";
 import { getDb, getDbClient } from "./db/runtime";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
@@ -2842,9 +2843,9 @@ export async function createTaskExtended(
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, profile, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         assetKey,
@@ -2886,6 +2887,7 @@ export async function createTaskExtended(
         options?.model ?? null,
         options?.modelTier ?? null,
         options?.effort ?? null,
+        options?.profile?.trim() || null,
         options?.scheduleId ?? null,
         options?.workflowRunId ?? null,
         options?.workflowRunStepId ?? null,
@@ -6647,14 +6649,18 @@ export async function upsertSwarmConfig(data: {
   const row = await getDbClient().transaction(async () => {
     const existing =
       scopeId === null
-        ? await getDbClient().get<{ id: string }>(
-            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
+        ? await getDbClient().get<{ id: string; value: string }>(
+            "SELECT id, value FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
             [data.scope, data.key],
           )
-        : await getDbClient().get<{ id: string }>(
-            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
+        : await getDbClient().get<{ id: string; value: string }>(
+            "SELECT id, value FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
             [data.scope, scopeId, data.key],
           );
+
+    if (data.scope === "agent" && scopeId && existing?.value !== storedValue) {
+      await clearAgentModelProfileOnOverrideChange(scopeId, data.key);
+    }
 
     if (existing) {
       // COALESCE keeps the stored flag when the caller did not send one.
@@ -6744,12 +6750,28 @@ export async function emitBuiltInIntegrationConnectedOnce(
  * predate hardening must remain removable through remediation paths.
  */
 export async function deleteSwarmConfig(id: string): Promise<boolean> {
-  const row = await getDbClient().get<Pick<SwarmConfigRow, "scope" | "scopeId">>(
-    "DELETE FROM swarm_config WHERE id = ? RETURNING scope, scopeId",
+  const row = await getDbClient().get<Pick<SwarmConfigRow, "scope" | "scopeId" | "key">>(
+    "DELETE FROM swarm_config WHERE id = ? RETURNING scope, scopeId, key",
     [id],
   );
+  if (row?.scope === "agent" && row.scopeId) {
+    await clearAgentModelProfileOnOverrideChange(row.scopeId, row.key);
+  }
   if (row) getDbClient().afterCommit(() => publishWorkerConfigNudge(row.scope, row.scopeId));
   return row !== null;
+}
+
+/**
+ * An agent's default model profile (MODEL_PROFILE) beats its MODEL_OVERRIDE and
+ * REASONING_EFFORT_OVERRIDE at claim. A change to either override, by any path,
+ * drops the profile default, so a stale default never beats a fresh override.
+ */
+async function clearAgentModelProfileOnOverrideChange(agentId: string, key: string): Promise<void> {
+  if (key !== "MODEL_OVERRIDE" && key !== "REASONING_EFFORT_OVERRIDE") return;
+  await getDbClient().run(
+    "DELETE FROM swarm_config WHERE scope = 'agent' AND scopeId = ? AND key = ?",
+    [agentId, MODEL_PROFILE_CONFIG_KEY],
+  );
 }
 
 /**

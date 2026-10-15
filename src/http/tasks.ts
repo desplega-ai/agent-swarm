@@ -35,6 +35,7 @@ import {
   updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
+import { taskProfileError } from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import {
   getTaskSteeringFields,
@@ -285,6 +286,8 @@ const createTask = route({
        */
       allowCustomModel: z.boolean().optional(),
       effort: ReasoningEffortSchema.optional(),
+      /** Model profile name, applied at claim. Exclusive with `model` and `modelTier`. */
+      profile: z.string().trim().min(1).optional(),
       /**
        * Create in `draft` status instead of the normal pending/unassigned/offered
        * status (#1240) — the task exists and is visible to its owner, but is not
@@ -953,6 +956,15 @@ export async function handleTasks(
       jsonError(res, modelError, 400);
       return true;
     }
+    const profileError = await taskProfileError({
+      profile: parsed.body.profile,
+      ...splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier }),
+      agentId: defaultAgentId,
+    });
+    if (profileError) {
+      jsonError(res, profileError, 400);
+      return true;
+    }
 
     const parentTask = parsed.body.parentTaskId
       ? await getTaskById(parsed.body.parentTaskId)
@@ -1009,6 +1021,7 @@ export async function handleTasks(
             modelTier: parsed.body.modelTier,
           }),
           effort: parsed.body.effort,
+          profile: parsed.body.profile,
         },
         { origin: "rest", allowCustomModel: parsed.body.allowCustomModel },
       );

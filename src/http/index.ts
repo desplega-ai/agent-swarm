@@ -103,6 +103,7 @@ import { handleMcpServers } from "./mcp-servers";
 import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
 import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
+import { handleModelProfiles } from "./model-profiles";
 import { handleModelsCatalog } from "./models-catalog";
 import { handleOAuthCallback, startOAuthPendingGc, stopOAuthPendingGc } from "./oauth-callback";
 import { handleGenericOAuth } from "./oauth-generic";
@@ -375,6 +376,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleDbQuery(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
+        () => handleModelProfiles(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams, myAgentId),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnections(req, res, pathSegments, queryParams, myAgentId),
@@ -659,6 +661,13 @@ try {
   startPricingRefreshLoop();
 } catch (err) {
   console.error("[startup] Failed to seed pricing rows:", err);
+}
+
+try {
+  const { ensureModelProfilesSeeded } = await import("../be/boot-seeds");
+  await ensureModelProfilesSeeded();
+} catch (err) {
+  console.error("[startup] Failed to seed model profiles:", err);
 }
 
 try {

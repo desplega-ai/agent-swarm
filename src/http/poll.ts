@@ -264,7 +264,7 @@ async function attachmentsForTrigger(
  * previous claim record is overwritten for the same reason.
  */
 async function claimModelFields(
-  task: TaskModelPinFields & { id: string },
+  task: TaskModelPinFields & { id: string; profile?: string | null; effort?: string | null },
   agent: Parameters<typeof recordClaimModelResolution>[1],
 ): Promise<Awaited<ReturnType<typeof recordClaimModelResolution>> & { model: string | undefined }> {
   const pin = taskModelPin(task);
@@ -273,6 +273,7 @@ async function claimModelFields(
     resolvedModel: undefined,
     modelSource: undefined,
     modelAlias: undefined,
+    resolvedProfile: undefined,
   };
   try {
     return {
