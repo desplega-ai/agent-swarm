@@ -122,8 +122,6 @@ test(
     const tempDir = `/tmp/runner-exit-shutdown-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tempDir}`.quiet();
     try {
-      await Bun.write(`${tempDir}/pm2`, '#!/bin/sh\nprintf "%s" "$1" > "$SHUTDOWN_TEST_PM2_LOG"\n');
-      await Bun.$`chmod +x ${tempDir}/pm2`.quiet();
       await Bun.write(
         `${tempDir}/runner.ts`,
         `
@@ -141,14 +139,12 @@ test(
             ...process.env,
             PATH: tempDir,
             ANONYMIZED_TELEMETRY: "false",
-            SHUTDOWN_TEST_PM2_LOG: `${tempDir}/pm2.log`,
           },
         }),
         "runner shutdown",
       );
       expect(result.stdout).toContain("shutdown callback");
       expect(result.stdout).not.toContain("unexpected return");
-      expect(await Bun.file(`${tempDir}/pm2.log`).text()).toBe("save");
       expect(requests).toHaveLength(1);
       expect(requests[0]?.path).toBe("/close");
       expect(requests[0]?.headers["x-agent-id"]).toBe(agentId);

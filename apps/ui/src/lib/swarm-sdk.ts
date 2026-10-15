@@ -1,5 +1,5 @@
 /**
- * In-SPA mirror of `BROWSER_SDK_JS` (see `src/artifact-sdk/browser-sdk.ts`).
+ * In-SPA mirror of `BROWSER_SDK_JS` (see `src/pages/browser-sdk.ts`).
  *
  * The classic SDK runs inside an iframed page and routes through
  * `/@swarm/api/*` (server injects bearer + agent-id). The JSON renderer runs

@@ -28,7 +28,6 @@ let sut: Sut;
 let api: ApiClient;
 let fixtureDir: string;
 let fixturePath: string;
-let pm2StubPath: string;
 
 /** A `claude` that initializes, accepts the prompt, and then never answers. */
 const hangingFixtureSource = `#!/usr/bin/env bun
@@ -87,12 +86,8 @@ describe("API drain with a real worker", () => {
   beforeAll(async () => {
     fixtureDir = await mkdtemp("/tmp/api-drain-worker-");
     fixturePath = join(fixtureDir, "claude-fixture");
-    pm2StubPath = join(fixtureDir, "bin");
-    await Bun.$`mkdir -p ${pm2StubPath}`.quiet();
     await Bun.write(fixturePath, hangingFixtureSource);
-    await Bun.write(join(pm2StubPath, "pm2"), "#!/bin/sh\nexit 0\n");
     await Bun.$`chmod 755 ${fixturePath}`.quiet();
-    await Bun.$`chmod 755 ${join(pm2StubPath, "pm2")}`.quiet();
     sut = await startSut(
       false,
       {},
@@ -138,7 +133,7 @@ describe("API drain with a real worker", () => {
       cwd: repoRoot,
       env: {
         ...minimalEnv(),
-        PATH: `${pm2StubPath}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
         HOME: home,
         AGENT_SWARM_API_KEY: sut.apiKey,
         API_KEY: sut.apiKey,

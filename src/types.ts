@@ -1459,7 +1459,7 @@ export type ChannelType = z.infer<typeof ChannelTypeSchema>;
 export type Channel = z.infer<typeof ChannelSchema>;
 export type ChannelMessage = z.infer<typeof ChannelMessageSchema>;
 
-// Service Types (for PM2/background services)
+// Service Types (removed PM2 service registry; kept with the services table)
 export const ServiceStatusSchema = z.enum(["starting", "healthy", "unhealthy", "stopped"]);
 
 export const ServiceSchema = z

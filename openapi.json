@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.172.0",
+    "version": "1.173.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -4415,93 +4415,6 @@
           "mcpServerId",
           "isActive",
           "installedAt"
-        ]
-      },
-      "Service": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 50
-          },
-          "port": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 65535,
-            "default": 3000
-          },
-          "description": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "healthCheckPath": {
-            "type": "string",
-            "default": "/health"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "starting",
-              "healthy",
-              "unhealthy",
-              "stopped"
-            ],
-            "default": "starting"
-          },
-          "script": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cwd": {
-            "type": "string"
-          },
-          "interpreter": {
-            "type": "string"
-          },
-          "args": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "env": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {},
-            "default": {}
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "lastUpdatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "agentId",
-          "name",
-          "script",
-          "createdAt",
-          "lastUpdatedAt"
         ]
       },
       "TaskTemplate": {
@@ -10257,7 +10170,6 @@
                               "prompt-templates",
                               "mcp",
                               "profiles",
-                              "services",
                               "scheduling",
                               "memory",
                               "workflows",
@@ -10321,7 +10233,6 @@
                               "prompt-templates",
                               "mcp",
                               "profiles",
-                              "services",
                               "scheduling",
                               "memory",
                               "workflows",
@@ -16667,82 +16578,6 @@
           },
           "404": {
             "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ecosystem": {
-      "get": {
-        "summary": "Get PM2 ecosystem config for agent services",
-        "tags": [
-          "Ecosystem"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "PM2 ecosystem config",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "apps": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "script": {
-                            "type": "string"
-                          },
-                          "cwd": {
-                            "type": "string"
-                          },
-                          "interpreter": {
-                            "type": "string"
-                          },
-                          "args": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "env": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "string"
-                            }
-                          }
-                        },
-                        "required": [
-                          "name",
-                          "script"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "apps"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing X-Agent-ID",
             "content": {
               "application/json": {
                 "schema": {
@@ -51657,68 +51492,6 @@
                     "sessions",
                     "skills",
                     "retention"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/services": {
-      "get": {
-        "summary": "List all registered services",
-        "tags": [
-          "Stats"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "status",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "agentId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "name",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Service list",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "services": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Service"
-                      }
-                    }
-                  },
-                  "required": [
-                    "services"
                   ]
                 }
               }

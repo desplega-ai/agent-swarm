@@ -76,7 +76,6 @@ Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
 | `bun run tsc:check` | Type check with tsgo (`tsc:check:tsc` runs tsc 5, the CI authority) |
 | `bun run test:root` | Run root unit tests (`bun run test:root -- src/tests/<file>.test.ts` for one) |
 | `bun run e2e:ui` | Playwright UI suite: builds `apps/ui`, one seeded API per worker (`-- --grep @smoke`, `-- --no-build`) |
-| `bun run pm2-{start,stop,restart,logs,status}` | All services (API 3013, UI 5274, lead 3201, worker 3202) |
 | `bun run docker:build:worker` | Build Docker worker image (full) |
 | `bun run docker:build:worker:slim` | Build slim worker image (`--target worker-slim`, for CI/E2E) |
 | `bun run docker:build:api` | Build API server image |
@@ -88,7 +87,7 @@ Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
 | `docker compose -f docker-compose.local.yml up --build` | Local compose (API + lead + worker) |
 | `uvx business-use-core@latest server dev` | BU backend on :13370 |
 
-PM2: lead/worker run in Docker. On code changes: `bun run docker:build:worker && bun run pm2-restart`.
+Lead/worker run in Docker. On code changes: `docker compose -f docker-compose.local.yml up --build`.
 
 </important>
 

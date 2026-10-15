@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { getActiveTaskCount } from "../be/db";
 import type { SwarmSpan } from "../otel";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { getNodeEnv } from "../utils/node-env";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export function duplicateGuardedQueryKey(query: URLSearchParams): string | undefined {
@@ -42,6 +43,18 @@ function getAllowedOrigins(): string[] {
 }
 
 /**
+ * Loopback origins on any port are trusted in local development
+ * (`NODE_ENV=development`, set by `start:http` and `dev:http`). The dashboard
+ * dev server, Playwright, or a second worktree pick arbitrary ports, and every
+ * loopback page already runs on the developer's machine. The production binary
+ * and the Docker image run without NODE_ENV, so this never applies there.
+ */
+function isDevLoopbackOrigin(origin: string): boolean {
+  if (getNodeEnv() !== "development") return false;
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$/.test(origin);
+}
+
+/**
  * Decide whether `origin` may receive credentialed CORS headers.
  * Unset or blank uses the built-in hosted/dev allowlist. Exact entries retain
  * their case-sensitive string comparison. A single leading `*.` matches one or
@@ -50,6 +63,7 @@ function getAllowedOrigins(): string[] {
  * Bare `*`, `https://*`, other wildcard positions, and non-origin URLs are ignored.
  */
 function originAllowedForCredentials(origin: string): boolean {
+  if (isDevLoopbackOrigin(origin)) return true;
   return getAllowedOrigins().some((entry) => {
     if (!entry.includes("*")) return entry === origin;
 

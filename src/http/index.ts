@@ -82,7 +82,6 @@ import { handleConfig } from "./config";
 import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
-import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
 import { handleExtensions } from "./extensions";
 import { handleFavorites } from "./favorites";
@@ -346,7 +345,6 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleAgentRegister(req, res, pathSegments, myAgentId),
         () => handlePoll(req, res, pathSegments, queryParams, myAgentId),
         () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
-        () => handleEcosystem(req, res, pathSegments, myAgentId),
         () => handleTrackers(req, res, pathSegments),
         () => handleWebhooks(req, res, pathSegments),
         () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),

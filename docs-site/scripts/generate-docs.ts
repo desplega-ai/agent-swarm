@@ -121,7 +121,6 @@ const tagDescriptions: Record<string, string> = {
   "Budgets": "Configure per-agent and global daily cost budgets to control AI agent spend",
   "Config": "Read and write swarm configuration values — global, agent-scoped, and repo-scoped settings",
   "Debug": "Debug utilities for inspecting swarm state and diagnosing agent issues",
-  "Ecosystem": "Query registered community and official agent integrations in the swarm ecosystem",
   "Events": "Stream and query swarm lifecycle events — task transitions, agent state changes, and audit log",
   "Heartbeat": "Health check endpoint — verify the agent-swarm.dev API is running and reachable",
   "Inbox State": "Manage per-user inbox item state — dismiss, snooze, and mark-done flags for swarm notifications and approval items",

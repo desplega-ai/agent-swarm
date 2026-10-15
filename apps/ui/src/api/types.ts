@@ -1060,29 +1060,6 @@ export interface TaskWithLogs extends AgentTask {
 
 export type ServiceStatus = "starting" | "healthy" | "unhealthy" | "stopped";
 
-export interface Service {
-  id: string;
-  agentId: string;
-  name: string;
-  port: number;
-  description?: string;
-  url?: string;
-  healthCheckPath: string;
-  status: ServiceStatus;
-  script: string;
-  cwd?: string;
-  interpreter?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-  lastUpdatedAt: string;
-}
-
-export interface ServicesResponse {
-  services: Service[];
-}
-
 /**
  * Phase 2 + Phase 12b: tells the UI where `totalCostUsd` came from so we can
  * render a badge. See `SessionCostSourceSchema` in `src/types.ts`.

@@ -2291,7 +2291,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -2305,7 +2305,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -5312,62 +5312,6 @@ export interface paths {
                 };
             };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ecosystem": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get PM2 ecosystem config for agent services */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description PM2 ecosystem config */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            apps: {
-                                name: string;
-                                script: string;
-                                cwd?: string;
-                                interpreter?: string;
-                                args?: string[];
-                                env?: {
-                                    [key: string]: string;
-                                };
-                            }[];
-                        };
-                    };
-                };
-                /** @description Missing X-Agent-ID */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -20015,48 +19959,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/services": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List all registered services */
-        get: {
-            parameters: {
-                query?: {
-                    status?: string;
-                    agentId?: string;
-                    name?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Service list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            services: components["schemas"]["Service"][];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/scheduled-tasks": {
         parameters: {
             query?: never;
@@ -25725,39 +25627,6 @@ export interface components {
             mcpServerId: string;
             isActive: boolean;
             installedAt: string;
-        };
-        Service: {
-            /** Format: uuid */
-            id: string;
-            agentId: string;
-            name: string;
-            /** @default 3000 */
-            port: number;
-            description?: string;
-            /** Format: uri */
-            url?: string;
-            /** @default /health */
-            healthCheckPath: string;
-            /**
-             * @default starting
-             * @enum {string}
-             */
-            status: "starting" | "healthy" | "unhealthy" | "stopped";
-            script: string;
-            cwd?: string;
-            interpreter?: string;
-            args?: string[];
-            env?: {
-                [key: string]: string;
-            };
-            /** @default {} */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            lastUpdatedAt: string;
         };
         TaskTemplate: {
             id: string;

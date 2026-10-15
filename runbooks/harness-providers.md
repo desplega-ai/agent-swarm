@@ -804,5 +804,5 @@ Offer review and mention sessions do not count toward this limit.
 Unset, invalid, or nonpositive values keep the existing continuous runner behavior.
 The runner stops acquiring work when completed and active sessions reach the limit.
 After the limit completes with no active session, the runner uses its normal shutdown routine and exits with code 0.
-Shutdown terminates process groups, emits telemetry, saves PM2 state, and sends `/close` with `runtimeShutdown: true`.
+Shutdown terminates process groups, emits telemetry, and sends `/close` with `runtimeShutdown: true`.
 Docker pools with a per-task lifecycle inject a limit of 1.

@@ -129,7 +129,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.299
+ARG CLAUDE_CODE_VERSION=2.1.300
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -340,7 +340,6 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<EOF
   "name": "global-deps",
   "private": true,
   "dependencies": {
-    "pm2": "6.0.14",
     "@desplega.ai/wts": "0.2.3",
     "@desplega.ai/agent-fs": "${AGENT_FS_VERSION}"
   },
@@ -384,12 +383,11 @@ ENV LEAD_SYSTEM_PROMPT=""
 ENV LEAD_SYSTEM_PROMPT_FILE=""
 ENV STARTUP_SCRIPT_STRICT=false
 ENV TEMPLATE_REGISTRY_URL=https://templates.agent-swarm.dev
-ENV PM2_HOME=/workspace/.pm2
 ENV PATH="/home/worker/.local/bin:/home/worker/.bun/bin:$PATH"
 
 VOLUME ["/logs"]
 
-# Expose service port for PM2 processes
+# Port for web services an agent runs itself
 EXPOSE 3000
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
@@ -583,9 +581,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791979242-g144271
-ARG AMP_SHA512_AMD64=e3c58fbdc018b913a8c881b3c841c7998db95aeaf05ed84da92f6e9cb25cc5c9b1352140dbb868be3124ae5ea73102b201ac56758c8e8993ee6f4f702d7bb76a
-ARG AMP_SHA512_ARM64=ad02981161c8ccb6617d969a08756b33d2c1ca8cddcb11a2eba20fa5ccd4bcec427eb1f427607919e9b1591e23bcec5474267489ba2fef7f212446c05065f20e
+ARG AMP_VERSION=0.0.1792036844-g99022c
+ARG AMP_SHA512_AMD64=1b91b6da0f058381293bd1ca8ecc02dbdfa1f2517ac2bc5d11354cd014925fc96cf775755a399a87a9b1124f8ee19e2bd5eb29140b8c605145fb738def43e5fa
+ARG AMP_SHA512_ARM64=4535df0a3b22bb914aad86ad3cd3c7b1c04d52037f4d13eefe1f5363f0f0156a55bd4e9362b6088dd508e3d698f7a5892e3b55bb491f8f94fb01339ff8dff2d5
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -633,7 +631,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.97
+ARG COPILOT_CLI_VERSION=1.0.98
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -673,9 +671,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.31.0
-ARG KIRO_CLI_SHA256_AMD64=8b3a8c3b032178e2662a6a530fa0bb7ee92e223528613f8f03b51d18b23a5e11
-ARG KIRO_CLI_SHA256_ARM64=4b00b411437520298d28ae8a1c51f63f4bfdb490c07170b4d5ae91cbeadabc0f
+ARG KIRO_CLI_VERSION=2.31.1
+ARG KIRO_CLI_SHA256_AMD64=22eef4c19c42782316b0e24cdd3399024760eec9056b4298751cb99f33795ace
+ARG KIRO_CLI_SHA256_ARM64=cf3fc7681cca9677e18c0d22371fe60d7921ca73ea9d751d78f9cb470c0dce6d
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \

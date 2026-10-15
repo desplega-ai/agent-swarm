@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.173.0] - 2026-10-15
+
+### Added
+- Azure DevOps: Azure Boards work items assigned to the bot or mentioning it create a linked swarm task, with tracker sync (#2119).
+- Slack: `SLACK_BLOCK_EXTERNAL_CHANNELS` keeps the bot out of external Slack Connect channels, with inbound and outbound guards, auto-leave and alerts. Off by default (#2143).
+- Scripts: SQL script connections run bounded, read-only Postgres queries while the DSN stays on the server (#2139).
+- Apps catalog: Table on a shared `ListView` layer with icons; status, feedback, loader and motion components; searchable and multi Select (#2130, #2131, #2132).
+- `qa-loom` seeded skill for narrated QA recordings of UI PRs (#2127).
+
+### Changed
+- Worker image bumps for opencode, dsh, amp, claude-code, gemini, copilot, kiro and agent-browser 0.39.1 (#2122, #2124, #2142).
+- Docs: dsh provider auth and a harness configuration reference (#2129).
+- CODEOWNERS no longer auto-requests reviews on every PR (#2141).
+- `dreaming-v2` skill seed patches (#2121).
+
+### Fixed
+- Compiled binaries read `NODE_ENV` at runtime, so production keeps blocking private and plain-HTTP MCP and script-connection URLs (#2138).
+- Slack: re-deferring reuses one waiting card, and duplicate pending watchers from the same agent are rejected (#2136).
+- Slack: worker deferred wakes no longer post outcome cards to human threads (#2140).
+- OpenCode on OpenRouter records the billed `usage.cost` and counts reasoning tokens as output (#2126).
+- Claude sessions load the agent's `CLAUDE.md` once instead of twice (#2123).
+- UI: wider app drawers on desktop, and the app detail header fits a phone screen (#2148, #2134).
+
 ## [1.172.0] - 2026-10-14
 
 ### Added

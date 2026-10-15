@@ -239,8 +239,6 @@ export interface SwarmSdk {
   chat_readThread(args: { threadId: string; limit?: number }): Promise<unknown>;
   // --- messaging ---
   message_read(args?: { channel?: string; limit?: number; since?: string; unreadOnly?: boolean; mentionsOnly?: boolean; markAsRead?: boolean }): Promise<unknown>;
-  // --- services ---
-  service_list(args?: { agentId?: string; name?: string; status?: "starting" | "healthy" | "unhealthy" | "stopped"; includeOwn?: boolean }): Promise<unknown>;
   // --- context / profiles ---
   context_history(args?: { agentId?: string; field?: "soulMd" | "identityMd" | "toolsMd" | "claudeMd" | "setupScript"; limit?: number }): Promise<unknown>;
   context_diff(args: { versionId: string; compareToVersionId?: string }): Promise<unknown>;
@@ -325,11 +323,6 @@ export interface SwarmSdk {
 
   // --- write: profiles ---
   profile_update(args: Record<string, unknown>): Promise<unknown>;
-
-  // --- write: services ---
-  service_register(args: Record<string, unknown>): Promise<unknown>;
-  service_unregister(args: { name: string }): Promise<unknown>;
-  service_updateStatus(args: { name: string; status: "starting" | "healthy" | "unhealthy" | "stopped" }): Promise<unknown>;
 
   // --- write: schedules ---
   schedule_create(args: Record<string, unknown>): Promise<unknown>;

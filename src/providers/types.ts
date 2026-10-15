@@ -263,7 +263,7 @@ export interface ProviderTraits {
    * agent never learns they exist. Defaults to true when omitted.
    */
   nativeSkillDiscovery?: boolean;
-  /** Provider runs in the local Docker container with /workspace, identity files, agent-fs, PM2, etc. */
+  /** Provider runs in the local Docker container with /workspace, identity files, agent-fs, etc. */
   hasLocalEnvironment: boolean;
   /** Live steering modes supported by this provider. Absent means none. */
   steerModes?: SteerMode[];

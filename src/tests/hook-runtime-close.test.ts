@@ -24,8 +24,6 @@ test(
     });
     await Bun.$`mkdir -p ${tempDir}`.quiet();
     try {
-      await Bun.write(`${tempDir}/pm2`, '#!/bin/sh\nif [ "$1" = jlist ]; then printf "[]"; fi\n');
-      await Bun.$`chmod +x ${tempDir}/pm2`.quiet();
       await Bun.write(
         `${tempDir}/.mcp.json`,
         JSON.stringify({

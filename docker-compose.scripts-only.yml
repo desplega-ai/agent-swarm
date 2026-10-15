@@ -125,7 +125,7 @@ services:
       - GITHUB_DISABLE=true
 
     ports:
-      # 3113 on the host: 3013 is usually taken by the pm2 dev API
+      # 3113 on the host: 3013 is usually taken by the local dev API
       - "3113:3013"
 
     healthcheck:

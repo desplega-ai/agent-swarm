@@ -72,12 +72,6 @@ export const DEFERRED_TOOLS = new Set([
   "retry-workflow-run",
   "cancel-workflow-run",
 
-  // Services (4)
-  "register-service",
-  "unregister-service",
-  "list-services",
-  "update-service-status",
-
   // Config (7)
   "set-config",
   "list-config",

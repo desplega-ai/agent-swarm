@@ -123,12 +123,6 @@ export const SDK_TOOL_NAME_MAP = {
   context_history: "context-history",
   context_diff: "context-diff",
 
-  // ── services ──
-  service_list: "list-services",
-  service_register: "register-service",
-  service_unregister: "unregister-service", // destructive
-  service_updateStatus: "update-service-status",
-
   // ── workflows ──
   workflow_list: "list-workflows",
   workflow_get: "get-workflow",
