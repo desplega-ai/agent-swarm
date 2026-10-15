@@ -167,6 +167,18 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
   scheduled increase to $3/M input and $15/M output on 2026-09-01. Claude
   Code's bundled local rate table may be stale-high, so treat its reported USD
   as advisory and use the server-recomputed row for the canonical total.
+- **Claude 5.5 cache reads:** Opus 5.5 and Sonnet 5.5 cache hits cost 0.05x
+  input ($0.20/M and $0.10/M), not the usual 0.1x. Claude Code builds in use
+  around 2026-10-09 still priced Sonnet 5.5 hits at $0.20/M, so their
+  `harnessCostUsd` runs high by `cacheReadTokens × $0.10/M`.
+- **Claude Haiku 5.5 context tier:** a request whose prompt (input + cache
+  reads + cache writes) is over 100k tokens bills every class at 5x: $0.50/M
+  input, $0.05/M cache hit, $0.625/M 5m write, $1/M 1h write, $2.50/M output.
+  It is the only Claude 5.x model with a long-context tier; the others bill the
+  full 1M window at standard rates. The recompute prices Haiku 5.5 at the base
+  tier, so sessions with over-100k requests under-count, and the harness total
+  is the closer figure for them. Same per-request accounting gap as GPT-5.6
+  below.
 - **GPT-5.6 context tier:** above 272k context, the GPT-5.6 family bills
   2× input/cache rates and 1.5× output rates. The current recompute receives
   aggregate session token counts, not enough per-request context information
