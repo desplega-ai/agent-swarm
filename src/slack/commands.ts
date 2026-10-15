@@ -1,10 +1,18 @@
 import type { App } from "@slack/bolt";
 import { getAllAgents, getAllTasks } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
 
 export function registerCommandHandler(app: App): void {
-  app.command("/agent-swarm-status", async ({ ack, respond }) => {
+  app.command("/agent-swarm-status", async ({ ack, respond, command, client }) => {
     await ack();
+
+    // The status reply lists task summaries; never show them in an external channel.
+    if (await shouldBlockChannel(client, command.channel_id)) {
+      console.log(`[Slack] Refusing /agent-swarm-status in external channel ${command.channel_id}`);
+      await respond({ response_type: "ephemeral", text: EXTERNAL_CHANNEL_BLOCKED_REPLY });
+      return;
+    }
 
     const agents = await getAllAgents();
     const tasks = await getAllTasks({ status: "in_progress" });

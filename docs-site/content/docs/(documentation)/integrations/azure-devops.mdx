@@ -1,11 +1,11 @@
 ---
 title: Azure DevOps Integration
-description: Connect Azure Repos so a bot mention in a pull request creates a swarm task, and workers clone, push, and open PRs with git and the az CLI
+description: Connect Azure Repos and Azure Boards so a bot mention in a pull request, or a work item assigned to the bot, creates a swarm task, and workers clone, push, and open PRs with git and the az CLI
 ---
 
 Agent Swarm supports Azure Repos alongside GitHub and GitLab. Service hooks turn bot mentions in pull requests into swarm tasks, and workers reach Azure Repos with `git` and the `az` CLI, both authenticated with one Personal Access Token (PAT).
 
-This first version covers **Azure Repos and pull request service hooks**. Azure Boards (work items), Microsoft Entra ID service principals, and a dashboard card come later.
+This version covers **Azure Repos pull request service hooks** and **Azure Boards work item service hooks**. Status comments on work items, Microsoft Entra ID service principals, and a dashboard card come later.
 
 ## 1. Create a bot user and its PAT
 
@@ -14,11 +14,13 @@ Create a dedicated Azure DevOps user for the swarm, for example `agent-swarm-bot
 1. Add the user to your organization and give it **Basic** access.
 2. Add it to each project the swarm works in, with **Contributors** permissions on the repositories.
 3. Signed in as that user, go to **User settings > Personal access tokens > New Token**.
-4. Select the scope **Code: Read & write**. It covers clone, push, pull requests, PR comments, and comment likes. Add work item scopes later, when Boards support lands.
+4. Select the scope **Code: Read & write**. It covers clone, push, pull requests, PR comments, and comment likes. Add **Work Items: Read & write** so workers can read and update work items with `az boards`.
 
 Mentions are matched against the PAT owner, so `@agent-swarm-bot` in a PR is what triggers the swarm.
 
 As with GitHub and GitLab, anyone who can comment on a pull request in a connected repository can trigger the swarm with a mention. Give the bot user access only to repositories where you accept that.
+
+**Work item triggers are stricter.** Work item text reaches a PAT-enabled agent, so a work item assignment, description mention, or comment mention creates a task only when the person who caused the event maps to a known swarm user, or their sign-in name is listed in `AZURE_DEVOPS_ALLOWED_ACTORS`. Events from anyone else are dropped and logged, and the actor shows up in the unmapped-identity list for triage. Work item events are also dropped unless they belong to the organization in `AZURE_DEVOPS_ORG_URL` (without it, only `dev.azure.com` and `*.visualstudio.com` HTTPS organizations qualify), and the PAT is never sent to any other URL. Scope the PAT to the one organization and to the projects the swarm serves; the Work Items scope should be granted only if you use Azure Boards.
 
 ## 2. Configure the swarm
 
@@ -34,6 +36,10 @@ AZURE_DEVOPS_WEBHOOK_SECRET=a-long-random-string
 
 # Optional: identity GUID of the bot (default: the identity that owns the PAT)
 AZURE_DEVOPS_BOT_ID=00000000-0000-0000-0000-000000000000
+
+# Optional: sign-in names (comma-separated) allowed to trigger work item tasks
+# without a linked swarm user
+AZURE_DEVOPS_ALLOWED_ACTORS=alex@your-company.com
 
 # Optional: name for plain-text @mentions (default: agent-swarm-bot)
 AZURE_DEVOPS_BOT_NAME=agent-swarm-bot
@@ -56,6 +62,11 @@ In the Azure DevOps project, go to **Project settings > Service hooks > Create s
 |---------|---------|
 | **Pull request created** | Repository and branch: optional |
 | **Pull request commented on** | Repository and branch: optional |
+| **Work item created** | Area path and work item type: optional |
+| **Work item updated** | Area path and work item type: optional. Field `Assigned To` is a useful filter, but the swarm also checks the field change itself, because the hook fires on comments too. |
+| **Work item commented on** | Area path and work item type: optional |
+| **Work item deleted** | Area path and work item type: optional |
+| **Work item restored** | Area path and work item type: optional |
 
 On the action page of each subscription:
 
@@ -63,7 +74,7 @@ On the action page of each subscription:
 - **Basic authentication username**: any value, for example `agent-swarm`
 - **Basic authentication password**: the value of `AZURE_DEVOPS_WEBHOOK_SECRET`
 - **Resource details to send**: **All**
-- **Resource version**: for **Pull request commented on**, pick **2.0**. Version 1.0 sends only the comment, without the pull request. The swarm answers it with `{"created":false}`, logs a warning, and creates no task. For **Pull request created**, keep the default, **1.0**.
+- **Resource version**: keep the default, **1.0**, for work item events. For **Pull request commented on**, pick **2.0**. Version 1.0 sends only the comment, without the pull request. The swarm answers it with `{"created":false}`, logs a warning, and creates no task. For **Pull request created**, keep the default, **1.0**.
 
 Use **Test** on the subscription to check the connection. The test payload has no bot mention, so the swarm answers `{"created":false}`.
 
@@ -73,6 +84,14 @@ Use **Test** on the subscription to check the connection. The test payload has n
 |-------|-------------|
 | PR created with a bot mention in the description | Creates a task for the lead agent |
 | New PR comment with a bot mention | Creates a task with the comment as context, linked to any active task for the same PR, and likes the comment as an acknowledgement |
+
+| Work item created, assigned to the bot or mentioning it in the description | Creates a task for the lead agent and links it to the work item |
+| Work item updated, `Assigned To` changed to the bot | Same. Other edits, and reassignments away from the bot, are ignored |
+| Work item comment with a bot mention | Creates a task with the comment as context. If the work item already has an active task, the new task is a child of it |
+| Work item deleted | Cancels the linked task if it is still active |
+| Work item restored | If the task was cancelled by the delete and the item is still assigned to the bot, creates a follow-up task. If the item was never linked, behaves like created |
+
+Work item mentions work as the picker mention (`data-vss-mention` with the bot's identity GUID) or typed `@agent-swarm-bot` / `@<bot sign-in name before the @>`. Each delivery is deduplicated on its service-hook notification id, so retries create no second task. The swarm ignores work item events caused by the bot itself and comment edits.
 
 Mentions work in two forms. A mention picked from the identity picker is stored as `@<GUID>` and matches the bot's identity. A typed `@agent-swarm-bot` matches `AZURE_DEVOPS_BOT_NAME`. The swarm ignores comments written by the bot itself, system comments, and edits to existing comments, so fixing a typo does not create a second task.
 
@@ -94,6 +113,8 @@ The slim image has no `az`; `git` access to Azure Repos still works there.
 | Clone | `gh repo clone` | `git clone https://dev.azure.com/org/project/_git/repo` |
 | Create PR | `gh pr create` | `az repos pr create --project <p> --repository <r> --source-branch <b>` |
 | View PR | `gh pr view` | `az repos pr show --id <n>` |
+| View work item | - | `az boards work-item show --id <n>` |
+| Reply on work item | - | `az boards work-item update --id <n> --discussion "<reply>"` |
 | Comment on PR | `gh pr comment` | `az devops invoke --area git --resource pullRequestThreads --route-parameters project=<p> repositoryId=<r> pullRequestId=<n> --http-method POST --in-file <json> --api-version 7.1` |
 
 `az repos` has no comment command, so comments go through `az devops invoke` with a JSON body such as `{"comments":[{"content":"Done, see the latest push."}],"status":1}`. Tasks created from Azure DevOps events include this recipe.
@@ -115,6 +136,9 @@ Azure DevOps events can trigger [workflows](/docs/concepts/workflows):
 | Deliveries fail with `401 {"error":"Invalid credentials"}` | The Basic authentication password does not match `AZURE_DEVOPS_WEBHOOK_SECRET`. |
 | Deliveries fail with `503` | `AZURE_DEVOPS_WEBHOOK_SECRET` is not set on the API server, or `AZURE_DEVOPS_DISABLE=true`. |
 | A mention returns `{"created":false}` and no task appears | The author is the bot identity, usually the PAT owner. Mention from another account. |
+| A work item event returns `{"created":false}` and the log says the actor is not a known swarm user | Link the person's Azure DevOps sign-in name to a swarm user, or add it to `AZURE_DEVOPS_ALLOWED_ACTORS`. |
+| A work item delivery returns `500` | The bot identity lookup or task creation failed. Azure DevOps retries the delivery; nothing was recorded as handled. |
+| Assigning a work item does nothing | The **Work item updated** subscription is missing, or the item was assigned by the bot identity itself. |
 | Every comment returns `{"created":false}` and the API logs `required resource fields are missing` | The comment subscription uses resource version 1.0. Edit it and pick 2.0. |
 
 ## Related

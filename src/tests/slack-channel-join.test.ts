@@ -1,6 +1,7 @@
-import { describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { WebClient } from "@slack/web-api";
 import { withAutoJoin } from "../slack/channel-join";
+import { resetExternalChannelStateForTesting } from "../slack/external-channel";
 
 // Mirrors the shape @slack/web-api's platformErrorFromResult produces:
 // message = "An API error occurred: <code>", data.error = "<code>"
@@ -37,6 +38,8 @@ function makeClient(opts: {
 }
 
 describe("withAutoJoin", () => {
+  beforeEach(() => resetExternalChannelStateForTesting());
+
   test("success: fn called once, join and info not called", async () => {
     const { client, infoFn, joinFn } = makeClient({});
     const fn = mock(() => Promise.resolve("ok"));

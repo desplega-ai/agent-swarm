@@ -682,6 +682,10 @@ SLACK_DISABLE=true
 SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com  # Comma-separated email domains
 SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs to always allow
 
+# Optional: Keep the bot out of external Slack Connect channels (default: false)
+# Alerts go to SLACK_ALERTS_CHANNEL.
+# SLACK_BLOCK_EXTERNAL_CHANNELS=true
+
 # Optional: Additive thread buffering (batch non-mention thread messages)
 # ADDITIVE_SLACK=true
 # ADDITIVE_SLACK_BUFFER_MS=10000

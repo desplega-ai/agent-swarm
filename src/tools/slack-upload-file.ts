@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
+import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { MAX_FILE_SIZE, uploadFile } from "@/slack/files";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -221,6 +222,11 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
       const app = getSlackApp();
       if (!app) {
         return toolErr("Slack not configured.");
+      }
+
+      const blockReason = await getChannelBlockReason(app.client, slackChannelId);
+      if (blockReason) {
+        return toolErr(externalChannelToolError(slackChannelId, blockReason));
       }
 
       // Validate: must provide either filePath OR content (not both, not neither)
