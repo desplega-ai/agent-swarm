@@ -287,7 +287,7 @@ async function claimModelFields(
     return {
       ...cleared,
       ...(await recordClaimModelResolution({ ...task, model: pin }, agent, {
-        includeRepoSecrets: readsRepoSecrets(auth, agent.isLead ?? false),
+        includeRepoSecrets: readsRepoSecrets(auth, agent),
       })),
     };
   } catch (error) {

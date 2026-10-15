@@ -55,24 +55,23 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-function agentReadsSecrets(agentId: string, isLead: boolean): boolean {
-  return can({
-    principal: { kind: "agent", agentId, isLead },
-    verb: "config.read.secrets",
-    resource: { kind: "none" },
-    source: "http",
-  }).allow;
-}
-
 /**
  * Whether this caller's `/api/config/resolved` carries secret repo rows (the
  * `includeRepoSecrets` of {@link resolveSecretsRead}): a runtime-token agent
  * gets them only with `config.read.secrets`. Claim uses it so an agent's
  * default profile yields only to repo rows that worker's env really gets.
  */
-export function readsRepoSecrets(auth: HttpRequestAuth | null, isLead: boolean): boolean {
+export function readsRepoSecrets(
+  auth: HttpRequestAuth | null,
+  agent: { isLead?: boolean } | null | undefined,
+): boolean {
   if (auth?.kind !== "agent" || !auth.runtimeId) return true;
-  return agentReadsSecrets(auth.agentId, isLead);
+  return can({
+    principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
+    verb: "config.read.secrets",
+    resource: { kind: "none" },
+    source: "http",
+  }).allow;
 }
 
 async function requestSecretReadScope(
@@ -83,7 +82,15 @@ async function requestSecretReadScope(
   if (auth?.kind === "operator") return "all";
   if (auth?.kind === "agent") {
     const agent = await getAgentById(auth.agentId);
-    if (agentReadsSecrets(auth.agentId, agent?.isLead ?? false)) return "all";
+    if (
+      can({
+        principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
+        verb: "config.read.secrets",
+        resource: { kind: "none" },
+        source: "http",
+      }).allow
+    )
+      return "all";
     if (!auth.runtimeId || resolvedScope?.agentId !== auth.agentId) return "none";
     return "self";
   }
