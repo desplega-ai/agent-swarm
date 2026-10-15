@@ -9778,7 +9778,7 @@ export interface paths {
         put?: never;
         /**
          * Create a model profile
-         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. Operator or dashboard user only.
+         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. Operator only (the shared API key).
          */
         post: {
             parameters: {
@@ -9916,7 +9916,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model profile
-         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or an unfinished task asked for it. Operator or dashboard user only.
+         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or an unfinished task asked for it. Operator only (the shared API key).
          */
         delete: {
             parameters: {
@@ -9974,7 +9974,7 @@ export interface paths {
         head?: never;
         /**
          * Update a model profile
-         * @description Changes the model, effort, custom-model flag or description; the name and harness are fixed. Omit a field to keep it; `effort: null` clears it. Applies to tasks claimed after the change. Operator or dashboard user only.
+         * @description Changes the model, effort, custom-model flag or description; the name and harness are fixed. Omit a field to keep it; `effort: null` clears it. Applies to tasks claimed after the change. Operator only (the shared API key).
          */
         patch: {
             parameters: {

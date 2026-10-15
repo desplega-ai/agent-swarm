@@ -3,7 +3,7 @@
 // A profile is a named harness + model + optional effort. Lead picks one per
 // task (`profile` on send-task / POST /api/tasks) or sets it as an agent's
 // default (PATCH /api/agents/{id}/runtime { profile }); claim resolves it.
-// Reads are open to every caller; writes are for humans (`models.profiles.write`).
+// Reads are open to every caller; writes are operator-only (`models.profiles.write`).
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAlias } from "@desplega/model-catalog";
@@ -68,7 +68,7 @@ const createProfile = route({
   pattern: ["api", "model-profiles"],
   summary: "Create a model profile",
   description:
-    "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. Operator or dashboard user only.",
+    "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   body: z.object({
@@ -93,7 +93,7 @@ const updateProfile = route({
   pattern: ["api", "model-profiles", null],
   summary: "Update a model profile",
   description:
-    "Changes the model, effort, custom-model flag or description; the name and harness are fixed. Omit a field to keep it; `effort: null` clears it. Applies to tasks claimed after the change. Operator or dashboard user only.",
+    "Changes the model, effort, custom-model flag or description; the name and harness are fixed. Omit a field to keep it; `effort: null` clears it. Applies to tasks claimed after the change. Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   params: z.object({ name: z.string() }),
@@ -117,7 +117,7 @@ const deleteProfile = route({
   pattern: ["api", "model-profiles", null],
   summary: "Delete a model profile",
   description:
-    "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or an unfinished task asked for it. Operator or dashboard user only.",
+    "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or an unfinished task asked for it. Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   params: z.object({ name: z.string() }),
@@ -166,7 +166,7 @@ async function canWriteProfiles(
     source: "http",
   });
   if (!decision.allow) {
-    jsonError(res, "Writing model profiles requires an operator or a dashboard user", 403);
+    jsonError(res, "Writing model profiles requires the operator", 403);
     return false;
   }
   return true;

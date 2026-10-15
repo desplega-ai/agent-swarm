@@ -154,7 +154,7 @@ describe("profile CRUD", () => {
     );
   });
 
-  test("dashboard users may write; agents, the lead included, may not", async () => {
+  test("only the operator may write; dashboard users and agents, the lead included, may not", async () => {
     const body = { name: "devin-any", harness: "devin", model: "devin" };
     expect(
       (await call("POST", "/api/model-profiles", body, { "x-agent-id": LEAD_ID })).status,
@@ -164,7 +164,18 @@ describe("profile CRUD", () => {
     ).toBe(403);
     expect(
       (await call("POST", "/api/model-profiles", body, { "x-test-auth": "user" })).status,
-    ).toBe(201);
+    ).toBe(403);
+    // Nor edit one: a shared profile changes what other people's queued tasks run.
+    expect(
+      (
+        await call(
+          "PATCH",
+          "/api/model-profiles/claude-regular",
+          { model: "haiku" },
+          { "x-test-auth": "user" },
+        )
+      ).status,
+    ).toBe(403);
     // Reads stay open to agents.
     expect(
       (await call("GET", "/api/model-profiles", undefined, { "x-agent-id": CLAUDE_ID })).status,

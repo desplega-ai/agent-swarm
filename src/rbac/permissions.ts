@@ -199,7 +199,8 @@ export const PERMISSIONS = {
     namespace: "models",
   },
   "models.profiles.write": {
-    description: "Create, update, or delete model profiles (named harness + model + effort).",
+    description:
+      "Create, update, or delete model profiles (named harness + model + effort). Operator (shared API key) only.",
     namespace: "models",
   },
   "config.read.secrets": {

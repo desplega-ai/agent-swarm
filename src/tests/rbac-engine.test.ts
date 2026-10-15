@@ -99,10 +99,12 @@ const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "approval.respond",
   "runtime_controller.write",
   "runtime_pool.write",
-  "models.profiles.write",
 ];
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
+
+// The shared API key alone: dashboard users are denied too.
+const API_KEY_OPERATOR_VERBS: PermissionVerb[] = ["models.profiles.write"];
 
 const AGENT_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.harness-support.write"];
 
@@ -207,6 +209,7 @@ describe("verb-group partition", () => {
       ...LEAD_OR_OPERATOR_OR_USER_VERBS,
       ...OPERATOR_OR_USER_VERBS,
       ...LEAD_OR_OPERATOR_VERBS,
+      ...API_KEY_OPERATOR_VERBS,
       ...AGENT_OR_OPERATOR_VERBS,
     ];
     expect(new Set(grouped).size).toBe(grouped.length);
@@ -316,6 +319,23 @@ describe("agent-or-operator verbs", () => {
   };
   for (const verb of AGENT_OR_OPERATOR_VERBS) {
     test(`${verb}: any registered agent or the operator allowed, dashboard users denied`, () => {
+      expectDecisions(verb, { kind: "none" }, expected);
+    });
+  }
+});
+
+describe("api-key operator verbs", () => {
+  const expected: Expected = {
+    lead: false,
+    worker: false,
+    ownerWorker: false,
+    creatorWorker: false,
+    userRequester: false,
+    foreignUser: false,
+    operator: true,
+  };
+  for (const verb of API_KEY_OPERATOR_VERBS) {
+    test(`${verb}: only the operator allowed`, () => {
       expectDecisions(verb, { kind: "none" }, expected);
     });
   }
