@@ -608,6 +608,8 @@ export interface McpUserConfigResponse {
 export interface ChatSdkAdapterStatus {
   name: "telegram" | "slack" | "discord" | "teams";
   configured: boolean;
+  /** False when the entry carries `enabled: false`: configured and kept, not started. */
+  enabled: boolean;
   /** `incomplete`: saved with a missing field or an unresolvable `$config`; `error` names it. */
   health: "ok" | "error" | "disabled" | "incomplete";
   error?: string;

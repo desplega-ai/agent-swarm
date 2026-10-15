@@ -20990,6 +20990,9 @@
                           "configured": {
                             "type": "boolean"
                           },
+                          "enabled": {
+                            "type": "boolean"
+                          },
                           "health": {
                             "type": "string",
                             "enum": [
@@ -21054,6 +21057,7 @@
                         "required": [
                           "name",
                           "configured",
+                          "enabled",
                           "health",
                           "webhookUrl"
                         ]

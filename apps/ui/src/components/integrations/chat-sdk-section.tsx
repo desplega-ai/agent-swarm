@@ -1,5 +1,6 @@
 import { AlertCircle, Check, Copy, Info, RotateCw, Webhook } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
+import { api } from "@/api/client";
 import {
   useChatSdkStatus,
   useInvalidateChatSdkStatus,
@@ -42,12 +43,14 @@ import {
   configRefKey,
   type Drafts,
   discordInviteUrl,
+  effectiveSecretValue,
   initialDrafts,
   isObject,
   isRequired,
   type JsonObject,
   localTunnelPort,
   maskSecretsForPreview,
+  mergeAdaptersForSave,
   parseAdapters,
   secretFieldProblem,
   storedEntryFor,
@@ -151,13 +154,21 @@ function ChatSdkForm({
   const upsert = useUpsertConfigsBatch();
   const invalidateStatus = useInvalidateChatSdkStatus();
 
-  const built = useMemo(() => buildAll(drafts, stored), [drafts, stored]);
+  // Secret rows that exist: an adapter switched back on reuses its own rows.
+  const existingKeys = useMemo(
+    () => new Set(configs.filter((c) => c.scope === "global").map((c) => c.key)),
+    [configs],
+  );
+  const built = useMemo(
+    () => buildAll(drafts, stored, existingKeys),
+    [drafts, stored, existingKeys],
+  );
   // Compared with the stored value as this form would write it, so key order
   // and omitted defaults in hand-written JSON do not count as a change. Object
   // values (`$config` references) pass through unchanged on both sides.
   const baselineJson = useMemo(
-    () => JSON.stringify(buildAll(initialDrafts(stored), stored).adapters),
-    [stored],
+    () => JSON.stringify(buildAll(initialDrafts(stored), stored, existingKeys).adapters),
+    [stored, existingKeys],
   );
   const nextJson = JSON.stringify(built.adapters);
   const adaptersChanged = nextJson !== baselineJson;
@@ -180,9 +191,24 @@ function ChatSdkForm({
         return;
       }
     }
-    // Batch 2: the adapters JSON, then the flag.
+    // Batch 2: the adapters JSON, then the flag. The JSON is merged over the
+    // row as stored right now, so an adapter added elsewhere while this form
+    // was open survives the save.
+    let mergedJson: string | undefined;
+    if (adaptersChanged) {
+      let fresh: JsonObject = stored;
+      try {
+        const current = await api.fetchConfigs({ scope: "global" });
+        fresh = parseAdapters(findConfigForKey(current.configs, "CHAT_SDK_ADAPTERS")?.value);
+      } catch {
+        // Offline or denied: fall back to the value this form was built from.
+      }
+      mergedJson = JSON.stringify(mergeAdaptersForSave(fresh, stored, drafts, built.adapters));
+    }
     const settings = [
-      ...(adaptersChanged ? [{ key: "CHAT_SDK_ADAPTERS", value: nextJson, isSecret: false }] : []),
+      ...(mergedJson !== undefined
+        ? [{ key: "CHAT_SDK_ADAPTERS", value: mergedJson, isSecret: false }]
+        : []),
       ...(enabled !== storedEnabled
         ? [{ key: "CHAT_SDK_ENABLED", value: enabled ? "true" : "false", isSecret: false }]
         : []),
@@ -265,6 +291,7 @@ function ChatSdkForm({
           def={def}
           draft={drafts[def.name]}
           storedEntry={storedEntryFor(stored, def.name)}
+          existingKeys={existingKeys}
           status={status?.adapters.find((adapter) => adapter.name === def.name)}
           statusError={statusError}
           envOnly={envOnlyAdapters}
@@ -299,6 +326,9 @@ function healthView(
     return included
       ? { tone: "neutral", label: "Not saved" }
       : { tone: "neutral", label: "Not configured" };
+  }
+  if (!status.enabled) {
+    return { tone: "neutral", label: "Off, configuration kept", description: status.error };
   }
   if (status.health === "error") {
     return { tone: "error", label: "Failed to start", description: status.error };
@@ -351,6 +381,8 @@ interface AdapterPanelProps {
   def: ChatSdkAdapterDef;
   draft: AdapterDraft;
   storedEntry: JsonObject | undefined;
+  /** Global config keys that exist (secret rows of a switched-off adapter are reused). */
+  existingKeys: ReadonlySet<string>;
   status: ChatSdkAdapterStatus | undefined;
   statusError: string | undefined;
   /** The adapters come from the deployment env: the switch shows the running state, locked. */
@@ -364,6 +396,7 @@ function AdapterPanel({
   def,
   draft,
   storedEntry,
+  existingKeys,
   status,
   statusError,
   envOnly,
@@ -375,6 +408,7 @@ function AdapterPanel({
   const view = healthView(status, draft.included, statusError);
   const envConfigured = envOnly && status?.configured === true;
   const showDetails = draft.included || envConfigured;
+  const switchOn = envOnly ? envConfigured && status?.enabled !== false : draft.enabled;
   const savedMode = status?.mode;
   // The mode the panel shows: the draft while editing, else the running one.
   const mode = draft.included ? draft.values.mode : savedMode;
@@ -398,22 +432,39 @@ function AdapterPanel({
         label={view.label}
         description={view.description}
         actions={
-          <Switch
-            checked={envOnly ? envConfigured : draft.included}
-            disabled={envOnly}
-            onCheckedChange={(included) => onChange((prev) => ({ ...prev, included }))}
-            aria-label={`Use ${def.label}`}
-          />
+          <div className="flex items-center gap-3">
+            {draft.included && !draft.enabled && !envOnly && (
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => onChange((prev) => ({ ...prev, included: false }))}
+              >
+                Remove configuration
+              </Button>
+            )}
+            <Switch
+              checked={switchOn}
+              disabled={envOnly}
+              // Off keeps the entry (`enabled: false`); on creates it when needed.
+              onCheckedChange={(enabled) =>
+                onChange((prev) => ({ ...prev, enabled, included: enabled || prev.included }))
+              }
+              aria-label={`Use ${def.label}`}
+            />
+          </div>
         }
       />
       {statusKnown && (
         <OAuthSectionRow>
-          {/* Remounted when the switch flips, so the steps fold away once the adapter is on. */}
+          {/* Remounted when the switch flips: the steps unfold once the adapter is on. */}
           <ChatSdkSetup
-            key={showDetails ? "on" : "off"}
+            key={switchOn ? "on" : "off"}
             adapter={def.name}
             docsUrl={docsUrl}
-            defaultOpen={!showDetails}
+            defaultOpen={switchOn}
+            webhookUrl={status?.webhookUrl}
             inviteUrl={
               def.name === "discord"
                 ? discordInviteUrl(
@@ -436,7 +487,11 @@ function AdapterPanel({
                 adapter={def.name}
                 field={field}
                 draft={draft}
-                storedValue={storedEntry?.[field.key]}
+                storedValue={
+                  field.kind === "secret"
+                    ? effectiveSecretValue(def.name, field, storedEntry?.[field.key], existingKeys)
+                    : storedEntry?.[field.key]
+                }
                 configs={configs}
                 onChange={onChange}
               />

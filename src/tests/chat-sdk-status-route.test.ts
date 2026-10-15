@@ -153,6 +153,7 @@ interface StatusBody {
   adapters: Array<{
     name: string;
     configured: boolean;
+    enabled: boolean;
     health: string;
     error?: string;
     webhookUrl: string;
@@ -259,6 +260,24 @@ describe("GET /api/integrations/chat/status", () => {
         expect(entry).toMatchObject({ configured: true, health: "incomplete" });
         expect(entry?.error).toBe("CHAT_SDK_ADAPTERS.discord.publicKey: required");
         expect(entry?.guilds).toBeUndefined();
+      },
+    );
+  });
+
+  test("an entry with enabled: false is configured, not enabled, and says the config is kept", async () => {
+    await withEnv(
+      {
+        CHAT_SDK_ADAPTERS: JSON.stringify({
+          ...BOOT_ADAPTERS,
+          discord: { ...DISCORD_ENTRY, enabled: false },
+        }),
+      },
+      async () => {
+        const body = await getStatus();
+        const entry = body.adapters.find((a) => a.name === "discord");
+        expect(entry).toMatchObject({ configured: true, enabled: false, health: "disabled" });
+        expect(entry?.error).toContain("configuration is kept");
+        expect(body.adapters.find((a) => a.name === "telegram")?.enabled).toBe(true);
       },
     );
   });

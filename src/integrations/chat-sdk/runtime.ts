@@ -315,7 +315,7 @@ async function configFingerprint(config: ChatSdkConfig): Promise<string> {
   const slackDisabled = isEnvFlagEnabled("SLACK_DISABLE", false);
   // Incomplete adapters are not part of the running state, so editing one
   // does not restart the adapters that run.
-  const { incomplete: _incomplete, ...rest } = config;
+  const { incomplete: _incomplete, disabled: _disabled, ...rest } = config;
   return createHash("sha256")
     .update(JSON.stringify({ ...rest, adapters, slackDisabled }))
     .digest("hex");

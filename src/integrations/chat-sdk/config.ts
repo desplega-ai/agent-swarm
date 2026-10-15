@@ -9,6 +9,7 @@ import {
   type ChatSdkAdapters,
   ChatSdkAdaptersDraftSchema,
   firstIssueText,
+  isAdapterEntryEnabled,
 } from "./schema";
 
 export {
@@ -42,6 +43,8 @@ export interface ChatSdkConfig {
    * not resolve. The text names the field. The other adapters still start.
    */
   incomplete?: Partial<Record<ChatSdkAdapterName, string>>;
+  /** Adapters present with `enabled: false`: configured, kept, not started. */
+  disabled?: ChatSdkAdapterName[];
   /** A problem with the whole value (bad JSON, unknown adapter, forbidden key): nothing starts. */
   error?: string;
 }
@@ -89,6 +92,8 @@ async function buildSwarmConfigLookup(): Promise<(key: string) => string | undef
 function toResolvedAdapterConfig(raw: Record<string, unknown>): ResolvedAdapterConfig {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(raw)) {
+    // The card's switch, not an adapter option.
+    if (key === "enabled") continue;
     out[key] = RESOLVER_FIELDS.has(key) && typeof value === "string" ? async () => value : value;
   }
   return out;
@@ -126,9 +131,14 @@ export async function getChatSdkConfig(): Promise<ChatSdkConfig> {
   const lookup = await buildSwarmConfigLookup();
   const adapters: ChatSdkConfig["adapters"] = {};
   const incomplete: NonNullable<ChatSdkConfig["incomplete"]> = {};
+  const disabled: ChatSdkAdapterName[] = [];
   for (const name of CHAT_SDK_ADAPTER_NAMES) {
     const entry = draft.data[name];
     if (entry === undefined) continue;
+    if (!isAdapterEntryEnabled(entry)) {
+      disabled.push(name);
+      continue;
+    }
     const validated = CHAT_SDK_ADAPTER_SCHEMAS[name].safeParse(entry);
     if (!validated.success) {
       incomplete[name] = firstIssueText(validated.error, `CHAT_SDK_ADAPTERS.${name}`, entry);
@@ -149,6 +159,7 @@ export async function getChatSdkConfig(): Promise<ChatSdkConfig> {
     enabled,
     adapters,
     ...(Object.keys(incomplete).length > 0 ? { incomplete } : {}),
+    ...(disabled.length > 0 ? { disabled } : {}),
   };
 }
 

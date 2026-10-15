@@ -8,6 +8,7 @@ import {
   localTunnelPort,
   MASKED_SECRET,
   maskSecretsForPreview,
+  mergeAdaptersForSave,
   secretFieldProblem,
 } from "./chat-sdk-form";
 
@@ -121,6 +122,7 @@ describe("Chat SDK form: partial saves", () => {
   test("missing required fields do not block the save; they are listed as missing", () => {
     const drafts = initialDrafts({});
     drafts.discord.included = true;
+    drafts.discord.enabled = true;
     drafts.discord.secrets.botToken = "token-only";
     const built = buildAll(drafts, {});
     expect(built.problems).toEqual([]);
@@ -132,6 +134,7 @@ describe("Chat SDK form: partial saves", () => {
   test("a mode-dependent field counts as missing only in that mode", () => {
     const drafts = initialDrafts({});
     drafts.telegram.included = true;
+    drafts.telegram.enabled = true;
     drafts.telegram.secrets.botToken = "t";
     drafts.telegram.values.mode = "webhook";
     expect(buildAll(drafts, {}).missing).toEqual(["Telegram: Webhook secret token"]);
@@ -142,6 +145,7 @@ describe("Chat SDK form: partial saves", () => {
   test("a format problem still blocks, even on a partial entry", () => {
     const drafts = initialDrafts({});
     drafts.discord.included = true;
+    drafts.discord.enabled = true;
     drafts.discord.values.publicKey = "not-hex";
     const built = buildAll(drafts, {});
     expect(built.problems).toEqual(["Discord: Public key must be 64 hex characters"]);
@@ -168,5 +172,83 @@ describe("Chat SDK form: Discord invite link", () => {
     expect(discordInviteUrl(undefined)).toBeUndefined();
     expect(discordInviteUrl("")).toBeUndefined();
     expect(discordInviteUrl("abc")).toBeUndefined();
+  });
+});
+
+describe("Chat SDK form: merge over the stored row on save", () => {
+  const telegramEntry = { botToken: { $config: "CHAT_SDK_TELEGRAM_BOT_TOKEN" }, mode: "polling" };
+
+  test("an adapter added elsewhere while the form was open survives the save", () => {
+    // The form was built when the row held nothing; Telegram was added since.
+    const drafts = initialDrafts({});
+    drafts.discord.included = true;
+    drafts.discord.enabled = true;
+    drafts.discord.values.applicationId = "1560241123685965894";
+    const built = buildAll(drafts, {});
+    const merged = mergeAdaptersForSave({ telegram: telegramEntry }, {}, drafts, built.adapters);
+    expect(merged).toEqual({ telegram: telegramEntry, discord: built.adapters.discord });
+  });
+
+  test("an adapter the user switched off is removed, an untouched one keeps the fresh value", () => {
+    const stored = { telegram: telegramEntry, discord: { applicationId: "1" } };
+    const drafts = initialDrafts(stored);
+    drafts.telegram.included = false;
+    const built = buildAll(drafts, stored);
+    const fresh = { telegram: telegramEntry, discord: { applicationId: "2" } };
+    expect(mergeAdaptersForSave(fresh, stored, drafts, built.adapters)).toEqual({
+      discord: { applicationId: "2" },
+    });
+  });
+
+  test("a touched adapter takes the form's version over a concurrent change", () => {
+    const stored = { discord: { applicationId: "1" } };
+    const drafts = initialDrafts(stored);
+    drafts.discord.values.applicationId = "3";
+    const built = buildAll(drafts, stored);
+    expect(
+      mergeAdaptersForSave({ discord: { applicationId: "2" } }, stored, drafts, built.adapters),
+    ).toEqual({ discord: { applicationId: "3" } });
+  });
+});
+
+describe("Chat SDK form: an adapter switched back on reuses its secret rows", () => {
+  test("the bot token references its existing row instead of counting as missing", () => {
+    const drafts = initialDrafts({});
+    drafts.telegram.included = true;
+    drafts.telegram.enabled = true;
+    drafts.telegram.values.mode = "polling";
+    const existing = new Set(["CHAT_SDK_TELEGRAM_BOT_TOKEN"]);
+    const built = buildAll(drafts, {}, existing);
+    expect(built.missing).toEqual([]);
+    expect(built.secretRows).toEqual([]);
+    expect(built.adapters.telegram).toEqual({
+      botToken: { $config: "CHAT_SDK_TELEGRAM_BOT_TOKEN" },
+      mode: "polling",
+    });
+    // Without the row the token is still missing.
+    expect(buildAll(drafts, {}).missing).toEqual(["Telegram: Bot token"]);
+  });
+});
+
+describe("Chat SDK form: the switch keeps the configuration", () => {
+  const telegramEntry = { botToken: { $config: "CHAT_SDK_TELEGRAM_BOT_TOKEN" }, mode: "polling" };
+
+  test("switching off writes enabled: false and keeps every value", () => {
+    const stored = { telegram: telegramEntry };
+    const drafts = initialDrafts(stored);
+    expect(drafts.telegram).toMatchObject({ included: true, enabled: true });
+    drafts.telegram.enabled = false;
+    expect(buildAll(drafts, stored).adapters.telegram).toEqual({
+      ...telegramEntry,
+      enabled: false,
+    });
+  });
+
+  test("switching back on drops the flag; an entry without the flag counts as enabled", () => {
+    const stored = { telegram: { ...telegramEntry, enabled: false } };
+    const drafts = initialDrafts(stored);
+    expect(drafts.telegram.enabled).toBe(false);
+    drafts.telegram.enabled = true;
+    expect(buildAll(drafts, stored).adapters.telegram).toEqual(telegramEntry);
   });
 });

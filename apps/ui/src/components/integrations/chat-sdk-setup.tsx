@@ -1,6 +1,10 @@
-import type { ReactNode } from "react";
-import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import type { ChatSdkAdapterName } from "@/lib/chat-sdk-fields";
+import { Check, ChevronRight, Copy } from "lucide-react";
+import { type ReactNode, useRef, useState } from "react";
+import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { CHAT_SDK_ADAPTER_DEFS, type ChatSdkAdapterName } from "@/lib/chat-sdk-fields";
 import { DISCORD_INVITE_PERMISSIONS } from "@/lib/chat-sdk-form";
 import { cn } from "@/lib/utils";
 
@@ -233,31 +237,126 @@ function steps(adapter: ChatSdkAdapterName, { docsUrl, inviteUrl }: StepContext)
 interface ChatSdkSetupProps {
   adapter: ChatSdkAdapterName;
   docsUrl: string | undefined;
-  /** Open by default while the adapter is off; collapsed once it is turned on. */
+  /** Open by default once the adapter is turned on; collapsed while it is off. */
   defaultOpen: boolean;
   /** Discord only: the invite link for the entered application id. */
   inviteUrl?: string;
+  /** This swarm's webhook URL for the adapter, included in the copied brief. */
+  webhookUrl?: string;
 }
 
-export function ChatSdkSetup({ adapter, docsUrl, defaultOpen, inviteUrl }: ChatSdkSetupProps) {
+const COPY_TOOLTIP = "Send this to Exty or your agent with computer use to set it up for you.";
+
+/**
+ * The steps as plain text for an agent: the rendered list (one source for
+ * what a human and an agent read), with the links spelled out, plus the
+ * values the agent must bring back to this card.
+ */
+function agentBrief(
+  adapter: ChatSdkAdapterName,
+  list: HTMLOListElement | null,
+  webhookUrl: string | undefined,
+  docsUrl: string | undefined,
+): string {
+  const def = CHAT_SDK_ADAPTER_DEFS.find((candidate) => candidate.name === adapter);
+  const steps = Array.from(list?.querySelectorAll("li") ?? []).map((item, index) => {
+    const clone = item.cloneNode(true) as HTMLElement;
+    // "label (https://...)" so the link survives the copy.
+    for (const anchor of Array.from(clone.querySelectorAll("a[href]"))) {
+      anchor.textContent = `${anchor.textContent} (${anchor.getAttribute("href")})`;
+    }
+    return `${index + 1}. ${clone.textContent?.replace(/\s+/g, " ").trim()}`;
+  });
+  const fields = (def?.fields ?? [])
+    .map((field) => `- ${field.label} (${field.key})${field.required ? ", required" : ""}`)
+    .join("\n");
+  return [
+    `Set up the ${def?.label ?? adapter} adapter of the Agent Swarm Chat SDK channel.`,
+    "Follow these steps on the platform, then enter the values in the Agent Swarm dashboard under Settings > Integrations > Chat SDK, turn on the adapter and save.",
+    "",
+    ...steps,
+    "",
+    ...(webhookUrl
+      ? [`Webhook URL of this swarm (where the platform needs one): ${webhookUrl}`, ""]
+      : []),
+    "Values the dashboard asks for:",
+    fields,
+    ...(docsUrl ? ["", `Docs: ${docsUrl}#${DOCS_ANCHOR[adapter]}`] : []),
+  ].join("\n");
+}
+
+export function ChatSdkSetup({
+  adapter,
+  docsUrl,
+  defaultOpen,
+  inviteUrl,
+  webhookUrl,
+}: ChatSdkSetupProps) {
+  const listRef = useRef<HTMLOListElement>(null);
+  const { copied, copy } = useCopyToClipboard();
+  const [open, setOpen] = useState(defaultOpen);
+  // The same header as CollapsibleSection (plain variant), with the copy
+  // button beside the toggle: a button cannot sit inside the toggle button.
   return (
-    <CollapsibleSection title="Setup" heading="h3" defaultOpen={defaultOpen}>
-      <div className="space-y-2 pt-1">
-        <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-5 text-muted-foreground marker:text-muted-foreground">
-          {steps(adapter, { docsUrl, inviteUrl }).map((step, index) => (
-            // The step list is static per adapter, so the index is a stable key.
-            <li key={index} className="pl-1">
-              {step}
-            </li>
-          ))}
-        </ol>
-        {docsUrl && (
-          <p className="text-xs text-muted-foreground">
-            Full guide:{" "}
-            <ExternalLink href={`${docsUrl}#${DOCS_ANCHOR[adapter]}`}>Chat SDK docs</ExternalLink>.
-          </p>
-        )}
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <h3>
+          <button
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
+            aria-expanded={open}
+            className="group flex items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <ChevronRight
+              className={cn(
+                "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-snappy motion-reduce:transition-none",
+                open && "rotate-90",
+              )}
+            />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Setup
+            </span>
+          </button>
+        </h3>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={() => void copy(agentBrief(adapter, listRef.current, webhookUrl, docsUrl))}
+              aria-label={copied ? "Copied" : "Copy the setup steps for an agent"}
+            >
+              {copied ? <Check className="text-status-success-strong" /> : <Copy />}
+              {copied ? "Copied" : "Copy for your agent"}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{COPY_TOOLTIP}</TooltipContent>
+        </Tooltip>
       </div>
-    </CollapsibleSection>
+      <AnimatedReveal open={open}>
+        <div className="space-y-2 pt-1">
+          <ol
+            ref={listRef}
+            className="list-decimal space-y-1.5 pl-5 text-xs leading-5 text-muted-foreground marker:text-muted-foreground"
+          >
+            {steps(adapter, { docsUrl, inviteUrl }).map((step, index) => (
+              // The step list is static per adapter, so the index is a stable key.
+              <li key={index} className="pl-1">
+                {step}
+              </li>
+            ))}
+          </ol>
+          {docsUrl && (
+            <p className="text-xs text-muted-foreground">
+              Full guide:{" "}
+              <ExternalLink href={`${docsUrl}#${DOCS_ANCHOR[adapter]}`}>Chat SDK docs</ExternalLink>
+              .
+            </p>
+          )}
+        </div>
+      </AnimatedReveal>
+    </div>
   );
 }

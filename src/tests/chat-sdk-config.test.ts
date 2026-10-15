@@ -243,6 +243,24 @@ describe("getChatSdkConfig", () => {
     expect(config.incomplete?.teams).toBe("CHAT_SDK_ADAPTERS.teams.appTenantId: required");
   });
 
+  test("enabled: false keeps the entry out of the started adapters, listed as disabled", async () => {
+    setAdapters({
+      telegram: { botToken: { $config: "TG_TOKEN" }, secretToken: "s", enabled: false },
+      discord: { botToken: "x", enabled: false },
+    });
+    const config = await getChatSdkConfig();
+    expect(config.adapters).toEqual({});
+    expect(config.disabled).toEqual(["telegram", "discord"]);
+    // Not validated for completeness while off.
+    expect(config.incomplete).toBeUndefined();
+    const on = { telegram: { botToken: { $config: "TG_TOKEN" }, secretToken: "s", enabled: true } };
+    setAdapters(on);
+    const enabled = await getChatSdkConfig();
+    expect(Object.keys(enabled.adapters)).toEqual(["telegram"]);
+    // The switch is not passed to the adapter factory.
+    expect(enabled.adapters.telegram?.enabled).toBeUndefined();
+  });
+
   test("a forbidden key or an unknown adapter still fails the whole value", async () => {
     setAdapters({ telegram: { botToken: "x" }, discord: { apiUrl: "http://evil.example" } });
     const config = await getChatSdkConfig();

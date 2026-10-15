@@ -7586,6 +7586,7 @@ export interface paths {
                                 /** @enum {string} */
                                 name: "telegram" | "slack" | "discord" | "teams";
                                 configured: boolean;
+                                enabled: boolean;
                                 /** @enum {string} */
                                 health: "ok" | "error" | "disabled" | "incomplete";
                                 error?: string;

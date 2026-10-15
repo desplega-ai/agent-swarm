@@ -6,6 +6,7 @@ import { resolveAdapterApiUrl } from "./adapters";
 import { CHAT_SDK_ADAPTER_NAMES, type ChatSdkAdapterName, getChatSdkConfig } from "./config";
 import { fetchDiscordGuilds } from "./discord-api";
 import { getChatSdkHealth } from "./runtime";
+import { isAdapterEntryEnabled } from "./schema";
 import { callTelegramBotApi, TelegramBotApiError } from "./telegram-api";
 
 /**
@@ -23,6 +24,8 @@ export const ChatSdkStatusSchema = z.object({
     z.object({
       name: z.enum(CHAT_SDK_ADAPTER_NAMES),
       configured: z.boolean(),
+      /** False when the entry carries `enabled: false`: configured and kept, not started. */
+      enabled: z.boolean(),
       /** `incomplete`: present in `CHAT_SDK_ADAPTERS` with a missing field or an unresolvable `$config`; `error` names it. */
       health: z.enum(["ok", "error", "disabled", "incomplete"]),
       error: z.string().optional(),
@@ -118,6 +121,7 @@ export async function getChatSdkStatus(): Promise<ChatSdkStatus> {
   const discordGuilds = await discordGuildsFor(config, runtimeHealth.discord);
   const adapters = CHAT_SDK_ADAPTER_NAMES.map((name): ChatSdkAdapterStatus => {
     const configured = raw[name] !== undefined;
+    const enabled = isAdapterEntryEnabled(raw[name]);
     const current = runtimeHealth[name];
     const incomplete = config.incomplete?.[name];
     const rawMode = raw[name]?.mode;
@@ -135,12 +139,15 @@ export async function getChatSdkStatus(): Promise<ChatSdkStatus> {
       // Saved with a missing field, or a `$config` row that does not exist.
       health = "incomplete";
       error = incomplete;
+    } else if (configured && !enabled) {
+      error = "Turned off on the card. The configuration is kept.";
     } else if (config.enabled && configured) {
       error = blockedCause ? `Not started: ${blockedCause}` : NOT_RUNNING;
     }
     return {
       name,
       configured,
+      enabled,
       health,
       ...(error ? { error: statusError(error) } : {}),
       webhookUrl: chatSdkWebhookUrl(name),

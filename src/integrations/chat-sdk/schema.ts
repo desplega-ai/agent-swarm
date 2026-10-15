@@ -41,10 +41,14 @@ function forbiddenKeyIssues(value: Record<string, unknown>, ctx: z.RefinementCtx
   }
 }
 
+/** Fields every adapter has next to its own shape. `enabled: false` keeps the entry but does not start it. */
+const COMMON_SHAPE = {
+  userName: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
+};
+
 function adapterSchema<S extends AdapterShape>(shape: S) {
-  return z
-    .looseObject({ ...shape, userName: z.string().min(1).optional() })
-    .superRefine(forbiddenKeyIssues);
+  return z.looseObject({ ...shape, ...COMMON_SHAPE }).superRefine(forbiddenKeyIssues);
 }
 
 /**
@@ -207,11 +211,21 @@ export function firstIssueText(
  * schemas from the API); `src/tests/chat-sdk-fields-sync.test.ts` keeps the two equal.
  */
 export const CHAT_SDK_ADAPTER_FIELDS: Record<ChatSdkAdapterName, readonly string[]> = {
-  telegram: Object.keys(TelegramAdapterSchema.shape),
-  slack: Object.keys(SlackAdapterSchema.shape),
-  discord: Object.keys(DiscordAdapterSchema.shape),
-  teams: Object.keys(TeamsAdapterSchema.shape),
+  telegram: formFields(TelegramAdapterSchema.shape),
+  slack: formFields(SlackAdapterSchema.shape),
+  discord: formFields(DiscordAdapterSchema.shape),
+  teams: formFields(TeamsAdapterSchema.shape),
 };
+
+/** `enabled` is the panel switch on the card, not a form field. */
+function formFields(shape: AdapterShape): string[] {
+  return Object.keys(shape).filter((key) => key !== "enabled");
+}
+
+/** True unless the entry carries `enabled: false`. */
+export function isAdapterEntryEnabled(entry: Record<string, unknown> | undefined): boolean {
+  return entry !== undefined && entry.enabled !== false;
+}
 
 /**
  * `VALIDATED_KEYS` validator for `CHAT_SDK_ADAPTERS`: the draft shape only

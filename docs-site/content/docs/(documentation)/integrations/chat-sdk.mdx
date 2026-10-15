@@ -56,6 +56,10 @@ A value in `CHAT_SDK_ADAPTERS` can reference another config key as `{"$config": 
 - It rejects reserved keys such as `API_KEY`.
 - A missing row keeps that adapter off, with the status `incomplete` and the row name in the error. The other adapters start.
 
+### Switching an adapter off
+
+The panel switch writes `"enabled": false` into the adapter's entry instead of removing it. The adapter stops, the values and the secret rows stay, and the card shows **Off, configuration kept**. Switch it on again to start it with the same values. **Remove configuration** deletes the entry (the secret rows stay, and are reused when the adapter is set up again).
+
 ### Partial saves
 
 An adapter entry may lack required fields. The card saves it, marks the adapter **Incomplete, not running** with the missing field, and starts the other adapters. This lets you store the bot token first and add the rest later. A wrong value format (a Discord public key that is not 64 hex characters, a forbidden key such as `apiUrl`) is still rejected on save.

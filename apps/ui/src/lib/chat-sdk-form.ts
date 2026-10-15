@@ -13,7 +13,10 @@ import {
 
 export type JsonObject = Record<string, unknown>;
 export type AdapterDraft = {
+  /** The entry exists in `CHAT_SDK_ADAPTERS` (configured). */
   included: boolean;
+  /** The panel switch. Off keeps the entry with `enabled: false`, so the config survives. */
+  enabled: boolean;
   values: Record<string, string>;
   secrets: Record<string, string>;
 };
@@ -83,9 +86,31 @@ export function initialDrafts(stored: JsonObject): Drafts {
     for (const field of def.fields) {
       if (field.kind !== "secret") values[field.key] = toText(field, entry?.[field.key]);
     }
-    drafts[def.name] = { included: entry !== undefined, values, secrets: {} };
+    drafts[def.name] = {
+      included: entry !== undefined,
+      enabled: entry !== undefined && entry.enabled !== false,
+      values,
+      secrets: {},
+    };
   }
   return drafts;
+}
+
+/**
+ * The stored value of a secret field, or a reference to its own secret row
+ * (`CHAT_SDK_<ADAPTER>_<FIELD>`) when the entry has none but the row exists.
+ * An adapter switched off and on again keeps its secrets this way: the row
+ * survives the switch, only the JSON entry is removed.
+ */
+export function effectiveSecretValue(
+  adapter: ChatSdkAdapterName,
+  field: ChatSdkField,
+  storedValue: unknown,
+  existingKeys: ReadonlySet<string>,
+): unknown {
+  if (storedValue !== undefined) return storedValue;
+  const key = chatSdkSecretKey(adapter, field.key);
+  return existingKeys.has(key) ? { $config: key } : undefined;
 }
 
 /** The adapter entry the form would save, plus the secret rows it needs. */
@@ -93,21 +118,26 @@ export function buildEntry(
   def: ChatSdkAdapterDef,
   draft: AdapterDraft,
   storedEntry: JsonObject | undefined,
+  existingKeys: ReadonlySet<string> = new Set(),
 ): { entry: JsonObject; secretRows: SecretRow[] } {
   // Keys the form does not know (hand-written in the Advanced JSON) are kept.
   const entry: JsonObject = { ...storedEntry };
+  // Omitted when on (the default), so an enabled entry stays as it was.
+  delete entry.enabled;
+  if (!draft.enabled) entry.enabled = false;
   const secretRows: SecretRow[] = [];
   for (const field of def.fields) {
     const storedValue = storedEntry?.[field.key];
     delete entry[field.key];
     if (field.kind === "secret") {
       const typed = draft.secrets[field.key]?.trim();
+      const fallback = effectiveSecretValue(def.name, field, storedValue, existingKeys);
       if (typed) {
         const key = chatSdkSecretKey(def.name, field.key);
         secretRows.push({ key, value: typed });
         entry[field.key] = { $config: key };
-      } else if (storedValue !== undefined) {
-        entry[field.key] = storedValue;
+      } else if (fallback !== undefined) {
+        entry[field.key] = fallback;
       }
       continue;
     }
@@ -190,7 +220,12 @@ export interface BuiltAdapters {
   missing: string[];
 }
 
-export function buildAll(drafts: Drafts, stored: JsonObject): BuiltAdapters {
+export function buildAll(
+  drafts: Drafts,
+  stored: JsonObject,
+  /** Global config keys that exist: secret rows of a switched-off adapter are reused. */
+  existingKeys: ReadonlySet<string> = new Set(),
+): BuiltAdapters {
   const adapters: JsonObject = {};
   const secretRows: SecretRow[] = [];
   const problems: string[] = [];
@@ -198,13 +233,39 @@ export function buildAll(drafts: Drafts, stored: JsonObject): BuiltAdapters {
   for (const def of CHAT_SDK_ADAPTER_DEFS) {
     const draft = drafts[def.name];
     if (!draft.included) continue;
-    const result = buildEntry(def, draft, storedEntryFor(stored, def.name));
+    const result = buildEntry(def, draft, storedEntryFor(stored, def.name), existingKeys);
     adapters[def.name] = result.entry;
     secretRows.push(...result.secretRows);
     problems.push(...adapterProblems(def, draft, result.entry));
     missing.push(...missingFields(def, draft, result.entry));
   }
   return { adapters, secretRows, problems, missing };
+}
+
+/**
+ * The adapters object to write, merged over the value stored right now.
+ * The form was built from `stored`; another tab, an API call or a lead may
+ * have changed the row since. Only adapters this form touched (switch
+ * flipped, a value or a secret typed) take the form's version; every other
+ * adapter keeps what the row holds now. Without this, a stale form that never
+ * saw a newly added adapter removed it on save.
+ */
+export function mergeAdaptersForSave(
+  fresh: JsonObject,
+  stored: JsonObject,
+  drafts: Drafts,
+  builtAdapters: JsonObject,
+): JsonObject {
+  const baseline = initialDrafts(stored);
+  const next: JsonObject = { ...fresh };
+  for (const def of CHAT_SDK_ADAPTER_DEFS) {
+    const draft = drafts[def.name];
+    const touched = JSON.stringify(draft) !== JSON.stringify(baseline[def.name]);
+    if (!touched) continue;
+    if (draft.included) next[def.name] = builtAdapters[def.name];
+    else delete next[def.name];
+  }
+  return next;
 }
 
 /**
