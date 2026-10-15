@@ -56,6 +56,12 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
           .describe(
             "Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7).",
           ),
+        detached: z
+          .boolean()
+          .optional()
+          .describe(
+            "Do not attach the request to your current task, so no hitl-follow-up task is created. For scripts that read the request's status themselves.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -63,7 +69,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
         url: z.string().optional(),
       }),
     },
-    async ({ title, questions, timeoutSeconds }, requestInfo) => {
+    async ({ title, questions, timeoutSeconds, detached }, requestInfo) => {
       if (!requestInfo.agentId) {
         return toolErr(
           'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
@@ -74,8 +80,10 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       // Resolve sourceTaskId: prefer header, fall back to agent's current in-progress task.
       // The X-Source-Task-Id header may be missing when the per-session MCP config wasn't
       // created (e.g. .mcp.json not found, session resumed, or lead agent on a non-task trigger).
-      let sourceTaskId = requestInfo.sourceTaskId;
-      if (!sourceTaskId && requestInfo.agentId) {
+      // A detached request has no source task: a script call carries no task
+      // header, and the agent's current task is unrelated to the script.
+      let sourceTaskId = detached ? undefined : requestInfo.sourceTaskId;
+      if (!sourceTaskId && !detached && requestInfo.agentId) {
         const currentTask = await getAgentCurrentTask(requestInfo.agentId);
         if (currentTask) {
           sourceTaskId = currentTask.id;

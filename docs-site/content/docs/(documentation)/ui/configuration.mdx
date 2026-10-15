@@ -115,6 +115,44 @@ and execution. A timeout, a failure, or a result without a boolean `quiet` is an
 verdict, and the checklist task is created in both modes. Both keys apply on the next tick
 without a restart. Config writes reject modes other than `shadow` and `enforce`.
 
+### Jev gate
+
+The built-in `heartbeat-jev-gate` script is a ready gate. Set
+`HEARTBEAT_CHECKLIST_GATE_SCRIPT=heartbeat-jev-gate` to use it. Each tick it builds a compact
+state of about 1,500 characters (current time, new failures since the previous checklist,
+tracked HEARTBEAT items due today or past their `DELETE` date, the previous checklist result,
+task counts, agent status) and asks Jev, TypeSafe's decision model, whether the Lead needs to
+act. It reports a quiet tick when Jev's probability is below the threshold, and puts the
+probability and provider in `reason`. On a wake verdict, `summary` lists the failures and
+tracked items behind it. One decision costs about $0.00004.
+
+Jev needs one of two global secrets, set on the Secrets page; a key set only in the API's
+environment is not detected. The script never reads the key:
+the script egress layer adds it to requests bound for the host that issued it.
+
+- `TYPESAFE_API_KEY`: TypeSafe's decisions API at `api.typesafe.ai`.
+- `OPENROUTER_API_KEY`: OpenRouter's decisions API at `openrouter.ai`. Skipped when
+  `OPENROUTER_BASE_URL` points at a gateway, since the key may then be a gateway token.
+
+With neither key, the first tick creates one approval request asking a person to add a key or
+decline, and links it in the heartbeat log's gate `reason`. No Slack message is sent. Until a
+key exists, every tick returns `{ quiet: false, reason: "jev-gate inactive: <state>" }` with no
+`summary`, so the checklist runs as if the gate were off. Ticks never prompt again after that
+first request, whether it is pending, approved, rejected, or expired. Adding a key turns the
+gate on at the next tick with no further step. The setup state lives in KV namespace
+`heartbeat-jev-gate`, key `setup`. Delete it to ask again.
+
+Optional global config values tune the script:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `HEARTBEAT_JEV_GATE_THRESHOLD` | `0.5` | Quiet when p(needs action) is below this |
+| `HEARTBEAT_JEV_GATE_PROVIDER` | `auto` | `typesafe`, `openrouter`, or `auto` (TypeSafe first) |
+| `HEARTBEAT_JEV_GATE_TIMEZONE` | `UTC` | IANA zone for the state's time and due dates |
+
+Run `script-run` on `heartbeat-jev-gate` with `{ "dryRun": true }` to see the verdict, the
+compact state, and the setup prompt, without creating a prompt or writing KV.
+
 ## Script executor
 
 The **Workflows & scheduler** group includes `SCRIPT_EXECUTOR`, with `native` as the default

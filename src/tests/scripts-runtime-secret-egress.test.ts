@@ -88,6 +88,8 @@ describe("runtime secret egress", () => {
 describe("egress-substitution", () => {
   describe("buildEgressSecrets", () => {
     test("includes GITHUB_TOKEN when set in env", async () => {
+      delete process.env.TYPESAFE_API_KEY;
+      delete process.env.OPENROUTER_API_KEY;
       process.env.GITHUB_TOKEN = "ghp_test1234567890abcdef";
       const secrets = await buildEgressSecrets();
       expect(secrets).toEqual([
@@ -105,10 +107,33 @@ describe("egress-substitution", () => {
       ]);
     });
 
-    test("returns empty array when GITHUB_TOKEN not set", async () => {
+    test("returns empty array when no default-bound key is set", async () => {
       delete process.env.GITHUB_TOKEN;
+      delete process.env.TYPESAFE_API_KEY;
+      delete process.env.OPENROUTER_API_KEY;
       const secrets = await buildEgressSecrets();
       expect(secrets).toEqual([]);
+    });
+
+    test("binds each Jev key only to the host that issued it", async () => {
+      delete process.env.GITHUB_TOKEN;
+      process.env.TYPESAFE_API_KEY = "typesafe-test-key";
+      process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+      const secrets = await buildEgressSecrets();
+      expect(
+        secrets.map(({ configKey, allowedHosts, value }) => ({ configKey, allowedHosts, value })),
+      ).toEqual([
+        {
+          configKey: "TYPESAFE_API_KEY",
+          allowedHosts: ["api.typesafe.ai"],
+          value: "typesafe-test-key",
+        },
+        {
+          configKey: "OPENROUTER_API_KEY",
+          allowedHosts: ["openrouter.ai"],
+          value: "openrouter-test-key",
+        },
+      ]);
     });
   });
 

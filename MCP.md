@@ -1526,6 +1526,7 @@ Create an approval request and return at once with the request id and URL. The a
 | `title` | `string` | Yes | - | Title of the approval request |
 | `questions` | `array` | Yes | - | Questions to ask the human |
 | `timeoutSeconds` | `number` | No | - | Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). |
+| `detached` | `boolean` | No | - | Do not attach the request to your current task, so no hitl-follow-up task is created. For scripts that read the request's status themselves. |
 
 ### cancel-approval-request
 
