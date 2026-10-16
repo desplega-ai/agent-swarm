@@ -42,6 +42,7 @@ function issueDefinition() {
           enabled: { kind: "boolean" },
           dueAt: { kind: "date" },
           status: { kind: "enum", enum: ["open", "urgent"] },
+          payload: { kind: "json" },
           hidden: { kind: "string", hidden: true },
         },
       },
@@ -70,6 +71,7 @@ describe("renderAppTypes", () => {
     expect(rendered).toContain("enabled?: boolean;");
     expect(rendered).toContain("/** date */\n    dueAt?: string;");
     expect(rendered).toContain('status?: "open" | "urgent";');
+    expect(rendered).toContain("payload?: unknown;");
     expect(rendered).not.toContain("hidden?:");
     expect(rendered).toContain("id: string;");
     expect(rendered).toContain("createdAt: string;");

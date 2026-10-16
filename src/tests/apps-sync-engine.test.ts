@@ -994,6 +994,31 @@ describe("swarm-tasks source", () => {
       refreshSecretScrubberCache();
     }
   });
+
+  test("projects an array field into a json column intact", async () => {
+    const task = await createTaskExtended("tagged", {
+      agentId: OWNER_AGENT_ID,
+      tags: ["alpha", "beta"],
+    });
+    const appId = await createSyncApp(
+      appWith({
+        task: {
+          columns: {
+            ...TASK_COLUMNS,
+            taskTags: { kind: "json", source: { of: "pool", field: "tags" } },
+          },
+          sources: { pool: { connector: "swarm-tasks", joinKey: "taskKey", config: {} } },
+        },
+      }),
+    );
+
+    const pass = (await runAppSync({ appId })).passes[0]!;
+
+    expect(pass).toMatchObject({ connector: "swarm-tasks", pulled: 1, created: 1 });
+    const rows = await rowsOf(appId, "task", "taskKey");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ taskKey: task.id, taskTags: ["alpha", "beta"] });
+  });
 });
 
 describe("pair expansion", () => {

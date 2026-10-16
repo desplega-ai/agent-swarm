@@ -161,7 +161,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { cn, formatDuration, formatSmartTime } from "@/lib/utils";
+import { cn, formatSmartTime } from "@/lib/utils";
 import { resolveScopedParams } from "./action-params";
 import type {
   ActionChain,
@@ -182,6 +182,7 @@ import type {
   TableRowActionConfirm,
   TabsTab,
 } from "./catalog";
+import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import { useJsonRenderThemeAttr } from "./theme-scope";
 import { usePageShortcut } from "./use-page-shortcut";
@@ -385,15 +386,6 @@ function RelativeTimeCell({ value }: { value: unknown }) {
   );
 }
 
-/** Percent (0-100) of a progress value against `max`, or null when not numeric. */
-function progressPercent(value: unknown, max: number | undefined): number | null {
-  const number = typeof value === "number" ? value : Number(value);
-  if (value === null || value === undefined || value === "" || !Number.isFinite(number))
-    return null;
-  const ceiling = max && max > 0 ? max : 100;
-  return Math.max(0, Math.min(100, Math.round((number / ceiling) * 100)));
-}
-
 function ProgressCell({ value, max }: { value: unknown; max?: number }) {
   const percent = progressPercent(value, max);
   if (percent === null) return null;
@@ -418,35 +410,7 @@ function safeHttpUrl(value: unknown): string | null {
   }
 }
 
-// ─── Shared value formatting (Table cells + DetailList fields) ──────────────
-
-/** Every rendering kind a `Table` column or a `DetailList` field can declare. */
-type ValueKind = NonNullable<TableColumn["kind"] | DetailListField["kind"]>;
-
-/**
- * One value → its display text, by declared kind. Shared by `Table`'s cell
- * renderer and `DetailList` so the two surfaces never drift on dates
- * (relative time) or booleans (yes / no).
- */
-function formatValue(kind: ValueKind | undefined, value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (kind === "duration") {
-    const ms = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(ms) ? formatDuration(ms) : String(value);
-  }
-  if (kind === "progress") {
-    const percent = progressPercent(value, undefined);
-    return percent === null ? String(value) : `${percent}%`;
-  }
-  if (kind === "date" || kind === "relative") {
-    const text = String(value);
-    return Number.isNaN(Date.parse(text)) ? text : formatSmartTime(text);
-  }
-  if (kind === "boolean") return value ? "yes" : "no";
-  if (kind === "number" && typeof value === "number") return value.toLocaleString();
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
+// ─── Shared cell helpers (Table cells + DetailList fields) ──────────────────
 
 /** `kind: "badge"` tone lookup — an unmapped value is neutral, never missing. */
 function badgeToneFor(tones: Record<string, BadgeTone> | undefined, value: string): BadgeTone {
@@ -1197,7 +1161,7 @@ function minWidthForKind(kind: TableColumn["kind"]): number {
  * date / yes-no column, which is where the reading happens.
  */
 function flexForKind(kind: TableColumn["kind"]): number {
-  return kind === undefined || kind === "text" || kind === "string" ? 2 : 1;
+  return kind === undefined || kind === "text" || kind === "string" || kind === "json" ? 2 : 1;
 }
 
 /** Columns whose values read best right-aligned with tabular digits. */

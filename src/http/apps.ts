@@ -6,10 +6,10 @@ import {
   type AppQueryDef,
   type AppValidationIssue,
   applyAppDefinitionPatch,
-  ColumnKindSchema,
   isIso8601Date,
   type ModelDef,
   parseAppDefinition,
+  ScalarColumnKindSchema,
   SORTABLE_SYSTEM_DATE_COLUMNS,
   SYSTEM_COLUMN_KINDS,
 } from "../apps/definition";
@@ -218,7 +218,7 @@ const UserConfigValuesSchema = z.record(
  * on the wire anyway — the key can only ever be absent.
  */
 const AppUserConfigFieldSchema = z.object({
-  kind: ColumnKindSchema,
+  kind: ScalarColumnKindSchema,
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),
   enum: z.array(z.string()).optional(),
   label: z.string().optional(),
@@ -771,6 +771,8 @@ async function resolveModel(
 }
 
 function parseFilterValue(raw: string, column: ModelDef["columns"][string]): unknown {
+  // Mirrors the definition-time rule: a raw query string can never equal a stored JSON value.
+  if (column.kind === "json") throw new Error("json columns cannot be filtered");
   if (column.kind === "number") {
     if (!DECIMAL_NUMBER_PATTERN.test(raw)) throw new Error("must be a decimal number");
     const value = Number(raw);
@@ -1188,6 +1190,18 @@ export async function handleApps(
           {
             error: "invalid sort",
             issues: [{ path: "sort", message: "must be <column>:<asc|desc> for a known column" }],
+          },
+          400,
+        );
+        return true;
+      }
+      if (resolved.model.columns[column]?.kind === "json") {
+        // Mirrors the definition-time rule; `compareValues` would otherwise order "[object Object]" strings.
+        json(
+          res,
+          {
+            error: "invalid sort",
+            issues: [{ path: "sort", message: "json columns cannot be sorted" }],
           },
           400,
         );

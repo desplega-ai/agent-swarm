@@ -963,17 +963,25 @@ export interface paths {
                         version: number;
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;
@@ -1148,17 +1156,25 @@ export interface paths {
                         definition?: unknown;
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;
@@ -1304,17 +1320,25 @@ export interface paths {
                         };
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;

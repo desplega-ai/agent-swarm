@@ -9,7 +9,7 @@ import {
   type AppDefinition,
   type AppValidationIssue,
   type ColumnDef,
-  isIso8601Date,
+  isValidColumnValue,
   type ModelDef,
   type SourceDef,
   type SourceTransform,
@@ -484,19 +484,6 @@ function applyTransform(value: unknown, transform: SourceTransform | undefined):
   }
 }
 
-/**
- * Mirrors the row-store's per-kind value check. Projections are pre-validated
- * here so one bad field nulls one column instead of throwing mid-reconcile and
- * leaving the pass half-applied.
- */
-function validForKind(column: ColumnDef, value: unknown): boolean {
-  if (column.kind === "string") return typeof value === "string";
-  if (column.kind === "number") return typeof value === "number" && Number.isFinite(value);
-  if (column.kind === "boolean") return typeof value === "boolean";
-  if (column.kind === "date") return typeof value === "string" && isIso8601Date(value);
-  return typeof value === "string" && Boolean(column.enum?.includes(value));
-}
-
 function projectRecord(args: {
   record: SourceRecord;
   bindings: Array<[string, ColumnDef]>;
@@ -518,7 +505,10 @@ function projectRecord(args: {
       );
       value = null;
     }
-    if (value !== null && !validForKind(column, value)) {
+    // Projections are pre-validated with the row store's own kind check so one
+    // bad field nulls one column instead of throwing mid-reconcile and leaving
+    // the pass half-applied.
+    if (value !== null && !isValidColumnValue(column, value)) {
       warn(
         args.warnings,
         `column "${name}": field "${binding.field}" produced a value that is not a valid ${column.kind}`,

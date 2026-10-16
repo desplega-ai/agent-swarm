@@ -15,12 +15,63 @@ export const AppNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/, {
   message: "must start with a lowercase letter and contain only letters, numbers, or underscores",
 });
 
-export const ColumnKindSchema = z.enum(["string", "number", "boolean", "date", "enum"]);
+export const ColumnKindSchema = z.enum(["string", "number", "boolean", "date", "enum", "json"]);
+
+/**
+ * Column kinds allowed where values must stay scalar (user-config fields and
+ * element props) — `json` is model-column only.
+ */
+export const ScalarColumnKindSchema = ColumnKindSchema.exclude(["json"]);
 
 const ISO_8601_PREFIX = /^\d{4}-\d{2}-\d{2}(?:T.*)?$/;
 
 export function isIso8601Date(value: string): boolean {
   return ISO_8601_PREFIX.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+/** Serialized-size cap for json column values AND defaults. */
+export const MAX_JSON_COLUMN_BYTES = 256 * 1024;
+
+/** Serialized UTF-8 byte size, or null when the value is not JSON-serializable. */
+export function serializedJsonSize(value: unknown): number | null {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? null : Buffer.byteLength(serialized, "utf8");
+  } catch {
+    return null; // circular reference / BigInt / throwing toJSON
+  }
+}
+
+export type JsonColumnValueIssue = "unserializable" | "oversized";
+
+/**
+ * Why a value cannot live in a json column — not JSON-serializable, or over
+ * `MAX_JSON_COLUMN_BYTES` once serialized — or `null` when it fits. The single
+ * implementation of the size cap; it serializes exactly once, and each caller
+ * maps the reason to its own message.
+ */
+export function jsonColumnValueIssue(value: unknown): JsonColumnValueIssue | null {
+  const size = serializedJsonSize(value);
+  if (size === null) return "unserializable";
+  return size > MAX_JSON_COLUMN_BYTES ? "oversized" : null;
+}
+
+/**
+ * The one per-kind check for a NON-null column value, shared by the row store,
+ * schema migrations and the sync engine so a value the store accepts is a
+ * value a migration directive or a projection accepts too. Null policy
+ * (required / hidden / nulling a projection) stays with each caller.
+ */
+export function isValidColumnValue(
+  column: Pick<ColumnDef, "kind" | "enum">,
+  value: unknown,
+): boolean {
+  if (column.kind === "string") return typeof value === "string";
+  if (column.kind === "number") return typeof value === "number" && Number.isFinite(value);
+  if (column.kind === "boolean") return typeof value === "boolean";
+  if (column.kind === "date") return typeof value === "string" && isIso8601Date(value);
+  if (column.kind === "json") return jsonColumnValueIssue(value) === null;
+  return typeof value === "string" && Boolean(column.enum?.includes(value));
 }
 
 export const SourceTransformSchema = z.enum(["slug", "lower", "upper", "cents", "date-parse"]);
@@ -48,11 +99,23 @@ const ColumnDefSchema = z
     required: z.boolean().optional(),
     enum: z.array(z.string()).optional(),
     index: z.boolean().optional(),
-    default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    default: z
+      .union([
+        z.string(),
+        z.number(),
+        z.boolean(),
+        z.record(z.string(), z.unknown()),
+        z.array(z.unknown()),
+      ])
+      .optional(),
     hidden: z.boolean().optional(),
     source: ColumnSourceBindingSchema.optional(),
   })
   .superRefine((column, ctx) => {
+    if (column.kind === "json" && column.index) {
+      ctx.addIssue({ code: "custom", path: ["index"], message: "json columns cannot be indexed" });
+    }
+
     if (column.kind === "enum") {
       if (!column.enum || column.enum.length === 0) {
         ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values are required" });
@@ -70,6 +133,24 @@ const ColumnDefSchema = z
     }
 
     if (column.default === undefined) return;
+    if (column.kind === "json") {
+      const issue = jsonColumnValueIssue(column.default);
+      if (issue === "unserializable") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["default"],
+          message: "json column default must be JSON-serializable",
+        });
+      } else if (issue === "oversized") {
+        // An oversized default would pass here only to fail every row create.
+        ctx.addIssue({
+          code: "custom",
+          path: ["default"],
+          message: "json column default exceeds the 256KB size limit",
+        });
+      }
+      return;
+    }
     const valid =
       (column.kind === "string" && typeof column.default === "string") ||
       (column.kind === "number" &&
@@ -93,7 +174,7 @@ const ColumnDefSchema = z
 
 const UserConfigFieldSchema = z
   .object({
-    kind: ColumnKindSchema,
+    kind: ScalarColumnKindSchema,
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
     enum: z.array(z.string()).optional(),
     label: z.string().optional(),
@@ -275,7 +356,7 @@ const AppPageSchema = z
 
 const ElementPropDefSchema = z
   .object({
-    kind: ColumnKindSchema,
+    kind: ScalarColumnKindSchema,
     required: z.boolean().optional(),
     enum: z.array(z.string()).min(1).optional(),
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
@@ -438,6 +519,14 @@ export const AppDefinitionSchema = z
           });
           continue;
         }
+        if (columnDefinition.kind === "json") {
+          ctx.addIssue({
+            code: "custom",
+            path: ["queries", queryName, "filter", column],
+            message: "json columns cannot be filtered",
+          });
+          continue;
+        }
         if (typeof value === "object") continue;
         const valid =
           (columnDefinition.kind === "string" && typeof value === "string") ||
@@ -467,6 +556,12 @@ export const AppDefinitionSchema = z
           code: "custom",
           path: ["queries", queryName, "sort", "column"],
           message: `unknown or hidden column "${sortColumn}"`,
+        });
+      } else if (sortColumn && model.columns[sortColumn]?.kind === "json") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["queries", queryName, "sort", "column"],
+          message: "json columns cannot be sorted",
         });
       }
     }
