@@ -42,7 +42,7 @@ const ENV_KEYS = [
   "AGENT_FS_API_URL",
   "STEERING_ENABLED",
   "TELEGRAM_MENTION_ON_REPLY",
-  "CHAT_SDK_OWNER_WINDOW_MINUTES",
+  "CHAT_SDK_OWNER_WINDOW_MIN",
 ];
 const savedEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
@@ -83,7 +83,7 @@ beforeAll(async () => {
   process.env.STEERING_ENABLED = "true";
   // The adapter must treat a reply to the bot as a mention without the env fallback.
   delete process.env.TELEGRAM_MENTION_ON_REPLY;
-  delete process.env.CHAT_SDK_OWNER_WINDOW_MINUTES;
+  delete process.env.CHAT_SDK_OWNER_WINDOW_MIN;
   resetFileStorageProviderForTests();
   initDb(TEST_DB_PATH);
   lead = await createAgent({

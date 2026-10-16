@@ -95,11 +95,11 @@ const DEFAULT_OWNER_WINDOW_MINUTES = 15;
 
 /**
  * Start of the thread-owner window: a thread keeps its owner while the
- * owner's task is open and for `CHAT_SDK_OWNER_WINDOW_MINUTES` (default 15,
+ * owner's task is open and for `CHAT_SDK_OWNER_WINDOW_MIN` (default 15,
  * 0 = only while open) after it ends. Read per call, so a change applies at once.
  */
 export function chatOwnerWindowStart(now: number = Date.now()): string {
-  const raw = process.env.CHAT_SDK_OWNER_WINDOW_MINUTES?.trim();
+  const raw = process.env.CHAT_SDK_OWNER_WINDOW_MIN?.trim();
   const value = raw ? Number(raw) : Number.NaN;
   const minutes = Number.isFinite(value) && value >= 0 ? value : DEFAULT_OWNER_WINDOW_MINUTES;
   return new Date(now - minutes * 60_000).toISOString();

@@ -36,7 +36,7 @@ The channel reads these keys from the environment or from global swarm config:
 | `CHAT_SDK_ENABLED` | `true` to start the channel. Default `false`. A saved change applies within a few seconds. |
 | `CHAT_SDK_ADAPTERS` | JSON object. Each key is an adapter name (`telegram`, `slack`, `discord`, `teams`), each value is the adapter config. A saved change applies within a few seconds. |
 | `CHAT_SDK_BUFFER_MS` | How long a thread collects messages before it creates one task. Default `10000` (10 s), 1 to 600000. No restart needed. |
-| `CHAT_SDK_OWNER_WINDOW_MINUTES` | How long after a task ends its thread keeps the same owner. Default `15`, 0 to 1440. `0` keeps the owner only while the task is open. No restart needed. |
+| `CHAT_SDK_OWNER_WINDOW_MIN` | How long after a task ends its thread keeps the same owner. Default `15`, 0 to 1440. `0` keeps the owner only while the task is open. No restart needed. |
 | `CHAT_SDK_API_URL_OVERRIDES` | Environment only, for development and tests. JSON of platform API base URLs by adapter name, for example `{"telegram":"http://127.0.0.1:8081"}`. Never set it in production. |
 
 ### Secrets by reference
@@ -261,7 +261,7 @@ A Teams thread id contains the service URL of the conversation, and the adapter 
 ## How it works
 
 1. **Buffer.** A mention or a DM opens a thread buffer. More messages in the same thread join it for `CHAT_SDK_BUFFER_MS` (10 s by default). A message that starts with `!now` flushes the buffer at once. One flush creates one task.
-2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent, or a workflow when the message mentions the bot or is a DM, so a plain reply in a subscribed thread never starts a second run), the agent that owns the thread (while its task is open, and for `CHAT_SDK_OWNER_WINDOW_MINUTES` after it ends), and then the Lead for a mention or DM. A `pre.chat.route` extension can change the target.
+2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent, or a workflow when the message mentions the bot or is a DM, so a plain reply in a subscribed thread never starts a second run), the agent that owns the thread (while its task is open, and for `CHAT_SDK_OWNER_WINDOW_MIN` after it ends), and then the Lead for a mention or DM. A `pre.chat.route` extension can change the target.
 3. **Task.** The task gets `source: "chat"` and a context key `task:chat-sdk:{adapter}:{encoded thread id}`. Later tasks in the same thread share the key. The task text starts with a header such as `[chat] telegram · supergroup "Life" · from: Taras (@tarasyarema) · addressed: reply-to-bot`, then the recent thread messages. `addressed` is `dm`, `mention`, `reply-to-bot`, `requester-follow-up` or `none`. The sender is resolved through the user registry as the `<adapter>` identity kind with the platform user id (for Telegram, `telegram` and `from.id`). A known sender becomes the task's `requestedByUserId`, so times and per-user preferences apply. An unknown sender appears in the People page **Unmapped** tab; link it there.
 4. **Steer or follow up.** When the Lead's task for the thread is in progress, a new plain reply steers that task, and the bot posts a short acknowledgement. Otherwise the reply waits in the buffer and becomes a follow-up task that depends on the previous one.
 
