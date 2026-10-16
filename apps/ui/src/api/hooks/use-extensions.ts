@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ExtensionInstallInput, ExtensionPatchInput } from "@/api/types";
+import { useCallback } from "react";
+import type { Extension, ExtensionInstallInput, ExtensionPatchInput } from "@/api/types";
 import { api } from "../client";
 
 /** Run-log tail refresh cadence while the detail page is mounted. */
@@ -55,6 +56,23 @@ export function useExtensionRuns(
   });
 }
 
+/**
+ * Cancel the in-flight fetches and pending retries of one extension's per-id
+ * queries. `enabled: false` only stops new fetches: a retained observer keeps
+ * an already-failing fetch retrying. A removed query is not re-created.
+ */
+export function useCancelExtensionRequests() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (id: string) => {
+      void queryClient.cancelQueries({ queryKey: ["extension", id] });
+      void queryClient.cancelQueries({ queryKey: ["extension-versions", id] });
+      void queryClient.cancelQueries({ queryKey: ["extension-runs", id] });
+    },
+    [queryClient],
+  );
+}
+
 export function useExtensionTypeDefs() {
   return useQuery({
     queryKey: ["extension-type-defs"],
@@ -106,6 +124,11 @@ export function useDeleteExtension(id: string) {
   return useMutation({
     mutationFn: () => api.deleteExtension(id),
     onSuccess: () => {
+      // Drop the card now: the list refetch below can be slow, and until it
+      // lands the grid would still render the deleted card.
+      queryClient.setQueryData<Extension[]>(["extensions"], (list) =>
+        list?.filter((extension) => extension.id !== id),
+      );
       invalidate();
       // The record is gone; drop its per-id caches instead of refetching a 404.
       queryClient.removeQueries({ queryKey: ["extension", id] });

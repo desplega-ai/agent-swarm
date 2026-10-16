@@ -215,7 +215,7 @@ function CatalogDetailSheet({
 
   return (
     <Sheet open={!!item} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-2xl" {...focus}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-2xl" {...focus.contentProps}>
         <SheetHeader className="border-b border-border px-6 py-4 pr-12">
           <SheetTitle className="flex min-w-0 items-center gap-2">
             <span className="truncate font-mono">{shown?.name ?? "Extension"}</span>

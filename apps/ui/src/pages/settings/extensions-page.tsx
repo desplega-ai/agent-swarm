@@ -117,7 +117,8 @@ export default function ExtensionsPage() {
   if (isLoading) return <PageSkeleton />;
 
   /** The card's Details control, else (deleted card) the page's install button. */
-  function sheetFocusFallback(extensionId: string) {
+  function sheetFocusFallback(extensionId: string, deleted: boolean) {
+    if (deleted) return installButton.current;
     return (
       document.querySelector<HTMLElement>(
         `[data-extension-details="${CSS.escape(extensionId)}"]`,

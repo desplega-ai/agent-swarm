@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   useActivateExtensionVersion,
+  useCancelExtensionRequests,
   useDeleteExtension,
   useDisableExtension,
   useEnableExtension,
@@ -756,14 +757,18 @@ export function ExtensionDetail({
 
 /**
  * Focus handling for a sheet opened without a SheetTrigger, where Radix would
- * return focus to <body> on close. Open focuses the panel itself (not its first
+ * return focus to <body> on close. Spread `contentProps` on SheetContent. Open focuses the panel itself (not its first
  * button, Delete or Install) and remembers what had focus; close returns there,
- * or to `fallback()` when nothing did (deep link) or it left the page (deleted
- * card).
+ * or to `fallback()` when nothing did (deep link) or it left the page.
+ * `forgetOpener()` sends the next close to `fallback()` even while the opener
+ * is still in the DOM, as a deleted card is until the list refetch lands.
  */
 export function useSheetFocus(fallback: () => HTMLElement | null) {
   const opener = useRef<HTMLElement | null>(null);
-  return {
+  const forgetOpener = () => {
+    opener.current = null;
+  };
+  const contentProps = {
     onOpenAutoFocus(event: Event) {
       const active = document.activeElement;
       opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
@@ -777,6 +782,7 @@ export function useSheetFocus(fallback: () => HTMLElement | null) {
       target?.focus();
     },
   };
+  return { contentProps, forgetOpener };
 }
 
 /**
@@ -784,7 +790,7 @@ export function useSheetFocus(fallback: () => HTMLElement | null) {
  * `extensionId` is set; the route `/settings/extensions/:id` drives it, so
  * deep links land on the grid with this sheet open. Full width on small
  * screens. `focusFallback` names where focus goes on close when the opener is
- * gone.
+ * gone, or always once the extension was deleted.
  */
 export function ExtensionDetailSheet({
   extensionId,
@@ -793,22 +799,33 @@ export function ExtensionDetailSheet({
 }: {
   extensionId: string | null;
   onClose: () => void;
-  focusFallback: (extensionId: string) => HTMLElement | null;
+  focusFallback: (extensionId: string, deleted: boolean) => HTMLElement | null;
 }) {
   const open = !!extensionId;
   // Keep the last id so the body stays rendered while the sheet animates
   // closed; its queries stop with `open`, so a closed or deleted extension is
   // never polled.
   const [shownId, setShownId] = useState(extensionId);
-  if (extensionId && extensionId !== shownId) setShownId(extensionId);
+  const deleted = useRef(false);
+  if (extensionId && extensionId !== shownId) {
+    setShownId(extensionId);
+    deleted.current = false;
+  }
   // Cache reader only: the body's query owns fetching and polling.
   const { data: bundle } = useExtension(shownId ?? undefined, { enabled: false });
   const extension = bundle?.extension;
-  const focus = useSheetFocus(() => (shownId ? focusFallback(shownId) : null));
+  const focus = useSheetFocus(() => (shownId ? focusFallback(shownId, deleted.current) : null));
+  // The header's disabled observer keeps a failing fetch retrying after the
+  // body stops, so closing (or switching extensions) cancels that id's requests.
+  const cancelRequests = useCancelExtensionRequests();
+  useEffect(() => {
+    if (!open || !shownId) return;
+    return () => cancelRequests(shownId);
+  }, [open, shownId, cancelRequests]);
 
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" {...focus}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" {...focus.contentProps}>
         <SheetHeader className="border-b border-border px-6 py-4 pr-12">
           <SheetTitle className="flex min-w-0 items-center gap-2">
             <span className="truncate font-mono">{extension?.name ?? "Extension"}</span>
@@ -830,7 +847,11 @@ export function ExtensionDetailSheet({
               key={shownId}
               extensionId={shownId}
               active={open}
-              onDeleted={onClose}
+              onDeleted={() => {
+                deleted.current = true;
+                focus.forgetOpener();
+                onClose();
+              }}
             />
           )}
         </div>
