@@ -1,4 +1,4 @@
-import { nearestReasoningLevel } from "@desplega/model-catalog";
+import { nearestReasoningLevel, openAICompatibleKeyVars } from "@desplega/model-catalog";
 import { AlertTriangle, ArrowUpCircle, Info, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -95,6 +95,8 @@ const CREDENTIAL_KEYS = [
   "AMP_API_KEY",
   "CURSOR_API_KEY",
   "XAI_API_KEY",
+  // OpenAI-compatible registry provider keys, canonical and alias.
+  ...openAICompatibleKeyVars(),
   ...DEVIN_CREDENTIAL_KEYS,
 ];
 

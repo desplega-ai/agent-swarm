@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 /**
@@ -9,17 +10,28 @@ import { scrubSecrets } from "../utils/secret-scrubber";
  * and it walks up from its cwd (`/workspace/...`) to load `/workspace/CLAUDE.md`
  * as project memory too, so every Claude session paid for the notes twice.
  *
- * `claudeMdExcludes` drops only that one path from Claude's memory load. The
- * file stays on disk for the other harnesses (one container can live-swap
- * providers mid-run), and repo-level `CLAUDE.md` files still load.
+ * `claudeMdExcludes` drops that path from Claude's memory load. The file stays
+ * on disk for the other harnesses (one container can live-swap providers
+ * mid-run), and repo-level `CLAUDE.md` files still load.
+ *
+ * The user-memory copy (`~/.claude/CLAUDE.md`) is excluded too: the system
+ * prompt carries the same notes (base-prompt.ts block J), where the provider
+ * caches them across sessions. Claude would load the user-memory copy into an
+ * uncached message instead. The SessionStart hook still writes that file: it
+ * is the copy the agent edits and the Stop hook syncs back to the profile.
  */
 export const WORKSPACE_CLAUDE_MD_EXCLUDE = "/workspace/CLAUDE.md";
+
+/** `~/.claude/CLAUDE.md` for the HOME the Claude session runs under. */
+export function userClaudeMdExclude(home: string = process.env.HOME ?? homedir()): string {
+  return join(home, ".claude", "CLAUDE.md");
+}
 
 export type ClaudeFlagSettings = Record<string, unknown> & { claudeMdExcludes: string[] };
 
 /** Flag-level settings (`--settings` / SDK `settings`) for every Claude session. */
 export function claudeFlagSettings(): ClaudeFlagSettings {
-  return { claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE] };
+  return { claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()] };
 }
 
 const SETTINGS_FLAG = "--settings";

@@ -6,6 +6,7 @@ import {
   Cog,
   type LucideIcon,
   Mail,
+  MessageSquare,
   MessagesSquare,
   Monitor,
   Workflow,
@@ -33,6 +34,7 @@ import { NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
 const TASK_SOURCE_LABELS: Record<string, string> = {
   agentmail: "Email",
   api: "API",
+  chat: "Chat",
   comb: "Comb",
   github: "GitHub",
   gitlab: "GitLab",
@@ -77,6 +79,7 @@ const SOURCE_LOGOS: Record<string, string> = {
 const SOURCE_ICONS: Record<string, LucideIcon> = {
   agentmail: Mail,
   api: Code,
+  chat: MessageSquare,
   comb: MessagesSquare,
   mcp: Bot,
   schedule: CalendarClock,

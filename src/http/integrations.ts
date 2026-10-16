@@ -1,9 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import {
+  ChatSdkActionError,
+  ChatSdkStatusSchema,
+  getChatSdkStatus,
+  registerTelegramWebhook,
+} from "../integrations/chat-sdk/status";
 import { buildSlackManifest } from "../slack/manifest";
+import { ensureHttpPermission } from "./config";
 import { resolveConfigValue, resolveMcpBaseUrl } from "./config-values";
 import { route } from "./route-def";
+import { jsonError } from "./utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +55,20 @@ const McpUserConfigSchema = z.object({
 });
 
 const SlackManifestSchema = z.record(z.string(), z.unknown());
+
+const TelegramRegisterWebhookSchema = z.object({
+  webhookUrl: z.string(),
+  webhookInfo: z.looseObject({
+    url: z.string(),
+    has_custom_certificate: z.boolean().optional(),
+    pending_update_count: z.number().optional(),
+    last_error_date: z.number().optional(),
+    last_error_message: z.string().optional(),
+    max_connections: z.number().optional(),
+    ip_address: z.string().optional(),
+    allowed_updates: z.array(z.string()).optional(),
+  }),
+});
 
 // ─── Route Definition ────────────────────────────────────────────────────────
 
@@ -94,7 +116,38 @@ const slackManifestRoute = route({
   },
 });
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const chatSdkStatusRoute = route({
+  method: "get",
+  path: "/api/integrations/chat/status",
+  pattern: ["api", "integrations", "chat", "status"],
+  summary:
+    "Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL.",
+  tags: ["Integrations"],
+  responses: {
+    200: {
+      description:
+        "Per-adapter status. `health` is `disabled` for an adapter that is not running. Never contains secret values.",
+      schema: ChatSdkStatusSchema,
+    },
+  },
+});
+
+const chatSdkTelegramRegisterWebhookRoute = route({
+  method: "post",
+  path: "/api/integrations/chat/telegram/register-webhook",
+  pattern: ["api", "integrations", "chat", "telegram", "register-webhook"],
+  summary:
+    "Register this swarm's public Telegram webhook URL and secret token with the Bot API (setWebhook), then return getWebhookInfo.",
+  tags: ["Integrations"],
+  body: z.object({}).optional(),
+  responses: {
+    200: { description: "Webhook registered", schema: TelegramRegisterWebhookSchema },
+    400: { description: "Telegram is not configured for webhook mode" },
+    403: { description: "Only the lead agent or a dashboard user can register the webhook" },
+    502: { description: "The Telegram Bot API rejected the call" },
+  },
+  rbac: { permission: "integration.chat.manage" },
+});
 
 // ─── Public handler factory ──────────────────────────────────────────────────
 
@@ -119,6 +172,40 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
       const parsed = await slackManifestRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       slackManifestRoute.respond(res, 200, buildSlackManifest(parsed.query.name));
+      return true;
+    }
+
+    if (chatSdkStatusRoute.match(req.method, pathSegments)) {
+      chatSdkStatusRoute.respond(res, 200, await getChatSdkStatus());
+      return true;
+    }
+
+    if (chatSdkTelegramRegisterWebhookRoute.match(req.method, pathSegments)) {
+      const parsed = await chatSdkTelegramRegisterWebhookRoute.parse(
+        req,
+        res,
+        pathSegments,
+        queryParams,
+      );
+      if (!parsed) return true;
+      // Operators and dashboard users pass; agents need the verb (lead-only
+      // under the legacy policy).
+      if (
+        !(await ensureHttpPermission(
+          req,
+          res,
+          "integration.chat.manage",
+          "Registering the Telegram webhook requires the lead agent",
+        ))
+      ) {
+        return true;
+      }
+      try {
+        chatSdkTelegramRegisterWebhookRoute.respond(res, 200, await registerTelegramWebhook());
+      } catch (error) {
+        if (!(error instanceof ChatSdkActionError)) throw error;
+        jsonError(res, error.message, error.status);
+      }
       return true;
     }
 

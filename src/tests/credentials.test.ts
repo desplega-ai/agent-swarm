@@ -84,4 +84,25 @@ describe("validateOpencodeCredentials", () => {
       validateOpencodeCredentials({ OPENROUTER_API_KEY: "sk-or", ANTHROPIC_API_KEY: "sk-ant" }),
     ).toBe("openrouter_api_key");
   });
+
+  test("accepts a NaN key under either name", () => {
+    expect(validateOpencodeCredentials({ NAN_API_KEY: "example-nan" })).toBe("nan_api_key");
+    expect(validateOpencodeCredentials({ HELMCODE_API_NAN: "example-nan" })).toBe("nan_api_key");
+  });
+
+  test("accepts a Helmcode key", () => {
+    expect(validateOpencodeCredentials({ HELMCODE_API_KEY: "example-helm" })).toBe(
+      "helmcode_api_key",
+    );
+  });
+
+  test("keeps OpenRouter ahead of NaN and Helmcode", () => {
+    expect(
+      validateOpencodeCredentials({
+        OPENROUTER_API_KEY: "sk-or",
+        NAN_API_KEY: "example-nan",
+        HELMCODE_API_KEY: "example-helm",
+      }),
+    ).toBe("openrouter_api_key");
+  });
 });

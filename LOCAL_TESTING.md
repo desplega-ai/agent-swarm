@@ -24,10 +24,10 @@ bun run test:root                                      # all unit tests, one pro
 bun run test:root -- src/tests/<file>.test.ts          # one file
 bun run test:root -- --watch src/tests/<file>.test.ts
 bun run test:root -- --parallel=4 --changed=$(git merge-base origin/main HEAD)   # only files affected by this branch
-bun run test:root -- --parallel=4 --shard=1/2                                    # CI shard 1 (CI also passes restored --timings files)
+bun run test:root -- --parallel=4 --shard=1/4                                    # CI shard 1 (CI also passes restored --timings files)
 ```
 
-`--parallel=N` runs each test file in its own worker process (it implies `--isolate`), so files cannot see each other's module mocks, globals, or leaked handles. `--changed=<ref>` selects test files whose import graph touches files changed since `<ref>`; always pass the **merge-base**, not `origin/main` itself, or every upstream commit counts as a change (0 files on a docs-only branch, ~20 files for a leaf tool edit). `--shard=N/M` splits files by count; CI adds `--timings=<file>` entries restored from the actions cache (per-file durations written by the previous green run's `--update-timings`, merged by the `save-timings` job; the `restore-timings` job resolves the snapshot once and both shards download the same artifact, so they always split the same file list) so the split is by total time. Nothing is committed; the first run after a cache wipe splits by count. Locally you can do the same with `--update-timings --timings=/tmp/timings.json`.
+`--parallel=N` runs each test file in its own worker process (it implies `--isolate`), so files cannot see each other's module mocks, globals, or leaked handles. `--changed=<ref>` selects test files whose import graph touches files changed since `<ref>`; always pass the **merge-base**, not `origin/main` itself, or every upstream commit counts as a change (0 files on a docs-only branch, ~20 files for a leaf tool edit). `--shard=N/M` splits files by count; CI adds `--timings=<file>` entries restored from the actions cache (per-file durations written by the previous green run's `--update-timings`, merged by the `save-timings` job; the `restore-timings` job resolves the snapshot once and every shard downloads the same artifact, so they always split the same file list) so the split is by total time. Nothing is committed; the first run after a cache wipe splits by count. Locally you can do the same with `--update-timings --timings=/tmp/timings.json`.
 
 Before selecting tests, `scripts/pre-push-tests.sh` runs a file-backed Bun process through the production sandbox limits. When the probe exits 134, the hook sets `SWARM_SKIP_SANDBOX_SPAWN_TESTS=1` and skips only spawn-dependent tests in `scripts-runtime`, `script-workflows-runtime-e2e`, `scripts-mcp-e2e`, `sandboxed-process`, `scripts-runtime-identity`, and `slack-read-boundaries`; all other affected tests still run. `RLIMIT_NPROC` is enforced per UID, so even the sandbox's 4096-process ceiling can prevent Bun 1.4.0 from starting when host-wide swarm thread usage for the worker UID is already high. At runtime, an exit 134 before user code starts is classified as `capacity_exceeded` and retried twice with bounded backoff before it reaches the caller. CI does not set the skip variable and runs every sandbox test.
 
@@ -179,7 +179,7 @@ Cursor needs `CURSOR_API_KEY` and defaults to `gpt-5.4-nano`, the cheapest model
 Amp needs `AMP_API_KEY` and a preinstalled `amp` executable (`AMP_BINARY`), and defaults to the `low` mode.
 Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), and defaults to `grok-build-0.1`, xAI's cheapest model. `E2E_MODEL_GROK=openrouter/deepseek/deepseek-v4.1-flash` runs it on `OPENROUTER_API_KEY` instead.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.3` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.4` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.

@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-16
+
+### Removed
+- **Breaking:** PM2, the service registry and the artifacts feature. Gone: the `agent-swarm artifact` command, the `register-service`, `unregister-service`, `list-services` and `update-service-status` tools, `GET /ecosystem`, `GET /api/services`, the script SDK `service_*` methods, the `services` capability and the dashboard Services page. Pages and apps replace them. A leftover `services` entry in `CAPABILITIES` is now ignored, and the seeded `artifacts` skill is retired unless a user edited it (#2147).
+
+### Added
+- Chat SDK channel: Telegram, Slack, Teams and Discord adapters, with `chat-post`, `chat-reply`, `chat-read-thread`, `chat-open-dm` and `register-chat-channel` tools, configured through `CHAT_SDK_ENABLED` and `CHAT_SDK_ADAPTERS` (#2125).
+- Vercel AI Gateway (Token Pass) with the full chat catalog and a fixed endpoint (#2176).
+- NaN and Helmcode as OpenAI-compatible providers on pi and opencode (#2172).
+- Config: per-row `exportToEnv` flag decides which config rows reach agent env, so secrets stay out of agent shells by default (#2156).
+- UI: Sessions turns and transcript render with a ported shadcn Trace; mermaid diagrams and frontmatter tables render in Comb; wider secrets dialogs with edit and formatted JSON; devin in the harness picker (#2162, #2160, #2159, #2157).
+- `email-domain-health` seeded skill and playbook (#2170).
+
+### Changed
+- The system prompt stays byte-identical across an agent's sessions, so provider prompt caching hits (#2171).
+- CI runs unit tests in 4 shards and logs runner memory on failure (#2174).
+- agent-fs pins bumped to 0.16.3; worker image bumps for claude-code, anthropic sdk, amp, copilot, kiro and dsh (#2173, #2154, #2167).
+- Docs: Open Oncall replication guide, Jev image inputs and costs, Gmail sender guidance, heartbeat spec sync (#2177, #2161, #2152, #2155).
+
+### Fixed
+- Scripts: `ctx.swarm.config.get` returns the invoking agent's config instead of `undefined` (#2168).
+- Scripts: the SDK defaults respect the API `PORT` (#2166).
+- DB: boot re-runs when `initDb` fails after opening, instead of reusing a half-booted handle (#2175).
+- Models: tasks record the effort they ran at, and re-runs stop replaying the previous model (#2158).
+- Pricing: Sonnet 5.5 cache reads seeded at $0.10, and Claude thinking tokens recorded (#2165).
+- Pages read `MAX(version)` instead of every snapshot; a GitHub comment that creates no task logs why (#2164).
+- Skills: `skill-get` resolves agent-owned swarm skills by name (#2151).
+- HTTP: loopback origins on any port are allowed in local development (#2137).
+
 ## [1.173.0] - 2026-10-15
 
 ### Added

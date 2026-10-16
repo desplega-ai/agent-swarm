@@ -122,7 +122,10 @@ The `ScriptContext` passed to your `default` export carries:
   repos, schedules). Method allowlist: see
   `src/scripts-runtime/sdk-allowlist.ts`.
 - `ctx.swarm.config` — `apiKey`, `agentId`, `mcpBaseUrl` (all wrapped in
-  `Redacted<string>`), plus `ctx.swarm.config.get("KEY")` for user config.
+  `Redacted<string>`), plus `ctx.swarm.config.get("KEY")` for swarm config
+  resolved for the invoking agent (agent scope over global). An unset key
+  returns `undefined`. Unwrap with `ctx.stdlib.Redacted.value(...)` only where
+  the value is used, such as a request header.
   Redacted values stringify and serialize as `<redacted>`; never unwrap one
   into a return value, log line, or request body assembled by hand.
 - `ctx.api.<slug>` / `ctx.mcp.<slug>` — typed clients for registered script

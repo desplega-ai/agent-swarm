@@ -22,8 +22,10 @@
  *     the underlying context becomes irrelevant — e.g. user cancels).
  *
  * Concurrency: single-process, single-event-loop. No cross-instance locking.
- * Flush callbacks run sequentially per key (the buffer is cleared BEFORE the
- * callback fires, so re-enqueues during `onFlush` create a fresh buffer).
+ * The buffer is cleared BEFORE the callback fires, so re-enqueues during
+ * `onFlush` create a fresh buffer, and its flush can start while the earlier
+ * `onFlush` for the same key still runs. A caller that needs per-key order
+ * must serialize inside `onFlush`.
  */
 
 export type BufferFlushReason = "timer" | "manual";

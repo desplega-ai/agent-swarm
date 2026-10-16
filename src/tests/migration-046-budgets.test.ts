@@ -224,25 +224,26 @@ describe("migration 046 — budgets and pricing", () => {
     // Derive expected rates from the vendored snapshot instead of literals —
     // Anthropic reprices (sonnet-5 intro rate through 2026-08-31), and this
     // test pins faithful PROJECTION of the snapshot, not a rate freeze.
-    const cost = loadModelsDevCache()?.anthropic?.models?.["claude-sonnet-5"]?.cost;
-    expect(cost?.input).toBeGreaterThan(0);
-    const expectedPrices = {
-      input: cost?.input,
-      cached_input: cost?.cache_read,
-      cache_write: cost?.cache_write,
-      // Phase 3: Anthropic-billed rows derive the 1h class at 2x base input.
-      cache_write_1h: (cost?.input ?? 0) * 2,
-      output: cost?.output,
-    } as const;
+    // The `sonnet` shortname follows the current default, Sonnet 5.5.
     const seededKeys = [
-      ["claude", "claude-sonnet-5"],
-      ["claude-managed", "claude-sonnet-5"],
-      ["claude", "sonnet"],
-      ["claude-managed", "sonnet"],
-      ["pi", "sonnet"],
+      ["claude", "claude-sonnet-5", "claude-sonnet-5"],
+      ["claude-managed", "claude-sonnet-5", "claude-sonnet-5"],
+      ["claude", "sonnet", "claude-sonnet-5-5"],
+      ["claude-managed", "sonnet", "claude-sonnet-5-5"],
+      ["pi", "sonnet", "claude-sonnet-5-5"],
     ] as const;
 
-    for (const [provider, model] of seededKeys) {
+    for (const [provider, model, sourceId] of seededKeys) {
+      const cost = loadModelsDevCache()?.anthropic?.models?.[sourceId]?.cost;
+      expect(cost?.input).toBeGreaterThan(0);
+      const expectedPrices = {
+        input: cost?.input,
+        cached_input: cost?.cache_read,
+        cache_write: cost?.cache_write,
+        // Phase 3: Anthropic-billed rows derive the 1h class at 2x base input.
+        cache_write_1h: (cost?.input ?? 0) * 2,
+        output: cost?.output,
+      } as const;
       for (const [tokenClass, price] of Object.entries(expectedPrices)) {
         const row = await client.get<PricingRow>(
           `SELECT * FROM pricing

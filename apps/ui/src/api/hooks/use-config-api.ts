@@ -103,6 +103,8 @@ export interface UpsertConfigEntry {
   envPath?: string | null;
   scope?: "global";
   scopeId?: string | null;
+  /** Omitted: the server default for the key applies. */
+  exportToEnv?: boolean;
 }
 
 export interface BatchResult {
@@ -140,6 +142,7 @@ export function useUpsertConfigsBatch() {
             isSecret: entry.isSecret,
             description: entry.description ?? null,
             envPath: entry.envPath ?? null,
+            ...(entry.exportToEnv !== undefined ? { exportToEnv: entry.exportToEnv } : {}),
           });
           successCount += 1;
         } catch (err) {

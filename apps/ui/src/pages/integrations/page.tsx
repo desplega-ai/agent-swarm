@@ -1,5 +1,6 @@
 import { Plug, Search } from "lucide-react";
 import { useMemo } from "react";
+import { useChatSdkStatus } from "@/api/hooks/use-chat-sdk";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { IntegrationCard } from "@/components/integrations/integration-card";
@@ -55,6 +56,12 @@ export default function IntegrationsPage() {
   }, []);
   const { data: envPresence } = useEnvPresence(allCatalogKeys);
   const presence = envPresence ?? {};
+  // Env presence cannot show CHAT_SDK_ENABLED=false, so read the live value
+  // when the flag comes from the env only.
+  const chatSdkEnvOnly =
+    presence.CHAT_SDK_ENABLED === true && !findConfigForKey(configs ?? [], "CHAT_SDK_ENABLED");
+  const chatSdkStatus = useChatSdkStatus({ enabled: chatSdkEnvOnly, poll: false });
+  const live = { chatSdkEnabled: chatSdkStatus.data?.enabled };
 
   // "Fresh swarm" check: nothing in DB AND nothing in deploy env.
   const hasAnyIntegrationConfigured = useMemo(() => {
@@ -201,7 +208,7 @@ export default function IntegrationsPage() {
             {QUICK_PICK_IDS.map((pickId) => {
               const def = INTEGRATIONS.find((i) => i.id === pickId);
               if (!def) return null;
-              const status = deriveIntegrationStatus(def, configs ?? [], presence);
+              const status = deriveIntegrationStatus(def, configs ?? [], presence, live);
               return <IntegrationCard key={def.id} def={def} status={status} />;
             })}
           </div>
@@ -253,7 +260,7 @@ export default function IntegrationsPage() {
       ) : (
         <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
           {visible.map((def) => {
-            const status = deriveIntegrationStatus(def, configs ?? [], presence);
+            const status = deriveIntegrationStatus(def, configs ?? [], presence, live);
             return <IntegrationCard key={def.id} def={def} status={status} />;
           })}
         </div>

@@ -75,8 +75,8 @@ wait_for_api_ready() {
 wait_for_api_ready "$MCP_URL"
 
 if [ "$HARNESS_PROVIDER" = "pi" ]; then
-    # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or auth.json must
-    # exist — UNLESS MODEL_OVERRIDE selects amazon-bedrock, in which case
+    # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, NAN_API_KEY (or its
+    # HELMCODE_API_NAN alias), HELMCODE_API_KEY, or auth.json must exist — UNLESS MODEL_OVERRIDE selects amazon-bedrock, in which case
     # credential resolution is delegated to the AWS SDK at first inference
     # call (env vars, ~/.aws/*, SSO, IMDS, assume-role, etc.). The boot gate
     # in checkPiMonoCredentials short-circuits to satisfiedBy=sdk-delegated
@@ -86,8 +86,8 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
             echo "pi provider: MODEL_OVERRIDE=${MODEL_OVERRIDE} — AWS SDK will resolve Bedrock credentials at runtime (env, ~/.aws/*, SSO, IMDS)."
             ;;
         *)
-            if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
-                echo "Warning: pi provider has no credentials yet (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / ~/.pi/agent/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
+            if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "${NAN_API_KEY:-}" ] && [ -z "${HELMCODE_API_NAN:-}" ] && [ -z "${HELMCODE_API_KEY:-}" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
+                echo "Warning: pi provider has no credentials yet (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / NAN_API_KEY / HELMCODE_API_NAN / HELMCODE_API_KEY / ~/.pi/agent/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
             fi
             ;;
     esac
@@ -108,10 +108,11 @@ elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
         echo "Warning: cursor provider has no credentials yet (CURSOR_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
-    # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist
+    # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY,
+    # NAN_API_KEY (or its HELMCODE_API_NAN alias), HELMCODE_API_KEY, or auth.json must exist
     OPENCODE_AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
-    if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ ! -f "$OPENCODE_AUTH_FILE" ]; then
-        echo "Warning: opencode provider has no credentials yet (OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / ${OPENCODE_AUTH_FILE}). Worker will park in credential-wait until creds appear in swarm_config."
+    if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "${NAN_API_KEY:-}" ] && [ -z "${HELMCODE_API_NAN:-}" ] && [ -z "${HELMCODE_API_KEY:-}" ] && [ ! -f "$OPENCODE_AUTH_FILE" ]; then
+        echo "Warning: opencode provider has no credentials yet (OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / NAN_API_KEY / HELMCODE_API_NAN / HELMCODE_API_KEY / ${OPENCODE_AUTH_FILE}). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     # Claude Managed Agents — sessions run in Anthropic's cloud sandbox.
@@ -349,7 +350,7 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     DSH_BIN="${DSH_BINARY:-dsh}"
     if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
-        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-alpha.3 during image provisioning."
+        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-alpha.4 during image provisioning."
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"

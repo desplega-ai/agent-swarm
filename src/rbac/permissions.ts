@@ -79,6 +79,11 @@ export const PERMISSIONS = {
     description: "Mutate a task's filesystem artifacts and attachments.",
     namespace: "task",
   },
+  "task.parent.attach": {
+    description:
+      "Create a task under an existing parent task. The child inherits the parent's thread context (contextKey, Slack thread, requester).",
+    namespace: "task",
+  },
   "task.progress.write": {
     description:
       "Write a task's progress, status, or output (its assignee, a lead, a human, or anyone while unassigned).",
@@ -122,6 +127,22 @@ export const PERMISSIONS = {
   },
   "integration.kapso.manage": {
     description: "Register or unregister a Kapso inbound number.",
+    namespace: "integration",
+  },
+  "integration.chat.manage": {
+    description: "Register or unregister a Chat SDK channel route.",
+    namespace: "integration",
+  },
+  "integration.chat.post": {
+    description: "Post to a Chat SDK thread or channel other than the thread of the current task.",
+    namespace: "integration",
+  },
+  "integration.chat.read": {
+    description: "Read a Chat SDK thread other than the thread of the current task.",
+    namespace: "integration",
+  },
+  "integration.chat.dm": {
+    description: "Open a direct-message thread with a user on a Chat SDK adapter.",
     namespace: "integration",
   },
   "integration.slack.post": {

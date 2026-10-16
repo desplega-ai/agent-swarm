@@ -49,6 +49,10 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "memory.write.consolidated",
   "channel.delete",
   "integration.kapso.manage",
+  "integration.chat.manage",
+  "integration.chat.post",
+  "integration.chat.read",
+  "integration.chat.dm",
   "integration.slack.post",
   "integration.slack.read",
   "integration.slack.thread.start",
@@ -140,6 +144,7 @@ const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [
 const COMPOSITE_VERBS: PermissionVerb[] = [
   "memory.delete.any",
   "task.fs.mutate",
+  "task.parent.attach",
   "task.progress.write",
 ];
 
@@ -570,9 +575,12 @@ describe("memory.delete.any composite (human, lead for swarm, owner for agent sc
   });
 });
 
-describe("task.fs.mutate composite (operator OR user OR lead OR assignee OR creator)", () => {
-  test("only an unrelated worker agent is denied", () => {
-    expectDecisions("task.fs.mutate", TASK_RESOURCE, {
+describe("task.fs.mutate and task.parent.attach composite (operator OR user OR lead OR assignee OR creator)", () => {
+  test.each([
+    "task.fs.mutate",
+    "task.parent.attach",
+  ] as const)("%s: only an unrelated worker agent is denied", (verb) => {
+    expectDecisions(verb, TASK_RESOURCE, {
       lead: true,
       worker: false,
       ownerWorker: true, // assignee (task.agentId)

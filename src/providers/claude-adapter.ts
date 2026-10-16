@@ -1041,7 +1041,7 @@ class ClaudeSession implements ProviderSession {
       "--allow-dangerously-skip-permissions",
       "--permission-mode",
       "bypassPermissions",
-      // Skip the workspace copy of claudeMd; ~/.claude/CLAUDE.md already carries it.
+      // Skip both on-disk copies of claudeMd; the system prompt already carries it.
       // createSession merged caller `--settings` into these, so this is the only one.
       "--settings",
       JSON.stringify(this.flagSettings),

@@ -3,6 +3,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import type {
   ApprovalResolvedEvent,
+  ChatMessageEvent,
   KapsoMessageEvent,
   TaskBudgetRefusedEvent,
   VcsEvent,
@@ -258,6 +259,41 @@ const onKapsoMessage = observed("kapso.message.received", async (data) => {
   );
 });
 
+/** `chat.message.received` and `chat.message.sent` carry the same fields; the name sets the direction. */
+function chatMessageBridge(eventName: string, direction: ChatMessageEvent["direction"]) {
+  return observed(eventName, async (data) => {
+    const source = (data ?? {}) as Record<string, unknown>;
+    const adapter = text(source.adapter);
+    const channelId = text(source.channelId);
+    const threadId = text(source.threadId);
+    const messageText = text(source.text);
+    if (
+      adapter === undefined ||
+      channelId === undefined ||
+      threadId === undefined ||
+      messageText === undefined
+    ) {
+      return;
+    }
+    await dispatchPost(
+      "post.chat.message",
+      compact<ChatMessageEvent>({
+        adapter,
+        channelId,
+        threadId,
+        userId: text(source.userId),
+        text: messageText,
+        direction,
+        taskId: text(source.taskId),
+        messageId: text(source.messageId),
+      }),
+    );
+  });
+}
+
+const onChatMessageReceived = chatMessageBridge("chat.message.received", "inbound");
+const onChatMessageSent = chatMessageBridge("chat.message.sent", "outbound");
+
 // The code-host events are named `<provider>.<kind>.<action>` and the last
 // segment is open-ended (`github.pull_request.<action>`, `gitlab.pipeline.<status>`),
 // so one prefix subscription per provider covers them all.
@@ -331,6 +367,8 @@ export function initExtensionPostBridge(): void {
   workflowEventBus.on("task.budget_refused", onTaskBudgetRefused);
   workflowEventBus.on("agentmail.message.received", onEmailReceived);
   workflowEventBus.on("kapso.message.received", onKapsoMessage);
+  workflowEventBus.on("chat.message.received", onChatMessageReceived);
+  workflowEventBus.on("chat.message.sent", onChatMessageSent);
   for (const prefix of VCS_PREFIXES) workflowEventBus.onPrefix(prefix, onVcsEvent);
 }
 
@@ -348,5 +386,7 @@ export function teardownExtensionPostBridge(): void {
   workflowEventBus.off("task.budget_refused", onTaskBudgetRefused);
   workflowEventBus.off("agentmail.message.received", onEmailReceived);
   workflowEventBus.off("kapso.message.received", onKapsoMessage);
+  workflowEventBus.off("chat.message.received", onChatMessageReceived);
+  workflowEventBus.off("chat.message.sent", onChatMessageSent);
   for (const prefix of VCS_PREFIXES) workflowEventBus.offPrefix(prefix, onVcsEvent);
 }

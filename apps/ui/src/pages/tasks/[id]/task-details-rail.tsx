@@ -1,3 +1,4 @@
+import { openAICompatibleProviders, providerKeyVars } from "@desplega/model-catalog";
 import { ExternalLink, GitBranch, Github, Gitlab, GitPullRequest, Link2, User } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -48,6 +49,12 @@ const API_KEY_LABELS: Record<string, string> = {
   CLAUDE_CODE_OAUTH_TOKEN: "OAuth",
   ANTHROPIC_API_KEY: "Anthropic",
   OPENROUTER_API_KEY: "OpenRouter",
+  // OpenAI-compatible registry providers, canonical key and aliases.
+  ...Object.fromEntries(
+    openAICompatibleProviders().flatMap((p) =>
+      providerKeyVars(p).map((name) => [name, p.displayName]),
+    ),
+  ),
 };
 
 /** The first time the task went to `in_progress` (a resume does not count). */

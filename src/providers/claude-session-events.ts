@@ -32,6 +32,7 @@ type ClaudeUsage = {
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
   thinking_input_tokens?: number;
+  output_tokens_details?: { thinking_tokens?: number };
   cache_creation?: Record<string, unknown>;
 };
 
@@ -125,7 +126,11 @@ function costFromResult(
     cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
     cacheWrite5mTokens: finiteNumber(cacheCreation?.ephemeral_5m_input_tokens),
     cacheWrite1hTokens: finiteNumber(cacheCreation?.ephemeral_1h_input_tokens),
-    thinkingTokens: usage?.thinking_input_tokens ?? 0,
+    // A subset of output_tokens, already billed at the output rate.
+    thinkingTokens:
+      tokenCount(usage?.output_tokens_details?.thinking_tokens) ??
+      tokenCount(usage?.thinking_input_tokens) ??
+      0,
     models,
     durationMs: json.duration_ms || 0,
     numTurns: json.num_turns ?? null,

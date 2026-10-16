@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { BrandLogo } from "@/components/shared/brand-logo";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { IntegrationDef } from "@/lib/integrations-catalog";
@@ -65,7 +66,10 @@ interface IntegrationCardProps {
 
 export function IntegrationCard({ def, status, className }: IntegrationCardProps) {
   const Icon = resolveIcon(def.iconKey);
-  const logo = def.logoSrc ? (
+  // A provider glyph (`ProviderIcon`) wins, then a logo file, then the lucide icon.
+  const logo = def.providerIconKey ? (
+    <ProviderIcon provider={def.providerIconKey} className="h-5 w-5 text-foreground opacity-100" />
+  ) : def.logoSrc ? (
     <BrandLogo src={def.logoSrc} className="size-5 text-foreground" />
   ) : (
     <Icon className="h-5 w-5 text-foreground" aria-hidden="true" />

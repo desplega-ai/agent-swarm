@@ -96,54 +96,72 @@ describe("runScript", () => {
     expect(output.result).toEqual({ status: 200, parsed: { ok: true } });
   });
 
-  spawnTest("ctx.swarm bridge round-trips kv_set then kv_get", async () => {
-    const entries = new Map<string, unknown>();
-    const server = Bun.serve({
-      port: 0,
-      async fetch(req) {
-        expect(req.headers.get("authorization")).toBe(
-          "Bearer example-runtime-test-secret-1234567890",
-        );
-        expect(req.headers.get("x-agent-id")).toBe("agent-1");
+  spawnTest(
+    "ctx.swarm bridge respects URL overrides and PORT fallback",
+    async () => {
+      const entries = new Map<string, unknown>();
+      const agentId = crypto.randomUUID();
+      const server = Bun.serve({
+        hostname: "localhost",
+        port: 0,
+        async fetch(req) {
+          expect(req.headers.get("authorization")).toBe(
+            "Bearer example-runtime-test-secret-1234567890",
+          );
+          expect(req.headers.get("x-agent-id")).toBe(agentId);
 
-        const url = new URL(req.url);
-        if (req.method === "PUT" && url.pathname.startsWith("/api/kv/")) {
-          const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
-          const body = (await req.json()) as { value: unknown };
-          entries.set(key, body.value);
-          return Response.json({ key, value: body.value });
-        }
-        if (req.method === "GET" && url.pathname.startsWith("/api/kv/")) {
-          const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
-          return Response.json({ key, value: entries.get(key) ?? null });
-        }
-        return Response.json({ error: "not found" }, { status: 404 });
-      },
-    });
+          const url = new URL(req.url);
+          if (req.method === "PUT" && url.pathname.startsWith("/api/kv/")) {
+            const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
+            const body = (await req.json()) as { value: unknown };
+            entries.set(key, body.value);
+            return Response.json({ key, value: body.value });
+          }
+          if (req.method === "GET" && url.pathname.startsWith("/api/kv/")) {
+            const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
+            return Response.json({ key, value: entries.get(key) ?? null });
+          }
+          return Response.json({ error: "not found" }, { status: 404 });
+        },
+      });
 
-    try {
-      const output = await runScript({
-        agentId: "agent-1",
-        mcpBaseUrl: `http://127.0.0.1:${server.port}`,
-        resources,
-        source: `
+      try {
+        const baseUrl = `http://localhost:${server.port}`;
+        for (const urlSource of ["input", "MCP_BASE_URL", "PORT"] as const) {
+          delete process.env.PORT;
+          process.env.MCP_BASE_URL = "http://unused.invalid";
+          if (urlSource === "MCP_BASE_URL") {
+            process.env.MCP_BASE_URL = baseUrl;
+          } else if (urlSource === "PORT") {
+            delete process.env.MCP_BASE_URL;
+            process.env.PORT = String(server.port);
+          }
+
+          const output = await runScript({
+            agentId,
+            mcpBaseUrl: urlSource === "input" ? baseUrl : undefined,
+            resources,
+            source: `
           export default async (_args, ctx) => {
             await ctx.swarm.kv_set({ key: "bridge-smoke", value: { ok: true } });
             return await ctx.swarm.kv_get({ key: "bridge-smoke" });
           };
         `,
-      });
+          });
 
-      expect(output.error).toBeUndefined();
-      expect(output.result).toEqual({
-        success: true,
-        status: 200,
-        data: { key: "bridge-smoke", value: { ok: true } },
-      });
-    } finally {
-      server.stop(true);
-    }
-  });
+          expect(output.error, `${urlSource}: ${output.stderr}`).toBeUndefined();
+          expect(output.result, urlSource).toEqual({
+            success: true,
+            status: 200,
+            data: { key: "bridge-smoke", value: { ok: true } },
+          });
+        }
+      } finally {
+        server.stop(true);
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   spawnTest("ctx.swarm.kv_get forwards path/offset/limit as a view query", async () => {
     const seen: string[] = [];

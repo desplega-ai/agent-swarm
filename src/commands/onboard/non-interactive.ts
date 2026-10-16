@@ -1,3 +1,4 @@
+import { openAICompatibleProviders, providerKeyVars } from "@desplega/model-catalog";
 import {
   type HarnessProvider,
   type InstallProvider,
@@ -42,8 +43,9 @@ type ProviderStateKey =
   | "awsSessionToken"
   | "awsProfile";
 
-const ACCEPTED_CREDENTIALS =
-  "Set one of: CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (Claude Code); OPENAI_API_KEY (OpenAI); OPENROUTER_API_KEY (OpenRouter); or AWS_REGION plus AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE and a Bedrock MODEL_OVERRIDE.";
+const ACCEPTED_CREDENTIALS = `Set one of: CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (Claude Code); OPENAI_API_KEY (OpenAI); OPENROUTER_API_KEY (OpenRouter); or AWS_REGION plus AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE and a Bedrock MODEL_OVERRIDE. ${openAICompatibleProviders()
+  .map((p) => `${p.displayName} (${providerKeyVars(p).join(" or ")})`)
+  .join(" and ")} keys for pi/opencode are added from the dashboard.`;
 
 const DEFERRED_CREDENTIAL_LABEL = "no credential yet";
 
