@@ -76,7 +76,14 @@ const taskRow = (over: Record<string, unknown> = {}): Row => ({
 
 const makeCtx = (
   config: Record<string, unknown> = {},
-  opts: { row?: Row; key?: string; openrouterKey?: string; dbThrows?: boolean } = {},
+  opts: {
+    row?: Row;
+    key?: string;
+    openrouterKey?: string;
+    dbThrows?: boolean;
+    /** The caller's agents.isLead; null means no agents row. */
+    callerIsLead?: boolean | null;
+  } = {},
 ) => {
   const kv: Record<string, unknown> = {};
   const counters: Record<string, number> = {};
@@ -92,6 +99,13 @@ const makeCtx = (
     db_query: async (args: any) => {
       queries.push(args);
       if (opts.dbThrows) throw new Error("db down");
+      if (String(args.sql).includes("FROM agents")) {
+        const lead = opts.callerIsLead ?? false;
+        return {
+          success: true,
+          data: { rows: opts.callerIsLead === null ? [] : [{ isLead: lead ? 1 : 0 }] },
+        };
+      }
       return { success: true, data: { rows: row ? [row] : [] } };
     },
     kv_set: async ({ key, value }: any) => {
@@ -210,6 +224,44 @@ describe("pass", () => {
       expect(await handler(event, ctx)).toBeUndefined();
     }
     expect(jevCalls).toHaveLength(0);
+  });
+
+  test("a non-lead worker completing another agent's task causes zero judge egress", async () => {
+    jevScores(0.1);
+    for (const callerIsLead of [false, null]) {
+      const { ctx, queries } = makeCtx(
+        { mode: "enforce" },
+        { row: taskRow({ agentId: "agent-2" }), callerIsLead },
+      );
+      expect(await handler(completion("x"), ctx)).toBeUndefined();
+      // Lead status is read for the caller from the agents row.
+      expect(queries[1]).toMatchObject({ params: ["agent-1"] });
+    }
+    expect(jevCalls).toHaveLength(0);
+  });
+
+  test("a lead completing a worker-owned task reaches the judge", async () => {
+    jevScores(0.1);
+    const { ctx, counters } = makeCtx(
+      { mode: "enforce" },
+      { row: taskRow({ agentId: "agent-2" }), callerIsLead: true },
+    );
+    expect(await handler(completion("x"), ctx)).toMatchObject({ action: "block" });
+    expect(jevCalls).toHaveLength(1);
+    expect(counters).toMatchObject({ total: 1, fail: 1, blocked: 1 });
+  });
+
+  test("a completion on an unassigned task reaches the judge", async () => {
+    jevScores(0.1);
+    const { ctx, counters, queries } = makeCtx(
+      { mode: "enforce" },
+      { row: taskRow({ agentId: null }) },
+    );
+    expect(await handler(completion("x"), ctx)).toMatchObject({ action: "block" });
+    expect(jevCalls).toHaveLength(1);
+    expect(counters).toMatchObject({ total: 1, fail: 1, blocked: 1 });
+    // Owner and unassigned cases never need the caller's agents row.
+    expect(queries).toHaveLength(1);
   });
 
   test("mode off never reads the task", async () => {

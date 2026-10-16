@@ -307,6 +307,26 @@ FROM agent_tasks t
 LEFT JOIN users u ON u.id = t.requestedByUserId
 WHERE t.id = ?`;
 
+const LEAD_SQL = "SELECT isLead FROM agents WHERE id = ?";
+
+/**
+ * Mirrors the `task.progress.write` rule store-progress enforces
+ * (src/rbac/legacy-policy.ts): the caller owns the task, the task is
+ * unassigned, or the caller is a lead. Lead status comes from the caller's
+ * agents row, never from tool args. Extension callers return before this.
+ */
+const mayWriteProgress = async (
+  swarm: Swarm,
+  callerId: string | undefined,
+  taskAgentId: string,
+): Promise<boolean> => {
+  if (!callerId) return false;
+  if (!taskAgentId || taskAgentId === callerId) return true;
+  const q = (await swarm.db_query({ sql: LEAD_SQL, params: [callerId] })) as Envelope;
+  const row = (q?.data?.rows ?? q?.rows ?? [])[0];
+  return Number(cell(row, 0, "isLead") ?? 0) === 1;
+};
+
 const extension: SwarmExtension = (api) => {
   api.on("pre.tool.call", async (event, ctx) => {
     if (event.tool !== "store-progress") return;
@@ -346,9 +366,9 @@ const extension: SwarmExtension = (api) => {
       const threadOpening = String(cell(row, 6, "askHead") ?? "");
       const ask = latestAsk(String(cell(row, 7, "askTail") ?? ""));
 
-      // Judge only the caller's own task, so no agent can ship another task's
-      // thread and preferences to the external judge.
-      if (!agentId || agentId !== event.requestInfo?.agentId) return;
+      // Judge only a completion store-progress will accept, so no agent can ship
+      // another task's thread and preferences to the external judge.
+      if (!(await mayWriteProgress(ctx.swarm, event.requestInfo?.agentId, agentId))) return;
 
       // Only where the text actually reaches a human in Slack.
       if (source !== "slack" && !slackThreadTs) return;
