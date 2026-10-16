@@ -37,6 +37,7 @@ import { azureDevOpsWorkItemContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import type { TrackerSync } from "../tracker/types";
 import { isTerminalTaskStatus } from "../types";
+import { workflowEventBus } from "../workflows/event-bus";
 import { resolveAzureDevOpsBotIdentity } from "./api";
 import {
   AZURE_DEVOPS_BOT_NAME,
@@ -561,7 +562,7 @@ export async function handleWorkItemUpdated(event: WorkItemUpdatedEvent): Promis
   const org = orgFor(event);
   if (!org) return dropUntrustedOrg(event.eventType);
 
-  return await handleDelivery(org, event.id, update.workItemId, async () => {
+  const routeAssignment = async (): Promise<HandlerResult> => {
     const bot = await resolveBot(org.url);
     if (!isBotString(change.newValue, bot) || isBotString(change.oldValue, bot)) {
       return { created: false };
@@ -579,6 +580,21 @@ export async function handleWorkItemUpdated(event: WorkItemUpdatedEvent): Promis
       },
       "assigned",
     );
+  };
+
+  return await handleDelivery(org, event.id, update.workItemId, async () => {
+    const result = await routeAssignment();
+    // Published inside the receipt and lock so a retried delivery cannot repeat it.
+    workflowEventBus.emit("azure-devops.work_item.assigned", {
+      work_item_id: update.workItemId,
+      title: update.revision.fields["System.Title"],
+      project: update.revision.fields["System.TeamProject"],
+      action: "assigned",
+      assigned_to: change.newValue,
+      previous_assignee: change.oldValue,
+      user_login: update.revisedBy?.uniqueName ?? update.revisedBy?.id,
+    });
+    return result;
   });
 }
 
@@ -598,31 +614,45 @@ export async function handleWorkItemCommented(
   const org = orgFor(event);
   if (!org) return dropUntrustedOrg(event.eventType);
 
+  const routeComment = async (): Promise<HandlerResult> => {
+    const bot = await resolveBot(org.url);
+    const actor = parseIdentityString(item.fields["System.ChangedBy"]);
+    if (isBotIdentity(actor, bot)) return { created: false };
+
+    const { mentioned, text } = inspectMention(item.fields["System.History"], bot);
+    if (!mentioned) return { created: false };
+
+    return await routeToTask(
+      {
+        eventId: event.id,
+        eventType: event.eventType,
+        workItemId: item.id,
+        fields: item.fields,
+        org,
+        actor,
+      },
+      "mentioned_comment",
+      text,
+    );
+  };
+
   const commentKey = ref ? `comment:${trackerKey(org, item.id)}:${ref.commentId}` : undefined;
   return await handleDelivery(
     org,
     event.id,
     item.id,
     async () => {
-      const bot = await resolveBot(org.url);
-      const actor = parseIdentityString(item.fields["System.ChangedBy"]);
-      if (isBotIdentity(actor, bot)) return { created: false };
-
-      const { mentioned, text } = inspectMention(item.fields["System.History"], bot);
-      if (!mentioned) return { created: false };
-
-      return await routeToTask(
-        {
-          eventId: event.id,
-          eventType: event.eventType,
-          workItemId: item.id,
-          fields: item.fields,
-          org,
-          actor,
-        },
-        "mentioned_comment",
-        text,
-      );
+      const result = await routeComment();
+      // Published inside the receipt and lock so a retried delivery cannot repeat it.
+      workflowEventBus.emit("azure-devops.work_item.commented", {
+        work_item_id: item.id,
+        title: item.fields["System.Title"],
+        project: item.fields["System.TeamProject"],
+        action: "commented",
+        comment: item.fields["System.History"],
+        user_login: item.fields["System.ChangedBy"],
+      });
+      return result;
     },
     commentKey,
   );

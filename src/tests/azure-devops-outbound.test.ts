@@ -1,10 +1,18 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { resetAzureDevOpsBotIdCache } from "../azure-devops/api";
+import { resetAzureDevOpsBotIdCache, updateWorkItemFields } from "../azure-devops/api";
 import { initAzureDevOps, resetAzureDevOps } from "../azure-devops/auth";
 import { initAzureDevOpsOutbound, teardownAzureDevOpsOutbound } from "../azure-devops/outbound";
-import { closeDb, createAgent, createTaskExtended, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createWorkflow,
+  getDbClient,
+  initDb,
+  listWorkflowRuns,
+} from "../be/db";
 import {
   createTrackerSyncIfAbsent,
   deleteTrackerSync,
@@ -12,6 +20,7 @@ import {
 } from "../be/db-queries/tracker";
 import { emitTaskStarted } from "../be/task-lifecycle-events";
 import { handleWebhooks } from "../http/webhooks";
+import { initWorkflows, stopRetryPoller, stopWaitPoller } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
 import commentedFixture from "./fixtures/azure-boards/workitem.commented.json";
 import updatedFixture from "./fixtures/azure-boards/workitem.updated.json";
@@ -247,5 +256,165 @@ describe("work item workflow events", () => {
       action: "commented",
       comment: first.resource.fields["System.History"],
     });
+  });
+});
+
+describe("work item state ordering and commit boundary", () => {
+  test("a held Doing PATCH cannot land after Done", async () => {
+    process.env.AZURE_DEVOPS_WORKITEM_STATE_STARTED = "Doing";
+    process.env.AZURE_DEVOPS_WORKITEM_STATE_DONE = "Done";
+    const taskId = await linkedTask(9);
+    const applied: string[] = [];
+    let releaseDoing!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseDoing = resolve;
+    });
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return inner(input, init);
+      const value = JSON.parse(String(init.body))[0].value as string;
+      if (value === "Doing") await held;
+      applied.push(value);
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    emitTaskStarted({ id: taskId } as never);
+    await settle();
+    workflowEventBus.emit("task.completed", { taskId });
+    await settle();
+    expect(applied).toEqual([]);
+    releaseDoing();
+    await settle();
+    expect(applied).toEqual(["Doing", "Done"]);
+  });
+
+  test("a rolled-back start never reaches Azure", async () => {
+    process.env.AZURE_DEVOPS_WORKITEM_STATE_STARTED = "Doing";
+    const taskId = await linkedTask(9);
+    await getDbClient()
+      .transaction(async () => {
+        emitTaskStarted({ id: taskId } as never);
+        throw new Error("rollback");
+      })
+      .catch(() => {});
+    await settle();
+    expect(patches).toHaveLength(0);
+  });
+
+  test("a committed start is delivered after the commit", async () => {
+    process.env.AZURE_DEVOPS_WORKITEM_STATE_STARTED = "Doing";
+    const taskId = await linkedTask(9);
+    await getDbClient().transaction(async () => {
+      emitTaskStarted({ id: taskId } as never);
+    });
+    await settle();
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.body[0]?.value).toBe("Doing");
+  });
+
+  test("scrubs secrets from a rejected update response", async () => {
+    const token = `ghp_${"a1B2c3D4e5".repeat(4)}`;
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === "PATCH"
+        ? new Response(`bad token ${token}`, { status: 401 })
+        : inner(input, init)) as typeof fetch;
+    const logged: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => void logged.push(args.join(" "));
+    try {
+      await updateWorkItemFields(ORG_URL, 9, [
+        { op: "add", path: "/fields/System.State", value: "X" },
+      ]);
+    } finally {
+      console.error = original;
+    }
+    expect(logged.join("\n")).toContain("401");
+    expect(logged.join("\n")).not.toContain(token);
+  });
+});
+
+describe("work item workflow events: trust and delivery boundaries", () => {
+  const unsubscribers: (() => void)[] = [];
+  afterEach(() => {
+    for (const off of unsubscribers.splice(0)) off();
+  });
+  function capture(name: string): Json[] {
+    const seen: Json[] = [];
+    const handler = (d: Json) => seen.push(d);
+    workflowEventBus.on(name, handler);
+    unsubscribers.push(() => workflowEventBus.off(name, handler));
+    return seen;
+  }
+  function fresh(sample: unknown): Json {
+    const event = structuredClone(sample) as Json;
+    event.id = `00000000-0000-4000-8000-${String(5000 + ++nextId).padStart(12, "0")}`;
+    if (event.resource?.commentVersionRef) {
+      event.resource.commentVersionRef.commentId = 3_000_000 + nextId;
+      event.resource.commentVersionRef.version = 1;
+    }
+    return event;
+  }
+  function assigned(): Json {
+    const event = fresh(updatedFixture);
+    event.resource.fields = {
+      ...event.resource.fields,
+      "System.AssignedTo": { oldValue: "A <a@example.com>", newValue: "B <b@example.com>" },
+    };
+    return event;
+  }
+  function excludeOrg(event: Json): Json {
+    const swap = (value: unknown) => String(value).replace("acme-org", "excluded-org");
+    event.resourceContainers.account.baseUrl = swap(event.resourceContainers.account.baseUrl);
+    event.resourceContainers.collection.baseUrl = swap(event.resourceContainers.collection.baseUrl);
+    event.resource.url = swap(event.resource.url);
+    return event;
+  }
+
+  test("events from an untrusted organization are not published", async () => {
+    const assignedSeen = capture("azure-devops.work_item.assigned");
+    const commentedSeen = capture("azure-devops.work_item.commented");
+    await post(excludeOrg(assigned()));
+    await post(excludeOrg(fresh(commentedFixture)));
+    expect(assignedSeen).toHaveLength(0);
+    expect(commentedSeen).toHaveLength(0);
+  });
+
+  test("concurrent and sequential retries publish once", async () => {
+    const assignedSeen = capture("azure-devops.work_item.assigned");
+    const commentedSeen = capture("azure-devops.work_item.commented");
+    const assignment = assigned();
+    const comment = fresh(commentedFixture);
+    await Promise.all([post(assignment), post(assignment)]);
+    await post(assignment);
+    await Promise.all([post(comment), post(comment)]);
+    await post(comment);
+    // Same comment re-delivered under a new delivery id: the comment receipt covers it.
+    const redelivered = structuredClone(comment);
+    redelivered.id = `00000000-0000-4000-8000-${String(5000 + ++nextId).padStart(12, "0")}`;
+    await post(redelivered);
+    expect(assignedSeen).toHaveLength(1);
+    expect(commentedSeen).toHaveLength(1);
+  });
+
+  test("published events start enabled event-trigger workflows", async () => {
+    await initWorkflows();
+    stopRetryPoller();
+    stopWaitPoller();
+    const make = (eventName: string) =>
+      createWorkflow({
+        name: `azure-trigger-${crypto.randomUUID().slice(0, 8)}`,
+        definition: {
+          nodes: [{ id: "n1", type: "notify", config: { channel: "swarm", template: "t" } }],
+        },
+        triggers: [{ type: "event", eventName: eventName as never }],
+      });
+    const onAssigned = await make("azure-devops.work_item.assigned");
+    const onCommented = await make("azure-devops.work_item.commented");
+    await post(assigned());
+    await post(fresh(commentedFixture));
+    await settle();
+    expect(await listWorkflowRuns(onAssigned.id)).toHaveLength(1);
+    expect(await listWorkflowRuns(onCommented.id)).toHaveLength(1);
   });
 });

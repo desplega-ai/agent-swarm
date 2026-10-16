@@ -2403,7 +2403,11 @@ export const TriggerConfigSchema = z
     }),
     z.object({
       type: z.literal("event"),
-      eventName: z.literal("slack.message"),
+      eventName: z.enum([
+        "slack.message",
+        "azure-devops.work_item.assigned",
+        "azure-devops.work_item.commented",
+      ]),
     }),
   ])
   .superRefine((trigger, ctx) => {

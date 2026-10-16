@@ -3,6 +3,7 @@
  * and resolving the bot identity behind the PAT. Uses raw fetch, no SDK.
  */
 
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   getAzureDevOpsOrgUrl,
   getAzureDevOpsToken,
@@ -163,7 +164,9 @@ export async function likeAzureDevOpsComment(
   try {
     const resp = await fetch(url, { method: "POST", headers: headers() });
     if (!resp.ok) {
-      console.error(`[AzureDevOps] Failed to like comment: ${resp.status} ${await resp.text()}`);
+      console.error(
+        `[AzureDevOps] Failed to like comment: ${resp.status} ${scrubSecrets(await resp.text())}`,
+      );
     }
   } catch (err) {
     console.error(`[AzureDevOps] Error liking comment:`, err);
@@ -189,7 +192,9 @@ export async function postAzureDevOpsPullRequestComment(
       }),
     });
     if (!resp.ok) {
-      console.error(`[AzureDevOps] Failed to post comment: ${resp.status} ${await resp.text()}`);
+      console.error(
+        `[AzureDevOps] Failed to post comment: ${resp.status} ${scrubSecrets(await resp.text())}`,
+      );
     }
   } catch (err) {
     console.error(`[AzureDevOps] Error posting comment:`, err);
@@ -228,12 +233,15 @@ export async function updateWorkItemFields(
     );
     if (!resp.ok) {
       console.error(
-        `[AzureDevOps] Failed to update work item #${workItemId}: ${resp.status} ${await resp.text()}`,
+        `[AzureDevOps] Failed to update work item #${workItemId}: ${resp.status} ${scrubSecrets(await resp.text())}`,
       );
     }
     return resp.ok;
   } catch (err) {
-    console.error(`[AzureDevOps] Error updating work item #${workItemId}:`, err);
+    console.error(
+      `[AzureDevOps] Error updating work item #${workItemId}:`,
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    );
     return false;
   }
 }

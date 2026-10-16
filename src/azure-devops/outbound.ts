@@ -1,3 +1,4 @@
+import { getDbClient } from "../be/db";
 import { getTrackerSync } from "../be/db-queries/tracker";
 import { onTaskStarted } from "../be/task-lifecycle-events";
 import type { AgentTask } from "../types";
@@ -27,7 +28,27 @@ async function transitionLinkedWorkItem(taskId: string, state: string): Promise<
   const ok = await updateWorkItemFields(`https://${orgKey}`, workItemId, [
     { op: "add", path: "/fields/System.State", value: state },
   ]);
-  if (ok) console.log(`[AzureDevOps] Work item #${workItemId} -> ${state} (task ${taskId})`);
+  if (ok) {
+    console.log(
+      scrubSecrets(`[AzureDevOps] Work item #${workItemId} -> ${state} (task ${taskId})`),
+    );
+  }
+}
+
+const transitionChains = new Map<string, Promise<void>>();
+
+/**
+ * Run transitions for one task in the order they were requested, so a slow
+ * "Doing" PATCH cannot land after "Done". Callers never wait on the chain.
+ */
+function enqueueTransition(taskId: string, state: string, eventName: string): void {
+  const run = (transitionChains.get(taskId) ?? Promise.resolve())
+    .then(() => transitionLinkedWorkItem(taskId, state))
+    .catch((error) => report(eventName, error));
+  transitionChains.set(taskId, run);
+  void run.then(() => {
+    if (transitionChains.get(taskId) === run) transitionChains.delete(taskId);
+  });
 }
 
 function report(eventName: string, error: unknown): void {
@@ -37,19 +58,15 @@ function report(eventName: string, error: unknown): void {
   );
 }
 
-async function handleTaskStarted(task: AgentTask): Promise<void> {
+function handleTaskStarted(task: AgentTask): void {
   const state = getWorkItemState("STARTED");
-  if (state) await transitionLinkedWorkItem(task.id, state);
-}
-
-async function handleTaskCompleted(data: unknown): Promise<void> {
-  const { taskId } = (data ?? {}) as { taskId?: string };
-  const state = getWorkItemState("DONE");
-  if (taskId && state) await transitionLinkedWorkItem(taskId, state);
+  if (state) enqueueTransition(task.id, state, "task.started");
 }
 
 const onTaskCompleted = (data: unknown): void => {
-  handleTaskCompleted(data).catch((error) => report("task.completed", error));
+  const { taskId } = (data ?? {}) as { taskId?: string };
+  const state = getWorkItemState("DONE");
+  if (taskId && state) enqueueTransition(taskId, state, "task.completed");
 };
 
 let subscribed = false;
@@ -63,7 +80,8 @@ export function initAzureDevOpsOutbound(): void {
   if (!startedHookRegistered) {
     startedHookRegistered = true;
     onTaskStarted((task) => {
-      if (subscribed) handleTaskStarted(task).catch((error) => report("task.started", error));
+      // startTask/claimTask can emit inside a transaction; a rollback must not reach Azure.
+      if (subscribed) getDbClient().afterCommit(() => handleTaskStarted(task));
     });
   }
   workflowEventBus.on("task.completed", onTaskCompleted);

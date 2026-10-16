@@ -4880,7 +4880,9 @@
                     "eventName": {
                       "type": "string",
                       "enum": [
-                        "slack.message"
+                        "slack.message",
+                        "azure-devops.work_item.assigned",
+                        "azure-devops.work_item.commented"
                       ]
                     }
                   },
@@ -5557,7 +5559,9 @@
                     "eventName": {
                       "type": "string",
                       "enum": [
-                        "slack.message"
+                        "slack.message",
+                        "azure-devops.work_item.assigned",
+                        "azure-devops.work_item.commented"
                       ]
                     }
                   },
@@ -57266,7 +57270,9 @@
                             "eventName": {
                               "type": "string",
                               "enum": [
-                                "slack.message"
+                                "slack.message",
+                                "azure-devops.work_item.assigned",
+                                "azure-devops.work_item.commented"
                               ]
                             }
                           },
@@ -57658,7 +57664,9 @@
                             "eventName": {
                               "type": "string",
                               "enum": [
-                                "slack.message"
+                                "slack.message",
+                                "azure-devops.work_item.assigned",
+                                "azure-devops.work_item.commented"
                               ]
                             }
                           },
