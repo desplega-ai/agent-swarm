@@ -1,0 +1,357 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { TelegramMockFilePart } from "../../scripts/dev/telegram-bot-api-mock";
+import {
+  closeDb,
+  completeTask,
+  createAgent,
+  createTaskExtended,
+  initDb,
+  insertTaskAttachment,
+} from "../be/db";
+import { recordTaskAttachmentUpload } from "../be/task-attachment-store";
+import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
+import { telegramAttachmentType } from "../integrations/chat-sdk/outbound";
+import { processPendingChatRelays, stopChatRelayWatcher } from "../integrations/chat-sdk/relay";
+import { chatSdkContextKey } from "../tasks/context-key";
+import { registerChatPostTool } from "../tools/chat-post";
+import { registerChatReplyTool } from "../tools/chat-reply";
+import type { Agent, AgentTask, TaskAttachment } from "../types";
+import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-harness";
+
+const TEST_DB_PATH = "./test-chat-sdk-outbound-files.sqlite";
+const MB = 1024 * 1024;
+const PDF_BYTES = new TextEncoder().encode("%PDF-1.4\n% test document\n%%EOF\n");
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+const savedEnv = new Map(
+  ["AGENT_FS_LOCAL_DIR", "AGENT_FS_API_URL"].map((key) => [key, process.env[key]]),
+);
+
+let harness: TelegramHarness;
+let lead: Agent;
+let worker: Agent;
+let server: McpServer;
+let fsDir: string;
+let nextChatId = 660_000;
+
+type ToolResult = {
+  structuredContent: { success: boolean; message: string; [key: string]: unknown };
+};
+
+async function callTool(
+  name: string,
+  headers: Record<string, string>,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  // biome-ignore lint/complexity/noBannedTypes: accessing internal MCP SDK type for test
+  const tools = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })
+    ._registeredTools;
+  const handler = tools[name]?.handler;
+  if (!handler) throw new Error(`Tool not registered: ${name}`);
+  return (await handler(args, {
+    sessionId: "test-session",
+    requestInfo: { headers },
+  })) as ToolResult;
+}
+
+/** Every Bot API call addressed to `chatId`, in order. */
+function callsTo(chatId: number): Array<{ method: string; body: Record<string, unknown> }> {
+  return harness.mock.calls
+    .map((call) => ({ method: call.method, body: call.body as Record<string, unknown> }))
+    .filter((call) => String(call.body.chat_id) === String(chatId));
+}
+
+function textOf(body: Record<string, unknown>): string {
+  const rich = body.rich_message as { markdown?: string } | undefined;
+  return String(rich?.markdown ?? body.text ?? "");
+}
+
+async function chatTask(chatId: number, agentId: string): Promise<AgentTask> {
+  return createTaskExtended(`chat task for ${chatId}`, {
+    agentId,
+    source: "chat",
+    contextKey: chatSdkContextKey(`telegram:${chatId}`),
+  });
+}
+
+/** Store bytes through the active provider and record them as an attachment of `taskId`. */
+async function attach(
+  taskId: string,
+  name: string,
+  bytes: Uint8Array,
+  contentType: string,
+  options: { agentId?: string | null; intent?: string } = {},
+): Promise<TaskAttachment> {
+  const provider = getFileStorageProvider();
+  const scope = { taskId, name };
+  const uploaded = await provider.upload(scope, bytes, {
+    contentType,
+    sizeBytes: bytes.byteLength,
+  });
+  return recordTaskAttachmentUpload({
+    provider,
+    scope,
+    uploaded,
+    sizeBytes: bytes.byteLength,
+    sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"),
+    contentType,
+    agentId: options.agentId === undefined ? worker.id : options.agentId,
+    intent: options.intent,
+  });
+}
+
+async function removeDbFiles(): Promise<void> {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => {});
+  }
+}
+
+beforeAll(async () => {
+  await removeDbFiles();
+  fsDir = await mkdtemp(join(tmpdir(), "chat-sdk-outbound-fs-"));
+  process.env.AGENT_FS_LOCAL_DIR = fsDir;
+  delete process.env.AGENT_FS_API_URL;
+  resetFileStorageProviderForTests();
+  initDb(TEST_DB_PATH);
+  lead = await createAgent({
+    id: crypto.randomUUID(),
+    name: "ChatFilesLead",
+    isLead: true,
+    status: "idle",
+  });
+  worker = await createAgent({
+    id: crypto.randomUUID(),
+    name: "ChatFilesWorker",
+    isLead: false,
+    status: "idle",
+  });
+  server = new McpServer({ name: "chat-files-test", version: "1.0.0" });
+  registerChatReplyTool(server);
+  registerChatPostTool(server);
+  harness = await startTelegramHarness();
+  // Relay ticks are driven by the tests.
+  await stopChatRelayWatcher();
+});
+
+afterAll(async () => {
+  await harness.stop();
+  closeDb();
+  await removeDbFiles();
+  await rm(fsDir, { recursive: true, force: true });
+  for (const [key, value] of savedEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  resetFileStorageProviderForTests();
+});
+
+beforeEach(() => {
+  nextChatId += 1;
+});
+
+describe("telegramAttachmentType", () => {
+  test("only types Telegram's media methods take become photo, video or audio", () => {
+    expect(telegramAttachmentType("image/png", 1_000)).toBe("image");
+    expect(telegramAttachmentType("image/jpeg", 11 * MB)).toBe("file");
+    expect(telegramAttachmentType("image/svg+xml", 1_000)).toBe("file");
+    expect(telegramAttachmentType("video/mp4", 1_000)).toBe("video");
+    expect(telegramAttachmentType("audio/mpeg", 1_000)).toBe("audio");
+    expect(telegramAttachmentType("application/pdf", 1_000)).toBe("file");
+  });
+});
+
+describe("chat-reply attachments", () => {
+  test("an agent-fs PDF arrives as a document after the text", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+    await getFileStorageProvider().upload(
+      { taskId: task.id, name: "q3.pdf", key: "thoughts/worker/reports/q3.pdf" },
+      PDF_BYTES,
+      { contentType: "application/pdf" },
+    );
+
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { text: "Here is the report.", attachments: ["/thoughts/worker/reports/q3.pdf"] },
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.unsentFiles).toEqual([]);
+    const calls = callsTo(chatId);
+    expect(calls.map((call) => call.method)).toEqual([
+      expect.stringMatching(/^send(Rich)?Message$/),
+      "sendDocument",
+    ]);
+    expect(textOf(calls[0]!.body)).toBe("Here is the report.");
+    expect(calls[1]!.body.document).toEqual({
+      filename: "q3.pdf",
+      type: "application/pdf",
+      size: PDF_BYTES.byteLength,
+    } satisfies TelegramMockFilePart);
+  });
+
+  test("a task attachment id sends the file; an image goes as a photo", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+    const png = await attach(task.id, "chart.png", PNG_BYTES, "image/png");
+
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { text: "The chart.", attachments: [png.id] },
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    const photo = callsTo(chatId).find((call) => call.method === "sendPhoto");
+    expect((photo?.body.photo as TelegramMockFilePart).filename).toBe("chart.png");
+  });
+
+  test("several documents go as one media group; a photo goes on its own", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+    const a = await attach(task.id, "a.pdf", PDF_BYTES, "application/pdf");
+    // Different bytes: a task keeps one attachment row per sha256.
+    const b = await attach(
+      task.id,
+      "b.pdf",
+      new TextEncoder().encode("%PDF-1.4 b"),
+      "application/pdf",
+    );
+    const png = await attach(task.id, "c.png", PNG_BYTES, "image/png");
+
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { text: "Three files.", attachments: [a.id, png.id, b.id] },
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    const uploads = callsTo(chatId).filter((call) => !/^send(Rich)?Message$/.test(call.method));
+    expect(uploads.map((call) => call.method).sort()).toEqual(["sendMediaGroup", "sendPhoto"]);
+    const group = uploads.find((call) => call.method === "sendMediaGroup")!;
+    const media = JSON.parse(String(group.body.media)) as Array<{ type: string }>;
+    expect(media.map((item) => item.type)).toEqual(["document", "document"]);
+    expect((group.body.media0 as TelegramMockFilePart).filename).toBe("a.pdf");
+    expect((group.body.media1 as TelegramMockFilePart).filename).toBe("b.pdf");
+  });
+
+  test("a file over Telegram's 50 MB limit is not sent and the thread gets a note", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+    const big = await insertTaskAttachment({
+      taskId: task.id,
+      agentId: worker.id,
+      name: "dump.zip",
+      kind: "shared-fs",
+      path: "never/read.zip",
+      providerId: "local-fs",
+      providerKey: "never/read.zip",
+      mimeType: "application/zip",
+      sizeBytes: 60 * MB,
+    });
+
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { text: "The dump.", attachments: [big.id] },
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.unsentFiles).toEqual([
+      { name: "dump.zip", reason: "60.0 MB, over the 50.0 MB upload limit of Telegram" },
+    ]);
+    expect(result.structuredContent.message).toContain("Could not send 1 file");
+    const calls = callsTo(chatId);
+    expect(calls.some((call) => call.method === "sendDocument")).toBe(false);
+    expect(textOf(calls.at(-1)!.body)).toContain(
+      "dump.zip: 60.0 MB, over the 50.0 MB upload limit",
+    );
+  });
+
+  test("a platform refusal becomes a note, not a silent failure", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+    const pdf = await attach(task.id, "refused.pdf", PDF_BYTES, "application/pdf");
+    harness.mock.failUploads(1);
+
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { text: "A file.", attachments: [pdf.id] },
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    const unsent = result.structuredContent.unsentFiles as Array<{ name: string; reason: string }>;
+    expect(unsent.map((file) => file.name)).toEqual(["refused.pdf"]);
+    expect(unsent[0]!.reason).toContain("refused by Telegram");
+    expect(textOf(callsTo(chatId).at(-1)!.body)).toContain("refused.pdf: refused by Telegram");
+  });
+
+  test("an unknown attachment id or a traversal path is refused before anything is sent", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+    const headers = { "x-agent-id": worker.id, "x-source-task-id": task.id };
+
+    const unknown = await callTool("chat-reply", headers, {
+      text: "x",
+      attachments: [crypto.randomUUID()],
+    });
+    expect(unknown.structuredContent.success).toBe(false);
+    expect(unknown.structuredContent.message).toContain("is not an attachment of task");
+
+    const traversal = await callTool("chat-reply", headers, {
+      text: "x",
+      attachments: ["../etc/passwd"],
+    });
+    expect(traversal.structuredContent.success).toBe(false);
+    expect(traversal.structuredContent.message).toContain("parent path segments");
+
+    expect(callsTo(chatId)).toEqual([]);
+  });
+});
+
+describe("chat-post attachments", () => {
+  test("the lead posts a file to another thread", async () => {
+    const chatId = nextChatId;
+    const leadTask = await createTaskExtended("lead work", { agentId: lead.id, source: "mcp" });
+    const pdf = await attach(leadTask.id, "brief.pdf", PDF_BYTES, "application/pdf", {
+      agentId: lead.id,
+    });
+
+    const result = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id, "x-source-task-id": leadTask.id },
+      { adapter: "telegram", threadId: `telegram:${chatId}`, text: "FYI", attachments: [pdf.id] },
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(callsTo(chatId).map((call) => call.method)).toContain("sendDocument");
+  });
+});
+
+describe("relay of output attachments", () => {
+  test("a completed task relays its output attachments after the answer, not the user's uploads", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, lead.id);
+    await attach(task.id, "result.pdf", PDF_BYTES, "application/pdf", { agentId: lead.id });
+    await attach(task.id, "from-user.png", PNG_BYTES, "image/png", {
+      agentId: null,
+      intent: "user-upload",
+    });
+    await completeTask(task.id, "Done, report attached.");
+
+    await processPendingChatRelays();
+
+    const calls = callsTo(chatId);
+    expect(calls.map((call) => call.method)).toEqual([
+      expect.stringMatching(/^send(Rich)?Message$/),
+      "sendDocument",
+    ]);
+    expect(textOf(calls[0]!.body)).toBe("Done, report attached.");
+    expect((calls[1]!.body.document as TelegramMockFilePart).filename).toBe("result.pdf");
+  });
+});

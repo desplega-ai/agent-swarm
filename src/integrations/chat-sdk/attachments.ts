@@ -26,7 +26,7 @@ import { errorMessage } from "./logger";
 /** How often a draft's lease is renewed while its uploads run; the sweep waits 5 minutes. */
 const DRAFT_LEASE_REFRESH_MS = 60_000;
 /** A file a user sent the bot, like one uploaded from the dashboard composer. */
-const SHARED_FILE_INTENT = "user-upload";
+export const SHARED_FILE_INTENT = "user-upload";
 
 /**
  * One attachment of a buffered chat message. `id` is `<messageId>-<n>` with
@@ -55,7 +55,7 @@ export type InboundChatFiles = {
   [Symbol.asyncDispose](): Promise<void>;
 };
 
-function formatFileSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

@@ -5,7 +5,10 @@
  * methods the Telegram adapter calls (getMe, getWebhookInfo, sendMessage, ...)
  * and records every call. `addFile(path, bytes)` serves a file through
  * `getFile` and the `/file/bot<token>/<path>` download route (the file id is
- * the path). `failSends(n)` answers the next n sends with HTTP 500. `failSetWebhook(true)`
+ * the path). Multipart uploads (sendDocument, sendPhoto, sendMediaGroup, ...)
+ * are recorded with each file part as `{ filename, type, size }`.
+ * `failSends(n)` answers the next n sends with HTTP 500. `failUploads(n)`
+ * answers the next n file uploads with HTTP 413. `failSetWebhook(true)`
  * answers `setWebhook` with HTTP 401 and a description that echoes the bot token (tests
  * check that the API redacts it). Point the API at it with
  * `CHAT_SDK_API_URL_OVERRIDES='{"telegram":"http://127.0.0.1:<port>"}'`.
@@ -27,10 +30,21 @@ export interface TelegramBotApiMock {
   addFile: (path: string, bytes: Uint8Array) => void;
   /** Answer the next `count` send calls (sendMessage, sendRichMessage) with HTTP 500. */
   failSends: (count: number) => void;
+  /** Answer the next `count` file uploads (sendDocument, sendMediaGroup, ...) with HTTP 413. */
+  failUploads: (count: number) => void;
   /** While on, `setWebhook` answers HTTP 401 with a description that contains the bot token. */
   failSetWebhook: (on: boolean) => void;
   stop: () => void;
 }
+
+/** A file part of a recorded multipart call. */
+export interface TelegramMockFilePart {
+  filename: string;
+  type: string;
+  size: number;
+}
+
+const UPLOAD_METHODS = /^send(Document|Photo|Video|Audio|MediaGroup)$/;
 
 export const TELEGRAM_MOCK_BOT = {
   id: 4242,
@@ -86,12 +100,46 @@ function resultFor(
         from: TELEGRAM_MOCK_BOT,
         text: body.text ?? (body.rich_message as { markdown?: string } | undefined)?.markdown,
       };
+    case "sendDocument":
+    case "sendPhoto":
+    case "sendVideo":
+    case "sendAudio":
+      return {
+        message_id: nextMessageId++,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: Number(body.chat_id), type: "private" },
+        from: TELEGRAM_MOCK_BOT,
+        ...(body.caption ? { caption: body.caption } : {}),
+      };
+    case "sendMediaGroup": {
+      const media = JSON.parse(String(body.media ?? "[]")) as unknown[];
+      return media.map(() => ({
+        message_id: nextMessageId++,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: Number(body.chat_id), type: "private" },
+        from: TELEGRAM_MOCK_BOT,
+      }));
+    }
     default:
       return true;
   }
 }
 
 async function readBody(req: Request): Promise<Record<string, unknown>> {
+  if (req.headers.get("content-type")?.startsWith("multipart/form-data")) {
+    const body: Record<string, unknown> = {};
+    for (const [key, value] of await req.formData()) {
+      body[key] =
+        typeof value === "string"
+          ? value
+          : ({
+              filename: value.name,
+              type: value.type,
+              size: value.size,
+            } satisfies TelegramMockFilePart);
+    }
+    return body;
+  }
   const text = await req.text();
   if (!text) return {};
   try {
@@ -106,6 +154,7 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
   const files = new Map<string, Uint8Array>();
   const webhook: WebhookState = { url: "" };
   let failingSends = 0;
+  let failingUploads = 0;
   let failingSetWebhook = false;
   const server = Bun.serve({
     port,
@@ -135,6 +184,13 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
           { status: 500 },
         );
       }
+      if (failingUploads > 0 && UPLOAD_METHODS.test(method)) {
+        failingUploads -= 1;
+        return Response.json(
+          { ok: false, error_code: 413, description: "Request Entity Too Large" },
+          { status: 413 },
+        );
+      }
       const result = resultFor(method, body, files, webhook);
       if (method === "getFile" && result === null) {
         return Response.json(
@@ -153,6 +209,9 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
     addFile: (path, bytes) => files.set(path, bytes),
     failSends: (count) => {
       failingSends = count;
+    },
+    failUploads: (count) => {
+      failingUploads = count;
     },
     failSetWebhook: (on) => {
       failingSetWebhook = on;
