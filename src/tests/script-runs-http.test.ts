@@ -672,8 +672,8 @@ describe("POST /api/internal/raw-llm failure", () => {
     keyVar: (typeof KEY_VARS)[number],
     pad: string,
     fn: (dummy: string, calls: () => number) => Promise<void>,
+    dummy = `nan-${randomToken(32)}`,
   ) {
-    const dummy = `nan-${randomToken(32)}`;
     const previous = Object.fromEntries(KEY_VARS.map((name) => [name, process.env[name]]));
     const previousFetch = globalThis.fetch;
     for (const name of KEY_VARS) delete process.env[name];
@@ -718,6 +718,21 @@ describe("POST /api/internal/raw-llm failure", () => {
         });
       });
     }
+
+    // A random key can contain "529"; that must not read as an overload.
+    test(`a ${keyVar} key containing 529 is not mistaken for a rate limit`, async () => {
+      await withNanKey(
+        keyVar,
+        "",
+        async (dummy, calls) => {
+          const result = await executeRawLlm({ prompt: "hi", model: "nan/qwen3.8-flash" });
+          expect(calls()).toBe(1);
+          expect(result.status).toBe("failed");
+          if (result.status === "failed") expect(result.error).not.toContain(dummy);
+        },
+        `nan-5L76Mxo2D529A9S0GrqOZWIpYdfO1aIM`,
+      );
+    });
 
     test(`scrubs the fallback-port error for a padded ${keyVar} key`, async () => {
       await withNanKey(keyVar, "  ", async (dummy, calls) => {
