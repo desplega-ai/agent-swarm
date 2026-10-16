@@ -108,6 +108,7 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
       agentId,
       egressSecrets: credentials.egressSecrets,
       userConfig: credentials.userConfig,
+      agentFs: credentials.agentFs,
       apiConnections: getScriptApiConnectionDescriptors({ agentId }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
       timeoutMs: 60_000,

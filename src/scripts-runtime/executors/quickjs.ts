@@ -10,7 +10,8 @@ import type { ExecutorInput, ExecutorOutput, ScriptExecutor, ScriptExecutorError
  *
  * The sandbox has no filesystem, no process APIs, and no network except the
  * host calls that the quickjs runner exposes (ctx.swarm, ctx.api, ctx.mcp,
- * fetch). Every value crosses as JSON. See quickjs-runner.ts for the limits.
+ * ctx.fs, ctx.sh, fetch). Every value crosses as JSON. See quickjs-runner.ts
+ * for the limits.
  */
 
 // Each worker keeps one QuickJS WASM module (~25 ms to load) and runs one job

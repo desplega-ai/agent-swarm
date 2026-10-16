@@ -5,8 +5,10 @@ import {
   CredentialBroker,
   DEFAULT_CREDENTIAL_BINDINGS,
   type FailedCredentialBinding,
+  placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
-import type { EgressSecretEntry } from "@/scripts-runtime/executors/types";
+import type { EgressSecretEntry, ScriptAgentFsDescriptor } from "@/scripts-runtime/executors/types";
+import { AGENT_FS_API_KEY_CONFIG } from "@/scripts-runtime/script-fs";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
 import { getResolvedConfig } from "./db";
 import { resolveOAuthBindingToken } from "./oauth-credential-bindings";
@@ -50,6 +52,40 @@ function toScriptUserConfig(configs: Awaited<ReturnType<typeof getResolvedConfig
 }
 
 /**
+ * The agent's default agent-fs drive for `ctx.fs` / `ctx.sh`, and the binding
+ * that lets the patched fetch put the agent's own key on agent-fs requests.
+ * Same lookup as store-progress: agent config over global, then the API env.
+ * The API's bootstrap key (`API_AGENT_FS_API_KEY`) is never a fallback.
+ */
+function agentFsMount(
+  configMap: Map<string, string>,
+): { descriptor: ScriptAgentFsDescriptor; binding: CredentialBinding } | undefined {
+  const value = (key: string) => configMap.get(key)?.trim() || process.env[key]?.trim();
+  const apiUrl = value("AGENT_FS_API_URL")?.replace(/\/+$/, "");
+  const orgId = value("AGENT_FS_DEFAULT_ORG_ID");
+  const driveId = value("AGENT_FS_DEFAULT_DRIVE_ID");
+  if (!apiUrl || !orgId || !driveId) return undefined;
+  let host: string;
+  try {
+    host = new URL(apiUrl).hostname;
+  } catch {
+    return undefined;
+  }
+  return {
+    descriptor: { apiUrl, orgId, driveId },
+    binding: {
+      configKey: AGENT_FS_API_KEY_CONFIG,
+      allowedHosts: [host],
+      headerTemplate: `Authorization: Bearer ${placeholderForConfigKey(AGENT_FS_API_KEY_CONFIG)}`,
+      scope: "global",
+      scopeId: null,
+      active: true,
+      authKind: "config",
+    },
+  };
+}
+
+/**
  * Resolve credential bindings for a script run, partitioning OAuth bindings
  * whose refresh failed into `failedBindings` (surfaced to the sandbox so the
  * patched fetch throws a typed error) instead of silently dropping them.
@@ -63,15 +99,17 @@ export async function buildScriptCredentialBindingsWithFailures(input: {
   egressSecrets: EgressSecretEntry[];
   failedBindings: FailedCredentialBinding[];
   userConfig: ScriptUserConfig;
+  agentFs?: ScriptAgentFsDescriptor;
 }> {
   const resolvedConfigs = await getResolvedConfig(input.agentId, input.repoId);
   // Before the binding loop below, so a binding's own scrubber label wins.
   const userConfig = toScriptUserConfig(resolvedConfigs);
   const configMap = new Map(resolvedConfigs.map((config) => [config.key, config.value]));
+  const agentFs = agentFsMount(configMap);
   const broker = new CredentialBroker(
     new RelationalCredentialBindingStore(),
     (configKey) => configMap.get(configKey) ?? process.env[configKey],
-    DEFAULT_CREDENTIAL_BINDINGS,
+    agentFs ? [...DEFAULT_CREDENTIAL_BINDINGS, agentFs.binding] : DEFAULT_CREDENTIAL_BINDINGS,
     (oauthAuthorizationId) => resolveOAuthBindingToken(oauthAuthorizationId),
   );
 
@@ -82,10 +120,17 @@ export async function buildScriptCredentialBindingsWithFailures(input: {
   for (const binding of resolved) {
     registerVolatileSecret(binding.value, binding.configKey);
   }
+  // Mount the drive only when the agent's key resolved; without it every call is a 401.
+  const agentFsKeyResolved = resolved.some(
+    (binding) =>
+      binding.configKey === AGENT_FS_API_KEY_CONFIG &&
+      agentFs?.binding.allowedHosts.every((host) => binding.allowedHosts.includes(host)),
+  );
   return {
     egressSecrets: resolved,
     failedBindings: failed,
     userConfig,
+    ...(agentFs && agentFsKeyResolved ? { agentFs: agentFs.descriptor } : {}),
   };
 }
 
