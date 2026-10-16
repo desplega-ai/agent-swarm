@@ -870,6 +870,54 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
 
+  // ------------------------------------------------------------- Cohesivity
+  {
+    id: "cohesivity",
+    name: "Cohesivity",
+    description:
+      "Postgres, Redis, storage, hosting and login for the apps agents build, over one HTTP API with no account needed to start.",
+    category: "other",
+    iconKey: "database",
+    docsUrl: "https://cohesivity.ai/docs?ref=gh-agent-swarm",
+    recommendedSkills: [
+      {
+        name: "cohesivity",
+        source: "template",
+        templateRepo: "desplega-ai/agent-swarm",
+        templatePath: "templates/skills/cohesivity",
+        roles: ["lead", "worker"],
+        reason:
+          "How agents share one tenant through swarm config, create it with a single call, and provision and query services without exposing the keys.",
+        installOnSetup: true,
+      },
+    ],
+    fields: [
+      {
+        key: "COHESIVITY_TENANT_ID",
+        label: "Tenant ID",
+        type: "text",
+        helpText:
+          "Optional. Leave all three fields blank and the first agent that needs a backend creates a tenant and saves it here. Fill them in to reuse an existing project.",
+      },
+      {
+        key: "COHESIVITY_MANAGEMENT_KEY",
+        label: "Management key",
+        type: "password",
+        isSecret: true,
+        helpText:
+          "Optional. The `coh_man_` key from a `.cohesivity` file, used to provision services.",
+      },
+      {
+        key: "COHESIVITY_APPLICATION_KEY",
+        label: "Application key",
+        type: "password",
+        isSecret: true,
+        helpText:
+          "Optional. The `coh_app_` key from a `.cohesivity` file, used by app code for `/edge` calls.",
+      },
+    ],
+  },
+
   // -------------------------------------------------------------- Anthropic
   {
     id: "anthropic",
