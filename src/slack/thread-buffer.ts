@@ -7,6 +7,9 @@ import {
 import { findUserByExternalId } from "../be/users";
 import { createAdditiveBuffer } from "../tasks/additive-buffer";
 import { slackContextKey } from "../tasks/context-key";
+import { TaskCreationBlockedError } from "../tasks/errors";
+import { scrubSecrets } from "../utils/secret-scrubber";
+import { ackSlackMessage } from "./ack";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
@@ -286,28 +289,44 @@ async function slackFlush(
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
   const mostRecentTask = await getMostRecentTaskInThread(channelId, threadTs);
-  const { task, unattached } = await createSlackTaskWithFiles(
-    fullDescription,
-    {
-      agentId: lead?.id,
-      routingReason:
-        lead && mostRecentTask?.agentId === lead.id ? "continuity" : lead ? "skill" : undefined,
-      routingSource: lead ? "engine_default" : undefined,
-      source: "slack",
-      slackChannelId: channelId,
-      slackThreadTs: threadTs,
-      slackTriggerMessageTs: items.at(-1)!.ts,
-      slackUserId: originalRequesterId,
-      requestedByUserId,
-      dependsOn,
-      parentTaskId: mostRecentTask?.id,
-      // A human message in the thread: never answer it in the latest thread
-      // task's structured-output contract.
-      inheritParentOutputSchema: false,
-      contextKey: slackContextKey({ channelId, threadTs }),
-    },
-    inbound,
-  );
+  let created: Awaited<ReturnType<typeof createSlackTaskWithFiles>>;
+  try {
+    created = await createSlackTaskWithFiles(
+      fullDescription,
+      {
+        agentId: lead?.id,
+        routingReason:
+          lead && mostRecentTask?.agentId === lead.id ? "continuity" : lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        slackTriggerMessageTs: items.at(-1)!.ts,
+        slackUserId: originalRequesterId,
+        requestedByUserId,
+        dependsOn,
+        parentTaskId: mostRecentTask?.id,
+        // A human message in the thread: never answer it in the latest thread
+        // task's structured-output contract.
+        inheritParentOutputSchema: false,
+        contextKey: slackContextKey({ channelId, threadTs }),
+      },
+      inbound,
+    );
+  } catch (error) {
+    if (!(error instanceof TaskCreationBlockedError)) throw error;
+
+    console.info(
+      "[Slack] pre.task.create blocked:",
+      error.extension.name,
+      scrubSecrets(error.reason),
+    );
+    if (app) {
+      await ackSlackMessage(app.client, channelId, items.at(-1)!.ts, "no_entry");
+    }
+    return;
+  }
+  const { task, unattached } = created;
 
   if (app) await notifySlackFileFailures(app.client, channelId, threadTs, unattached);
 

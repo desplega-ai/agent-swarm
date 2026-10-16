@@ -9,6 +9,7 @@ import {
   getSwarmConfigs,
   maskSecrets,
 } from "../be/db";
+import { modelProfileRefError } from "../be/db/model-profiles";
 import {
   AGENT_MAX_TASKS_CONFIG_KEY,
   resetAgentMaxTasksMirror,
@@ -27,7 +28,7 @@ import {
 } from "../be/swarm-config-guard";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
 import { SwarmConfigSchema } from "../types";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
@@ -46,6 +47,25 @@ function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
 function singleHeader(req: IncomingMessage, name: string): string | undefined {
   const raw = req.headers[name];
   return Array.isArray(raw) ? raw[0] : raw;
+}
+
+/**
+ * Whether this caller's `/api/config/resolved` carries secret repo rows (the
+ * `includeRepoSecrets` of {@link resolveSecretsRead}): a runtime-token agent
+ * gets them only with `config.read.secrets`. Claim uses it so an agent's
+ * default profile yields only to repo rows that worker's env really gets.
+ */
+export function readsRepoSecrets(
+  auth: HttpRequestAuth | null,
+  agent: { isLead?: boolean } | null | undefined,
+): boolean {
+  if (auth?.kind !== "agent" || !auth.runtimeId) return true;
+  return can({
+    principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
+    verb: "config.read.secrets",
+    resource: { kind: "none" },
+    source: "http",
+  }).allow;
 }
 
 async function requestSecretReadScope(
@@ -512,7 +532,11 @@ export async function handleConfig(
       }
       const result = includeSecrets || !config.isSecret ? config : maskSecrets([config])[0]!;
       upsertConfig.respond(res, 200, result);
-    } catch (_error) {
+    } catch (error) {
+      if (modelProfileRefError(error) === "missing") {
+        jsonError(res, `Unknown model profile "${String(value)}"`, 400);
+        return true;
+      }
       jsonError(res, "Failed to upsert config", 500);
     }
     return true;

@@ -60,6 +60,7 @@ declare module "swarm-extension" {
     model?: string | undefined;
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
     effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+    profile?: string | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | undefined;
     workflowRunStepId?: string | undefined;
@@ -194,6 +195,8 @@ declare module "swarm-extension" {
     modelSource?: string | undefined;
     modelAlias?: string | undefined;
     resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+    profile?: string | undefined;
+    resolvedProfile?: string | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | null | undefined;
     workflowRunStepId?: string | null | undefined;

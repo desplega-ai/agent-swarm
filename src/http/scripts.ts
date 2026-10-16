@@ -41,6 +41,7 @@ import {
 import { can } from "../rbac";
 import { extractScriptSignature, type ScriptSignature } from "../scripts-runtime/extract-signature";
 import { runScript } from "../scripts-runtime/loader";
+import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
 import {
   ScriptApiAuthModeSchema,
   ScriptApiRecordSchema,
@@ -236,6 +237,10 @@ const upsertRoute = route({
         name: z.string(),
         version: z.number(),
         contentDeduped: z.boolean(),
+        warnings: z
+          .array(z.string())
+          .optional()
+          .describe("Advisory quickjs-executor compatibility findings. Never blocks the save."),
       }),
     },
     400: { description: "Validation or typecheck failure" },
@@ -424,7 +429,15 @@ const createScriptApiRoute = route({
   params: idParamsSchema,
   body: createScriptApiBodySchema,
   responses: {
-    201: { description: "Endpoint created", schema: scriptApiWithSecretSchema },
+    201: {
+      description: "Endpoint created",
+      schema: scriptApiWithSecretSchema.extend({
+        warnings: z
+          .array(z.string())
+          .optional()
+          .describe("Advisory quickjs-executor compatibility findings for the script."),
+      }),
+    },
     400: { description: "Validation error or script has no owning agent" },
     404: { description: "Script not found" },
   },
@@ -702,10 +715,14 @@ export async function handleScripts(
       });
     }
 
+    const warnings = quickJSCompatWarnings(
+      checkQuickJSCompat(parsed.body.source, { fsMode: parsed.body.fsMode }),
+    );
     upsertRoute.respond(res, 200, {
       name: result.script.name,
       version: result.script.version,
       contentDeduped: result.contentDeduped,
+      ...(warnings.length > 0 ? { warnings } : {}),
     });
     return true;
   }
@@ -1092,7 +1109,13 @@ export async function handleScripts(
       label: parsed.body.label ?? null,
       createdBy: await resolveHttpAuditUserId(req, agentId),
     });
-    createScriptApiRoute.respond(res, 201, endpoint);
+    const warnings = quickJSCompatWarnings(
+      checkQuickJSCompat(script.source, { fsMode: script.fsMode }),
+    );
+    createScriptApiRoute.respond(res, 201, {
+      ...endpoint,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
     return true;
   }
 

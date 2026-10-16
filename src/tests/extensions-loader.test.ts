@@ -52,6 +52,21 @@ describe("extension loader", () => {
     expect(await Bun.file(loaded.sourcePath).exists()).toBe(false);
   });
 
+  test("loads hooks from a safe nested bundle path", async () => {
+    const bundle = await loadBundleFixture("minimal");
+    const hooks = bundle.files[bundle.manifest.assets.hooks]!;
+    bundle.manifest = {
+      ...bundle.manifest,
+      assets: { ...bundle.manifest.assets, hooks: "nested/hooks.ts" },
+    };
+    bundle.files = { "nested/hooks.ts": hooks };
+    const installed = await installExtension(bundle);
+    const loaded = await loadExtension({ record: installed.extension, ...bundle });
+
+    expect(await Bun.file(loaded.sourcePath).exists()).toBe(true);
+    await loaded.dispose();
+  });
+
   test("defensively rejects file traversal before writing bundle files", async () => {
     const input = await installLoadable("minimal");
     input.files["../escape.ts"] = "export default () => {};";

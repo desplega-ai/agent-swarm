@@ -5,11 +5,14 @@
  *
  *  - `__host_call(path, argsJson)`: async host call, resolves to a JSON envelope.
  *  - `__host_sync(op, json)`: sync host call, returns a JSON envelope.
+ *    `crypto.random` returns that many random bytes.
  *  - `__host_log(stream, text)`: append to the captured stdout or stderr.
  *  - `__host_sleep(ms)`: resolves after `ms` on the host clock.
  *  - `__host_done(json)`: reports the final outcome of the run.
  *
  * Every value crosses the boundary as JSON. The sandbox has no other way out.
+ * `SANDBOX_WEB_SHIMS` (quickjs-web-shims.ts) runs first and adds URL,
+ * URLSearchParams, TextEncoder and TextDecoder.
  * `__swarm_shape` (injected before this file) lists the configured api/mcp
  * connections so `ctx.api.<slug>` matches the native executor exactly.
  */
@@ -64,6 +67,39 @@ const setTimeout = (fn, ms, ...args) => {
 const clearTimeout = (id) => {
   timers.delete(id);
 };
+// Shares the timer ids with setTimeout, so either clear function stops either.
+const setInterval = (fn, ms, ...args) => {
+  const id = ++timerSeq;
+  const delay = Math.max(1, Number(ms) || 0);
+  timers.add(id);
+  const tick = () =>
+    __host_sleep(delay).then(() => {
+      if (!timers.has(id)) return;
+      tick();
+      fn(...args);
+    });
+  tick();
+  return id;
+};
+const clearInterval = clearTimeout;
+
+// ── crypto (bytes come from the host CSPRNG) ──
+const INTEGER_ARRAYS = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, BigInt64Array, BigUint64Array];
+const getRandomValues = (array) => {
+  if (!INTEGER_ARRAYS.some((type) => array instanceof type)) {
+    throw new TypeError("crypto.getRandomValues: the argument must be an integer TypedArray");
+  }
+  new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(hostSync("crypto.random", array.byteLength));
+  return array;
+};
+const randomUUID = () => {
+  const bytes = hostSync("crypto.random", 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.map((b) => (b + 256).toString(16).slice(1)).join("");
+  return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+};
+const crypto = Object.freeze({ getRandomValues, randomUUID });
 
 // ── Redacted ──
 const redactedEntries = new WeakMap();
@@ -115,7 +151,7 @@ const config = Object.freeze({
   },
 });
 
-// ── fetch (text bodies only) ──
+// ── fetch ──
 class Headers {
   constructor(init) {
     this._map = new Map();
@@ -165,14 +201,44 @@ class Response {
     return JSON.parse(this._body);
   }
 }
+const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const toBase64 = (bytes) => {
+  let out = "";
+  let i = 0;
+  for (; i + 2 < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    out += BASE64[n >> 18] + BASE64[(n >> 12) & 63] + BASE64[(n >> 6) & 63] + BASE64[n & 63];
+  }
+  if (i < bytes.length) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8);
+    out += BASE64[n >> 18] + BASE64[(n >> 12) & 63] + (i + 1 < bytes.length ? BASE64[(n >> 6) & 63] : "=") + "=";
+  }
+  return out;
+};
+// Binary bodies cross the host boundary as base64; the host decodes them.
+const encodeBody = (body, headers) => {
+  if (body == null) return {};
+  if (typeof body === "string") return { body };
+  if (body instanceof globalThis.URLSearchParams) {
+    if (!headers.has("content-type")) headers.set("content-type", "application/x-www-form-urlencoded;charset=UTF-8");
+    return { body: body.toString() };
+  }
+  if (body instanceof ArrayBuffer) return { bodyBase64: toBase64(new Uint8Array(body)) };
+  if (ArrayBuffer.isView(body)) {
+    return { bodyBase64: toBase64(new Uint8Array(body.buffer, body.byteOffset, body.byteLength)) };
+  }
+  throw new TypeError(
+    "quickjs executor: fetch body must be a string, Uint8Array, ArrayBuffer or URLSearchParams (JSON.stringify objects first)",
+  );
+};
 const toRequest = (input, init) => {
   const options = init || {};
   const url = typeof input === "string" ? input : input && (input.href || input.url) ? input.href || input.url : String(input);
-  if (options.body != null && typeof options.body !== "string") {
-    throw new TypeError("quickjs executor: fetch body must be a string (JSON.stringify it first)");
-  }
-  const headers = options.headers == null ? undefined : Array.from(new Headers(options.headers).entries());
-  const request = { url, method: options.method, headers, body: options.body == null ? undefined : options.body };
+  const headerMap = new Headers(options.headers);
+  const body = encodeBody(options.body, headerMap);
+  const headerList = Array.from(headerMap.entries());
+  const headers = options.headers == null && headerList.length === 0 ? undefined : headerList;
+  const request = { url, method: options.method, headers, ...body };
   if (options.retries !== undefined) request.retries = options.retries;
   if (options.timeoutMs !== undefined) request.timeoutMs = options.timeoutMs;
   return request;
@@ -223,6 +289,9 @@ const define = (name, value) =>
 define("console", console);
 define("setTimeout", setTimeout);
 define("clearTimeout", clearTimeout);
+define("setInterval", setInterval);
+define("clearInterval", clearInterval);
+define("crypto", crypto);
 define("fetch", fetch);
 define("Headers", Headers);
 define("Response", Response);

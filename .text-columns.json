@@ -402,6 +402,12 @@
     },
     "resolvedEffort": {
       "exempt": "enum"
+    },
+    "profile": {
+      "exempt": "enum or fixed-format value"
+    },
+    "resolvedProfile": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "agentmail_inbox_mappings": {
@@ -2609,9 +2615,15 @@
     }
   },
   "session_tokens": {
-    "runtimeId": { "exempt": "identifier" },
-    "parentRuntimeId": { "exempt": "identifier" },
-    "controllerId": { "exempt": "identifier" },
+    "runtimeId": {
+      "exempt": "identifier"
+    },
+    "parentRuntimeId": {
+      "exempt": "identifier"
+    },
+    "controllerId": {
+      "exempt": "identifier"
+    },
     "id": {
       "exempt": "identifier"
     },
@@ -3766,6 +3778,41 @@
       "exempt": "timestamp"
     },
     "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "model_profiles": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "exempt": "enum or fixed-format value"
+    },
+    "harness": {
+      "exempt": "enum or fixed-format value"
+    },
+    "model": {
+      "exempt": "enum or fixed-format value"
+    },
+    "effort": {
+      "exempt": "enum"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "seededFrom": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
       "exempt": "timestamp"
     },
     "created_by": {

@@ -32,6 +32,7 @@ import {
 import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
 import { ampModelError, ampPinCatalogError, ampPinProviderError } from "../utils/amp-models";
 import { getAgentById, getAllAgents } from "./db";
+import { getModelProfileByName } from "./db/model-profiles";
 import { loadModelsCatalog } from "./model-catalog-store";
 import { resolveLatestAlias } from "./model-tier-resolution";
 
@@ -100,9 +101,15 @@ export async function harnessModelErrorFor(
  * stays sync and catalog-free; this runs next to it.
  */
 export async function poolTaskRunsOnHarness(
-  task: TaskModelPinFields | null | undefined,
+  task: (TaskModelPinFields & { profile?: string | null }) | null | undefined,
   harness: string | null | undefined,
 ): Promise<boolean> {
+  // A task's model profile runs on one harness only; other workers leave it in the pool.
+  const profileName = task?.profile?.trim();
+  if (profileName) {
+    const profile = await getModelProfileByName(profileName);
+    return !profile || !harness || profile.harness === harness;
+  }
   // Only the task's own pin restricts harnesses; a model a previous run
   // reported into `model` does not.
   const model = taskModelPin(task ?? {})?.trim();

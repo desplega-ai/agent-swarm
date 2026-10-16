@@ -219,6 +219,11 @@ export const PERMISSIONS = {
       "Record whether a pinned harness CLI version accepts a model (a worker reports its own probe results; the operator may correct any row).",
     namespace: "models",
   },
+  "models.profiles.write": {
+    description:
+      "Create, update, or delete model profiles (named harness + model + effort). Operator (shared API key) only.",
+    namespace: "models",
+  },
   "config.read.secrets": {
     description: "Read unmasked secret config values.",
     namespace: "config",

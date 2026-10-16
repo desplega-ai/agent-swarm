@@ -101,6 +101,7 @@ import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
+import { vcsRepoName, vcsRepoUrlMatches } from "../utils/vcs-repo-match.ts";
 import {
   canonicalAzureDevOpsRepoUrl,
   isAzureDevOpsUrl,
@@ -212,11 +213,7 @@ export async function fetchRepoConfig(
   guidelines?: RepoGuidelines | null;
 } | null> {
   try {
-    const requested = vcsRepo
-      .trim()
-      .replace(/\/+$/, "")
-      .replace(/\.git$/, "");
-    const repoName = requested.split("/").pop() || requested;
+    const repoName = vcsRepoName(vcsRepo);
     const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
@@ -233,18 +230,7 @@ export async function fetchRepoConfig(
       }>;
     };
     if (requireExactMatch) {
-      return (
-        data.repos.find((r) => {
-          const normalized = r.url
-            .trim()
-            .replace(/\/+$/, "")
-            .replace(/\.git$/, "");
-          if (normalized === requested) return true;
-          // Qualified URLs must retain their host. Only shorthand references use suffix matching.
-          if (requested.includes(":")) return false;
-          return normalized.endsWith(`/${requested}`) || normalized.endsWith(`:${requested}`);
-        }) ?? null
-      );
+      return data.repos.find((r) => vcsRepoUrlMatches(r.url, vcsRepo)) ?? null;
     }
     return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
   } catch {

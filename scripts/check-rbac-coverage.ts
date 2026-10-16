@@ -93,6 +93,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
     "proxies to /api/extensions which enforces extension.write / GET is ungated",
   "src/tools/extension-list.ts":
     "proxies to /api/extensions which enforces extension.write / GET is ungated",
+  "src/tools/model-profiles/list-model-profiles.ts":
+    "read-only, like the ungated GET /api/model-profiles",
   "src/tools/get-metrics.ts": PIN_REASON,
   "src/tools/get-swarm.ts": PIN_REASON,
   "src/tools/join-swarm.ts": PIN_REASON,

@@ -92,6 +92,8 @@ export type AgentTaskRow = {
   resolvedModel?: string | null;
   modelSource?: string | null;
   modelAlias?: string | null;
+  profile?: string | null;
+  resolvedProfile?: string | null;
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
@@ -322,6 +324,8 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     resolvedEffort: ReasoningEffortSchema.safeParse(row.resolvedEffort).success
       ? (row.resolvedEffort as ReasoningEffort)
       : undefined,
+    profile: row.profile ?? undefined,
+    resolvedProfile: row.resolvedProfile ?? undefined,
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
@@ -455,6 +459,9 @@ export async function hasNonTerminalResumeChild(parentId: string): Promise<boole
   );
   return row !== undefined && row !== null;
 }
+
+/** How far back the heartbeat repairs a superseded task that never got a resume. */
+export const SUPERSEDED_RESUME_REPAIR_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Superseded tasks that never got a resume child. Both supersede paths

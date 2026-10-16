@@ -28,6 +28,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [get-tasks](#get-tasks)
   - [get-metrics](#get-metrics)
   - [send-task](#send-task)
+  - [list-model-profiles](#list-model-profiles)
   - [get-task-details](#get-task-details)
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
@@ -304,6 +305,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
+| `profile` | `string` | No | - | Model profile name (see list-model-profiles): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with model and modelTier. A set `effort` still wins over the profile's. |
 | `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. |
 | `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
 | `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
@@ -312,6 +314,16 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `requestedByUserId` | `string` | No | - | Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. Only lead agents can name a user other than the requester of their current task. |
 | `followUpConfig` | `unknown` | No | - | Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows. |
 | `outputSchema` | `object` | No | - | Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. |
+
+### list-model-profiles
+
+**List Model Profiles**
+
+List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on send-task to run that task on it, or set it as an agent's default through PATCH /api/agents/{id}/runtime. A profile runs only on its own harness. Filter by `harness` to see what an agent on that harness can run.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
 
 ### get-task-details
 
@@ -473,6 +485,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only used with 'create' action. |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
+| `profile` | `string` | No | - | Model profile name for the created pool task (see list-model-profiles); only workers on its harness claim it. Exclusive with model and modelTier. Only used with 'create' action. |
 | `requiredCapabilities` | `array` | No | - | Capabilities required for pool routing. |
 | `leadOnly` | `boolean` | No | false | Structured authorization constraint: only Lead agents may claim this privileged task. |
 

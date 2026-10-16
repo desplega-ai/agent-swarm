@@ -630,6 +630,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "215_swarm_config_export_to_env.sql");
       // 219 rewrites task_context_snapshots, which this fixture does not create.
       markMigrationApplied(database, "219_relabel_pi_context_compactions.sql");
+      // 220 reads agents and swarm_config, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "220_model_profiles.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

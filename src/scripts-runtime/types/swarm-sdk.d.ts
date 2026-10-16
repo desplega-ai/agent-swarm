@@ -311,6 +311,8 @@ declare module "swarm-sdk" {
       key?: string;
       includeSecrets?: boolean;
     }): Promise<unknown>;
+    // --- model profiles ---
+    modelProfile_list(args?: { harness?: string }): Promise<unknown>;
     // --- slack ---
     slack_read(args?: {
       inboxMessageId?: string;

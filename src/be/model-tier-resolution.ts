@@ -7,9 +7,12 @@
  *
  * Precedence (first hit wins):
  *   1. task `model`                         → modelSource "model"
- *   2. the claiming worker's MODEL_TIER_*   → "worker-env"  (agents.modelTierOverrides)
- *   3. swarm_config MODEL_TIER_<PROV>_<TIER> → "tier-config"
- *   4. DEFAULT_MODEL_TIER_MAP                → "tier-default"
+ *   2. task `profile`                       → "profile:task"
+ *   3. the claiming worker's MODEL_TIER_*   → "worker-env"  (agents.modelTierOverrides)
+ *   4. swarm_config MODEL_TIER_<PROV>_<TIER> → "tier-config"
+ *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default"
+ *   6. the agent's default profile          → "profile:agent-default" (no model, no tier,
+ *      no repo-scoped MODEL_OVERRIDE on the task's repo)
  *
  * Any layer may hold a `latest:` alias. An alias that resolves to nothing
  * (empty catalog, everything filtered) falls through to the next layer.
@@ -45,8 +48,14 @@ import {
   type ProviderName,
   ProviderNameSchema,
   parseModelTier,
+  type ReasoningEffort,
 } from "../types";
 import { getDbClient } from "./db";
+import {
+  getAgentDefaultProfileName,
+  getModelProfileByName,
+  repoModelOverrideKeys,
+} from "./db/model-profiles";
 import {
   CLI_PINNED_HARNESSES,
   fallbackForUnsupportedModel,
@@ -74,7 +83,9 @@ export type ModelSource =
   | "tier-config"
   | "tier-default"
   | "fallback:cli-unsupported"
-  | "fallback:cli-unsupported:model";
+  | "fallback:cli-unsupported:model"
+  | "profile:task"
+  | "profile:agent-default";
 
 export interface TaskModelResolution {
   resolvedModel: string;
@@ -490,15 +501,21 @@ async function applyCliSupport(
   if (!fallback) return resolution;
   noticeCliUnsupported(harness, cliVersion, resolution.resolvedModel, fallback);
   // Keep the winning layer in the source: a fallback from the task's own `latest:` alias is
-  // still a task-level pin (a resume carries it), one from a tier layer is not.
-  const modelSource =
-    resolution.modelSource === "model"
+  // still a task-level pin (a resume carries it), one from a tier layer is not. A profile keeps
+  // its own source; `resolvedProfile` still names it and `resolvedModel` shows the swap.
+  const modelSource = resolution.modelSource.startsWith("profile:")
+    ? resolution.modelSource
+    : resolution.modelSource === "model"
       ? "fallback:cli-unsupported:model"
       : "fallback:cli-unsupported";
   return { ...resolution, resolvedModel: fallback, modelSource };
 }
 
 export type ClaimModelFields = Partial<TaskModelResolution> & {
+  /** The profile claim applied (`agent_tasks.resolvedProfile`). */
+  resolvedProfile?: string;
+  /** The profile's effort, when it has one and the task set none; the worker spawns with it. */
+  effort?: ReasoningEffort;
   /**
    * Set when the task's explicit model is rejected by this worker's CLI, or belongs to another
    * harness family (`[model-harness-mismatch]`); the worker fails the task without a spawn.
@@ -507,16 +524,132 @@ export type ClaimModelFields = Partial<TaskModelResolution> & {
 };
 
 /**
+ * Resolve a model profile for a claim. Null when the profile does not apply:
+ * an agent default that is missing or on another harness falls through to the
+ * tier chain. For a task's own `profile` both are a hard stop.
+ */
+async function resolveClaimProfile(
+  name: string,
+  source: "profile:task" | "profile:agent-default",
+  harness: ProviderName | null,
+): Promise<
+  | { profile: { name: string; effort: ReasoningEffort | null }; resolution: TaskModelResolution }
+  | { modelUnsupported: string }
+  | null
+> {
+  const isTask = source === "profile:task";
+  const profile = await getModelProfileByName(name);
+  if (!profile) {
+    return isTask
+      ? { modelUnsupported: `[model-profile-missing] Model profile "${name}" no longer exists.` }
+      : null;
+  }
+  if (profile.harness !== harness) {
+    if (!isTask) return null;
+    return {
+      modelUnsupported: `[model-harness-mismatch] Model profile "${name}" runs on the ${profile.harness} harness, not on the ${harness ?? "unknown"} harness of this worker. Re-create the task with a ${harness ?? "matching"} profile.`,
+    };
+  }
+  let resolution: TaskModelResolution = {
+    resolvedModel: profile.model,
+    modelSource: source,
+    modelAlias: null,
+  };
+  if (isAlias(profile.model)) {
+    const resolved = await resolveLatestAlias(profile.model);
+    if (!resolved) {
+      if (!isTask) return null;
+      return {
+        modelUnsupported: `[model-profile-unresolved] Model profile "${name}" names ${profile.model}, which resolves to no usable model.`,
+      };
+    }
+    resolution = {
+      resolvedModel: resolved,
+      modelSource: source,
+      modelAlias: profile.model.trim().toLowerCase(),
+    };
+  }
+  return { profile: { name: profile.name, effort: profile.effort }, resolution };
+}
+
+/**
  * Resolve and record the model for a task the given agent is claiming. Runs
  * inside the claim transaction. Returns the fields to merge into the trigger.
  * `task.model` must be the task's own pin (`taskModelPin`), never the model a
  * previous session reported into the column.
  */
 export async function recordClaimModelResolution(
-  task: { id: string; model?: string | null; modelTier?: string | null },
+  task: {
+    id: string;
+    model?: string | null;
+    modelTier?: string | null;
+    profile?: string | null;
+    effort?: string | null;
+    vcsRepo?: string | null;
+  },
   agent: { id: string; harnessProvider?: ProviderName | null; provider?: ProviderName | null },
+  /**
+   * Whether the claiming worker's config read includes secret repo rows
+   * (`readsRepoSecrets`). A secret repo override it never receives cannot
+   * beat its default profile. Defaults to true (an operator-key worker).
+   */
+  { includeRepoSecrets = true }: { includeRepoSecrets?: boolean } = {},
 ): Promise<ClaimModelFields> {
   const harnessProvider = agent.harnessProvider ?? agent.provider ?? null;
+
+  if (!task.model?.trim()) {
+    const taskProfile = task.profile?.trim();
+    const agentDefault =
+      taskProfile || parseModelTier(task.modelTier)
+        ? null
+        : await getAgentDefaultProfileName(agent.id);
+    // The agent default is agent-scoped config: a repo-scoped MODEL_OVERRIDE or
+    // REASONING_EFFORT_OVERRIDE on the task's repo still beats it on that axis
+    // (repo > agent), as it beats the agent's own override in the worker env.
+    // A task's own profile is the creator's pick and beats repo config.
+    const repoKeys = agentDefault
+      ? await repoModelOverrideKeys(task.vcsRepo, { includeSecrets: includeRepoSecrets })
+      : new Set<string>();
+    const defaultProfile = repoKeys.has("MODEL_OVERRIDE") ? null : agentDefault;
+    const picked = taskProfile
+      ? await resolveClaimProfile(taskProfile, "profile:task", harnessProvider)
+      : defaultProfile
+        ? await resolveClaimProfile(defaultProfile, "profile:agent-default", harnessProvider)
+        : null;
+    if (picked && "modelUnsupported" in picked)
+      return { modelUnsupported: picked.modelUnsupported };
+    if (picked) {
+      const checked = await applyCliSupport(
+        picked.resolution,
+        harnessProvider,
+        await getAgentHarnessCliVersion(agent.id),
+      );
+      // Profiles never fail fast on the CLI check (only a raw task pin does), so this is a resolution.
+      const resolution = "unsupported" in checked ? picked.resolution : checked;
+      await getDbClient().run(
+        "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = ? WHERE id = ?",
+        [
+          resolution.resolvedModel,
+          resolution.modelSource,
+          resolution.modelAlias,
+          picked.profile.name,
+          task.id,
+        ],
+      );
+      return {
+        resolvedModel: resolution.resolvedModel,
+        modelSource: resolution.modelSource,
+        ...(resolution.modelAlias ? { modelAlias: resolution.modelAlias } : {}),
+        resolvedProfile: picked.profile.name,
+        // A task's own effort stays the pin; the profile's fills only an unset one,
+        // and an agent default's yields to the repo's effort override.
+        ...(!task.effort && picked.profile.effort && !repoKeys.has("REASONING_EFFORT_OVERRIDE")
+          ? { effort: picked.profile.effort }
+          : {}),
+      };
+    }
+  }
+
   const resolved = await resolveTaskModel({
     model: task.model,
     modelTier: task.modelTier,
@@ -527,8 +660,9 @@ export async function recordClaimModelResolution(
     // A re-claimed row keeps the claim record of its previous run; drop it so
     // the trigger and the row do not replay that run's model.
     await getDbClient().run(
-      `UPDATE agent_tasks SET resolvedModel = NULL, modelSource = NULL, modelAlias = NULL
-         WHERE id = ? AND (resolvedModel IS NOT NULL OR modelSource IS NOT NULL OR modelAlias IS NOT NULL)`,
+      `UPDATE agent_tasks SET resolvedModel = NULL, modelSource = NULL, modelAlias = NULL, resolvedProfile = NULL
+         WHERE id = ? AND (resolvedModel IS NOT NULL OR modelSource IS NOT NULL OR modelAlias IS NOT NULL
+           OR resolvedProfile IS NOT NULL)`,
       [task.id],
     );
     return {};
@@ -544,7 +678,7 @@ export async function recordClaimModelResolution(
   }
   const resolution = checked;
   await getDbClient().run(
-    "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ? WHERE id = ?",
+    "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = NULL WHERE id = ?",
     [resolution.resolvedModel, resolution.modelSource, resolution.modelAlias, task.id],
   );
   return resolution.modelAlias

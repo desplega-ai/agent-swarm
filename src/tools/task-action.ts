@@ -28,6 +28,7 @@ import {
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
+import { modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
@@ -109,6 +110,14 @@ export const taskActionInputSchema = z.object({
   effort: ReasoningEffortSchema.optional().describe(
     "Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action.",
   ),
+  profile: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "Model profile name for the created pool task (see list-model-profiles); only workers on its harness claim it. Exclusive with model and modelTier. Only used with 'create' action.",
+    ),
   requiredCapabilities: z
     .array(z.string())
     .optional()
@@ -296,6 +305,12 @@ export async function taskActionHandler(
       allowCustomModel: input.allowCustomModel,
     });
     if (modelError) return taskActionResult({ success: false, message: modelError }, agentId);
+    const profileError = await taskProfileError({
+      profile: input.profile,
+      model: normalizedModel.model,
+      modelTier: normalizedModel.modelTier,
+    });
+    if (profileError) return taskActionResult({ success: false, message: profileError }, agentId);
     try {
       assetKey = key
         ? await authorizeAssetKeyWrite(key, await resolveTaskAuditUserId(ctx.sourceTaskId, agentId))
@@ -324,6 +339,7 @@ export async function taskActionHandler(
         model: normalizedModel.model,
         modelTier: normalizedModel.modelTier,
         effort: input.effort,
+        profile: input.profile,
         routingAffinity:
           leadOnly || requiredCapabilities?.length
             ? { leadOnly, capabilities: requiredCapabilities ?? [] }
@@ -342,7 +358,7 @@ export async function taskActionHandler(
     };
   }
 
-  const result = await getDbClient().transaction(async (): Promise<TaskActionResult> => {
+  const transacted = getDbClient().transaction(async (): Promise<TaskActionResult> => {
     switch (action) {
       case "create": {
         const newTask = await createTaskExtended(
@@ -643,6 +659,11 @@ export async function taskActionHandler(
       default:
         return { success: false, message: `Unknown action: ${action}` };
     }
+  });
+  const result = await transacted.catch((error: unknown): TaskActionResult => {
+    // A create whose profile was deleted between taskProfileError and the insert.
+    if (modelProfileRefError(error) !== "missing") throw error;
+    return { success: false, message: `Unknown model profile "${input.profile}".` };
   });
 
   // Phase 5: when the accept gate refused, run after-commit side
