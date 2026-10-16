@@ -128,7 +128,7 @@ Losing the key while keeping the database means losing every encrypted secret wi
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `opencode`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `opencode`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). When unset and the worker has no Anthropic credential but has an OpenRouter, NaN or Helmcode key, the default is `pi`. See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -153,6 +153,10 @@ Which credentials you need depends on your selected harness provider:
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models via pi-mono |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
 | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | When `MODEL_OVERRIDE` starts with `google/` | — | Google AI API key for direct Google models. Either name is accepted |
+| `NAN_API_KEY` | One of* | — | NaN API key for `nan/<id>` models (pi and opencode only). `HELMCODE_API_NAN` is accepted as an alias; `NAN_API_KEY` wins when both are set. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `HELMCODE_API_KEY` | One of* | — | Helmcode API key for `helmcode/<id>` models (pi and opencode only). Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `NAN_BASE_URL` | No | `https://api.nan.builders/v1` | Overrides the NaN API root for pi, opencode and the key check. Not a secret. Every [registry provider](/docs/guides/harness-configuration#adding-a-provider) reads `<ID>_BASE_URL` the same way |
+| `HELMCODE_BASE_URL` | No | `https://api.helmcode.com/v1` | Overrides the Helmcode API root for pi, opencode and the key check. Not a secret |
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used for OpenRouter model and summarizer traffic. Any chat-completions gateway works — see [Model Gateways](/docs/guides/provider-auth/model-gateways) |
 | `BEDROCK_AUTH_MODE` | No | inferred from `MODEL_OVERRIDE` | Optional Bedrock mode override. `sdk` uses the AWS SDK credential chain; `bearer` requires `AWS_BEARER_TOKEN_BEDROCK`. Both probe credentials and enumerate models |
 | `AWS_BEARER_TOKEN_BEDROCK` | In Bedrock bearer mode | — | Bedrock API key required when `BEDROCK_AUTH_MODE=bearer` |
@@ -205,11 +209,15 @@ See [Provider Auth: Grok](/docs/guides/provider-auth/grok) for models, isolation
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used by the OpenRouter provider, model refreshes, and the session summarizer plugin. Any chat-completions gateway works — see [Model Gateways](/docs/guides/provider-auth/model-gateways) |
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
+| `NAN_API_KEY` | One of* | — | NaN API key for `nan/<id>` models (pi and opencode only). `HELMCODE_API_NAN` is accepted as an alias; `NAN_API_KEY` wins when both are set. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `HELMCODE_API_KEY` | One of* | — | Helmcode API key for `helmcode/<id>` models (pi and opencode only). Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `NAN_BASE_URL` | No | `https://api.nan.builders/v1` | Overrides the NaN API root for pi, opencode and the key check. Not a secret. Every [registry provider](/docs/guides/harness-configuration#adding-a-provider) reads `<ID>_BASE_URL` the same way |
+| `HELMCODE_BASE_URL` | No | `https://api.helmcode.com/v1` | Overrides the Helmcode API root for pi, opencode and the key check. Not a secret |
 | `OPENCODE_SDK_PATH` | No | Global npm root | Absolute path to `@opencode/sdk/dist/index.js`, when it is not under `/usr/lib/node_modules` or `/usr/local/lib/node_modules` |
 | `OPENCODE_SKILLS_DIR` | No | `~/.opencode/skills` | Directory used by the OpenCode inline resolver for `/<skill>` prompts |
 | `MODEL_OVERRIDE` | No | `openrouter/qwen/qwen3-coder-flash` | Model string passed to opencode. Use `provider/model-id` format (e.g. `anthropic/claude-sonnet-4-6`, `openai/gpt-4o`) |
 
-\* At least one of `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `~/.local/share/opencode/auth.json` is required.
+\* At least one of `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `NAN_API_KEY` (or `HELMCODE_API_NAN`), `HELMCODE_API_KEY`, or `~/.local/share/opencode/auth.json` is required.
 
 **Devin** (`HARNESS_PROVIDER=devin`):
 
@@ -381,6 +389,17 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 2. Have the lead call `register-kapso-number` to point the number at `/api/integrations/kapso/webhook` and store the routing mapping.
 3. Use `send-whatsapp-message` / `reply-whatsapp-message` for the common text path, or the `kapso-whatsapp` skill for templates, media, and reactions.
 
+## Chat SDK (Telegram, Slack, Teams, Discord)
+
+| Variable | Description |
+|----------|-------------|
+| `CHAT_SDK_ENABLED` | Set to `true` to start the Chat SDK channel and enable the `chat-sdk` capability (default: `false`). A saved change applies within a few seconds |
+| `CHAT_SDK_ADAPTERS` | JSON object keyed by adapter name (`telegram`, `slack`, `discord`, `teams`). Values may reference secret config rows as `{"$config": "KEY"}` |
+| `CHAT_SDK_BUFFER_MS` | How long a thread collects messages before it creates one task (default: `10000`, range 1 to 600000) |
+| `CHAT_SDK_API_URL_OVERRIDES` | Environment only, for development and tests. JSON of platform API base URLs by adapter name. Never set it in production |
+
+A `slack` adapter requires `SLACK_DISABLE=true`. See [Chat SDK](/docs/integrations/chat-sdk) for setup.
+
 ## Sentry Integration
 
 | Variable | Description |
@@ -551,6 +570,10 @@ ANTHROPIC_API_KEY=sk-key1,sk-key2
 ```
 
 When a session is spawned, the runner splits the credential value by commas and randomly selects one. Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
+
+On the pi and opencode harnesses, `OPENROUTER_API_KEY`, `NAN_API_KEY` (or `HELMCODE_API_NAN`) and `HELMCODE_API_KEY` pool the same way: each task gets one key, picked by the model's provider prefix. On opencode the picked key is handed to the provider config, so an `OPENROUTER_API_KEY` pool works there too.
+
+NaN and Helmcode cap concurrency per key (NaN: 60 RPM, 7 concurrent requests in total on the base plan, 10 on premium, 5 per model on `qwen3.6`, `gemma4` and the `mimo` models; Helmcode: 100 RPM, 2M tokens per minute, 5 concurrent requests per model, 10 on the GLM family, DeepSeek V4 Flash and Qwen 3.8 Flash). One key shared across a fleet hits these caps fast, so use a pool.
 
 ## Telemetry
 

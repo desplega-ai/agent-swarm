@@ -10,7 +10,7 @@ import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/se
 import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { _resetAutoReloadForTests, flushPendingIntegrationsReload } from "../http/core";
 import { handleMcp } from "../http/mcp";
-import { getBasePrompt } from "../prompts/base-prompt";
+import { getBasePrompt, getTaskContextPrompt } from "../prompts/base-prompt";
 import { createServer } from "../server";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode";
 import { listenOnFreePort } from "./test-net";
@@ -371,9 +371,8 @@ describe("scripts-only prompt gating", () => {
   });
 
   test("uses the scripts-only Slack variant for Slack-originated tasks", async () => {
-    const prompt = await getBasePrompt({
+    const prompt = await getTaskContextPrompt({
       role: "worker",
-      agentId: "scripts-only-slack-agent",
       scriptsOnly: true,
       slackContext: { channelId: "C123", threadTs: "123.456" },
     });

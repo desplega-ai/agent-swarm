@@ -1,3 +1,4 @@
+import { openAICompatibleKeyVars } from "@desplega/model-catalog";
 import type { EnvPresenceMap } from "@/api/hooks/use-integrations-meta";
 import type {
   AgentWithTasks,
@@ -43,6 +44,8 @@ export const PRESENCE_KEYS = [
   "OPENROUTER_API_KEY",
   "OPENROUTER_BASE_URL",
   "DEEPSEEK_API_KEY",
+  // OpenAI-compatible registry provider keys, canonical and alias.
+  ...openAICompatibleKeyVars(),
   "DEVIN_API_KEY",
   "DEVIN_ORG_ID",
 ];

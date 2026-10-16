@@ -1,3 +1,4 @@
+import { openAICompatibleProviderIds } from "@desplega/model-catalog";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
@@ -86,7 +87,7 @@ export const registerModelCatalogOverlayUpsertTool = (server: McpServer) => {
           .string()
           .min(1)
           .describe(
-            "models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode.",
+            `models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, ${openAICompatibleProviderIds().join(", ")}.`,
           ),
         modelId: z
           .string()

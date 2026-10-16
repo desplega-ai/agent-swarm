@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { openAICompatibleBaseUrlVars, openAICompatibleKeyVars } from "@desplega/model-catalog";
 import { getApiKey } from "../utils/api-key";
 import { isSensitiveKey, scrubSecrets } from "../utils/secret-scrubber";
 
@@ -20,6 +21,10 @@ export const DEFAULT_E2B_FORWARD_KEYS = [
   "CLAUDE_CODE_OAUTH_TOKEN",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
+  // OpenAI-compatible registry providers: key vars (canonical and alias) and
+  // their `<ID>_BASE_URL` overrides.
+  ...openAICompatibleKeyVars(),
+  ...openAICompatibleBaseUrlVars(),
   "GITHUB_TOKEN",
   "GITLAB_TOKEN",
   "AZURE_DEVOPS_TOKEN",

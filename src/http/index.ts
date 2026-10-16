@@ -41,6 +41,7 @@ import {
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
+import { startChatSdk, stopChatSdk } from "../integrations/chat-sdk/runtime";
 import { initJira } from "../jira";
 import { initLinear } from "../linear";
 import {
@@ -503,6 +504,9 @@ async function shutdown() {
   // Stop Slack bot
   await stopSlackApp();
 
+  // Stop Chat SDK adapters and drain their background handlers before the DB closes
+  await stopChatSdk();
+
   // Stop OAuth keepalive
   if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
     const { stopOAuthKeepalive } = await import("../oauth/keepalive");
@@ -768,6 +772,16 @@ httpServer
     } catch (err) {
       console.error("[Slack] Failed to start, continuing boot without Slack:", err);
     }
+
+    // Chat SDK channel: never the boot path, so not awaited. Adapter init
+    // makes network calls (Slack's auth.test retries for up to ~30 min), and
+    // the scheduler, heartbeat and supervisor below must start regardless.
+    void startChatSdk().catch((err: unknown) => {
+      console.error(
+        "[chat-sdk] Failed to start, continuing without Chat SDK:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      );
+    });
 
     // Independent of workers, scheduler targets, and heartbeat agent tasks.
     startQueueStallAlarm();

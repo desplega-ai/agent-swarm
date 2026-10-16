@@ -28,7 +28,8 @@ export type AgentTaskSource =
   | "workflow"
   | "linear"
   | "jira"
-  | "comb";
+  | "comb"
+  | "chat";
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
@@ -604,6 +605,42 @@ export interface ConnectorCodeResponse {
 export interface McpUserConfigResponse {
   mcpBaseUrl: string;
   mcpUserUrl: string;
+}
+
+/** `GET /api/integrations/chat/status`. Never carries secret values. */
+export interface ChatSdkAdapterStatus {
+  name: "telegram" | "slack" | "discord" | "teams";
+  configured: boolean;
+  /** False when the entry carries `enabled: false`: configured and kept, not started. */
+  enabled: boolean;
+  /** `incomplete`: saved with a missing field or an unresolvable `$config`; `error` names it. */
+  health: "ok" | "error" | "disabled" | "incomplete";
+  error?: string;
+  webhookUrl: string;
+  mode?: string;
+  gateway?: { state: "running" | "backoff" | "stopped"; since: string; restarts: number };
+  /** Discord only, while the Gateway runs: the servers the bot was invited to. */
+  guilds?: { count: number; names: string[] };
+}
+
+export interface ChatSdkStatusResponse {
+  enabled: boolean;
+  slackClash: boolean;
+  /** Config problem that keeps every adapter from starting. */
+  error?: string;
+  adapters: ChatSdkAdapterStatus[];
+}
+
+/** `POST /api/integrations/chat/telegram/register-webhook`. */
+export interface ChatSdkTelegramWebhookResponse {
+  webhookUrl: string;
+  webhookInfo: {
+    url: string;
+    pending_update_count?: number;
+    last_error_date?: number;
+    last_error_message?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface CreateUserInput {

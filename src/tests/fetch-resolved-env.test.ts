@@ -394,6 +394,45 @@ describe("fetchResolvedEnv", () => {
     ]);
   });
 
+  test("HELMCODE_API_NAN alias becomes NAN_API_KEY and pools for a nan/* model", async () => {
+    const agentId = crypto.randomUUID();
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: { configs: [{ key: "HELMCODE_API_NAN", value: "fixture-nan-a,fixture-nan-b" }] },
+    });
+    const result = await fetchResolvedEnv(testUrl, "key", agentId, {}, "nan/glm5.3-flash", {
+      provider: "opencode",
+    });
+    expect(result.env.NAN_API_KEY).toMatch(/^fixture-nan-[ab]$/);
+    expect(result.credentialSelections.map((selection) => selection.keyType)).toEqual([
+      "NAN_API_KEY",
+    ]);
+  });
+
+  test("an explicit NAN_API_KEY wins over the HELMCODE_API_NAN alias", async () => {
+    const agentId = crypto.randomUUID();
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "NAN_API_KEY", value: "fixture-nan-canonical" },
+          { key: "HELMCODE_API_NAN", value: "fixture-nan-alias" },
+        ],
+      },
+    });
+    const result = await fetchResolvedEnv(testUrl, "key", agentId, {}, "nan/qwen3.6", {
+      provider: "pi",
+    });
+    expect(result.env.NAN_API_KEY).toBe("fixture-nan-canonical");
+  });
+
+  test("the alias also normalizes from the boot env when the API is unreachable", async () => {
+    const result = await fetchResolvedEnv("", "key", "agent-1", {
+      HELMCODE_API_NAN: "fixture-nan-boot",
+    });
+    expect(result.env.NAN_API_KEY).toBe("fixture-nan-boot");
+  });
+
   describe("model-scoped window filter — GET /api/keys/available?model=<family>", () => {
     beforeEach(() => {
       keysAvailableRequests.length = 0;

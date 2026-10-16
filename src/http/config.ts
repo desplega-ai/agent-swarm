@@ -19,6 +19,7 @@ import { fillOrgLogoFromWebsite } from "../be/org-profile";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   internalConfigKeyError,
+  isApiOnlyConfigKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
@@ -37,16 +38,9 @@ const MAX_ENV_PRESENCE_KEYS = 200;
 const SECRETS_FORCE_MASK_NOTE =
   " (secret values masked: this token cannot read secrets in this scope)";
 
-// Config keys the API server owns for its own use and must NEVER hand out over
-// HTTP — workers/entrypoints read config to build their env, and the agent-fs
-// bootstrap admin key would let a compromised worker administer the shared org.
-// The API materializes these into its own process.env at boot via
-// getInjectableGlobalConfigs, so no HTTP consumer legitimately needs them.
-const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY", "SLACK_SIGNING_SECRET"]);
-
 function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
   return configs.filter(
-    (config) => !API_ONLY_CONFIG_KEYS.has(config.key) && !isInternalConfigKey(config.key),
+    (config) => !isApiOnlyConfigKey(config.key) && !isInternalConfigKey(config.key),
   );
 }
 
@@ -138,6 +132,28 @@ export async function ensureConfigAdmin(
   res: ServerResponse,
   verb: Extract<PermissionVerb, "config.write.any" | "config.delete.any">,
 ): Promise<boolean> {
+  return ensureHttpPermission(
+    req,
+    res,
+    verb,
+    verb === "config.write.any"
+      ? "Writing swarm config requires the lead agent"
+      : "Deleting swarm config requires the lead agent",
+  );
+}
+
+/**
+ * The general form of `ensureConfigAdmin`: operators and users pass, guests
+ * get a plain 403, and an agent principal (session identity first, then the
+ * legacy X-Agent-ID header) must hold `verb`. On denial it writes a 403 with
+ * `forbiddenMessage` and returns false.
+ */
+export async function ensureHttpPermission(
+  req: IncomingMessage,
+  res: ServerResponse,
+  verb: PermissionVerb,
+  forbiddenMessage: string,
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
   if (auth?.kind === "guest") {
@@ -153,13 +169,7 @@ export async function ensureConfigAdmin(
     source: "http",
   });
   if (!decision.allow) {
-    jsonError(
-      res,
-      verb === "config.write.any"
-        ? "Writing swarm config requires the lead agent"
-        : "Deleting swarm config requires the lead agent",
-      403,
-    );
+    jsonError(res, forbiddenMessage, 403);
     return false;
   }
   return true;

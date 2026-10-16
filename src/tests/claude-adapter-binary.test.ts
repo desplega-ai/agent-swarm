@@ -49,7 +49,7 @@ import {
   resolveClaudeBridgeEnabled,
   resolveClaudeTrustDirs,
 } from "../providers/claude-adapter";
-import { ClaudeSettingsConfigError } from "../providers/claude-flag-settings";
+import { ClaudeSettingsConfigError, userClaudeMdExclude } from "../providers/claude-flag-settings";
 import type { ProviderSessionConfig } from "../providers/types";
 import { setFlockForTests } from "../utils/file-lock";
 import { holdFileLock } from "./fixtures/hold-file-lock";
@@ -775,7 +775,7 @@ describe("CLAUDE_BINARY env override", () => {
     expect(argv[0]).toBe("claude");
   });
 
-  test("excludes only /workspace/CLAUDE.md from Claude's memory load", async () => {
+  test("excludes both on-disk agent CLAUDE.md copies from Claude's memory load", async () => {
     const adapter = new ClaudeAdapter();
     await createCompletedSession(adapter, makeConfig());
 
@@ -783,7 +783,7 @@ describe("CLAUDE_BINARY env override", () => {
     const at = argv.indexOf("--settings");
     expect(at).toBeGreaterThan(0);
     expect(JSON.parse(argv[at + 1] ?? "")).toEqual({
-      claudeMdExcludes: [WORKSPACE_CLAUDE_MD_PATH],
+      claudeMdExcludes: [WORKSPACE_CLAUDE_MD_PATH, userClaudeMdExclude()],
     });
   });
 
@@ -820,7 +820,12 @@ describe("CLAUDE_BINARY env override", () => {
       expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "")).toEqual({
         model: "from-file",
         env: { X: "kept" },
-        claudeMdExcludes: ["/repo/CLAUDE.md", WORKSPACE_CLAUDE_MD_PATH, "/other/CLAUDE.md"],
+        claudeMdExcludes: [
+          "/repo/CLAUDE.md",
+          WORKSPACE_CLAUDE_MD_PATH,
+          "/other/CLAUDE.md",
+          userClaudeMdExclude(),
+        ],
       });
       expect(argv[0]).toBe("claude");
       expect(argv.slice(argv.indexOf("--max-turns"), argv.indexOf("--max-turns") + 2)).toEqual([

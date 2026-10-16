@@ -1,0 +1,1322 @@
+{
+  "name": "Open Oncall",
+  "description": "Sleep better without relying on a single provider. Incidents from the open-oncall workflow: root cause, approvals, fix PRs and provider failover.",
+  "definition": {
+    "models": {
+      "incident": {
+        "columns": {
+          "runId": {
+            "kind": "string",
+            "index": true
+          },
+          "incidentRef": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "incidentRef"
+            }
+          },
+          "alertSource": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "alertSource"
+            }
+          },
+          "title": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "title"
+            }
+          },
+          "service": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "service"
+            }
+          },
+          "repo": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "repo"
+            }
+          },
+          "severity": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "severity"
+            }
+          },
+          "sevTone": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "sevTone"
+            }
+          },
+          "status": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "status"
+            },
+            "index": true
+          },
+          "statusTone": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "statusTone"
+            }
+          },
+          "open": {
+            "kind": "boolean",
+            "source": {
+              "of": "runs",
+              "field": "open"
+            }
+          },
+          "alertAt": {
+            "kind": "date",
+            "source": {
+              "of": "runs",
+              "field": "alertAt"
+            }
+          },
+          "rootCauseAt": {
+            "kind": "date",
+            "source": {
+              "of": "runs",
+              "field": "rootCauseAt"
+            }
+          },
+          "resolvedAt": {
+            "kind": "date",
+            "source": {
+              "of": "runs",
+              "field": "resolvedAt"
+            }
+          },
+          "ttrcMs": {
+            "kind": "number",
+            "source": {
+              "of": "runs",
+              "field": "ttrcMs"
+            }
+          },
+          "ttrc": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "ttrc"
+            }
+          },
+          "summary": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "summary"
+            }
+          },
+          "rootCause": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "rootCause"
+            }
+          },
+          "proposedFix": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "proposedFix"
+            }
+          },
+          "evidence": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "evidence"
+            }
+          },
+          "suspectCommit": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "suspectCommit"
+            }
+          },
+          "confidence": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "confidence"
+            }
+          },
+          "investigatedBy": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "investigatedBy"
+            }
+          },
+          "fixedBy": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "fixedBy"
+            }
+          },
+          "failover": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "failover"
+            }
+          },
+          "failoverShort": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "failoverShort"
+            }
+          },
+          "failovers": {
+            "kind": "number",
+            "source": {
+              "of": "runs",
+              "field": "failovers"
+            }
+          },
+          "drill": {
+            "kind": "boolean",
+            "source": {
+              "of": "runs",
+              "field": "drill"
+            }
+          },
+          "prUrl": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "prUrl"
+            }
+          },
+          "approvalId": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "approvalId"
+            }
+          },
+          "approvalState": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "approvalState"
+            }
+          },
+          "approvalExpiresAt": {
+            "kind": "date",
+            "source": {
+              "of": "runs",
+              "field": "approvalExpiresAt"
+            }
+          },
+          "approvalAsk": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "approvalAsk"
+            }
+          },
+          "respondPath": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "respondPath"
+            }
+          },
+          "linksMd": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "linksMd"
+            }
+          },
+          "runStatus": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "runStatus"
+            }
+          },
+          "outcome": {
+            "kind": "string",
+            "source": {
+              "of": "runs",
+              "field": "outcome"
+            }
+          }
+        },
+        "sources": {
+          "runs": {
+            "connector": "script",
+            "scriptId": "<SYNC_SCRIPT_ID>",
+            "joinKey": "runId",
+            "args": {
+              "model": "incident"
+            }
+          }
+        }
+      },
+      "event": {
+        "columns": {
+          "eventKey": {
+            "kind": "string",
+            "index": true
+          },
+          "runId": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "runId"
+            },
+            "index": true
+          },
+          "seq": {
+            "kind": "number",
+            "source": {
+              "of": "events",
+              "field": "seq"
+            }
+          },
+          "at": {
+            "kind": "date",
+            "source": {
+              "of": "events",
+              "field": "at"
+            }
+          },
+          "time": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "time"
+            }
+          },
+          "stage": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "stage"
+            }
+          },
+          "title": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "title"
+            }
+          },
+          "detail": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "detail"
+            }
+          },
+          "provider": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "provider"
+            }
+          },
+          "agent": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "agent"
+            }
+          },
+          "model": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "model"
+            }
+          },
+          "state": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "state"
+            }
+          },
+          "link": {
+            "kind": "string",
+            "source": {
+              "of": "events",
+              "field": "link"
+            }
+          }
+        },
+        "sources": {
+          "events": {
+            "connector": "script",
+            "scriptId": "<SYNC_SCRIPT_ID>",
+            "joinKey": "eventKey",
+            "args": {
+              "model": "event"
+            }
+          }
+        }
+      },
+      "stats": {
+        "columns": {
+          "statKey": {
+            "kind": "string",
+            "index": true
+          },
+          "openIncidents": {
+            "kind": "number",
+            "source": {
+              "of": "summary",
+              "field": "openIncidents"
+            }
+          },
+          "openNote": {
+            "kind": "string",
+            "source": {
+              "of": "summary",
+              "field": "openNote"
+            }
+          },
+          "incidents": {
+            "kind": "number",
+            "source": {
+              "of": "summary",
+              "field": "incidents"
+            }
+          },
+          "medianTtrcMs": {
+            "kind": "number",
+            "source": {
+              "of": "summary",
+              "field": "medianTtrcMs"
+            }
+          },
+          "medianTtrc": {
+            "kind": "string",
+            "source": {
+              "of": "summary",
+              "field": "medianTtrc"
+            }
+          },
+          "ttrcNote": {
+            "kind": "string",
+            "source": {
+              "of": "summary",
+              "field": "ttrcNote"
+            }
+          },
+          "ttrcSample": {
+            "kind": "number",
+            "source": {
+              "of": "summary",
+              "field": "ttrcSample"
+            }
+          },
+          "failoversWeek": {
+            "kind": "number",
+            "source": {
+              "of": "summary",
+              "field": "failoversWeek"
+            }
+          },
+          "failoverNote": {
+            "kind": "string",
+            "source": {
+              "of": "summary",
+              "field": "failoverNote"
+            }
+          }
+        },
+        "sources": {
+          "summary": {
+            "connector": "script",
+            "scriptId": "<SYNC_SCRIPT_ID>",
+            "joinKey": "statKey",
+            "args": {
+              "model": "stats"
+            }
+          }
+        }
+      }
+    },
+    "queries": {
+      "incidents": {
+        "model": "incident",
+        "sort": {
+          "column": "alertAt",
+          "dir": "desc"
+        },
+        "limit": 200
+      },
+      "pendingApprovals": {
+        "model": "incident",
+        "filter": {
+          "status": "Awaiting approval"
+        },
+        "sort": {
+          "column": "alertAt",
+          "dir": "desc"
+        },
+        "limit": 50
+      },
+      "incidentDetail": {
+        "model": "incident",
+        "filter": {
+          "runId": {
+            "$param": "runId"
+          }
+        },
+        "limit": 1
+      },
+      "incidentEvents": {
+        "model": "event",
+        "filter": {
+          "runId": {
+            "$param": "runId"
+          }
+        },
+        "sort": {
+          "column": "seq",
+          "dir": "asc"
+        },
+        "limit": 100
+      },
+      "stats": {
+        "model": "stats",
+        "filter": {
+          "statKey": "summary"
+        },
+        "limit": 1
+      }
+    },
+    "actions": {
+      "refresh": {
+        "kind": "sync"
+      }
+    },
+    "pages": {
+      "main": {
+        "title": "Open Oncall",
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Stack",
+            "props": {
+              "gap": "lg"
+            },
+            "children": ["header", "metrics", "approvalsSection", "incidentsSection"]
+          },
+          "header": {
+            "type": "Stack",
+            "props": {
+              "direction": "row",
+              "justify": "between",
+              "align": "center",
+              "collapseBelow": "sm",
+              "gap": "md"
+            },
+            "children": ["brand", "refreshBtn"]
+          },
+          "brand": {
+            "type": "Stack",
+            "props": {
+              "gap": "xs"
+            },
+            "children": ["logo", "motto"]
+          },
+          "logo": {
+            "type": "Markdown",
+            "props": {
+              "content": "<img src=\"https://docs.agent-swarm.dev/playbooks/open-oncall/open-oncall-lockup-600.png\" width=\"300\" height=\"81\" alt=\"Open Oncall, an Agent Swarm workflow\">"
+            }
+          },
+          "motto": {
+            "type": "Text",
+            "props": {
+              "content": "Sleep better without relying on a single provider. Alerts from PagerDuty, Datadog, Grafana, Opsgenie, Sentry or any webhook: the swarm finds the root cause, you approve the fix.",
+              "tone": "muted"
+            }
+          },
+          "refreshBtn": {
+            "type": "Button",
+            "props": {
+              "label": "Refresh",
+              "variant": "outline",
+              "icon": "refresh-cw",
+              "busyWith": "refresh",
+              "successLabel": "Up to date",
+              "shortcut": "r"
+            },
+            "on": {
+              "press": [
+                {
+                  "action": "app.action",
+                  "params": {
+                    "name": "refresh"
+                  }
+                }
+              ]
+            }
+          },
+          "metrics": {
+            "type": "Grid",
+            "props": {
+              "columns": 3,
+              "gap": "md"
+            },
+            "children": ["mOpen", "mTtrc", "mFailover"]
+          },
+          "mOpen": {
+            "type": "Metric",
+            "props": {
+              "label": "Open incidents",
+              "value": {
+                "$state": "/queries/stats/data/0/openIncidents"
+              },
+              "detail": {
+                "$state": "/queries/stats/data/0/openNote"
+              },
+              "icon": "alert-triangle",
+              "tone": "error",
+              "loading": {
+                "$state": "/queries/stats/loading"
+              }
+            }
+          },
+          "mTtrc": {
+            "type": "Metric",
+            "props": {
+              "label": "Median time to root cause",
+              "value": {
+                "$state": "/queries/stats/data/0/medianTtrc"
+              },
+              "detail": {
+                "$state": "/queries/stats/data/0/ttrcNote"
+              },
+              "icon": "clock",
+              "tone": "info",
+              "info": "From the moment the alert lands to the posted root cause, across every incident Open Oncall diagnosed.",
+              "loading": {
+                "$state": "/queries/stats/loading"
+              }
+            }
+          },
+          "mFailover": {
+            "type": "Metric",
+            "props": {
+              "label": "Failovers this week",
+              "value": {
+                "$state": "/queries/stats/data/0/failoversWeek"
+              },
+              "detail": {
+                "$state": "/queries/stats/data/0/failoverNote"
+              },
+              "icon": "zap",
+              "tone": "warning",
+              "info": "Steps that failed on one provider and were rerouted to another harness (claude, then codex, then opencode) in the last 7 days.",
+              "loading": {
+                "$state": "/queries/stats/loading"
+              }
+            }
+          },
+          "approvalsSection": {
+            "type": "Section",
+            "props": {
+              "title": "Pending approvals",
+              "description": "The same requests the Slack thread links to. One answer resolves both."
+            },
+            "children": ["approvalsTable"]
+          },
+          "approvalsTable": {
+            "type": "Table",
+            "props": {
+              "data": {
+                "$state": "/queries/pendingApprovals/data"
+              },
+              "loading": {
+                "$state": "/queries/pendingApprovals/loading"
+              },
+              "error": {
+                "$state": "/queries/pendingApprovals/error"
+              },
+              "columns": [
+                {
+                  "key": "incidentRef",
+                  "label": "Incident",
+                  "width": 150
+                },
+                {
+                  "key": "summary",
+                  "label": "Root cause",
+                  "truncate": "end",
+                  "tooltip": "proposedFix"
+                },
+                {
+                  "key": "severity",
+                  "label": "Severity",
+                  "kind": "badge",
+                  "tones": {
+                    "SEV1": "error",
+                    "P1": "error",
+                    "SEV2": "warning",
+                    "P2": "warning",
+                    "SEV3": "info",
+                    "P3": "info"
+                  },
+                  "width": 100
+                },
+                {
+                  "key": "investigatedBy",
+                  "label": "Diagnosed by",
+                  "width": 230
+                },
+                {
+                  "key": "approvalExpiresAt",
+                  "label": "Expires",
+                  "kind": "relative",
+                  "width": 120
+                }
+              ],
+              "emptyState": {
+                "icon": "circle-check",
+                "title": "Nothing waiting on you",
+                "body": "New root causes show up here with Approve and Reject."
+              },
+              "onRowClick": [
+                {
+                  "action": "app.navigate",
+                  "params": {
+                    "page": "incident",
+                    "params": {
+                      "runId": {
+                        "$row": "runId"
+                      }
+                    }
+                  }
+                }
+              ],
+              "mobileFields": {
+                "title": "incidentRef",
+                "subtitle": "summary",
+                "meta": ["investigatedBy"],
+                "status": "severity"
+              },
+              "rowActions": [
+                {
+                  "label": "Approve",
+                  "icon": "check",
+                  "variant": "default",
+                  "confirm": {
+                    "title": "Approve the fix?",
+                    "description": "The swarm opens one fix PR on the incident's repo. Nothing is merged.",
+                    "confirmLabel": "Approve"
+                  },
+                  "actions": [
+                    {
+                      "action": "swarm.call",
+                      "params": {
+                        "method": "POST",
+                        "endpoint": {
+                          "$row": "respondPath"
+                        },
+                        "body": {
+                          "responses": {
+                            "approve": {
+                              "approved": true
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "action": "app.action",
+                      "params": {
+                        "name": "refresh"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "label": "Reject",
+                  "icon": "x",
+                  "variant": "destructive-outline",
+                  "confirm": {
+                    "title": "Reject the fix?",
+                    "description": "No PR is opened. The incident is handed to a human and the Slack thread says so.",
+                    "confirmLabel": "Reject"
+                  },
+                  "actions": [
+                    {
+                      "action": "swarm.call",
+                      "params": {
+                        "method": "POST",
+                        "endpoint": {
+                          "$row": "respondPath"
+                        },
+                        "body": {
+                          "responses": {
+                            "approve": {
+                              "approved": false
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "action": "app.action",
+                      "params": {
+                        "name": "refresh"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "incidentsSection": {
+            "type": "Section",
+            "props": {
+              "title": "Incidents"
+            },
+            "children": ["filters", "incidentsTable"]
+          },
+          "filters": {
+            "type": "Stack",
+            "props": {
+              "direction": "row",
+              "gap": "sm",
+              "align": "center",
+              "collapseBelow": "md"
+            },
+            "children": ["search", "statusChips"]
+          },
+          "search": {
+            "type": "SearchInput",
+            "props": {
+              "id": "q",
+              "placeholder": "Search alerts, services, root causes",
+              "shortcut": "/"
+            }
+          },
+          "statusChips": {
+            "type": "Chips",
+            "props": {
+              "id": "statusFilter",
+              "options": [
+                "Investigating",
+                "Awaiting approval",
+                "Fixing",
+                "Resolved",
+                "Handed to a human"
+              ],
+              "multiple": true,
+              "label": "Status"
+            }
+          },
+          "incidentsTable": {
+            "type": "Table",
+            "props": {
+              "data": {
+                "$state": "/queries/incidents/data"
+              },
+              "loading": {
+                "$state": "/queries/incidents/loading"
+              },
+              "error": {
+                "$state": "/queries/incidents/error"
+              },
+              "search": {
+                "$state": "/ui/q/value"
+              },
+              "filters": {
+                "status": {
+                  "$state": "/ui/statusFilter/value"
+                }
+              },
+              "columns": [
+                {
+                  "key": "incidentRef",
+                  "label": "Incident",
+                  "width": 150,
+                  "pinned": "left"
+                },
+                {
+                  "key": "title",
+                  "label": "Alert",
+                  "truncate": "end",
+                  "tooltip": "title"
+                },
+                {
+                  "key": "severity",
+                  "label": "Severity",
+                  "kind": "badge",
+                  "tones": {
+                    "SEV1": "error",
+                    "P1": "error",
+                    "SEV2": "warning",
+                    "P2": "warning",
+                    "SEV3": "info",
+                    "P3": "info"
+                  },
+                  "width": 100
+                },
+                {
+                  "key": "status",
+                  "label": "Status",
+                  "kind": "status",
+                  "tones": {
+                    "Investigating": "info",
+                    "Awaiting approval": "pending",
+                    "Fixing": "active",
+                    "Resolved": "success",
+                    "Handed to a human": "neutral"
+                  },
+                  "width": 170
+                },
+                {
+                  "key": "failoverShort",
+                  "label": "Failover",
+                  "tooltip": "failover",
+                  "width": 170
+                },
+                {
+                  "key": "ttrc",
+                  "label": "Root cause in",
+                  "width": 120,
+                  "align": "end"
+                },
+                {
+                  "key": "alertAt",
+                  "label": "Age",
+                  "kind": "relative",
+                  "width": 110
+                }
+              ],
+              "emptyState": {
+                "icon": "circle-check",
+                "title": "No incidents yet",
+                "body": "Point a PagerDuty webhook (or any alert source) at the open-oncall workflow."
+              },
+              "onRowClick": [
+                {
+                  "action": "app.navigate",
+                  "params": {
+                    "page": "incident",
+                    "params": {
+                      "runId": {
+                        "$row": "runId"
+                      }
+                    }
+                  }
+                }
+              ],
+              "mobileFields": {
+                "title": "incidentRef",
+                "subtitle": "title",
+                "meta": ["ttrc"],
+                "status": "status"
+              }
+            }
+          }
+        }
+      },
+      "incident": {
+        "title": "Incident",
+        "params": {
+          "runId": {
+            "kind": "string",
+            "required": true
+          }
+        },
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Stack",
+            "props": {
+              "gap": "lg"
+            },
+            "children": ["head", "failoverAlert", "approvalCard", "body", "evidenceSection"]
+          },
+          "head": {
+            "type": "Stack",
+            "props": {
+              "gap": "sm"
+            },
+            "children": ["headTitle", "headBadges"]
+          },
+          "headTitle": {
+            "type": "Heading",
+            "props": {
+              "text": {
+                "$state": "/queries/incidentDetail/data/0/title"
+              },
+              "level": "h2"
+            }
+          },
+          "headBadges": {
+            "type": "Stack",
+            "props": {
+              "direction": "row",
+              "gap": "sm",
+              "align": "center",
+              "wrap": true
+            },
+            "children": ["bRef", "bStatus", "bSev", "bService", "bAge"]
+          },
+          "bRef": {
+            "type": "Badge",
+            "props": {
+              "text": {
+                "$state": "/queries/incidentDetail/data/0/incidentRef"
+              },
+              "icon": "flag",
+              "variant": "status"
+            }
+          },
+          "bStatus": {
+            "type": "Badge",
+            "props": {
+              "text": {
+                "$state": "/queries/incidentDetail/data/0/status"
+              },
+              "tone": {
+                "$state": "/queries/incidentDetail/data/0/statusTone"
+              },
+              "variant": "status"
+            }
+          },
+          "bSev": {
+            "type": "Badge",
+            "props": {
+              "text": {
+                "$state": "/queries/incidentDetail/data/0/severity"
+              },
+              "tone": {
+                "$state": "/queries/incidentDetail/data/0/sevTone"
+              }
+            }
+          },
+          "bService": {
+            "type": "Badge",
+            "props": {
+              "text": {
+                "$state": "/queries/incidentDetail/data/0/repo"
+              },
+              "icon": "github",
+              "variant": "status"
+            }
+          },
+          "bAge": {
+            "type": "Badge",
+            "props": {
+              "text": {
+                "$state": "/queries/incidentDetail/data/0/ttrc"
+              },
+              "icon": "clock",
+              "variant": "status",
+              "hint": "Time from alert to root cause"
+            }
+          },
+          "failoverAlert": {
+            "type": "Alert",
+            "visible": {
+              "$state": "/queries/incidentDetail/data/0/failovers",
+              "gt": 0
+            },
+            "props": {
+              "title": "Provider failover",
+              "message": {
+                "$state": "/queries/incidentDetail/data/0/failover"
+              },
+              "tone": "warning",
+              "icon": "zap"
+            }
+          },
+          "approvalCard": {
+            "type": "Card",
+            "visible": {
+              "$state": "/queries/incidentDetail/data/0/approvalState",
+              "eq": "pending"
+            },
+            "props": {
+              "title": "Waiting for your approval",
+              "description": {
+                "$state": "/queries/incidentDetail/data/0/approvalAsk"
+              }
+            },
+            "children": ["approvalButtons"]
+          },
+          "approvalButtons": {
+            "type": "Stack",
+            "props": {
+              "direction": "row",
+              "gap": "sm"
+            },
+            "children": ["approveBtn", "rejectBtn"]
+          },
+          "approveBtn": {
+            "type": "Button",
+            "props": {
+              "label": "Approve fix",
+              "icon": "check",
+              "busyWith": "refresh",
+              "successLabel": "Approved"
+            },
+            "on": {
+              "press": [
+                {
+                  "action": "swarm.call",
+                  "params": {
+                    "method": "POST",
+                    "endpoint": {
+                      "$state": "/queries/incidentDetail/data/0/respondPath"
+                    },
+                    "body": {
+                      "responses": {
+                        "approve": {
+                          "approved": true
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "action": "app.action",
+                  "params": {
+                    "name": "refresh"
+                  }
+                }
+              ]
+            }
+          },
+          "rejectBtn": {
+            "type": "Button",
+            "props": {
+              "label": "Reject, hand to a human",
+              "icon": "x",
+              "variant": "destructive-outline"
+            },
+            "on": {
+              "press": [
+                {
+                  "action": "swarm.call",
+                  "params": {
+                    "method": "POST",
+                    "endpoint": {
+                      "$state": "/queries/incidentDetail/data/0/respondPath"
+                    },
+                    "body": {
+                      "responses": {
+                        "approve": {
+                          "approved": false
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "action": "app.action",
+                  "params": {
+                    "name": "refresh"
+                  }
+                }
+              ]
+            }
+          },
+          "body": {
+            "type": "Split",
+            "props": {
+              "ratio": "2-1",
+              "gap": "lg",
+              "collapseBelow": "lg"
+            },
+            "children": ["timelineCard", "side"]
+          },
+          "timelineCard": {
+            "type": "Card",
+            "props": {
+              "title": "Timeline",
+              "description": "Alert to resolution. Each step names the provider that ran it."
+            },
+            "children": ["timeline"]
+          },
+          "timeline": {
+            "type": "Table",
+            "props": {
+              "data": {
+                "$state": "/queries/incidentEvents/data"
+              },
+              "loading": {
+                "$state": "/queries/incidentEvents/loading"
+              },
+              "density": "compact",
+              "pagination": false,
+              "columns": [
+                {
+                  "key": "time",
+                  "label": "Time (Madrid)",
+                  "width": 120,
+                  "tooltip": "at"
+                },
+                {
+                  "key": "stage",
+                  "label": "Step",
+                  "width": 110
+                },
+                {
+                  "key": "title",
+                  "label": "What happened",
+                  "truncate": "end",
+                  "tooltip": "detail"
+                },
+                {
+                  "key": "provider",
+                  "label": "Provider",
+                  "kind": "badge",
+                  "width": 100
+                },
+                {
+                  "key": "agent",
+                  "label": "Agent",
+                  "width": 130
+                },
+                {
+                  "key": "state",
+                  "label": "",
+                  "kind": "status",
+                  "tones": {
+                    "ok": "success",
+                    "fired": "error",
+                    "failover": "warning",
+                    "failed": "error",
+                    "waiting": "pending",
+                    "running": "active"
+                  },
+                  "width": 100
+                }
+              ],
+              "mobileFields": {
+                "title": "title",
+                "subtitle": "stage",
+                "meta": ["provider", "agent"],
+                "status": "state"
+              },
+              "emptyMessage": "No steps recorded yet."
+            }
+          },
+          "side": {
+            "type": "Stack",
+            "props": {
+              "gap": "md"
+            },
+            "children": ["rcCard", "linksCard"]
+          },
+          "rcCard": {
+            "type": "Card",
+            "props": {
+              "title": "Root cause"
+            },
+            "children": ["rcList"]
+          },
+          "rcList": {
+            "type": "DetailList",
+            "props": {
+              "data": {
+                "$state": "/queries/incidentDetail/data/0"
+              },
+              "loading": {
+                "$state": "/queries/incidentDetail/loading"
+              },
+              "columns": 1,
+              "fields": [
+                {
+                  "key": "summary",
+                  "label": "Summary"
+                },
+                {
+                  "key": "rootCause",
+                  "label": "Root cause"
+                },
+                {
+                  "key": "proposedFix",
+                  "label": "Proposed fix"
+                },
+                {
+                  "key": "suspectCommit",
+                  "label": "Suspect commit",
+                  "kind": "copy"
+                },
+                {
+                  "key": "confidence",
+                  "label": "Confidence"
+                },
+                {
+                  "key": "investigatedBy",
+                  "label": "Diagnosed by"
+                },
+                {
+                  "key": "fixedBy",
+                  "label": "Fixed by"
+                }
+              ]
+            }
+          },
+          "linksCard": {
+            "type": "Card",
+            "props": {
+              "title": "Links"
+            },
+            "children": ["links"]
+          },
+          "links": {
+            "type": "Markdown",
+            "props": {
+              "content": {
+                "$state": "/queries/incidentDetail/data/0/linksMd"
+              }
+            }
+          },
+          "evidenceSection": {
+            "type": "Section",
+            "props": {
+              "title": "Evidence",
+              "collapsible": true,
+              "defaultOpen": false
+            },
+            "children": ["evidence"]
+          },
+          "evidence": {
+            "type": "Markdown",
+            "props": {
+              "content": {
+                "$state": "/queries/incidentDetail/data/0/evidence"
+              }
+            }
+          }
+        }
+      }
+    },
+    "defaultPage": "main",
+    "theme": "hive"
+  }
+}

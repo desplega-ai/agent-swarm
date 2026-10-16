@@ -7,7 +7,12 @@ import { createServer } from "@/server";
 import { parseEnvFlag } from "@/utils/env-flag";
 import { getRequestAuth } from "@/utils/request-auth-context";
 import { resolveScriptsOnlyMode } from "@/utils/scripts-only-mode";
-import { parseTaskToolManifest, selectTaskTools } from "@/utils/task-tool-manifest";
+import {
+  CHAT_TASK_ONLY_TOOLS,
+  isChatSdkTask,
+  parseTaskToolManifest,
+  selectTaskTools,
+} from "@/utils/task-tool-manifest";
 
 export type McpTransportActivity = Record<string, number>;
 export type McpSessionAgents = Record<string, string>;
@@ -218,18 +223,22 @@ export async function handleMcp(
         true,
       );
       let preloadedTools: string[] = [];
+      const sourceTaskId = headerValue(req.headers["x-source-task-id"]);
+      const sourceTask = sourceTaskId ? await getTaskById(sourceTaskId) : undefined;
+      // A session bound to a non-chat task never sees chat-reply. Without the
+      // header the tool stays, and resolves the agent's current task itself.
+      const excludedTools =
+        sourceTask && !isChatSdkTask(sourceTask) ? [...CHAT_TASK_ONLY_TOOLS] : [];
       if (preloadEnabled) {
-        const taskId = headerValue(req.headers["x-source-task-id"]);
-        const task = taskId ? await getTaskById(taskId) : undefined;
         // Never select a manifest using another agent's task. Session-token
         // identity is also checked above, before any MCP session is created.
-        if (task?.agentId === agentId) {
+        if (sourceTask?.agentId === agentId) {
           const manifestValue =
             configs.find((config) => config.key === "TASK_TOOL_MANIFESTS")?.value ??
             process.env.TASK_TOOL_MANIFESTS ??
             "{}";
           try {
-            preloadedTools = selectTaskTools(parseTaskToolManifest(manifestValue), task);
+            preloadedTools = selectTaskTools(parseTaskToolManifest(manifestValue), sourceTask);
           } catch {
             // An invalid deployment value must not prevent tool discovery.
             // Avoid logging its contents, which may contain misfiled secrets.
@@ -239,6 +248,7 @@ export async function handleMcp(
       }
       const server = await createServer({
         preloadedTools,
+        excludedTools,
         // Agent row, then global row, then deployment env. A blank agent row
         // resolves to "unset" for that agent.
         enabledTools:

@@ -326,6 +326,8 @@ declare module "swarm-sdk" {
       types?: Array<"public" | "private" | "dm" | "mpim">;
       limit?: number;
     }): Promise<unknown>;
+    // --- chat sdk ---
+    chat_readThread(args: { threadId: string; limit?: number }): Promise<unknown>;
     // --- messaging ---
     message_read(args?: {
       channel?: string;
@@ -469,6 +471,30 @@ declare module "swarm-sdk" {
     slack_downloadFile(args: { url: string }): Promise<unknown>;
     slack_delete(args: { channelId: string; messageTs: string }): Promise<unknown>;
     slack_update(args: { channelId: string; messageTs: string; message: string }): Promise<unknown>;
+
+    // --- write: chat sdk ---
+    chat_reply(args: { text: string }): Promise<unknown>;
+    chat_post(args: {
+      adapter: "telegram" | "slack" | "discord" | "teams";
+      threadId?: string;
+      channelId?: string;
+      text: string;
+    }): Promise<unknown>;
+    chat_openDm(args: {
+      adapter: "telegram" | "slack" | "discord" | "teams";
+      userId: string;
+    }): Promise<unknown>;
+    chat_registerChannel(args: {
+      adapter: "telegram" | "slack" | "discord" | "teams";
+      channelId: string;
+      agentId?: string;
+      workflowId?: string;
+      name?: string;
+    }): Promise<unknown>;
+    chat_unregisterChannel(args: {
+      adapter: "telegram" | "slack" | "discord" | "teams";
+      channelId: string;
+    }): Promise<unknown>;
 
     // --- write: messaging (internal) ---
     message_post(args: { channel?: string; content: string; to?: string }): Promise<unknown>;

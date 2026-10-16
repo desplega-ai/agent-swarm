@@ -36,6 +36,8 @@ import brainstormingConfig from "../../../templates/skills/brainstorming/config.
 import brainstormingContent from "../../../templates/skills/brainstorming/content.md" with {
   type: "text",
 };
+import chatSdkConfig from "../../../templates/skills/chat-sdk/config.json" with { type: "text" };
+import chatSdkContent from "../../../templates/skills/chat-sdk/content.md" with { type: "text" };
 import codeQualityConfig from "../../../templates/skills/code-quality/config.json" with {
   type: "text",
 };
@@ -92,6 +94,12 @@ import downloadTaskAttachmentConfig from "../../../templates/skills/download-tas
   type: "text",
 };
 import downloadTaskAttachmentContent from "../../../templates/skills/download-task-attachment/content.md" with {
+  type: "text",
+};
+import emailDomainHealthConfig from "../../../templates/skills/email-domain-health/config.json" with {
+  type: "text",
+};
+import emailDomainHealthContent from "../../../templates/skills/email-domain-health/content.md" with {
   type: "text",
 };
 import engineeringStandardsConfig from "../../../templates/skills/engineering-standards/config.json" with {
@@ -327,6 +335,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
   { config: brainstormingConfig, body: brainstormingContent },
+  { config: chatSdkConfig, body: chatSdkContent },
   { config: codeQualityConfig, body: codeQualityContent },
   { config: codeReviewingConfig, body: codeReviewingContent },
   { config: commsConfig, body: commsContent },
@@ -338,6 +347,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: delegateWorkConfig, body: delegateWorkContent },
   { config: designDocsConfig, body: designDocsContent },
   { config: downloadTaskAttachmentConfig, body: downloadTaskAttachmentContent },
+  { config: emailDomainHealthConfig, body: emailDomainHealthContent },
   { config: engineeringStandardsConfig, body: engineeringStandardsContent },
   { config: heartbeatRunbookConfig, body: heartbeatRunbookContent },
   { config: implementingConfig, body: implementingContent },

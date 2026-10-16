@@ -3,6 +3,8 @@
 // behavior that is uneconomical to express through a server round-trip.
 
 import { describe, expect, test } from "bun:test";
+import { loadModelsDevCache } from "../be/modelsdev-cache";
+import { buildModelsDevSeedRows } from "../be/seed-pricing";
 import { recomputeSessionCost } from "../http/session-cost-recompute";
 import type { PricingProvider, PricingTokenClass } from "../types";
 
@@ -213,5 +215,49 @@ describe("recomputeSessionCost — pure branch behavior", () => {
       lookupFrom(OPENCODE_DEEPSEEK),
     );
     expect(result.costSource).toBe("pricing-table");
+  });
+});
+
+describe("nan and helmcode sessions price at $0 from the seeded table", () => {
+  // Rows projected from the vendored snapshot, exactly as the boot seeder and
+  // the runtime refresh insert them.
+  const cache = loadModelsDevCache();
+  const rows = cache ? buildModelsDevSeedRows(cache) : [];
+  const book: RateBook = Object.fromEntries(
+    rows.map((row) => [`${row.provider}:${row.model}:${row.tokenClass}`, row.pricePerMillionUsd]),
+  );
+
+  test("pi on nan/glm5.3-flash and opencode on helmcode/qwen3.6 record pricing-table, total 0", async () => {
+    for (const [provider, model] of [
+      ["pi", "nan/glm5.3-flash"],
+      ["opencode", "helmcode/qwen3.6"],
+    ] as const) {
+      const result = await recomputeSessionCost(
+        {
+          ...BASE,
+          provider,
+          model,
+          harnessCostUsd: 0,
+          inputTokens: 50_000,
+          outputTokens: 2_000,
+          cacheReadTokens: 10_000,
+        },
+        lookupFrom(book),
+      );
+      expect(result.costSource).toBe("pricing-table");
+      expect(result.totalCostUsd).toBe(0);
+    }
+  });
+
+  test("nan/qwen3.6 and helmcode/qwen3.6 are separate pricing keys", () => {
+    for (const harness of ["pi", "opencode"]) {
+      const keys = new Set(
+        rows
+          .filter((row) => row.provider === harness && row.model.endsWith("/qwen3.6"))
+          .map((row) => row.model),
+      );
+      expect(keys.has("nan/qwen3.6")).toBe(true);
+      expect(keys.has("helmcode/qwen3.6")).toBe(true);
+    }
   });
 });

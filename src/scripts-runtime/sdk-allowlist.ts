@@ -105,6 +105,14 @@ export const SDK_TOOL_NAME_MAP = {
   slack_delete: "slack-delete", // external: mutates Slack, destructive
   slack_update: "slack-update", // external: mutates Slack
 
+  // ── chat sdk ──
+  chat_reply: "chat-reply", // external: sends to the task's chat thread
+  chat_post: "chat-post", // external: sends to a chat platform
+  chat_openDm: "chat-open-dm", // external: opens a platform DM
+  chat_readThread: "chat-read-thread",
+  chat_registerChannel: "register-chat-channel",
+  chat_unregisterChannel: "unregister-chat-channel", // destructive
+
   // ── messaging (internal) ──
   message_read: "read-messages",
   message_post: "post-message",

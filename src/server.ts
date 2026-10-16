@@ -6,6 +6,7 @@ import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { isSteeringEnabled } from "./be/steering";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
+import { isChatSdkEnabled } from "./integrations/chat-sdk/config";
 import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
 import { getSlackConfiguration } from "./slack/config";
@@ -21,6 +22,10 @@ import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
 import { registerCancelApprovalRequestTool } from "./tools/cancel-approval-request";
 import { registerCancelTaskTool } from "./tools/cancel-task";
+import { registerChatOpenDmTool } from "./tools/chat-open-dm";
+import { registerChatPostTool } from "./tools/chat-post";
+import { registerChatReadThreadTool } from "./tools/chat-read-thread";
+import { registerChatReplyTool } from "./tools/chat-reply";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
@@ -91,6 +96,10 @@ import {
 } from "./tools/prompt-templates";
 import { registerReadMessagesTool } from "./tools/read-messages";
 import { registerRegisterAgentmailInboxTool } from "./tools/register-agentmail-inbox";
+import {
+  registerRegisterChatChannelTool,
+  registerUnregisterChatChannelTool,
+} from "./tools/register-chat-channel";
 import {
   registerRegisterKapsoNumberTool,
   registerUnregisterKapsoNumberTool,
@@ -226,6 +235,7 @@ export const ALL_CAPABILITIES = [
   "repo",
   "agentmail",
   "kapso",
+  "chat-sdk",
   "swarm-x",
 ] as const;
 
@@ -257,6 +267,7 @@ const DEFAULT_CAPABILITIES: string = [
   // "swarm-x",
   // "agentmail",
   // "kapso",
+  // "chat-sdk", (added by getEnabledCapabilities when CHAT_SDK_ENABLED is true)
 ].join(",");
 
 // Note: unknown names are kept (they never match hasCapability); workers
@@ -281,12 +292,16 @@ export function getEnabledCapabilities(): CAPABILITIES_T[] {
   // Only known flags: the register response validates against ALL_CAPABILITIES,
   // so a retired name still listed in CAPABILITIES (e.g. `services`) would
   // otherwise turn every agent registration into a 500.
-  const capabilities = Array.from(getCapabilities()).filter((capability) =>
-    KNOWN_CAPABILITIES.has(capability),
+  const capabilities: CAPABILITIES_T[] = Array.from(getCapabilities()).filter(
+    (capability) => KNOWN_CAPABILITIES.has(capability) && capability !== "chat-sdk",
   );
+  // The Chat SDK channel follows CHAT_SDK_ENABLED, not the CAPABILITIES list.
+  if (isChatSdkEnabled()) capabilities.push("chat-sdk");
   // Phase 1 has no HTTP receiver. Do not advertise usable Slack tools to
-  // workers when HTTP (or an invalid transport) was selected.
-  return getSlackConfiguration().mode === "socket"
+  // workers when HTTP (or an invalid transport) was selected, or when the
+  // built-in Slack app is off (SLACK_DISABLE, required by the Chat SDK Slack adapter).
+  const slack = getSlackConfiguration();
+  return slack.mode === "socket" && !slack.disabled
     ? capabilities
     : capabilities.filter((capability) => capability !== "slack");
 }
@@ -346,6 +361,13 @@ function applyToolAllowlist(server: McpServer, allowlist: readonly string[]): vo
   }
 }
 
+function removeTools(server: McpServer, names: readonly string[]): void {
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- the MCP SDK keeps its tool registry private.
+  const tools = (server as unknown as { _registeredTools: Record<string, { remove(): void }> })
+    ._registeredTools;
+  for (const name of names) tools[name]?.remove();
+}
+
 export async function createServer(
   opts: {
     scriptsOnly?: boolean;
@@ -353,6 +375,8 @@ export async function createServer(
     preloadedTools?: readonly string[];
     /** Raw SWARM_ENABLED_TOOLS value for this session; defaults to the env. */
     enabledTools?: string;
+    /** Tool names removed from this session after registration (task-context filters). */
+    excludedTools?: readonly string[];
   } = {},
 ) {
   // Reload env
@@ -370,8 +394,12 @@ export async function createServer(
   // fullSurface to register every tool group regardless of CAPABILITIES.
   // An allowlist also registers every group, then prunes to the listed names.
   // This shadows the module-level hasCapability for the registrations below.
+  // `chat-sdk` follows CHAT_SDK_ENABLED (as in getEnabledCapabilities), not
+  // the CAPABILITIES list.
   const hasCapability = (cap: CAPABILITIES_T): boolean =>
-    opts.fullSurface === true || toolAllowlist !== undefined || getCapabilities().has(cap);
+    opts.fullSurface === true ||
+    toolAllowlist !== undefined ||
+    (cap === "chat-sdk" ? isChatSdkEnabled() : getCapabilities().has(cap));
 
   // Initialize database with WAL mode
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
@@ -685,6 +713,16 @@ export async function createServer(
     registerReplyWhatsappMessageTool(server);
   }
 
+  // Chat SDK capability - Telegram/Slack/Discord/Teams through the Chat SDK channel (reply, post, DM, read, channel routes)
+  if (hasCapability("chat-sdk")) {
+    registerChatReplyTool(server);
+    registerChatPostTool(server);
+    registerChatOpenDmTool(server);
+    registerChatReadThreadTool(server);
+    registerRegisterChatChannelTool(server);
+    registerUnregisterChatChannelTool(server);
+  }
+
   // Swarm-x capability - external command routes mirroring the `agent-swarm x ...` CLI surface
   if (hasCapability("swarm-x")) {
     registerSwarmXTool(server);
@@ -702,6 +740,9 @@ export async function createServer(
   }
 
   if (toolAllowlist) applyToolAllowlist(server, toolAllowlist);
+  if (opts.fullSurface !== true && opts.excludedTools?.length) {
+    removeTools(server, opts.excludedTools);
+  }
 
   return server;
 }

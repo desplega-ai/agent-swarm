@@ -19,6 +19,7 @@
  * admin route (`POST /api/pricing`) — we don't overwrite seed rows.
  */
 
+import { openAICompatibleProviderIds } from "@desplega/model-catalog";
 import type { PricingProvider, PricingTokenClass } from "../types";
 import { getDb } from "./db";
 import {
@@ -98,8 +99,9 @@ const ANTHROPIC_SHORTNAME_TO_MODELSDEV: Record<string, string> = {
 const ANTHROPIC_SHORTNAME_PRICING_FALLBACKS: Record<string, ModelsDevCostBlock> = {
   // https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-09-22)
   "claude-opus-5-5": { input: 4, output: 20, cache_read: 0.2, cache_write: 5 },
-  // https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-09-28)
-  "claude-sonnet-5-5": { input: 2, output: 10, cache_read: 0.2, cache_write: 2.5 },
+  // https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-10-15):
+  // cache hits on Sonnet 5.5 cost 0.05x input, not the usual 0.1x.
+  "claude-sonnet-5-5": { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 },
   "claude-fable-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
   "claude-mythos-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
 };
@@ -364,6 +366,21 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
       // Also store under the full openrouter id so the same row resolves
       // whether the caller passes "google/..." or the stripped name.
       add(id, projectCostBlock("gemini", id, model.cost));
+    }
+  }
+
+  // ---- OpenAI-compatible registry providers ($0 flat-rate subscriptions) --
+  // pi and opencode run these as `<provider>/<id>`. The models.dev `nan`
+  // section and the registry-synthesized `helmcode` section
+  // (`withRegistryCatalogSections`) carry cost {0, 0}, so the sessions price
+  // as `pricing-table` at $0 instead of `unpriced`. The provider prefix stays
+  // in the key: `nan/qwen3.6` and `helmcode/qwen3.6` are separate rows.
+  for (const provider of openAICompatibleProviderIds()) {
+    for (const [id, model] of Object.entries(cache[provider]?.models ?? {})) {
+      if (!model?.cost) continue;
+      const key = `${provider}/${id}`;
+      add(key, projectCostBlock("pi", key, model.cost));
+      add(key, projectCostBlock("opencode", key, model.cost));
     }
   }
 

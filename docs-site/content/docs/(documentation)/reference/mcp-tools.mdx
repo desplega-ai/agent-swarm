@@ -10,13 +10,13 @@ Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools
 Every tool group is gated by a capability flag on the API server, controlled by the `CAPABILITIES` environment variable (or a `CAPABILITIES` global swarm-config entry, which takes precedence at server creation). When unset, the defaults apply:
 
 - **Enabled by default:** `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
-- **Disabled by default:** `messaging` (post/read messages, channels), `services` (background service registry), `prompt-templates`, `swarm-x` (external command routes), `agentmail`, `kapso` (WhatsApp)
+- **Disabled by default:** `messaging` (post/read messages, channels), `prompt-templates`, `swarm-x` (external command routes), `agentmail`, `kapso` (WhatsApp), `chat-sdk` (added automatically when `CHAT_SDK_ENABLED=true`)
 
 Setting `CAPABILITIES` **replaces** the whole list — it is not additive. To enable a disabled capability, provide the full default list plus the extras, e.g. `CAPABILITIES=core,task-pool,...,repo,messaging`. Sections below note when a tool group is disabled by default.
 
 Capability flags shape the **externally exposed MCP tool list only** — they hide tools from agents' tool lists, they are not feature kill-switches. The scripts SDK bridge always builds a full-surface server instance, so scripts keep their full typed SDK (governed by the [scripts SDK allowlist](/docs/guides/scripts-only-mode)) regardless of `CAPABILITIES`. HTTP REST routes are generally not gated either.
 
-Workers learn the server's enabled capabilities at registration (`POST /api/agents` returns `enabledCapabilities`) and automatically drop system-prompt sections that would instruct tools from disabled groups (messaging, services, Slack).
+Workers learn the server's enabled capabilities at registration (`POST /api/agents` returns `enabledCapabilities`) and automatically drop system-prompt sections that would instruct tools from disabled groups (messaging, Slack). The `services` capability was removed with the service registry; a leftover `services` entry in `CAPABILITIES` is ignored.
 
 ## Tool Search & Annotations
 

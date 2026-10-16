@@ -1,7 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
+import { OPENAI_COMPATIBLE_PROVIDERS } from "@desplega/model-catalog";
 import {
   buildCredStatusReport,
   CREDENTIAL_PROVIDER_CHECKERS,
+  checkOpenAICompatibleProvider,
   checkProviderCredentials,
   isBedrockMode,
   isCredCheckDisabled,
@@ -652,6 +654,37 @@ describe("checkOpencodeCredentials", () => {
     ).toBe(true);
   });
 
+  test("strict: nan/* needs NAN_API_KEY or its HELMCODE_API_NAN alias", () => {
+    const env = { MODEL_OVERRIDE: "nan/glm5.3-flash", OPENROUTER_API_KEY: "x" };
+    const missing = checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("NAN_API_KEY");
+    for (const name of ["NAN_API_KEY", "HELMCODE_API_NAN"]) {
+      expect(
+        checkOpencodeCredentials({ ...env, [name]: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+      ).toBe(true);
+    }
+  });
+
+  test("strict: helmcode/* needs HELMCODE_API_KEY, not the NaN alias", () => {
+    const env = { MODEL_OVERRIDE: "helmcode/glm5.3", HELMCODE_API_NAN: "x" };
+    const missing = checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("HELMCODE_API_KEY");
+    expect(
+      checkOpencodeCredentials({ ...env, HELMCODE_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(true);
+  });
+
+  test("permissive: a NaN or Helmcode key alone is enough", () => {
+    for (const name of ["NAN_API_KEY", "HELMCODE_API_NAN", "HELMCODE_API_KEY"]) {
+      expect(checkOpencodeCredentials({ [name]: "x" }, { homeDir: HOME, fs: noFiles }).ready).toBe(
+        true,
+      );
+    }
+  });
+
   test("not ready when nothing is set", () => {
     const status = checkOpencodeCredentials({}, { homeDir: HOME, fs: noFiles });
     expect(status.ready).toBe(false);
@@ -923,6 +956,112 @@ describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
     // acp is credential-free by design: the target process owns its own auth.
     expect(REQUIRED_CRED_VARS_BY_PROVIDER.acp).toEqual([]);
   });
+
+  test("pi and opencode list the NaN (both names) and Helmcode key vars", () => {
+    for (const p of ["pi", "opencode"] as const) {
+      expect(REQUIRED_CRED_VARS_BY_PROVIDER[p]).toEqual(
+        expect.arrayContaining(["NAN_API_KEY", "HELMCODE_API_NAN", "HELMCODE_API_KEY"]),
+      );
+    }
+  });
+});
+
+describe("NaN and Helmcode live probes", () => {
+  const envReady = { ready: true, missing: [], satisfiedBy: "env" as const };
+
+  function fakeProvider(status: number) {
+    const seen: Array<{ path: string; authorization: string | null }> = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        seen.push({
+          path: new URL(req.url).pathname,
+          authorization: req.headers.get("authorization"),
+        });
+        return new Response(status === 200 ? '{"data":[]}' : '{"error":"Invalid API key."}', {
+          status,
+        });
+      },
+    });
+    return { server, seen, baseUrl: `${server.url.toString().replace(/\/$/, "")}/v1` };
+  }
+
+  for (const [name, probe] of [
+    [
+      "nan",
+      (key: string, url: string) =>
+        checkOpenAICompatibleProvider(OPENAI_COMPATIBLE_PROVIDERS.nan, key, url),
+    ],
+    [
+      "helmcode",
+      (key: string, url: string) =>
+        checkOpenAICompatibleProvider(OPENAI_COMPATIBLE_PROVIDERS.helmcode, key, url),
+    ],
+  ] as const) {
+    test(`${name} probe lists models with a Bearer key at the injected base URL`, async () => {
+      const ok = fakeProvider(200);
+      const bad = fakeProvider(401);
+      try {
+        expect(await probe("fixture-key", `${ok.baseUrl}/`)).toMatchObject({ ok: true });
+        expect(ok.seen).toEqual([{ path: "/v1/models", authorization: "Bearer fixture-key" }]);
+        const failure = await probe("fixture-key", bad.baseUrl);
+        expect(failure.ok).toBe(false);
+        expect(failure.error).toContain("HTTP 401");
+      } finally {
+        ok.server.stop(true);
+        bad.server.stop(true);
+      }
+    });
+  }
+
+  for (const provider of ["pi", "opencode"] as const) {
+    for (const [env, url] of [
+      [{ NAN_API_KEY: "fixture-nan" }, "https://api.nan.builders/v1/models"],
+      [{ HELMCODE_API_NAN: "fixture-nan" }, "https://api.nan.builders/v1/models"],
+      [{ HELMCODE_API_KEY: "fixture-helm" }, "https://api.helmcode.com/v1/models"],
+      // `<ID>_BASE_URL` moves the probe with the provider.
+      [
+        { NAN_API_KEY: "fixture-nan", NAN_BASE_URL: "https://nan-gw.example.test/v1/" },
+        "https://nan-gw.example.test/v1/models",
+      ],
+    ] as const) {
+      test(`${provider}: ${Object.keys(env).join("+")} is probed at ${url}`, async () => {
+        const realFetch = globalThis.fetch;
+        const fetchMock = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
+          return new Response("{}", { status: 200 });
+        });
+        globalThis.fetch = fetchMock as typeof fetch;
+        try {
+          const result = await validateProviderCredentials(provider, { ...env }, envReady);
+          expect(result.ok).toBe(true);
+          expect(fetchMock).toHaveBeenCalledTimes(1);
+          expect(String(fetchMock.mock.calls[0]?.[0])).toBe(url);
+          const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+          expect(headers.Authorization).toBe(`Bearer ${Object.values(env)[0]}`);
+        } finally {
+          globalThis.fetch = realFetch;
+        }
+      });
+    }
+
+    test(`${provider}: an OpenRouter key keeps the probe ahead of a NaN key`, async () => {
+      const realFetch = globalThis.fetch;
+      const fetchMock = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
+        return new Response("{}", { status: 200 });
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+      try {
+        await validateProviderCredentials(
+          provider,
+          { OPENROUTER_API_KEY: "fixture-or", NAN_API_KEY: "fixture-nan" },
+          envReady,
+        );
+        expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain("nan.builders");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+  }
 });
 
 // ─── Migration 055: report composition + opt-out ────────────────────────────

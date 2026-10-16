@@ -7,18 +7,20 @@
  * config wiring, steering, abort, and stream-death handling.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import type { OpenCodeEvent } from "@opencode/sdk";
 import { normalizeSessionLogs, type SessionLogRecord } from "../../apps/ui/src/logs-parser";
 import {
   _setOpencodeSdkLoaderForTests,
   _setOpencodeSessionHooksForTests,
   applyOpenRouterBaseUrlOverride,
+  applyProviderKeySplice,
   OpencodeAdapter,
   type OpencodeSession,
   resolveOpencodeSdkSpecifier,
 } from "../providers/opencode-adapter";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 const SESSION_ID = "ses_test";
 
@@ -128,13 +130,14 @@ function makeFakeHost(events: OpenCodeEvent[], opts: FakeHostOptions = {}) {
   return host;
 }
 
-function installHost(host: FakeHost) {
+function installHost(host: FakeHost, onCreate?: (options: Record<string, unknown>) => void) {
   _setOpencodeSdkLoaderForTests(async () => ({
     version: "2.0.28",
     sdk: {
       OpenCode: {
         create: async (options: Record<string, unknown>) => {
           host.createOptions = options;
+          onCreate?.(options);
           // Set the plugins up the way OpenCode does, with a stub context.
           const plugins = options.plugins as Array<{ setup: (ctx: unknown) => Promise<void> }>;
           for (const plugin of plugins) {
@@ -143,6 +146,8 @@ function installHost(host: FakeHost) {
                 hook: async () => {},
                 list: async () => host.tools.map((id) => ({ id })),
               },
+              // Registered when the session config carries a per-task env.
+              shell: { hook: async () => {} },
               session: {
                 hook: async (
                   name: string,
@@ -839,5 +844,214 @@ describe("OpenRouter attribution config", () => {
     const config = {};
     applyOpenRouterBaseUrlOverride(config, { OPENROUTER_APP_ATTRIBUTION: "false" });
     expect(config).toEqual({});
+  });
+});
+
+describe("provider key splice (one picked key per task)", () => {
+  const PICKED = "sk-picked-member-0123456789";
+  const POOL = "sk-pool-member-aaaaaaaaaa,sk-pool-member-bbbbbbbbbb";
+  const SPLICE_VARS = [
+    "NAN_API_KEY",
+    "HELMCODE_API_NAN",
+    "HELMCODE_API_KEY",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+  ];
+  const saved: Record<string, string | undefined> = {};
+  beforeAll(() => {
+    for (const key of SPLICE_VARS) saved[key] = process.env[key];
+  });
+  afterEach(() => {
+    for (const key of SPLICE_VARS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+    clearVolatileSecretsForTesting();
+  });
+
+  test("nan: env [] and the per-task key, even with a pool in process.env", async () => {
+    process.env.NAN_API_KEY = POOL;
+    const { host } = await runSession(
+      [succeeded],
+      testConfig({ model: "nan/glm5.3-flash", env: { NAN_API_KEY: PICKED } }),
+    );
+    const nan = configOf(host).provider.nan;
+    expect(nan.env).toEqual([]);
+    expect(nan.options.apiKey).toBe(PICKED);
+  });
+
+  test("nan: the HELMCODE_API_NAN alias is read when NAN_API_KEY is empty", () => {
+    const config = {};
+    const picked = applyProviderKeySplice(config, "nan/qwen3.6", { HELMCODE_API_NAN: PICKED });
+    expect(picked).toEqual({ key: PICKED, name: "HELMCODE_API_NAN" });
+    expect(config).toEqual({ provider: { nan: { env: [], options: { apiKey: PICKED } } } });
+  });
+
+  test("a pool that reaches the splice unpicked yields its first member", () => {
+    const config = {};
+    applyProviderKeySplice(config, "nan/qwen3.6", {
+      NAN_API_KEY: ` ${PICKED} , sk-other-0000000000`,
+    });
+    expect(config).toEqual({ provider: { nan: { env: [], options: { apiKey: PICKED } } } });
+  });
+
+  test("helmcode: full custom block with limits, reasoning options merged in", async () => {
+    const { host } = await runSession(
+      [succeeded],
+      testConfig({
+        model: "helmcode/glm5.3",
+        reasoningEffort: "high",
+        env: { HELMCODE_API_KEY: PICKED },
+      }),
+    );
+    const helmcode = configOf(host).provider.helmcode;
+    expect(helmcode).toMatchObject({
+      npm: "@ai-sdk/openai-compatible",
+      name: "Helmcode",
+      env: [],
+      options: { baseURL: "https://api.helmcode.com/v1", apiKey: PICKED },
+    });
+    expect(helmcode.models["glm5.3"]).toEqual({
+      name: "GLM-5.3",
+      tool_call: true,
+      reasoning: true,
+      limit: { context: 1048576, output: 32768 },
+      options: { reasoningEffort: "high" },
+    });
+    expect(Object.keys(helmcode.models)).toEqual([
+      "deepseek-v4-flash",
+      "glm5.3",
+      "glm5.3-flash",
+      "qwen3.6",
+      "gemma4",
+    ]);
+  });
+
+  test("helmcode: a model missing from the table still gets an entry", () => {
+    const config: Record<string, any> = {};
+    applyProviderKeySplice(config, "helmcode/brand-new", { HELMCODE_API_KEY: PICKED });
+    expect(config.provider.helmcode.models["brand-new"]).toEqual({
+      name: "brand-new",
+      tool_call: true,
+    });
+  });
+
+  test("openrouter gateway: baseURL kept next to env [] and the picked key", async () => {
+    process.env.OPENROUTER_API_KEY = POOL;
+    const { host } = await runSession(
+      [succeeded],
+      testConfig({
+        model: "openrouter/deepseek/deepseek-v4-flash",
+        env: { OPENROUTER_API_KEY: PICKED, OPENROUTER_BASE_URL: "http://127.0.0.1:1234/v1" },
+      }),
+    );
+    expect(configOf(host).provider.openrouter).toEqual({
+      env: [],
+      options: { apiKey: PICKED, baseURL: "http://127.0.0.1:1234/v1" },
+    });
+  });
+
+  test("openrouter host: attribution headers kept next to env [] and the picked key", async () => {
+    const { host } = await runSession(
+      [succeeded],
+      testConfig({
+        model: "openrouter/deepseek/deepseek-v4-flash",
+        env: { OPENROUTER_API_KEY: PICKED },
+      }),
+    );
+    const openrouter = configOf(host).provider.openrouter;
+    expect(openrouter.env).toEqual([]);
+    expect(openrouter.options.apiKey).toBe(PICKED);
+    expect(openrouter.options.headers).toMatchObject({ "X-Title": "Agent Swarm" });
+  });
+
+  test("no splice without a key, or for providers outside the splice", () => {
+    for (const model of ["nan/qwen3.6", "helmcode/glm5.3", "openrouter/x/y"]) {
+      const config = {};
+      expect(applyProviderKeySplice(config, model, {})).toBeUndefined();
+      expect(config).toEqual({});
+    }
+    for (const model of ["anthropic/claude-sonnet-4-5", "openai/gpt-5", "glm5.3", "", undefined]) {
+      const config = {};
+      applyProviderKeySplice(config, model, {
+        ANTHROPIC_API_KEY: PICKED,
+        OPENAI_API_KEY: PICKED,
+        NAN_API_KEY: PICKED,
+      });
+      expect(config).toEqual({});
+    }
+  });
+});
+
+describe("spliced key never reaches logs, events, or errors", () => {
+  // Not in process.env: the key a dashboard save delivers to the per-task env only.
+  const SENTINEL = "sk-nan-sentinel-do-not-log-4f9c2e";
+  let captured: string[] = [];
+  let spies: Array<ReturnType<typeof spyOn>> = [];
+  beforeAll(() => {
+    delete process.env.NAN_API_KEY;
+  });
+  afterEach(() => {
+    for (const spy of spies) spy.mockRestore();
+    spies = [];
+    captured = [];
+    clearVolatileSecretsForTesting();
+  });
+  function captureConsole() {
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+      spies.push(
+        spyOn(console, method).mockImplementation((...args: unknown[]) => {
+          captured.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+        }),
+      );
+    }
+  }
+
+  test("SDK log lines and a provider failure that echo the config are scrubbed", async () => {
+    captureConsole();
+    const host = makeFakeHost([
+      ev("session.execution.failed", {
+        sessionID: SESSION_ID,
+        error: { message: `401 Invalid API key ${SENTINEL}` },
+      }),
+    ]);
+    installHost(host, (options) => {
+      const content = (options.config as { content: string }).content;
+      const log = options.log as { emit: (entry: { message: string }) => void };
+      log.emit({ message: `config: ${content}` });
+    });
+    const session = (await new OpencodeAdapter().createSession(
+      testConfig({ model: "nan/glm5.3-flash", env: { NAN_API_KEY: SENTINEL } }),
+    )) as OpencodeSession;
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => emitted.push(e));
+    const result = await session.waitForCompletion();
+
+    // Positive control: the key did reach the SDK config.
+    expect(configOf(host).provider.nan.options.apiKey).toBe(SENTINEL);
+    expect(captured.some((line) => line.includes("[opencode] config:"))).toBe(true);
+    expect(result.isError).toBe(true);
+
+    for (const line of captured) expect(line).not.toContain(SENTINEL);
+    expect(JSON.stringify(emitted)).not.toContain(SENTINEL);
+    expect(result.failureReason ?? "").not.toContain(SENTINEL);
+  });
+
+  test("a host start failure that echoes the config is scrubbed before it propagates", async () => {
+    captureConsole();
+    const host = makeFakeHost([]);
+    installHost(host, (options) => {
+      const content = (options.config as { content: string }).content;
+      throw new Error(`invalid config ${content}`);
+    });
+    const error = await new OpencodeAdapter()
+      .createSession(testConfig({ model: "nan/glm5.3-flash", env: { NAN_API_KEY: SENTINEL } }))
+      .then(
+        () => undefined,
+        (err: unknown) => err as Error,
+      );
+    expect(error?.message).toStartWith("opencode host failed to start: invalid config");
+    expect(error?.message).not.toContain(SENTINEL);
+    for (const line of captured) expect(line).not.toContain(SENTINEL);
   });
 });

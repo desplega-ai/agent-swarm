@@ -168,6 +168,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
                 logs={logs}
                 compactionSnapshots={contextData?.snapshots}
                 isRunning={taskIsRunning(task?.status)}
+                trace
               />
             ) : (
               <p className="text-xs text-muted-foreground italic">No transcript yet.</p>

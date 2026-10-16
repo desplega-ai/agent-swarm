@@ -2291,7 +2291,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -2305,7 +2305,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -7558,6 +7558,148 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/chat/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-adapter status. `health` is `disabled` for an adapter that is not running. Never contains secret values. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            enabled: boolean;
+                            slackClash: boolean;
+                            error?: string;
+                            adapters: {
+                                /** @enum {string} */
+                                name: "telegram" | "slack" | "discord" | "teams";
+                                configured: boolean;
+                                enabled: boolean;
+                                /** @enum {string} */
+                                health: "ok" | "error" | "disabled" | "incomplete";
+                                error?: string;
+                                webhookUrl: string;
+                                mode?: string;
+                                gateway?: {
+                                    /** @enum {string} */
+                                    state: "running" | "backoff" | "stopped";
+                                    since: string;
+                                    restarts: number;
+                                };
+                                guilds?: {
+                                    count: number;
+                                    names: string[];
+                                };
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/chat/telegram/register-webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register this swarm's public Telegram webhook URL and secret token with the Bot API (setWebhook), then return getWebhookInfo. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Webhook registered */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            webhookUrl: string;
+                            webhookInfo: {
+                                url: string;
+                                has_custom_certificate?: boolean;
+                                pending_update_count?: number;
+                                last_error_date?: number;
+                                last_error_message?: string;
+                                max_connections?: number;
+                                ip_address?: string;
+                                allowed_updates?: string[];
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Telegram is not configured for webhook mode */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only the lead agent or a dashboard user can register the webhook */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The Telegram Bot API rejected the call */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kv/{key}": {
         parameters: {
             query?: never;
@@ -12006,7 +12148,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -12101,7 +12243,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -12131,6 +12273,15 @@ export interface paths {
                 };
                 /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -12399,7 +12550,7 @@ export interface paths {
                          */
                         onUnsupported?: "degrade" | "fail";
                         /** @enum {string} */
-                        source?: "ui" | "mcp" | "script" | "slack" | "api";
+                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
                         requestedByUserId?: string;
                     };
                 };
@@ -13047,6 +13198,14 @@ export interface paths {
                         "application/json": {
                             tasks: (components["schemas"]["AgentTask"] & {
                                 attachments: components["schemas"]["TaskAttachment"][];
+                                requestedBy?: {
+                                    id?: string;
+                                    name: string;
+                                    email?: string;
+                                    role?: string;
+                                    notes?: string;
+                                    comms?: components["schemas"]["UserCommsPrefs"];
+                                };
                             })[];
                         };
                     };
@@ -18019,7 +18178,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -23135,6 +23294,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/chat/{adapter}/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle Chat SDK platform webhooks (Telegram, Slack, Discord, Teams) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Chat SDK adapter name, e.g. telegram */
+                    adapter: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Adapter response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid platform signature or secret token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Teams activity whose serviceUrl is not a Bot Framework host */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Chat SDK disabled or adapter not configured */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 1 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Adapter configured but failed to start */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflow-runs/{runId}/events": {
         parameters: {
             query?: never;
@@ -24672,7 +24913,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -25373,7 +25614,7 @@ export interface components {
             /** @enum {string} */
             deliveredMode?: "steer" | "queue";
             /** @enum {string} */
-            source: "ui" | "mcp" | "script" | "slack" | "api";
+            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
             senderLabel?: string;
             /** @enum {string} */
             createdByKind: "user" | "agent" | "system";
@@ -25401,6 +25642,11 @@ export interface components {
             metadata?: string;
             /** Format: date-time */
             createdAt: string;
+        };
+        UserCommsPrefs: {
+            tone?: string;
+            language?: string;
+            verbosity?: string;
         };
         Page: {
             id: string;
@@ -25469,11 +25715,6 @@ export interface components {
             changedBy: string | null;
             changedAt: string;
             changeReason: string | null;
-        };
-        UserCommsPrefs: {
-            tone?: string;
-            language?: string;
-            verbosity?: string;
         };
         BudgetRefusedTrigger: {
             /** @enum {string} */
