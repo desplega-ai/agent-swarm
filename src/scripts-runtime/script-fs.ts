@@ -22,6 +22,13 @@ import type { ScriptAgentFsDescriptor } from "./executors/types";
 export const AGENT_FS_MOUNT = "/afs";
 /** Agent-scoped config key that holds the agent's own agent-fs API key. */
 export const AGENT_FS_API_KEY_CONFIG = "AGENT_FS_API_KEY";
+/**
+ * Bytes that one run's scratch files may hold, and that one `ctx.sh` command
+ * may read, keep live or print. Under quickjs this code runs in the API
+ * process, outside the QuickJS heap limit, so just-bash's own defaults (1 GiB
+ * of scratch, 512 MiB per command) are too high.
+ */
+export const SCRIPT_FS_MAX_BYTES = 64 * 1024 * 1024;
 
 export type ScriptFsStat = { isFile: boolean; isDirectory: boolean; size: number; mtime: string };
 export type ScriptShOptions = { cwd?: string; env?: Record<string, string>; stdin?: string };
@@ -47,7 +54,9 @@ async function openSession(agentFs: ScriptAgentFsDescriptor | undefined): Promis
   const { Bash, InMemoryFs, MountableFs } = await import("just-bash");
   // just-bash writes its default layout (/bin, /usr, /dev, /proc) into the base
   // filesystem, so the base must be scratch memory and never the drive.
-  const fs = new MountableFs({ base: new InMemoryFs() });
+  const fs = new MountableFs({
+    base: new InMemoryFs(undefined, { maxTotalBytes: SCRIPT_FS_MAX_BYTES }),
+  });
   if (agentFs) {
     const { AgentFsFileSystem } = await import("@desplega.ai/agent-fs-just-bash");
     const drive = new AgentFsFileSystem({
@@ -59,12 +68,18 @@ async function openSession(agentFs: ScriptAgentFsDescriptor | undefined): Promis
       fetch: (input, init) => globalThis.fetch(input, init),
       writeMessage: (operation, path) => `swarm script: ${operation} ${path}`,
     });
-    // The adapter declares its own copy of just-bash's branded ByteString type.
-    // The runtime value is the same latin1 string, so only the brand differs.
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- see the comment above.
-    fs.mount(AGENT_FS_MOUNT, drive as unknown as IFileSystem);
+    fs.mount(AGENT_FS_MOUNT, drive);
   }
-  const bash = new Bash({ fs, cwd: agentFs ? AGENT_FS_MOUNT : "/" });
+  const bash = new Bash({
+    fs,
+    cwd: agentFs ? AGENT_FS_MOUNT : "/",
+    executionLimits: {
+      maxInputBytes: SCRIPT_FS_MAX_BYTES,
+      maxLiveBytes: SCRIPT_FS_MAX_BYTES,
+      maxOutputSize: SCRIPT_FS_MAX_BYTES,
+      maxStringLength: SCRIPT_FS_MAX_BYTES,
+    },
+  });
   return { fs, bash };
 }
 

@@ -12,7 +12,11 @@ import {
   type ScriptExecutor,
   type SwarmConfigPayload,
 } from "../scripts-runtime/executors/types";
-import { AGENT_FS_API_KEY_CONFIG } from "../scripts-runtime/script-fs";
+import {
+  AGENT_FS_API_KEY_CONFIG,
+  createScriptFs,
+  SCRIPT_FS_MAX_BYTES,
+} from "../scripts-runtime/script-fs";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 
 // A minimal agent-fs: the ops and raw-file routes that AgentFsFileSystem calls.
@@ -244,6 +248,20 @@ function suite(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean
 
 suite("native", () => new NativeScriptExecutor(), true);
 suite("quickjs", () => new QuickJSScriptExecutor(), false);
+
+// Under quickjs, ctx.fs and ctx.sh run in the API process, outside the QuickJS heap limit.
+test("scratch files and one ctx.sh command stay under SCRIPT_FS_MAX_BYTES", async () => {
+  const { fs, sh } = createScriptFs(undefined);
+  await expect(fs.writeFile("/tmp/big", "a".repeat(SCRIPT_FS_MAX_BYTES + 1))).rejects.toThrow(
+    "ENOSPC",
+  );
+  await fs.writeFile("/tmp/half", "a".repeat(SCRIPT_FS_MAX_BYTES / 2 + 1));
+  const over = await sh("cat /tmp/half /tmp/half | wc -c");
+  expect(over.exitCode).not.toBe(0);
+  expect(over.stderr).toContain("output size limit exceeded");
+  // The session still works after a command hits the cap.
+  expect((await sh("echo ok")).stdout).toBe("ok\n");
+});
 
 describe("agent-fs credential resolution (real resolver)", () => {
   const COORDS = {
