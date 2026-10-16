@@ -23333,7 +23333,7 @@ export interface paths {
                             /** @enum {string} */
                             type: "event";
                             /** @enum {string} */
-                            eventName: "slack.message";
+                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -23505,7 +23505,7 @@ export interface paths {
                             /** @enum {string} */
                             type: "event";
                             /** @enum {string} */
-                            eventName: "slack.message";
+                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -25844,7 +25844,7 @@ export interface components {
                 /** @enum {string} */
                 type: "event";
                 /** @enum {string} */
-                eventName: "slack.message";
+                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
             })[];
             cooldown?: {
                 hours?: number;
@@ -26068,7 +26068,7 @@ export interface components {
                 /** @enum {string} */
                 type: "event";
                 /** @enum {string} */
-                eventName: "slack.message";
+                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
             })[];
             cooldown?: {
                 hours?: number;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
+import { scrubSecrets } from "../../utils/secret-scrubber";
 import { BaseExecutor, type ExecutorResult } from "./base";
 import { resolveWorkflowLlmConfig } from "./workflow-llm";
 
@@ -80,12 +81,16 @@ export async function executeRawLlm(
       return {
         status: "success",
         output: { result: null, model: modelName },
-        error: `LLM call failed, using fallback port: ${err instanceof Error ? err.message : String(err)}`,
+        error: scrubSecrets(
+          `LLM call failed, using fallback port: ${err instanceof Error ? err.message : String(err)}`,
+        ),
       };
     }
     return {
       status: "failed",
-      error: `LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
+      // Provider errors can echo the request key back; scrub before any
+      // consumer (journal, HTTP route, workflow step) sees the text.
+      error: scrubSecrets(`LLM call failed: ${err instanceof Error ? err.message : String(err)}`),
     };
   }
 }

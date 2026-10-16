@@ -77,6 +77,67 @@ describe("resolveWorkflowLlmConfig", () => {
     expect(config.model).toBe("gpt-5.4");
   });
 
+  test("routes a registry-provider model to that provider, not OpenRouter", async () => {
+    const config = await resolveWorkflowLlmConfig("nan/qwen3.8-flash", {
+      OPENROUTER_API_KEY: "sk-or-test",
+      NAN_API_KEY: "nan-test",
+    });
+
+    expect(config).toEqual({
+      apiKey: "nan-test",
+      baseURL: "https://api.nan.builders/v1",
+      headers: {},
+      model: "qwen3.8-flash",
+    });
+  });
+
+  test("reads a registry provider's alias key and base URL override", async () => {
+    const config = await resolveWorkflowLlmConfig("nan/deepseek-v4-flash", {
+      HELMCODE_API_NAN: "nan-alias",
+      NAN_BASE_URL: "https://nan.example.test/v1/",
+    });
+
+    expect(config.apiKey).toBe("nan-alias");
+    expect(config.baseURL).toBe("https://nan.example.test/v1");
+    expect(config.model).toBe("deepseek-v4-flash");
+  });
+
+  test("hands the SDK one key from a canonical NaN key pool", async () => {
+    const pool = ["nan-pool-a", "nan-pool-b", "nan-pool-c"];
+    for (let i = 0; i < 20; i++) {
+      const config = await resolveWorkflowLlmConfig("nan/qwen3.8-flash", {
+        NAN_API_KEY: ` ${pool.join(", ")} `,
+      });
+      expect(pool).toContain(config.apiKey);
+    }
+  });
+
+  test("hands the SDK one key from an alias NaN key pool", async () => {
+    const pool = ["nan-alias-a", "nan-alias-b"];
+    for (let i = 0; i < 20; i++) {
+      const config = await resolveWorkflowLlmConfig("nan/deepseek-v4-flash", {
+        HELMCODE_API_NAN: pool.join(","),
+      });
+      expect(pool).toContain(config.apiKey);
+    }
+  });
+
+  test("fails a registry-provider model without its key instead of falling back to OpenRouter", async () => {
+    await expect(
+      resolveWorkflowLlmConfig("nan/qwen3.8-flash", { OPENROUTER_API_KEY: "sk-or-test" }),
+    ).rejects.toThrow("No NaN credential found for nan/qwen3.8-flash. Set NAN_API_KEY.");
+  });
+
+  test("keeps OpenRouter vendor ids on OpenRouter", async () => {
+    const config = await resolveWorkflowLlmConfig("deepseek/deepseek-v4.1-flash", {
+      OPENROUTER_API_KEY: "sk-or-test",
+      NAN_API_KEY: "nan-test",
+    });
+
+    expect(config.apiKey).toBe("sk-or-test");
+    expect(config.model).toBe("deepseek/deepseek-v4.1-flash");
+  });
+
   test("rejects credential kinds without an OpenAI-compatible endpoint", async () => {
     await expect(
       resolveWorkflowLlmConfig(undefined, { ANTHROPIC_API_KEY: "example-sk-ant-test" }),

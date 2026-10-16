@@ -358,6 +358,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
 | `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
 | `AZURE_DEVOPS_ALLOWED_ACTORS` | Comma-separated sign-in names allowed to trigger Azure Boards work item tasks without a linked swarm user |
+| `AZURE_DEVOPS_WORKITEM_STATE_STARTED` | Work item state to set when its swarm task starts (process-specific, e.g. `Doing`); unset = no change |
+| `AZURE_DEVOPS_WORKITEM_STATE_DONE` | Work item state to set when its swarm task completes (e.g. `Done`); unset = no change |
 | `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
 | `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
 | `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
@@ -369,8 +371,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 |----------|-------------|
 | `AGENTMAIL_DISABLE` | Set to `true` to skip AgentMail integration |
 | `AGENTMAIL_WEBHOOK_SECRET` | Svix signing secret for webhook verification |
-| `AGENTMAIL_INBOX_DOMAIN_FILTER` | Comma-separated domains to allow for incoming inbox webhooks (e.g., `yourdomain.com,example.com`). Unmatched inbox domains are silently dropped |
-| `AGENTMAIL_SENDER_DOMAIN_FILTER` | Comma-separated sender domains to allow (e.g., `gmail.com,company.com`). Unmatched sender domains are silently dropped |
+| `AGENTMAIL_INBOX_DOMAIN_FILTER` | Comma-separated inbox addresses or domains to allow for incoming inbox webhooks (e.g., `bot@yourdomain.com,example.com`). An entry with `@` matches that exact address; a bare domain matches any address on it. Unmatched inboxes are silently dropped |
+| `AGENTMAIL_SENDER_DOMAIN_FILTER` | Comma-separated sender addresses or domains to allow (e.g., `me@gmail.com,company.com`). An entry with `@` matches that exact address; a bare domain matches any address on it. Unmatched senders are silently dropped |
 | `ADDITIVE_AGENTMAIL` | Set to `true` to enable non-mention thread message buffering and batching for AgentMail, mirroring `ADDITIVE_SLACK` |
 | `ADDITIVE_AGENTMAIL_BUFFER_MS` | Debounce window (ms) for buffering rapid AgentMail follow-up messages into a single task when `ADDITIVE_AGENTMAIL=true` is set (default: `10000`) |
 

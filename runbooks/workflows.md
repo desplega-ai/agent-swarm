@@ -286,6 +286,8 @@ When a node has to decide, pick the cheapest node that can decide. Use `system-o
 | A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `system-one-decision` |
 | Free-form generation, or findings a later node reads | `raw-llm` or `agent-task` |
 
+A `raw-llm` node's `model` picks its endpoint. A model prefixed with an OpenAI-compatible registry provider id (`nan/qwen3.8-flash`, `helmcode/<model>`) goes to that provider's base URL with its key (`NAN_API_KEY` or its alias), and fails when the key is missing instead of falling back to OpenRouter. Any other model goes to the resolved OpenRouter or OpenAI credential. Check `schema` support per model: NaN's `deepseek-v4-flash` rejects `json_schema` output, while `qwen3.8-flash`, `qwen3.6` and `gemma4` accept it.
+
 Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `system-one-decision` as part of `state`. The `workflow-iterate` skill carries the same rule for agents that edit workflows.
 
 ## SystemOne Decision nodes

@@ -194,7 +194,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.0.30
+ARG OPENCODE_VERSION=2.0.31
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -235,7 +235,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.16.3
+ARG AGENT_FS_VERSION=0.16.4
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -565,8 +565,8 @@ RUN case "$TARGETARCH" in \
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.1-alpha.4
-ARG DSH_SHA512=9e724fdd4c83d257650311f4057841501604def23bc340c40a772acc0975128b47a61139976820c1e9e86b15e22122600d31dce4157d25623a614e4f488f487e
+ARG DSH_VERSION=0.2.1-alpha.5
+ARG DSH_SHA512=7a1a56be646c91d429f825ceeba05e2b61c1601d0f422b70756635dd5cd455ab293d217193413e719b6f4210cf81cefb65e4446f3f489d74337c32634365b2ee
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -581,9 +581,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1792123242-g03edc7
-ARG AMP_SHA512_AMD64=5003a2ab19255b68a3142d4b4516e95065ecd8915151c70878fdad7976fd1e3ac693f7a29803ba8b722a01b712ac65d774ebe668dd43ba3436050f4c3357e9ac
-ARG AMP_SHA512_ARM64=a8584c42cb2f9577d0b813ec08f5d4c1ad22f739de2d625433394df32c7d74e110df3f8a9c5ec1ad412f600c3dec2fd61261ab08b894b7034fe670e1e17cae65
+ARG AMP_VERSION=0.0.1792152053-g57ff9b
+ARG AMP_SHA512_AMD64=7a00b59d60bce2206e05c617f18d11e0d40563f03afbb7f602b115e13b8cd9f9e8c4d8b4e540d3072f01d6ecb712e3b9051fb2406bfdae16b98bf4c13d9eaf17
+ARG AMP_SHA512_ARM64=742d01daaf376351daf4d1a184e8d46aa44c572cf5535a5dd2832a918cd0974b34ab88fb234618f3d1555078a6349f52bf8ee9362b96f69b650eb8203eee382e
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \

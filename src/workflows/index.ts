@@ -37,7 +37,14 @@ import { startWaitPoller } from "./wait-poller";
 // ─── Module-level singleton ────────────────────────────────
 
 let _registry: ExecutorRegistry | null = null;
-let slackMessageTriggerListenerInitialized = false;
+let eventTriggerListenersInitialized = false;
+
+/** Bus events that start workflows with a matching `event` trigger. Keep in sync with `TriggerConfigSchema`. */
+const EVENT_TRIGGER_NAMES = [
+  "slack.message",
+  "azure-devops.work_item.assigned",
+  "azure-devops.work_item.commented",
+] as const;
 
 function createBuiltInExecutorRegistry(): ExecutorRegistry {
   return createExecutorRegistry({
@@ -57,18 +64,20 @@ export function getExecutorRegistry(): ExecutorRegistry {
   return _registry;
 }
 
-function setupSlackMessageTriggerListener(): void {
-  if (slackMessageTriggerListenerInitialized) return;
+function setupEventTriggerListeners(): void {
+  if (eventTriggerListenersInitialized) return;
 
-  workflowEventBus.on("slack.message", (payload) => {
-    void handleEventTrigger("slack.message", payload, getExecutorRegistry()).catch((err) => {
-      console.error(
-        "[workflows] Failed to dispatch slack.message event trigger:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      );
+  for (const eventName of EVENT_TRIGGER_NAMES) {
+    workflowEventBus.on(eventName, (payload) => {
+      void handleEventTrigger(eventName, payload, getExecutorRegistry()).catch((err) => {
+        console.error(
+          `[workflows] Failed to dispatch ${eventName} event trigger:`,
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
+      });
     });
-  });
-  slackMessageTriggerListenerInitialized = true;
+  }
+  eventTriggerListenersInitialized = true;
 }
 
 /**
@@ -84,7 +93,7 @@ export async function initWorkflows(): Promise<void> {
 
   // 2. Wire up resume listener (task.completed / task.failed / task.cancelled)
   setupWorkflowResumeListener(workflowEventBus, _registry);
-  setupSlackMessageTriggerListener();
+  setupEventTriggerListeners();
 
   // 3. Recover incomplete runs (running + waiting) from previous lifecycle
   recoverIncompleteRuns(_registry).catch((err) => {
