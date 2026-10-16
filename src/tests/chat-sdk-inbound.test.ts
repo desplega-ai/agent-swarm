@@ -30,7 +30,14 @@ import {
 } from "./chat-sdk-harness";
 
 const TEST_DB_PATH = "./test-chat-sdk-inbound.sqlite";
-const ENV_KEYS = ["AGENT_FS_LOCAL_DIR", "AGENT_FS_API_URL", "STEERING_ENABLED"];
+const ENV_KEYS = [
+  "AGENT_FS_LOCAL_DIR",
+  "AGENT_FS_API_URL",
+  "STEERING_ENABLED",
+  "TRANSCRIPTION_API_KEY",
+  "TRANSCRIPTION_BASE_URL",
+  "TRANSCRIPTION_MODEL",
+];
 const savedEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 let harness: TelegramHarness;
@@ -359,5 +366,115 @@ describe("Chat SDK inbound pipeline", () => {
     await postTelegramUpdate(telegramUpdate(group(-2009), "just chatting"));
     await flushChatBuffers();
     expect(await chatTasks(-2009)).toHaveLength(0);
+  });
+});
+
+describe("Chat SDK inbound voice notes and size limit", () => {
+  const voiceBytes = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 0, 2, 0, 0, 1, 2, 3]);
+  const voiceUpdate = (chatId: number, fileId: string) =>
+    telegramUpdate(dm(chatId), "", {
+      voice: {
+        file_id: fileId,
+        file_unique_id: `${fileId}-unique`,
+        duration: 2,
+        mime_type: "audio/ogg",
+        file_size: voiceBytes.byteLength,
+      },
+    });
+
+  test("a voice note is transcribed into the task text and stays attached", async () => {
+    const requests: Array<{ auth: string | null; model: unknown; filename: string }> = [];
+    const stt = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(req) {
+        const form = await req.formData();
+        const file = form.get("file") as File;
+        requests.push({
+          auth: req.headers.get("authorization"),
+          model: form.get("model"),
+          filename: file.name,
+        });
+        return Response.json({ text: "Deploy the staging branch tonight." });
+      },
+    });
+    process.env.TRANSCRIPTION_API_KEY = "stt-test-key";
+    process.env.TRANSCRIPTION_BASE_URL = `http://127.0.0.1:${stt.port}/v1`;
+    try {
+      harness.mock.addFile("voice/note-1.oga", voiceBytes);
+      await postTelegramUpdate(voiceUpdate(2101, "voice/note-1.oga"));
+      await flushChatBuffers();
+    } finally {
+      stt.stop(true);
+      delete process.env.TRANSCRIPTION_API_KEY;
+      delete process.env.TRANSCRIPTION_BASE_URL;
+    }
+
+    expect(requests).toEqual([
+      { auth: "Bearer stt-test-key", model: "whisper-1", filename: "audio-1.ogg" },
+    ]);
+    const tasks = await chatTasks(2101);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.task).toContain("[Transcript of audio-1]\nDeploy the staging branch tonight.");
+    const attachments = await getTaskAttachments(tasks[0]!.id);
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({
+      mimeType: "audio/ogg",
+      sizeBytes: voiceBytes.byteLength,
+    });
+  });
+
+  test("without a transcription provider the voice note is attached with a one-line note", async () => {
+    harness.mock.addFile("voice/note-2.oga", voiceBytes);
+    await postTelegramUpdate(voiceUpdate(2102, "voice/note-2.oga"));
+    await flushChatBuffers();
+
+    const tasks = await chatTasks(2102);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.task).toContain(
+      "(not transcribed: no transcription provider configured, set TRANSCRIPTION_API_KEY)",
+    );
+    expect(await getTaskAttachments(tasks[0]!.id)).toHaveLength(1);
+  });
+
+  test("a 30 MB file is not downloaded; the task says why and the user gets a too-large reply", async () => {
+    const chatId = 2103;
+    await postTelegramUpdate(
+      telegramUpdate(dm(chatId), "", {
+        caption: "here is the recording",
+        document: {
+          file_id: "documents/big.zip",
+          file_unique_id: "big-unique",
+          file_name: "big.zip",
+          mime_type: "application/zip",
+          file_size: 30 * 1024 * 1024,
+        },
+      }),
+    );
+    await flushChatBuffers();
+
+    const tasks = await chatTasks(chatId);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.task).toContain("big.zip (application/zip, 30.0 MB)");
+    expect(tasks[0]!.task).toContain(
+      "(not attached: too large (30.0 MB, the limit for files sent to the Telegram bot is 20.0 MB))",
+    );
+    expect(
+      harness.mock.calls.some(
+        (call) =>
+          call.method === "getFile" &&
+          (call.body as { file_id?: string }).file_id === "documents/big.zip",
+      ),
+    ).toBe(false);
+    const replies = harness.mock.calls
+      .filter((call) => /^send(Rich)?Message$/.test(call.method))
+      .map((call) => call.body as Record<string, unknown>)
+      .filter((body) => String(body.chat_id) === String(chatId))
+      .map((body) =>
+        String((body.rich_message as { markdown?: string } | undefined)?.markdown ?? body.text),
+      );
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain("Too large to read");
+    expect(replies[0]).toContain("big.zip: too large (30.0 MB");
   });
 });
