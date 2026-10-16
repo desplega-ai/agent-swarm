@@ -58,7 +58,11 @@ export const registerChatPostTool = (server: McpServer) => {
           { data },
         );
       }
-      const resolved = await resolveChatAttachmentRefs(attachments ?? [], requestInfo.sourceTaskId);
+      const resolved = await resolveChatAttachmentRefs(
+        attachments ?? [],
+        requestInfo.sourceTaskId,
+        requestInfo.agentId,
+      );
       if ("error" in resolved) return toolErr(resolved.error, { data });
       try {
         const sent = await postChatMessage({

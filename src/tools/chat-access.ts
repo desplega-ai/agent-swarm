@@ -10,7 +10,7 @@ export const chatAttachmentsSchema = z
   .max(10)
   .optional()
   .describe(
-    "Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in the swarm agent-fs drive, such as thoughts/<agent-id>/report.pdf. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it.",
+    "Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in your agent-fs drive, such as thoughts/<agent-id>/report.pdf, read with your own agent-fs credential. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it.",
   );
 
 /** Chat SDK verbs; the legacy policy grants them to the lead only. */

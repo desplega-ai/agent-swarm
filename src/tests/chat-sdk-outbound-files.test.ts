@@ -11,6 +11,7 @@ import {
   createTaskExtended,
   initDb,
   insertTaskAttachment,
+  upsertSwarmConfig,
 } from "../be/db";
 import { recordTaskAttachmentUpload } from "../be/task-attachment-store";
 import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
@@ -27,7 +28,10 @@ const MB = 1024 * 1024;
 const PDF_BYTES = new TextEncoder().encode("%PDF-1.4\n% test document\n%%EOF\n");
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 const savedEnv = new Map(
-  ["AGENT_FS_LOCAL_DIR", "AGENT_FS_API_URL"].map((key) => [key, process.env[key]]),
+  ["AGENT_FS_LOCAL_DIR", "AGENT_FS_API_URL", "API_AGENT_FS_API_KEY"].map((key) => [
+    key,
+    process.env[key],
+  ]),
 );
 
 let harness: TelegramHarness;
@@ -36,6 +40,48 @@ let worker: Agent;
 let server: McpServer;
 let fsDir: string;
 let nextChatId = 660_000;
+
+// A stand-in agent-fs API. The API's own key reads every file; the worker's
+// key reads only its own thoughts, as a per-agent agent-fs credential does.
+const AGENT_FS_ORG = "shared-org";
+const AGENT_FS_DRIVE = "shared-drive";
+const API_FS_KEY = "api-owned-fs-key";
+const WORKER_FS_KEY = "worker-fs-key";
+const LEAD_FS_KEY = "lead-fs-key";
+const PRIVATE_BYTES = new TextEncoder().encode("private: not for the worker\n");
+const agentFsFiles = new Map<string, { bytes: Uint8Array; type: string }>([
+  ["thoughts/worker/reports/q3.pdf", { bytes: PDF_BYTES, type: "application/pdf" }],
+  ["restricted/private.txt", { bytes: PRIVATE_BYTES, type: "text/plain" }],
+]);
+/** Every request the stand-in agent-fs received: the raw path and the bearer. */
+const agentFsRequests: Array<{ path: string; auth: string | null }> = [];
+let agentFs: ReturnType<typeof Bun.serve>;
+
+function startAgentFs(): ReturnType<typeof Bun.serve> {
+  return Bun.serve({
+    port: 0,
+    fetch(req) {
+      const path = new URL(req.url).pathname;
+      const auth = req.headers.get("authorization");
+      agentFsRequests.push({ path, auth });
+      const prefix = `/orgs/${AGENT_FS_ORG}/drives/${AGENT_FS_DRIVE}/files/`;
+      if (!path.startsWith(prefix) || !path.endsWith("/raw")) {
+        return new Response("not found", { status: 404 });
+      }
+      const key = decodeURIComponent(path.slice(prefix.length, -"/raw".length));
+      const file = agentFsFiles.get(key);
+      if (!file) return new Response("not found", { status: 404 });
+      const allowed =
+        auth === `Bearer ${API_FS_KEY}` ||
+        auth === `Bearer ${LEAD_FS_KEY}` ||
+        (auth === `Bearer ${WORKER_FS_KEY}` && key.startsWith("thoughts/worker/"));
+      if (!allowed) return new Response("forbidden", { status: 403 });
+      return new Response(file.bytes, {
+        headers: { "content-type": file.type, "content-length": String(file.bytes.byteLength) },
+      });
+    },
+  });
+}
 
 type ToolResult = {
   structuredContent: { success: boolean; message: string; [key: string]: unknown };
@@ -128,6 +174,22 @@ beforeAll(async () => {
     isLead: false,
     status: "idle",
   });
+  agentFs = startAgentFs();
+  // The API holds a key that reads everything; path attachments must not use it.
+  process.env.API_AGENT_FS_API_KEY = API_FS_KEY;
+  for (const [key, value] of [
+    ["AGENT_FS_API_URL", agentFs.url.origin],
+    ["AGENT_FS_DEFAULT_ORG_ID", AGENT_FS_ORG],
+    ["AGENT_FS_DEFAULT_DRIVE_ID", AGENT_FS_DRIVE],
+  ] as const) {
+    await upsertSwarmConfig({ scope: "global", key, value });
+  }
+  for (const [agent, value] of [
+    [worker, WORKER_FS_KEY],
+    [lead, LEAD_FS_KEY],
+  ] as const) {
+    await upsertSwarmConfig({ scope: "agent", scopeId: agent.id, key: "AGENT_FS_API_KEY", value });
+  }
   server = new McpServer({ name: "chat-files-test", version: "1.0.0" });
   registerChatReplyTool(server);
   registerChatPostTool(server);
@@ -138,6 +200,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await harness.stop();
+  agentFs.stop(true);
   closeDb();
   await removeDbFiles();
   await rm(fsDir, { recursive: true, force: true });
@@ -150,6 +213,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   nextChatId += 1;
+  agentFsRequests.length = 0;
 });
 
 describe("telegramAttachmentType", () => {
@@ -167,11 +231,6 @@ describe("chat-reply attachments", () => {
   test("an agent-fs PDF arrives as a document after the text", async () => {
     const chatId = nextChatId;
     const task = await chatTask(chatId, worker.id);
-    await getFileStorageProvider().upload(
-      { taskId: task.id, name: "q3.pdf", key: "thoughts/worker/reports/q3.pdf" },
-      PDF_BYTES,
-      { contentType: "application/pdf" },
-    );
 
     const result = await callTool(
       "chat-reply",
@@ -192,6 +251,97 @@ describe("chat-reply attachments", () => {
       type: "application/pdf",
       size: PDF_BYTES.byteLength,
     } satisfies TelegramMockFilePart);
+    // Read from the caller's drive with the caller's own key.
+    expect(agentFsRequests).toEqual([
+      {
+        path: `/orgs/${AGENT_FS_ORG}/drives/${AGENT_FS_DRIVE}/files/thoughts/worker/reports/q3.pdf/raw`,
+        auth: `Bearer ${WORKER_FS_KEY}`,
+      },
+    ]);
+  });
+
+  test("a path the caller's own agent-fs key cannot read is not sent, though the API's key can read it", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { text: "Here it is.", attachments: ["restricted/private.txt"] },
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    const unsent = result.structuredContent.unsentFiles as Array<{ name: string; reason: string }>;
+    expect(unsent).toEqual([
+      {
+        name: "private.txt",
+        reason: "could not be read (your agent-fs credential cannot read this path)",
+      },
+    ]);
+    const calls = callsTo(chatId);
+    expect(calls.map((call) => call.method)).toEqual([
+      expect.stringMatching(/^send(Rich)?Message$/),
+      expect.stringMatching(/^send(Rich)?Message$/),
+    ]);
+    expect(textOf(calls[1]!.body)).toContain("private.txt: could not be read");
+    expect(JSON.stringify(calls)).not.toContain("not for the worker");
+    expect(agentFsRequests.map((request) => request.auth)).toEqual([`Bearer ${WORKER_FS_KEY}`]);
+  });
+
+  test("an encoded traversal path is refused before any agent-fs request or send", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+    const headers = { "x-agent-id": worker.id, "x-source-task-id": task.id };
+
+    for (const path of [
+      "%2e%2e/%2e%2e/private-drive/files/private.txt",
+      "thoughts/%2E%2E/%2E%2E/%2E%2E/private-drive/files/private.txt",
+      "..%2f..%2fprivate-drive/files/private.txt",
+    ]) {
+      const result = await callTool("chat-reply", headers, { text: "x", attachments: [path] });
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toContain(`Path ${path}:`);
+    }
+
+    expect(agentFsRequests).toEqual([]);
+    expect(callsTo(chatId)).toEqual([]);
+  });
+
+  test("a `?` or `#` in a path stays inside the file name", async () => {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, worker.id);
+
+    await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { text: "x", attachments: ["thoughts/worker/a?b#c.pdf"] },
+    );
+
+    expect(agentFsRequests.map((request) => request.path)).toEqual([
+      `/orgs/${AGENT_FS_ORG}/drives/${AGENT_FS_DRIVE}/files/thoughts/worker/a%3Fb%23c.pdf/raw`,
+    ]);
+  });
+
+  test("a caller without its own agent-fs key cannot send a path", async () => {
+    const chatId = nextChatId;
+    const keyless = await createAgent({
+      id: crypto.randomUUID(),
+      name: "ChatFilesKeyless",
+      isLead: false,
+      status: "idle",
+    });
+    const task = await chatTask(chatId, keyless.id);
+
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": keyless.id, "x-source-task-id": task.id },
+      { text: "x", attachments: ["restricted/private.txt"] },
+    );
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("no agent-fs credential");
+    expect(agentFsRequests).toEqual([]);
+    expect(callsTo(chatId)).toEqual([]);
   });
 
   test("a task attachment id sends the file; an image goes as a photo", async () => {

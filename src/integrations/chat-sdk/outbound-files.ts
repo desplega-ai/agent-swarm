@@ -1,11 +1,17 @@
 /**
- * Files an agent sends to a chat thread: task attachments and agent-fs paths,
- * read through the active file provider. `postChatMessage` sends them.
+ * Files an agent sends to a chat thread: task attachments, read through the
+ * active file provider, and agent-fs paths, read with the caller's own agent-fs
+ * credential. `postChatMessage` sends them.
  */
-import { basename } from "node:path";
-import { getTaskAttachments } from "@/be/db";
+import { getResolvedConfig, getTaskAttachments } from "@/be/db";
 import { backingProviderId, scopeFromAttachment } from "@/be/task-attachment-store";
-import { type FileScope, normalizeStoredKey } from "@/fs/provider";
+import { AgentFsProvider } from "@/fs/agent-fs-provider";
+import {
+  type FileScope,
+  type FileStorageProvider,
+  FilesError,
+  normalizeStoredKey,
+} from "@/fs/provider";
 import { getFileStorageProvider } from "@/fs/registry";
 import type { TaskAttachment } from "@/types";
 import { SHARED_FILE_INTENT } from "./attachments";
@@ -14,11 +20,15 @@ import { ChatFileTooLargeError, type OutboundChatFile } from "./outbound";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The caller's own agent-fs credential and default drive. Never the API's `API_AGENT_FS_API_KEY`. */
+export type CallerAgentFs = { apiUrl: string; apiKey: string; orgId: string; driveId: string };
+
 async function download(
   scope: FileScope,
   maxBytes: number,
+  provider: Pick<FileStorageProvider, "download"> = getFileStorageProvider(),
 ): Promise<{ data: Uint8Array; mimeType?: string }> {
-  const response = await getFileStorageProvider().download(scope);
+  const response = await provider.download(scope);
   const length = Number(response.headers.get("content-length"));
   if (Number.isFinite(length) && length > maxBytes) {
     await response.body?.cancel();
@@ -40,26 +50,81 @@ export function chatFileOfTaskAttachment(attachment: TaskAttachment): OutboundCh
   };
 }
 
-/** A file at a path of the swarm's file provider (the agent-fs drive, or the local store). */
-export function chatFileOfPath(path: string, taskId?: string): OutboundChatFile {
-  const key = normalizeStoredKey(path);
-  const name = basename(key);
+/**
+ * The segments of a tool-supplied path, each decoded once and checked, so an
+ * encoded `..`, separator, `?` or `#` cannot leave the drive or change the endpoint.
+ */
+function pathSegments(path: string): string[] {
+  return normalizeStoredKey(path)
+    .split("/")
+    .map((segment) => {
+      let decoded = segment;
+      try {
+        decoded = decodeURIComponent(segment);
+      } catch {
+        // A lone `%` is part of the name; it is encoded below.
+      }
+      if (!decoded || decoded === "." || decoded === ".." || /[/\\\0]/.test(decoded)) {
+        throw new FilesError(
+          "Provider",
+          "Path must not contain empty, `.` or `..` segments, or encoded separators",
+        );
+      }
+      return decoded;
+    });
+}
+
+/** The agent-fs credential and drive the caller itself holds, or undefined when it has none. */
+async function callerAgentFs(agentId: string | undefined): Promise<CallerAgentFs | undefined> {
+  if (!agentId) return undefined;
+  const configs = await getResolvedConfig(agentId);
+  const value = (key: string) => configs.find((c) => c.key === key)?.value?.trim();
+  const apiUrl = value("AGENT_FS_API_URL") || process.env.AGENT_FS_API_URL?.trim();
+  const apiKey = value("AGENT_FS_API_KEY");
+  const orgId = value("AGENT_FS_DEFAULT_ORG_ID");
+  const driveId = value("AGENT_FS_DEFAULT_DRIVE_ID");
+  return apiUrl && apiKey && orgId && driveId ? { apiUrl, apiKey, orgId, driveId } : undefined;
+}
+
+/**
+ * A file at a path of the caller's agent-fs drive, read with the caller's own
+ * credential: a path the caller cannot read is not sent, and the thread gets a note.
+ */
+export function chatFileOfPath(path: string, access: CallerAgentFs): OutboundChatFile {
+  const segments = pathSegments(path);
+  const name = segments.at(-1)!;
+  const key = segments.map(encodeURIComponent).join("/");
   return {
     name,
-    load: (maxBytes) => download({ taskId: taskId ?? "chat", name, key }, maxBytes),
+    load: async (maxBytes) => {
+      try {
+        return await download(
+          { taskId: "chat", name, key, orgId: access.orgId, driveId: access.driveId },
+          maxBytes,
+          new AgentFsProvider(access),
+        );
+      } catch (error) {
+        if (error instanceof FilesError && error.code === "Unauthorized") {
+          throw new Error("your agent-fs credential cannot read this path");
+        }
+        throw error;
+      }
+    },
   };
 }
 
 /**
  * Resolve the `attachments` of `chat-reply` and `chat-post`: an attachment id
- * of `taskId`, or a file path. Returns an error naming the first entry that
- * cannot be sent, so the tool refuses before posting anything.
+ * of `taskId`, or an agent-fs path read as `agentId`. Returns an error naming
+ * the first entry that cannot be sent, so the tool refuses before posting anything.
  */
 export async function resolveChatAttachmentRefs(
   refs: string[],
   taskId: string | undefined,
+  agentId: string | undefined,
 ): Promise<{ files: OutboundChatFile[] } | { error: string }> {
   let taskAttachments: TaskAttachment[] | undefined;
+  let access: CallerAgentFs | undefined | null = null;
   const files: OutboundChatFile[] = [];
   for (const ref of refs) {
     if (UUID_PATTERN.test(ref)) {
@@ -77,8 +142,14 @@ export async function resolveChatAttachmentRefs(
       files.push(file);
       continue;
     }
+    if (access === null) access = await callerAgentFs(agentId);
+    if (!access) {
+      return {
+        error: `Path ${ref}: you have no agent-fs credential and drive to read it with. Attach the file to your task and send its attachment id.`,
+      };
+    }
     try {
-      files.push(chatFileOfPath(ref, taskId));
+      files.push(chatFileOfPath(ref, access));
     } catch (error) {
       return { error: `Path ${ref}: ${errorMessage(error)}` };
     }
