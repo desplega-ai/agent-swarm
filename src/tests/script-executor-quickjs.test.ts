@@ -91,22 +91,27 @@ function input(source: string, overrides: Partial<ExecutorInput> = {}): Executor
 }
 
 describe("quickjs executor", () => {
-  test("runs TypeScript with a tree-shaken zod argsSchema", async () => {
-    const source = `import { z } from "zod";
-export const argsSchema = z.object({ email: z.string().email(), n: z.number().int() });
+  for (const [moduleName, fields] of [
+    ["zod", "email: z.string().email(), n: z.number().int()"],
+    ["zod/mini", "email: z.email(), n: z.int()"],
+  ]) {
+    test(`runs TypeScript with a tree-shaken ${moduleName} argsSchema`, async () => {
+      const source = `import * as z from "${moduleName}";
+export const argsSchema = z.object({ ${fields} });
 type Args = z.infer<typeof argsSchema>;
 export default async function (args: Args) {
   return { domain: args.email.split("@")[1], double: args.n * 2 };
 }`;
-    const ok = await executor.run({ ...input(source), args: { email: "a@b.co", n: 3 } });
-    expect(ok.error).toBeUndefined();
-    expect(ok.result).toEqual({ domain: "b.co", double: 6 });
+      const ok = await executor.run({ ...input(source), args: { email: "a@b.co", n: 3 } });
+      expect(ok.error).toBeUndefined();
+      expect(ok.result).toEqual({ domain: "b.co", double: 6 });
 
-    const bad = await executor.run({ ...input(source), args: { email: "nope", n: 1.5 } });
-    expect(bad.error).toBe("eval_error");
-    expect(bad.runtimeError?.message).toContain("argsSchema validation failed:");
-    expect(bad.runtimeError?.message).toContain("email");
-  });
+      const bad = await executor.run({ ...input(source), args: { email: "nope", n: 1.5 } });
+      expect(bad.error).toBe("eval_error");
+      expect(bad.runtimeError?.message).toContain("argsSchema validation failed:");
+      expect(bad.runtimeError?.message).toContain("email");
+    });
+  }
 
   test("accepts args that arrive as a JSON string", async () => {
     const output = await executor.run({

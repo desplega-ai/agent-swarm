@@ -1,0 +1,10 @@
+{
+  "update_id": 900001,
+  "message": {
+    "message_id": 11,
+    "date": 1760400000,
+    "chat": { "id": 555001, "type": "private", "first_name": "Taras", "username": "taras_test" },
+    "from": { "id": 555001, "is_bot": false, "first_name": "Taras", "username": "taras_test" },
+    "text": "hello swarm, please summarize the open tasks"
+  }
+}

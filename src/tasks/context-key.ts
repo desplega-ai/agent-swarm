@@ -14,9 +14,13 @@
  * Key schema:
  *   task:slack:{channelId}:{threadTs}
  *   task:agentmail:{threadId}
+ *   task:chat-sdk:{adapter}:{encodeURIComponent(platformThreadId)}
+ *                                                 (Chat SDK thread ids carry `:`, so the
+ *                                                  part after the adapter is URI-encoded)
  *   task:trackers:github:{owner}:{repo}:{issue|pr}:{number}
  *   task:trackers:gitlab:{projectId}:{mr|issue}:{iid}
  *   task:trackers:azure-devops:{repositoryId}:pr:{pullRequestId}
+ *   task:trackers:azure-devops:{organization}:workitem:{workItemId}
  *   task:trackers:linear:{issueIdentifier}        (e.g. DES-42 — case preserved)
  *   task:trackers:jira:{issueIdentifier}          (e.g. PROJ-123 — case preserved)
  *   task:schedule:{scheduleId}
@@ -38,13 +42,20 @@
 
 const SEPARATOR = ":";
 
-export type ContextKeyFamily = "slack" | "agentmail" | "trackers" | "schedule" | "workflow";
+export type ContextKeyFamily =
+  | "slack"
+  | "agentmail"
+  | "chat-sdk"
+  | "trackers"
+  | "schedule"
+  | "workflow";
 
 export type TrackerProvider = "github" | "gitlab" | "azure-devops" | "linear" | "jira";
 
 export type ParsedContextKey =
   | { family: "slack"; parts: { channelId: string; threadTs: string } }
   | { family: "agentmail"; parts: { threadId: string } }
+  | { family: "chat-sdk"; parts: { adapter: string; threadId: string } }
   | {
       family: "trackers";
       subFamily: "github";
@@ -59,6 +70,11 @@ export type ParsedContextKey =
       family: "trackers";
       subFamily: "azure-devops";
       parts: { repositoryId: string; kind: "pr"; pullRequestId: number };
+    }
+  | {
+      family: "trackers";
+      subFamily: "azure-devops";
+      parts: { organization: string; kind: "workitem"; workItemId: number };
     }
   | {
       family: "trackers";
@@ -93,6 +109,42 @@ export function slackContextKey(input: { channelId: string; threadTs: string }):
   const channelId = assertSafePart(input.channelId, "channelId");
   const threadTs = assertSafePart(input.threadTs, "threadTs");
   return ["task", "slack", channelId, threadTs].join(SEPARATOR);
+}
+
+/**
+ * Chat SDK thread ids are `<adapter>:<platform id>` and the platform id itself
+ * may contain `:` (Telegram `telegram:<chatId>:<topicId>`, Slack
+ * `slack:<channel>:<ts>`). The adapter stays a plain key part; the rest is
+ * URI-encoded so the key keeps a fixed part count. `parseContextKey` returns
+ * the original thread id in `parts.threadId`.
+ */
+export function chatSdkContextKey(threadId: string): string {
+  const raw = typeof threadId === "string" ? threadId : "";
+  const separatorIndex = raw.indexOf(SEPARATOR);
+  if (separatorIndex <= 0 || separatorIndex === raw.length - 1) {
+    throw new Error(
+      `context-key: chat-sdk thread id must be "<adapter>:<id>" (got ${JSON.stringify(threadId)})`,
+    );
+  }
+  const adapter = assertSafePart(raw.slice(0, separatorIndex), "adapter");
+  const rest = encodeURIComponent(raw.slice(separatorIndex + 1));
+  return ["task", "chat-sdk", adapter, rest].join(SEPARATOR);
+}
+
+/**
+ * The Chat SDK thread a contextKey points at, or null when the key is missing,
+ * malformed, or of another family. Never throws.
+ */
+export function chatThreadOfContextKey(
+  key: string | null | undefined,
+): { adapter: string; threadId: string } | null {
+  if (!key) return null;
+  try {
+    const parsed = parseContextKey(key);
+    return parsed.family === "chat-sdk" ? parsed.parts : null;
+  } catch {
+    return null;
+  }
 }
 
 export function agentmailContextKey(input: { threadId: string }): string {
@@ -156,6 +208,20 @@ export function azureDevOpsContextKey(input: {
     );
   }
   return ["task", "trackers", "azure-devops", repositoryId, "pr", pullRequestId].join(SEPARATOR);
+}
+
+export function azureDevOpsWorkItemContextKey(input: {
+  organization: string;
+  workItemId: number;
+}): string {
+  const organization = assertSafePart(input.organization, "organization");
+  const workItemId = assertSafePart(input.workItemId, "workItemId");
+  if (!/^\d+$/.test(workItemId)) {
+    throw new Error(
+      `context-key: azure-devops "workItemId" must be a positive integer (got ${JSON.stringify(workItemId)})`,
+    );
+  }
+  return ["task", "trackers", "azure-devops", organization, "workitem", workItemId].join(SEPARATOR);
 }
 
 export function linearContextKey(input: { issueIdentifier: string }): string {
@@ -235,6 +301,19 @@ export function parseContextKey(key: string): ParsedContextKey {
       }
       return { family: "agentmail", parts: { threadId: parts[2] as string } };
     }
+    case "chat-sdk": {
+      if (parts.length !== 4 || !parts[2] || !parts[3]) {
+        throw new Error(`context-key: malformed chat-sdk key: ${JSON.stringify(key)}`);
+      }
+      const adapter = parts[2];
+      let rest: string;
+      try {
+        rest = decodeURIComponent(parts[3]);
+      } catch {
+        throw new Error(`context-key: malformed chat-sdk key: ${JSON.stringify(key)}`);
+      }
+      return { family: "chat-sdk", parts: { adapter, threadId: `${adapter}:${rest}` } };
+    }
     case "schedule": {
       if (parts.length !== 3) {
         throw new Error(`context-key: malformed schedule key: ${JSON.stringify(key)}`);
@@ -293,10 +372,23 @@ export function parseContextKey(key: string): ParsedContextKey {
         };
       }
       if (subFamily === "azure-devops") {
-        if (parts.length !== 6 || parts[4] !== "pr") {
+        if (parts.length !== 6 || (parts[4] !== "pr" && parts[4] !== "workitem")) {
           throw new Error(`context-key: malformed azure-devops key: ${JSON.stringify(key)}`);
         }
         const idStr = parts[5] as string;
+        if (parts[4] === "workitem") {
+          const workItemId = Number.parseInt(idStr, 10);
+          if (!/^\d+$/.test(idStr) || !Number.isFinite(workItemId)) {
+            throw new Error(
+              `context-key: malformed azure-devops workItemId "${idStr}": ${JSON.stringify(key)}`,
+            );
+          }
+          return {
+            family: "trackers",
+            subFamily: "azure-devops",
+            parts: { organization: parts[3] as string, kind: "workitem", workItemId },
+          };
+        }
         const pullRequestId = Number.parseInt(idStr, 10);
         if (!Number.isFinite(pullRequestId)) {
           throw new Error(

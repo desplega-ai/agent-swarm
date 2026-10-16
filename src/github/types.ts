@@ -56,6 +56,7 @@ export interface PullRequestReviewEvent extends GitHubWebhookEvent {
     html_url: string;
     user: { login: string };
     submitted_at: string;
+    commit_id?: string;
   };
   pull_request: {
     number: number;
@@ -63,7 +64,7 @@ export interface PullRequestReviewEvent extends GitHubWebhookEvent {
     body: string | null;
     html_url: string;
     user: { login: string };
-    head: { ref: string };
+    head: { ref: string; sha?: string };
     base: { ref: string };
   };
 }

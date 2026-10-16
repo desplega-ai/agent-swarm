@@ -136,6 +136,12 @@ import {
   CODEX_AUTH_WATCH_NAMESPACE,
   codexAuthBenchMarkerKey,
 } from "../utils/codex-auth-failure";
+import {
+  defaultExportToEnv,
+  effectiveExportToEnv,
+  envExportRestrictedError,
+  isEnvExportRestrictedKey,
+} from "../utils/config-env-export";
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
@@ -205,7 +211,12 @@ import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
-import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
+import {
+  isInternalConfigKey,
+  isReservedConfigKey,
+  reservedKeyError,
+  teamsSdkEnvKeysSql,
+} from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
 import { publishWorkerConfigNudge, publishWorkerNudge } from "./worker-nudges";
 import { defineWorkflowPayload, type WorkflowPayloadView } from "./workflow-replay";
@@ -292,17 +303,21 @@ export {
   findTaskByGitHub,
   findTaskByVcs,
   getAgentCurrentTask,
+  getAgentWorkingOnContextKey,
   getAgentWorkingOnThread,
   getAllTasks,
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
   getInProgressTasksByContextKey,
+  getLatestActiveTaskByContextKey,
   getLatestActiveTaskInThread,
+  getLatestLeadTaskByContextKey,
   getLatestLeadTaskInThread,
   getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
   getMostRecentTaskInThread,
+  getPendingChatRelayTasks,
   getPendingSlackRelayTasks,
   getRecentlyFinishedWorkerTasks,
   getSlackTasksMissingTree,
@@ -313,13 +328,19 @@ export {
   getTasksByAgentId,
   getTasksByStatus,
   getTasksCount,
+  giveUpStaleChatRelays,
   hasNonTerminalRerouteDecisionChild,
   hasNonTerminalResumeChild,
   isLinearTrackerContextKey,
+  markChatRelayAttempted,
+  markChatRelayDelivered,
+  markChatRelayGivenUp,
   markFinalizedSlackRelaysDelivered,
   markSlackRelayAttempted,
   markSlackRelayDelivered,
   markTasksNotified,
+  type PendingChatRelay,
+  recordChatRelayError,
   resetTasksNotified,
   type TaskFilters,
 } from "./db/tasks/read";
@@ -782,7 +803,8 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
  *
  * The join is `agent_tasks.parentTaskId` — `defer-task` sets it on the
  * schedule and `createStandaloneScheduleTask` passes it through, so the
- * wake-up task points back at the task whose card announced the wait.
+ * wake-up task points back at the task whose card announced the wait. Follow
+ * subsequent re-defers to the latest wake, keeping the original card open.
  * `deferredAt` (not the `deferred` tag) identifies the deferring task,
  * because the wake-up task inherits the tag.
  */
@@ -790,15 +812,30 @@ export async function getResolvableDeferralOutcomes(
   limit = 50,
 ): Promise<{ card: SlackMessageRecord; deferredTaskId: string; wakeTaskId: string }[]> {
   const rows = await getDbClient().query<SlackMessageRow & { wake_task_id: string }>(
-    `SELECT card.*, wake.id AS wake_task_id
-       FROM slack_messages card
-       JOIN agent_tasks deferred ON deferred.id = card.task_id
-       JOIN agent_tasks wake ON wake.parentTaskId = deferred.id AND wake.taskType = 'deferred'
+    `WITH RECURSIVE chain(card_id, task_id) AS (
+         SELECT card.id, deferred.id FROM slack_messages card
+         JOIN agent_tasks deferred ON deferred.id = card.task_id
+         WHERE card.kind = 'outcome' AND deferred.deferredAt IS NOT NULL
+           AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
+           AND card.ts NOT LIKE 'pending:%'
+         UNION
+         SELECT chain.card_id, wake.id FROM chain
+         JOIN agent_tasks parent ON parent.id = chain.task_id AND parent.deferredAt IS NOT NULL
+         JOIN agent_tasks wake ON wake.parentTaskId = parent.id AND wake.taskType = 'deferred'
+       )
+       SELECT card.*, wake.id AS wake_task_id
+       FROM chain
+       JOIN slack_messages card ON card.id = chain.card_id
+       JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
        WHERE card.kind = 'outcome'
          AND card.finalized_at IS NOT NULL
          AND card.deferral_resolved_at IS NULL
          AND card.ts NOT LIKE 'pending:%'
-         AND deferred.deferredAt IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_tasks child
+           WHERE child.parentTaskId = wake.id AND child.taskType = 'deferred'
+         )
+         AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
          AND wake.status IN ('completed', 'failed', 'cancelled')
        ORDER BY wake.finishedAt ASC
        LIMIT ?`,
@@ -4359,7 +4396,8 @@ export async function releaseStaleMentionProcessing(timeoutMinutes: number = 30)
 }
 
 // ============================================================================
-// Service Operations (PM2/background services)
+// Service Operations (removed PM2 service registry; the table and these
+// accessors stay until a drop migration lands)
 // ============================================================================
 
 type ServiceRow = {
@@ -6326,6 +6364,7 @@ type SwarmConfigRow = {
   createdAt: string;
   lastUpdatedAt: string;
   encrypted: number; // SQLite boolean: 0 = plaintext, 1 = AES-256-GCM ciphertext
+  exportToEnv?: number; // SQLite boolean; absent only on pre-215 test schemas
 };
 
 type SwarmConfigLookupRow = {
@@ -6354,6 +6393,7 @@ function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
       createdAt: row.createdAt,
       lastUpdatedAt: row.lastUpdatedAt,
       encrypted: isEncrypted,
+      exportToEnv: effectiveExportToEnv(row.key, row.exportToEnv !== 0),
     };
   }
 
@@ -6380,6 +6420,7 @@ function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     encrypted: isEncrypted,
+    exportToEnv: effectiveExportToEnv(row.key, row.exportToEnv !== 0),
   };
 }
 
@@ -6534,7 +6575,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
   const rows = await getDbClient().query<SwarmConfigRow>(
     `SELECT * FROM swarm_config
        WHERE scope = 'global'
-         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION')
+         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${teamsSdkEnvKeysSql()})
        ORDER BY key ASC`,
   );
   return rows.filter((row) => !isInternalConfigKey(row.key)).map(rowToSwarmConfig);
@@ -6588,10 +6629,16 @@ export async function upsertSwarmConfig(data: {
   isSecret?: boolean;
   envPath?: string | null;
   description?: string | null;
+  /** Omitted: an update keeps the stored flag; an insert uses `defaultExportToEnv`. */
+  exportToEnv?: boolean;
 }): Promise<SwarmConfig> {
   if (isReservedConfigKey(data.key)) {
     throw reservedKeyError(data.key);
   }
+  if (data.exportToEnv === true && isEnvExportRestrictedKey(data.key)) {
+    throw new Error(envExportRestrictedError(data.key));
+  }
+  const restricted = isEnvExportRestrictedKey(data.key);
 
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
@@ -6625,17 +6672,30 @@ export async function upsertSwarmConfig(data: {
           );
 
     if (existing) {
+      // COALESCE keeps the stored flag when the caller did not send one.
       return await getDbClient().get<SwarmConfigRow>(
-        `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?
+        `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?,
+           exportToEnv = CASE WHEN ? THEN 0 ELSE COALESCE(?, exportToEnv) END
          WHERE id = ? RETURNING *`,
-        [storedValue, isSecret, envPath, description, encryptedFlag, now, existing.id],
+        [
+          storedValue,
+          isSecret,
+          envPath,
+          description,
+          encryptedFlag,
+          now,
+          restricted ? 1 : 0,
+          data.exportToEnv === undefined ? null : data.exportToEnv ? 1 : 0,
+          existing.id,
+        ],
       );
     }
 
     const id = crypto.randomUUID();
+    const exportToEnv = restricted ? 0 : (data.exportToEnv ?? defaultExportToEnv(data.key)) ? 1 : 0;
     return await getDbClient().get<SwarmConfigRow>(
-      `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         data.scope,
@@ -6648,6 +6708,7 @@ export async function upsertSwarmConfig(data: {
         now,
         now,
         encryptedFlag,
+        exportToEnv,
       ],
     );
   });

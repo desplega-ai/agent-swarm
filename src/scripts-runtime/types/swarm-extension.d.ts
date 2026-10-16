@@ -19,6 +19,7 @@ declare module "swarm-extension" {
       | "linear"
       | "jira"
       | "comb"
+      | "chat"
       | undefined;
     routingReason?:
       | "skill"
@@ -132,7 +133,8 @@ declare module "swarm-extension" {
       | "system"
       | "linear"
       | "jira"
-      | "comb";
+      | "comb"
+      | "chat";
     tags: string[];
     priority: number;
     dependsOn: string[];
@@ -191,6 +193,7 @@ declare module "swarm-extension" {
     resolvedModel?: string | undefined;
     modelSource?: string | undefined;
     modelAlias?: string | undefined;
+    resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | null | undefined;
     workflowRunStepId?: string | null | undefined;
@@ -467,6 +470,43 @@ declare module "swarm-extension" {
           kind: "broadcast";
         };
   }
+  /** A Chat SDK message after its thread buffer flushed, before routing. */
+  export interface ChatRouteEvent {
+    /** Adapter name, such as `telegram` or `slack`. */
+    adapter: string;
+    channelId: string;
+    /** The Chat SDK thread id, prefixed with the adapter name. */
+    threadId: string;
+    /** The first buffered sender. */
+    userId: string;
+    userName?: string;
+    /** The buffered messages, joined. */
+    text: string;
+    botMentioned: boolean;
+    isDirectMessage: boolean;
+    /** Set when earlier swarm tasks exist in this thread. */
+    threadContext?: {
+      adapter: string;
+      threadId: string;
+    };
+  }
+  export interface ChatRouteModify {
+    target:
+      | {
+          kind: "agent";
+          agentId: string;
+        }
+      | {
+          kind: "lead";
+        }
+      | {
+          kind: "broadcast";
+        }
+      | {
+          kind: "workflow";
+          workflowId: string;
+        };
+  }
   export type HeartbeatClassification = "no-session" | "stale-session" | "fresh-stalled";
   export type HeartbeatAction = "supersede-resume" | "fail" | "record";
   export interface HeartbeatRemediateEvent {
@@ -510,6 +550,18 @@ declare module "swarm-extension" {
     text: string;
     threadTs?: string;
     taskId?: string;
+  }
+  /** A Chat SDK message the swarm received or sent. */
+  export interface ChatMessageEvent {
+    adapter: string;
+    channelId: string;
+    threadId: string;
+    /** The sender, for an inbound message. */
+    userId?: string;
+    text: string;
+    direction: "inbound" | "outbound";
+    taskId?: string;
+    messageId?: string;
   }
   /**
    * A person answered an approval request. Fires for workflow and standalone
@@ -619,6 +671,11 @@ declare module "swarm-extension" {
       modify: SlackRouteModify;
       result: PreResult<SlackRouteModify>;
     };
+    "pre.chat.route": {
+      event: ChatRouteEvent;
+      modify: ChatRouteModify;
+      result: PreResult<ChatRouteModify>;
+    };
     "pre.heartbeat.remediate": {
       event: HeartbeatRemediateEvent;
       modify: HeartbeatRemediateModify;
@@ -661,6 +718,11 @@ declare module "swarm-extension" {
     };
     "post.slack.message": {
       event: SlackMessageEvent;
+      modify: never;
+      result: void;
+    };
+    "post.chat.message": {
+      event: ChatMessageEvent;
       modify: never;
       result: void;
     };

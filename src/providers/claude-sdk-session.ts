@@ -30,6 +30,7 @@ import {
   runClaudeSessionSummary,
 } from "./claude-adapter";
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
+import type { ClaudeFlagSettings } from "./claude-flag-settings";
 import type { ClaudeProtocolMessage } from "./claude-session-events";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import type {
@@ -281,7 +282,10 @@ export type CreateClaudeSdkSessionOptions = {
   taskFilePath: string;
   taskFileKey: string;
   sessionMcpConfig: string | null;
+  /** Claude argv prefix with caller `--settings` already stripped. */
   claudeBinaryArgv: readonly string[];
+  /** Validated session settings, caller `--settings` merged in. */
+  settings: ClaudeFlagSettings;
   systemPromptFile: string | null;
   harnessVariant?: string;
   harnessVariantMeta?: Record<string, unknown>;
@@ -470,6 +474,9 @@ class ClaudeSdkSession implements ProviderSession {
           pathToClaudeCodeExecutable: executable,
           systemPrompt: { type: "preset", preset: "claude_code" },
           settingSources: ["user", "project", "local"],
+          // createSession merged caller `--settings` into these; the SDK passes
+          // them as the spawned Claude's one `--settings` flag.
+          settings: this.options.settings,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (text) => {

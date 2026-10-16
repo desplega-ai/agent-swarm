@@ -303,6 +303,7 @@ Task event bus handlers run after commit.
 The post bridge reads the current task and then calls `dispatchPost`.
 Tool post events run after tool result finalization.
 The Slack post event runs after authorization and before route dispatch.
+`pre.chat.route` runs after the Chat SDK thread buffer flushes and before task creation, outside any transaction. `post.chat.message` is bridged from the `chat.message.received` and `chat.message.sent` bus events.
 
 ## Failure handling
 

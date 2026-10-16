@@ -6,6 +6,101 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-16
+
+### Removed
+- **Breaking:** PM2, the service registry and the artifacts feature. Gone: the `agent-swarm artifact` command, the `register-service`, `unregister-service`, `list-services` and `update-service-status` tools, `GET /ecosystem`, `GET /api/services`, the script SDK `service_*` methods, the `services` capability and the dashboard Services page. Pages and apps replace them. A leftover `services` entry in `CAPABILITIES` is now ignored, and the seeded `artifacts` skill is retired unless a user edited it (#2147).
+
+### Added
+- Chat SDK channel: Telegram, Slack, Teams and Discord adapters, with `chat-post`, `chat-reply`, `chat-read-thread`, `chat-open-dm` and `register-chat-channel` tools, configured through `CHAT_SDK_ENABLED` and `CHAT_SDK_ADAPTERS` (#2125).
+- Vercel AI Gateway (Token Pass) with the full chat catalog and a fixed endpoint (#2176).
+- NaN and Helmcode as OpenAI-compatible providers on pi and opencode (#2172).
+- Config: per-row `exportToEnv` flag decides which config rows reach agent env, so secrets stay out of agent shells by default (#2156).
+- UI: Sessions turns and transcript render with a ported shadcn Trace; mermaid diagrams and frontmatter tables render in Comb; wider secrets dialogs with edit and formatted JSON; devin in the harness picker (#2162, #2160, #2159, #2157).
+- `email-domain-health` seeded skill and playbook (#2170).
+
+### Changed
+- The system prompt stays byte-identical across an agent's sessions, so provider prompt caching hits (#2171).
+- CI runs unit tests in 4 shards and logs runner memory on failure (#2174).
+- agent-fs pins bumped to 0.16.3; worker image bumps for claude-code, anthropic sdk, amp, copilot, kiro and dsh (#2173, #2154, #2167).
+- Docs: Open Oncall replication guide, Jev image inputs and costs, Gmail sender guidance, heartbeat spec sync (#2177, #2161, #2152, #2155).
+
+### Fixed
+- Scripts: `ctx.swarm.config.get` returns the invoking agent's config instead of `undefined` (#2168).
+- Scripts: the SDK defaults respect the API `PORT` (#2166).
+- DB: boot re-runs when `initDb` fails after opening, instead of reusing a half-booted handle (#2175).
+- Models: tasks record the effort they ran at, and re-runs stop replaying the previous model (#2158).
+- Pricing: Sonnet 5.5 cache reads seeded at $0.10, and Claude thinking tokens recorded (#2165).
+- Pages read `MAX(version)` instead of every snapshot; a GitHub comment that creates no task logs why (#2164).
+- Skills: `skill-get` resolves agent-owned swarm skills by name (#2151).
+- HTTP: loopback origins on any port are allowed in local development (#2137).
+
+## [1.173.0] - 2026-10-15
+
+### Added
+- Azure DevOps: Azure Boards work items assigned to the bot or mentioning it create a linked swarm task, with tracker sync (#2119).
+- Slack: `SLACK_BLOCK_EXTERNAL_CHANNELS` keeps the bot out of external Slack Connect channels, with inbound and outbound guards, auto-leave and alerts. Off by default (#2143).
+- Scripts: SQL script connections run bounded, read-only Postgres queries while the DSN stays on the server (#2139).
+- Apps catalog: Table on a shared `ListView` layer with icons; status, feedback, loader and motion components; searchable and multi Select (#2130, #2131, #2132).
+- `qa-loom` seeded skill for narrated QA recordings of UI PRs (#2127).
+
+### Changed
+- Worker image bumps for opencode, dsh, amp, claude-code, gemini, copilot, kiro and agent-browser 0.39.1 (#2122, #2124, #2142).
+- Docs: dsh provider auth and a harness configuration reference (#2129).
+- CODEOWNERS no longer auto-requests reviews on every PR (#2141).
+- `dreaming-v2` skill seed patches (#2121).
+
+### Fixed
+- Compiled binaries read `NODE_ENV` at runtime, so production keeps blocking private and plain-HTTP MCP and script-connection URLs (#2138).
+- Slack: re-deferring reuses one waiting card, and duplicate pending watchers from the same agent are rejected (#2136).
+- Slack: worker deferred wakes no longer post outcome cards to human threads (#2140).
+- OpenCode on OpenRouter records the billed `usage.cost` and counts reasoning tokens as output (#2126).
+- Claude sessions load the agent's `CLAUDE.md` once instead of twice (#2123).
+- UI: wider app drawers on desktop, and the app detail header fits a phone screen (#2148, #2134).
+
+## [1.172.0] - 2026-10-14
+
+### Added
+- OpenCode harness runs OpenCode 2.0 in-process through `@opencode/sdk`, replacing the old `plugin/opencode-plugins` plugin (#2112).
+- Scripts can import `zod/mini` alongside `zod` for smaller `quickjs` bundles (#2111).
+
+### Changed
+- Worker image bumps for pi, amp, grok, copilot and kiro (#2108, #2110).
+- `heartbeat-runbook` skill seed patches (#2106).
+
+### Fixed
+- GitHub: review state is read with `GITHUB_TOKEN` when there is no App installation (#2107).
+- Slack: continuation and result links carry labels (#2118).
+
+## [1.171.1] - 2026-10-13
+
+### Changed
+- amp bumped in the worker image (#2103).
+
+### Fixed
+- Dashboard: the organization-name prompt is asked once, and `notifyUs` drops `install_id` when telemetry is off (#2104).
+
+## [1.171.0] - 2026-10-12
+
+1.170.0 was bumped on `main` but never published (no tag, npm package or GitHub release), so this release ships the 1.170.0 changes below as well.
+
+### Added
+- Dashboard: a one-tap 0-10 feedback card shown to admins at a moment of success or friction, then once a quarter (#2080).
+- Dashboard: admins can set a company website that brands the dashboard, opt in to a revocable "used by" logo listing, and turn telemetry on from a banner without a restart (#2081).
+- Dashboard: a fleet benchmark card on Home that compares the swarm with similar swarms, its API route, and the Slack Connect channel offered as a perk (#2086).
+- Dashboard: `catppuccin` (Latte light / Mocha dark) classic theme preset for the dashboard and app canvases (#2100).
+- Telemetry: pop-up impression and bell events are sent as catalogued events through the API, and the bell card drops "I already have one" (#2079).
+
+### Changed
+- agent-fs bumped to 0.16.1 (#2091); amp bumped in the worker image (#2092).
+- Docs: TLA+ specs synced with main (heartbeat, workflows) (#2093), the review skill sweeps repeated findings across the whole PR diff (#2089), and release notes for the week of 2026-10-12 (#2101).
+
+### Fixed
+- Dashboard: the org-name prompt remembers "Later" per session, shows only to admins, and appears once per page load (#2076).
+- Integrations: `LINEAR_ENABLED` and `JIRA_ENABLED` are parsed with the shared env-flag parser (#2096); so is `CONTEXT_MODE_DISABLED` (#2097).
+- pi: swarm MCP setup is retried before its tools are dropped (#2090).
+- Tests: Slack attachment URL environment is isolated per test (#2088).
+
 ## [1.170.0] - 2026-10-12
 
 ### Added

@@ -51,12 +51,53 @@ function AmazonBedrockIcon(props: IconProps) {
   );
 }
 
+function NanIcon(props: IconProps) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, provider label provides accessible name
+    <svg aria-hidden {...ICON_BASE} {...props}>
+      {/* A number sign struck through: "not a number". */}
+      <rect x="7" y="3" width="2" height="18" rx="1" />
+      <rect x="15" y="3" width="2" height="18" rx="1" />
+      <rect x="3" y="7" width="18" height="2" rx="1" />
+      <rect x="3" y="15" width="18" height="2" rx="1" />
+      <rect x="11" y="-1.5" width="2" height="27" rx="1" transform="rotate(45 12 12)" />
+    </svg>
+  );
+}
+
+function HelmcodeIcon(props: IconProps) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, provider label provides accessible name
+    <svg aria-hidden {...ICON_BASE} {...props}>
+      {/* A ship's wheel: evokes a helm. */}
+      <path d="M12 4.5a7.5 7.5 0 1 1 0 15a7.5 7.5 0 1 1 0-15zm0 2.2a5.3 5.3 0 1 0 0 10.6a5.3 5.3 0 1 0 0-10.6z" />
+      <circle cx="12" cy="12" r="2.5" />
+      <rect x="11" y="1" width="2" height="22" rx="1" />
+      <rect x="11" y="1" width="2" height="22" rx="1" transform="rotate(45 12 12)" />
+      <rect x="11" y="1" width="2" height="22" rx="1" transform="rotate(90 12 12)" />
+      <rect x="11" y="1" width="2" height="22" rx="1" transform="rotate(135 12 12)" />
+    </svg>
+  );
+}
+
+function VercelIcon(props: IconProps) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, provider label provides accessible name
+    <svg aria-hidden {...ICON_BASE} {...props}>
+      <path d="M12 3 24 24H0L12 3z" />
+    </svg>
+  );
+}
+
 const ICON_BY_PROVIDER: Record<ProviderIconKey, (p: IconProps) => ReactElement> = {
   anthropic: AnthropicIcon,
   openai: OpenAIIcon,
   openrouter: OpenRouterIcon,
+  vercel: VercelIcon,
   "amazon-bedrock": AmazonBedrockIcon,
   amp: AmpMark,
+  nan: NanIcon,
+  helmcode: HelmcodeIcon,
 };
 
 export interface ProviderIconProps extends IconProps {

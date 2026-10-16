@@ -15,6 +15,11 @@ export interface CostData {
   taskId?: string;
   agentId: string;
   totalCostUsd: number;
+  /**
+   * `totalCostUsd` is what the model provider charged, not a token estimate,
+   * so it wins over the pricing table (opencode on OpenRouter).
+   */
+  harnessCostBilled?: boolean;
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
@@ -28,7 +33,11 @@ export interface CostData {
   cacheWrite1hTokens?: number;
   /** Migration 063: codex reasoning_output_tokens (and similar) for reasoning models. */
   reasoningOutputTokens?: number;
-  /** Migration 063: claude extended-thinking tokens from CLI's `usage.thinking_input_tokens`. */
+  /**
+   * Migration 063: claude extended-thinking tokens from the result line's
+   * `usage.output_tokens_details.thinking_tokens`. Informational: they are a
+   * subset of `outputTokens` and already priced there.
+   */
   thinkingTokens?: number;
   /** Complete per-model usage, including sidechain/subagent tokens when available. */
   models?: CostModelUsage[];
@@ -258,7 +267,7 @@ export interface ProviderTraits {
    * agent never learns they exist. Defaults to true when omitted.
    */
   nativeSkillDiscovery?: boolean;
-  /** Provider runs in the local Docker container with /workspace, identity files, agent-fs, PM2, etc. */
+  /** Provider runs in the local Docker container with /workspace, identity files, agent-fs, etc. */
   hasLocalEnvironment: boolean;
   /** Live steering modes supported by this provider. Absent means none. */
   steerModes?: SteerMode[];

@@ -10,8 +10,7 @@ let unsubscribeRefresh: (() => void) | null = null;
 
 export function isLinearEnabled(): boolean {
   if (isEnvFlagEnabled("LINEAR_DISABLE", false)) return false;
-  const enabled = process.env.LINEAR_ENABLED;
-  if (enabled === "false" || enabled === "0") return false;
+  if (!isEnvFlagEnabled("LINEAR_ENABLED", true)) return false;
   return !!process.env.LINEAR_CLIENT_ID;
 }
 

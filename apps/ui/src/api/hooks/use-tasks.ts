@@ -91,11 +91,14 @@ interface TaskLiveReadOptions {
 }
 
 /** Session log lines, polled every 5 s. One read is about 300 KB. */
-export function useTaskSessionLogs(taskId: string, opts?: TaskLiveReadOptions) {
+export function useTaskSessionLogs(
+  taskId: string,
+  opts?: TaskLiveReadOptions & { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ["task", taskId, "session-logs"],
     queryFn: () => api.fetchTaskSessionLogs(taskId),
-    enabled: !!taskId,
+    enabled: !!taskId && (opts?.enabled ?? true),
     refetchInterval: opts?.refetchInterval ?? 5000,
     ...(opts?.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });

@@ -19,7 +19,7 @@ describe("script import allowlist", () => {
     if (!result.ok) {
       expect(result.diagnostic).toContain("node:fs");
       expect(result.diagnostic).toContain(
-        'Allowed imports are "swarm-sdk", "stdlib", "zod", and relative paths',
+        'Allowed imports are "swarm-sdk", "stdlib", "zod", "zod/mini", and relative paths',
       );
     }
   });

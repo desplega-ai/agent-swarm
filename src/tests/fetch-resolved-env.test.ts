@@ -120,6 +120,95 @@ describe("fetchResolvedEnv", () => {
       warning.mockRestore();
     }
   });
+
+  test("exportToEnv=false rows stay out of the harness env, even over a boot copy", async () => {
+    const agentId = crypto.randomUUID();
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "VERCEL_TOKEN", value: "row-vercel", isSecret: true, exportToEnv: false },
+          { key: "GITHUB_TOKEN", value: "row-github", isSecret: true, exportToEnv: true },
+          { key: "PUBLIC_SETTING", value: "visible", isSecret: false, exportToEnv: true },
+          { key: "HIDDEN_SETTING", value: "hidden", isSecret: false, exportToEnv: false },
+          // A pre-215 API sends no flag: the row keeps exporting.
+          { key: "LEGACY_SECRET", value: "row-legacy", isSecret: true },
+          // Restricted keys never export, whatever the row says.
+          { key: "SLACK_APP_TOKEN", value: "row-xapp", isSecret: true, exportToEnv: true },
+        ],
+      },
+    });
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      // The base env stands for the container env or an older entrypoint's
+      // boot export; a withheld row must remove those copies too.
+      const result = await fetchResolvedEnv(testUrl, "key", agentId, {
+        VERCEL_TOKEN: "boot-vercel",
+        SLACK_APP_TOKEN: "boot-xapp",
+      });
+      expect(result.env.VERCEL_TOKEN).toBeUndefined();
+      expect(result.env.HIDDEN_SETTING).toBeUndefined();
+      expect(result.env.SLACK_APP_TOKEN).toBeUndefined();
+      expect(result.env.GITHUB_TOKEN).toBe("row-github");
+      expect(result.env.PUBLIC_SETTING).toBe("visible");
+      expect(result.env.LEGACY_SECRET).toBe("row-legacy");
+      const logged = log.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("HIDDEN_SETTING, SLACK_APP_TOKEN, VERCEL_TOKEN");
+      expect(logged).not.toContain("row-vercel");
+      expect(logged).not.toContain("boot-vercel");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  test("a row revoked after boot leaves process.env, so merged adapter envs lose it", async () => {
+    const agentId = crypto.randomUUID();
+    const key = "REVOKED_AFTER_BOOT_SECRET";
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: { configs: [{ key, value: "row-value", isSecret: true, exportToEnv: false }] },
+    });
+    // The entrypoint exported the row at boot, before it was switched off.
+    process.env[key] = "boot-export";
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const result = await fetchResolvedEnv(testUrl, "key", agentId);
+      expect(result.env[key]).toBeUndefined();
+      expect(process.env[key]).toBeUndefined();
+      // The amp, dsh, grok, cursor and claude adapters spawn with this shape.
+      expect({ ...process.env, ...result.env }[key]).toBeUndefined();
+    } finally {
+      delete process.env[key];
+      log.mockRestore();
+    }
+  });
+
+  test("a masked row keeps its boot value only when the row is exported", async () => {
+    const agentId = crypto.randomUUID();
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "EXPORTED_BOOT", value: MASKED_SECRET_VALUE, isSecret: true, exportToEnv: true },
+          { key: "WITHHELD_BOOT", value: MASKED_SECRET_VALUE, isSecret: true, exportToEnv: false },
+        ],
+      },
+    });
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const result = await fetchResolvedEnv(testUrl, "key", agentId, {
+        EXPORTED_BOOT: "boot-exported",
+        WITHHELD_BOOT: "boot-withheld",
+      });
+      expect(result.env.EXPORTED_BOOT).toBe("boot-exported");
+      expect(result.env.WITHHELD_BOOT).toBeUndefined();
+    } finally {
+      warning.mockRestore();
+      log.mockRestore();
+    }
+  });
+
   test("repository scope requires the requested repository identity", async () => {
     const repoId = crypto.randomUUID();
     let url = "https://github.com/another-owner/fixture";
@@ -303,6 +392,45 @@ describe("fetchResolvedEnv", () => {
       "CLAUDE_CODE_OAUTH_TOKEN",
       "ANTHROPIC_API_KEY",
     ]);
+  });
+
+  test("HELMCODE_API_NAN alias becomes NAN_API_KEY and pools for a nan/* model", async () => {
+    const agentId = crypto.randomUUID();
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: { configs: [{ key: "HELMCODE_API_NAN", value: "fixture-nan-a,fixture-nan-b" }] },
+    });
+    const result = await fetchResolvedEnv(testUrl, "key", agentId, {}, "nan/glm5.3-flash", {
+      provider: "opencode",
+    });
+    expect(result.env.NAN_API_KEY).toMatch(/^fixture-nan-[ab]$/);
+    expect(result.credentialSelections.map((selection) => selection.keyType)).toEqual([
+      "NAN_API_KEY",
+    ]);
+  });
+
+  test("an explicit NAN_API_KEY wins over the HELMCODE_API_NAN alias", async () => {
+    const agentId = crypto.randomUUID();
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "NAN_API_KEY", value: "fixture-nan-canonical" },
+          { key: "HELMCODE_API_NAN", value: "fixture-nan-alias" },
+        ],
+      },
+    });
+    const result = await fetchResolvedEnv(testUrl, "key", agentId, {}, "nan/qwen3.6", {
+      provider: "pi",
+    });
+    expect(result.env.NAN_API_KEY).toBe("fixture-nan-canonical");
+  });
+
+  test("the alias also normalizes from the boot env when the API is unreachable", async () => {
+    const result = await fetchResolvedEnv("", "key", "agent-1", {
+      HELMCODE_API_NAN: "fixture-nan-boot",
+    });
+    expect(result.env.NAN_API_KEY).toBe("fixture-nan-boot");
   });
 
   describe("model-scoped window filter — GET /api/keys/available?model=<family>", () => {

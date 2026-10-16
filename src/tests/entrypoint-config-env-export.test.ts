@@ -93,7 +93,10 @@ function extractExportFilter(lineMarker: string): string {
   const line = script.split("\n").find((l) => l.includes(lineMarker) && l.includes("jq -r '"));
   if (!line) throw new Error(`Could not locate the jq line containing ${lineMarker}`);
   const start = line.indexOf("jq -r '") + "jq -r '".length;
-  const end = line.indexOf("' /tmp/swarm_config.json", start);
+  // Inline programs read /tmp/swarm_config.json; the swarm_config_env_lines
+  // function reads its "$1" argument.
+  const ends = ["' /tmp/swarm_config.json", '\' "$1"'].map((tail) => line.indexOf(tail, start));
+  const end = ends.find((index) => index !== -1) ?? -1;
   if (end === -1) throw new Error(`Could not locate the end of the jq program for ${lineMarker}`);
   return line.slice(start, end);
 }
@@ -127,7 +130,7 @@ describe("entrypoint config env export: real jq filter", () => {
   test(
     "never exports codex_oauth or codex_oauth_<n>, nor the runner-resolved keys",
     async () => {
-      const lines = await runJq(extractExportFilter("> /tmp/swarm_config.env"), configs);
+      const lines = await runJq(extractExportFilter("(.value | @sh)"), configs);
       const keys = lines.map((l) => l.slice(0, l.indexOf("=")));
       expect(keys).toEqual(["NORMAL", "codex_oauth_extra"]);
       expect(lines.join("\n")).not.toContain("rt.secret");

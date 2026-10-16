@@ -1,1507 +1,794 @@
 /**
- * Unit tests for OpencodeSession lifecycle (DES-299, DES-300).
+ * Unit tests for the OpenCode 2 adapter.
  *
- * Mocks `@opencode-ai/sdk` so we can drive canned SSE event sequences
- * and verify the SSE→ProviderEvent mapping, cost aggregation, raw_log
- * persistence, and per-task isolation (agent file, config, data home).
+ * A fake embedded host stands in for `@opencode/sdk` (injected through
+ * `_setOpencodeSdkLoaderForTests`), so these tests drive canned OpenCode 2
+ * events through the adapter and check the ProviderEvent mapping, cost,
+ * config wiring, steering, abort, and stream-death handling.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
-import { resolveProviderOutput, trackAssistantText } from "../commands/runner";
-import type {
-  ProviderEvent,
-  ProviderResult,
-  ProviderSession,
-  ProviderSessionConfig,
-} from "../providers/types";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import type { OpenCodeEvent } from "@opencode/sdk";
+import { normalizeSessionLogs, type SessionLogRecord } from "../../apps/ui/src/logs-parser";
+import {
+  _setOpencodeSdkLoaderForTests,
+  _setOpencodeSessionHooksForTests,
+  applyOpenRouterBaseUrlOverride,
+  applyProviderKeySplice,
+  OpencodeAdapter,
+  type OpencodeSession,
+  resolveOpencodeSdkSpecifier,
+} from "../providers/opencode-adapter";
+import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+const SESSION_ID = "ses_test";
 
 function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSessionConfig {
   return {
     prompt: "do something",
     systemPrompt: "be helpful",
-    model: "claude-opus-4",
+    model: "openrouter/google/gemini-3-flash-preview",
     role: "worker",
     agentId: "agent-1",
     taskId: "task-1",
-    apiUrl: "http://localhost:0",
+    apiUrl: "http://127.0.0.1:9",
     apiKey: "example-test-key",
-    cwd: "/tmp/test",
-    logFile: "/tmp/test.log",
+    cwd: "/tmp/opencode-adapter-test",
+    logFile: "/tmp/opencode-adapter-test.log",
     ...overrides,
   };
 }
 
-/** Build a fake opencode SSE stream from a list of events. */
-function makeStream(events: OpencodeEvent[]): AsyncGenerator<OpencodeEvent> {
-  async function* gen(): AsyncGenerator<OpencodeEvent> {
-    for (const ev of events) yield ev;
-  }
-  return gen();
+/** Builds a typed event; the adapter only reads `type` and `data`. */
+function ev(type: string, data: Record<string, unknown>): OpenCodeEvent {
+  return { id: `evt_${type}`, created: 0, type, data } as unknown as OpenCodeEvent;
 }
 
-/** Last args captured by the fakeClient.session.prompt mock. */
-let lastPromptArgs: unknown;
-
-/** Last config passed to createOpencode mock. */
-let lastCreateOpencodeConfig: unknown;
-
-/** Collect all ProviderEvents emitted by a session. */
-async function driveSession(
-  events: OpencodeEvent[],
-  cfg: ProviderSessionConfig = testConfig(),
-): Promise<{ emitted: ProviderEvent[]; result: ProviderResult; serverCloseCalls: () => number }> {
-  const emitted: ProviderEvent[] = [];
-
-  // Build the fake client/server pair used by the mock
-  const fakeSessionId = "sess-abc-123";
-  const fakeStream = makeStream(events);
-
-  const fakeClient = {
-    session: {
-      create: async () => ({ data: { id: fakeSessionId }, error: undefined }),
-      prompt: async (args: unknown) => {
-        lastPromptArgs = args;
-        return { data: {}, error: undefined };
-      },
-    },
-    event: {
-      subscribe: async () => ({ stream: fakeStream }),
-    },
-  };
-
-  const closeServer = mock(() => {});
-  const fakeServer = { url: "http://127.0.0.1:12345", close: closeServer };
-
-  // Install mock BEFORE importing the adapter (Bun hoists mock.module)
-  mock.module("@opencode-ai/sdk", () => ({
-    createOpencode: async (opts: unknown) => {
-      lastCreateOpencodeConfig = opts;
-      return { client: fakeClient, server: fakeServer };
-    },
-  }));
-
-  // Dynamic import ensures the mock is applied
-  const { OpencodeAdapter } = await import("../providers/opencode-adapter");
-  const adapter = new OpencodeAdapter();
-  const session = await adapter.createSession(cfg);
-  session.onEvent((e) => emitted.push(e));
-
-  // Give microtasks (session_init) a chance to run
-  await new Promise((r) => setTimeout(r, 0));
-
-  const result = await session.waitForCompletion();
-  return { emitted, result, serverCloseCalls: () => closeServer.mock.calls.length };
-}
-
-async function inspectSessionBeforeIdle(
-  cfg: ProviderSessionConfig,
-  inspect: () => Promise<void>,
-): Promise<void> {
-  const fakeSessionId = "sess-abc-123";
-  let releaseIdle!: () => void;
-  const idleReleased = new Promise<void>((resolve) => {
-    releaseIdle = resolve;
-  });
-
-  const fakeClient = {
-    session: {
-      create: async () => ({ data: { id: fakeSessionId }, error: undefined }),
-      prompt: async (args: unknown) => {
-        lastPromptArgs = args;
-        return { data: {}, error: undefined };
-      },
-    },
-    event: {
-      subscribe: async () => ({
-        stream: (async function* (): AsyncGenerator<OpencodeEvent> {
-          await idleReleased;
-          yield { type: "session.idle", properties: { sessionID: fakeSessionId } };
-        })(),
-      }),
-    },
-  };
-
-  const fakeServer = { url: "http://127.0.0.1:12345", close: mock(() => {}) };
-
-  mock.module("@opencode-ai/sdk", () => ({
-    createOpencode: async (opts: unknown) => {
-      lastCreateOpencodeConfig = opts;
-      return { client: fakeClient, server: fakeServer };
-    },
-  }));
-
-  const { OpencodeAdapter } = await import("../providers/opencode-adapter");
-  const adapter = new OpencodeAdapter();
-  const session = await adapter.createSession(cfg);
-  session.onEvent(() => {});
-  await new Promise((r) => setTimeout(r, 0));
-  await inspect();
-  releaseIdle();
-  await session.waitForCompletion();
-}
-
-async function inspectSteeringBeforeIdle(
-  sessionMethods: {
-    abort: (args: unknown) => Promise<unknown>;
-    promptAsync: (args: unknown) => Promise<unknown>;
-  },
-  inspect: (session: ProviderSession, serverCloseCalls: () => number) => Promise<void>,
-): Promise<void> {
-  const fakeSessionId = "sess-steering-123";
-  let releaseIdle!: () => void;
-  const idleReleased = new Promise<void>((resolve) => {
-    releaseIdle = resolve;
-  });
-  const fakeClient = {
-    session: {
-      create: async () => ({ data: { id: fakeSessionId }, error: undefined }),
-      prompt: async () => ({ data: {}, error: undefined }),
-      ...sessionMethods,
-    },
-    event: {
-      subscribe: async () => ({
-        stream: (async function* (): AsyncGenerator<OpencodeEvent> {
-          await idleReleased;
-          yield { type: "session.idle", properties: { sessionID: fakeSessionId } };
-        })(),
-      }),
-    },
-  };
-  const closeServer = mock(() => {});
-  const fakeServer = { url: "http://127.0.0.1:12345", close: closeServer };
-
-  mock.module("@opencode-ai/sdk", () => ({
-    createOpencode: async () => ({ client: fakeClient, server: fakeServer }),
-  }));
-
-  const { OpencodeAdapter } = await import("../providers/opencode-adapter");
-  const session = await new OpencodeAdapter().createSession(
-    testConfig({ taskId: "task-steering" }),
-  );
-  session.onEvent(() => {});
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  try {
-    await inspect(session, () => closeServer.mock.calls.length);
-  } finally {
-    releaseIdle();
-    await session.waitForCompletion();
-  }
-}
-
-// ── tests ─────────────────────────────────────────────────────────────────────
-
-describe("OpencodeSession.deliverSteering", () => {
-  beforeEach(() => {
-    mock.restore();
-  });
-
-  test("queue mode prompts asynchronously without aborting", async () => {
-    const abortCalls: unknown[] = [];
-    const promptAsyncCalls: unknown[] = [];
-    await inspectSteeringBeforeIdle(
-      {
-        abort: async (args) => {
-          abortCalls.push(args);
-          return {};
-        },
-        promptAsync: async (args) => {
-          promptAsyncCalls.push(args);
-          return {};
-        },
-      },
-      async (session) => {
-        await expect(
-          session.deliverSteering?.({ mode: "queue", text: "Use this extra context." }),
-        ).resolves.toEqual({ delivered: true, mode: "queue" });
-        expect(abortCalls).toEqual([]);
-        expect(promptAsyncCalls).toEqual([
-          {
-            path: { id: "sess-steering-123" },
-            body: { parts: [{ type: "text", text: "Use this extra context." }] },
-          },
-        ]);
-      },
-    );
-  });
-
-  test("a steer request never aborts and reports queue honestly", async () => {
-    const calls: Array<{ method: "abort" | "promptAsync"; args: unknown }> = [];
-    await inspectSteeringBeforeIdle(
-      {
-        abort: async (args) => {
-          calls.push({ method: "abort", args });
-          return {};
-        },
-        promptAsync: async (args) => {
-          calls.push({ method: "promptAsync", args });
-          return {};
-        },
-      },
-      async (session, serverCloseCalls) => {
-        // opencode advertises `["queue"]` only: E2E showed the re-prompt fails
-        // once the session has been aborted, losing the message to the
-        // undeliverable path. A steer request that reaches the adapter anyway
-        // is served as a queue and reported as such.
-        await expect(
-          session.deliverSteering?.({ mode: "steer", text: "Stop and revise." }),
-        ).resolves.toEqual({ delivered: true, mode: "queue" });
-        expect(calls).toEqual([
-          {
-            method: "promptAsync",
-            args: {
-              path: { id: "sess-steering-123" },
-              body: { parts: [{ type: "text", text: "Stop and revise." }] },
-            },
-          },
-        ]);
-        expect(serverCloseCalls()).toBe(0);
-        await expect(
-          Promise.race([
-            session.waitForCompletion().then(() => "completed"),
-            Promise.resolve("still-running"),
-          ]),
-        ).resolves.toBe("still-running");
-      },
-    );
-  });
-
-  test("returns an undeliverable result when the opencode SDK rejects the prompt", async () => {
-    await inspectSteeringBeforeIdle(
-      {
-        abort: async () => ({}),
-        promptAsync: async () => {
-          throw new Error("opencode prompt rejected");
-        },
-      },
-      async (session) => {
-        await expect(
-          session.deliverSteering?.({ mode: "queue", text: "Try again later." }),
-        ).resolves.toEqual({
-          delivered: false,
-          reason: "Error: opencode prompt rejected",
-        });
-      },
-    );
-  });
-
-  test("returns an undeliverable result after the session has completed", async () => {
-    // Once `finish()` runs, the local server is closed and further events are
-    // ignored — a promptAsync would start a turn nobody observes while
-    // reporting a false `delivered`, suppressing follow-up promotion.
-    const promptAsyncCalls: unknown[] = [];
-    await inspectSteeringBeforeIdle(
-      {
-        abort: async () => ({}),
-        promptAsync: async (args) => {
-          promptAsyncCalls.push(args);
-          return {};
-        },
-      },
-      async (session) => {
-        await session.abort();
-        await expect(
-          session.deliverSteering?.({ mode: "queue", text: "Too late for this run." }),
-        ).resolves.toEqual({
-          delivered: false,
-          reason: "opencode session already completed",
-        });
-        expect(promptAsyncCalls).toEqual([]);
-      },
-    );
-  });
+const tokens = (input: number, output: number, read = 0, write = 0) => ({
+  input,
+  output,
+  reasoning: 0,
+  cache: { read, write },
 });
 
-describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
-  beforeEach(() => {
-    // Reset module mock cache between tests so each test gets a fresh instance
-    mock.restore();
-  });
+type FakeHost = ReturnType<typeof makeFakeHost>;
 
-  test("session.idle → emits result with isError=false", async () => {
-    const events: OpencodeEvent[] = [
-      {
-        type: "session.idle",
-        properties: { sessionID: "sess-abc-123" },
+type McpStatus =
+  | { status: "connected" | "pending" | "disabled" }
+  | { status: "failed" | "needs_auth"; error: string };
+
+type FakeHostOptions = {
+  endStream?: boolean;
+  promptError?: Error;
+  /** Swarm MCP status per `mcp.list` call; the last entry repeats. Omit the server with `null`. */
+  mcpStatuses?: Array<McpStatus | null>;
+  /** Registered tool ids the plugin's tool lister returns. */
+  tools?: string[];
+  /** Model responses handed to the plugin's `http.response` hook at startup. */
+  responses?: Response[];
+};
+
+/**
+ * An embedded host whose event stream replays `events`, then either ends
+ * (`endStream`) or stays open until `close()`. By default its swarm MCP
+ * server is connected with `store-progress` registered.
+ */
+function makeFakeHost(events: OpenCodeEvent[], opts: FakeHostOptions = {}) {
+  const statuses = opts.mcpStatuses ?? [{ status: "connected" }];
+  let release: () => void = () => {};
+  const closed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const host = {
+    createOptions: undefined as unknown as Record<string, unknown>,
+    created: [] as unknown[],
+    prompts: [] as Array<Record<string, unknown>>,
+    interrupts: [] as unknown[],
+    closeCalls: 0,
+    mcpListCalls: 0,
+    /** Session hooks the plugins registered, with their options. */
+    sessionHooks: {} as Record<
+      string,
+      { fn: (event: any) => unknown; options?: { providerID?: string } }
+    >,
+    mcp: {
+      list: async () => {
+        const status = statuses[Math.min(host.mcpListCalls, statuses.length - 1)];
+        host.mcpListCalls++;
+        return { location: {}, data: status ? [{ name: "swarm", status }] : [] };
       },
-    ];
-    const { emitted, result, serverCloseCalls } = await driveSession(events);
-
-    const sessionInit = emitted.find((e) => e.type === "session_init");
-    expect(sessionInit?.type).toBe("session_init");
-    if (sessionInit?.type !== "session_init") {
-      throw new Error("Expected opencode session_init event");
-    }
-    expect(sessionInit.provider).toBe("opencode");
-    expect(sessionInit.harnessVariant).toBe("stock");
-    expect(typeof sessionInit.harnessVariantMeta?.version).toBe("string");
-    expect((sessionInit.harnessVariantMeta?.version as string).length).toBeGreaterThan(0);
-
-    const resultEvent = emitted.find((e) => e.type === "result");
-    expect(resultEvent).toBeDefined();
-    if (resultEvent?.type === "result") {
-      expect(resultEvent.isError).toBe(false);
-      expect(resultEvent.cost).toBeDefined();
-      expect(resultEvent.cost.provider).toBe("opencode");
-    }
-    expect(result.isError).toBe(false);
-    expect(result.exitCode).toBe(0);
-    expect(result.sessionId).toBe("sess-abc-123");
-    expect(serverCloseCalls()).toBe(1);
-  });
-
-  test("session.idle closes the server and drops later heartbeat events", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-      { type: "server.heartbeat", properties: {} } as OpencodeEvent,
-    ];
-    const { emitted, serverCloseCalls } = await driveSession(events);
-
-    expect(serverCloseCalls()).toBe(1);
-    const rawLogContents = emitted
-      .filter((e): e is Extract<ProviderEvent, { type: "raw_log" }> => e.type === "raw_log")
-      .map((e) => e.content);
-    expect(rawLogContents.some((content) => content.includes("server.heartbeat"))).toBe(false);
-  });
-
-  test("session.error → emits error event and fails result", async () => {
-    const events: OpencodeEvent[] = [
-      {
-        type: "session.error",
-        properties: {
-          sessionID: "sess-abc-123",
-          error: { message: "provider overloaded" } as never,
-        },
+    },
+    tools: opts.tools ?? ["read", "swarm_store-progress"],
+    responses: opts.responses ?? [],
+    sessions: {
+      create: async (input: unknown) => {
+        host.created.push(input);
+        return { id: SESSION_ID };
       },
-    ];
-    const { emitted, result, serverCloseCalls } = await driveSession(events);
+      prompt: async (input: Record<string, unknown>) => {
+        if (opts.promptError) throw opts.promptError;
+        host.prompts.push(input);
+        return {};
+      },
+      interrupt: async (input: unknown) => {
+        host.interrupts.push(input);
+        return {};
+      },
+    },
+    events: {
+      async *subscribe() {
+        for (const event of events) yield event;
+        if (!opts.endStream) await closed;
+      },
+    },
+    close: async () => {
+      host.closeCalls++;
+      release();
+    },
+  };
+  return host;
+}
 
-    const errorEvent = emitted.find((e) => e.type === "error");
-    expect(errorEvent).toBeDefined();
-    if (errorEvent?.type === "error") {
-      expect(errorEvent.message).toContain("provider overloaded");
-    }
-    expect(result.isError).toBe(true);
-    expect(result.exitCode).toBe(1);
-    expect(result.failureReason).toContain("provider overloaded");
-    expect(serverCloseCalls()).toBe(1);
-  });
-
-  test("prompt Model not found refreshes OpenRouter cache and retries once", async () => {
-    const emitted: ProviderEvent[] = [];
-    const refreshCalls: Array<{ model?: string; configFilePath: string; dataHomePath: string }> =
-      [];
-    const fakeSessionId = "sess-abc-123";
-    let promptCalls = 0;
-    let resolveSecondPrompt!: () => void;
-    const secondPromptSent = new Promise<void>((resolve) => {
-      resolveSecondPrompt = resolve;
-    });
-
-    const fakeClient = {
-      session: {
-        create: async () => ({ data: { id: fakeSessionId }, error: undefined }),
-        prompt: async (args: unknown) => {
-          lastPromptArgs = args;
-          promptCalls += 1;
-          if (promptCalls === 1) {
-            throw new Error(
-              "Model not found: openrouter/x-ai/grok-4.3. Did you mean: x-ai/grok-4.3?",
-            );
+function installHost(host: FakeHost, onCreate?: (options: Record<string, unknown>) => void) {
+  _setOpencodeSdkLoaderForTests(async () => ({
+    version: "2.0.28",
+    sdk: {
+      OpenCode: {
+        create: async (options: Record<string, unknown>) => {
+          host.createOptions = options;
+          onCreate?.(options);
+          // Set the plugins up the way OpenCode does, with a stub context.
+          const plugins = options.plugins as Array<{ setup: (ctx: unknown) => Promise<void> }>;
+          for (const plugin of plugins) {
+            await plugin.setup({
+              tool: {
+                hook: async () => {},
+                list: async () => host.tools.map((id) => ({ id })),
+              },
+              // Registered when the session config carries a per-task env.
+              shell: { hook: async () => {} },
+              session: {
+                hook: async (
+                  name: string,
+                  fn: (event: unknown) => unknown,
+                  options?: { providerID?: string },
+                ) => {
+                  host.sessionHooks[name] = { fn, options };
+                },
+              },
+            });
           }
-          resolveSecondPrompt();
-          return { data: {}, error: undefined };
+          for (const response of host.responses) {
+            await host.sessionHooks["http.response"]?.fn({ response });
+          }
+          return host;
         },
       },
-      event: {
-        subscribe: async () => ({
-          stream: (async function* (): AsyncGenerator<OpencodeEvent> {
-            await secondPromptSent;
-            yield { type: "session.idle", properties: { sessionID: fakeSessionId } };
-          })(),
-        }),
-      },
-    };
-    const fakeServer = { url: "http://127.0.0.1:12345", close: mock(() => {}) };
+    } as never,
+  }));
+}
 
-    mock.module("@opencode-ai/sdk", () => ({
-      createOpencode: async () => ({ client: fakeClient, server: fakeServer }),
-    }));
+async function startSession(
+  events: OpenCodeEvent[],
+  cfg: ProviderSessionConfig = testConfig(),
+  opts: FakeHostOptions = {},
+) {
+  const host = makeFakeHost(events, opts);
+  installHost(host);
+  const session = (await new OpencodeAdapter().createSession(cfg)) as OpencodeSession;
+  const emitted: ProviderEvent[] = [];
+  session.onEvent((e) => emitted.push(e));
+  return { host, session, emitted };
+}
 
-    const { OpencodeAdapter, _setOpenRouterModelCacheRefreshForTests } = await import(
-      "../providers/opencode-adapter"
-    );
-    _setOpenRouterModelCacheRefreshForTests(
-      async (opencodeConfig, configFilePath, dataHomePath) => {
-        refreshCalls.push({ model: opencodeConfig.model, configFilePath, dataHomePath });
-      },
-    );
-    try {
-      const adapter = new OpencodeAdapter();
-      const session = await adapter.createSession(
-        testConfig({ model: "openrouter/x-ai/grok-4.3", taskId: "task-refresh" }),
-      );
-      session.onEvent((e) => emitted.push(e));
+async function runSession(
+  events: OpenCodeEvent[],
+  cfg?: ProviderSessionConfig,
+  opts?: FakeHostOptions,
+) {
+  const started = await startSession(events, cfg, opts);
+  const result = await started.session.waitForCompletion();
+  return { ...started, result };
+}
 
-      const result = await session.waitForCompletion();
-
-      expect(result.isError).toBe(false);
-      expect(promptCalls).toBe(2);
-      expect(refreshCalls).toEqual([
-        {
-          model: "openrouter/x-ai/grok-4.3",
-          configFilePath: "/tmp/opencode-task-refresh.json",
-          dataHomePath: "/tmp/opencode-data-task-refresh",
-        },
-      ]);
-      expect(emitted.some((e) => e.type === "progress" && e.message.includes("refreshing"))).toBe(
-        true,
-      );
-    } finally {
-      _setOpenRouterModelCacheRefreshForTests(null);
-    }
-  });
-
-  test("permission.updated → emits error (headless cannot approve)", async () => {
-    const events: OpencodeEvent[] = [
-      {
-        type: "permission.updated",
-        properties: {
-          id: "perm-1",
-          type: "bash",
-          sessionID: "sess-abc-123",
-          messageID: "msg-1",
-          title: "Run shell command",
-          metadata: {},
-          time: { created: Date.now() },
-        },
-      },
-    ];
-    const { emitted, result } = await driveSession(events);
-
-    const errorEvent = emitted.find((e) => e.type === "error");
-    expect(errorEvent).toBeDefined();
-    if (errorEvent?.type === "error") {
-      expect(errorEvent.message).toContain("Permission request");
-    }
-    expect(result.isError).toBe(true);
-  });
-
-  test("message.updated (other session) → ignored", async () => {
-    const events: OpencodeEvent[] = [
-      {
-        type: "message.updated",
-        properties: {
-          info: {
-            id: "msg-other",
-            sessionID: "other-session",
-            role: "assistant",
-            cost: 999,
-            tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
-            time: { created: Date.now() },
-            parentID: "",
-            modelID: "claude-opus",
-            providerID: "anthropic",
-            mode: "live",
-            path: { cwd: "/", root: "/" },
-          } as never,
-        },
-      },
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const { result } = await driveSession(events);
-    // The other-session cost should NOT be accumulated
-    expect(result.cost?.totalCostUsd).toBe(0);
-  });
-
-  test("all events emit a raw_log", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const { emitted } = await driveSession(events);
-
-    const rawLogs = emitted.filter((e) => e.type === "raw_log");
-    expect(rawLogs.length).toBeGreaterThan(0);
-  });
-});
-
-describe("OpencodeSession — cost aggregation", () => {
-  beforeEach(() => {
-    mock.restore();
-  });
-
-  function finalizedMessage(
-    id: string,
-    values: {
-      cost: number;
-      input: number;
-      output: number;
-      reasoning?: number;
-      cacheRead?: number;
-      cacheWrite?: number;
-    },
-  ): OpencodeEvent {
-    const now = Date.now();
-    return {
-      type: "message.updated",
-      properties: {
-        info: {
-          id,
-          sessionID: "sess-abc-123",
-          role: "assistant",
-          cost: values.cost,
-          tokens: {
-            input: values.input,
-            output: values.output,
-            reasoning: values.reasoning ?? 0,
-            cache: { read: values.cacheRead ?? 0, write: values.cacheWrite ?? 0 },
-          },
-          time: { created: now, completed: now + 1 },
-          parentID: "",
-          modelID: "claude-opus",
-          providerID: "anthropic",
-          mode: "live",
-          path: { cwd: "/", root: "/" },
-        } as never,
-      },
-    };
+async function waitFor(check: () => boolean, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("waitFor timed out");
+    await Bun.sleep(5);
   }
+}
 
-  test("distinct finalized message.updated steps → totals are summed", async () => {
-    const stepCosts = [0.001, 0.002, 0.0015];
-    const stepEvents: OpencodeEvent[] = stepCosts.map((cost, i) => ({
-      type: "message.updated",
-      properties: {
-        info: {
-          id: `msg-${i}`,
-          sessionID: "sess-abc-123",
-          role: "assistant",
-          cost,
-          tokens: {
-            input: 100 + i * 10,
-            output: 50 + i * 5,
-            reasoning: 0,
-            cache: { read: i * 2, write: i },
-          },
-          // Phase 9 fix: accumulator gates on `time.completed` so simulated steps
-          // must look like finalized opencode messages.
-          time: { created: Date.now(), completed: Date.now() + 1 },
-          parentID: "",
-          modelID: "claude-opus",
-          providerID: "anthropic",
-          mode: "live",
-          path: { cwd: "/", root: "/" },
-        } as never,
-      },
-    }));
+function configOf(host: FakeHost): Record<string, any> {
+  const config = host.createOptions.config as { content: string };
+  return JSON.parse(config.content);
+}
 
-    const events: OpencodeEvent[] = [
-      ...stepEvents,
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
+const succeeded = ev("session.execution.succeeded", { sessionID: SESSION_ID });
 
-    const { result } = await driveSession(events);
-    const expected = stepCosts.reduce((a, b) => a + b, 0);
-    expect(result.cost?.totalCostUsd).toBeCloseTo(expected, 10);
-    expect(result.cost?.numTurns).toBe(stepCosts.length);
-    expect(result.cost?.inputTokens).toBe(100 + 110 + 120);
-    expect(result.cost?.outputTokens).toBe(50 + 55 + 60);
-    expect(result.cost?.cacheReadTokens).toBe(0 + 2 + 4);
-    expect(result.cost?.cacheWriteTokens).toBe(0 + 1 + 2);
-  });
-
-  test("duplicate finalized snapshot with the same message id is counted once", async () => {
-    const message = finalizedMessage("msg-duplicate", {
-      cost: 0.004,
-      input: 100,
-      output: 50,
-      reasoning: 10,
-      cacheRead: 20,
-      cacheWrite: 5,
-    });
-    const { result } = await driveSession([
-      message,
-      message,
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ]);
-
-    expect(result.cost?.totalCostUsd).toBe(0.004);
-    expect(result.cost?.inputTokens).toBe(100);
-    expect(result.cost?.outputTokens).toBe(50);
-    expect(result.cost?.reasoningOutputTokens).toBe(10);
-    expect(result.cost?.cacheReadTokens).toBe(20);
-    expect(result.cost?.cacheWriteTokens).toBe(5);
-    expect(result.cost?.numTurns).toBe(1);
-  });
-
-  test("latest finalized snapshot wins when a message id is updated", async () => {
-    const { result } = await driveSession([
-      finalizedMessage("msg-last-wins", {
-        cost: 0.004,
-        input: 100,
-        output: 50,
-        reasoning: 10,
-        cacheRead: 20,
-        cacheWrite: 5,
-      }),
-      finalizedMessage("msg-last-wins", {
-        cost: 0.007,
-        input: 200,
-        output: 80,
-        reasoning: 12,
-        cacheRead: 30,
-        cacheWrite: 8,
-      }),
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ]);
-
-    expect(result.cost?.totalCostUsd).toBe(0.007);
-    expect(result.cost?.inputTokens).toBe(200);
-    expect(result.cost?.outputTokens).toBe(80);
-    expect(result.cost?.reasoningOutputTokens).toBe(12);
-    expect(result.cost?.cacheReadTokens).toBe(30);
-    expect(result.cost?.cacheWriteTokens).toBe(8);
-    expect(result.cost?.numTurns).toBe(1);
-  }, 30_000);
-
-  test("reasoning tokens are summed across distinct finalized messages", async () => {
-    const { result } = await driveSession([
-      finalizedMessage("msg-reasoning-1", { cost: 0.001, input: 10, output: 5, reasoning: 7 }),
-      finalizedMessage("msg-reasoning-2", { cost: 0.002, input: 20, output: 8, reasoning: 11 }),
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ]);
-
-    expect(result.cost?.reasoningOutputTokens).toBe(18);
-    expect(result.cost?.numTurns).toBe(2);
-  });
-
-  test("messages without ids are counted separately, not merged into one entry", async () => {
-    const stripId = (event: OpencodeEvent): OpencodeEvent => {
-      const clone = structuredClone(event) as {
-        properties: { info: { id?: string } };
-      };
-      delete clone.properties.info.id;
-      return clone as unknown as OpencodeEvent;
-    };
-    const { result } = await driveSession([
-      stripId(finalizedMessage("ignored-1", { cost: 0.001, input: 10, output: 5 })),
-      stripId(finalizedMessage("ignored-2", { cost: 0.002, input: 20, output: 8 })),
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ]);
-
-    // Two id-less messages must not collapse into a single Map entry.
-    expect(result.cost?.totalCostUsd).toBeCloseTo(0.003, 10);
-    expect(result.cost?.numTurns).toBe(2);
-  });
-
-  test("a finalized message without a tokens block defaults to zero tokens, no throw", async () => {
-    const message = finalizedMessage("msg-no-tokens", { cost: 0.005, input: 0, output: 0 });
-    const clone = structuredClone(message) as {
-      properties: { info: { tokens?: unknown } };
-    };
-    delete clone.properties.info.tokens;
-    const { result } = await driveSession([
-      clone as unknown as OpencodeEvent,
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ]);
-
-    expect(result.cost?.totalCostUsd).toBeCloseTo(0.005, 10);
-    expect(result.cost?.inputTokens).toBe(0);
-    expect(result.cost?.outputTokens).toBe(0);
-    expect(result.cost?.numTurns).toBe(1);
-  });
-
-  test("cost data includes provider='opencode'", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const { result } = await driveSession(events);
-    expect(result.cost?.provider).toBe("opencode");
-  });
-
-  test("cost data includes taskId and agentId from config", async () => {
-    const cfg = testConfig({ taskId: "my-task", agentId: "my-agent" });
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const { result } = await driveSession(events, cfg);
-    expect(result.cost?.taskId).toBe("my-task");
-    expect(result.cost?.agentId).toBe("my-agent");
-  });
-});
-
-describe("OpencodeSession — raw_log persistence", () => {
-  beforeEach(() => {
-    mock.restore();
-  });
-
-  test("every SSE event produces at least one raw_log row", async () => {
-    const events: OpencodeEvent[] = [
-      {
-        type: "message.updated",
-        properties: {
-          info: {
-            id: "msg-1",
-            sessionID: "sess-abc-123",
-            role: "assistant",
-            cost: 0.001,
-            tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
-            time: { created: Date.now() },
-            parentID: "",
-            modelID: "claude-opus",
-            providerID: "anthropic",
-            mode: "live",
-            path: { cwd: "/", root: "/" },
-          } as never,
-        },
-      },
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-
-    const { emitted } = await driveSession(events);
-    const rawLogs = emitted.filter((e) => e.type === "raw_log");
-    // At minimum: one per SSE event + one for the result event
-    expect(rawLogs.length).toBeGreaterThanOrEqual(events.length);
-  });
-
-  test("raw_log content is a valid JSON string", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const { emitted } = await driveSession(events);
-    const rawLogs = emitted.filter((e) => e.type === "raw_log");
-    for (const rl of rawLogs) {
-      if (rl.type === "raw_log") {
-        expect(() => JSON.parse(rl.content)).not.toThrow();
-      }
-    }
-  }, 30_000);
-});
-
-// ── Phase 9: context_usage emission ───────────────────────────────────────────
-
-describe("OpencodeSession — context_usage emission (phase 9 fix)", () => {
-  beforeEach(() => {
-    mock.restore();
-  });
-
-  /** Build a `message.updated` event with optional finalize flag. */
-  function makeMessageUpdated(
-    overrides: {
-      sessionID?: string;
-      completed?: boolean;
-      input?: number;
-      output?: number;
-      cacheRead?: number;
-      cacheWrite?: number;
-      cost?: number;
-      modelID?: string;
-    } = {},
-  ): OpencodeEvent {
-    const now = Date.now();
-    return {
-      type: "message.updated",
-      properties: {
-        info: {
-          id: `msg-${now}`,
-          sessionID: overrides.sessionID ?? "sess-abc-123",
-          role: "assistant",
-          cost: overrides.cost ?? 0.001,
-          tokens: {
-            input: overrides.input ?? 0,
-            output: overrides.output ?? 0,
-            reasoning: 0,
-            cache: {
-              read: overrides.cacheRead ?? 0,
-              write: overrides.cacheWrite ?? 0,
-            },
-          },
-          time: overrides.completed ? { created: now, completed: now + 1 } : { created: now },
-          parentID: "",
-          modelID: overrides.modelID ?? "claude-sonnet-4-5",
-          providerID: "anthropic",
-          mode: "live",
-          path: { cwd: "/", root: "/" },
-        } as never,
-      },
-    };
+const prevEnv: Record<string, string | undefined> = {};
+beforeAll(() => {
+  for (const key of ["SKIP_SESSION_SUMMARY", "CONTEXT_MODE_DISABLED", "OPENCODE_SDK_PATH"]) {
+    prevEnv[key] = process.env[key];
   }
-
-  test("finalized message with real tokens → emits context_usage matching the cost row", async () => {
-    // Mirrors the E2E evidence: opencode reports `in=12, cache.read=99970,
-    // cache.write=104606, out=288` on the FINAL message.updated for the turn.
-    const events: OpencodeEvent[] = [
-      makeMessageUpdated({
-        completed: true,
-        input: 12,
-        output: 288,
-        cacheRead: 99970,
-        cacheWrite: 104606,
-      }),
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-
-    const { emitted, result } = await driveSession(events);
-
-    const contextEvents = emitted.filter((e) => e.type === "context_usage");
-    expect(contextEvents.length).toBe(1);
-    const ctx = contextEvents[0];
-    if (ctx?.type === "context_usage") {
-      // Unified formula: input + cache_read + cache_write + output
-      expect(ctx.contextUsedTokens).toBe(12 + 99970 + 104606 + 288);
-      expect(ctx.contextFormula).toBe("input-cache-output");
-      expect(ctx.outputTokens).toBe(288);
-      expect(ctx.contextTotalTokens).toBeGreaterThan(0);
-      expect(ctx.contextPercent).toBeGreaterThan(0);
-    }
-    // The cost row stays consistent — same tokens, single turn.
-    expect(result.cost?.inputTokens).toBe(12);
-    expect(result.cost?.cacheReadTokens).toBe(99970);
-    expect(result.cost?.cacheWriteTokens).toBe(104606);
-    expect(result.cost?.outputTokens).toBe(288);
-    expect(result.cost?.numTurns).toBe(1);
-  });
-
-  test("non-finalized message.updated (tokens all zero) → NO context_usage emission", async () => {
-    // Simulates opencode's intermediate streaming updates that arrive before
-    // the model returns usage counts. Pre-fix, these emitted a 0-token snapshot
-    // that the runner-side throttle pinned for the rest of the session.
-    const events: OpencodeEvent[] = [
-      makeMessageUpdated({ completed: false }),
-      makeMessageUpdated({ completed: false }),
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-
-    const { emitted, result } = await driveSession(events);
-
-    const contextEvents = emitted.filter((e) => e.type === "context_usage");
-    expect(contextEvents.length).toBe(0);
-    // Cost accumulator also skipped non-finalized updates.
-    expect(result.cost?.numTurns).toBe(0);
-    expect(result.cost?.totalCostUsd).toBe(0);
-  });
-
-  test("mix of streaming-zero updates then finalized update → exactly one context_usage from the final", async () => {
-    // The realistic opencode event stream: many intermediate zero-token updates
-    // followed by a single finalized update. Only the finalized one should
-    // produce a context_usage row.
-    const events: OpencodeEvent[] = [
-      makeMessageUpdated({ completed: false }),
-      makeMessageUpdated({ completed: false }),
-      makeMessageUpdated({
-        completed: true,
-        input: 50,
-        output: 200,
-        cacheRead: 1000,
-        cacheWrite: 500,
-      }),
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-
-    const { emitted, result } = await driveSession(events);
-
-    const contextEvents = emitted.filter((e) => e.type === "context_usage");
-    expect(contextEvents.length).toBe(1);
-    if (contextEvents[0]?.type === "context_usage") {
-      expect(contextEvents[0].contextUsedTokens).toBe(50 + 1000 + 500 + 200);
-    }
-    expect(result.cost?.numTurns).toBe(1);
-    expect(result.cost?.inputTokens).toBe(50);
-  });
-
-  test("finalized message with all-zero tokens → still no emission (guards against pathological zero turns)", async () => {
-    const events: OpencodeEvent[] = [
-      makeMessageUpdated({ completed: true }), // all zero tokens
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-
-    const { emitted } = await driveSession(events);
-    const contextEvents = emitted.filter((e) => e.type === "context_usage");
-    expect(contextEvents.length).toBe(0);
-  });
+  process.env.SKIP_SESSION_SUMMARY = "1";
+  delete process.env.CONTEXT_MODE_DISABLED;
+});
+afterAll(() => {
+  for (const [key, value] of Object.entries(prevEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+afterEach(() => {
+  _setOpencodeSdkLoaderForTests(null);
+  _setOpencodeSessionHooksForTests(null);
 });
 
-// ── DES-300: per-task isolation ────────────────────────────────────────────────
+describe("OpencodeAdapter — host and config wiring", () => {
+  test("passes the per-task config as content and the swarm plugin as an object", async () => {
+    const { host } = await runSession([succeeded], testConfig({ contextKey: "ctx-1" }));
+    const config = configOf(host);
 
-describe("OpencodeSession — assistant text for final-message validation", () => {
-  beforeEach(() => {
-    mock.restore();
-  });
-
-  const SESSION = "sess-abc-123";
-
-  function messageUpdated(
-    id: string,
-    role: "assistant" | "user",
-    completed: boolean,
-  ): OpencodeEvent {
-    const now = Date.now();
-    return {
-      type: "message.updated",
-      properties: {
-        info: {
-          id,
-          sessionID: SESSION,
-          role,
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-          time: completed ? { created: now, completed: now + 1 } : { created: now },
-          parentID: "",
-          modelID: "m",
-          providerID: "p",
-          mode: "live",
-          path: { cwd: "/", root: "/" },
-        } as never,
+    expect(config.model).toBe("openrouter/google/gemini-3-flash-preview");
+    expect(config.permission).toMatchObject({ edit: "allow", bash: "allow" });
+    expect(config.agent).toEqual({ swarm: { mode: "primary", prompt: "be helpful" } });
+    expect(config.mcp.swarm).toMatchObject({
+      type: "remote",
+      url: "http://127.0.0.1:9/mcp",
+      headers: {
+        Authorization: "Bearer example-test-key",
+        "X-Agent-ID": "agent-1",
+        "X-Source-Task-Id": "task-1",
+        "X-Context-Key": "ctx-1",
       },
-    };
-  }
+    });
+    expect(config.mcp["context-mode"]).toMatchObject({ type: "local", command: ["context-mode"] });
 
-  function textPart(
-    messageID: string,
-    id: string,
-    text: string,
-    extra: { synthetic?: boolean; ignored?: boolean } = {},
-  ): OpencodeEvent {
-    return {
-      type: "message.part.updated",
-      properties: {
-        part: { id, sessionID: SESSION, messageID, type: "text", text, ...extra } as never,
-      },
-    };
-  }
+    const plugins = host.createOptions.plugins as Array<{ id: string; setup: unknown }>;
+    expect(plugins.map((p) => p.id)).toEqual(["agent-swarm"]);
+    expect(typeof plugins[0]?.setup).toBe("function");
+  });
 
-  const idle: OpencodeEvent = { type: "session.idle", properties: { sessionID: SESSION } };
-
-  function assistantTexts(emitted: ProviderEvent[]): string[] {
-    return emitted.flatMap((e) =>
-      e.type === "message" && e.role === "assistant" ? [e.content] : [],
-    );
-  }
-
-  test("the runner's final-message buffer holds the last step's text, ready for outputSchema validation", async () => {
-    const final = JSON.stringify({ verdict: "pass", score: 3 });
-    const { emitted } = await driveSession([
-      messageUpdated("m1", "assistant", false),
-      textPart("m1", "p1", "Checking the page first."),
-      messageUpdated("m1", "assistant", true),
-      // Step 2 is tool-free and carries the answer.
-      messageUpdated("m2", "assistant", false),
-      textPart("m2", "p2", final),
-      messageUpdated("m2", "assistant", true),
-      idle,
+  test("creates the session in the task cwd with the swarm agent and queues the prompt", async () => {
+    const { host, session } = await startSession([]);
+    await waitFor(() => host.prompts.length > 0);
+    expect(host.created).toEqual([
+      { location: { directory: "/tmp/opencode-adapter-test" }, agent: "swarm" },
     ]);
-
-    expect(assistantTexts(emitted)).toEqual(["Checking the page first.", final]);
-
-    const holder: { value?: string } = {};
-    for (const e of emitted) trackAssistantText(holder, e);
-    expect(resolveProviderOutput({ output: undefined }, holder)).toBe(final);
-  });
-
-  test("user-message text and synthetic or ignored parts are never emitted as assistant text", async () => {
-    const { emitted } = await driveSession([
-      messageUpdated("u1", "user", true),
-      textPart("u1", "pu", "the task prompt"),
-      messageUpdated("m1", "assistant", false),
-      textPart("m1", "p-synth", "injected reminder", { synthetic: true }),
-      textPart("m1", "p-ign", "ignored text", { ignored: true }),
-      textPart("m1", "p1", "real answer"),
-      messageUpdated("m1", "assistant", true),
-      idle,
+    expect(host.prompts).toEqual([
+      { sessionID: SESSION_ID, text: "do something", delivery: "queue" },
     ]);
-
-    expect(assistantTexts(emitted)).toEqual(["real answer"]);
+    await session.abort();
   });
 
-  test("streamed snapshots and replayed finalized updates emit the message once, with its full text", async () => {
-    const { emitted } = await driveSession([
-      messageUpdated("m1", "assistant", false),
-      textPart("m1", "p1", '{"a"'),
-      textPart("m1", "p1", '{"a": 1}'),
-      messageUpdated("m1", "assistant", true),
-      messageUpdated("m1", "assistant", true),
-      idle,
-    ]);
-
-    expect(assistantTexts(emitted)).toEqual(['{"a": 1}']);
-  });
-
-  test("a text part that lands after its message finalized re-emits the fuller text", async () => {
-    const { emitted } = await driveSession([
-      messageUpdated("m1", "assistant", false),
-      textPart("m1", "p1", "first half. "),
-      messageUpdated("m1", "assistant", true),
-      textPart("m1", "p2", "second half."),
-      idle,
-    ]);
-
-    expect(assistantTexts(emitted)).toEqual(["first half.", "first half. second half."]);
-  });
-});
-
-describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
-  let prevOpencodeSkillsDir: string | undefined;
-
-  beforeEach(() => {
-    prevOpencodeSkillsDir = process.env.OPENCODE_SKILLS_DIR;
-    lastPromptArgs = undefined;
-    lastCreateOpencodeConfig = undefined;
-    mock.restore();
-  });
-
-  afterEach(() => {
-    if (prevOpencodeSkillsDir === undefined) delete process.env.OPENCODE_SKILLS_DIR;
-    else process.env.OPENCODE_SKILLS_DIR = prevOpencodeSkillsDir;
-    // Clean up any written files from tests
-    Bun.$`rm -rf /tmp/opencode-task-1.json /tmp/opencode-data-task-1`.quiet().nothrow();
-    Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
-    rmSync("/tmp/opencode-skills-test", { recursive: true, force: true });
-  });
-
-  test("session.prompt receives agent=swarm-<taskId>", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const cfg = testConfig({ taskId: "task-1" });
-    await driveSession(events, cfg);
-
-    expect(lastPromptArgs).toBeDefined();
-    const args = lastPromptArgs as { body?: { agent?: string } };
-    expect(args.body?.agent).toBe("swarm-task-1");
-  });
-
-  test("inlines a leading slash skill before sending prompt", async () => {
-    const skillDir = "/tmp/opencode-skills-test/work-on-task";
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(join(skillDir, "SKILL.md"), "Use the task worker procedure.");
-    process.env.OPENCODE_SKILLS_DIR = "/tmp/opencode-skills-test";
-
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const cfg = testConfig({
-      taskId: "task-1",
-      prompt: "/work-on-task task-123\n\nTask body.",
-    });
-    await driveSession(events, cfg);
-
-    const args = lastPromptArgs as { body?: { parts?: Array<{ type: string; text: string }> } };
-    const text = args.body?.parts?.[0]?.text ?? "";
-    expect(text).toStartWith("Use the task worker procedure.");
-    expect(text).toContain("User request: task-123\n\nTask body.");
-    expect(text).not.toContain("/work-on-task task-123");
-  });
-
-  test("createOpencode receives config with model, mcp.swarm, and permission", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const cfg = testConfig({
-      taskId: "task-1",
-      model: "claude-sonnet-4-6",
-      apiUrl: "http://localhost:9999",
-      apiKey: "mykey",
-      agentId: "agent-42",
-    });
-    await driveSession(events, cfg);
-
-    expect(lastCreateOpencodeConfig).toBeDefined();
-    const opts = lastCreateOpencodeConfig as {
-      timeout?: number;
-      config?: {
-        model?: string;
-        mcp?: Record<string, unknown>;
-        permission?: Record<string, string>;
-      };
-    };
-    // Server-start timeout must override the SDK's 5s default (E2B cold-start flake)
-    expect(opts.timeout).toBe(30_000);
-    expect(opts.config?.model).toBe("claude-sonnet-4-6");
-    expect(opts.config?.mcp?.swarm).toBeDefined();
-    const swarm = opts.config?.mcp?.swarm as {
-      type: string;
-      url: string;
-      headers?: Record<string, string>;
-    };
-    expect(swarm.type).toBe("remote");
-    expect(swarm.url).toContain("http://localhost:9999");
-    expect(swarm.headers?.Authorization).toContain("mykey");
-    expect(opts.config?.permission?.edit).toBe("allow");
-  });
-
-  test("swarm MCP headers carry the per-boot runtime identity when set", async () => {
-    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
-    process.env.SWARM_RUNTIME_INSTANCE_ID = "opencode-runtime-1";
-    try {
-      const events: OpencodeEvent[] = [
-        { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-      ];
-      await driveSession(events, testConfig({ taskId: "task-1" }));
-
-      const opts = lastCreateOpencodeConfig as {
-        config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
-      };
-      expect(opts.config?.mcp?.swarm?.headers?.["X-Runtime-Instance-ID"]).toBe(
-        "opencode-runtime-1",
-      );
-    } finally {
-      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
-      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
-    }
-  });
-
-  test("swarm MCP headers carry the task id and context key", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    await driveSession(
-      events,
-      testConfig({ taskId: "task-1", contextKey: "task:slack:C1:1700000000.000100" }),
-    );
-
-    const opts = lastCreateOpencodeConfig as {
-      config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
-    };
-    const headers = opts.config?.mcp?.swarm?.headers;
-    expect(headers?.["X-Source-Task-Id"]).toBe("task-1");
-    expect(headers?.["X-Context-Key"]).toBe("task:slack:C1:1700000000.000100");
-  });
-
-  test("swarm MCP headers omit the context key when the task has none", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    await driveSession(events, testConfig({ taskId: "task-1" }));
-
-    const opts = lastCreateOpencodeConfig as {
-      config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
-    };
-    const headers = opts.config?.mcp?.swarm?.headers;
-    expect(headers?.["X-Source-Task-Id"]).toBe("task-1");
-    expect(headers?.["X-Context-Key"]).toBeUndefined();
-  });
-
-  test("swarm MCP headers omit the runtime identity when unset", async () => {
-    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
-    delete process.env.SWARM_RUNTIME_INSTANCE_ID;
-    try {
-      const events: OpencodeEvent[] = [
-        { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-      ];
-      await driveSession(events, testConfig({ taskId: "task-1" }));
-
-      const opts = lastCreateOpencodeConfig as {
-        config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
-      };
-      expect(opts.config?.mcp?.swarm?.headers?.["X-Runtime-Instance-ID"]).toBeUndefined();
-    } finally {
-      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
-      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
-    }
-  });
-
-  test("per-task agent file is written with system prompt", async () => {
-    const cwd = `/tmp/opencode-test-agent-${Date.now()}`;
-    await Bun.$`mkdir -p ${cwd}`.quiet();
-    const cfg = testConfig({ taskId: "task-agent-file", systemPrompt: "be a coder", cwd });
-    await inspectSessionBeforeIdle(cfg, async () => {
-      const agentFile = Bun.file(join(cwd, ".opencode", "agents", "swarm-task-agent-file.md"));
-      const exists = await agentFile.exists();
-      expect(exists).toBe(true);
-      if (exists) {
-        const content = await agentFile.text();
-        expect(content).toContain("be a coder");
-      }
-    });
-
-    // Cleanup
-    await Bun.$`rm -rf ${cwd}`.quiet().nothrow();
-  });
-
-  test("per-task config file is written as valid JSON", async () => {
-    const cfg = testConfig({ taskId: "task-cfg-json", contextKey: "task:api:ctx-1" });
-    await inspectSessionBeforeIdle(cfg, async () => {
-      const configFile = Bun.file("/tmp/opencode-task-cfg-json.json");
-      const exists = await configFile.exists();
-      expect(exists).toBe(true);
-      if (exists) {
-        const text = await configFile.text();
-        expect(() => JSON.parse(text)).not.toThrow();
-        const parsed = JSON.parse(text) as {
-          mcp?: { swarm?: { headers?: Record<string, string> } };
-          permission?: unknown;
-        };
-        expect(parsed.mcp).toBeDefined();
-        expect(parsed.permission).toBeDefined();
-        // The per-task file must carry the task identity too: `opencode serve`
-        // reads this file (via OPENCODE_CONFIG), not the in-process object.
-        expect(parsed.mcp?.swarm?.headers?.["X-Source-Task-Id"]).toBe("task-cfg-json");
-        expect(parsed.mcp?.swarm?.headers?.["X-Context-Key"]).toBe("task:api:ctx-1");
-      }
-    });
-
-    // Cleanup
-    await Bun.$`rm -f /tmp/opencode-task-cfg-json.json`.quiet().nothrow();
-    await Bun.$`rm -rf /tmp/opencode-data-task-cfg-json`.quiet().nothrow();
-  });
-});
-
-// ── Phase 4 (reasoning-effort plan): provider-keyed reasoning options ──────────
-
-describe("OpencodeAdapter — reasoning_effort wiring", () => {
-  beforeEach(() => {
-    lastCreateOpencodeConfig = undefined;
-    mock.restore();
-  });
-
-  test("reasoningEffort: 'low' on an openrouter model sets provider.openrouter.models[id].options.reasoning.effort", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const cfg = testConfig({
-      model: "openrouter/google/gemini-3-flash-preview",
-      reasoningEffort: "low",
-    });
-    await driveSession(events, cfg);
-
-    const opts = lastCreateOpencodeConfig as {
-      config?: { provider?: Record<string, { models?: Record<string, { options?: unknown }> }> };
-    };
-    const options =
-      opts.config?.provider?.openrouter?.models?.["google/gemini-3-flash-preview"]?.options;
-    expect(options).toEqual({ reasoning: { effort: "low" } });
-  });
-
-  test("reasoningEffort: 'high' on an anthropic model sets provider.anthropic.models[id].options.thinking.budgetTokens", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const cfg = testConfig({
-      model: "anthropic/claude-opus-4-8",
-      reasoningEffort: "high",
-    });
-    await driveSession(events, cfg);
-
-    const opts = lastCreateOpencodeConfig as {
-      config?: { provider?: Record<string, { models?: Record<string, { options?: unknown }> }> };
-    };
-    const options = opts.config?.provider?.anthropic?.models?.["claude-opus-4-8"]?.options;
-    expect(options).toEqual({ thinking: { type: "enabled", budgetTokens: 32768 } });
-  });
-
-  test("undefined reasoningEffort leaves model options unset", async () => {
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    const cfg = testConfig({ model: "openrouter/google/gemini-3-flash-preview" });
-    await driveSession(events, cfg);
-
-    const opts = lastCreateOpencodeConfig as {
-      config?: { provider?: Record<string, { models?: unknown }> };
-    };
-    expect(opts.config?.provider?.openrouter?.models).toBeUndefined();
-  });
-});
-
-// ── Phase 4: context-mode in-process plugin ────────────────────────────────────
-
-describe("OpencodeAdapter — context-mode plugin wiring (phase 4)", () => {
-  let prevContextModeDisabled: string | undefined;
-  let prevContextModePluginPath: string | undefined;
-  // The global npm install of context-mode is absent in the test env, so point
-  // the override at a real temp file to make resolution succeed deterministically.
-  const fakePluginPath = "/tmp/ctx-mode-opencode-plugin.test.js";
-
-  beforeEach(() => {
-    prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
-    prevContextModePluginPath = process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH;
-    lastCreateOpencodeConfig = undefined;
-    mock.restore();
-  });
-
-  afterEach(() => {
-    // Never leak the env mutations across tests.
-    if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
-    else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
-    if (prevContextModePluginPath === undefined)
-      delete process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH;
-    else process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = prevContextModePluginPath;
-    Bun.$`rm -rf /tmp/opencode-task-1.json /tmp/opencode-data-task-1`.quiet().nothrow();
-    Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
-    Bun.$`rm -f ${fakePluginPath}`.quiet().nothrow();
-  });
-
-  /** Pull the opencode config object passed to createOpencode. */
-  function getBuiltConfig(): { plugin?: string[]; mcp?: Record<string, unknown> } {
-    const opts = lastCreateOpencodeConfig as {
-      config?: { plugin?: string[]; mcp?: Record<string, unknown> };
-    };
-    expect(opts.config).toBeDefined();
-    return opts.config as { plugin?: string[]; mcp?: Record<string, unknown> };
-  }
-
-  test("resolveContextModePluginPath returns the override path when it exists", async () => {
-    writeFileSync(fakePluginPath, "// test plugin\n");
-    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
-    const { resolveContextModePluginPath } = await import("../providers/opencode-adapter");
-    expect(resolveContextModePluginPath()).toBe(fakePluginPath);
-  });
-
-  test("resolveContextModePluginPath returns null when the override path is missing", async () => {
-    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = "/tmp/ctx-mode-does-not-exist.js";
-    const { resolveContextModePluginPath } = await import("../providers/opencode-adapter");
-    expect(resolveContextModePluginPath()).toBeNull();
-  });
-
-  test("plugin array includes the resolved context-mode plugin path when available", async () => {
-    delete process.env.CONTEXT_MODE_DISABLED;
-    writeFileSync(fakePluginPath, "// test plugin\n");
-    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    await driveSession(events, testConfig({ taskId: "task-1" }));
-
-    const built = getBuiltConfig();
-    expect(built.plugin).toContain(fakePluginPath);
-    // The bare package name must never be used — opencode can't resolve it offline.
-    expect(built.plugin).not.toContain("context-mode");
-  });
-
-  test("plugin array excludes context-mode when CONTEXT_MODE_DISABLED=true", async () => {
+  test("context-mode is not wired when CONTEXT_MODE_DISABLED is set", async () => {
     process.env.CONTEXT_MODE_DISABLED = "true";
-    writeFileSync(fakePluginPath, "// test plugin\n");
-    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    await driveSession(events, testConfig({ taskId: "task-1" }));
-
-    const built = getBuiltConfig();
-    expect(built.plugin).not.toContain(fakePluginPath);
-    expect(built.plugin).not.toContain("context-mode");
+    try {
+      const { host } = await runSession([succeeded]);
+      expect(configOf(host).mcp["context-mode"]).toBeUndefined();
+    } finally {
+      delete process.env.CONTEXT_MODE_DISABLED;
+    }
   });
 
-  test("context-mode does NOT appear in the mcp block", async () => {
-    delete process.env.CONTEXT_MODE_DISABLED;
-    writeFileSync(fakePluginPath, "// test plugin\n");
-    process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
-    const events: OpencodeEvent[] = [
-      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
-    ];
-    await driveSession(events, testConfig({ taskId: "task-1" }));
-
-    const built = getBuiltConfig();
-    expect(built.mcp).toBeDefined();
-    expect(built.mcp?.["context-mode"]).toBeUndefined();
-  });
-});
-
-describe("OpencodeAdapter: session create timeout", () => {
-  let prevTimeout: string | undefined;
-
-  beforeEach(() => {
-    prevTimeout = process.env.OPENCODE_SERVER_TIMEOUT_MS;
-    mock.restore();
+  test("reasoningEffort on an openrouter model sets provider options", async () => {
+    const { host } = await runSession([succeeded], testConfig({ reasoningEffort: "low" }));
+    expect(
+      configOf(host).provider.openrouter.models["google/gemini-3-flash-preview"].options,
+    ).toEqual({ reasoning: { effort: "low" } });
   });
 
-  afterEach(() => {
-    if (prevTimeout === undefined) delete process.env.OPENCODE_SERVER_TIMEOUT_MS;
-    else process.env.OPENCODE_SERVER_TIMEOUT_MS = prevTimeout;
-    Bun.$`rm -rf /tmp/opencode-task-timeout.json /tmp/opencode-data-task-timeout`.quiet().nothrow();
-    Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
+  test("session_init carries the SDK version", async () => {
+    const { emitted } = await runSession([succeeded]);
+    expect(emitted[0]).toMatchObject({
+      type: "session_init",
+      sessionId: SESSION_ID,
+      provider: "opencode",
+      harnessVariantMeta: { version: "2.0.28" },
+    });
   });
 
-  test("a hung session.create fails the spawn after OPENCODE_SERVER_TIMEOUT_MS and closes the server", async () => {
-    process.env.OPENCODE_SERVER_TIMEOUT_MS = "50";
-    const closeServer = mock(() => {});
-    const fakeServer = { url: "http://127.0.0.1:12345", close: closeServer };
-    const fakeClient = {
-      session: {
-        create: () => new Promise<never>(() => {}),
-        prompt: async () => ({ data: {}, error: undefined }),
-      },
-      event: { subscribe: async () => ({ stream: makeStream([]) }) },
-    };
-    mock.module("@opencode-ai/sdk", () => ({
-      createOpencode: async () => ({ client: fakeClient, server: fakeServer }),
-    }));
-
-    const { OpencodeAdapter } = await import("../providers/opencode-adapter");
-    const adapter = new OpencodeAdapter();
-
-    await expect(adapter.createSession(testConfig({ taskId: "task-timeout" }))).rejects.toThrow(
-      "opencode session create timed out after 50ms",
-    );
-    expect(closeServer).toHaveBeenCalledTimes(1);
+  test("OPENCODE_SDK_PATH overrides the SDK lookup", () => {
+    process.env.OPENCODE_SDK_PATH = "/opt/opencode/sdk/dist/index.js";
+    try {
+      expect(resolveOpencodeSdkSpecifier()).toBe("/opt/opencode/sdk/dist/index.js");
+    } finally {
+      delete process.env.OPENCODE_SDK_PATH;
+    }
   });
 });
 
-describe("OpencodeAdapter: event stream ends without session.idle", () => {
-  beforeEach(() => {
-    mock.restore();
-  });
-
-  afterEach(() => {
-    Bun.$`rm -rf /tmp/opencode-task-stream-end.json /tmp/opencode-data-task-stream-end`
-      .quiet()
-      .nothrow();
-    Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
-  });
-
-  test("settles the session as failed and caps SSE reconnects so a dead server cannot hold the slot", async () => {
-    let subscribeArgs: { sseMaxRetryAttempts?: number } | undefined;
-    const closeServer = mock(() => {});
-    const fakeClient = {
-      session: {
-        create: async () => ({ data: { id: "sess-stream-end" }, error: undefined }),
-        prompt: async () => ({ data: {}, error: undefined }),
-      },
-      event: {
-        subscribe: async (args: { sseMaxRetryAttempts?: number }) => {
-          subscribeArgs = args;
-          // The server died: the stream closes with no session.idle.
-          return { stream: makeStream([]) };
-        },
-      },
-    };
-    mock.module("@opencode-ai/sdk", () => ({
-      createOpencode: async () => ({
-        client: fakeClient,
-        server: { url: "http://127.0.0.1:12345", close: closeServer },
+describe("OpencodeSession — event mapping", () => {
+  test("tool, text, step and usage events map to provider events and cost", async () => {
+    const { result, emitted, host } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { command: "ls" } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: "file.txt\n" }],
       }),
-    }));
-
-    const { OpencodeAdapter, OPENCODE_SSE_MAX_RETRY_ATTEMPTS } = await import(
-      "../providers/opencode-adapter"
-    );
-    const session = await new OpencodeAdapter().createSession(
-      testConfig({ taskId: "task-stream-end" }),
-    );
-    session.onEvent(() => {});
-
-    const settled = await Promise.race([
-      session.waitForCompletion(),
-      Bun.sleep(2_000).then(() => "pending" as const),
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_2", name: "read" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_2", input: {} }),
+      ev("session.tool.failed", {
+        sessionID: SESSION_ID,
+        id: "call_2",
+        error: { type: "unknown", message: "no such file" },
+      }),
+      ev("session.step.ended", { sessionID: SESSION_ID, tokens: tokens(1000, 10, 200, 0) }),
+      ev("session.text.ended", {
+        sessionID: SESSION_ID,
+        assistantMessageID: "msg_2",
+        ordinal: 0,
+        text: "All done.",
+      }),
+      ev("session.step.ended", { sessionID: SESSION_ID, tokens: tokens(1200, 5) }),
+      ev("session.usage.updated", {
+        sessionID: SESSION_ID,
+        cost: 0.42,
+        tokens: tokens(2200, 15, 200, 0),
+      }),
+      succeeded,
     ]);
-    expect(settled).not.toBe("pending");
-    const result = settled as ProviderResult;
-    expect(result.exitCode).toBe(1);
+
+    const visible = emitted.filter((e) => e.type !== "raw_log");
+    expect(visible.map((e) => e.type)).toEqual([
+      "session_init",
+      "tool_start",
+      "tool_end",
+      "tool_start",
+      "tool_end",
+      "context_usage",
+      "message",
+      "context_usage",
+      "result",
+    ]);
+    expect(visible[1]).toEqual({
+      type: "tool_start",
+      toolCallId: "call_1",
+      toolName: "shell",
+      args: { command: "ls" },
+    });
+    expect(visible[2]).toMatchObject({ toolName: "shell", result: "file.txt\n", isError: false });
+    expect(visible[4]).toMatchObject({ toolName: "read", result: "no such file", isError: true });
+    expect(visible[5]).toMatchObject({ contextUsedTokens: 1210, outputTokens: 10 });
+    expect(visible[6]).toEqual({
+      type: "message",
+      role: "assistant",
+      content: "All done.",
+      messageId: "msg_2",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.isError).toBe(false);
+    expect(result.cost).toMatchObject({
+      totalCostUsd: 0.42,
+      inputTokens: 2200,
+      outputTokens: 15,
+      cacheReadTokens: 200,
+      numTurns: 2,
+      provider: "opencode",
+      taskId: "task-1",
+      agentId: "agent-1",
+    });
+    expect(host.closeCalls).toBe(1);
+  });
+
+  test("text parts of one message are joined in order", async () => {
+    const { emitted } = await runSession([
+      ev("session.text.ended", {
+        sessionID: SESSION_ID,
+        assistantMessageID: "m",
+        ordinal: 0,
+        text: "a ",
+      }),
+      ev("session.text.ended", {
+        sessionID: SESSION_ID,
+        assistantMessageID: "m",
+        ordinal: 1,
+        text: "b",
+      }),
+      succeeded,
+    ]);
+    const messages = emitted.filter((e) => e.type === "message");
+    expect(messages.map((m) => (m as { content: string }).content)).toEqual(["a", "a b"]);
+  });
+
+  test("events from other sessions are ignored", async () => {
+    const { result, emitted } = await runSession([
+      ev("session.execution.failed", { sessionID: "ses_child", error: { message: "child" } }),
+      ev("session.usage.updated", { sessionID: "ses_child", cost: 9, tokens: tokens(1, 1) }),
+      succeeded,
+    ]);
+    expect(result.isError).toBe(false);
+    expect(result.cost?.totalCostUsd).toBe(0);
+    expect(emitted.some((e) => e.type === "error")).toBe(false);
+  });
+
+  test("every handled event produces a scrubbed raw_log", async () => {
+    const { emitted } = await runSession([succeeded]);
+    const raw = emitted.filter((e) => e.type === "raw_log");
+    expect(raw.length).toBeGreaterThan(0);
+    for (const r of raw) expect(() => JSON.parse((r as { content: string }).content)).not.toThrow();
+  });
+
+  test("session.execution.failed fails the task with the error message", async () => {
+    const { result, emitted } = await runSession([
+      ev("session.execution.failed", {
+        sessionID: SESSION_ID,
+        error: { type: "provider", message: "rate limited" },
+      }),
+    ]);
+    expect(result).toMatchObject({ exitCode: 1, isError: true, failureReason: "rate limited" });
+    expect(emitted).toContainEqual({ type: "error", message: "rate limited" });
+  });
+
+  test("permission.asked fails the session (headless cannot answer)", async () => {
+    const { result } = await runSession([
+      ev("permission.asked", {
+        sessionID: SESSION_ID,
+        id: "per_1",
+        action: "shell",
+        resources: [],
+      }),
+    ]);
     expect(result.isError).toBe(true);
-    expect(result.failureReason).toContain("runner exited without result");
-    expect(subscribeArgs?.sseMaxRetryAttempts).toBe(OPENCODE_SSE_MAX_RETRY_ATTEMPTS);
-    expect(closeServer).toHaveBeenCalledTimes(1);
+    expect(result.failureReason).toContain("per_1");
+  });
+
+  test("a stream that ends without a terminal event settles the session as failed", async () => {
+    const { result } = await runSession([], testConfig(), { endStream: true });
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toBe("runner exited without result: opencode event stream ended");
+  });
+
+  test("a step on a different model than requested fails the session", async () => {
+    const step = (providerID: string, id: string) =>
+      ev("session.step.started", { sessionID: SESSION_ID, model: { id, providerID } });
+
+    const ok = await runSession([step("openrouter", "google/gemini-3-flash-preview"), succeeded]);
+    expect(ok.result.isError).toBe(false);
+
+    const { result } = await runSession([
+      step("openrouter", "anthropic/claude-haiku-5.5"),
+      succeeded,
+    ]);
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toBe(
+      "opencode ran openrouter/anthropic/claude-haiku-5.5 instead of the requested model openrouter/google/gemini-3-flash-preview; the requested model is not in OpenCode's catalog",
+    );
+  });
+
+  test("a rejected prompt fails the session", async () => {
+    const { result } = await runSession([], testConfig(), {
+      promptError: new Error("model not found: x/y"),
+    });
+    expect(result).toMatchObject({ isError: true, failureReason: "model not found: x/y" });
+  });
+});
+
+describe("OpencodeSession — cost of an OpenRouter session", () => {
+  // Task 06c031dd (opencode 2.0.28, openrouter/deepseek/deepseek-v4.1-flash),
+  // verbatim from session_logs: a title call, then three agent steps.
+  // `session.usage.updated` is cumulative; `output` excludes reasoning.
+  const deepseek = testConfig({ model: "openrouter/deepseek/deepseek-v4.1-flash" });
+  const usage = (cost: number, input: number, output: number, reasoning: number, read: number) =>
+    ev("session.usage.updated", {
+      sessionID: SESSION_ID,
+      cost,
+      tokens: { input, output, reasoning, cache: { read, write: 0 } },
+    });
+  const step = (cost: number, input: number, output: number, reasoning: number, read: number) =>
+    ev("session.step.ended", {
+      sessionID: SESSION_ID,
+      finish: "tool-calls",
+      cost,
+      tokens: { input, output, reasoning, cache: { read, write: 0 } },
+    });
+  const v2Events = [
+    usage(0.00010640000000000001, 1019, 9, 0, 0),
+    step(0.00023894900000000002, 51770, 53, 26, 0),
+    usage(0.000345349, 52789, 62, 26, 0),
+    step(0.0005280831000000001, 12963, 102, 7, 51840),
+    usage(0.0008734321000000001, 65752, 164, 33, 51840),
+    step(0.0005287785, 165, 15, 0, 64896),
+    usage(0.0014022106, 65917, 179, 33, 116736),
+    succeeded,
+  ];
+
+  // OpenRouter's final SSE chunk for deepseek/deepseek-v4.1-flash, served by
+  // Together (live probe, 2026-10-14): `usage.cost` is the billed USD.
+  const openRouterSse = (cost: number, cached: number) =>
+    new Response(
+      [
+        ": OPENROUTER PROCESSING",
+        "",
+        `data: ${JSON.stringify({ id: "gen-1", choices: [{ index: 0, delta: { content: "pong" } }] })}`,
+        "",
+        `data: ${JSON.stringify({
+          id: "gen-1",
+          provider: "Together",
+          model: "deepseek/deepseek-v4.1-flash",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: {
+            prompt_tokens: 26545,
+            completion_tokens: 15,
+            total_tokens: 26560,
+            cost,
+            is_byok: false,
+            prompt_tokens_details: { cached_tokens: cached, cache_write_tokens: 0 },
+            completion_tokens_details: { reasoning_tokens: 11 },
+          },
+        })}`,
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+
+  test("reports v2 tokens with reasoning billed as output", async () => {
+    const { result } = await runSession(v2Events, deepseek);
+    expect(result.cost).toMatchObject({
+      totalCostUsd: 0.0014022106,
+      inputTokens: 65917,
+      outputTokens: 212,
+      reasoningOutputTokens: 33,
+      cacheReadTokens: 116736,
+      cacheWriteTokens: 0,
+      numTurns: 3,
+    });
+    expect(result.cost?.harnessCostBilled).toBeUndefined();
+  });
+
+  test("reports OpenRouter's billed cost when every response carried one", async () => {
+    const { result } = await runSession(v2Events, deepseek, {
+      responses: [
+        openRouterSse(0.0079815, 0),
+        openRouterSse(0.000191676, 26496),
+        new Response('{"error":{"message":"rate limited"}}', { status: 429 }),
+      ],
+    });
+    expect(result.cost?.harnessCostBilled).toBe(true);
+    expect(result.cost?.totalCostUsd).toBeCloseTo(0.0079815 + 0.000191676, 12);
+    expect(result.cost?.inputTokens).toBe(65917);
+  });
+
+  test("falls back to OpenCode's estimate when a response has no billed cost", async () => {
+    const { result } = await runSession(v2Events, deepseek, {
+      responses: [openRouterSse(0.0079815, 0), new Response("data: [DONE]\n\n")],
+    });
+    expect(result.cost?.harnessCostBilled).toBeUndefined();
+    expect(result.cost?.totalCostUsd).toBe(0.0014022106);
+  });
+
+  test("hooks only OpenRouter responses, and only for an OpenRouter model", async () => {
+    const openrouter = await runSession([succeeded], deepseek);
+    expect(openrouter.host.sessionHooks["http.response"]?.options).toEqual({
+      providerID: "openrouter",
+    });
+    const direct = await runSession([succeeded], testConfig({ model: "anthropic/claude-haiku" }));
+    expect(direct.host.sessionHooks["http.response"]).toBeUndefined();
+  });
+
+  test("skips title generation", async () => {
+    const { host } = await runSession([succeeded]);
+    const event: { result?: string } = {};
+    await host.sessionHooks.title?.fn(event);
+    expect(event.result).toBe("swarm task task-1");
+  });
+});
+
+describe("OpencodeSession — persisted rows render in the dashboard", () => {
+  test("text, tools and errors render once each, in order", async () => {
+    const text = (ordinal: number, value: string, messageID = "msg_1") => [
+      ev("session.text.started", { sessionID: SESSION_ID, assistantMessageID: messageID, ordinal }),
+      ev("session.text.delta", {
+        sessionID: SESSION_ID,
+        assistantMessageID: messageID,
+        ordinal,
+        delta: value,
+      }),
+      ev("session.text.ended", {
+        sessionID: SESSION_ID,
+        assistantMessageID: messageID,
+        ordinal,
+        text: value,
+      }),
+    ];
+    const { emitted } = await runSession([
+      ...text(0, "Listing files."),
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { command: "ls" } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: "file.txt\n" }],
+      }),
+      ...text(1, " Found one."),
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_2", name: "read" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_2", input: { path: "x" } }),
+      ev("session.tool.failed", {
+        sessionID: SESSION_ID,
+        id: "call_2",
+        error: { type: "unknown", message: "no such file" },
+      }),
+      ev("session.step.ended", { sessionID: SESSION_ID, tokens: tokens(1000, 10) }),
+      ev("session.execution.failed", {
+        sessionID: SESSION_ID,
+        error: { type: "unknown", message: "provider overloaded" },
+      }),
+    ]);
+
+    // The runner stores every raw_log line verbatim as a session log row.
+    const rows: SessionLogRecord[] = emitted
+      .filter((e) => e.type === "raw_log")
+      .map((e, index) => ({
+        id: `row-${index}`,
+        taskId: "task-1",
+        sessionId: "session-1",
+        iteration: 1,
+        cli: "opencode",
+        content: (e as { content: string }).content,
+        lineNumber: index + 1,
+        createdAt: "2026-10-13T10:00:00.000Z",
+      }));
+    const { items } = normalizeSessionLogs(rows);
+
+    const visible = items
+      .filter((item) => item.kind !== "lifecycle")
+      .map((item) =>
+        item.kind === "text"
+          ? `${item.role} text: ${item.text}`
+          : item.kind === "tool_call"
+            ? `tool_call ${item.tool?.name} ${JSON.stringify(item.tool?.input)}`
+            : item.kind === "tool_result"
+              ? `tool_result ${item.result?.id} error=${item.result?.isError} ${item.result?.payload}`
+              : item.kind,
+      );
+    expect(visible).toEqual([
+      "assistant text: Listing files.",
+      'tool_call shell {"command":"ls"}',
+      "tool_result call_1 error=false file.txt\n",
+      "assistant text:  Found one.",
+      'tool_call read {"path":"x"}',
+      "tool_result call_2 error=true no such file",
+      "system text: opencode error: provider overloaded",
+    ]);
+    expect(items.some((item) => item.kind === "unknown")).toBe(false);
+  });
+});
+
+describe("OpencodeSession — session end is bounded", () => {
+  test("a profile sync that never answers cannot strand the host or completion", async () => {
+    let syncCalls = 0;
+    _setOpencodeSessionHooksForTests({
+      budgetMs: 50,
+      // A held profile PUT that ignores cancellation: the worst case.
+      syncIdentity: () => {
+        syncCalls++;
+        return new Promise<void>(() => {});
+      },
+    });
+    const { result, host } = await runSession([succeeded]);
+    expect(syncCalls).toBe(1);
+    expect(host.closeCalls).toBe(1);
+    expect(result).toMatchObject({ exitCode: 0, isError: false });
+  });
+
+  test("abort while finishing cancels the sync, closes the host, and completes", async () => {
+    let syncSignal: AbortSignal | undefined;
+    _setOpencodeSessionHooksForTests({
+      budgetMs: 60_000,
+      // A deferred profile response that only ends when the request is cancelled.
+      syncIdentity: (_config, _source, signal) => {
+        syncSignal = signal;
+        return new Promise<void>((resolve) =>
+          signal?.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      },
+    });
+    const { session, host } = await startSession([succeeded]);
+    await waitFor(() => syncSignal !== undefined);
+    expect(session.isFinished).toBe(true);
+    expect(host.closeCalls).toBe(0);
+
+    await session.abort();
+    const result = await session.waitForCompletion();
+    expect(syncSignal?.aborted).toBe(true);
+    expect(host.closeCalls).toBe(1);
+    expect(result).toMatchObject({ exitCode: 0, isError: false });
+  });
+});
+
+describe("OpencodeAdapter — swarm MCP admission", () => {
+  test("waits for a pending server, then prompts once store-progress is registered", async () => {
+    const { host, session } = await startSession([], testConfig(), {
+      mcpStatuses: [null, { status: "pending" }, { status: "connected" }],
+    });
+    await waitFor(() => host.prompts.length > 0);
+    expect(host.mcpListCalls).toBeGreaterThanOrEqual(3);
+    await session.abort();
+  });
+
+  test("a refused server fails the session before the first prompt and closes the host", async () => {
+    const { result, host } = await runSession([], testConfig(), {
+      mcpStatuses: [
+        { status: "pending" },
+        { status: "failed", error: "Unable to connect. (ConnectionRefused)" },
+      ],
+    });
+    expect(host.prompts).toEqual([]);
+    expect(host.closeCalls).toBe(1);
+    expect(result).toMatchObject({ exitCode: 1, isError: true });
+    expect(result.failureReason).toBe(
+      "swarm MCP admission failed: swarm MCP server failed: Unable to connect. (ConnectionRefused)",
+    );
+  });
+
+  test("an unauthorized server fails with a scrubbed reason", async () => {
+    const leaked = `sk-or-v1-${"a1B2c3D4e5".repeat(5)}`;
+    const { result, host, emitted } = await runSession([], testConfig(), {
+      mcpStatuses: [{ status: "needs_auth", error: `401 for bearer ${leaked}` }],
+    });
+    expect(host.prompts).toEqual([]);
+    expect(host.closeCalls).toBe(1);
+    expect(result.failureReason).toContain(
+      "swarm MCP admission failed: swarm MCP server needs_auth",
+    );
+    expect(result.failureReason).not.toContain(leaked);
+    expect(JSON.stringify(emitted)).not.toContain(leaked);
+  });
+
+  test("a connected server without store-progress fails once admission times out", async () => {
+    _setOpencodeSessionHooksForTests({ admissionTimeoutMs: 50 });
+    const { result, host } = await runSession([], testConfig(), {
+      tools: ["read", "swarm_poll-task"],
+    });
+    expect(host.prompts).toEqual([]);
+    expect(host.closeCalls).toBe(1);
+    expect(result.failureReason).toContain(
+      "swarm MCP server connected without required tools: store-progress",
+    );
+  });
+});
+
+describe("OpencodeSession — abort and steering", () => {
+  test("abort interrupts the session, closes the host, and reports aborted", async () => {
+    const { session, host } = await startSession([]);
+    await session.abort();
+    const result = await session.waitForCompletion();
+    expect(host.interrupts).toEqual([{ sessionID: SESSION_ID }]);
+    expect(host.closeCalls).toBe(1);
+    expect(result).toMatchObject({ exitCode: 1, isError: true, failureReason: "aborted" });
+  });
+
+  test("steering queues a prompt, even when steer is requested", async () => {
+    const { session, host } = await startSession([]);
+    await Bun.sleep(0);
+    const delivered = await session.deliverSteering({ mode: "steer", text: "also do X" });
+    expect(delivered).toEqual({ delivered: true, mode: "queue" });
+    expect(host.prompts.at(-1)).toEqual({
+      sessionID: SESSION_ID,
+      text: "also do X",
+      delivery: "queue",
+    });
+    await session.abort();
+  });
+
+  test("steering after completion is undeliverable", async () => {
+    const { session } = await runSession([succeeded]);
+    expect(await session.deliverSteering({ mode: "queue", text: "late" })).toEqual({
+      delivered: false,
+      reason: "opencode session already completed",
+    });
   });
 });
 
 describe("OpenRouter attribution config", () => {
-  test("overrides harness attribution while preserving custom headers and options", async () => {
-    const { applyOpenRouterBaseUrlOverride } = await import("../providers/opencode-adapter");
+  test("overrides harness attribution while preserving custom headers and options", () => {
     const config = {
       provider: {
         openrouter: {
@@ -1528,8 +815,8 @@ describe("OpenRouter attribution config", () => {
       },
     });
   });
-  test("gateway override preserves options without injecting attribution", async () => {
-    const { applyOpenRouterBaseUrlOverride } = await import("../providers/opencode-adapter");
+
+  test("gateway override preserves options without injecting attribution", () => {
     const config = {
       provider: {
         openrouter: {
@@ -1552,10 +839,219 @@ describe("OpenRouter attribution config", () => {
     });
     expect(config.provider.anthropic).toEqual({ options: { apiKey: "test-other" } });
   });
-  test("task opt-out leaves default provider config untouched", async () => {
-    const { applyOpenRouterBaseUrlOverride } = await import("../providers/opencode-adapter");
+
+  test("task opt-out leaves default provider config untouched", () => {
     const config = {};
     applyOpenRouterBaseUrlOverride(config, { OPENROUTER_APP_ATTRIBUTION: "false" });
     expect(config).toEqual({});
+  });
+});
+
+describe("provider key splice (one picked key per task)", () => {
+  const PICKED = "sk-picked-member-0123456789";
+  const POOL = "sk-pool-member-aaaaaaaaaa,sk-pool-member-bbbbbbbbbb";
+  const SPLICE_VARS = [
+    "NAN_API_KEY",
+    "HELMCODE_API_NAN",
+    "HELMCODE_API_KEY",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+  ];
+  const saved: Record<string, string | undefined> = {};
+  beforeAll(() => {
+    for (const key of SPLICE_VARS) saved[key] = process.env[key];
+  });
+  afterEach(() => {
+    for (const key of SPLICE_VARS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+    clearVolatileSecretsForTesting();
+  });
+
+  test("nan: env [] and the per-task key, even with a pool in process.env", async () => {
+    process.env.NAN_API_KEY = POOL;
+    const { host } = await runSession(
+      [succeeded],
+      testConfig({ model: "nan/glm5.3-flash", env: { NAN_API_KEY: PICKED } }),
+    );
+    const nan = configOf(host).provider.nan;
+    expect(nan.env).toEqual([]);
+    expect(nan.options.apiKey).toBe(PICKED);
+  });
+
+  test("nan: the HELMCODE_API_NAN alias is read when NAN_API_KEY is empty", () => {
+    const config = {};
+    const picked = applyProviderKeySplice(config, "nan/qwen3.6", { HELMCODE_API_NAN: PICKED });
+    expect(picked).toEqual({ key: PICKED, name: "HELMCODE_API_NAN" });
+    expect(config).toEqual({ provider: { nan: { env: [], options: { apiKey: PICKED } } } });
+  });
+
+  test("a pool that reaches the splice unpicked yields its first member", () => {
+    const config = {};
+    applyProviderKeySplice(config, "nan/qwen3.6", {
+      NAN_API_KEY: ` ${PICKED} , sk-other-0000000000`,
+    });
+    expect(config).toEqual({ provider: { nan: { env: [], options: { apiKey: PICKED } } } });
+  });
+
+  test("helmcode: full custom block with limits, reasoning options merged in", async () => {
+    const { host } = await runSession(
+      [succeeded],
+      testConfig({
+        model: "helmcode/glm5.3",
+        reasoningEffort: "high",
+        env: { HELMCODE_API_KEY: PICKED },
+      }),
+    );
+    const helmcode = configOf(host).provider.helmcode;
+    expect(helmcode).toMatchObject({
+      npm: "@ai-sdk/openai-compatible",
+      name: "Helmcode",
+      env: [],
+      options: { baseURL: "https://api.helmcode.com/v1", apiKey: PICKED },
+    });
+    expect(helmcode.models["glm5.3"]).toEqual({
+      name: "GLM-5.3",
+      tool_call: true,
+      reasoning: true,
+      limit: { context: 1048576, output: 32768 },
+      options: { reasoningEffort: "high" },
+    });
+    expect(Object.keys(helmcode.models)).toEqual([
+      "deepseek-v4-flash",
+      "glm5.3",
+      "glm5.3-flash",
+      "qwen3.6",
+      "gemma4",
+    ]);
+  });
+
+  test("helmcode: a model missing from the table still gets an entry", () => {
+    const config: Record<string, any> = {};
+    applyProviderKeySplice(config, "helmcode/brand-new", { HELMCODE_API_KEY: PICKED });
+    expect(config.provider.helmcode.models["brand-new"]).toEqual({
+      name: "brand-new",
+      tool_call: true,
+    });
+  });
+
+  test("openrouter gateway: baseURL kept next to env [] and the picked key", async () => {
+    process.env.OPENROUTER_API_KEY = POOL;
+    const { host } = await runSession(
+      [succeeded],
+      testConfig({
+        model: "openrouter/deepseek/deepseek-v4-flash",
+        env: { OPENROUTER_API_KEY: PICKED, OPENROUTER_BASE_URL: "http://127.0.0.1:1234/v1" },
+      }),
+    );
+    expect(configOf(host).provider.openrouter).toEqual({
+      env: [],
+      options: { apiKey: PICKED, baseURL: "http://127.0.0.1:1234/v1" },
+    });
+  });
+
+  test("openrouter host: attribution headers kept next to env [] and the picked key", async () => {
+    const { host } = await runSession(
+      [succeeded],
+      testConfig({
+        model: "openrouter/deepseek/deepseek-v4-flash",
+        env: { OPENROUTER_API_KEY: PICKED },
+      }),
+    );
+    const openrouter = configOf(host).provider.openrouter;
+    expect(openrouter.env).toEqual([]);
+    expect(openrouter.options.apiKey).toBe(PICKED);
+    expect(openrouter.options.headers).toMatchObject({ "X-Title": "Agent Swarm" });
+  });
+
+  test("no splice without a key, or for providers outside the splice", () => {
+    for (const model of ["nan/qwen3.6", "helmcode/glm5.3", "openrouter/x/y"]) {
+      const config = {};
+      expect(applyProviderKeySplice(config, model, {})).toBeUndefined();
+      expect(config).toEqual({});
+    }
+    for (const model of ["anthropic/claude-sonnet-4-5", "openai/gpt-5", "glm5.3", "", undefined]) {
+      const config = {};
+      applyProviderKeySplice(config, model, {
+        ANTHROPIC_API_KEY: PICKED,
+        OPENAI_API_KEY: PICKED,
+        NAN_API_KEY: PICKED,
+      });
+      expect(config).toEqual({});
+    }
+  });
+});
+
+describe("spliced key never reaches logs, events, or errors", () => {
+  // Not in process.env: the key a dashboard save delivers to the per-task env only.
+  const SENTINEL = "sk-nan-sentinel-do-not-log-4f9c2e";
+  let captured: string[] = [];
+  let spies: Array<ReturnType<typeof spyOn>> = [];
+  beforeAll(() => {
+    delete process.env.NAN_API_KEY;
+  });
+  afterEach(() => {
+    for (const spy of spies) spy.mockRestore();
+    spies = [];
+    captured = [];
+    clearVolatileSecretsForTesting();
+  });
+  function captureConsole() {
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+      spies.push(
+        spyOn(console, method).mockImplementation((...args: unknown[]) => {
+          captured.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+        }),
+      );
+    }
+  }
+
+  test("SDK log lines and a provider failure that echo the config are scrubbed", async () => {
+    captureConsole();
+    const host = makeFakeHost([
+      ev("session.execution.failed", {
+        sessionID: SESSION_ID,
+        error: { message: `401 Invalid API key ${SENTINEL}` },
+      }),
+    ]);
+    installHost(host, (options) => {
+      const content = (options.config as { content: string }).content;
+      const log = options.log as { emit: (entry: { message: string }) => void };
+      log.emit({ message: `config: ${content}` });
+    });
+    const session = (await new OpencodeAdapter().createSession(
+      testConfig({ model: "nan/glm5.3-flash", env: { NAN_API_KEY: SENTINEL } }),
+    )) as OpencodeSession;
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => emitted.push(e));
+    const result = await session.waitForCompletion();
+
+    // Positive control: the key did reach the SDK config.
+    expect(configOf(host).provider.nan.options.apiKey).toBe(SENTINEL);
+    expect(captured.some((line) => line.includes("[opencode] config:"))).toBe(true);
+    expect(result.isError).toBe(true);
+
+    for (const line of captured) expect(line).not.toContain(SENTINEL);
+    expect(JSON.stringify(emitted)).not.toContain(SENTINEL);
+    expect(result.failureReason ?? "").not.toContain(SENTINEL);
+  });
+
+  test("a host start failure that echoes the config is scrubbed before it propagates", async () => {
+    captureConsole();
+    const host = makeFakeHost([]);
+    installHost(host, (options) => {
+      const content = (options.config as { content: string }).content;
+      throw new Error(`invalid config ${content}`);
+    });
+    const error = await new OpencodeAdapter()
+      .createSession(testConfig({ model: "nan/glm5.3-flash", env: { NAN_API_KEY: SENTINEL } }))
+      .then(
+        () => undefined,
+        (err: unknown) => err as Error,
+      );
+    expect(error?.message).toStartWith("opencode host failed to start: invalid config");
+    expect(error?.message).not.toContain(SENTINEL);
+    for (const line of captured) expect(line).not.toContain(SENTINEL);
   });
 });

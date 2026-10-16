@@ -245,3 +245,30 @@ export function applyReasoningEffort(
     }
   }
 }
+
+const REASONING_HARNESSES: ReadonlySet<string> = new Set<ReasoningHarness>([
+  "claude",
+  "codex",
+  "pi",
+  "opencode",
+  "dsh",
+  "cursor",
+  "amp",
+  "grok",
+]);
+
+/**
+ * The effort a session on this harness and model actually runs at: `level`
+ * when the adapter applies it, null when it is unset or dropped (the harness
+ * default applies). Same decision the adapters make in `applyReasoningEffort`.
+ */
+export function effectiveReasoningEffort(
+  harness: string,
+  model: string,
+  level: ReasoningEffort | undefined,
+): ReasoningEffort | null {
+  if (!level || !REASONING_HARNESSES.has(harness)) return null;
+  return applyReasoningEffort(harness as ReasoningHarness, model, level).kind === "noop"
+    ? null
+    : level;
+}

@@ -1042,9 +1042,13 @@ describe("createSessionMcpConfig", () => {
     }
   });
 
-  test("excludes context-mode entry when CONTEXT_MODE_DISABLED='true'", async () => {
+  test.each([
+    "true",
+    "1",
+    "TRUE",
+  ])("excludes context-mode entry when CONTEXT_MODE_DISABLED='%s'", async (value) => {
     const prev = process.env.CONTEXT_MODE_DISABLED;
-    process.env.CONTEXT_MODE_DISABLED = "true";
+    process.env.CONTEXT_MODE_DISABLED = value;
     try {
       await writeFile(
         join(sandbox, ".mcp.json"),

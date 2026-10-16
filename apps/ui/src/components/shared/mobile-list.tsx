@@ -18,6 +18,7 @@ export function MobileList({
   label,
   loading,
   emptyMessage,
+  empty,
   footer,
   className,
 }: {
@@ -25,6 +26,8 @@ export function MobileList({
   label: string;
   loading?: boolean;
   emptyMessage: string;
+  /** Replaces the dashed `emptyMessage` box, e.g. with an `EmptyState`. */
+  empty?: ReactNode;
   /** Rendered under the rows, e.g. a "Show more" button or a pager. */
   footer?: ReactNode;
   className?: string;
@@ -39,6 +42,7 @@ export function MobileList({
     );
   }
   if (Children.count(children) === 0) {
+    if (empty) return <>{empty}</>;
     return (
       <p
         className={cn(
@@ -67,13 +71,19 @@ export function MobileList({
 
 export function MobileListRow({
   to,
+  onClick,
+  selected,
   title,
   leading,
   status,
   meta,
   live,
 }: {
-  to: string;
+  /** Row link. Without it, `onClick` makes the row a button. */
+  to?: string;
+  onClick?: () => void;
+  /** Highlights the row whose detail is open. */
+  selected?: boolean;
   title: ReactNode;
   /** Avatar or icon before the title. */
   leading?: ReactNode;
@@ -87,42 +97,63 @@ export function MobileListRow({
   const facts = (meta ?? []).filter(
     (fact) => fact !== null && fact !== undefined && fact !== false && fact !== "",
   );
+  const rowClass = cn(
+    "relative flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
+    selected && "bg-accent/50",
+  );
+  const content = (
+    <>
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-y-2 left-0 w-0.5 rounded-full",
+          live ? "bg-primary" : "bg-transparent",
+        )}
+      />
+      {leading ? <span className="mt-0.5 shrink-0">{leading}</span> : null}
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex min-w-0 items-start gap-2">
+          <span className="min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere] line-clamp-2">
+            {title}
+          </span>
+          {status ? <span className="shrink-0">{status}</span> : null}
+        </span>
+        {facts.length > 0 ? (
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+            {facts.map((fact, index) => (
+              // Facts are positional and never reorder, so the index is a stable key.
+              // The separator trails its fact, so a wrapped line never starts with "·".
+              <span key={index} className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="min-w-0 truncate">{fact}</span>
+                {index < facts.length - 1 ? <span aria-hidden>·</span> : null}
+              </span>
+            ))}
+          </span>
+        ) : null}
+      </span>
+      {to !== undefined || onClick ? (
+        <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      ) : null}
+    </>
+  );
   return (
     <li>
-      <Link
-        to={to}
-        className="relative flex min-h-11 items-start gap-3 px-4 py-3 outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
-      >
-        <span
-          aria-hidden
-          className={cn(
-            "absolute inset-y-2 left-0 w-0.5 rounded-full",
-            live ? "bg-primary" : "bg-transparent",
-          )}
-        />
-        {leading ? <span className="mt-0.5 shrink-0">{leading}</span> : null}
-        <span className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="flex min-w-0 items-start gap-2">
-            <span className="min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere] line-clamp-2">
-              {title}
-            </span>
-            {status ? <span className="shrink-0">{status}</span> : null}
-          </span>
-          {facts.length > 0 ? (
-            <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
-              {facts.map((fact, index) => (
-                // Facts are positional and never reorder, so the index is a stable key.
-                // The separator trails its fact, so a wrapped line never starts with "·".
-                <span key={index} className="inline-flex min-w-0 items-center gap-1.5">
-                  <span className="min-w-0 truncate">{fact}</span>
-                  {index < facts.length - 1 ? <span aria-hidden>·</span> : null}
-                </span>
-              ))}
-            </span>
-          ) : null}
-        </span>
-        <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-      </Link>
+      {to !== undefined ? (
+        <Link to={to} className={rowClass}>
+          {content}
+        </Link>
+      ) : onClick ? (
+        <button
+          type="button"
+          className={rowClass}
+          onClick={onClick}
+          aria-current={selected ? "true" : undefined}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className={rowClass}>{content}</div>
+      )}
     </li>
   );
 }

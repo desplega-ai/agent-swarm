@@ -31,6 +31,8 @@ interface SessionCostRecomputeInput {
   provider?: PricingProvider;
   model: string;
   harnessCostUsd: number;
+  /** `harnessCostUsd` is the provider's bill, not a token estimate. */
+  harnessCostBilled?: boolean;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -187,8 +189,16 @@ export async function recomputeSessionCost(
   // every request was billed through Amp, so it wins over the token price,
   // which still fills the per-model breakdown. Grok's `costUsdTicks` is the
   // same kind of report: what xAI billed, long-context tiers included.
-  if ((input.provider === "amp" || input.provider === "grok") && input.harnessCostUsd > 0) {
-    const priced = await recomputeSessionCost({ ...input, harnessCostUsd: 0 }, lookupRate);
+  // opencode on OpenRouter sends OpenRouter's `usage.cost` sum, flagged as
+  // billed: the routed endpoint can cost many times the list price.
+  if (
+    (input.provider === "amp" || input.provider === "grok" || input.harnessCostBilled) &&
+    input.harnessCostUsd > 0
+  ) {
+    const priced = await recomputeSessionCost(
+      { ...input, harnessCostUsd: 0, harnessCostBilled: false },
+      lookupRate,
+    );
     return {
       totalCostUsd: input.harnessCostUsd,
       costSource: "harness",

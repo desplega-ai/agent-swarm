@@ -11,7 +11,14 @@ import {
   withSpan,
   withSpanContext,
 } from "../otel.ts";
-import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
+import {
+  type BasePromptArgs,
+  getBasePrompt,
+  getTaskContextPrompt,
+  type RepoContext,
+  type SlackTaskContext,
+  type TaskContextPromptArgs,
+} from "../prompts/base-prompt.ts";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -40,6 +47,7 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import { effectiveReasoningEffort } from "../providers/reasoning-effort.ts";
 import {
   createSkillInvokeTracker,
   isSkillLoaderCall,
@@ -48,6 +56,7 @@ import {
 } from "../providers/skill-invoke.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { WorkerRealtimeClient } from "../realtime/worker-client";
+import { resumedTaskModelSelection, type TaskModelPinFields } from "../tasks/model-pin.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import { mapTriggerSurface } from "../telemetry-context.ts";
 import {
@@ -66,12 +75,14 @@ import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { ensure, initialize } from "../utils/business-use";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
+import { isEnvExportRestrictedKey } from "../utils/config-env-export.ts";
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import {
   type CredentialSelection,
   ModelWindowExhaustedError,
+  normalizeProviderKeyAliases,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
@@ -81,7 +92,11 @@ import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
-import { registerSensitiveKeyName, scrubSecrets } from "../utils/secret-scrubber.ts";
+import {
+  registerEnvSecrets,
+  registerSensitiveKeyName,
+  scrubSecrets,
+} from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
@@ -113,6 +128,7 @@ import {
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
   syncProfileFilesToServer,
+  WORKSPACE_CLAUDE_MD_PATH,
   writeIdentityBaselines,
   writeProfileFileFromDb,
 } from "./profile-sync.ts";
@@ -178,17 +194,6 @@ function scheduleRunnerGc(reason: string): boolean {
   }, 0);
   timer.unref?.();
   return true;
-}
-
-/** Save PM2 process list for persistence across container restarts */
-async function savePm2State(role: string): Promise<void> {
-  try {
-    console.log(`[${role}] Saving PM2 process list...`);
-    await Bun.$`pm2 save`.quiet();
-    console.log(`[${role}] PM2 state saved`);
-  } catch {
-    // PM2 not available or no processes - silently ignore
-  }
 }
 
 /** Fetch repo config for a task's vcsRepo (e.g., "desplega-ai/agent-swarm") */
@@ -845,6 +850,19 @@ const deploymentMemoryRaters = process.env.MEMORY_RATERS;
  */
 const rowOverriddenBootEnv = new Map<string, string | undefined>();
 
+let lastWithheldEnvKeys = "";
+
+/** Names only, and only when the set changes, so per-spawn reloads stay quiet. */
+function logWithheldEnvKeys(keys: string[]): void {
+  const summary = [...keys].sort().join(", ");
+  if (summary === lastWithheldEnvKeys) return;
+  lastWithheldEnvKeys = summary;
+  if (!summary) return;
+  console.log(
+    `[env-reload] Kept ${keys.length} config entries with exportToEnv=false out of the harness env: ${summary}`,
+  );
+}
+
 export async function fetchResolvedEnv(
   apiUrl: string,
   apiKey: string,
@@ -894,7 +912,12 @@ export async function fetchResolvedEnv(
         console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
       } else {
         const data = (await response.json()) as {
-          configs: Array<{ key: string; value: string; isSecret?: boolean }>;
+          configs: Array<{
+            key: string;
+            value: string;
+            isSecret?: boolean;
+            exportToEnv?: boolean;
+          }>;
         };
 
         // A deleted row restores the deployment value (including unset), while
@@ -913,7 +936,25 @@ export async function fetchResolvedEnv(
           scriptsOnlyConfigValue = data.configs.find(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
+          const withheldEnvKeys: string[] = [];
           for (const config of data.configs) {
+            // Every harness and its shell tool inherit this env. A row with
+            // exportToEnv=false stays out of it, and so does a copy of it in
+            // the base env (container env, or an older entrypoint's export).
+            // Checked before the masked-value fallback so a masked response
+            // can never keep a withheld boot value alive. An API without the
+            // field (pre-215) leaves it undefined, which keeps exporting.
+            if (config.exportToEnv === false || isEnvExportRestrictedKey(config.key)) {
+              if (config.isSecret) registerSensitiveKeyName(config.key);
+              delete env[config.key];
+              // Several adapters build the child env as
+              // `{ ...process.env, ...config.env }`, so a boot-time export
+              // revoked later must leave process.env too. It stays out until
+              // the worker restarts, even if the row is deleted afterwards.
+              if (baseEnv === process.env) delete process.env[config.key];
+              withheldEnvKeys.push(config.key);
+              continue;
+            }
             if (config.isSecret && config.value === MASKED_SECRET_VALUE) {
               skippedSecretKeys.push(config.key);
               continue;
@@ -956,6 +997,7 @@ export async function fetchResolvedEnv(
               scrubSecrets(`[env-reload] Skipped masked secrets: ${skippedSecretKeys.join(", ")}`),
             );
           }
+          logWithheldEnvKeys(withheldEnvKeys);
           console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
         }
         // Non-secret stand-in for the pool rows skipped above, so credential
@@ -967,6 +1009,16 @@ export async function fetchResolvedEnv(
       console.warn(`[env-reload] Could not fetch config, using current env: ${error}`);
     }
   }
+
+  // Registry key aliases (`HELMCODE_API_NAN` for `NAN_API_KEY`) are copied
+  // into their canonical var once here, so pooling, credential checks, pi's
+  // runtime key and the opencode key splice only ever read the canonical
+  // name. An explicit canonical value wins.
+  normalizeProviderKeyAliases(env);
+  // Rows admitted after boot and pool members live only in this env, never in
+  // process.env, so the scrubber's env pass cannot see them. Register them
+  // before any adapter can echo one into a log or failure reason.
+  registerEnvSecrets(env);
 
   // A task already has an adapter. Repository configuration must not select
   // credentials or configure hooks for a different harness.
@@ -1354,11 +1406,6 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "create-channel": "📢 Creating channel",
   "list-channels": "📢 Listing channels",
   "delete-channel": "📢 Deleting channel",
-  // Services
-  "register-service": "🔌 Registering service",
-  "list-services": "🔌 Listing services",
-  "unregister-service": "🔌 Unregistering service",
-  "update-service-status": "🔌 Updating service status",
   // Reusable scripts
   "script-search": "📜 Searching scripts",
   "script-run": "📜 Running script",
@@ -2342,6 +2389,7 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     output?: string;
     status?: string;
     contextKey?: string;
+    requestedBy?: Trigger["requestedBy"];
   }>
 > {
   const headers: Record<string, string> = {
@@ -2378,6 +2426,7 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         finishedAt?: string;
         output?: string;
         status?: string;
+        requestedBy?: Trigger["requestedBy"];
       }>;
     };
     return data.tasks || [];
@@ -2536,7 +2585,6 @@ export function setupShutdownHandlers(
       });
       await closeAgent(apiConfig, role);
     }
-    await savePm2State(role);
     process.exit(exitCode);
   };
 
@@ -2804,10 +2852,13 @@ async function saveProviderSessionId(
   model?: string,
   harnessVariant?: string,
   harnessVariantMeta?: Record<string, unknown>,
+  effort?: ReasoningEffort | null,
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const body: Record<string, unknown> = { claudeSessionId };
+  // Devin's body variant has no effort field.
+  if (effort !== undefined && provider !== "devin") body.effort = effort;
   if (provider !== undefined) body.provider = provider;
   if (providerMeta !== undefined) body.providerMeta = providerMeta;
   if (model !== undefined && model !== "") body.model = model;
@@ -3281,6 +3332,64 @@ export async function buildRequesterProfilePrompt(
   });
 
   return result.skipped ? "" : result.text.trim();
+}
+
+/**
+ * Warning appended to the task prompt when the task's `dir` was requested but
+ * the session could not start there. Shared by the fresh and resume paths so
+ * both send the model the same text.
+ */
+export function missingTaskDirWarning(
+  taskDir: string | undefined,
+  effectiveCwd: string | undefined,
+): string | undefined {
+  return taskDir && !effectiveCwd
+    ? `Note: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`
+    : undefined;
+}
+
+/** Per-task context that rides in the task prompt, never the system prompt. */
+export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArgs> & {
+  requestedBy?: RequesterProfile;
+  /** Set when the task's `dir` does not exist and the session falls back. */
+  cwdWarning?: string;
+};
+
+/**
+ * The two prompts of one task session. The system prompt depends only on the
+ * agent (profile, harness, deployment), so it is byte-identical across that
+ * agent's sessions and the provider reads it from cache instead of re-writing
+ * it. Everything that varies per task (repository block, scripts-only Slack
+ * note, requester profile, cwd warning) is appended to the task prompt.
+ */
+export async function buildTaskSessionPrompts(input: {
+  basePromptArgs: BasePromptArgs;
+  additionalSystemPrompt?: string;
+  taskPrompt: string;
+  context: TaskSessionContext;
+}): Promise<{ systemPrompt: string; prompt: string }> {
+  const { basePromptArgs, additionalSystemPrompt, context } = input;
+  const basePrompt = await getBasePrompt(basePromptArgs);
+  const systemPrompt = additionalSystemPrompt
+    ? `${basePrompt}\n\n${additionalSystemPrompt}`
+    : basePrompt;
+
+  const taskContext = [
+    await getTaskContextPrompt({
+      ...basePromptArgs,
+      repoContext: context.repoContext,
+      slackContext: context.slackContext,
+    }),
+    await buildRequesterProfilePrompt(context.requestedBy),
+    context.cwdWarning?.trim(),
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+
+  return {
+    systemPrompt,
+    prompt: taskContext ? `${input.taskPrompt}\n\n${taskContext}` : input.taskPrompt,
+  };
 }
 
 /** A non-2xx answer from `POST /api/agents`; carries the status for retry triage. */
@@ -4127,6 +4236,9 @@ async function spawnProviderProcess(
   }
   if (spawnModel.warning) console.warn(spawnModel.warning);
   const model = spawnModel.model;
+  // Recorded on the task at session start, like the model: what the adapter
+  // applies, not just what was asked for.
+  const sessionEffort = effectiveReasoningEffort(adapter.name, model, reasoningEffortOverride);
 
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
   // can pass codexSlot through and the adapter writes token refreshes back to
@@ -4430,6 +4542,7 @@ async function spawnProviderProcess(
               model,
               event.harnessVariant,
               event.harnessVariantMeta,
+              sessionEffort,
             ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
           } else {
             // Pool task: save provider session ID on active session so it can be
@@ -5689,17 +5802,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentSkillsSummary: { name: string; description: string }[] | undefined;
   let agentMcpServers: string[] | undefined;
 
-  // Per-task repo context — set when processing a task with githubRepo
-  let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
-  // Slack context for current task (gates Slack instructions in prompt)
-  let currentTaskSlackContext: BasePromptArgs["slackContext"] | undefined;
-
   // Generate base prompt (identity fields injected after profile fetch below).
   // Traits are read fresh on each call so a live adapter swap (Section 4)
-  // produces a prompt matching the new provider's capabilities.
-  const buildSystemPrompt = async () => {
+  // produces a prompt matching the new provider's capabilities. Per-task
+  // context never enters it; see buildTaskSessionPrompts.
+  const basePromptArgs = (): BasePromptArgs => {
     const { traits } = adapter;
-    return getBasePrompt({
+    return {
       role,
       agentId,
       capabilities,
@@ -5710,19 +5819,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       name: agentProfileName,
       description: agentDescription,
       // SOUL.md is the persona and travels to every provider. base-prompt
-      // gates IDENTITY.md (inject when edited) and CLAUDE.md (local
-      // non-claude providers, inject when edited) itself.
+      // gates IDENTITY.md and CLAUDE.md (inject when edited) itself.
       soulMd: agentSoulMd,
       identityMd: agentIdentityMd,
       claudeMd: agentClaudeMd,
-      repoContext: currentRepoContext,
-      slackContext: currentTaskSlackContext,
       ...(traits.hasMcp && {
         skillsSummary: agentSkillsSummary,
         mcpServers: agentMcpServers,
       }),
-    });
+    };
   };
+
+  const buildSystemPrompt = async () => getBasePrompt(basePromptArgs());
 
   let basePrompt = await buildSystemPrompt();
 
@@ -6449,10 +6557,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   }
 
-  // Write CLAUDE.md to workspace (agent-level instructions)
+  // Write CLAUDE.md to workspace (agent-level instructions) for every harness:
+  // a live provider swap can start a non-Claude session in this container.
+  // Claude sessions exclude this copy (claude-flag-settings.ts) and read
+  // ~/.claude/CLAUDE.md instead.
   if (agentClaudeMd) {
     try {
-      const backupPath = await writeProfileFileFromDb("/workspace/CLAUDE.md", agentClaudeMd);
+      const backupPath = await writeProfileFileFromDb(WORKSPACE_CLAUDE_MD_PATH, agentClaudeMd);
       if (backupPath) console.warn(`[${role}] Archived differing CLAUDE.md at ${backupPath}`);
       console.log(`[${role}] Wrote CLAUDE.md to workspace`);
     } catch (err) {
@@ -6653,7 +6764,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
-        if (!resumeCwd && task.vcsRepo && apiUrl) {
+        let resumeRepoContext: RepoContext | undefined;
+        if (task.vcsRepo && apiUrl) {
           const repoConfig = await fetchRepoConfig(apiUrl, apiKey, task.vcsRepo);
           const effectiveConfig = repoConfig ?? {
             url: task.vcsRepo,
@@ -6664,10 +6776,33 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           // This is the paused-task-resume-after-restart path — never a first
           // kickoff, so never force-reset the base branch here.
           const repoContext = await ensureRepoForTask(effectiveConfig, role, false);
-          if (repoContext?.clonePath) {
+          resumeRepoContext = { ...repoContext, guidelines: repoConfig?.guidelines ?? null };
+          if (!resumeCwd && repoContext?.clonePath) {
             resumeCwd = repoContext.clonePath;
           }
         }
+
+        // Same split as the main task path: stable system prompt, per-task
+        // context (repository, scripts-only Slack note, requester profile,
+        // cwd warning) in the task prompt.
+        const resumeSlackChannelId = (task as { slackChannelId?: string }).slackChannelId;
+        const resumeSession = await buildTaskSessionPrompts({
+          basePromptArgs: basePromptArgs(),
+          additionalSystemPrompt,
+          taskPrompt: resumePrompt,
+          context: {
+            repoContext: resumeRepoContext,
+            slackContext: resumeSlackChannelId
+              ? {
+                  channelId: resumeSlackChannelId,
+                  threadTs: (task as { slackThreadTs?: string }).slackThreadTs,
+                }
+              : undefined,
+            requestedBy: task.requestedBy,
+            cwdWarning: missingTaskDirWarning(task.dir, resumeCwd),
+          },
+        });
+        resumePrompt = resumeSession.prompt;
 
         // Per-task runner session ID so session logs are scoped to this task
         const resumeRunnerSessionId = crypto.randomUUID();
@@ -6689,7 +6824,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             {
               prompt: resumePrompt,
               logFile,
-              systemPrompt: resolvedSystemPrompt,
+              systemPrompt: resumeSession.systemPrompt,
               additionalArgs: opts.additionalArgs,
               // Native resume deprecated: always undefined. Follow-up continuity flows through
               // the context preamble injected above (see context-preamble.ts).
@@ -6702,10 +6837,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               runnerSessionId: resumeRunnerSessionId,
               iteration,
               taskId: task.id,
-              model: (task as { model?: string }).model,
+              // Only the task's own pin carries over. `model` and the claim
+              // record describe the run before the pause; without a pin the
+              // resumed run resolves from the agent's current config.
+              ...resumedTaskModelSelection(task as TaskModelPinFields),
               modelTier: (task as { modelTier?: string }).modelTier,
-              resolvedModel: (task as { resolvedModel?: string }).resolvedModel,
-              modelSource: (task as { modelSource?: string }).modelSource,
               effort: (task as { effort?: ReasoningEffort }).effort,
               harnessProvider: state.harnessProvider,
               cwd: resumeCwd,
@@ -7098,11 +7234,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           ?.slackChannelId;
         const taskSlackThreadTs = (trigger.task as { slackThreadTs?: string } | undefined)
           ?.slackThreadTs;
-        currentTaskSlackContext = taskSlackChannelId
+        const taskSlackContext: SlackTaskContext | undefined = taskSlackChannelId
           ? { channelId: taskSlackChannelId, threadTs: taskSlackThreadTs }
           : undefined;
 
         // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
+        let currentRepoContext: RepoContext | undefined;
         const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
         if (taskVcsRepo && apiUrl) {
           const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
@@ -7126,8 +7263,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             ...repoResult,
             guidelines: repoConfig?.guidelines ?? null,
           };
-        } else {
-          currentRepoContext = undefined;
         }
 
         // Resolve effective working directory (priority: task.dir > repoContext.clonePath > process.cwd())
@@ -7166,11 +7301,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             " You can still access any path on the filesystem — this is just your starting directory.";
         }
 
-        // Warn in system prompt when task dir was specified but doesn't exist
-        let cwdWarning = "";
-        if (taskDir && !effectiveCwd) {
-          cwdWarning = `\n\nNote: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`;
-        }
+        // Warn when task dir was specified but doesn't exist
+        const cwdWarning = missingTaskDirWarning(taskDir, effectiveCwd);
 
         // Per-task skill hot-reload. Reuses the boot-time helper; signature
         // probe short-circuits when nothing changed. Skipped for
@@ -7216,13 +7348,21 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           );
         }
 
-        // Rebuild system prompt with per-task repo context
-        const taskBasePrompt = await buildSystemPrompt();
-        const requesterProfilePrompt = await buildRequesterProfilePrompt(trigger.requestedBy);
-        const taskPromptParts = [taskBasePrompt, requesterProfilePrompt, additionalSystemPrompt]
-          .filter((part): part is string => Boolean(part))
-          .join("\n\n");
-        const taskSystemPrompt = taskPromptParts + cwdWarning;
+        // Rebuild the system prompt (profile or skills may have changed) and
+        // append the per-task context to the task prompt.
+        const taskSession = await buildTaskSessionPrompts({
+          basePromptArgs: basePromptArgs(),
+          additionalSystemPrompt,
+          taskPrompt: triggerPrompt,
+          context: {
+            repoContext: currentRepoContext,
+            slackContext: taskSlackContext,
+            requestedBy: trigger.requestedBy,
+            cwdWarning,
+          },
+        });
+        const taskSystemPrompt = taskSession.systemPrompt;
+        triggerPrompt = taskSession.prompt;
 
         // The server refused the task's explicit model for this worker's CLI
         // version (harness_model_support = unsupported): fail fast, no spawn.

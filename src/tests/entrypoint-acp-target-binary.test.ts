@@ -393,7 +393,6 @@ describe("docker-entrypoint.sh: provider binary chain contract", () => {
   test.each([
     ["claude", "Claude CLI:"],
     ["codex", "Codex CLI:"],
-    ["opencode", "opencode CLI:"],
     ["dsh", "dsh CLI:"],
     ["claude-managed", "no local CLI required"],
     ["devin", "cloud API"],
@@ -404,6 +403,25 @@ describe("docker-entrypoint.sh: provider binary chain contract", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(expected);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "checks the opencode branch for the in-process SDK, not a CLI",
+    async () => {
+      const sdkPath = join(getStubDir(), "opencode-sdk-index.js");
+      writeFileSync(sdkPath, "");
+      const found = await runChain({ HARNESS_PROVIDER: "opencode", OPENCODE_SDK_PATH: sdkPath });
+      expect(found.exitCode).toBe(0);
+      expect(found.stdout).toContain(`OpenCode SDK: ${sdkPath}`);
+
+      const missing = await runChain({
+        HARNESS_PROVIDER: "opencode",
+        OPENCODE_SDK_PATH: join(getStubDir(), "no-such-sdk.js"),
+      });
+      expect(missing.exitCode).not.toBe(0);
+      expect(missing.stdout).toContain("FATAL: @opencode/sdk not found");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

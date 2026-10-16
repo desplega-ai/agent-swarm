@@ -1,3 +1,4 @@
+import { openAICompatibleProviders, providerKeyVars } from "@desplega/model-catalog";
 import { ExternalLink, GitBranch, Github, Gitlab, GitPullRequest, Link2, User } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -12,6 +13,7 @@ import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
+import { EffortMark } from "@/components/shared/effort-mark";
 import { SessionId } from "@/components/shared/session-id";
 import type { EndSummary } from "@/components/shared/session-log-messages";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
@@ -25,6 +27,7 @@ import { formatTokens } from "@/lib/format-tokens";
 import { progressBarTone } from "@/lib/percent-progress-tone";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
+import { taskDisplayEffort } from "@/lib/task-model-resolution";
 import { cn, formatElapsed, formatRelativeTime, formatSmartTime, parseUTCDate } from "@/lib/utils";
 import { taskSourceLabel } from "./task-source-line";
 import { NARROW_ICON_TARGET, NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
@@ -46,6 +49,12 @@ const API_KEY_LABELS: Record<string, string> = {
   CLAUDE_CODE_OAUTH_TOKEN: "OAuth",
   ANTHROPIC_API_KEY: "Anthropic",
   OPENROUTER_API_KEY: "OpenRouter",
+  // OpenAI-compatible registry providers, canonical key and aliases.
+  ...Object.fromEntries(
+    openAICompatibleProviders().flatMap((p) =>
+      providerKeyVars(p).map((name) => [name, p.displayName]),
+    ),
+  ),
 };
 
 /** The first time the task went to `in_progress` (a resume does not count). */
@@ -638,7 +647,10 @@ export function TaskDetailsRail({
           ) : null}
           {stats && stats.models.length > 0 ? (
             <RailRow label="Model" mono>
-              {stats.models.join(", ")}
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                {stats.models.join(", ")}
+                <EffortMark effort={taskDisplayEffort(task)} className="text-muted-foreground" />
+              </span>
             </RailRow>
           ) : null}
           {stats ? (
@@ -719,11 +731,6 @@ export function TaskDetailsRail({
           {task.source ? (
             <RailRow label="Source" mono>
               {task.source}
-            </RailRow>
-          ) : null}
-          {task.effort ? (
-            <RailRow label="Effort" mono>
-              {task.effort}
             </RailRow>
           ) : null}
         </dl>

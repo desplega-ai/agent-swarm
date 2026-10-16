@@ -34,8 +34,10 @@ fi
 
 run_full_suite() {
   # Mirror merge-gate's shard boundaries so local load matches CI.
-  bun run test:root -- --timeout 10000 --parallel=4 --shard=1/2
-  exec bun run test:root -- --timeout 10000 --parallel=4 --shard=2/2
+  bun run test:root -- --timeout 10000 --parallel=4 --shard=1/4
+  bun run test:root -- --timeout 10000 --parallel=4 --shard=2/4
+  bun run test:root -- --timeout 10000 --parallel=4 --shard=3/4
+  exec bun run test:root -- --timeout 10000 --parallel=4 --shard=4/4
 }
 
 probe_file=$(mktemp)
@@ -57,6 +59,7 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/connection-embedded-auth.test.ts \
     src/tests/sandboxed-process.test.ts \
     src/tests/schedule-target-type.test.ts \
+    src/tests/script-connections-sql.test.ts \
     src/tests/script-connections.test.ts \
     src/tests/script-executor-conformance.test.ts \
     src/tests/script-workflows-runtime-e2e.test.ts \

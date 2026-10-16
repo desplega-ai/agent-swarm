@@ -14,7 +14,6 @@ This guide covers all deployment options for Agent Swarm.
 - [GitHub App Integration](#github-app-integration)
 - [Sentry Integration](#sentry-integration)
 - [System Prompts](#system-prompts)
-- [Service Registry (PM2)](#service-registry-pm2)
 - [Publishing (Maintainers)](#publishing-maintainers)
 - [Self-Hosted SSO](#self-hosted-sso)
 
@@ -266,8 +265,7 @@ Current worker-image defaults in `Dockerfile.worker`:
 - `CLAUDE_CODE_VERSION=2.1.246`
 - `PI_CODING_AGENT_VERSION=0.84.3`
 - `CODEX_VERSION=0.149.1`
-- `OPENCODE_VERSION=1.18.23`
-- `OPENCODE_SDK_VERSION=1.18.23`
+- `OPENCODE_VERSION=2.0.30` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -345,7 +343,6 @@ The Docker worker image uses a multi-stage build with two publishable targets:
 
 - **Languages**: Python 3, Node.js 22, Bun
 - **Build tools**: gcc, g++, make, cmake
-- **Process manager**: PM2 (for background services)
 - **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
 - **Agent tools**: `wts` (git worktree manager)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh, fuse3
@@ -526,7 +523,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=1.0` disabling rating-based demotion. On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.15.3. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.16.3. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
@@ -560,7 +557,6 @@ The bundled agent-fs service uses version 0.15.3. Provisioning seeds agent displ
 | `LEAD_PORT` | No | Host port for lead service (default: `3020`). Example — adjust to your setup. In isolated network namespaces all services can share the same port. |
 | `WORKER1_PORT` | No | Host port for worker-1 service (default: `3021`). Example — see `LEAD_PORT`. |
 | `WORKER2_PORT` | No | Host port for worker-2 service (default: `3022`). Example — see `LEAD_PORT`. |
-| `PM2_HOME` | No | PM2 state directory (default: `/workspace/.pm2`) |
 | `GITHUB_TOKEN` | No | GitHub token for git operations |
 | `GITHUB_EMAIL` | No | Git commit email (default: `worker-agent@desplega.ai`) |
 | `GITHUB_NAME` | No | Git commit name (default: `Worker Agent`) |
@@ -589,7 +585,7 @@ The bundled agent-fs service uses version 0.15.3. Provisioning seeds agent displ
 | `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |
 | `CAPABILITIES` | Comma-separated capability flags gating which MCP tool groups the server registers | `core,task-pool,scripts,config,mcp,profiles,scheduling,memory,workflows,pages,metrics,kv,slack,tracker,skills,repo` |
 
-> **Capabilities:** `services`, `prompt-templates`, `messaging`, `swarm-x`, `agentmail`, and `kapso` are **disabled by default** — add them to `CAPABILITIES` to enable. Setting `CAPABILITIES` replaces the whole default list (it is not additive). **Upgrade seed:** if an explicit `CAPABILITIES` env value is present and no global swarm-config `CAPABILITIES` row exists, boot backfills the previously always-registered groups (`core`, `config`, `scripts`, `mcp`, `slack`, `tracker`, `skills`, `repo`) into an auto-seeded, operator-editable swarm-config row so legacy explicit lists don't silently lose those tools. Edit or delete that row to take full control — once it exists the seed never touches it again. The value can also be stored as a global swarm-config entry, which overrides the env var at server creation. Capability flags shape the externally exposed MCP tool list only — they are not feature kill-switches: the scripts SDK bridge always sees the full tool surface (governed by its own allowlist), and HTTP REST routes are generally not gated. See [MCP.md](./MCP.md) for the tool-to-capability mapping.
+> **Capabilities:** `prompt-templates`, `messaging`, `swarm-x`, `agentmail`, and `kapso` are **disabled by default** — add them to `CAPABILITIES` to enable. Setting `CAPABILITIES` replaces the whole default list (it is not additive). **Upgrade seed:** if an explicit `CAPABILITIES` env value is present and no global swarm-config `CAPABILITIES` row exists, boot backfills the previously always-registered groups (`core`, `config`, `scripts`, `mcp`, `slack`, `tracker`, `skills`, `repo`) into an auto-seeded, operator-editable swarm-config row so legacy explicit lists don't silently lose those tools. Edit or delete that row to take full control — once it exists the seed never touches it again. The value can also be stored as a global swarm-config entry, which overrides the env var at server creation. Capability flags shape the externally exposed MCP tool list only — they are not feature kill-switches: the scripts SDK bridge always sees the full tool surface (governed by its own allowlist), and HTTP REST routes are generally not gated. See [MCP.md](./MCP.md) for the tool-to-capability mapping.
 
 > **Split / Helm deploys:** In topologies where `MCP_BASE_URL` points at an internal/cluster address (e.g. a Kubernetes Service DNS name reachable only inside the cluster), set `PUBLIC_MCP_BASE_URL` to the public ingress origin. OAuth redirect URIs and webhook URLs handed to external providers (Linear, Jira, GitHub) are built from `PUBLIC_MCP_BASE_URL` when it is set, falling back to `MCP_BASE_URL` otherwise.
 
@@ -685,6 +681,10 @@ SLACK_DISABLE=true
 # Optional: Filter allowed users
 SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com  # Comma-separated email domains
 SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs to always allow
+
+# Optional: Keep the bot out of external Slack Connect channels (default: false)
+# Alerts go to SLACK_ALERTS_CHANNEL.
+# SLACK_BLOCK_EXTERNAL_CHANNELS=true
 
 # Optional: Additive thread buffering (batch non-mention thread messages)
 # ADDITIVE_SLACK=true
@@ -878,49 +878,6 @@ docker run --rm -it \
 
 - CLI flags > Environment variables
 - Inline text (`SYSTEM_PROMPT`) > File (`SYSTEM_PROMPT_FILE`)
-
----
-
-## Service Registry (PM2)
-
-Workers can run background services on port 3000 using PM2. Services are registered for discovery and auto-restart.
-
-### PM2 Commands
-
-```bash
-pm2 start /workspace/app/server.js --name my-api  # Start a service
-pm2 stop|restart|delete my-api                     # Manage services
-pm2 logs [name]                                    # View logs
-pm2 list                                           # Show running processes
-```
-
-### MCP Tools
-
-- `register-service` - Register service for discovery and auto-restart
-- `unregister-service` - Remove from registry
-- `list-services` - Find services exposed by other agents
-- `update-service-status` - Update health status
-
-### Starting a New Service
-
-```bash
-# 1. Start your service with PM2
-pm2 start /workspace/myapp/server.js --name my-api
-
-# 2. Register it (via MCP tool)
-# register-service script="/workspace/myapp/server.js"
-
-# 3. Mark healthy when ready
-# update-service-status name="my-api" status="healthy"
-```
-
-### Service URL Pattern
-
-`https://{agentId}.{SWARM_URL}`
-
-### Health Checks
-
-Implement a `/health` endpoint returning 200 OK for monitoring.
 
 ---
 

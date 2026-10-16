@@ -1,5 +1,5 @@
 /**
- * Parent side of the page feedback overlay (`src/artifact-sdk/feedback-overlay.ts`).
+ * Parent side of the page feedback overlay (`src/pages/feedback-overlay.ts`).
  *
  * Inside the dashboard, the overlay does not call the API itself. It hands the
  * collected comments to this page over postMessage, and the SPA sends them

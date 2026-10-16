@@ -255,6 +255,7 @@ export async function handleX(
     timeoutMs,
     egressSecrets: credentials.egressSecrets,
     failedBindings: credentials.failedBindings,
+    userConfig: credentials.userConfig,
     apiConnections: getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
     mcpConnections: getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
   });

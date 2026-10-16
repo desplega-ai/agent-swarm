@@ -106,3 +106,89 @@ Comment:
   ],
   category: "event",
 });
+
+// ============================================================================
+// Azure Boards work-item events
+// ============================================================================
+
+registerTemplate({
+  eventType: "common.command_suggestions.azure_devops_work_item",
+  header: "",
+  defaultBody:
+    'Workers have the `az` CLI with the azure-devops extension, authenticated with the swarm PAT. Inspect the work item with `az boards work-item show --id {{work_item_id}}`. To reply on it, run `az boards work-item update --id {{work_item_id}} --discussion "<reply>"`.',
+  variables: [{ name: "work_item_id", description: "Work item ID" }],
+  category: "common",
+});
+
+const WORK_ITEM_VARIABLES = [
+  { name: "work_item_id", description: "Work item ID" },
+  { name: "work_item_type", description: "Work item type (Task, Bug, Issue, ...)" },
+  { name: "title", description: "Work item title" },
+  { name: "state", description: "Work item state" },
+  { name: "project", description: "Azure DevOps project name" },
+  { name: "work_item_url", description: "Work item web URL" },
+  {
+    name: "username",
+    description:
+      "Actor identity — resolved canonical name (e.g. 'Luis (azure-devops:luis@example.com)') or the UNKNOWN sentinel",
+  },
+];
+
+registerTemplate({
+  eventType: "azure-devops.work_item.assigned",
+  header: "[Azure DevOps {{work_item_type}} #{{work_item_id}}] {{title}}",
+  defaultBody: `Project: {{project}}
+State: {{state}}
+Triggered by: {{username}} ({{trigger}})
+URL: {{work_item_url}}
+
+{{description_section}}{{@template[common.command_suggestions.azure_devops_work_item]}}{{@template[common.delegation_instruction.azure_devops]}}`,
+  variables: [
+    ...WORK_ITEM_VARIABLES,
+    { name: "trigger", description: "Why the task was created (assigned to the bot, mentioned)" },
+    {
+      name: "description_section",
+      description: "Description section (HTML stripped) or empty string",
+    },
+  ],
+  category: "event",
+});
+
+registerTemplate({
+  eventType: "azure-devops.work_item.commented",
+  header: "[Azure DevOps {{work_item_type}} #{{work_item_id}}] {{username}} mentioned bot",
+  defaultBody: `Project: {{project}}
+Title: {{title}}
+State: {{state}}
+URL: {{work_item_url}}
+
+Comment:
+{{context}}{{existing_task_note}}
+
+{{@template[common.command_suggestions.azure_devops_work_item]}}{{@template[common.delegation_instruction.azure_devops]}}`,
+  variables: [
+    ...WORK_ITEM_VARIABLES,
+    { name: "context", description: "Comment text with the bot mention removed" },
+    { name: "existing_task_note", description: "Note about an active task, or empty string" },
+  ],
+  category: "event",
+});
+
+registerTemplate({
+  eventType: "azure-devops.work_item.followup",
+  header: "[Azure DevOps {{work_item_type}} #{{work_item_id}}] Follow-up: {{title}}",
+  defaultBody: `Project: {{project}}
+State: {{state}}
+Trigger: {{trigger}} by {{username}}
+URL: {{work_item_url}}
+
+{{user_message}}
+
+{{@template[common.command_suggestions.azure_devops_work_item]}}{{@template[common.delegation_instruction.azure_devops]}}`,
+  variables: [
+    ...WORK_ITEM_VARIABLES,
+    { name: "trigger", description: "What re-engaged the swarm" },
+    { name: "user_message", description: "Comment text, or empty string" },
+  ],
+  category: "event",
+});

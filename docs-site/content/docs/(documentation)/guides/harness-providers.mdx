@@ -16,7 +16,7 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
 
 For an operator-facing comparison of the install choices, see the [Provider Capability Matrix](/docs/guides/provider-capability-matrix).
 
-**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (a fresh Codex app-server inside each isolated task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents. Sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping. Experimental rollout across DES-295 to DES-299), `acp` (a curated OpenCode, Gemini CLI, or GitHub Copilot CLI preset, or a custom [Agent Client Protocol](https://agentclientprotocol.com) command), `dsh` (DeepSeek's `@deepseek-ai/dsh` CLI, routed through OpenRouter or the DeepSeek API), `amp` (the [Amp](#amp-amp) CLI in execute mode; see [Provider Auth: Amp](/docs/guides/provider-auth/amp)), `cursor` (Cursor's agent through `@cursor/sdk`; see [Provider Auth: Cursor](/docs/guides/provider-auth/cursor)), `grok` (the xAI Grok CLI on the swarm's ACP client; see [Provider Auth: Grok](/docs/guides/provider-auth/grok)).
+**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (a fresh Codex app-server inside each isolated task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents. Sessions execute in Anthropic's cloud sandbox), `opencode` (OpenCode 2 embedded in-process via [`@opencode/sdk`](https://opencode.ai), mapping its session events), `acp` (a curated OpenCode, Gemini CLI, or GitHub Copilot CLI preset, or a custom [Agent Client Protocol](https://agentclientprotocol.com) command), `dsh` (DeepSeek's `@deepseek-ai/dsh` CLI, routed through OpenRouter or the DeepSeek API; see [Provider Auth: DeepSeek Harness](/docs/guides/provider-auth/dsh)), `amp` (the [Amp](#amp-amp) CLI in execute mode; see [Provider Auth: Amp](/docs/guides/provider-auth/amp)), `cursor` (Cursor's agent through `@cursor/sdk`; see [Provider Auth: Cursor](/docs/guides/provider-auth/cursor)), `grok` (the xAI Grok CLI on the swarm's ACP client; see [Provider Auth: Grok](/docs/guides/provider-auth/grok)).
 
 ---
 
@@ -61,7 +61,7 @@ unchanged. Keep API and ChatGPT lifecycle decisions separate.
 Offer review and mention sessions do not count toward this limit.
 The worker accepts no further work once completed and active sessions reach N.
 It waits for active sessions, then uses the normal shutdown routine and exits with code 0.
-Shutdown terminates process groups, emits telemetry, saves PM2 state, and sends `/close` with `runtimeShutdown: true`.
+Shutdown terminates process groups, emits telemetry, and sends `/close` with `runtimeShutdown: true`.
 Unset or invalid values preserve continuous operation.
 Per-task Docker pools set N to 1.
 
@@ -190,9 +190,9 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`. The child starts one `codex app-server`, then bridges JSON-RPC notifications and requests to normalized events and controls over bidirectional JSONL. | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 | [`src/providers/devin-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/devin-adapter.ts) | Cognition Devin v3 REST API; worker polls the remote session | `DEVIN_API_KEY` + `DEVIN_ORG_ID` |
-| [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | In-process `@opencode-ai/sdk` server with SSE event mapping | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
+| [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | OpenCode 2 embedded in-process via `@opencode/sdk` | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
 | [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | `Bun.spawn` of the selected OpenCode, Gemini CLI, Copilot, Qwen Code, Kiro CLI or Goose preset, or a custom target, driven over stdio with `@agentclientprotocol/sdk`'s ndjson `ClientSideConnection`. The OpenCode preset injects a configured `OPENROUTER_BASE_URL` into `OPENCODE_CONFIG_CONTENT` as `provider.openrouter.options.baseURL`, alongside the model fallback. | The ACP target owns its model auth and receives a session-scoped `aseph_` token as the swarm MCP bearer |
-| [`src/providers/dsh-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/dsh-adapter.ts) | Preinstalled DeepSeek Harness CLI, headless JSON over stdin/stdout | `OPENROUTER_API_KEY` for `openrouter/` models; `DEEPSEEK_API_KEY` for native IDs. Swarm MCP via an inserted `dsh-mcp-client`, cost/context from step usage, reasoning effort; no steering or native resume |
+| [`src/providers/dsh-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/dsh-adapter.ts) | Preinstalled DeepSeek Harness CLI, headless JSON over stdin/stdout | `OPENROUTER_API_KEY` for `openrouter/` models; `DEEPSEEK_API_KEY` for native IDs. See [DeepSeek Harness](/docs/guides/provider-auth/dsh) for model routing. Swarm MCP via an inserted `dsh-mcp-client`, cost/context from step usage, reasoning effort; no steering or native resume |
 | [`src/providers/amp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/amp-adapter.ts) | Preinstalled Amp CLI (`amp -x --stream-json --stream-json-input`), Claude-compatible JSONL over stdin/stdout | `AMP_API_KEY` (an access token from ampcode.com). Swarm MCP via a per-task `--mcp-config`, system prompt via a per-task plugin mode, queued steering, tokens priced from the `amp` rows; every thread is stored on ampcode.com |
 | [`src/providers/grok-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/grok-adapter.ts) | Preinstalled xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`), driven by the shared ACP client in `acp-adapter.ts` | `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models (see [Grok](/docs/guides/provider-auth/grok)). Fresh `GROK_HOME` per session with Claude/Cursor compat off, swarm MCP via `session/new`, system prompt appended via `_meta.rules`, cost from xAI's billed `costUsdTicks`, effort via `--reasoning-effort`, no steering |
 | [`src/providers/cursor-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/cursor-adapter.ts) | In-process `@cursor/sdk` local runtime (`Agent.create` + `agent.send`); the agent loop and tools run in the worker, inference on Cursor's hosted models | `CURSOR_API_KEY` (user or service-account key; see [Cursor](/docs/guides/provider-auth/cursor) for plans and key creation). Swarm MCP over HTTP with the per-task headers, steer + queue steering, token cost priced from vendor rates, reasoning effort via the model's own params. The swarm prompt rides in the first message unless the account has `systemPrompt` access (`CURSOR_NATIVE_SYSTEM_PROMPT=true`) |
@@ -202,6 +202,10 @@ ACP session tokens identify the session's agent and task. On the HTTP config rou
 ACP config-option metadata is scrubbed with `scrubSecrets` before session events are emitted, including strings in grouped choices. This protects both persisted dashboard metadata and diagnostic logs while preserving non-secret model IDs, descriptions, and boolean values.
 
 After a prompt completes, ACP persists a bounded, scrubbed `acp_prompt_response` raw-log diagnostic with the optional usage and `_meta` fields. Reported input/output/cache counters feed cost telemetry; missing counters are `undefined` at the adapter boundary but become zero in the session-cost API and DB. Persisted costs and UI displays cannot distinguish missing usage from measured zero; the raw diagnostic retains absence. Unresolved pricing stays `unpriced`. See [cost and context computation](/docs/guides/cost-and-context-computation#acp-prompt-usage).
+
+### Pi swarm MCP setup
+
+Pi retries swarm MCP initialization and tool discovery up to three times, waiting 500 ms and then 1 s between attempts. Each attempt starts a fresh MCP client. After all attempts fail, it logs a warning and creates the session without swarm MCP tools.
 
 ### Local subprocess teardown
 
@@ -434,7 +438,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1791720050-g0a7ff0`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1792123242-g03edc7`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.
@@ -560,7 +564,7 @@ The sync lives in [`src/commands/profile-sync.ts`](https://github.com/desplega-a
 | `claude`, `pi`, `codex`, `opencode` | yes | **Yes** — when the finished session ran on this provider |
 | `devin`, `claude-managed` | no | No — these have no `/workspace` FS |
 
-- **`CLAUDE.md` source is provider-routed (`resolveClaudeMdPath`).** `claude` edits its personal file at `~/.claude/CLAUDE.md` (also synced by the Claude Stop hook); every other local harness (`codex`/`pi`/`opencode`) edits `/workspace/CLAUDE.md` — the file the runner materializes from the `claudeMd` DB field at boot and that the base-prompt truncation notice points them to. An all-`claude` batch syncs the personal file (the runner is a backstop and never overwrites it with the stale workspace copy); any non-`claude` session in the batch routes to `/workspace/CLAUDE.md`. This closes the previously-open non-Claude `CLAUDE.md` FS → DB gap.
+- **`CLAUDE.md` source is provider-routed (`resolveClaudeMdPath`).** `claude` edits its personal file at `~/.claude/CLAUDE.md` (also synced by the Claude Stop hook); every other local harness (`codex`/`pi`/`opencode`) edits `/workspace/CLAUDE.md` — the file the runner materializes from the `claudeMd` DB field at boot and that the base-prompt truncation notice points them to. An all-`claude` batch syncs the personal file (the runner is a backstop and never overwrites it with the stale workspace copy); any non-`claude` session in the batch routes to `/workspace/CLAUDE.md`. This closes the previously-open non-Claude `CLAUDE.md` FS → DB gap. The runner writes `/workspace/CLAUDE.md` for every harness (one container can live-swap providers), and Claude sessions pass `claudeMdExcludes` in `--settings` so that copy is not loaded on top of `~/.claude/CLAUDE.md`; repo-level `CLAUDE.md` files still load.
 - **Baseline hashes protect lead-side profile edits.** At session start the runner records SHA-256 baselines for the identity files it just materialized from the DB. On session-end sync, unchanged files are skipped; only files the agent actually modified sync back. That preserves `update-profile` edits made by the lead during a running session instead of having the stale local copy blindly overwrite the DB row at shutdown.
 - **Identity budgets ratchet oversized fields down without truncating them.** SOUL.md and IDENTITY.md have 10,000-character budgets; CLAUDE.md and TOOLS.md have 20,000-character budgets. A field already above its budget may stay level or shrink, but cannot grow. Each file is posted independently, so one rejection does not discard valid edits to the others. Rejections and later reconciliations are persisted as events, and unresolved rejections add recovery guidance to the next worker prompt. Run `bun src/commands/profile-sync-audit.ts` inside the worker to compare the local files with DB state; it exits `2` when divergence exists.
 
@@ -710,7 +714,7 @@ The swarm API exposes its MCP server at `{apiUrl}/mcp`. Tools are defined under 
 | **Claude** | Discovers an existing `.mcp.json` (walking up from `cwd`), injects `X-Source-Task-Id` into the `agent-swarm` entry, writes a per-session copy to `/tmp/mcp-<taskId>.json`, launches CLI with `--mcp-config <path> --strict-mcp-config`. | [`claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) L117–184, L251 |
 | **Pi** | Constructs `McpHttpClient(apiUrl, apiKey, agentId, taskId)`, calls `listTools()`, wraps each as a pi-mono `ToolDefinition` with prefix `mcp__<name>__`. | [`pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) L410–421, [`pi-mono-mcp-client.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-mcp-client.ts) L53 |
 | **Codex** | `buildCodexConfig` registers `mcp_servers["agent-swarm"] = { url: "{apiUrl}/mcp", http_headers: { Authorization, X-Agent-ID, X-Source-Task-Id }, bearer_token_env_var, startup_timeout_sec }`. Passed to `new Codex({ config })`. | [`codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) L132–243, L857–861 |
-| **opencode** | `createSession` writes `mcp.swarm = { type: "remote", url: "{apiUrl}/mcp", headers: { Authorization, X-Agent-ID, X-Source-Task-Id, X-Context-Key, X-Runtime-Instance-ID } }` into the per-task `/tmp/opencode-<taskId>.json` that its own `opencode serve` reads. `X-Context-Key` is sent only when the task has one. | [`opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) |
+| **opencode** | `createSession` writes `mcp.swarm = { type: "remote", url: "{apiUrl}/mcp", headers: { Authorization, X-Agent-ID, X-Source-Task-Id, X-Context-Key, X-Runtime-Instance-ID } }` into the per-task config passed to its embedded `@opencode/sdk` host. `X-Context-Key` is sent only when the task has one. | [`opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) |
 
 ### Required headers
 
@@ -750,7 +754,7 @@ Even if the in-process MCP connection fails, the **runner** and the adapter's ow
 
 ### How it is built
 
-Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/base-prompt.ts) and orchestrated by `buildSystemPrompt()` in [`src/commands/runner.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/runner.ts). Static blocks come first, per-task blocks last, so the cached prefix stays stable across tasks. The pieces, in order:
+Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/base-prompt.ts) and orchestrated by `buildTaskSessionPrompts()` in [`src/commands/runner.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/runner.ts). The system prompt depends only on the agent (profile, harness, deployment), so it is byte-identical across that agent's sessions and the provider reads it from its prompt cache instead of re-writing it. Nothing per task, per requester or per session may enter it. The pieces, in order:
 
 | Source | Section | Gate |
 |---|---|---|
@@ -760,11 +764,17 @@ Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://gith
 | Template `system.agent.slack` | `## Slack` (both roles) | Slack tokens set, not scripts-only, `slack` capability |
 | Template `system.agent.steering` | `## Live task steering` | `STEERING_ENABLED`, adapter `steerModes`, `core` capability |
 | Template `system.agent.tools_skills` (skills + MCP server lines interpolated) | `## Tools and skills` | MCP. Count + discovery pointer for harnesses with native skill discovery (claude, pi), enumerated list otherwise |
-| `agentClaudeMd` | `## Your notes (CLAUDE.md)` (truncated at 20k) | Local environment, provider codex/opencode/pi, content differs from the generated default. Claude loads `~/.claude/CLAUDE.md` and `/workspace/CLAUDE.md` natively |
+| `agentClaudeMd` | `## Your notes (CLAUDE.md)` (truncated at 20k) | Local environment, provider claude/codex/opencode/pi, content differs from the generated default. Claude excludes both `~/.claude/CLAUDE.md` and `/workspace/CLAUDE.md` from its memory load via `claudeMdExcludes`, so this is its only copy; the hook still writes `~/.claude/CLAUDE.md` as the file the agent edits |
+| `SYSTEM_PROMPT` env / `--system-prompt` | Appended | Operator config |
+
+Per-task context is appended to the **task prompt** (the first user turn), after the task text, by `getTaskContextPrompt(args)` and the runner:
+
+| Source | Section | Gate |
+|---|---|---|
+| Template `system.agent.scripts_only_mode.slack` | `## Slack (scripts-only)` | Worker, scripts-only, Slack-originated task |
 | Template `system.agent.repository` (per-task pieces interpolated) | `## Repository` | Task has a repo. Clone sentence + `get-repos` pointer, repo `CLAUDE.md` inlined for opencode only (12k cap), auto-stashes, guidelines, `code-quality` skill pointer |
 | `task.requester.profile` | `## Requester Profile` | Requester has role, notes, or comms |
-| `SYSTEM_PROMPT` env / `--system-prompt` | Appended | Operator config |
-| `task.additionalSystemPrompt` | Appended per-task | Task field |
+| cwd warning | `Note: The task requested working directory ...` | Task `dir` does not exist |
 
 The shared `system.agent.communication` template sets reply defaults for every session composite:
 

@@ -19,6 +19,7 @@ const configEntryShape = z.looseObject({
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
   encrypted: z.boolean().optional(),
+  exportToEnv: z.boolean().optional(),
 });
 
 export const registerListConfigTool = (server: McpServer) => {
@@ -102,7 +103,7 @@ export const registerListConfigTool = (server: McpServer) => {
             : result
                 .map(
                   (c) =>
-                    `- [${c.scope}${c.scopeId ? `:${c.scopeId}` : ""}] ${c.key}=${c.isSecret && !effectiveIncludeSecrets ? "********" : c.value}${c.description ? ` — ${c.description}` : ""}`,
+                    `- [${c.scope}${c.scopeId ? `:${c.scopeId}` : ""}] ${c.key}=${c.isSecret && !effectiveIncludeSecrets ? "********" : c.value}${c.exportToEnv ? "" : " [not in agent env]"}${c.description ? ` — ${c.description}` : ""}`,
                 )
                 .join("\n");
 

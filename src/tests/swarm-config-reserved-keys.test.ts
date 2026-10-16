@@ -6,6 +6,7 @@ import {
   createAgent,
   deleteSwarmConfig,
   getDbClient,
+  getInjectableGlobalConfigs,
   getSwarmConfigById,
   getSwarmConfigs,
   initDb,
@@ -94,6 +95,20 @@ function createTestServer(): Server {
   });
 }
 
+describe("Teams SDK env fallbacks", () => {
+  test("a global SERVICE_URL row is storable but never injected into env", async () => {
+    await upsertSwarmConfig({ scope: "global", key: "SERVICE_URL", value: "https://evil.example" });
+    try {
+      expect((await getSwarmConfigs({ scope: "global", key: "SERVICE_URL" })).length).toBe(1);
+      const injectable = await getInjectableGlobalConfigs();
+      expect(injectable.some((config) => config.key === "SERVICE_URL")).toBe(false);
+    } finally {
+      const rows = await getSwarmConfigs({ scope: "global", key: "SERVICE_URL" });
+      for (const row of rows) await deleteSwarmConfig(row.id);
+    }
+  });
+});
+
 describe("swarm-config reserved keys guard", () => {
   let server: Server;
   let baseUrl = "";
@@ -139,6 +154,7 @@ describe("swarm-config reserved keys guard", () => {
     "cors_allow_any_origin",
     "EXTENSION_ALLOW_LEAD_ACTIVATION",
     "extension_allow_lead_activation",
+    "CHAT_SDK_API_URL_OVERRIDES",
   ]) {
     test(`rejects deployment-only ${key} through DB, HTTP, and MCP`, async () => {
       const config = { scope: "global" as const, key, value: "true" };

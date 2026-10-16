@@ -158,6 +158,18 @@ describe("resolveHarnessProvider", () => {
   test("keeps 'claude' when no credentials are present at all", () => {
     expect(resolveHarnessProvider({}, {})).toBe("claude");
   });
+
+  test("prefers 'pi' when a NaN or Helmcode key is the only LLM credential", () => {
+    expect(resolveHarnessProvider({ NAN_API_KEY: "example-nan" }, {})).toBe("pi");
+    expect(resolveHarnessProvider({}, { HELMCODE_API_NAN: "example-nan" })).toBe("pi");
+    expect(resolveHarnessProvider({ HELMCODE_API_KEY: "example-helm" }, {})).toBe("pi");
+  });
+
+  test("keeps 'claude' when a NaN key sits next to an Anthropic credential", () => {
+    expect(
+      resolveHarnessProvider({ NAN_API_KEY: "example-nan", ANTHROPIC_API_KEY: "example-ant" }, {}),
+    ).toBe("claude");
+  });
 });
 
 // ─── validateConfigValue ─────────────────────────────────────────────────────

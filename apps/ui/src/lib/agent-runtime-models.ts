@@ -7,8 +7,12 @@ import {
   harnessModelIds,
   isReasoningHarness,
   modelDisplayName,
+  type OpenAICompatibleProviderId,
+  openAICompatibleProviderIds,
+  openAICompatibleProviders,
   type ReasoningEffortLevel,
   reasoningLevelsFor,
+  withRegistryCatalogSections,
 } from "@desplega/model-catalog";
 import type { AcpTarget, ProviderName, SwarmConfig } from "@/api/types";
 import modelsCache from "./modelsdev-cache.json";
@@ -58,7 +62,14 @@ export interface ModelOption {
   reasoningLevels?: ReadonlyArray<ReasoningEffortLevel>;
 }
 
-export type ProviderIconKey = "anthropic" | "openai" | "openrouter" | "amazon-bedrock" | "amp";
+/** Every glyph `ProviderIcon` draws; each OpenAI-compatible registry id needs one. */
+export type ProviderIconKey =
+  | "anthropic"
+  | "openai"
+  | "openrouter"
+  | "amazon-bedrock"
+  | "amp"
+  | OpenAICompatibleProviderId;
 
 export interface ModelGroup {
   provider: string;
@@ -74,7 +85,12 @@ export interface ModelGroup {
   disabledReason?: string;
 }
 
-export type SnapshotProviderId = "openrouter" | "anthropic" | "openai" | "amazon-bedrock";
+export type SnapshotProviderId =
+  | "openrouter"
+  | "anthropic"
+  | "openai"
+  | "amazon-bedrock"
+  | OpenAICompatibleProviderId;
 
 type CatalogProviderId = SnapshotProviderId | "opencode" | "deepseek";
 
@@ -109,7 +125,11 @@ interface CachedProvider {
  */
 export type LiveModelsCatalog = Partial<Record<CatalogProviderId, CachedProvider>>;
 
-const CACHE = modelsCache as unknown as Record<string, CachedProvider | undefined>;
+// The bundled snapshot plus the registry-synthesized sections models.dev does
+// not list (`helmcode`), as the server merges them.
+const CACHE = withRegistryCatalogSections(
+  modelsCache as unknown as Record<string, CachedProvider | undefined>,
+);
 
 /** A provider section of `source`, or undefined for a key it does not own (never a prototype member). */
 function sectionOf(
@@ -353,7 +373,29 @@ const DIRECT_HARNESS_ACCEPTED_KEYS: Record<"claude" | "codex", string[]> = {
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
 };
 
-const SNAPSHOT_ORDER: SnapshotProviderId[] = ["openrouter", "anthropic", "openai"];
+const SNAPSHOT_ORDER: SnapshotProviderId[] = [
+  "openrouter",
+  // OpenAI-compatible registry providers, in declaration order.
+  ...openAICompatibleProviderIds(),
+  "anthropic",
+  "openai",
+];
+
+/** Picker meta for every OpenAI-compatible registry provider: its label, key and glyph. */
+function registrySnapshotMeta(): Record<
+  OpenAICompatibleProviderId,
+  { label: string; requiredKey: string; iconKey: ProviderIconKey }
+> {
+  return Object.fromEntries(
+    openAICompatibleProviders().map((p) => [
+      p.id,
+      { label: p.displayName, requiredKey: p.envVar, iconKey: p.id as OpenAICompatibleProviderId },
+    ]),
+  ) as Record<
+    OpenAICompatibleProviderId,
+    { label: string; requiredKey: string; iconKey: ProviderIconKey }
+  >;
+}
 
 /** Bedrock-specific snapshot ID — kept separate from SNAPSHOT_ORDER since it is
  *  only shown for the pi harness, not for opencode. */
@@ -370,6 +412,7 @@ const SNAPSHOT_META: Record<
   },
   anthropic: { label: "Anthropic", requiredKey: "ANTHROPIC_API_KEY", iconKey: "anthropic" },
   openai: { label: "OpenAI", requiredKey: "OPENAI_API_KEY", iconKey: "openai" },
+  ...registrySnapshotMeta(),
   /**
    * Amazon Bedrock — credentials come from the AWS SDK default chain, not a
    * single env var. `requiredKey` is a human label (not an env key); the group's
@@ -414,13 +457,25 @@ function hasCodexOAuthSlot(configs: SwarmConfig[] | undefined): boolean {
   return Boolean(configs?.some((c) => CODEX_OAUTH_SLOT_RE.test(c.key) && c.value !== ""));
 }
 
+/**
+ * Other names a credential is accepted under: each registry provider's key
+ * aliases. The runner copies an alias into the canonical var when only the
+ * alias is set (`normalizeProviderKeyAliases` in `src/utils/credentials.ts`),
+ * so `HELMCODE_API_NAN` unlocks NaN.
+ */
+const KEY_ALIASES: Partial<Record<string, readonly string[]>> = Object.fromEntries(
+  openAICompatibleProviders().map((p) => [p.envVar, p.aliasEnvVars]),
+);
+
 export function hasRuntimeCredential(
   key: string,
   configs: SwarmConfig[] | undefined,
   envPresence: Record<string, boolean> | undefined,
 ): boolean {
-  if (envPresence?.[key]) return true;
-  if (hasConfigKey(configs, key)) return true;
+  for (const name of [key, ...(KEY_ALIASES[key] ?? [])]) {
+    if (envPresence?.[name]) return true;
+    if (hasConfigKey(configs, name)) return true;
+  }
   if (key === "CODEX_OAUTH") return hasCodexOAuthSlot(configs);
   return false;
 }
@@ -945,6 +1000,7 @@ function liveModelOption(
     openai: "openai",
     openrouter: "openrouter",
     "amazon-bedrock": "amazon-bedrock",
+    ...Object.fromEntries(openAICompatibleProviderIds().map((id) => [id, id])),
   };
   return {
     id,

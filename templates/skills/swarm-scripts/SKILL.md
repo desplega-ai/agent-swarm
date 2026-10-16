@@ -64,6 +64,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 
 - `args` can be `undefined` when a caller passes none. Guard with `argsSchema.safeParse(args ?? {})` or optional chaining.
 - Export a Zod `argsSchema` from every named script. `script-upsert` converts it to JSON Schema, so callers, schedules, and workflows see the input contract.
+- Both `zod` and `zod/mini` imports work. Use `import * as z from "zod/mini"` for smaller QuickJS bundles. Mini uses functional forms: `z.optional(z.string())`, `z._default(z.number(), 10)`, and `z.string().check(z.minLength(1))`; its schemas still have `.parse()` and `.safeParse()`.
 - Inline source through `script-run` runs without a typecheck. `script-upsert` typechecks before it saves. Import `ScriptContext` from `"swarm-sdk"` in inline code too, so promotion to a named script works.
 - SDK methods return `Promise<unknown>`. Responses are usually wrapped: read `res?.data ?? res`. Exception: `app_query` with a literal `appId` and `query` returns rows typed from the app's columns.
 - `agentId` is propagated through the `X-Agent-ID` header, so SDK calls run as you. `taskId` is not ambient: pass it in `args` when the script calls `task_storeProgress`.
@@ -75,7 +76,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 
 - `ctx.swarm.*`: the swarm SDK. `task_get`, `task_send`, `task_storeProgress`, `task_action`, `task_list`, `slack_reply`, `memory_search`, `memory_store`, `kv_get`, `kv_getOrNull`, `kv_set`, `kv_delete`, `kv_incr`, `kv_list`, `swarm_get`, `agent_info`, `db_query`, and more. `kv_getOrNull` returns the entry, `null` on a missing key, and throws on other errors.
 - `ctx.swarm.task_send` requires `routingReason` and `routingNote` whenever `agentId` is present. The note must explain the worker choice in at least 10 characters after trimming whitespace (maximum 200 characters). Use `human_pinned` for an explicit/configured choice, `skill` for a role or specialization match, `continuity` for the same worker/session, `reroute_fault` for a fault handoff, or `overflow` for capacity/pool escalation. Omit both `agentId` and routing fields for the pool.
-- `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for user config values. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
+- `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for swarm config values, resolved for the agent running the script (agent scope over global, the same rows `get-config` returns for that agent). A key that is not set returns `undefined`, so `config.get("KEY") ?? fallback` works. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
 - `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
 - `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `Redacted`.
 - `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
@@ -106,11 +107,13 @@ export default async function main(args: { status?: string; limit?: number } | u
 
 ## Secrets
 
+A config row reaches your shell env only when its `exportToEnv` flag is on. If `$KEY` is empty in your shell but `get-config` or `list-config` shows the row marked `not in agent env`, the row stays server-side on purpose: do not copy the value into a file, an env var, or a command. Use it from a script instead, through one of the paths below. Harness, git, and agent-fs credentials stay exported. Keys only the API server reads (Slack app token and signing secret, GitHub App private key, webhook and OAuth client secrets) can never be exported. If a recipe genuinely needs the variable in a shell, ask the lead to turn `exportToEnv` on for that row (`set-config` with `exportToEnv: true`); it applies to your next task.
+
 Order of preference:
 
 1. A registered connection: `ctx.api.<slug>.<operationId>({ path, query, header, body })` (OpenAPI), `ctx.api.<slug>.graphql(query, variables)` (GraphQL), `ctx.mcp.<slug>.<toolName>(args)` (MCP, proxied server-side, returns the raw MCP envelope: read `res.structuredContent ?? res.content?.[0]?.text`). Credentials attach at egress. The script never sees them. OAuth tokens refresh on their own.
 2. A credential binding placeholder in a hand-written request: `Authorization: Bearer [REDACTED:GITHUB_TOKEN]`. The runtime substitutes the value at egress, only for the binding's allowed hosts.
-3. `ctx.swarm.config.get("KEY")` for a config value you pass to `ctx.stdlib.fetch` as a header value. Still `Redacted`; never log it.
+3. `ctx.swarm.config.get("KEY")` for a config value you pass to `ctx.stdlib.fetch` as a header value. Unwrap it with `ctx.stdlib.Redacted.value(...)` inside the header itself (a wrapped value sends the literal `<redacted>`), and never log it. Secret values are scrubbed from run output.
 
 A raw secret, or the output of `get-config` with `includeSecrets: true`, must not appear in script source, script `args`, a schedule's `taskTemplate` or `scriptArgs`, or a task description. Those are stored as plain text and replayed on every run.
 

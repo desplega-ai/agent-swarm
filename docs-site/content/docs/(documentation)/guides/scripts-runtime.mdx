@@ -122,7 +122,10 @@ The `ScriptContext` passed to your `default` export carries:
   repos, schedules). Method allowlist: see
   `src/scripts-runtime/sdk-allowlist.ts`.
 - `ctx.swarm.config` — `apiKey`, `agentId`, `mcpBaseUrl` (all wrapped in
-  `Redacted<string>`), plus `ctx.swarm.config.get("KEY")` for user config.
+  `Redacted<string>`), plus `ctx.swarm.config.get("KEY")` for swarm config
+  resolved for the invoking agent (agent scope over global). An unset key
+  returns `undefined`. Unwrap with `ctx.stdlib.Redacted.value(...)` only where
+  the value is used, such as a request header.
   Redacted values stringify and serialize as `<redacted>`; never unwrap one
   into a return value, log line, or request body assembled by hand.
 - `ctx.api.<slug>` / `ctx.mcp.<slug>` — typed clients for registered script
@@ -180,6 +183,10 @@ The TypeScript import allowlist (`src/scripts-runtime/import-allowlist.ts`):
 - `stdlib`
 - `swarm-sdk`
 - `zod` — for declaring `export const argsSchema = z.object({...})`
+- `zod/mini` — the same schemas with a smaller bundle (useful under
+  `quickjs`). Mini uses functional forms: `z.optional(z.string())`,
+  `z._default(z.number(), 10)`, `z.string().check(z.minLength(1))`. Its
+  schemas still have `.parse()` and `.safeParse()`.
 
 `import "fs"` / `"node:fs"` / `"path"` / any unlisted bare specifier is
 rejected at upsert and at run time.
@@ -281,7 +288,7 @@ access except the host calls below. These are the differences from `native`:
 - **Available:** `ctx.swarm`, `ctx.api`, `ctx.mcp`, `ctx.stdlib.fetch`,
   `ctx.stdlib.fetchJson`, `ctx.stdlib.table`, `ctx.stdlib.Redacted`,
   `ctx.logger`, `console`, `fetch`, `Headers`, `Response`, `setTimeout`,
-  `clearTimeout`, and the `zod`, `stdlib`, and `swarm-sdk` imports.
+  `clearTimeout`, and the `zod`, `zod/mini`, `stdlib`, and `swarm-sdk` imports.
 - **`fetch` is text-only.** A request body must be a string. A response
   exposes `status`, `ok`, `headers`, `text()`, and `json()`. Streams, binary
   bodies, and `AbortSignal` are not supported.

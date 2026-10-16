@@ -9,12 +9,25 @@ import {
   verifyAgentMailWebhook,
 } from "../agentmail";
 import { archiveInboundMessage } from "../agentmail/inbound-archive";
-import type { PullRequestCommentedEvent, PullRequestCreatedEvent } from "../azure-devops";
+import type {
+  PullRequestCommentedEvent,
+  PullRequestCreatedEvent,
+  WorkItemCommentedEvent,
+  WorkItemCreatedEvent,
+  WorkItemDeletedEvent,
+  WorkItemRestoredEvent,
+  WorkItemUpdatedEvent,
+} from "../azure-devops";
 import {
   commentedPayloadOf,
   createdPullRequestOf,
   handlePullRequestCommented,
   handlePullRequestCreated,
+  handleWorkItemCommented,
+  handleWorkItemCreated,
+  handleWorkItemDeleted,
+  handleWorkItemRestored,
+  handleWorkItemUpdated,
   isAzureDevOpsEnabled,
   verifyAzureDevOpsWebhook,
 } from "../azure-devops";
@@ -53,6 +66,14 @@ import {
   verifyGitLabWebhook,
 } from "../gitlab";
 import { gitlabWorkflowActionName } from "../gitlab/workflow-action-name";
+import { trackBackground } from "../integrations/chat-sdk/background";
+import { isChatSdkEnabled } from "../integrations/chat-sdk/config";
+import {
+  getChatInstance,
+  isChatAdapterConfigured,
+  isChatSdkStopping,
+} from "../integrations/chat-sdk/runtime";
+import { isTrustedTeamsServiceUrl } from "../integrations/chat-sdk/teams-origin";
 import {
   type KapsoMessageActionResult,
   markKapsoMessageRead,
@@ -63,11 +84,14 @@ import { getKapsoConfig } from "../integrations/kapso/config";
 import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { resolveKapsoRequestedByUserId, routeKapsoInbound } from "../integrations/kapso/inbound";
 import { TaskCreationBlockedError } from "../tasks/errors";
+import { getPublicMcpBaseUrl } from "../utils/constants";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { canonicalAzureDevOpsRepoUrl } from "../vcs/azure-devops";
 import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
 import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
 import { route } from "./route-def";
+import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 
 // ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─
 
@@ -190,7 +214,74 @@ const kapsoWebhook = route({
   },
 });
 
+const chatSdkWebhook = route({
+  method: "post",
+  path: "/api/integrations/chat/{adapter}/webhook",
+  pattern: ["api", "integrations", "chat", null, "webhook"],
+  summary: "Handle Chat SDK platform webhooks (Telegram, Slack, Discord, Teams)",
+  tags: ["Webhooks"],
+  params: z.object({ adapter: z.string().describe("Chat SDK adapter name, e.g. telegram") }),
+  auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "provider webhook: the Chat SDK adapter verifies the platform signature (Telegram secret token, Slack signing secret, Discord Ed25519, Teams JWT)",
+  },
+  responses: {
+    200: { description: "Adapter response", unstructured: "adapter response proxied as-is" },
+    401: { description: "Invalid platform signature or secret token" },
+    403: { description: "Teams activity whose serviceUrl is not a Bot Framework host" },
+    404: { description: "Chat SDK disabled or adapter not configured" },
+    413: { description: "Body exceeds 1 MiB" },
+    503: { description: "Adapter configured but failed to start" },
+  },
+});
+
+/**
+ * Upper bound for a Chat SDK webhook body. Platform payloads are a few KB and
+ * files travel by URL, so anything larger is not a platform delivery.
+ */
+const CHAT_SDK_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
+
+/** False when a Teams activity body carries a `serviceUrl` that is not a Bot Framework host. */
+function hasTrustedTeamsServiceUrl(body: Buffer): boolean {
+  let serviceUrl: unknown;
+  try {
+    serviceUrl = (JSON.parse(body.toString("utf-8")) as { serviceUrl?: unknown } | null)
+      ?.serviceUrl;
+  } catch {
+    // Not JSON: the adapter rejects it.
+    return true;
+  }
+  if (serviceUrl === undefined || serviceUrl === null || serviceUrl === "") return true;
+  return typeof serviceUrl === "string" && isTrustedTeamsServiceUrl(serviceUrl);
+}
+
+/**
+ * Rebuild a Fetch `Request` from the raw Node request. Headers come from
+ * `rawHeaders` pairs: building `Headers` from `IncomingMessage.headers`
+ * comma-joins repeated values, which breaks signature checks.
+ */
+function toFetchRequest(req: IncomingMessage, rawBody: Buffer, fallbackPath: string): Request {
+  const headers = new Headers();
+  if (Array.isArray(req.rawHeaders) && req.rawHeaders.length > 0) {
+    for (let i = 0; i + 1 < req.rawHeaders.length; i += 2) {
+      headers.append(req.rawHeaders[i] as string, req.rawHeaders[i + 1] as string);
+    }
+  } else {
+    for (const [name, value] of Object.entries(req.headers)) {
+      for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+        headers.append(name, item);
+      }
+    }
+  }
+  return new Request(`${getPublicMcpBaseUrl()}${req.url ?? fallbackPath}`, {
+    method: req.method ?? "POST",
+    headers,
+    body: rawBody.length > 0 ? new Uint8Array(rawBody) : undefined,
+  });
+}
 
 function logKapsoAckResult(action: string, result: KapsoMessageActionResult): void {
   if (result.ok) return;
@@ -303,7 +394,8 @@ export async function handleWebhooks(
       return true;
     }
 
-    console.log(`[GitHub] Received ${eventType} event`);
+    const deliveryId = req.headers["x-github-delivery"] as string | undefined;
+    console.log(`[GitHub] Received ${eventType} event (delivery ${deliveryId ?? "unknown"})`);
 
     let result: WebhookDispatchResult = { created: false };
 
@@ -560,6 +652,16 @@ export async function handleWebhooks(
             return await handlePullRequestCreated(body as PullRequestCreatedEvent);
           case "ms.vss-code.git-pullrequest-comment-event":
             return await handlePullRequestCommented(body as PullRequestCommentedEvent);
+          case "workitem.created":
+            return await handleWorkItemCreated(body as WorkItemCreatedEvent);
+          case "workitem.updated":
+            return await handleWorkItemUpdated(body as WorkItemUpdatedEvent);
+          case "workitem.commented":
+            return await handleWorkItemCommented(body as WorkItemCommentedEvent);
+          case "workitem.deleted":
+            return await handleWorkItemDeleted(body as WorkItemDeletedEvent);
+          case "workitem.restored":
+            return await handleWorkItemRestored(body as WorkItemRestoredEvent);
           default:
             console.log(`[AzureDevOps] Ignoring unsupported event type: ${eventType}`);
             return { created: false };
@@ -791,6 +893,85 @@ export async function handleWebhooks(
         console.error(`[Kapso] Error handling inbound event: ${errorMessage}`);
       }
       kapsoWebhook.respond(res, 200, { received: true, routing: "error" });
+    }
+    return true;
+  }
+
+  // Chat SDK webhook: the adapter verifies the platform signature over the raw
+  // body, so the request is proxied as-is and the adapter's response returned.
+  if (chatSdkWebhook.match(req.method, pathSegments)) {
+    const adapterName = pathSegments[3] ?? "";
+    if (!isChatSdkEnabled() || !isChatAdapterConfigured(adapterName)) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Chat SDK adapter not configured" }));
+      return true;
+    }
+    if (isChatSdkStopping()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Chat SDK is shutting down" }));
+      return true;
+    }
+    const chat = getChatInstance(adapterName);
+    const handler = chat?.webhooks[adapterName];
+    if (!handler) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Chat SDK adapter failed to start" }));
+      return true;
+    }
+
+    // The route is unauthenticated and the adapter verifies the signature over
+    // the buffered body, so the body is bounded before it is buffered. An
+    // oversized stream is answered at once and drained without buffering, the
+    // same way `parseBody` keeps the connection usable.
+    if (enforceContentLengthCap(req, res, CHAT_SDK_WEBHOOK_MAX_BODY_BYTES) === BODY_TOO_LARGE) {
+      return true;
+    }
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let tooLarge = false;
+    for await (const chunk of req) {
+      if (tooLarge) continue;
+      receivedBytes += (chunk as Buffer).byteLength;
+      if (receivedBytes > CHAT_SDK_WEBHOOK_MAX_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        jsonError(res, `Payload too large (max ${CHAT_SDK_WEBHOOK_MAX_BODY_BYTES} bytes)`, 413);
+        continue;
+      }
+      chunks.push(chunk as Buffer);
+    }
+    if (tooLarge) return true;
+    const rawBody = Buffer.concat(chunks);
+    // The Teams adapter replies, reads history and downloads files with the
+    // bot token at the activity's serviceUrl, and caches it for DMs. Refuse an
+    // untrusted one before the adapter sees the activity.
+    if (adapterName === "teams" && !hasTrustedTeamsServiceUrl(rawBody)) {
+      console.warn("[chat-sdk] teams webhook refused: serviceUrl is not a Bot Framework host");
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Untrusted Teams serviceUrl" }));
+      return true;
+    }
+    const request = toFetchRequest(req, rawBody, `/api/integrations/chat/${adapterName}/webhook`);
+
+    try {
+      const response = await handler(request, {
+        // Handler errors are logged by `trackBackground` in `handlers.ts`.
+        waitUntil: trackBackground,
+      });
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, name) => {
+        responseHeaders[name] = value;
+      });
+      const body = Buffer.from(await response.arrayBuffer());
+      res.writeHead(response.status, responseHeaders);
+      res.end(body);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[chat-sdk] ${adapterName} webhook failed: ${scrubSecrets(message)}`);
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+      }
+      res.end(JSON.stringify({ error: "Chat SDK webhook failed" }));
     }
     return true;
   }

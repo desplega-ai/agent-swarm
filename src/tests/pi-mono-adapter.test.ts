@@ -1,13 +1,26 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OPENAI_COMPATIBLE_PROVIDERS } from "@desplega/model-catalog";
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import { configureHttpResolver, resetHttpResolver } from "../prompts/resolver";
 import {
+  checkPiMonoCredentials,
   createPiRuntimeAuth,
   extractPiAssistantText,
   PiMonoAdapter,
   resolveModel,
+  type SessionModelsJson,
+  writeSessionModelsJson,
 } from "../providers/pi-mono-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
 
@@ -151,8 +164,8 @@ describe("PiMonoAdapter.createSession — OPENROUTER_BASE_URL gateway", () => {
     const model = capturedOptions?.model as { baseUrl?: string; id?: string } | undefined;
     expect(model?.id).toBe("google/gemini-3-flash-preview");
     expect(model?.baseUrl).toBe(GATEWAY);
-    // The override was materialized for the runtime to load.
-    expect(existsSync(join(agentDir, "models.json"))).toBe(true);
+    // The override lives in the session's own copy, never the shared file.
+    expect(existsSync(join(agentDir, "models.json"))).toBe(false);
   });
 
   test("session model keeps the default openrouter.ai baseUrl when env is unset", async () => {
@@ -174,9 +187,9 @@ describe("PiMonoAdapter.createSession — OPENROUTER_BASE_URL gateway", () => {
   });
 });
 
-// ─── MCP runtime identity (multi-runtime dispatch gate) ──────────────────────
+// ─── MCP setup and runtime identity ─────────────────────────────────────────
 
-describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
+describe("PiMonoAdapter.createSession — MCP setup", () => {
   let createAgentSessionSpy: ReturnType<typeof spyOn>;
 
   afterEach(() => {
@@ -215,19 +228,42 @@ describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
     };
   }
 
-  /** Stub swarm API: records the runtime header on every /mcp request. */
-  function serveStub(seen: Array<string | null>) {
+  /** Stub swarm API: records headers and fails the requested setup steps once. */
+  function serveStub(
+    seen: Array<string | null>,
+    failures: string[] = [],
+    initializeSessions: Array<string | null> = [],
+  ) {
     return Bun.serve({
       port: 0,
-      fetch(req) {
+      async fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === "/mcp") {
           seen.push(req.headers.get("x-runtime-instance-id"));
-          return Response.json({
-            jsonrpc: "2.0",
-            id: 1,
-            result: { protocolVersion: "2025-03-26", capabilities: {}, tools: [] },
-          });
+          const body = (await req.json()) as { id?: number; method: string };
+          if (body.method === "initialize") {
+            initializeSessions.push(req.headers.get("mcp-session-id"));
+          }
+          if (body.method === failures[0]) {
+            failures.shift();
+            return new Response("Temporary MCP failure", { status: 503 });
+          }
+          if (body.method === "notifications/initialized") {
+            return new Response(null, { status: 202 });
+          }
+          return Response.json(
+            {
+              jsonrpc: "2.0",
+              id: body.id,
+              result:
+                body.method === "tools/list"
+                  ? { tools: [{ name: "get-tasks", inputSchema: { type: "object" } }] }
+                  : { protocolVersion: "2025-03-26", capabilities: {} },
+            },
+            body.method === "initialize"
+              ? { headers: { "mcp-session-id": `test-session-${initializeSessions.length}` } }
+              : undefined,
+          );
         }
         return Response.json({ servers: [] });
       },
@@ -268,6 +304,49 @@ describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
     } finally {
       if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
       else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+      server.stop(true);
+    }
+  });
+
+  test.each([
+    "initialize",
+    "notifications/initialized",
+    "tools/list",
+  ])("retries a transient %s failure and registers swarm tools with a fresh MCP session", async (failedMethod) => {
+    const seen: Array<string | null> = [];
+    const initializeSessions: Array<string | null> = [];
+    const server = serveStub(seen, [failedMethod], initializeSessions);
+    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
+    process.env.SWARM_RUNTIME_INSTANCE_ID = "pi-retry-runtime";
+    try {
+      spyOnCreateAgentSession();
+      const adapter = new PiMonoAdapter();
+      await adapter.createSession(makeMcpConfig(`http://localhost:${server.port}`));
+      const options = createAgentSessionSpy.mock.calls[0]?.[0];
+      expect(options?.customTools?.map((tool) => tool.name)).toEqual(["get-tasks", "bash"]);
+      expect(initializeSessions).toEqual([null, null]);
+      expect(new Set(seen)).toEqual(new Set(["pi-retry-runtime"]));
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+      server.stop(true);
+    }
+  });
+
+  test("stops after three failed MCP setup attempts and retains the no-tools fallback", async () => {
+    const initializeSessions: Array<string | null> = [];
+    const failures = ["initialize", "initialize", "initialize", "initialize"];
+    const server = serveStub([], failures, initializeSessions);
+    try {
+      spyOnCreateAgentSession();
+      const adapter = new PiMonoAdapter();
+      await adapter.createSession(makeMcpConfig(`http://localhost:${server.port}`));
+      expect(initializeSessions).toEqual([null, null, null]);
+      expect(failures).toEqual(["initialize"]);
+      expect(
+        createAgentSessionSpy.mock.calls[0]?.[0]?.customTools?.map((tool) => tool.name),
+      ).toEqual(["bash"]);
+    } finally {
       server.stop(true);
     }
   });
@@ -475,6 +554,371 @@ describe("createPiRuntimeAuth", () => {
     await expect(modelRuntime.getAuth("google")).resolves.toMatchObject({
       auth: { apiKey: "example-gemini-runtime" },
     });
+  });
+});
+
+// ─── NaN / Helmcode custom providers (models.json, runtime keys, resolve) ───
+
+const NAN_ENV = { NAN_API_KEY: "example-nan-picked" };
+const HELMCODE_ENV = { HELMCODE_API_KEY: "example-helmcode-picked" };
+async function readModelsJson(path: string | undefined): Promise<Record<string, any>> {
+  if (!path) throw new Error("expected a per-session models.json");
+  return JSON.parse(await Bun.file(path).text());
+}
+
+function withTempDir(prefix: string, fn: (dir: string) => Promise<void>): () => Promise<void> {
+  return async () => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    try {
+      await fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
+/** Compose a session's models.json and always remove it afterwards. */
+async function withSessionModels(
+  dir: string,
+  env: Record<string, string | undefined>,
+  model: string | undefined,
+  fn: (session: SessionModelsJson) => Promise<void>,
+): Promise<void> {
+  const session = await writeSessionModelsJson(dir, env, model);
+  try {
+    await fn(session);
+  } finally {
+    await session.dispose();
+  }
+}
+
+describe("writeSessionModelsJson (pi)", () => {
+  test(
+    "writes both blocks with $VAR apiKeys to a private file, never the key value or the shared file",
+    withTempDir("pi-custom-fresh-", async (dir) => {
+      await withSessionModels(dir, { ...NAN_ENV, ...HELMCODE_ENV }, undefined, async (s) => {
+        expect(s.modelsPath).toBeDefined();
+        expect(s.modelsPath?.startsWith(dir)).toBe(false);
+        expect(existsSync(join(dir, "models.json"))).toBe(false);
+        const raw = await Bun.file(s.modelsPath as string).text();
+        expect(raw).not.toContain("example-nan-picked");
+        expect(raw).not.toContain("example-helmcode-picked");
+        const written = JSON.parse(raw);
+        expect(written.providers.nan).toMatchObject({
+          baseUrl: OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl,
+          api: "openai-completions",
+          apiKey: "$NAN_API_KEY",
+        });
+        expect(written.providers.helmcode).toMatchObject({
+          baseUrl: OPENAI_COMPATIBLE_PROVIDERS.helmcode.baseUrl,
+          api: "openai-completions",
+          apiKey: "$HELMCODE_API_KEY",
+        });
+        expect(written.providers.helmcode.models.map((m: { id: string }) => m.id)).toEqual(
+          OPENAI_COMPATIBLE_PROVIDERS.helmcode.models.map((m) => m.id),
+        );
+        const glm = written.providers.nan.models.find((m: { id: string }) => m.id === "glm5.3");
+        expect(glm).toMatchObject({
+          contextWindow: 1000000,
+          maxTokens: 131072,
+          reasoning: true,
+          compat: { supportsDeveloperRole: true },
+        });
+      });
+    }),
+  );
+
+  test(
+    "dispose removes the private file",
+    withTempDir("pi-custom-dispose-", async (dir) => {
+      const s = await writeSessionModelsJson(dir, NAN_ENV);
+      expect(existsSync(s.modelsPath as string)).toBe(true);
+      await s.dispose();
+      await s.dispose();
+      expect(existsSync(s.modelsPath as string)).toBe(false);
+    }),
+  );
+
+  test(
+    "only the HELMCODE_API_NAN alias set: nan block still uses $NAN_API_KEY",
+    withTempDir("pi-custom-alias-", async (dir) => {
+      await withSessionModels(dir, { HELMCODE_API_NAN: "example-alias" }, undefined, async (s) => {
+        const written = await readModelsJson(s.modelsPath);
+        expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
+        expect(written.providers.helmcode).toBeUndefined();
+        expect(JSON.stringify(written)).not.toContain("example-alias");
+      });
+    }),
+  );
+
+  test(
+    "no key, default gateway, no marker: the session loads the shared file",
+    withTempDir("pi-custom-noop-", async (dir) => {
+      const userConfig = { providers: { nan: { baseUrl: "https://mine.example/v1" } } };
+      await Bun.write(join(dir, "models.json"), JSON.stringify(userConfig));
+      const s = await writeSessionModelsJson(dir, {});
+      expect(s.modelsPath).toBeUndefined();
+      expect(JSON.parse(readFileSync(join(dir, "models.json"), "utf-8"))).toEqual(userConfig);
+    }),
+  );
+
+  test(
+    "a user-authored providers.nan in the shared file wins; helmcode is still added",
+    withTempDir("pi-custom-user-", async (dir) => {
+      const userNan = { baseUrl: "https://mine.example/v1", apiKey: "$MY_VAR", models: [] };
+      const shared = JSON.stringify({ providers: { nan: userNan } });
+      await Bun.write(join(dir, "models.json"), shared);
+      await withSessionModels(dir, { ...NAN_ENV, ...HELMCODE_ENV }, undefined, async (s) => {
+        const written = await readModelsJson(s.modelsPath);
+        expect(written.providers.nan).toEqual(userNan);
+        expect(written.providers.helmcode.apiKey).toBe("$HELMCODE_API_KEY");
+      });
+      expect(readFileSync(join(dir, "models.json"), "utf-8")).toBe(shared);
+    }),
+  );
+
+  test(
+    "keeps other providers and top-level keys; the gateway comes from this session's env",
+    withTempDir("pi-custom-merge-", async (dir) => {
+      const gateway = "https://control-plane.example/proxy/v1";
+      await Bun.write(
+        join(dir, "models.json"),
+        JSON.stringify({
+          $schema: "https://pi.dev/schemas/models.schema.json",
+          providers: {
+            custom: { baseUrl: "https://custom.example/v1", api: "openai-completions" },
+            openrouter: { baseUrl: gateway },
+          },
+        }),
+      );
+      // An earlier version wrote that gateway into the shared file.
+      await Bun.write(
+        join(dir, ".agent-swarm-openrouter-override.json"),
+        JSON.stringify({ baseUrl: gateway }),
+      );
+      const sharedBefore = readFileSync(join(dir, "models.json"), "utf-8");
+      await withSessionModels(dir, NAN_ENV, undefined, async (s) => {
+        // This session uses the default gateway: the leftover override
+        // recorded in the legacy marker is reverted in its copy.
+        const written = await readModelsJson(s.modelsPath);
+        expect(written.$schema).toBe("https://pi.dev/schemas/models.schema.json");
+        expect(written.providers.openrouter).toBeUndefined();
+        expect(written.providers.custom.baseUrl).toBe("https://custom.example/v1");
+        expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
+      });
+      const other = "https://other-gateway.example/v1";
+      await withSessionModels(dir, { OPENROUTER_BASE_URL: other }, undefined, async (s) => {
+        expect((await readModelsJson(s.modelsPath)).providers.openrouter).toEqual({
+          baseUrl: other,
+        });
+      });
+      // The shared file is never written by the composer.
+      expect(readFileSync(join(dir, "models.json"), "utf-8")).toBe(sharedBefore);
+    }),
+  );
+
+  test(
+    "sibling sessions get their own endpoints, providers and model ids",
+    withTempDir("pi-custom-siblings-", async (dir) => {
+      const a = await writeSessionModelsJson(
+        dir,
+        { HELMCODE_API_KEY: "a", HELMCODE_BASE_URL: "http://127.0.0.1:1/v1", ...NAN_ENV },
+        "nan/glm5.2",
+      );
+      const b = await writeSessionModelsJson(
+        dir,
+        { HELMCODE_API_KEY: "b", HELMCODE_BASE_URL: "http://127.0.0.1:2/v1" },
+        "helmcode/glm5.3",
+      );
+      try {
+        expect(a.modelsPath).not.toBe(b.modelsPath);
+        const first = await readModelsJson(a.modelsPath);
+        const second = await readModelsJson(b.modelsPath);
+        expect(first.providers.helmcode.baseUrl).toBe("http://127.0.0.1:1/v1");
+        expect(second.providers.helmcode.baseUrl).toBe("http://127.0.0.1:2/v1");
+        // B has no NaN key: no nan block, even while A's session holds one.
+        expect(first.providers.nan.models.map((m: { id: string }) => m.id)).toContain("glm5.2");
+        expect(second.providers.nan).toBeUndefined();
+      } finally {
+        await a.dispose();
+        await b.dispose();
+      }
+    }),
+  );
+
+  test(
+    "corrupt shared models.json: the copy holds our blocks only, the shared file is untouched",
+    withTempDir("pi-custom-corrupt-", async (dir) => {
+      await Bun.write(join(dir, "models.json"), "{not json");
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await withSessionModels(dir, NAN_ENV, undefined, async (s) => {
+          expect((await readModelsJson(s.modelsPath)).providers.nan.apiKey).toBe("$NAN_API_KEY");
+        });
+      } finally {
+        warn.mockRestore();
+      }
+      expect(readFileSync(join(dir, "models.json"), "utf-8")).toBe("{not json");
+    }),
+  );
+
+  test(
+    "ModelRuntime resolves the written blocks as nan/<id> and helmcode/<id>",
+    withTempDir("pi-custom-runtime-", async (dir) => {
+      await withSessionModels(dir, { ...NAN_ENV, ...HELMCODE_ENV }, undefined, async (s) => {
+        const runtime = await piCodingAgent.ModelRuntime.create({
+          authPath: join(dir, "auth.json"),
+          modelsPath: s.modelsPath,
+        });
+        expect(runtime.getError()).toBeUndefined();
+        expect(runtime.getModel("nan", "qwen3.8-flash")?.baseUrl).toBe(
+          OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl,
+        );
+        expect(runtime.getModel("helmcode", "glm5.3")?.contextWindow).toBe(1048576);
+      });
+    }),
+  );
+});
+
+describe("createPiRuntimeAuth — NaN and Helmcode", () => {
+  test(
+    "HELMCODE_API_NAN alone sets the nan runtime key; NAN_API_KEY wins when both are set",
+    withTempDir("pi-custom-auth-", async (dir) => {
+      const models = await writeSessionModelsJson(dir, { NAN_API_KEY: "x", HELMCODE_API_KEY: "y" });
+      // pi's own agent-dir env var points auth.json at the temp dir.
+      const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+      process.env.PI_CODING_AGENT_DIR = dir;
+      try {
+        const path = models.modelsPath;
+        const aliasOnly = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a" }, path);
+        await expect(aliasOnly.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "a" } });
+
+        const both = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a", NAN_API_KEY: "b" }, path);
+        await expect(both.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "b" } });
+
+        const helm = await createPiRuntimeAuth({ HELMCODE_API_KEY: "h" }, path);
+        await expect(helm.getAuth("helmcode")).resolves.toMatchObject({ auth: { apiKey: "h" } });
+      } finally {
+        await models.dispose();
+        if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = origAgentDir;
+      }
+
+      // Runtime keys never land in auth.json.
+      const auth = (await Bun.file(join(dir, "auth.json")).exists())
+        ? await Bun.file(join(dir, "auth.json")).text()
+        : "";
+      expect(auth).not.toContain('"a"');
+      expect(auth).not.toContain('"b"');
+      expect(auth).not.toContain('"h"');
+    }),
+  );
+});
+
+describe("resolveModel — models.json custom providers", () => {
+  test(
+    "falls back to the runtime for nan/qwen3.8-flash and helmcode/glm5.3",
+    withTempDir("pi-custom-resolve-", async (dir) => {
+      const models = await writeSessionModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
+      const runtime = await piCodingAgent.ModelRuntime.create({
+        authPath: join(dir, "auth.json"),
+        modelsPath: models.modelsPath,
+      });
+      await models.dispose();
+      const nan = resolveModel("nan/qwen3.8-flash", NAN_ENV, runtime);
+      expect(nan?.provider).toBe("nan");
+      expect(nan?.id).toBe("qwen3.8-flash");
+      const helm = resolveModel("helmcode/glm5.3", HELMCODE_ENV, runtime);
+      expect(helm?.provider).toBe("helmcode");
+      expect(helm?.id).toBe("glm5.3");
+      expect(helm?.baseUrl).toBe(OPENAI_COMPATIBLE_PROVIDERS.helmcode.baseUrl);
+    }),
+  );
+
+  test(
+    "a nan/<id> outside the table (nan/glm5.2) gets a bare entry and resolves",
+    withTempDir("pi-custom-bare-", async (dir) => {
+      await withSessionModels(dir, NAN_ENV, "nan/glm5.2", async (s) => {
+        const written = await readModelsJson(s.modelsPath);
+        const ids = written.providers.nan.models.map((m: { id: string }) => m.id);
+        expect(ids).toContain("glm5.2");
+        expect(ids).toContain("glm5.3");
+        const runtime = await piCodingAgent.ModelRuntime.create({
+          authPath: join(dir, "auth.json"),
+          modelsPath: s.modelsPath,
+        });
+        const model = resolveModel("nan/glm5.2", NAN_ENV, runtime);
+        expect(model?.provider).toBe("nan");
+        expect(model?.id).toBe("glm5.2");
+        expect(model?.baseUrl).toBe(OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl);
+      });
+
+      // The bare entry belongs to that session: the next task's model never sees it.
+      await withSessionModels(dir, NAN_ENV, "nan/glm5.3", async (s) => {
+        const next = await readModelsJson(s.modelsPath);
+        expect(next.providers.nan.models.map((m: { id: string }) => m.id)).not.toContain("glm5.2");
+      });
+    }),
+  );
+
+  test("builtin hits are unchanged when a runtime is passed", async () => {
+    const runtime = { getModel: () => undefined };
+    const model = resolveModel("anthropic/claude-sonnet-5", {}, runtime);
+    expect(model?.provider).toBe("anthropic");
+  });
+
+  test("an unknown provider returns undefined and logs a scrubbed warning", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const runtime = { getModel: () => undefined };
+      expect(resolveModel("nope/model-x", {}, runtime)).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('"nope/model-x"');
+      expect(String(warn.mock.calls[0]?.[0])).toContain("default model");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("without a runtime, nan/<id> does not resolve (pi-ai has no builtin nan)", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(resolveModel("nan/glm5.3", NAN_ENV)).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("checkPiMonoCredentials — NaN and Helmcode", () => {
+  const opts = { homeDir: "/home/worker", fs: { existsSync: () => false } };
+
+  test("MODEL_OVERRIDE=nan/* accepts NAN_API_KEY or the HELMCODE_API_NAN alias", async () => {
+    const env = { MODEL_OVERRIDE: "nan/glm5.3" };
+    expect((await checkPiMonoCredentials(env, opts)).ready).toBe(false);
+    expect((await checkPiMonoCredentials({ ...env, NAN_API_KEY: "x" }, opts)).ready).toBe(true);
+    expect((await checkPiMonoCredentials({ ...env, HELMCODE_API_NAN: "x" }, opts)).ready).toBe(
+      true,
+    );
+    // An OpenRouter key does not satisfy a nan/* model.
+    expect((await checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, opts)).ready).toBe(
+      false,
+    );
+  });
+
+  test("MODEL_OVERRIDE=helmcode/* requires HELMCODE_API_KEY", async () => {
+    const env = { MODEL_OVERRIDE: "helmcode/glm5.3" };
+    const missing = await checkPiMonoCredentials({ ...env, NAN_API_KEY: "x" }, opts);
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("HELMCODE_API_KEY");
+    expect((await checkPiMonoCredentials({ ...env, HELMCODE_API_KEY: "x" }, opts)).ready).toBe(
+      true,
+    );
+  });
+
+  test("permissive case accepts a NaN-only or Helmcode-only worker", async () => {
+    expect((await checkPiMonoCredentials({ HELMCODE_API_NAN: "x" }, opts)).ready).toBe(true);
+    expect((await checkPiMonoCredentials({ HELMCODE_API_KEY: "x" }, opts)).ready).toBe(true);
   });
 });
 

@@ -1,8 +1,14 @@
+import {
+  type OpenAICompatibleProviderId,
+  openAICompatibleProviders,
+  providerKeyVars,
+} from "@desplega/model-catalog";
 import { useState } from "react";
 import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-secret-field";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SecretKeyField, TextField } from "./fields";
 import { type AiCardProps, baseUrlError, globalConfigValue } from "./model";
@@ -13,6 +19,8 @@ type OpenMode = "openrouter" | "gateway";
 const OR_KEY = "OPENROUTER_API_KEY";
 const BASE_URL = "OPENROUTER_BASE_URL";
 const DS_KEY = "DEEPSEEK_API_KEY";
+// OpenAI-compatible registry providers (NaN, Helmcode, ...), one key field each.
+const DIRECT_PROVIDERS = openAICompatibleProviders();
 
 // Gateway keys have no fixed shape: any value of 16+ characters.
 const GATEWAY_RULE: SecretRule = {};
@@ -37,6 +45,8 @@ function OpenHarnessIcon() {
 
 export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardProps) {
   const { save, isSaved } = useSetupSave(presence);
+  // An alias (HELMCODE_API_NAN) counts: the runner copies it into the canonical var.
+  const directSaved = (p: (typeof DIRECT_PROVIDERS)[number]) => providerKeyVars(p).some(isSaved);
   const [mode, setMode] = useState<OpenMode | null>(null);
 
   const gatewaySet = Boolean(presence[BASE_URL]);
@@ -75,7 +85,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
       icon={<OpenHarnessIcon />}
       title="Open harnesses: opencode, pi, DeepSeek"
       subtitle="Model-agnostic harnesses. One OpenRouter key runs all three."
-      saved={isSaved(OR_KEY) || isSaved(DS_KEY)}
+      saved={isSaved(OR_KEY) || isSaved(DS_KEY) || DIRECT_PROVIDERS.some(directSaved)}
     >
       <Tabs value={activeMode} onValueChange={(v) => setMode(v as OpenMode)}>
         <TabsList>
@@ -126,6 +136,36 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
               onSaved("deepseek");
             }}
           />
+        </div>
+      </CollapsibleSection>
+
+      {/* No onboarding method names these routes: a verified pi/opencode worker completes the step. */}
+      <CollapsibleSection
+        title={`${DIRECT_PROVIDERS.map((p) => p.displayName).join(" and ")} keys`}
+      >
+        <div className="space-y-3 pt-1.5">
+          {DIRECT_PROVIDERS.map((p) => (
+            <SecretKeyField
+              key={p.id}
+              id={`setup-ai-${p.id}-key`}
+              envKey={p.envVar}
+              placeholder="sk-..."
+              saved={directSaved(p)}
+              rule={GATEWAY_RULE}
+              info={
+                <>
+                  Runs <code className="font-mono">{p.id}/&lt;model&gt;</code> on pi and opencode.
+                  Comma-separate several keys to pool their concurrency.
+                </>
+              }
+              logo={
+                <ProviderIcon provider={p.id as OpenAICompatibleProviderId} className="size-3.5" />
+              }
+              onSave={async (value) => {
+                await save([{ key: p.envVar, value, isSecret: true }]);
+              }}
+            />
+          ))}
         </div>
       </CollapsibleSection>
     </ProviderCard>

@@ -76,9 +76,9 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-async function activeTask() {
+async function activeTask(owner = agentId) {
   const task = await createTaskExtended("work in progress", {
-    agentId,
+    agentId: owner,
     modelTier: "smart",
     priority: 70,
   });
@@ -90,6 +90,7 @@ async function defer(
   watchedId: string,
   event: TaskWakeEvent = "settled",
   extra: Record<string, unknown> = {},
+  caller = agentId,
 ) {
   return tool.handler(
     {
@@ -101,7 +102,7 @@ async function defer(
       checks: ["verify output"],
       ...extra,
     },
-    { sessionId: crypto.randomUUID(), requestInfo: { headers: { "x-agent-id": agentId } } },
+    { sessionId: crypto.randomUUID(), requestInfo: { headers: { "x-agent-id": caller } } },
   );
 }
 async function fixture(event: TaskWakeEvent = "settled") {
@@ -364,10 +365,57 @@ describe("defer-task wakeOn", () => {
     expect(await children(schedule.id)).toHaveLength(1);
   });
 
+  test("duplicate watcher admission is atomic, agent-scoped, and permits the fired chain to re-defer", async () => {
+    const producer = await activeTask();
+    const sibling = await activeTask();
+    const first = await activeTask();
+    const second = await activeTask();
+    const results = await Promise.all([
+      defer(first.id, producer.id, "settled", {
+        wakeOn: { event: "settled", taskIds: [producer.id, sibling.id] },
+      }),
+      defer(second.id, producer.id),
+    ]);
+    const accepted = results.find((result) => result.structuredContent.success)!;
+    const rejected = results.find((result) => !result.structuredContent.success)!;
+    expect(accepted).toBeDefined();
+    expect(rejected).toBeDefined();
+    expect(rejected.structuredContent.message).toContain(accepted.structuredContent.scheduleId!);
+    const rejectedTask = results[0] === rejected ? first : second;
+    expect((await getTaskById(rejectedTask.id))?.status).toBe("in_progress");
+    expect(
+      await getDbClient().query("SELECT id FROM scheduled_tasks WHERE parentTaskId = ?", [
+        rejectedTask.id,
+      ]),
+    ).toHaveLength(0);
+
+    const other = await createAgent({ name: "Independent watcher", isLead: false, status: "idle" });
+    const otherWatcher = await activeTask(other.id);
+    expect(
+      (await defer(otherWatcher.id, producer.id, "settled", {}, other.id)).structuredContent
+        .success,
+    ).toBe(true);
+    const dispatched = await dispatchDeferredTaskWait(
+      accepted.structuredContent.scheduleId!,
+      "ceiling",
+    );
+    expect(dispatched?.task).toBeDefined();
+    await startTask(dispatched!.task!.id);
+    expect((await defer(dispatched!.task!.id, producer.id)).structuredContent.success).toBe(true);
+  });
+
   test("two waiters follow a time-based deferral and fire once on the resume task's completion", async () => {
     await initDeferredTaskWaits();
     const { producer, schedule } = await fixture();
-    const second = await defer((await activeTask()).id, producer.id, "task.completed");
+    const secondAgent = await createAgent({ name: "Second waiter", isLead: false, status: "idle" });
+    const second = await defer(
+      (await activeTask(secondAgent.id)).id,
+      producer.id,
+      "task.completed",
+      {},
+      secondAgent.id,
+    );
+    expect(second.structuredContent.success).toBe(true);
     const secondSchedule = (await getScheduledTaskById(second.structuredContent.scheduleId!))!;
     const deferred = await defer(producer.id, producer.id, "settled", { wakeOn: undefined });
     expect(deferred.structuredContent.success).toBe(true);

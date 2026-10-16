@@ -25,6 +25,29 @@ function sectionTexts(blocks: SlackBlock[]): string[] {
     .map((b: SlackBlock) => b.text?.text ?? "");
 }
 
+// URL fallback assertions must not inherit dashboard or file hosts from the runner.
+let originalCombEnabled: string | undefined;
+let originalAppUrl: string | undefined;
+let originalAgentFsLiveUrl: string | undefined;
+
+beforeEach(() => {
+  originalCombEnabled = process.env.COMB_ENABLED;
+  delete process.env.COMB_ENABLED;
+  originalAppUrl = process.env.APP_URL;
+  originalAgentFsLiveUrl = process.env.AGENT_FS_LIVE_URL;
+  delete process.env.APP_URL;
+  delete process.env.AGENT_FS_LIVE_URL;
+});
+
+afterEach(() => {
+  if (originalCombEnabled === undefined) delete process.env.COMB_ENABLED;
+  else process.env.COMB_ENABLED = originalCombEnabled;
+  if (originalAppUrl === undefined) delete process.env.APP_URL;
+  else process.env.APP_URL = originalAppUrl;
+  if (originalAgentFsLiveUrl === undefined) delete process.env.AGENT_FS_LIVE_URL;
+  else process.env.AGENT_FS_LIVE_URL = originalAgentFsLiveUrl;
+});
+
 describe("formatAttachmentsBlockForSlack", () => {
   test("returns empty string when there are no attachments", () => {
     expect(formatAttachmentsBlockForSlack([])).toBe("");

@@ -542,7 +542,12 @@ describe("harness compatibility at every create entry point", () => {
   });
 
   test("send-task: the parent auto-route target is judged", async () => {
-    const parent = await createTaskExtended("codex parent", { agentId: codexId, source: "mcp" });
+    // The worker created the parent, so it may continue it (task.parent.attach).
+    const parent = await createTaskExtended("codex parent", {
+      agentId: codexId,
+      creatorAgentId: workerId,
+      source: "mcp",
+    });
     const refused = await sendTaskHandler(ownerCtx({ agentId: workerId }), {
       task: "child of a codex task",
       parentTaskId: parent.id,
@@ -660,5 +665,104 @@ describe("harness compatibility at every create entry point", () => {
     });
     expect(res.status).toBe(400);
     expect(String(res.body.error)).toContain("does not run on the codex harness");
+  });
+});
+
+describe("nan and helmcode catalog models", () => {
+  let piId = "";
+  let opencodeId = "";
+
+  beforeAll(async () => {
+    piId = (
+      await createAgent({
+        name: "validation-pi",
+        isLead: false,
+        status: "idle",
+        harnessProvider: "pi",
+      })
+    ).id;
+    opencodeId = (
+      await createAgent({
+        name: "validation-opencode",
+        isLead: false,
+        status: "idle",
+        harnessProvider: "opencode",
+      })
+    ).id;
+  });
+
+  const ids = [
+    "nan/glm5.3-flash",
+    "nan/glm5.3",
+    "nan/mimo-v2.6-flash",
+    "helmcode/glm5.3",
+    "helmcode/qwen3.6",
+    "helmcode/deepseek-v4-flash",
+  ];
+
+  test("pi and opencode accept the ids without allowCustomModel", async () => {
+    for (const harnessProvider of ["pi", "opencode"]) {
+      for (const model of ids) {
+        expect(await explicitModelError({ model, harnessProvider })).toBeNull();
+      }
+    }
+  });
+
+  test("claude and codex reject them with the harness mismatch, even with allowCustomModel", async () => {
+    for (const harnessProvider of ["claude", "codex"]) {
+      for (const allowCustomModel of [false, true]) {
+        for (const model of ["nan/glm5.3-flash", "helmcode/glm5.3"]) {
+          expect(await explicitModelError({ model, harnessProvider, allowCustomModel })).toContain(
+            `does not run on the ${harnessProvider} harness`,
+          );
+        }
+      }
+    }
+  });
+
+  test("a misspelt helmcode id is unknown", async () => {
+    expect(
+      await explicitModelError({ model: "helmcode/glm-5.3", harnessProvider: "pi" }),
+    ).toContain("Unknown model");
+  });
+
+  test("send-task: pi and opencode agents take the ids, a claude agent gets the mismatch", async () => {
+    const sender = ownerCtx({ agentId: leadId });
+    const args = {
+      task: "nan route",
+      offerMode: false,
+      allowDuplicate: false,
+      routingReason: "human_pinned" as const,
+      routingNote: "pinned to check the nan/helmcode catalog ids",
+    };
+    for (const agentId of [piId, opencodeId]) {
+      for (const model of ["nan/mimo-v2.6-flash", "helmcode/glm5.3"]) {
+        const accepted = await sendTaskHandler(sender, {
+          ...args,
+          task: `nan route ${model} to ${agentId}`,
+          agentId,
+          model,
+        });
+        expect({ ok: accepted.ok, message: accepted.message }).toEqual({
+          ok: true,
+          message: expect.any(String),
+        });
+      }
+    }
+    const refused = await sendTaskHandler(sender, {
+      ...args,
+      agentId: workerId,
+      model: "helmcode/glm5.3",
+    });
+    expect(refused.ok).toBe(false);
+    expect(refused.message).toContain("does not run on the claude harness");
+  });
+
+  test("PATCH /api/agents/:id/runtime stores a helmcode model on a pi agent", async () => {
+    const res = await api("PATCH", `/api/agents/${piId}/runtime`, {
+      harness_provider: "pi",
+      model: "helmcode/glm5.3",
+    });
+    expect(res.status).toBe(200);
   });
 });

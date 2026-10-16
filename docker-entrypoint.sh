@@ -75,8 +75,8 @@ wait_for_api_ready() {
 wait_for_api_ready "$MCP_URL"
 
 if [ "$HARNESS_PROVIDER" = "pi" ]; then
-    # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or auth.json must
-    # exist — UNLESS MODEL_OVERRIDE selects amazon-bedrock, in which case
+    # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, NAN_API_KEY (or its
+    # HELMCODE_API_NAN alias), HELMCODE_API_KEY, or auth.json must exist — UNLESS MODEL_OVERRIDE selects amazon-bedrock, in which case
     # credential resolution is delegated to the AWS SDK at first inference
     # call (env vars, ~/.aws/*, SSO, IMDS, assume-role, etc.). The boot gate
     # in checkPiMonoCredentials short-circuits to satisfiedBy=sdk-delegated
@@ -86,8 +86,8 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
             echo "pi provider: MODEL_OVERRIDE=${MODEL_OVERRIDE} — AWS SDK will resolve Bedrock credentials at runtime (env, ~/.aws/*, SSO, IMDS)."
             ;;
         *)
-            if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
-                echo "Warning: pi provider has no credentials yet (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / ~/.pi/agent/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
+            if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "${NAN_API_KEY:-}" ] && [ -z "${HELMCODE_API_NAN:-}" ] && [ -z "${HELMCODE_API_KEY:-}" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
+                echo "Warning: pi provider has no credentials yet (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / NAN_API_KEY / HELMCODE_API_NAN / HELMCODE_API_KEY / ~/.pi/agent/auth.json). Worker will park in credential-wait until creds appear in swarm_config."
             fi
             ;;
     esac
@@ -108,10 +108,11 @@ elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
         echo "Warning: cursor provider has no credentials yet (CURSOR_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
-    # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist
+    # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY,
+    # NAN_API_KEY (or its HELMCODE_API_NAN alias), HELMCODE_API_KEY, or auth.json must exist
     OPENCODE_AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
-    if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ ! -f "$OPENCODE_AUTH_FILE" ]; then
-        echo "Warning: opencode provider has no credentials yet (OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / ${OPENCODE_AUTH_FILE}). Worker will park in credential-wait until creds appear in swarm_config."
+    if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "${NAN_API_KEY:-}" ] && [ -z "${HELMCODE_API_NAN:-}" ] && [ -z "${HELMCODE_API_KEY:-}" ] && [ ! -f "$OPENCODE_AUTH_FILE" ]; then
+        echo "Warning: opencode provider has no credentials yet (OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / NAN_API_KEY / HELMCODE_API_NAN / HELMCODE_API_KEY / ${OPENCODE_AUTH_FILE}). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     # Claude Managed Agents — sessions run in Anthropic's cloud sandbox.
@@ -216,7 +217,7 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     # a standalone container that relies on the default API URL would
     # otherwise never reach the CODEX_OAUTH env-var fallback below, even
     # though every other API call in this script (wait_for_api_ready,
-    # /ecosystem, /api/repos, etc.) already treats MCP_URL as "the" base
+    # /api/repos, etc.) already treats MCP_URL as "the" base
     # URL. checkCodexCredentials (codex-adapter.ts) marks a bare CODEX_OAUTH
     # as satisfiedBy: 'side-effect-pending' the moment it's set, trusting
     # this block to write auth.json — so gating on the unset raw var meant
@@ -330,17 +331,26 @@ elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
 elif [ "$HARNESS_PROVIDER" = "devin" ]; then
     echo "Devin: cloud API (no local binary required)"
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
-    OPENCODE_BIN="${OPENCODE_BINARY:-opencode}"
-    if ! command -v "$OPENCODE_BIN" > /dev/null 2>&1; then
-        echo "FATAL: opencode CLI not found: '$OPENCODE_BIN'"
-        echo "  PATH=$PATH"
+    # OpenCode 2 runs in-process from the globally installed @opencode/sdk
+    # (same lookup as resolveOpencodeSdkSpecifier in opencode-adapter.ts).
+    OPENCODE_SDK_ENTRY="${OPENCODE_SDK_PATH:-}"
+    if [ -z "$OPENCODE_SDK_ENTRY" ]; then
+        for root in /usr/lib/node_modules /usr/local/lib/node_modules; do
+            if [ -f "$root/@opencode/sdk/dist/index.js" ]; then
+                OPENCODE_SDK_ENTRY="$root/@opencode/sdk/dist/index.js"
+                break
+            fi
+        done
+    fi
+    if [ -z "$OPENCODE_SDK_ENTRY" ] || [ ! -f "$OPENCODE_SDK_ENTRY" ]; then
+        echo "FATAL: @opencode/sdk not found. Install it with 'npm install -g @opencode/sdk' or set OPENCODE_SDK_PATH."
         exit 1
     fi
-    echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
+    echo "OpenCode SDK: $OPENCODE_SDK_ENTRY"
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     DSH_BIN="${DSH_BINARY:-dsh}"
     if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
-        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-alpha.2 during image provisioning."
+        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-alpha.4 during image provisioning."
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
@@ -354,7 +364,7 @@ elif [ "$HARNESS_PROVIDER" = "amp" ]; then
 elif [ "$HARNESS_PROVIDER" = "grok" ]; then
     GROK_BIN="${GROK_BINARY:-grok}"
     if ! command -v "$GROK_BIN" >/dev/null 2>&1; then
-        echo "FATAL: grok CLI not found: '$GROK_BIN'. Use worker-full or install @xai-official/grok@1.0.50 during image provisioning."
+        echo "FATAL: grok CLI not found: '$GROK_BIN'. Use worker-full or install @xai-official/grok@1.0.60 during image provisioning."
         exit 1
     fi
     echo "grok CLI: $(command -v "$GROK_BIN") ($(GROK_DISABLE_AUTOUPDATER=1 "$GROK_BIN" --version 2>/dev/null))"
@@ -501,58 +511,30 @@ echo "Working Directory: /workspace"
 echo "[entrypoint] Claude Code auto-updater disabled: DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER:-<unset>} (version: $(claude --version 2>/dev/null || echo unavailable))"
 echo "=========================="
 
-# Initialize PM2 daemon for background service management
-echo ""
-echo "=== PM2 Initialization ==="
-echo "PM2 Home: ${PM2_HOME:-~/.pm2}"
-# Ensure PM2 home directory exists (for persistence in /workspace)
-mkdir -p "${PM2_HOME:-$HOME/.pm2}"
-pm2 startup > /dev/null 2>&1 || true
-
-# Restore services from ecosystem (database-driven, more reliable than pm2 resurrect)
-ECOSYSTEM_FILE="/workspace/ecosystem.config.js"
-if [ -n "$AGENT_ID" ]; then
-    echo "Fetching ecosystem config from MCP server..."
-    if curl -s -f -H "Authorization: Bearer ${API_KEY}" \
-       -H "X-Agent-ID: ${AGENT_ID}" \
-       "${MCP_URL}/ecosystem" > /tmp/ecosystem.json 2>/dev/null; then
-
-        # Check if there are any apps to start
-        APP_COUNT=$(cat /tmp/ecosystem.json | jq -r '.apps | length' 2>/dev/null || echo "0")
-
-        if [ "$APP_COUNT" -gt "0" ]; then
-            echo "Found $APP_COUNT registered service(s)"
-            # Convert JSON to JS module
-            echo "module.exports = $(cat /tmp/ecosystem.json);" > "$ECOSYSTEM_FILE"
-            echo "Starting services from ecosystem file..."
-            pm2 start "$ECOSYSTEM_FILE" || true
-            pm2 list
-        else
-            echo "No services registered for this agent"
-        fi
-        rm -f /tmp/ecosystem.json
-    else
-        echo "Could not fetch ecosystem config (MCP server may be unavailable)"
-    fi
-else
-    echo "AGENT_ID not set, skipping ecosystem restore"
-fi
-
-# Fallback: try pm2 resurrect for any locally saved processes
-if pm2 resurrect 2>/dev/null; then
-    pm2 list 2>/dev/null || true
-fi
-echo "=========================="
-
-# Cleanup function for graceful shutdown
-cleanup() {
-    echo ""
-    echo "Shutting down PM2 processes..."
-    pm2 kill 2>/dev/null || true
-}
-trap cleanup EXIT SIGINT SIGTERM
-
 # ---- Fetch swarm config from API ----
+# BEGIN swarm_config_env (extracted verbatim by src/tests/entrypoint-export-to-env.test.ts — keep markers stable)
+# KEY='value' lines for every config row the worker env may carry. Skipped:
+#   - codex_oauth and codex_oauth_<n>: provider auth blobs with live refresh
+#     tokens, read on demand. Exporting them puts a replayable refresh token in
+#     every process env, and a replay revokes the whole token family. Mirrors
+#     isCodexOAuthConfigKey in src/providers/codex-oauth/env-keys.ts.
+#   - HARNESS_PROVIDER / CLAUDE_TRANSPORT: read by the runner from
+#     /api/config/resolved on each iteration; a boot copy would go stale.
+#   - keys that are not POSIX shell identifiers (e.g. CF-Access-Client-Id):
+#     sourcing one runs it as a command. The runner still resolves them per
+#     request via headerConfigKeys.
+#   - rows with exportToEnv=false: they stay server-side (connections, script
+#     credential bindings). An API without the field exports everything.
+swarm_config_env_lines() {
+    jq -r '.configs[] | select((.key | test("^codex_oauth(_[0-9]+)?$") | not) and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) | select(.exportToEnv != false) | "\(.key)=" + (.value | @sh)' "$1"
+}
+
+# Names of exportToEnv=false rows, so a copy in the container env is dropped too.
+swarm_config_withheld_keys() {
+    jq -r '.configs[] | select(.exportToEnv == false) | .key | select(test("^[A-Za-z_][A-Za-z0-9_]*$"))' "$1"
+}
+# END swarm_config_env
+
 if [ -n "$AGENT_ID" ]; then
     echo "Fetching swarm config from API..."
     if curl -s -f -H "Authorization: Bearer ${API_KEY}" \
@@ -563,37 +545,26 @@ if [ -n "$AGENT_ID" ]; then
         CONFIG_COUNT=$(jq '.configs | length' /tmp/swarm_config.json 2>/dev/null || echo "0")
         if [ "$CONFIG_COUNT" -gt 0 ]; then
             echo "Found $CONFIG_COUNT config entries, exporting as env vars..."
-            # Skip keys whose value is read dynamically by the runner from
-            # /api/config/resolved on each iteration. Baking them into env at
-            # boot would persist a stale value if the operator later deletes
-            # the swarm_config row (env would shadow the now-missing config).
-            #   - codex_oauth and codex_oauth_<n>: provider auth blobs with
-            #     live refresh tokens, read on demand. Exporting them puts a
-            #     replayable refresh token in every process env, and a replay
-            #     revokes the whole token family. Mirrors isCodexOAuthConfigKey
-            #     in src/providers/codex-oauth/env-keys.ts.
-            #   - HARNESS_PROVIDER: live-reconciled by runner.ts poll loop;
-            #     baking it would also defeat the precedence invariant
-            #     (swarm_config > env > "claude")
-            #   - CLAUDE_TRANSPORT: resolved for each session; clearing an
-            #     agent override must restore the deployment default.
-            # Also skip keys that are not valid POSIX shell identifiers
-            # (e.g. CF-Access-Client-Id). Sourcing such a key causes the shell
-            # to parse "CF-Access-Client-Id=value" as a command invocation →
-            # "command not found", aborting the rest of the export. These keys
-            # are still available to the runner via headerConfigKeys (resolved
-            # per-request), so skipping them here is safe.
             SKIPPED_NONIDENT=$(jq -r '.configs[] | select((.key | test("^codex_oauth(_[0-9]+)?$") | not) and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$") | not) | .key' /tmp/swarm_config.json 2>/dev/null || true)
             if [ -n "$SKIPPED_NONIDENT" ]; then
                 echo "[entrypoint] debug: skipping non-identifier config keys (not valid POSIX shell variable names, still available via headerConfigKeys): $(echo "$SKIPPED_NONIDENT" | tr '\n' ' ')"
             fi
-            jq -r '.configs[] | select((.key | test("^codex_oauth(_[0-9]+)?$") | not) and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
+            swarm_config_env_lines /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
             if [ -f /tmp/swarm_config.env ]; then
                 set -a
                 . /tmp/swarm_config.env
                 set +a
                 rm -f /tmp/swarm_config.env
             fi
+            WITHHELD_COUNT=0
+            for withheld_key in $(swarm_config_withheld_keys /tmp/swarm_config.json 2>/dev/null || true); do
+                unset "$withheld_key"
+                WITHHELD_COUNT=$((WITHHELD_COUNT + 1))
+            done
+            if [ "$WITHHELD_COUNT" -gt 0 ]; then
+                echo "[entrypoint] Kept $WITHHELD_COUNT config entries with exportToEnv=false out of the worker env"
+            fi
+            unset withheld_key WITHHELD_COUNT
         fi
         rm -f /tmp/swarm_config.json
     else
@@ -1231,6 +1202,14 @@ run_startup_script() {
 }
 
 run_startup_script
+
+# Secret config rows the startup script could use but the runner must not
+# inherit (computed by docker-entrypoint.sh). The runner re-resolves config
+# per task and hands each harness only the secrets it needs.
+for withheld_key in ${AGENT_SWARM_WITHHELD_ENV:-}; do
+    unset "$withheld_key"
+done
+unset AGENT_SWARM_WITHHELD_ENV withheld_key
 
 role="${AGENT_ROLE:-worker}"
 echo "Starting $role..."

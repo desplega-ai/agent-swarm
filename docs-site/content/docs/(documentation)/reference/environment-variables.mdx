@@ -19,6 +19,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MCP_BASE_URL` | `https://api.example-swarm.dev` | Internal/worker-facing API base — the URL workers, the UI, and the setup command use to reach the API server. In split deploys this may be an internal/cluster address. |
 | `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
 | `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` | `false` | When `true`, disables the SSRF guard that otherwise refuses `localhost`/RFC1918 private-IP hosts when the server connects to an operator-registered MCP server's OAuth discovery/token endpoints. Only needed to reach an internal-only MCP server, or for local dev/testing — keep the default deny-list in production. |
+| `ALLOW_PRIVATE_NETWORK_URLS` | `false` | When `true`, allows `localhost`/private-IP hosts and `http://` URLs for MCP server registration and proxying, onboarding LLM base URLs, OAuth app endpoints, and script connections. Development and test (`NODE_ENV=development` or `test`) allow them without it. Deployed images leave `NODE_ENV` unset, so they now deny private and loopback endpoints on these paths unless this is `true`. It does not affect MCP OAuth endpoints: those accept `http://` only under `NODE_ENV=development` or `test`, and private hosts only with `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`. |
 | `CORS_ALLOWED_ORIGINS` | Hosted/dev allowlist (below) | Comma-separated exact origins or wildcard-subdomain patterns. Unset or blank uses built-in defaults; a nonblank value replaces them. Unlisted origins receive neither Allow-Origin nor Allow-Credentials unless the non-credentialed compatibility option below is enabled. Applies to API and page-session endpoints. |
 | `CORS_ALLOW_ANY_ORIGIN` | `false` | Deployment-only compatibility opt-out (requires API restart; cannot be stored in Configuration): reflect any origin for non-credentialed requests only (`credentials: "omit"` for bearer clients). Cookie-authenticated responses still require an allowlisted origin; this flag never grants credentials to unlisted origins. Warns once per process when enabled. Prefer listing trusted SPA origins instead. |
 | `OAUTH_KEEPALIVE_DISABLE` | `false` | Disables the background job that proactively refreshes Linear/Jira OAuth refresh tokens every 12h to prevent silent expiry. |
@@ -74,7 +75,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MEMORY_RATERS` | `implicit-citation,explicit-self` | Comma-separated list of memory raters to enable (`noop`, `implicit-citation`, `explicit-self`, `llm`). Gates the server-side rating pass fired after task completion (`implicit-citation`) and worker-side gates: the Stop-hook's LLM-rating piggyback (`llm`) and the explicit self-rating tool hint (`explicit-self`). Unknown names are logged and skipped; unset enables citation ratings and self-rating hints on new and existing deployments. Set `MEMORY_RATERS=` explicitly to disable all raters. Deleting a swarm config override restores the deployment value, or the runtime default when unset. |
 | `MEMORY_RATER_MODEL` | Pinned per credential kind (`MEMORY_RATER_DEFAULT_MODEL`): `openrouter/deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-4-5`, `openai/gpt-6-luna`, `openai-codex/gpt-6-luna`, or `haiku` (Claude CLI) | Overrides the resolved model slug for the Stop-hook session-summarizer + LLM memory rater, across whichever credential (OpenRouter/Anthropic/OpenAI/Codex OAuth/Claude CLI) the shared `internal-ai` abstraction resolves. The defaults are pinned for the rater only: they do not follow the general default models (e.g. workflow LLM nodes), so a bump there never swaps the judge. Each `llm` rating records the model that produced it in `memory_rating.model`. On the OpenRouter path `completeStructured` sends `tool_choice: "required"`, so the model must accept forced tool calls: OpenRouter answers 400 for `anthropic/claude-sonnet-5.5` (`tool_choice: type tool and any are not supported`) and for `qwen/qwen3.8-flash`, so neither can be the rater model there. |
 | `MEMORY_RATER_WEIGHTS` | `1.0` per rater | Optional `name:multiplier,...` overrides (e.g. `llm:0.5,implicit-citation:2`) applied to each rater's emitted rating weight before it's persisted. Unlisted raters use `1.0`; the final per-event weight is clamped to `[0, 1]`. |
-| `CAPABILITIES` | `core,task-pool,scripts,config,mcp,profiles,scheduling,memory,workflows,pages,metrics,kv,slack,tracker,skills,repo` | Comma-separated capability flags gating which MCP tool groups the API server registers. Disabled by default: `services`, `prompt-templates`, `messaging`, `swarm-x`, `agentmail`, `kapso`. Setting this **replaces** the default list (not additive) — include every capability you want. Can also be set as a global swarm-config entry, which takes precedence over the env var at server creation. Upgrade note: when an explicit env value is set and no swarm-config `CAPABILITIES` row exists, boot auto-seeds a row backfilling the previously always-registered groups (`core`, `config`, `scripts`, `mcp`, `slack`, `tracker`, `skills`, `repo`) so legacy lists don't silently lose those tools — edit or delete the seeded row to take full control. Note: this shapes the externally exposed MCP tool list only — it is not a feature kill-switch. The scripts SDK bridge always sees the full tool surface (governed by its own allowlist), and HTTP REST routes are generally not gated. See [MCP tools reference](/docs/reference/mcp-tools) for the tool-to-capability mapping. |
+| `CAPABILITIES` | `core,task-pool,scripts,config,mcp,profiles,scheduling,memory,workflows,pages,metrics,kv,slack,tracker,skills,repo` | Comma-separated capability flags gating which MCP tool groups the API server registers. Disabled by default: `prompt-templates`, `messaging`, `swarm-x`, `agentmail`, `kapso`. Setting this **replaces** the default list (not additive) — include every capability you want. Can also be set as a global swarm-config entry, which takes precedence over the env var at server creation. Upgrade note: when an explicit env value is set and no swarm-config `CAPABILITIES` row exists, boot auto-seeds a row backfilling the previously always-registered groups (`core`, `config`, `scripts`, `mcp`, `slack`, `tracker`, `skills`, `repo`) so legacy lists don't silently lose those tools — edit or delete the seeded row to take full control. Note: this shapes the externally exposed MCP tool list only — it is not a feature kill-switch. The scripts SDK bridge always sees the full tool surface (governed by its own allowlist), and HTTP REST routes are generally not gated. See [MCP tools reference](/docs/reference/mcp-tools) for the tool-to-capability mapping. |
 | `SWARM_ENABLED_TOOLS` | unset | Optional MCP tool allowlist: comma-separated tool names (or a JSON array). When set, the API server registers exactly these tools on each agent MCP session, ignoring `CAPABILITIES` and `SCRIPTS_ONLY_MCP`. Unknown names are logged once and skipped; a blank or empty list is logged and ignored. Agent-scoped config beats global config, which beats this env var; changes apply on the next MCP session with no restart. The scripts SDK bridge is unaffected. See [Agent capabilities and tool allowlist](/docs/guides/agent-capabilities). |
 | `SKILL_FILES_MAX_COUNT` | `100` | Max number of files allowed in a single skill file-set upsert. |
 | `SKILL_FILES_MAX_FILE_BYTES` | `512000` (500 KB) | Max size in bytes for a single file within a skill file-set upsert. |
@@ -127,7 +128,7 @@ Losing the key while keeping the database means losing every encrypted secret wi
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `opencode`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `opencode`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). When unset and the worker has no Anthropic credential but has an OpenRouter, NaN or Helmcode key, the default is `pi`. See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -152,6 +153,10 @@ Which credentials you need depends on your selected harness provider:
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models via pi-mono |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
 | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | When `MODEL_OVERRIDE` starts with `google/` | — | Google AI API key for direct Google models. Either name is accepted |
+| `NAN_API_KEY` | One of* | — | NaN API key for `nan/<id>` models (pi and opencode only). `HELMCODE_API_NAN` is accepted as an alias; `NAN_API_KEY` wins when both are set. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `HELMCODE_API_KEY` | One of* | — | Helmcode API key for `helmcode/<id>` models (pi and opencode only). Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `NAN_BASE_URL` | No | `https://api.nan.builders/v1` | Overrides the NaN API root for pi, opencode and the key check. Not a secret. Every [registry provider](/docs/guides/harness-configuration#adding-a-provider) reads `<ID>_BASE_URL` the same way |
+| `HELMCODE_BASE_URL` | No | `https://api.helmcode.com/v1` | Overrides the Helmcode API root for pi, opencode and the key check. Not a secret |
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used for OpenRouter model and summarizer traffic. Any chat-completions gateway works — see [Model Gateways](/docs/guides/provider-auth/model-gateways) |
 | `BEDROCK_AUTH_MODE` | No | inferred from `MODEL_OVERRIDE` | Optional Bedrock mode override. `sdk` uses the AWS SDK credential chain; `bearer` requires `AWS_BEARER_TOKEN_BEDROCK`. Both probe credentials and enumerate models |
 | `AWS_BEARER_TOKEN_BEDROCK` | In Bedrock bearer mode | — | Bedrock API key required when `BEDROCK_AUTH_MODE=bearer` |
@@ -204,14 +209,15 @@ See [Provider Auth: Grok](/docs/guides/provider-auth/grok) for models, isolation
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used by the OpenRouter provider, model refreshes, and the session summarizer plugin. Any chat-completions gateway works — see [Model Gateways](/docs/guides/provider-auth/model-gateways) |
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
-| `OPENCODE_BINARY` | No | `opencode` | Path to the opencode CLI binary (if not in `$PATH`) |
+| `NAN_API_KEY` | One of* | — | NaN API key for `nan/<id>` models (pi and opencode only). `HELMCODE_API_NAN` is accepted as an alias; `NAN_API_KEY` wins when both are set. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `HELMCODE_API_KEY` | One of* | — | Helmcode API key for `helmcode/<id>` models (pi and opencode only). Supports comma-separated values for [multi-credential load balancing](#multi-credential-support). See [NaN and Helmcode](/docs/guides/harness-configuration#nan-and-helmcode) |
+| `NAN_BASE_URL` | No | `https://api.nan.builders/v1` | Overrides the NaN API root for pi, opencode and the key check. Not a secret. Every [registry provider](/docs/guides/harness-configuration#adding-a-provider) reads `<ID>_BASE_URL` the same way |
+| `HELMCODE_BASE_URL` | No | `https://api.helmcode.com/v1` | Overrides the Helmcode API root for pi, opencode and the key check. Not a secret |
+| `OPENCODE_SDK_PATH` | No | Global npm root | Absolute path to `@opencode/sdk/dist/index.js`, when it is not under `/usr/lib/node_modules` or `/usr/local/lib/node_modules` |
 | `OPENCODE_SKILLS_DIR` | No | `~/.opencode/skills` | Directory used by the OpenCode inline resolver for `/<skill>` prompts |
-| `OPENCODE_SERVER_TIMEOUT_MS` | No | `30000` | Timeout (ms) for the opencode SDK's server-start call; override when cold-start on slow disks (e.g. E2B) exceeds the SDK's own 5s default and spawn fails with "Timeout waiting for server to start" |
-| `OPENCODE_SWARM_PLUGIN_PATH` | No | Set automatically in the Docker image | Explicit override for the absolute path to the agent-swarm opencode plugin entrypoint; falls back to the Docker path if present, else a dev-relative path from source |
-| `CONTEXT_MODE_OPENCODE_PLUGIN_PATH` | No | Auto-discovered under the global npm root | Override for the absolute path to context-mode's built opencode plugin entry, used when the default global npm-root search can't find it — otherwise context-mode is silently skipped for that session |
 | `MODEL_OVERRIDE` | No | `openrouter/qwen/qwen3-coder-flash` | Model string passed to opencode. Use `provider/model-id` format (e.g. `anthropic/claude-sonnet-4-6`, `openai/gpt-4o`) |
 
-\* At least one of `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `~/.local/share/opencode/auth.json` is required.
+\* At least one of `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `NAN_API_KEY` (or `HELMCODE_API_NAN`), `HELMCODE_API_KEY`, or `~/.local/share/opencode/auth.json` is required.
 
 **Devin** (`HARNESS_PROVIDER=devin`):
 
@@ -273,7 +279,6 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `LEAD_PORT` | No | `3020` | Host port for lead service. Example variable used in `docker-compose.example.yml` — adjust to your setup. In isolated network namespaces all services can share the same port. |
 | `WORKER1_PORT` | No | `3021` | Host port for worker-1 service. Example — see `LEAD_PORT`. |
 | `WORKER2_PORT` | No | `3022` | Host port for worker-2 service. Example — see `LEAD_PORT`. |
-| `PM2_HOME` | No | `/workspace/.pm2` | PM2 state directory |
 | `TEMPLATE_ID` | No | — | Template for initial profile on first boot (e.g., `official/coder`) |
 | `TEMPLATE_REGISTRY_URL` | No | `https://templates.agent-swarm.dev` | URL of the templates registry |
 | `MODEL_TIER_MAP` | No | — | JSON object overriding portable tier-to-model resolution for the current worker, for example `{\"smol\":\"gpt-5.4-mini\",\"smart\":\"gpt-5.5\"}`. Applies when a task, schedule, or workflow uses `modelTier`. |
@@ -316,7 +321,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` | Set to `true` to require @mention for thread follow-up routing (default: `false`) |
 | `LEAD_MONITOR_CHANNELS` | Set to `true` to have the lead agent additionally poll monitored Slack channels for non-mention activity (not just @mentions/DMs), throttled to once per 60s per poll cycle |
 | `LEAD_MONITOR_CHANNEL_IDS` | Comma-separated Slack channel IDs allowlist restricting `LEAD_MONITOR_CHANNELS` activity monitoring to specific channels. Unset monitors every channel the bot is a member of |
-| `SLACK_ALERTS_CHANNEL` | Slack channel ID/name for setup-blocked automation, OAuth/Jira keepalive failures, and claimable-queue stall/recovery alerts. Repeated identical schedule setup failures are suppressed within a UTC day; workflow setup alerts are limited to one per workflow per UTC day. Unset means alerts are logged only, not sent |
+| `SLACK_BLOCK_EXTERNAL_CHANNELS` | Set to `true` to keep the bot out of external Slack Connect channels: no tasks from them, no writes to them, and the bot leaves on join or share (default: `false`). Read on every event, so a change in global config applies without a restart. See [Slack: External channels](/docs/integrations/slack#external-slack-connect-channels) |
+| `SLACK_ALERTS_CHANNEL` | Slack channel ID/name for setup-blocked automation, OAuth/Jira keepalive failures, claimable-queue stall/recovery alerts, and external Slack Connect channel alerts. Repeated identical schedule setup failures are suppressed within a UTC day; workflow setup alerts are limited to one per workflow per UTC day. Unset means alerts are logged only, not sent |
 
 ## GitHub Integration
 
@@ -347,10 +353,11 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 
 | Variable | Description |
 |----------|-------------|
-| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write) for git, `az repos`, and API calls |
+| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write; add Work Items, Read & write for Azure Boards) for git, `az repos`, `az boards`, and API calls |
 | `AZURE_DEVOPS_ORG_URL` | Organization URL, e.g. `https://dev.azure.com/your-org` |
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
 | `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
+| `AZURE_DEVOPS_ALLOWED_ACTORS` | Comma-separated sign-in names allowed to trigger Azure Boards work item tasks without a linked swarm user |
 | `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
 | `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
 | `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
@@ -381,6 +388,17 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 1. Set the values above in your `.env` or integrations dashboard.
 2. Have the lead call `register-kapso-number` to point the number at `/api/integrations/kapso/webhook` and store the routing mapping.
 3. Use `send-whatsapp-message` / `reply-whatsapp-message` for the common text path, or the `kapso-whatsapp` skill for templates, media, and reactions.
+
+## Chat SDK (Telegram, Slack, Teams, Discord)
+
+| Variable | Description |
+|----------|-------------|
+| `CHAT_SDK_ENABLED` | Set to `true` to start the Chat SDK channel and enable the `chat-sdk` capability (default: `false`). A saved change applies within a few seconds |
+| `CHAT_SDK_ADAPTERS` | JSON object keyed by adapter name (`telegram`, `slack`, `discord`, `teams`). Values may reference secret config rows as `{"$config": "KEY"}` |
+| `CHAT_SDK_BUFFER_MS` | How long a thread collects messages before it creates one task (default: `10000`, range 1 to 600000) |
+| `CHAT_SDK_API_URL_OVERRIDES` | Environment only, for development and tests. JSON of platform API base URLs by adapter name. Never set it in production |
+
+A `slack` adapter requires `SLACK_DISABLE=true`. See [Chat SDK](/docs/integrations/chat-sdk) for setup.
 
 ## Sentry Integration
 
@@ -552,6 +570,10 @@ ANTHROPIC_API_KEY=sk-key1,sk-key2
 ```
 
 When a session is spawned, the runner splits the credential value by commas and randomly selects one. Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
+
+On the pi and opencode harnesses, `OPENROUTER_API_KEY`, `NAN_API_KEY` (or `HELMCODE_API_NAN`) and `HELMCODE_API_KEY` pool the same way: each task gets one key, picked by the model's provider prefix. On opencode the picked key is handed to the provider config, so an `OPENROUTER_API_KEY` pool works there too.
+
+NaN and Helmcode cap concurrency per key (NaN: 60 RPM, 7 concurrent requests in total on the base plan, 10 on premium, 5 per model on `qwen3.6`, `gemma4` and the `mimo` models; Helmcode: 100 RPM, 2M tokens per minute, 5 concurrent requests per model, 10 on the GLM family, DeepSeek V4 Flash and Qwen 3.8 Flash). One key shared across a fleet hits these caps fast, so use a pool.
 
 ## Telemetry
 

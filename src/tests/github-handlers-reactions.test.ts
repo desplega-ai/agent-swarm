@@ -35,6 +35,7 @@ import {
   handleIssue,
   handlePullRequest,
   handlePullRequestReview,
+  setReviewCommentsRetryDelayForTests,
 } from "../github/handlers";
 import { GITHUB_BOT_NAME } from "../github/mentions";
 import type {
@@ -88,6 +89,7 @@ afterAll(async () => {
 beforeEach(async () => {
   savedToken = process.env.GITHUB_TOKEN;
   process.env.GITHUB_TOKEN = PAT;
+  setReviewCommentsRetryDelayForTests(() => {});
   calls = [];
   fetchRejects = false;
   await getDbClient().run("DELETE FROM agent_tasks");
@@ -98,6 +100,12 @@ beforeEach(async () => {
     init?: RequestInit,
   ) => {
     const headers = (init?.headers ?? {}) as Record<string, string>;
+    // Review handling also GETs the review's inline comments with the same PAT; only
+    // writes (reactions) are under test here.
+    if (!init?.method || init.method === "GET") {
+      if (fetchRejects) throw new Error("socket hang up");
+      return new Response("[]", { status: 200 });
+    }
     calls.push({
       url: String(input),
       authorization: headers.Authorization ?? null,
@@ -109,6 +117,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  setReviewCommentsRetryDelayForTests();
   fetchSpy.mockRestore();
   logSpy.mockRestore();
   errorSpy.mockRestore();

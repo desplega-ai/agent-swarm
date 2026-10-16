@@ -44,8 +44,11 @@ mock.module("../github/app", () => ({
 }));
 
 const TEST_DB_PATH = "./test-github-handlers-inline.sqlite";
+// The PAT fallback reads GITHUB_TOKEN; a worker shell may export one. Tests opt in per case.
+const savedGithubToken = process.env.GITHUB_TOKEN;
 
 beforeAll(async () => {
+  delete process.env.GITHUB_TOKEN;
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
@@ -59,6 +62,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (savedGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+  else process.env.GITHUB_TOKEN = savedGithubToken;
   setReviewCommentsRetryDelayForTests();
   closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
@@ -88,11 +93,14 @@ type TestInlineComment = {
   pull_request_review_id?: number | null;
 };
 
+const HEAD_OID = "abc123head";
+
 function makeReviewEvent(opts: {
   state: "approved" | "changes_requested" | "commented";
   body: string | null;
   installationId?: number;
   prUserLogin?: string;
+  commitId?: string;
 }): PullRequestReviewEvent {
   const id = ++reviewIdCounter;
   return {
@@ -104,6 +112,7 @@ function makeReviewEvent(opts: {
       html_url: `https://github.com/test/repo/pull/99#pullrequestreview-${id}`,
       user: { login: "reviewer" },
       submitted_at: "2026-01-01T00:00:00Z",
+      commit_id: opts.commitId ?? HEAD_OID,
     },
     pull_request: {
       number: 99,
@@ -400,8 +409,11 @@ describe("inline review comment surfacing", () => {
 // ── No-op approvals ──
 
 type ActionItemsFixture = {
-  threads?: { isResolved: boolean; isOutdated: boolean }[];
+  // isOutdated mirrors GitHub's thread shape; the handler must ignore it.
+  threads?: { isResolved: boolean; isOutdated?: boolean }[];
   reviews?: { state: string; submittedAt: string; author: { login: string } }[];
+  headOid?: string;
+  mergeState?: string | null;
 };
 
 function mockFetchForApproval(fixture: ActionItemsFixture | "error"): ReturnType<typeof spyOn> {
@@ -414,8 +426,16 @@ function mockFetchForApproval(fixture: ActionItemsFixture | "error"): ReturnType
         data: {
           repository: {
             pullRequest: {
+              mergeStateStatus: fixture.mergeState === undefined ? "CLEAN" : fixture.mergeState,
               reviewThreads: { pageInfo: { hasNextPage: false }, nodes: fixture.threads ?? [] },
               reviews: { pageInfo: { hasNextPage: false }, nodes: fixture.reviews ?? [] },
+              commits: {
+                nodes: [
+                  {
+                    commit: { oid: fixture.headOid ?? HEAD_OID },
+                  },
+                ],
+              },
             },
           },
         },
@@ -436,7 +456,7 @@ describe("no-op approved reviews", () => {
     const fetchSpy = mockFetchForApproval({
       threads: [
         { isResolved: true, isOutdated: false },
-        { isResolved: false, isOutdated: true },
+        { isResolved: true, isOutdated: true },
       ],
       reviews: [
         {
@@ -525,6 +545,34 @@ describe("no-op approved reviews", () => {
     expect(result.created).toBe(true);
   });
 
+  test("empty-body approval on a commit that is no longer the head: task is created", async () => {
+    const fetchSpy = mockFetchForApproval({
+      reviews: [APPROVED_BY_REVIEWER],
+      headOid: "def456newer",
+    });
+
+    const result = await handlePullRequestReview(
+      makeReviewEvent({ state: "approved", body: null, installationId: 123 }),
+    );
+    fetchSpy.mockRestore();
+
+    expect(result.created).toBe(true);
+    expect(await getLastTaskText()).toContain(
+      "head def456new (approved abc123hea), merge state CLEAN",
+    );
+  });
+
+  test("empty-body approval on a PR that is not CLEAN: task is created", async () => {
+    for (const mergeState of ["BLOCKED", "DIRTY", "UNSTABLE", "UNKNOWN", null]) {
+      const fetchSpy = mockFetchForApproval({ reviews: [APPROVED_BY_REVIEWER], mergeState });
+      const result = await handlePullRequestReview(
+        makeReviewEvent({ state: "approved", body: null, installationId: 123 }),
+      );
+      fetchSpy.mockRestore();
+      expect(result.created).toBe(true);
+    }
+  });
+
   test("GITHUB_SKIP_NOOP_APPROVALS=false: empty-body approval still creates a task", async () => {
     const previous = process.env.GITHUB_SKIP_NOOP_APPROVALS;
     process.env.GITHUB_SKIP_NOOP_APPROVALS = "false";
@@ -539,6 +587,87 @@ describe("no-op approved reviews", () => {
       fetchSpy.mockRestore();
       if (previous === undefined) delete process.env.GITHUB_SKIP_NOOP_APPROVALS;
       else process.env.GITHUB_SKIP_NOOP_APPROVALS = previous;
+    }
+  });
+});
+
+// ── Plain webhook + PAT deployments (no App installation on the event) ──
+
+describe("review fetch without an App installation", () => {
+  test("GITHUB_TOKEN set: empty-body approval with nothing open is skipped via the PAT", async () => {
+    process.env.GITHUB_TOKEN = "pat-for-tests";
+    const fetchSpy = mockFetchForApproval({ reviews: [APPROVED_BY_REVIEWER] });
+
+    try {
+      const result = await handlePullRequestReview(
+        makeReviewEvent({ state: "approved", body: null }),
+      );
+      expect(result.created).toBe(false);
+      const authHeaders = fetchSpy.mock.calls.map(([, init]) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        return headers.Authorization;
+      });
+      expect(authHeaders.length).toBeGreaterThan(0);
+      expect(authHeaders.every((h) => h === "Bearer pat-for-tests")).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.GITHUB_TOKEN;
+    }
+  });
+
+  test("GITHUB_TOKEN set: CHANGES_REQUESTED embeds inline comments with no degraded banner", async () => {
+    process.env.GITHUB_TOKEN = "pat-for-tests";
+    const fetchSpy = mockFetchWithComments(SAMPLE_INLINE_COMMENTS);
+
+    try {
+      const result = await handlePullRequestReview(
+        makeReviewEvent({ state: "changes_requested", body: "Please fix" }),
+      );
+      expect(result.created).toBe(true);
+      const text = await getLastTaskText();
+      expect(text).toContain("src/domain_tables.go:77");
+      expect(text).not.toContain("Inline comments could NOT be auto-fetched");
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.GITHUB_TOKEN;
+    }
+  });
+
+  test("GITHUB_TOKEN set: empty-body approval with an unresolved thread still creates a task", async () => {
+    process.env.GITHUB_TOKEN = "pat-for-tests";
+    const fetchSpy = mockFetchForApproval({
+      threads: [{ isResolved: false, isOutdated: false }],
+      reviews: [APPROVED_BY_REVIEWER],
+    });
+
+    try {
+      const result = await handlePullRequestReview(
+        makeReviewEvent({ state: "approved", body: null }),
+      );
+      expect(result.created).toBe(true);
+      expect(await getLastTaskText()).toContain("1 unresolved review thread(s)");
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.GITHUB_TOKEN;
+    }
+  });
+
+  test("GITHUB_TOKEN set: empty-body approval with an unresolved outdated thread still creates a task", async () => {
+    process.env.GITHUB_TOKEN = "pat-for-tests";
+    const fetchSpy = mockFetchForApproval({
+      threads: [{ isResolved: false, isOutdated: true }],
+      reviews: [APPROVED_BY_REVIEWER],
+    });
+
+    try {
+      const result = await handlePullRequestReview(
+        makeReviewEvent({ state: "approved", body: null }),
+      );
+      expect(result.created).toBe(true);
+      expect(await getLastTaskText()).toContain("1 unresolved review thread(s)");
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.GITHUB_TOKEN;
     }
   });
 });

@@ -8,6 +8,7 @@ import type {
   AgentTask,
   AgentTaskSource,
   ProviderName,
+  ReasoningEffort,
   RuntimePool,
   TaskAttachment,
 } from "../../../types";
@@ -312,6 +313,8 @@ export async function updateTaskClaudeSessionId(
   model?: string,
   harnessVariant?: string,
   harnessVariantMeta?: Record<string, unknown>,
+  /** Effort the session runs at; null records that the harness default applied. */
+  resolvedEffort?: ReasoningEffort | null,
 ): Promise<AgentTask | null> {
   const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];
   const params: (string | null)[] = [claudeSessionId, new Date().toISOString()];
@@ -335,6 +338,10 @@ export async function updateTaskClaudeSessionId(
   if (harnessVariantMeta !== undefined) {
     setClauses.push("harnessVariantMeta = ?");
     params.push(JSON.stringify(harnessVariantMeta));
+  }
+  if (resolvedEffort !== undefined) {
+    setClauses.push("resolvedEffort = ?");
+    params.push(resolvedEffort);
   }
 
   params.push(taskId);

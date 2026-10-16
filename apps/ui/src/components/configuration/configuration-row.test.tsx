@@ -55,6 +55,7 @@ function renderRow(saved: string | null, entry: ConfigCatalogEntry = RBAC, inEnv
             createdAt: "2026-09-26T00:00:00Z",
             lastUpdatedAt: "2026-09-26T00:00:00Z",
             encrypted: false,
+            exportToEnv: true,
           },
         ];
   client.setQueryData(["configs", { scope: "global" }], { configs });

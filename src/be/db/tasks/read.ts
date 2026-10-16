@@ -20,6 +20,7 @@ import {
   RoutingAffinitySchema,
 } from "../../../types";
 import { parseProviderMeta } from "../../../utils/provider-metadata";
+import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { getAgentById } from "../agents";
 import { getDbClient } from "../runtime";
 
@@ -87,6 +88,7 @@ export type AgentTaskRow = {
   model: string | null;
   modelTier: string | null;
   effort: string | null;
+  resolvedEffort?: string | null;
   resolvedModel?: string | null;
   modelSource?: string | null;
   modelAlias?: string | null;
@@ -154,6 +156,7 @@ type AgentTaskSummaryRow = Pick<
   | "modelSource"
   | "modelAlias"
   | "effort"
+  | "resolvedEffort"
   | "provider"
   | "requestedByUserId"
   | "progress"
@@ -207,6 +210,7 @@ const LIST_COLUMNS = {
     agent_tasks.offeredTo, agent_tasks.acceptedAt, agent_tasks.parentTaskId,
     agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier,
     agent_tasks.resolvedModel, agent_tasks.modelSource, agent_tasks.modelAlias, agent_tasks.effort,
+    agent_tasks.resolvedEffort,
     agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
     agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
     agent_tasks.peakContextPercent`,
@@ -315,6 +319,9 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     effort: ReasoningEffortSchema.safeParse(row.effort).success
       ? (row.effort as ReasoningEffort)
       : undefined,
+    resolvedEffort: ReasoningEffortSchema.safeParse(row.resolvedEffort).success
+      ? (row.resolvedEffort as ReasoningEffort)
+      : undefined,
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
@@ -380,6 +387,9 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
     modelAlias: row.modelAlias ?? undefined,
     effort: ReasoningEffortSchema.safeParse(row.effort).success
       ? (row.effort as ReasoningEffort)
+      : undefined,
+    resolvedEffort: ReasoningEffortSchema.safeParse(row.resolvedEffort).success
+      ? (row.resolvedEffort as ReasoningEffort)
       : undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
@@ -1035,6 +1045,163 @@ export async function markFinalizedSlackRelaysDelivered(): Promise<number> {
   return result.changes;
 }
 
+/** Pending Chat SDK relay row: the terminal task plus its obligation bookkeeping. */
+export interface PendingChatRelay {
+  task: AgentTask;
+  createdAt: string;
+  lastError: string | null;
+}
+
+/**
+ * Backoff gate for a chat relay obligation: eligible when never attempted, or
+ * when `min(3 s * 2^attempt_count, 10 min)` passed since `last_attempt_at`.
+ * `attempt_count >= 8` is already past the cap (3 s * 2^8 = 768 s). The one
+ * parameter is the reference time as ISO text.
+ */
+const CHAT_RELAY_ELIGIBLE_SQL = `(obligation.last_attempt_at IS NULL
+         OR (julianday(?) - julianday(obligation.last_attempt_at)) * 86400000.0 >=
+            CASE WHEN obligation.attempt_count >= 8 THEN 600000
+                 ELSE 3000 * (1 << obligation.attempt_count) END)`;
+
+/**
+ * Terminal chat tasks whose relay obligation is pending, out of backoff at
+ * `now`, and whose `task:chat-sdk:<adapter>:` contextKey names one of
+ * `adapters` (the adapters that are running). Rows of other adapters are left
+ * out of the query, so a stopped adapter cannot fill the window and starve the
+ * healthy ones. Returns no rows when `adapters` is empty. Never-attempted rows
+ * sort first, then the oldest attempts. A contextKey that does not parse as a
+ * chat key is not selected here; `giveUpStaleChatRelays` retires such rows once
+ * they age out.
+ */
+export async function getPendingChatRelayTasks(
+  now: number = Date.now(),
+  limit = 200,
+  adapters: readonly string[] = [],
+): Promise<PendingChatRelay[]> {
+  if (adapters.length === 0) return [];
+  for (const adapter of adapters) {
+    if (!/^[a-z]+$/.test(adapter)) throw new Error(`invalid chat adapter name: ${adapter}`);
+  }
+  const adapterFilter = adapters.map(() => "task.contextKey GLOB ?").join(" OR ");
+  const rows = await getDbClient().query<
+    AgentTaskRow & {
+      relay_created_at: string;
+      relay_last_error: string | null;
+    }
+  >(
+    `SELECT task.*,
+            obligation.created_at AS relay_created_at,
+            obligation.last_error AS relay_last_error
+       FROM chat_relay_obligations obligation
+       JOIN agent_tasks task ON task.id = obligation.task_id
+       WHERE obligation.delivered_at IS NULL
+       AND obligation.given_up_at IS NULL
+       AND task.status IN ('completed', 'failed', 'cancelled')
+       AND (${adapterFilter})
+       AND ${CHAT_RELAY_ELIGIBLE_SQL}
+       ORDER BY obligation.last_attempt_at IS NOT NULL,
+                obligation.last_attempt_at ASC,
+                obligation.created_at ASC
+       LIMIT ?`,
+    [
+      ...adapters.map((adapter) => `task:chat-sdk:${adapter}:*`),
+      new Date(now).toISOString(),
+      limit,
+    ],
+  );
+  return rows.map((row) => ({
+    task: rowToAgentTask(row),
+    createdAt: row.relay_created_at,
+    lastError: row.relay_last_error,
+  }));
+}
+
+/**
+ * Give up every pending chat relay obligation created more than `olderThanMs`
+ * before `now`, whatever the adapter state. Returns how many rows were retired.
+ */
+export async function giveUpStaleChatRelays(now: number, olderThanMs: number): Promise<number> {
+  const at = new Date(now).toISOString();
+  const cutoff = new Date(now - olderThanMs).toISOString();
+  const result = await getDbClient().run(
+    `UPDATE chat_relay_obligations
+       SET given_up_at = ?, last_error = 'gave up: older than 24h', updated_at = ?
+       WHERE delivered_at IS NULL AND given_up_at IS NULL AND created_at < ?`,
+    [at, at, cutoff],
+  );
+  return result.changes;
+}
+
+/**
+ * Claim a chat relay row before the send: bump `attempt_count` and set
+ * `last_attempt_at`. Conditional on the row still being pending and out of
+ * backoff, so two concurrent ticks cannot both send. Returns true when claimed.
+ */
+export async function markChatRelayAttempted(
+  taskId: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const at = new Date(now).toISOString();
+  const result = await getDbClient().run(
+    `UPDATE chat_relay_obligations AS obligation
+       SET attempt_count = attempt_count + 1,
+           last_attempt_at = ?,
+           updated_at = ?
+       WHERE task_id = ?
+       AND delivered_at IS NULL
+       AND given_up_at IS NULL
+       AND ${CHAT_RELAY_ELIGIBLE_SQL}`,
+    [at, at, taskId, at],
+  );
+  return result.changes > 0;
+}
+
+/** Record why the last chat relay attempt failed. The text is scrubbed before it is stored. */
+export async function recordChatRelayError(
+  taskId: string,
+  error: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const result = await getDbClient().run(
+    `UPDATE chat_relay_obligations
+       SET last_error = ?, updated_at = ?
+       WHERE task_id = ? AND delivered_at IS NULL`,
+    [scrubSecrets(error), new Date(now).toISOString(), taskId],
+  );
+  return result.changes > 0;
+}
+
+/** Mark a chat relay obligation delivered after the platform accepted every chunk. Idempotent. */
+export async function markChatRelayDelivered(
+  taskId: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const at = new Date(now).toISOString();
+  const result = await getDbClient().run(
+    `UPDATE chat_relay_obligations
+       SET delivered_at = ?, updated_at = ?
+       WHERE task_id = ? AND delivered_at IS NULL`,
+    [at, at, taskId],
+  );
+  return result.changes > 0;
+}
+
+/** Stop retrying a chat relay obligation. The reason is scrubbed before it is stored. */
+export async function markChatRelayGivenUp(
+  taskId: string,
+  error: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const at = new Date(now).toISOString();
+  const result = await getDbClient().run(
+    `UPDATE chat_relay_obligations
+       SET given_up_at = ?, last_error = ?, updated_at = ?
+       WHERE task_id = ? AND delivered_at IS NULL AND given_up_at IS NULL`,
+    [at, scrubSecrets(error), at, taskId],
+  );
+  return result.changes > 0;
+}
+
 /**
  * Get tasks that were recently finished (completed/failed) by workers (non-lead agents).
  * Used by leads to know when workers complete tasks.
@@ -1329,6 +1496,69 @@ export async function getLatestLeadTaskInThread(
        ORDER BY t.createdAt DESC, t.rowid DESC
        LIMIT 1`,
     [channelId, threadTs],
+  );
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * ContextKey twins of the Slack thread lookups above, for channels that key a
+ * conversation by `contextKey` only (Chat SDK). `source` narrows to the
+ * channel's ingress tasks, as the Slack twins do with `source = 'slack'`:
+ * follow-ups and delegated worker tasks inherit the parent's contextKey.
+ * All three use `idx_agent_tasks_context_key_status`.
+ */
+export async function getAgentWorkingOnContextKey(
+  contextKey: string,
+  source?: string,
+): Promise<Agent | null> {
+  const taskRow = await getDbClient().get<AgentTaskRow>(
+    `SELECT agentId FROM agent_tasks
+       WHERE contextKey = ?
+       AND (? IS NULL OR source = ?)
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    [contextKey, source ?? null, source ?? null],
+  );
+
+  if (taskRow?.agentId) return getAgentById(taskRow.agentId);
+
+  return null;
+}
+
+/** Latest `in_progress` or `pending` task on a contextKey (dependency chaining). */
+export async function getLatestActiveTaskByContextKey(
+  contextKey: string,
+  source?: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE contextKey = ?
+       AND (? IS NULL OR source = ?)
+       AND status IN ('in_progress', 'pending')
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    [contextKey, source ?? null, source ?? null],
+  );
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/** Latest task assigned to a lead agent on a contextKey (the steering target). */
+export async function getLatestLeadTaskByContextKey(
+  contextKey: string,
+  source?: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT t.*
+       FROM agent_tasks t
+       JOIN agents a ON a.id = t.agentId
+       WHERE t.contextKey = ?
+         AND (? IS NULL OR t.source = ?)
+         AND a.isLead = 1
+       ORDER BY t.createdAt DESC, t.rowid DESC
+       LIMIT 1`,
+    [contextKey, source ?? null, source ?? null],
   );
 
   return row ? rowToAgentTask(row) : null;

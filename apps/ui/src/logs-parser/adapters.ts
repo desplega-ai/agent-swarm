@@ -41,9 +41,15 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
     const message = isRecord(ev.message) ? ev.message : undefined;
     const rawContent = message?.content;
     const role = roleFromAnthropicEvent(ev, message);
+    // Set on the events a sub-agent emits: the id of the Agent/Task call
+    // that spawned it.
+    const parentToolUseId =
+      typeof ev.parent_tool_use_id === "string" && ev.parent_tool_use_id
+        ? ev.parent_tool_use_id
+        : undefined;
 
     if (typeof rawContent === "string") {
-      items.push(makeItem(d, "text", { role, text: rawContent }));
+      items.push(makeItem(d, "text", { role, text: rawContent, parentToolUseId }));
       continue;
     }
 
@@ -57,6 +63,7 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
       continue;
     }
 
+    const firstBlockItem = items.length;
     for (const block of rawContent) {
       if (!isRecord(block)) {
         items.push(makeItem(d, "unknown", { role: "system", raw: block }));
@@ -109,6 +116,10 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
           break;
         }
       }
+    }
+    if (parentToolUseId) {
+      for (let i = firstBlockItem; i < items.length; i++)
+        items[i].parentToolUseId = parentToolUseId;
     }
   }
 
@@ -643,10 +654,24 @@ export function normalizeOpencode(ordered: DecodedRecord[]): NormalizedItem[] {
     }
   >();
   const items: NormalizedItem[] = [];
+  // OpenCode 2: text and reasoning arrive as `session.{text,reasoning}.ended`
+  // per part. The adapter also mirrors each text end as a cumulative `message`
+  // per assistant message, so the parts win and the mirror is a fallback.
+  const v2PartRecIds = new Map<string, string[]>();
+  const v2TextMessageIds = new Set<string>();
+  const lastMessageMirror = new Map<string, string>();
 
   for (const d of ordered) {
     const ev = d.event;
     if (!isRecord(ev)) continue;
+    const v2Part = opencodeV2PartKey(ev);
+    if (v2Part) {
+      v2PartRecIds.set(v2Part.key, [...(v2PartRecIds.get(v2Part.key) ?? []), d.rec.id]);
+      if (ev.type === "session.text.ended") v2TextMessageIds.add(v2Part.messageId);
+    }
+    if (ev.type === "message" && ev.messageId != null) {
+      lastMessageMirror.set(String(ev.messageId), d.rec.id);
+    }
     const props = isRecord(ev.properties) ? ev.properties : undefined;
     const part = props && isRecord(props.part) ? props.part : undefined;
     if (ev.type === "message.part.delta") {
@@ -686,6 +711,7 @@ export function normalizeOpencode(ordered: DecodedRecord[]): NormalizedItem[] {
   const acc = new Map<string, { chunks: string[]; first: DecodedRecord; recIds: string[] }>();
   const orderedOutput: Array<
     | { kind: "part"; partId: string }
+    | { kind: "item"; item: NormalizedItem }
     | { kind: "event"; d: DecodedRecord; event: Record<string, unknown> }
   > = [];
 
@@ -726,12 +752,42 @@ export function normalizeOpencode(ordered: DecodedRecord[]): NormalizedItem[] {
       if (partId && (streamedPartIds.has(partId) || part?.type === "tool")) continue;
     }
 
+    // OpenCode 2 raw tool events are covered by the adapter's tool_start /
+    // tool_end mirrors; text and reasoning deltas by their `.ended` part.
+    if (typeof ev.type === "string" && OPENCODE_V2_COVERED.test(ev.type)) continue;
+
+    if (ev.type === "message") {
+      const messageId = ev.messageId == null ? undefined : String(ev.messageId);
+      if (messageId && v2TextMessageIds.has(messageId)) continue;
+      if (messageId && lastMessageMirror.get(messageId) !== d.rec.id) continue;
+    }
+
+    if (ev.type === "session.text.ended" || ev.type === "session.reasoning.ended") {
+      const v2Part = opencodeV2PartKey(ev);
+      const text = asString((ev.data as Record<string, unknown>).text) ?? "";
+      if (!v2Part || !text.trim()) continue;
+      orderedOutput.push({
+        kind: "item",
+        item: makeItem(d, ev.type === "session.reasoning.ended" ? "reasoning" : "text", {
+          role: "assistant",
+          text,
+          meta: { assistantMessageID: v2Part.messageId, ordinal: v2Part.ordinal },
+          coveredRecIds: (v2PartRecIds.get(v2Part.key) ?? []).filter((id) => id !== d.rec.id),
+        }),
+      });
+      continue;
+    }
+
     // Part updates used for streamed text typing/tool enrichment are covered by
     // their aggregate item. Other part updates remain low-key lifecycle rows.
     orderedOutput.push({ kind: "event", d, event: ev });
   }
 
   for (const output of orderedOutput) {
+    if (output.kind === "item") {
+      items.push(output.item);
+      continue;
+    }
     if (output.kind === "part") {
       const stream = acc.get(output.partId);
       if (!stream) continue;
@@ -827,6 +883,23 @@ function emitOpencodeEvent(
       items.push(makeItem(d, "lifecycle", { role: "system", meta: event }));
       break;
     }
+    case "message": {
+      const text = asString(event.content) ?? "";
+      if (!text.trim()) break;
+      items.push(
+        makeItem(d, "text", {
+          role: event.role === "user" ? "user" : "assistant",
+          text,
+          meta: { messageId: event.messageId },
+        }),
+      );
+      break;
+    }
+    case "error": {
+      const msg = asString(event.message) ?? "session error";
+      items.push(makeItem(d, "text", { role: "system", text: `opencode error: ${msg}` }));
+      break;
+    }
     case "server.heartbeat":
     case "server.connected": {
       break;
@@ -854,6 +927,7 @@ function emitOpencodeEvent(
         type === "reference.updated" ||
         type === "integration.updated" ||
         type === "todo.updated" ||
+        type.startsWith("permission.") ||
         type.startsWith("session.") ||
         type.startsWith("file.watcher.")
       ) {
@@ -1273,6 +1347,23 @@ function hasPresentInput(input: unknown): boolean {
   if (Array.isArray(input)) return input.length > 0;
   if (isRecord(input)) return Object.keys(input).length > 0;
   return true;
+}
+
+/** OpenCode 2 raw events that a mirror or an `.ended` part already renders. */
+const OPENCODE_V2_COVERED =
+  /^session\.(tool\.(input\.(started|delta|ended)|called|progress|success|failed)|(text|reasoning)\.(started|delta))$/;
+
+/** Identity of an OpenCode 2 text or reasoning part, shared by its deltas and end. */
+function opencodeV2PartKey(
+  ev: Record<string, unknown>,
+): { key: string; messageId: string; ordinal: number } | null {
+  const type = asString(ev.type);
+  const match = type?.match(/^session\.(text|reasoning)\.(started|delta|ended)$/);
+  if (!match || !isRecord(ev.data)) return null;
+  const messageId = asString(ev.data.assistantMessageID);
+  const ordinal = typeof ev.data.ordinal === "number" ? ev.data.ordinal : undefined;
+  if (!messageId || ordinal === undefined) return null;
+  return { key: `${match[1]}:${messageId}:${ordinal}`, messageId, ordinal };
 }
 
 function opencodeToolCallId(part: Record<string, unknown>): string | null {

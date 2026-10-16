@@ -36,3 +36,8 @@ export async function recordSeedState(
     [kind, key, seededHash, new Date().toISOString()],
   );
 }
+
+/** Forget `(kind, key)`, e.g. after the seeder retires the entity it seeded. */
+export async function deleteSeedState(kind: string, key: string): Promise<void> {
+  await getDbClient().run("DELETE FROM seed_state WHERE kind = ? AND key = ?", [kind, key]);
+}

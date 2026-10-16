@@ -13,7 +13,10 @@ import {
   type PaginationChangedEvent,
   PaginationModule,
   QuickFilterModule,
+  RowApiModule,
+  type RowClassParams,
   type RowClickedEvent,
+  RowStyleModule,
   TextFilterModule,
   TooltipModule,
   ValidationModule,
@@ -31,6 +34,8 @@ ModuleRegistry.registerModules([
   TextFilterModule,
   NumberFilterModule,
   QuickFilterModule,
+  RowApiModule,
+  RowStyleModule,
   ColumnAutoSizeModule,
   CsvExportModule,
   TooltipModule,
@@ -41,7 +46,7 @@ const DEFAULT_PAGE_SIZE_SELECTOR = [10, 20, 50, 100];
 /** The grid fills the wrapper's height minus the pager below it. */
 const FILL_CONTAINER_STYLE = { flex: "1 1 0%", minHeight: 0, width: "100%" } as const;
 
-interface DataGridProps<TData> {
+export interface DataGridProps<TData> {
   rowData: TData[] | undefined;
   columnDefs: ColDef<TData>[];
   quickFilterText?: string;
@@ -56,6 +61,13 @@ interface DataGridProps<TData> {
   domLayout?: "normal" | "autoHeight";
   enableCellTextSelection?: boolean;
   getRowId?: (params: GetRowIdParams<TData>) => string;
+  /** Extra class per row, e.g. a highlight for the row whose detail is open. */
+  getRowClass?: (params: RowClassParams<TData>) => string | string[] | undefined;
+  /**
+   * Row classes are computed when a row is drawn. Change this value to redraw
+   * the rows so `getRowClass` runs again (e.g. when the selected row changes).
+   */
+  rowClassKey?: string | number | null;
   /**
    * Override the AG-Grid default row height (~42px on the quartz theme).
    * Set when a table renders multi-line cells and needs extra vertical
@@ -102,6 +114,8 @@ export function DataGrid<TData>({
   domLayout = "normal",
   enableCellTextSelection = false,
   getRowId,
+  getRowClass,
+  rowClassKey,
   rowHeight,
   columnSizing = "fit",
   cellFocus,
@@ -117,6 +131,12 @@ export function DataGrid<TData>({
     [columnDefs],
   );
   const gridRef = useRef<AgGridReact<TData>>(null);
+  const drawnRowClassKey = useRef(rowClassKey);
+  useEffect(() => {
+    if (drawnRowClassKey.current === rowClassKey) return;
+    drawnRowClassKey.current = rowClassKey;
+    gridRef.current?.api?.redrawRows();
+  }, [rowClassKey]);
   // AG Grid's own paging panel is suppressed; this mirrors its state so the
   // shared `ListPager` renders the same pager the server-paged lists use.
   const [pager, setPager] = useState({ page: 0, pageSize: paginationPageSize, total: 0 });
@@ -283,6 +303,7 @@ export function DataGrid<TData>({
         onGridReady={onGridReady}
         onPaginationChanged={onPaginationChanged}
         getRowId={getRowId ?? defaultGetRowId}
+        getRowClass={getRowClass}
         animateRows={false}
         suppressCellFocus={!(cellFocus ?? hasEditableColumn)}
         onCellKeyDown={onCellKeyDown}

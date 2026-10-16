@@ -48,3 +48,7 @@ When your heartbeat runbook says so, check for unaddressed requests older than o
 ## Scripts-only mode
 
 The named Slack tools are not registered. Use `script-run` with inline source: `ctx.swarm.slack_reply({ taskId, message })`. The task ID carries the thread context.
+
+## Status and blocker questions
+
+Answer for the scope of the place the question was asked. In a customer or project channel or thread, "current blockers" or "what's the status" means that customer's or project's work: its tracker, its PRs, its open asks. Answer swarm-wide only in a DM or an ops channel, or when the person asks for it. Name the scope you used in the first line.

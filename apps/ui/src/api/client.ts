@@ -33,6 +33,8 @@ import type {
   BudgetsResponse,
   ChannelMessage,
   ChannelsResponse,
+  ChatSdkStatusResponse,
+  ChatSdkTelegramWebhookResponse,
   ClaudeRuntimeConfig,
   CombReviewBatchInput,
   CombReviewBatchResult,
@@ -123,7 +125,6 @@ import type {
   ScriptsResponse,
   ScriptTypeDefs,
   ScriptVersion,
-  ServicesResponse,
   SessionCostsResponse,
   SessionDetailResponse,
   SessionListItem,
@@ -1020,22 +1021,6 @@ class ApiClient {
     return res.json();
   }
 
-  async fetchServices(filters?: {
-    status?: string;
-    agentId?: string;
-    name?: string;
-  }): Promise<ServicesResponse> {
-    const params = new URLSearchParams();
-    if (filters?.status) params.set("status", filters.status);
-    if (filters?.agentId) params.set("agentId", filters.agentId);
-    if (filters?.name) params.set("name", filters.name);
-    const queryString = params.toString();
-    const url = `${this.getBaseUrl()}/api/services${queryString ? `?${queryString}` : ""}`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch services: ${res.status}`);
-    return res.json();
-  }
-
   async fetchSessionCosts(filters?: {
     agentId?: string;
     taskId?: string;
@@ -1246,6 +1231,7 @@ class ApiClient {
     isSecret?: boolean;
     envPath?: string | null;
     description?: string | null;
+    exportToEnv?: boolean;
   }): Promise<SwarmConfig> {
     const url = `${this.getBaseUrl()}/api/config?includeSecrets=true`;
     const cleaned = Object.fromEntries(Object.entries(data).filter(([_, v]) => v !== null));
@@ -3248,6 +3234,23 @@ class ApiClient {
     }
     const data = (await res.json()) as UserResponse;
     return data.user;
+  }
+
+  async getChatSdkStatus(): Promise<ChatSdkStatusResponse> {
+    const url = `${this.getBaseUrl()}/api/integrations/chat/status`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch Chat SDK status: ${res.status}`);
+    return (await res.json()) as ChatSdkStatusResponse;
+  }
+
+  async registerChatSdkTelegramWebhook(): Promise<ChatSdkTelegramWebhookResponse> {
+    const url = `${this.getBaseUrl()}/api/integrations/chat/telegram/register-webhook`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders(), body: "{}" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Failed to register the Telegram webhook: ${res.status}`);
+    }
+    return (await res.json()) as ChatSdkTelegramWebhookResponse;
   }
 
   async getMcpUserConfig(): Promise<McpUserConfigResponse> {

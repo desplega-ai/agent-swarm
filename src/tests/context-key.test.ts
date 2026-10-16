@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   agentContextKey,
   agentmailContextKey,
+  azureDevOpsContextKey,
+  azureDevOpsWorkItemContextKey,
   buildJiraContextKey,
+  chatSdkContextKey,
   githubContextKey,
   gitlabContextKey,
   linearContextKey,
@@ -124,6 +127,36 @@ describe("context-key separator safety", () => {
   });
 });
 
+describe("azure-devops work item keys", () => {
+  test("round-trips workitem keys", () => {
+    const key = azureDevOpsWorkItemContextKey({ organization: "fabrikam", workItemId: 42 });
+    expect(key).toBe("task:trackers:azure-devops:fabrikam:workitem:42");
+    expect(parseContextKey(key)).toEqual({
+      family: "trackers",
+      subFamily: "azure-devops",
+      parts: { organization: "fabrikam", kind: "workitem", workItemId: 42 },
+    });
+  });
+
+  test("the PR key still parses", () => {
+    const key = azureDevOpsContextKey({ repositoryId: "repo-1", pullRequestId: 7 });
+    expect(parseContextKey(key)).toEqual({
+      family: "trackers",
+      subFamily: "azure-devops",
+      parts: { repositoryId: "repo-1", kind: "pr", pullRequestId: 7 },
+    });
+  });
+
+  test("rejects a non-integer work item id", () => {
+    expect(() => azureDevOpsWorkItemContextKey({ organization: "o", workItemId: 1.5 })).toThrow();
+    expect(() => parseContextKey("task:trackers:azure-devops:o:workitem:abc")).toThrow();
+  });
+
+  test("rejects a workitem key with the wrong part count", () => {
+    expect(() => parseContextKey("task:trackers:azure-devops:workitem:42")).toThrow();
+  });
+});
+
 describe("parseContextKey", () => {
   test("round-trips slack keys", () => {
     const key = slackContextKey({ channelId: "C0A4J7GB0UD", threadTs: "1776800534.257079" });
@@ -132,6 +165,24 @@ describe("parseContextKey", () => {
       family: "slack",
       parts: { channelId: "C0A4J7GB0UD", threadTs: "1776800534.257079" },
     });
+  });
+
+  test("round-trips chat-sdk keys whose thread id contains colons", () => {
+    const threadId = "telegram:-1001234567890:42";
+    const key = chatSdkContextKey(threadId);
+    expect(key).toBe("task:chat-sdk:telegram:-1001234567890%3A42");
+    expect(key.split(":")).toHaveLength(4);
+    expect(parseContextKey(key)).toEqual({
+      family: "chat-sdk",
+      parts: { adapter: "telegram", threadId },
+    });
+  });
+
+  test("chat-sdk keys reject thread ids without an adapter prefix", () => {
+    expect(() => chatSdkContextKey("no-adapter")).toThrow(/<adapter>:<id>/);
+    expect(() => chatSdkContextKey(":123")).toThrow(/<adapter>:<id>/);
+    expect(() => chatSdkContextKey("telegram:")).toThrow(/<adapter>:<id>/);
+    expect(() => parseContextKey("task:chat-sdk:telegram")).toThrow(/malformed chat-sdk/);
   });
 
   test("round-trips agentmail keys", () => {

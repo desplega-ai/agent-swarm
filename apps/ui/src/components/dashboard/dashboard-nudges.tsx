@@ -1,11 +1,8 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowUpCircle, BarChart3, Building2, ExternalLink, Wrench, X } from "lucide-react";
+import { ArrowUpCircle, BarChart3, ExternalLink, Wrench, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { useEnableTelemetry } from "@/api/hooks/use-org-profile";
 import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
@@ -19,7 +16,6 @@ import { cn } from "@/lib/utils";
 import { AutomationSetupRows } from "./automation-setup-rows";
 
 const CURRENT_VERSION = __APP_VERSION__;
-const ORG_NAME_KEY = "SWARM_ORG_NAME";
 const TELEMETRY_DOCS_URL = "https://docs.agent-swarm.dev/docs/reference/telemetry";
 
 function readDismissedAt(storageKey: string): string | null {
@@ -34,11 +30,7 @@ export function DashboardNudges() {
   const { user } = useCurrentUser();
   const { data: status } = useStatusContext();
   const upgradeGate = useFeatureGate(CURRENT_VERSION);
-  const { data: configs } = useConfigs({ scope: "global" });
   const upgradeCard = useDismissibleCard(`dashboard-upgrade:${CURRENT_VERSION}`);
-  const orgNameCard = useDismissibleCard("dashboard-org-name");
-  // Open onboarding owns naming (step 2), and the setup card sits right above.
-  const onboardingOwnsName = useOnboardingOwnsFirstRun();
   const { config } = useConfig();
   const telemetryKey = deriveStorageKey(config.apiUrl, TELEMETRY_BANNER_CARD_KEY);
   const [telemetryDismissedAt, setTelemetryDismissedAt] = useState(() =>
@@ -63,17 +55,14 @@ export function DashboardNudges() {
     setTelemetryDismissedAt(now);
   }
 
-  const orgName = configs?.find((config) => config.key === ORG_NAME_KEY)?.value.trim();
   const showUpgrade =
     upgradeGate.currentVersion !== null && !upgradeGate.supported && !upgradeCard.dismissed;
-  const showOrgName =
-    configs !== undefined && !orgName && !orgNameCard.dismissed && !onboardingOwnsName;
   const waitingAutomations = status?.automations?.filter(
     (automation) => automation.state === "needs_setup",
   );
   const showAutomations = (waitingAutomations?.length ?? 0) > 0;
 
-  if (!showUpgrade && !showOrgName && !showAutomations && !showTelemetry) return null;
+  if (!showUpgrade && !showAutomations && !showTelemetry) return null;
 
   return (
     <div className="flex flex-col gap-2">
@@ -142,23 +131,6 @@ export function DashboardNudges() {
             </Button>
           }
           onDismiss={dismissTelemetry}
-        />
-      )}
-
-      {showOrgName && (
-        <NudgeBanner
-          priority="secondary"
-          icon={Building2}
-          title="Organization name"
-          description="Name it to compare your swarm with similar swarms."
-          action={
-            <Button asChild size="sm" variant="outline">
-              <Link to="/settings/configuration?search=SWARM_ORG_NAME#setting-SWARM_ORG_NAME">
-                Add name
-              </Link>
-            </Button>
-          }
-          onDismiss={orgNameCard.dismiss}
         />
       )}
     </div>

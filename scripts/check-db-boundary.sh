@@ -7,7 +7,6 @@
 #
 # Worker-side paths:
 #   src/commands/  src/hooks/  src/providers/  src/prompts/  src/scripts-runtime/  src/cli.tsx  src/claude.ts
-#   plugin/opencode-plugins/  (runs inside the opencode subprocess in the worker)
 #
 # Forbidden patterns:
 #   - import/from be/db (direct DB module)
@@ -25,7 +24,6 @@ WORKER_PATHS=(
   src/utils/
   src/cli.tsx
   src/claude.ts
-  plugin/opencode-plugins/
 )
 
 VIOLATIONS=""

@@ -4,14 +4,26 @@ import type { StatusResponse } from "@/api/types";
 // `__APP_VERSION__` is a Vite define; the hook reads it when it builds a payload.
 (globalThis as { __APP_VERSION__?: string }).__APP_VERSION__ = "test";
 
-type Feedback = { message?: string; email?: string; submission_id?: string };
+type Feedback = {
+  message?: string;
+  email?: string;
+  submission_id?: string;
+  install_id?: string;
+  installed_at?: string | null;
+};
 
 let statusData: StatusResponse | null | undefined;
 let userId: string | null;
 const submitted: Feedback[] = [];
 const events: Array<{ event: string; properties: Record<string, unknown> }> = [];
 
-mock.module("@/api/hooks/use-config-api", () => ({ useConfigs: () => ({ data: [] }) }));
+const globalConfigs = [
+  { key: "telemetry_installation_id", value: "install-1" },
+  { key: "telemetry_installed_at", value: "2026-01-01T00:00:00.000Z" },
+];
+mock.module("@/api/hooks/use-config-api", () => ({
+  useConfigs: () => ({ data: globalConfigs }),
+}));
 mock.module("@/api/hooks/use-feedback", () => ({
   useSubmitFeedback: () => ({ mutate: (input: Feedback) => submitted.push(input) }),
 }));
@@ -125,5 +137,21 @@ describe("useNotificationEvents", () => {
     expect(submitted[0]?.email).toBe("me@acme.com");
     expect(submitted[0]?.message).toContain("[notification] key=slack-connect-invite");
     expect(events).toEqual([]);
+  });
+
+  test("notifyUs carries install_id and installed_at while telemetry is on", () => {
+    useNotificationEvents().notifyUs("slack-connect-invite", "please invite me", "me@acme.com");
+
+    expect(submitted[0]?.install_id).toBe("install-1");
+    expect(submitted[0]?.installed_at).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("notifyUs omits install_id and installed_at while telemetry is off", () => {
+    statusData = status({ enabled: false });
+    useNotificationEvents().notifyUs("slack-connect-invite", "please invite me", "me@acme.com");
+
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]).not.toHaveProperty("install_id");
+    expect(submitted[0]).not.toHaveProperty("installed_at");
   });
 });

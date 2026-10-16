@@ -4,6 +4,7 @@ import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
+import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { downloadFile, type SlackFile } from "@/slack/files";
 import { attachableTask, attachSlackFilesForAgent } from "@/slack/inbound-files";
 import { extractSlackMessageText } from "@/slack/message-text";
@@ -152,6 +153,13 @@ export const registerSlackReadTool = (server: McpServer) => {
       const app = getSlackApp();
       if (!app) {
         return toolErr("Slack not configured.", { data: { messages: [] } });
+      }
+
+      const blockReason = await getChannelBlockReason(app.client, slackChannelId);
+      if (blockReason) {
+        return toolErr(externalChannelToolError(slackChannelId, blockReason), {
+          data: { messages: [] },
+        });
       }
 
       try {

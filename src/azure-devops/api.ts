@@ -3,7 +3,12 @@
  * and resolving the bot identity behind the PAT. Uses raw fetch, no SDK.
  */
 
-import { getAzureDevOpsOrgUrl, getAzureDevOpsToken, normalizeOrgUrl } from "./auth";
+import {
+  getAzureDevOpsOrgUrl,
+  getAzureDevOpsToken,
+  isTrustedOrgUrl,
+  normalizeOrgUrl,
+} from "./auth";
 
 const API_VERSION = "7.1";
 
@@ -32,7 +37,55 @@ function pullRequestBase(ref: AzureDevOpsPullRequestRef): string {
   );
 }
 
-let cachedBotId: { orgUrl: string; id: string } | null = null;
+interface BotIdentity {
+  id: string | null;
+  uniqueName: string | null;
+}
+
+/** A transient failure resolving the bot identity; the caller should let the delivery be retried. */
+export class AzureDevOpsLookupError extends Error {}
+
+let cachedBotIdentity: { orgUrl: string; identity: BotIdentity } | null = null;
+
+/** Org URL to query, or null when there is none or it is not safe to send the PAT to. */
+function credentialedOrgUrl(orgBaseUrl: string | null | undefined): string | null {
+  const orgUrl = normalizeOrgUrl(orgBaseUrl) ?? getAzureDevOpsOrgUrl();
+  if (!orgUrl || !getAzureDevOpsToken()) return null;
+  if (!isTrustedOrgUrl(orgUrl)) {
+    console.error("[AzureDevOps] Refusing to send credentials to an untrusted organization URL");
+    return null;
+  }
+  return orgUrl;
+}
+
+/**
+ * `_apis/connectionData` of the identity that owns the PAT, cached per org.
+ * Throws AzureDevOpsLookupError on a failed request. Redirects are refused so
+ * the PAT never follows a response to another host.
+ */
+async function loadBotIdentity(orgUrl: string): Promise<BotIdentity> {
+  if (cachedBotIdentity?.orgUrl === orgUrl) return cachedBotIdentity.identity;
+  let data: {
+    authenticatedUser?: { id?: string; properties?: { Account?: { $value?: string } } };
+  };
+  try {
+    const resp = await fetch(`${orgUrl}/_apis/connectionData`, {
+      headers: headers(),
+      redirect: "error",
+    });
+    if (!resp.ok) throw new AzureDevOpsLookupError(`connectionData returned ${resp.status}`);
+    data = (await resp.json()) as typeof data;
+  } catch (err) {
+    if (err instanceof AzureDevOpsLookupError) throw err;
+    throw new AzureDevOpsLookupError(`connectionData request failed: ${String(err)}`);
+  }
+  const identity = {
+    id: data.authenticatedUser?.id ?? null,
+    uniqueName: data.authenticatedUser?.properties?.Account?.$value?.trim() || null,
+  };
+  if (identity.id || identity.uniqueName) cachedBotIdentity = { orgUrl, identity };
+  return identity;
+}
 
 /**
  * Identity GUID of the bot. A picker @mention is stored as `@<GUID>` in the
@@ -46,31 +99,54 @@ export async function resolveAzureDevOpsBotId(
 ): Promise<string | null> {
   const fromEnv = process.env.AZURE_DEVOPS_BOT_ID?.trim();
   if (fromEnv) return fromEnv;
-
-  const orgUrl = normalizeOrgUrl(orgBaseUrl) ?? getAzureDevOpsOrgUrl();
-  if (!orgUrl || !getAzureDevOpsToken()) return null;
-  if (cachedBotId?.orgUrl === orgUrl) return cachedBotId.id;
-
+  const orgUrl = credentialedOrgUrl(orgBaseUrl);
+  if (!orgUrl) return null;
   try {
-    const resp = await fetch(`${orgUrl}/_apis/connectionData`, { headers: headers() });
-    if (!resp.ok) {
-      console.error(`[AzureDevOps] Failed to resolve bot identity: ${resp.status}`);
-      return null;
-    }
-    const data = (await resp.json()) as { authenticatedUser?: { id?: string } };
-    const id = data.authenticatedUser?.id;
-    if (!id) return null;
-    cachedBotId = { orgUrl, id };
-    return id;
+    return (await loadBotIdentity(orgUrl)).id;
   } catch (err) {
-    console.error(`[AzureDevOps] Error resolving bot identity:`, err);
+    console.error(`[AzureDevOps] Failed to resolve bot identity:`, err);
     return null;
   }
 }
 
+/**
+ * Sign-in name (usually the email) of the identity that owns the PAT, from
+ * `_apis/connectionData` (`authenticatedUser.properties.Account.$value`),
+ * cached per org. Work-item payloads carry people as the string
+ * `"Display Name <unique@name>"` with no GUID, so this is what identifies the
+ * bot in `System.AssignedTo`. Returns null when it cannot be resolved.
+ */
+export async function resolveAzureDevOpsBotUniqueName(
+  orgBaseUrl: string | null | undefined,
+): Promise<string | null> {
+  const orgUrl = credentialedOrgUrl(orgBaseUrl);
+  if (!orgUrl) return null;
+  try {
+    return (await loadBotIdentity(orgUrl)).uniqueName;
+  } catch (err) {
+    console.error(`[AzureDevOps] Failed to resolve bot sign-in name:`, err);
+    return null;
+  }
+}
+
+/**
+ * Both bot identifiers in one lookup, for work-item handlers. Unlike the
+ * helpers above, a failed request throws AzureDevOpsLookupError instead of
+ * degrading to null, so a transient outage makes the delivery retryable.
+ */
+export async function resolveAzureDevOpsBotIdentity(
+  orgBaseUrl: string | null | undefined,
+): Promise<BotIdentity> {
+  const fromEnv = process.env.AZURE_DEVOPS_BOT_ID?.trim() || null;
+  const orgUrl = credentialedOrgUrl(orgBaseUrl);
+  if (!orgUrl) return { id: fromEnv, uniqueName: null };
+  const identity = await loadBotIdentity(orgUrl);
+  return { id: fromEnv ?? identity.id, uniqueName: identity.uniqueName };
+}
+
 /** Reset the cached bot identity (tests, config reloads). */
 export function resetAzureDevOpsBotIdCache(): void {
-  cachedBotId = null;
+  cachedBotIdentity = null;
 }
 
 /**

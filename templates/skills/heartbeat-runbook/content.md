@@ -26,6 +26,8 @@ Two kinds of sections:
 - Never arm a defer chain to re-check a tracked item. The next heartbeat already checks it. Defer only for work no scheduled pass owns.
 - Incident detail goes to memory: `memory-store` at `swarm` scope, one line of pointer stays in the runbook.
 - At or over the cap: prune before you add, or instead of adding.
+- Identify an item by its full leading text (marker, number, title), never by its number alone. Numbers repeat after pruning, so "delete item 278" can hit two items.
+- A summary line that each sweep regenerates (a section header, a count) is a digest of the previous session. When it disagrees with an item, the item wins. Never cite the header as state.
 
 ## Handle a heartbeat-checklist task
 

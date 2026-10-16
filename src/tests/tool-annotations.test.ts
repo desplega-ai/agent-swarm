@@ -116,7 +116,6 @@ describe("Tool Annotations & Classification", () => {
       "delete-config",
       "delete-workflow",
       "delete-page",
-      "unregister-service",
       "slack-delete",
       "slack-archive-channel",
     ];
@@ -135,7 +134,6 @@ describe("Tool Annotations & Classification", () => {
       "get-tasks",
       "get-config",
       "list-channels",
-      "list-services",
       "list-schedules",
       "list-config",
       "memory-get",
@@ -350,7 +348,7 @@ describe("Tool Annotations & Classification", () => {
     expect(missing).toEqual([]);
   });
 
-  test("service tools are all deferred", () => {
+  test("the removed PM2 service registry tools stay gone", () => {
     const serviceTools = [
       "register-service",
       "unregister-service",
@@ -358,7 +356,8 @@ describe("Tool Annotations & Classification", () => {
       "update-service-status",
     ];
     for (const tool of serviceTools) {
-      expect(DEFERRED_TOOLS.has(tool)).toBe(true);
+      expect(DEFERRED_TOOLS.has(tool)).toBe(false);
+      expect(tools[tool]).toBeUndefined();
     }
   });
 
@@ -376,9 +375,10 @@ describe("Tool Annotations & Classification", () => {
     // We expect all tools to be registered when all capabilities are enabled
     // (this suite forces ALL_CAPABILITIES, including default-disabled ones).
     // Includes 11 skill tools, 7 MCP server tools, reusable script tools, and the
-    // native Kapso/WhatsApp tools (register/unregister number + send/reply message).
+    // native Kapso/WhatsApp tools (register/unregister number + send/reply message),
+    // and the six Chat SDK tools (chat-* + register/unregister-chat-channel).
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(157);
+    expect(count).toBeLessThanOrEqual(163);
   });
 
   test("core tools are fewer than deferred tools", () => {

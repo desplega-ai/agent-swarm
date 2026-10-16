@@ -806,7 +806,7 @@ class ClaudeManagedSession implements ProviderSession {
 export class ClaudeManagedAdapter implements ProviderAdapter {
   readonly name = "claude-managed";
   // Anthropic's cloud sandbox calls back into our /mcp endpoint, but the worker
-  // process is a thin SSE relay — no /workspace, no PM2, no agent-fs, no skills FS.
+  // process is a thin SSE relay — no /workspace, no agent-fs, no skills FS.
   readonly traits: ProviderTraits = {
     hasMcp: true,
     hasToolSearch: false,

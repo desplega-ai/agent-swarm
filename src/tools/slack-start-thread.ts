@@ -4,6 +4,7 @@ import { getAgentById, getTaskById, recordSlackMessage } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
+import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -54,6 +55,11 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
       const app = getSlackApp();
       if (!app) {
         return toolErr("Slack not configured.");
+      }
+
+      const blockReason = await getChannelBlockReason(app.client, channelId);
+      if (blockReason) {
+        return toolErr(externalChannelToolError(channelId, blockReason));
       }
 
       try {

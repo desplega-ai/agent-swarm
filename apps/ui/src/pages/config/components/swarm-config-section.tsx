@@ -34,6 +34,7 @@ export function SwarmConfigSection() {
     agentMap,
     dialogOpen,
     setDialogOpen,
+    dialogSession,
     editEntry,
     deleteTarget,
     setDeleteTarget,
@@ -102,6 +103,23 @@ export function SwarmConfigSection() {
             return <span className="font-mono text-muted-foreground">••••••••</span>;
           }
           return <span className="font-mono truncate select-text">{cfg.value}</span>;
+        },
+      },
+      {
+        field: "exportToEnv",
+        headerName: "Agent env",
+        width: 120,
+        minWidth: 100,
+        cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
+          const cfg = params.data;
+          if (!cfg) return null;
+          return cfg.exportToEnv ? (
+            <span className="text-muted-foreground">exported</span>
+          ) : (
+            <Badge variant="outline" size="tag">
+              server-only
+            </Badge>
+          );
         },
       },
       {
@@ -211,10 +229,14 @@ export function SwarmConfigSection() {
         config={detailEntry}
         onOpenChange={(open) => !open && setDetailEntry(null)}
         agentName={detailEntry?.scopeId ? agentMap.get(detailEntry.scopeId) : undefined}
+        onEdit={(entry) => {
+          setDetailEntry(null);
+          handleEdit(entry);
+        }}
       />
 
       <ConfigEntryDialog
-        key={editEntry?.id ?? "new"}
+        key={`${editEntry?.id ?? "new"}:${dialogSession}`}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editEntry={editEntry}

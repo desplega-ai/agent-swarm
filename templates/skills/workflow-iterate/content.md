@@ -173,6 +173,44 @@ Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the ke
 - Do not set `retry` or `validation.retry` on a `system-one-decision` node. It retries connection errors, 408, 429, and 5xx itself (`config.maxRetries`, 0 to 3, default 2) inside `config.timeoutMs` (default 30000). A 401, a 422, or an answer that fails validation ends after one attempt.
 - The node reads its provider's key (`TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `LAYA_API_KEY`, `OPENAI_DECISIONS_API_KEY`, or `CLOUDFLARE_API_TOKEN`, plus `LAYA_URL` for `laya` and `CLOUDFLARE_ACCOUNT_ID` for `cloudflare`) server-side. The key never appears in the definition, the step output, or an error. A run whose key or `LAYA_URL` is missing fails before any node executes, and a 401 or 403 fails the step as `<KEY> was rejected`. An unresolved `{{token}}` fails the step before any request.
 
+#### Jev images (direct TypeSafe API)
+
+`system-one-decision` cannot send images today: its strict config has no `assets` field, its wire sends only `state`, `model`, and `questions`, and it does not send the image opt-in header. A URL or base64 string in `state` stays text. Use a `swarm-script` calling `POST https://api.typesafe.ai/v1/systemone` with the credential kept server-side until the node supports assets.
+
+- Send `TypeSafe-Danger-Zone-Images: true`. Both `jev-1.13.0` and `jev-1.14.0` accept images; Box questions require 1.14. Pin the model you tested.
+- Upload PNG or JPEG bytes, not a URL. Prefer multipart: first part `request` is the JSON with content type `application/json`; an asset such as `assets[uuid] = { type: "image", part: "photo-file" }` names its file part. For JSON-only calls, use the base64 shape below: standard padded base64, no whitespace or `data:` prefix.
+- Each image must be still, at most 16 MiB decoded, 256–1568 pixels on each side, and 78,400–2,458,624 pixels total (256×256 is too small). Request body, all processed images together, and the expanded request each have a 32 MiB limit. Limits reject the whole request; the API does not resize. Rotate pixels upright before sending because EXIF orientation is not applied.
+- Generate a fresh UUID reference per image. References are replaced wherever they occur in string values in `state`, `instructions`, or `criteria`; object keys are not replaced. Every asset must be referenced. Repeating the same reference inserts and bills another image copy.
+
+```json
+{
+  "model": "jev-1.13.0",
+  "state": { "photo": "d1369c6a-538e-4ab3-91cd-f76f2f67b651" },
+  "assets": {
+    "d1369c6a-538e-4ab3-91cd-f76f2f67b651": {
+      "type": "image", "format": "png", "data_base64": "<encoded PNG bytes>"
+    }
+  },
+  "questions": {
+    "ready": { "type": "noul", "instructions": "Is the product in `photo` fully assembled?" }
+  }
+}
+```
+
+Measured 2026-10-15 on `jev-1.13.0`, using an 850×850 RGB PNG with a red square on white. Cost is the complete request's `usage.input_tokens × $0.042 / 1,000,000`; output is free:
+
+| Placement | Questions | Input tokens | Request cost (USD) |
+|---|---:|---:|---:|
+| Once in `state` | 1 | 2,273 | $0.000095466 |
+| Once in `state`, questions use the `photo` path | 2 | 2,289 | $0.000096138 |
+| Twice in `state` | 1 | 4,237 | $0.000177954 |
+| Once in each question's `instructions` | 2 | 4,203 | $0.000176526 |
+| Once in `state`, resized to 425×425 | 1 | 863 | $0.000036246 |
+
+The roughly $0.0001 claim (about 10,000 one-image requests per dollar) holds for this example; the exact cost depends on image size and prompt. **Question count alone does not multiply a shared state image's tokens.** Put shared images in `state` once and have questions use its field path, not the asset UUID. Image duplication scales with repeated references, including one copy per question when embedded in each question's instructions. If several judgments form one classification, a single `choice` can avoid repeating question-local images. Downscale when the detail permits: halving both dimensions reduced this request's billed tokens from 2,273 to 863; recheck accuracy on your images.
+
+Contract and current pricing: [TypeSafe images](https://docs.typesafe.ai/images), [models](https://docs.typesafe.ai/models). Re-measure before budgeting a different model, resolution, or prompt.
+
 ### `human-in-the-loop` (how approvals render)
 
 The same rules apply to a standalone `request-human-input` call.

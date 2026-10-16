@@ -12,6 +12,9 @@ import { fileURLToPath } from "node:url";
 const TIMEOUT_MS = 5_000;
 
 function extractorPath(): string {
+  if (process.env.SCRIPT_RUNTIME_DIR) {
+    return `${process.env.SCRIPT_RUNTIME_DIR}/extract-args-schema.bundle.js`;
+  }
   return fileURLToPath(new URL("../../scripts-runtime/extract-args-schema.ts", import.meta.url));
 }
 
@@ -30,6 +33,7 @@ export async function extractArgsJsonSchema(source: string): Promise<string | nu
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         HOME: process.env.HOME ?? "/tmp",
         TMPDIR: tmpdir,
+        SCRIPT_RUNTIME_DIR: process.env.SCRIPT_RUNTIME_DIR,
         SWARM_SCHEMA_SOURCE_FILE: sourceFile,
         SWARM_SCHEMA_RESULT_FILE: resultFile,
         SWARM_SCHEMA_TMPDIR: tmpdir,

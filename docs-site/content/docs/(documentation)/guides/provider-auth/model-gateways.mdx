@@ -29,6 +29,25 @@ There is no per-vendor gateway adapter in Agent Swarm, and adding one is not req
 
 For the standard harness credentials, model defaults, and Docker examples, see [Harness Configuration](/docs/guides/harness-configuration). For the contributor-facing adapter contract, see [Harness Providers](/docs/guides/harness-providers).
 
+## Vercel AI Gateway (Token Pass)
+
+OpenCode and pi-mono accept `AI_GATEWAY_API_KEY` natively. Use a [Token Pass API key](https://vercel.com/docs/ai-gateway/token-pass/getting-started) for Token Pass credit, or a regular AI Gateway key for usage billed to your AI Gateway balance.
+
+```bash
+HARNESS_PROVIDER=pi # or opencode
+AI_GATEWAY_API_KEY=<your-token-pass-api-key>
+MODEL_OVERRIDE=vercel/zai/glm-5.3
+# Any AI Gateway chat model works: vercel/moonshotai/kimi-k3, vercel/anthropic/claude-sonnet-4.6, ...
+```
+
+The `vercel/` prefix selects the harness provider; the full gateway model ID follows it. The model pickers list every AI Gateway chat model from the model catalog. Embedding, reranking, image and video models are left out because the harnesses cannot run them as agents.
+
+The endpoint is fixed. pi uses OpenAI Chat Completions at `https://ai-gateway.vercel.sh/v1`, and OpenCode uses its built-in AI Gateway provider. There is no `VERCEL_BASE_URL` override: when one is set, it is ignored with a warning, and a hand-written `providers.vercel` block in pi's `models.json` is pointed back at that URL. Both adapters generate their configuration per task.
+
+[Token Pass routing](https://vercel.com/docs/ai-gateway/token-pass/models-and-routing) automatically selects the `token-pass` provider for featured models when you supply a Token Pass key. No extra header or provider option is required. OIDC cannot spend Token Pass credit. When credit runs out, requests fail rather than falling back to paid usage. Token Pass includes ZDR; regional inference is opt-in through gateway request options or team settings, with no region header. This entry does not pin a region.
+
+The existing onboarding Vercel preset is for embeddings and uses the same API base URL. Token Pass keys cannot use embedding models, so keep a regular key for that preset.
+
 ## OpenRouter
 
 OpenCode and pi-mono have first-class OpenRouter support in the stock image. Both use the same key and the same model slug after the harness-specific prefix.
@@ -239,7 +258,7 @@ OPENROUTER_BASE_URL=https://gateway.example.com/v1
 MODEL_OVERRIDE=openrouter/qwen/qwen3-coder-flash
 ```
 
-The adapter writes `provider.openrouter.options.baseURL` into its per-task OpenCode config. It also mirrors the resolved value into the spawned OpenCode process environment so the bundled summarize plugin uses the same gateway instead of calling openrouter.ai directly.
+The adapter writes `provider.openrouter.options.baseURL` into its per-task OpenCode config. The session summary runs in the worker with the same per-task env, so it uses the same gateway instead of calling openrouter.ai directly.
 
 ### pi-mono through a gateway
 
@@ -250,7 +269,7 @@ OPENROUTER_BASE_URL=https://gateway.example.com/v1
 MODEL_OVERRIDE=openrouter/moonshotai/kimi-k2.5
 ```
 
-The adapter writes the override to pi-mono's `~/.pi/agent/models.json` before its per-session model runtime loads. Clearing the variable reverts that file to whatever it held before the swarm wrote the override.
+Each pi session loads its own copy of pi-mono's `~/.pi/agent/models.json` with the override added, so concurrent tasks with different gateways never share one. The adapter never writes `~/.pi/agent/models.json` itself, and clearing the variable takes the override out of the next session. A gateway that an earlier version wrote into that file is left out of sessions that run without the variable.
 
 `OPENROUTER_BASE_URL` does not affect Claude Code, Codex, Devin, or Claude Managed Agents. Claude Code uses `ANTHROPIC_BASE_URL` instead ([above](#claude-code-through-a-gateway-or-cloud-provider)). It also cannot adapt a Responses-only gateway into the chat-completions shape expected by these OpenRouter-backed paths.
 
@@ -281,7 +300,7 @@ MODEL_OVERRIDE=openrouter/anthropic/claude-opus-4.7
 Two details differ from OrcaRouter's own OpenCode and pi guides, which configure a dedicated `orcarouter` provider entry in `opencode.json` / `models.json`:
 
 - **Keep the `openrouter/` harness prefix.** Agent Swarm reuses the harness's built-in OpenRouter provider and redirects it, rather than registering a second provider. `MODEL_OVERRIDE` is therefore `openrouter/` followed by the full OrcaRouter model ID — including that ID's own provider prefix. OrcaRouter's routing alias becomes `openrouter/orcarouter/auto`.
-- **Do not hand-edit the harness config files.** Both adapters generate their gateway configuration per task from `OPENROUTER_BASE_URL`; a manual `opencode.json` or `~/.pi/agent/models.json` provider block is not the supported path here and the pi-mono adapter actively manages its own override in that file.
+- **Do not hand-edit the harness config files.** Both adapters generate their gateway configuration per task from `OPENROUTER_BASE_URL`; a manual `opencode.json` or `~/.pi/agent/models.json` provider block is not the supported path here, and `OPENROUTER_BASE_URL` wins over a hand-written OpenRouter `baseUrl`.
 
 <Callout type="info">
   These OrcaRouter values are taken from its public documentation

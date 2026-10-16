@@ -147258,7 +147258,7 @@
         "cost": {
           "input": 2,
           "output": 10,
-          "cache_read": 0.2,
+          "cache_read": 0.1,
           "cache_write": 2.5
         },
         "limit": {
@@ -314158,23 +314158,59 @@
     "name": "NaN",
     "doc": "https://nan.builders/docs/models",
     "models": {
-      "qwen3.6": {
-        "id": "qwen3.6",
-        "name": "Qwen3.6 35B-A3B",
-        "description": "Open multimodal Qwen MoE for local agents that need vision, audio, and code",
+      "qwen-image-2.1": {
+        "id": "qwen-image-2.1",
+        "name": "Qwen-Image-2.1",
+        "description": "Unified text-to-image generation and image editing model with native RGBA transparency and reference-image editing",
         "family": "qwen",
+        "attachment": false,
+        "reasoning": false,
+        "tool_call": false,
+        "temperature": true,
+        "release_date": "2026-09-14",
+        "last_updated": "2026-09-21",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "image"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 8192,
+          "output": 0
+        },
+        "cost": {
+          "input": 0,
+          "output": 0
+        },
+        "canonical_model_id": "alibaba/qwen-image-2.1"
+      },
+      "glm5.3-flash": {
+        "id": "glm5.3-flash",
+        "name": "GLM-5.3-Flash",
+        "description": "Native multimodal GLM model for efficient coding and long-horizon agent tasks",
+        "family": "glm-flash",
         "attachment": true,
         "reasoning": true,
         "reasoning_options": [
           {
-            "type": "toggle"
+            "type": "effort",
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "max"
+            ]
           }
         ],
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-04-17",
-        "last_updated": "2026-04-17",
+        "release_date": "2026-08-26",
+        "last_updated": "2026-08-26",
         "modalities": {
           "input": [
             "text",
@@ -314186,76 +314222,14 @@
         },
         "open_weights": true,
         "limit": {
-          "context": 262144,
-          "output": 65536
-        },
-        "cost": {
-          "input": 0,
-          "output": 0
-        }
-      },
-      "deepseek-v4-flash": {
-        "id": "deepseek-v4-flash",
-        "name": "DeepSeek V4 Flash",
-        "description": "Fast DeepSeek V4 lane for economical reasoning, coding, and long-context work",
-        "family": "deepseek-flash",
-        "attachment": false,
-        "reasoning": true,
-        "reasoning_options": [],
-        "tool_call": true,
-        "structured_output": true,
-        "temperature": true,
-        "knowledge": "2025-05",
-        "release_date": "2026-04-24",
-        "last_updated": "2026-04-24",
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "open_weights": true,
-        "limit": {
           "context": 1000000,
-          "output": 384000
-        },
-        "cost": {
-          "input": 0,
-          "output": 0
-        }
-      },
-      "glm5.2": {
-        "id": "glm5.2",
-        "name": "GLM-5.2",
-        "description": "Open flagship GLM for long-horizon coding agents, served at 500K context on the NaN premium tier",
-        "family": "glm",
-        "attachment": false,
-        "reasoning": true,
-        "reasoning_options": [],
-        "tool_call": true,
-        "structured_output": true,
-        "temperature": true,
-        "release_date": "2026-06-13",
-        "last_updated": "2026-06-13",
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "open_weights": true,
-        "limit": {
-          "context": 500000,
           "output": 131072
         },
         "cost": {
           "input": 0,
           "output": 0
-        }
+        },
+        "canonical_model_id": "zhipuai/glm-5.3-flash"
       },
       "gemma4": {
         "id": "gemma4",
@@ -314266,7 +314240,14 @@
         "reasoning": true,
         "reasoning_options": [
           {
-            "type": "toggle"
+            "type": "effort",
+            "values": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "max"
+            ]
           }
         ],
         "tool_call": true,
@@ -314291,7 +314272,85 @@
         "cost": {
           "input": 0,
           "output": 0
-        }
+        },
+        "canonical_model_id": "google/gemma-4-26b-a4b-it"
+      },
+      "qwen3.6": {
+        "id": "qwen3.6",
+        "name": "Qwen3.6 35B-A3B",
+        "description": "Open multimodal Qwen MoE for local agents that need vision, audio, and code",
+        "family": "qwen",
+        "attachment": true,
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "max"
+            ]
+          }
+        ],
+        "tool_call": true,
+        "structured_output": true,
+        "temperature": true,
+        "release_date": "2026-04-17",
+        "last_updated": "2026-04-17",
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 262144,
+          "output": 65536
+        },
+        "cost": {
+          "input": 0,
+          "output": 0
+        },
+        "canonical_model_id": "alibaba/qwen3.6-35b-a3b"
+      },
+      "mimo-v2.6-flash": {
+        "id": "mimo-v2.6-flash",
+        "name": "MiMo-V2.6-Flash",
+        "description": "MiMo Flash model for multimodal coding agents and long-context automation",
+        "family": "mimo",
+        "attachment": true,
+        "reasoning": true,
+        "reasoning_options": [],
+        "tool_call": true,
+        "temperature": true,
+        "release_date": "2026-09-22",
+        "last_updated": "2026-09-22",
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "audio"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 1048576,
+          "output": 131072
+        },
+        "cost": {
+          "input": 0,
+          "output": 0
+        },
+        "canonical_model_id": "xiaomi/mimo-v2.6-flash"
       },
       "qwen3.8-flash": {
         "id": "qwen3.8-flash",
@@ -314322,21 +314381,65 @@
         "cost": {
           "input": 0,
           "output": 0
-        }
+        },
+        "canonical_model_id": "alibaba/qwen3.8-flash"
       },
-      "glm5.3-flash": {
-        "id": "glm5.3-flash",
-        "name": "GLM-5.3-Flash",
-        "description": "Native multimodal GLM model for efficient coding and long-horizon agent tasks",
+      "glm5.3": {
+        "id": "glm5.3",
+        "name": "GLM-5.3",
+        "description": "Flagship GLM model for long-horizon coding, agents, and complex project delivery",
         "family": "glm",
+        "attachment": false,
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "max"
+            ]
+          }
+        ],
+        "tool_call": true,
+        "structured_output": true,
+        "temperature": true,
+        "release_date": "2026-08-14",
+        "last_updated": "2026-08-14",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 1000000,
+          "output": 131072
+        },
+        "cost": {
+          "input": 0,
+          "output": 0
+        },
+        "canonical_model_id": "zhipuai/glm-5.3"
+      },
+      "deepseek-v4-flash": {
+        "id": "deepseek-v4-flash",
+        "name": "DeepSeek V4.1 Flash",
+        "description": "DeepSeek V4.1 Flash model for reasoning and agentic coding",
+        "family": "deepseek-flash",
         "attachment": true,
         "reasoning": true,
         "reasoning_options": [],
         "tool_call": true,
         "structured_output": true,
         "temperature": true,
-        "release_date": "2026-08-26",
-        "last_updated": "2026-08-26",
+        "knowledge": "2025-05",
+        "release_date": "2026-09-10",
+        "last_updated": "2026-09-10",
         "modalities": {
           "input": [
             "text",
@@ -314346,9 +314449,41 @@
             "text"
           ]
         },
-        "open_weights": false,
+        "open_weights": true,
         "limit": {
           "context": 1000000,
+          "output": 384000
+        },
+        "cost": {
+          "input": 0,
+          "output": 0
+        },
+        "canonical_model_id": "deepseek/deepseek-v4.1-flash"
+      },
+      "glm5.2": {
+        "id": "glm5.2",
+        "name": "GLM-5.2",
+        "description": "Open flagship GLM for long-horizon coding agents, served at 500K context on the NaN premium tier",
+        "family": "glm",
+        "attachment": false,
+        "reasoning": true,
+        "reasoning_options": [],
+        "tool_call": true,
+        "structured_output": true,
+        "temperature": true,
+        "release_date": "2026-06-13",
+        "last_updated": "2026-06-13",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 500000,
           "output": 131072
         },
         "cost": {

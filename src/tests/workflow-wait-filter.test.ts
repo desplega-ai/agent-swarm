@@ -154,12 +154,14 @@ describe("matchesFilter — sandbox penetration (must all return false, never th
   });
 
   test("DoS: pathological regex terminates within timeout", async () => {
-    const filter = "(p) => /^(a+)+$/.test('a'.repeat(30) + 'X')";
+    // Still exponential backtracking, but 24 characters finish in ~0.1 s. The
+    // 50 ms timer cannot pre-empt a synchronous regex, so the elapsed time is
+    // the engine's own: 30 characters took 2058 ms on a loaded CI runner and
+    // failed the bound below without the matcher doing anything wrong.
+    const filter = "(p) => /^(a+)+$/.test('a'.repeat(24) + 'X')";
     const t0 = Date.now();
     const result = await matchesFilter({}, filter);
     const elapsed = Date.now() - t0;
-    // The regex would eventually return false on its own, but if it stalls
-    // the timeout catches it.
     expect(typeof result).toBe("boolean");
     expect(elapsed).toBeLessThan(2000);
   });

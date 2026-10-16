@@ -115,7 +115,7 @@ services:
       "
 
   agent-fs:
-    image: ghcr.io/desplega-ai/agent-fs:0.16.0
+    image: ghcr.io/desplega-ai/agent-fs:0.16.3
     platform: linux/amd64
     pull_policy: always
     depends_on:
@@ -730,7 +730,7 @@ services:
       # task routing (free-form strings allowed). This is distinct from the API
       # server's CAPABILITIES env, which gates which MCP tool groups the server
       # registers (see DEPLOYMENT.md).
-      - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,epics,memory,content-writing
+      - CAPABILITIES=core,task-pool,messaging,profiles,scheduling,epics,memory,content-writing
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
@@ -788,7 +788,7 @@ services:
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-reviewer
-      - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,epics,memory,content-review
+      - CAPABILITIES=core,task-pool,messaging,profiles,scheduling,epics,memory,content-review
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
@@ -846,7 +846,7 @@ services:
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-strategist
-      - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,epics,memory,content-strategy
+      - CAPABILITIES=core,task-pool,messaging,profiles,scheduling,epics,memory,content-strategy
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
@@ -904,7 +904,7 @@ services:
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/ux-principles
-      - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,memory,ux-analysis
+      - CAPABILITIES=core,task-pool,messaging,profiles,scheduling,memory,ux-analysis
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
@@ -962,7 +962,7 @@ services:
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/discoverability-optimizer
-      - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,memory,seo,aeo,discoverability
+      - CAPABILITIES=core,task-pool,messaging,profiles,scheduling,memory,seo,aeo,discoverability
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013

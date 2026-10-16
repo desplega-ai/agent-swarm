@@ -50,7 +50,7 @@ jobs:
 
       - name: Upload contract results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-e2e-contract
           path: out/
@@ -102,7 +102,7 @@ jobs:
       - name: Install pinned dsh
         if: matrix.provider == 'dsh'
         run: |
-          npm install --ignore-scripts --global --prefix "$RUNNER_TEMP/dsh" @deepseek-ai/dsh@0.2.1-alpha.2
+          npm install --ignore-scripts --global --prefix "$RUNNER_TEMP/dsh" @deepseek-ai/dsh@0.2.1-alpha.4
           "$RUNNER_TEMP/dsh/bin/dsh" --version
           echo "DSH_BINARY=$RUNNER_TEMP/dsh/bin/dsh" >> "$GITHUB_ENV"
 
@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload harness results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-e2e-${{ matrix.leg }}
           path: out/
@@ -164,7 +164,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Download job results
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: nightly-e2e-*
           path: results
@@ -198,7 +198,7 @@ jobs:
           cat nightly-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-e2e-report
           path: |

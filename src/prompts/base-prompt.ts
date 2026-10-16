@@ -8,11 +8,15 @@
  *   E          outputs (gated on AGENT_FS_API_URL and the pages capability)
  *   H          deployment-gated notes: slack, steering
  *   I          tools and skills (harness tool discovery, skills, MCP server names)
- *   J          agent notes: CLAUDE.md for codex, opencode, pi, only when edited
- *   K          repository (per task)
+ *   J          agent notes: CLAUDE.md, only when edited
  *
- * The runner appends the requester profile, the operator SYSTEM_PROMPT, and a
- * cwd warning after this.
+ * The runner appends the operator SYSTEM_PROMPT after this.
+ *
+ * Nothing here may vary per task, requester, or session: the provider caches
+ * the system prompt as a prefix, and one changed byte re-bills everything
+ * after it. Per-task context (repository, scripts-only Slack, requester
+ * profile, cwd warning) goes into the task prompt instead; see
+ * `getTaskContextPrompt` and the runner's `buildTaskSessionPrompts`.
  */
 
 import type { ProviderTraits } from "../providers/types";
@@ -44,13 +48,28 @@ const BOOTSTRAP_TOTAL_MAX_CHARS = 120_000;
 
 /**
  * Per-section cap applied to the *repo* CLAUDE.md when it is inlined (opencode
- * only). The agent-swarm OSS one is ~18 KB and the biggest volatile component
- * of the system prompt.
+ * only). The agent-swarm OSS one is ~18 KB and the biggest piece of the task
+ * context.
  */
 const REPO_CLAUDE_MD_MAX_CHARS = 12_000;
 
-/** Providers that do not load the agent's CLAUDE.md natively. Claude does. */
-const CLAUDE_MD_INJECT_PROVIDERS: ReadonlySet<string> = new Set(["codex", "opencode", "pi"]);
+/**
+ * Providers that get the agent's CLAUDE.md in the system prompt. Claude also
+ * keeps the editable copy at ~/.claude/CLAUDE.md but excludes it from its
+ * memory load (claude-flag-settings.ts), so it is read once, from the cached
+ * system prompt instead of an uncached message.
+ */
+const CLAUDE_MD_INJECT_PROVIDERS: ReadonlySet<string> = new Set([
+  "claude",
+  "codex",
+  "opencode",
+  "pi",
+]);
+
+/** Where each provider's editable CLAUDE.md lives, for the truncation notice. */
+function claudeMdSourcePath(provider: string): string {
+  return provider === "claude" ? "~/.claude/CLAUDE.md" : "/workspace/CLAUDE.md";
+}
 
 /** Providers that get the repo CLAUDE.md inlined until native loading is verified. */
 const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"]);
@@ -95,36 +114,61 @@ export type BasePromptArgs = {
   soulMd?: string;
   identityMd?: string;
   claudeMd?: string;
-  repoContext?: {
-    claudeMd?: string | null;
-    clonePath: string;
-    warning?: string | null;
-    autoStashes?: { ref: string; message: string }[];
-    guidelines?: {
-      prChecks: string[];
-      mergeChecks: string[];
-      allowMerge?: boolean;
-      review: string[];
-    } | null;
-  };
-  /** Slack context from the current task, if present */
-  slackContext?: { channelId: string; threadTs?: string };
   /** Pre-fetched skill summaries for the tools and skills section */
   skillsSummary?: { name: string; description: string }[];
   /** Names of the MCP servers connected for this agent */
   mcpServers?: string[];
 };
 
-export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
-  const { role, agentId, traits } = args;
+export type RepoContext = {
+  claudeMd?: string | null;
+  clonePath: string;
+  warning?: string | null;
+  autoStashes?: { ref: string; message: string }[];
+  guidelines?: {
+    prChecks: string[];
+    mergeChecks: string[];
+    allowMerge?: boolean;
+    review: string[];
+  } | null;
+};
+
+export type SlackTaskContext = { channelId: string; threadTs?: string };
+
+/** Inputs for the per-task context that rides in the task prompt. */
+export type TaskContextPromptArgs = Pick<
+  BasePromptArgs,
+  "role" | "traits" | "provider" | "scriptsOnly" | "serverCapabilities"
+> & {
+  repoContext?: RepoContext;
+  /** Slack context from the current task, if present */
+  slackContext?: SlackTaskContext;
+};
+
+function promptFlags(args: Pick<BasePromptArgs, "traits" | "provider" | "scriptsOnly">) {
   const {
     hasMcp = true,
     hasToolSearch = false,
     hasLocalEnvironment: hasLocalEnv = true,
     nativeSkillDiscovery = true,
-  } = traits ?? {};
+  } = args.traits ?? {};
+  const scriptsOnly = args.scriptsOnly ?? process.env.SCRIPTS_ONLY_MCP === "true";
+  return {
+    hasMcp,
+    hasToolSearch,
+    hasLocalEnv,
+    nativeSkillDiscovery,
+    provider: args.provider ?? "claude",
+    // Experimental scripts-only MCP surface (code-mode).
+    scriptsOnlyMode: hasMcp && scriptsOnly,
+  };
+}
+
+export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
+  const { role, agentId, traits } = args;
+  const { hasMcp, hasToolSearch, hasLocalEnv, nativeSkillDiscovery, provider, scriptsOnlyMode } =
+    promptFlags(args);
   const steerModes = traits?.steerModes ?? [];
-  const provider = args.provider ?? "claude";
 
   const defaultsInput = {
     name: args.name ?? agentId,
@@ -168,8 +212,6 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // Experimental scripts-only MCP surface (code-mode): named swarm tools are
   // not registered, so tell the agent everything goes through script-run.
-  const scriptsOnly = args.scriptsOnly ?? process.env.SCRIPTS_ONLY_MCP === "true";
-  const scriptsOnlyMode = hasMcp && scriptsOnly;
   if (scriptsOnlyMode) {
     const scriptsOnlyResult = await resolveTemplateAsync("system.agent.scripts_only_mode", {});
     prompt += `\n${scriptsOnlyResult.text}`;
@@ -197,13 +239,6 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const slackPromptToolsEnabled = areSlackPromptToolsEnabled(process.env, args.serverCapabilities);
   if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode) {
     const slackResult = await resolveTemplateAsync("system.agent.slack", {});
-    prompt += slackResult.text;
-  }
-  if (role !== "lead" && args.slackContext && scriptsOnlyMode && slackPromptToolsEnabled) {
-    const slackResult = await resolveTemplateAsync("system.agent.scripts_only_mode.slack", {
-      slackChannelId: args.slackContext.channelId,
-      slackThreadTs: args.slackContext.threadTs ?? "",
-    });
     prompt += slackResult.text;
   }
 
@@ -244,9 +279,9 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += toolsResult.text;
   }
 
-  // J. Agent notes (CLAUDE.md). Claude loads ~/.claude/CLAUDE.md and
-  // /workspace/CLAUDE.md natively; the others get it here, and only when it
-  // differs from the generated default.
+  // J. Agent notes (CLAUDE.md), only when it differs from the generated
+  // default. Claude excludes both ~/.claude/CLAUDE.md and /workspace/CLAUDE.md
+  // from its memory load (claude-flag-settings.ts), so this is its only copy.
   if (
     hasLocalEnv &&
     args.claudeMd &&
@@ -257,10 +292,42 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       BOOTSTRAP_MAX_CHARS,
       Math.max(0, BOOTSTRAP_TOTAL_MAX_CHARS - prompt.length),
     );
-    prompt += truncateSection(args.claudeMd, "## Your notes (CLAUDE.md)", "CLAUDE.md", budget);
+    prompt += truncateSection(
+      args.claudeMd,
+      "## Your notes (CLAUDE.md)",
+      claudeMdSourcePath(provider),
+      budget,
+    );
   }
 
-  // K. Repository (per task). Never truncated except the inlined repo CLAUDE.md.
+  // Blocks start and end with a newline; collapse the seams to one blank line.
+  return prompt.replace(/\n{3,}/g, "\n\n");
+};
+
+/**
+ * Per-task context that used to close the system prompt: the repository block
+ * and the scripts-only Slack note. It rides in the task prompt so the system
+ * prompt stays byte-identical across an agent's sessions. Empty when the task
+ * has neither.
+ */
+export const getTaskContextPrompt = async (args: TaskContextPromptArgs): Promise<string> => {
+  const { hasMcp, hasLocalEnv, provider, scriptsOnlyMode } = promptFlags(args);
+  let prompt = "";
+
+  if (
+    args.role !== "lead" &&
+    args.slackContext &&
+    scriptsOnlyMode &&
+    areSlackPromptToolsEnabled(process.env, args.serverCapabilities)
+  ) {
+    const slackResult = await resolveTemplateAsync("system.agent.scripts_only_mode.slack", {
+      slackChannelId: args.slackContext.channelId,
+      slackThreadTs: args.slackContext.threadTs ?? "",
+    });
+    prompt += slackResult.text;
+  }
+
+  // Repository. Never truncated except the inlined repo CLAUDE.md.
   if (args.repoContext) {
     const repoResult = await resolveTemplateAsync(
       "system.agent.repository",
@@ -269,8 +336,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += repoResult.text;
   }
 
-  // Blocks start and end with a newline; collapse the seams to one blank line.
-  return prompt.replace(/\n{3,}/g, "\n\n");
+  return prompt.replace(/\n{3,}/g, "\n\n").trim();
 };
 
 /**
@@ -331,7 +397,7 @@ function renderToolsAndSkillsVars(input: {
  * the heading lives in the template, the per-task pieces are built here.
  */
 function renderRepositoryVars(
-  repo: NonNullable<BasePromptArgs["repoContext"]>,
+  repo: RepoContext,
   ctx: { hasMcp: boolean; hasLocalEnv: boolean; provider: string },
 ): Record<string, string> {
   const vars: Record<string, string> = {
@@ -432,7 +498,7 @@ export function truncateRepoClaudeMd(content: string, clonePath: string, budget:
 function truncateSection(
   content: string | undefined,
   header: string,
-  fileName: string,
+  sourcePath: string,
   budget: number,
 ): string {
   if (!content || budget <= 0) return "";
@@ -441,7 +507,7 @@ function truncateSection(
   if (fullSection.length <= budget) return fullSection;
 
   const headerStr = `\n\n${header}\n\n`;
-  const notice = `\n\n[...truncated, see /workspace/${fileName} for full content]\n`;
+  const notice = `\n\n[...truncated, see ${sourcePath} for full content]\n`;
   const contentBudget = budget - headerStr.length - notice.length;
 
   if (contentBudget > 0) {

@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { openAICompatibleKeyVars } from "@desplega/model-catalog";
 import {
   clearVolatileSecretsForTesting,
+  createValueScrubber,
   isSensitiveKey,
   refreshSecretScrubberCache,
+  registerEnvSecrets,
   registerSensitiveKeyName,
   registerVolatileSecret,
+  SCRUBBER_RULES_VERSION,
   scrubObject,
   scrubSecrets,
   unregisterVolatileSecret,
@@ -75,6 +79,33 @@ describe("scrubSecrets — env-based replacement", () => {
     refreshSecretScrubberCache();
     const out = scrubSecrets("key=example-supersecretFooApiKey_longerthan12chars tail");
     expect(out).toBe("key=[REDACTED:FOO_SERVICE_API_KEY] tail");
+  });
+
+  test("redacts NaN and Helmcode keys, including the suffix-less HELMCODE_API_NAN alias", () => {
+    const values = {
+      NAN_API_KEY: `example-nan-${randomToken(24)}`,
+      HELMCODE_API_NAN: `example-nanalias-${randomToken(24)}`,
+      HELMCODE_API_KEY: `example-helm-${randomToken(24)}`,
+    };
+    for (const [name, value] of Object.entries(values)) process.env[name] = value;
+    refreshSecretScrubberCache();
+    for (const [name, value] of Object.entries(values)) {
+      expect(isSensitiveKey(name)).toBe(true);
+      expect(scrubSecrets(`Bearer ${value} tail`)).toBe(`Bearer [REDACTED:${name}] tail`);
+    }
+  });
+
+  test("the registry key vars are pinned to SCRUBBER_RULES_VERSION", () => {
+    // Every registry key var is an exact sensitive key, so a new registry
+    // entry changes the rules: bump SCRUBBER_RULES_VERSION (the boot sweep
+    // re-redacts stored rows once per version), then update this pin.
+    expect({
+      version: SCRUBBER_RULES_VERSION,
+      keyVars: [...openAICompatibleKeyVars()].sort(),
+    }).toEqual({
+      version: 8,
+      keyVars: ["AI_GATEWAY_API_KEY", "HELMCODE_API_KEY", "HELMCODE_API_NAN", "NAN_API_KEY"],
+    });
   });
 
   test("redacts any key with _TOKEN suffix", () => {
@@ -388,6 +419,23 @@ describe("registerVolatileSecret", () => {
     const out = scrubSecrets(`key=${secret}`);
     expect(out).toBe("key=[REDACTED:RUNTIME_TOKEN]");
     expect(out).not.toContain(secret);
+  });
+
+  test("registerEnvSecrets covers a per-task env that never reached process.env", () => {
+    const picked = `opaque${randomToken(20)}`;
+    const member = `opaque${randomToken(20)}`;
+    const env = {
+      HELMCODE_API_KEY: picked,
+      HELMCODE_API_NAN: `${member},opaque${randomToken(20)}`,
+      HELMCODE_BASE_URL: "http://127.0.0.1:9/v1",
+    };
+    expect(process.env.HELMCODE_API_KEY).not.toBe(picked);
+    expect(scrubSecrets(`echo ${picked}`)).toContain(picked);
+    registerEnvSecrets(env);
+    expect(scrubSecrets(`echo ${picked}`)).toBe("echo [REDACTED:HELMCODE_API_KEY]");
+    expect(scrubSecrets(`echo ${member}`)).toBe("echo [REDACTED:HELMCODE_API_NAN]");
+    // A non-secret key stays readable.
+    expect(scrubSecrets("http://127.0.0.1:9/v1")).toBe("http://127.0.0.1:9/v1");
   });
 
   test("ignores values shorter than the minimum length", () => {
@@ -888,4 +936,42 @@ describe("scrubSecrets — over-redaction guards", () => {
     },
     { retry: 2 },
   );
+});
+
+describe("createValueScrubber (per-run exact values)", () => {
+  test("redacts values under the global floor without registering them swarm-wide", () => {
+    const short = randomToken(5);
+    const scrub = createValueScrubber([{ value: short, name: "config:SHORT" }]);
+    expect(scrub.text(`got ${short}!`)).toBe("got [REDACTED:config:SHORT]!");
+    expect(scrubSecrets(`got ${short}!`)).toBe(`got ${short}!`);
+  });
+
+  test("a one-char value is redacted everywhere in the run's output", () => {
+    const scrub = createValueScrubber([{ value: "x", name: "config:ONE" }]);
+    expect(scrub.text("x+x")).toBe("[REDACTED:config:ONE]+[REDACTED:config:ONE]");
+  });
+
+  test("one pass, longest first: a marker is never rewritten by another value", () => {
+    const scrub = createValueScrubber([
+      { value: "RED", name: "config:A" },
+      { value: "REDACT", name: "config:B" },
+    ]);
+    expect(scrub.text("RED REDACT")).toBe("[REDACTED:config:A] [REDACTED:config:B]");
+  });
+
+  test("covers JSON-escaped forms, object keys and nested values", () => {
+    const value = 'a"b';
+    const scrub = createValueScrubber([{ value, name: "config:Q" }]);
+    expect(scrub.text(JSON.stringify({ v: value }))).toBe('{"v":"[REDACTED:config:Q]"}');
+    expect(scrub.object({ [value]: [value, 1, null] })).toEqual({
+      "[REDACTED:config:Q]": ["[REDACTED:config:Q]", 1, null],
+    });
+  });
+
+  test("no values and empty values are a no-op", () => {
+    const scrub = createValueScrubber([{ value: "", name: "config:EMPTY" }]);
+    expect(scrub.text("unchanged")).toBe("unchanged");
+    const obj = { a: 1 };
+    expect(scrub.object(obj)).toBe(obj);
+  });
 });

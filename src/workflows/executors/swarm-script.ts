@@ -127,6 +127,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
       mcpBaseUrl: getMcpBaseUrl(),
       egressSecrets: credentials.egressSecrets,
       failedBindings: credentials.failedBindings,
+      userConfig: credentials.userConfig,
       apiConnections: getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
       timeoutMs: config.timeoutMs,

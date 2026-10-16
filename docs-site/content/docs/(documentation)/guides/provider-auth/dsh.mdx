@@ -1,0 +1,54 @@
+---
+title: DeepSeek Harness (dsh)
+description: Configure DeepSeek Harness workers, choose the DeepSeek or OpenRouter route, and avoid the tier-default routing trap
+---
+
+`dsh` workers run DeepSeek's `@deepseek-ai/dsh` CLI in headless JSON mode. The
+worker image already includes it. This page covers the current route and model
+selection behavior; see [Harness Providers](/docs/guides/harness-providers)
+for adapter internals.
+
+## Configure the worker
+
+```bash
+HARNESS_PROVIDER=dsh
+DEEPSEEK_API_KEY=...
+```
+
+`DSH_BINARY` optionally selects another trusted `dsh` executable. The worker
+accepts either `DEEPSEEK_API_KEY` or `OPENROUTER_API_KEY` at startup, but the
+selected model decides which key a run needs.
+
+## Pick the route
+
+| Model format | Route | Required key |
+|---|---|---|
+| `openrouter/<id>` | OpenRouter | `OPENROUTER_API_KEY` |
+| Bare bundled dsh id, such as `deepseek-v4-flash` or `deepseek-v4-pro` | DeepSeek API | `DEEPSEEK_API_KEY` |
+
+The prefix is the route selector. A DeepSeek key does not turn an
+`openrouter/...` model into a direct DeepSeek request.
+
+## Use the DeepSeek API for tiered tasks
+
+Every built-in dsh tier currently defaults to `openrouter/...`; `ultra` even
+defaults to an Anthropic model. A worker with only `DEEPSEEK_API_KEY` therefore
+passes its credential check but a tiered task needs OpenRouter. Set a worker
+tier map to use DeepSeek directly:
+
+```bash
+MODEL_TIER_MAP='{"smol":"deepseek-v4-flash","regular":"deepseek-v4-flash","smart":"deepseek-v4-pro","ultra":"deepseek-v4-pro"}'
+```
+
+For an untiered task, set `MODEL_OVERRIDE=deepseek-v4-flash` (or another bare
+DeepSeek id). A task carrying `modelTier` resolves its tier before
+`MODEL_OVERRIDE`, so use `MODEL_TIER_MAP` for tiered work.
+
+## Runtime behavior
+
+- Reasoning effort is passed to dsh when the selected model supports it.
+- The adapter inserts the swarm MCP client for each task. Tool names appear as
+  `mcp__agent-swarm__<tool>`.
+- dsh currently has no live steering and no native session resume.
+- dsh reports step token usage, not billed USD. The swarm prices the usage from
+  its dsh pricing rows and derives context from each step's token counts.

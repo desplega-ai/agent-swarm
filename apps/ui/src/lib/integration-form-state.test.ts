@@ -24,6 +24,7 @@ function row(key: string, value: string, isSecret = false): SwarmConfig {
     createdAt: "2026-10-02T00:00:00.000Z",
     lastUpdatedAt: "2026-10-02T00:00:00.000Z",
     encrypted: false,
+    exportToEnv: true,
   };
 }
 

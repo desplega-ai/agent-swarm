@@ -255,13 +255,28 @@ describe("vendored OpenAPI", () => {
           new Date().toISOString(),
           new Bun.CryptoHasher("sha256").update(migration117).digest("hex"),
         );
+      // 213 rebuilds script_connections with post-117 columns, so it must wait for 117 too.
+      const migration213 = readFileSync(
+        "src/be/migrations/213_script_connections_sql.sql",
+        "utf-8",
+      );
+      database
+        .prepare(
+          "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          213,
+          "213_script_connections_sql",
+          new Date().toISOString(),
+          new Bun.CryptoHasher("sha256").update(migration213).digest("hex"),
+        );
       runMigrations(database);
       database
         .query(
           "INSERT INTO script_connections (id, slug, kind, openapi_spec_json) VALUES (?, ?, ?, ?)",
         )
         .run("legacy-row", "legacy", "openapi", "{}");
-      database.run("DELETE FROM _migrations WHERE version = 117");
+      database.run("DELETE FROM _migrations WHERE version IN (117, 213)");
       runMigrations(database);
       expect(
         database.query<{ id: string }, []>("SELECT id FROM script_connections").get()?.id,

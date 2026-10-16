@@ -16,14 +16,16 @@
  * (original pages set — unchanged), Table, Form, Badge (swarm-apps), the
  * layout + interactivity tier: Stack, Grid, Split, Divider, Tabs, SearchInput,
  * Select, Markdown, plus the router tier: Drawer, DetailList, and the Kibo-based
- * data blocks: Kanban, Calendar, ContributionGraph.
- * Action set: `swarm.sdk`, `swarm.call` (original) plus `app.mutate`,
- * `app.refresh`, `app.action`, `app.navigate` (swarm-apps; the pages renderer
- * registers inert stubs).
+ * data blocks: Kanban, Calendar, ContributionGraph, plus the status /
+ * feedback set: Icon, Progress, EmptyState, CopyButton, Kbd, Skeleton,
+ * Spinner, AvatarStack, Section, Chips.
+ * Action set: `swarm.sdk`, `swarm.call` (original), `ui.toast` (both
+ * surfaces) plus `app.mutate`, `app.refresh`, `app.action`, `app.navigate`
+ * (swarm-apps; the pages renderer registers inert stubs).
  *
  * State roots the catalog owns: `/queries/<name>` (runtime), `/forms/<id>`
  * (Form), `/actions/<name>` (runtime), `/ui/<id>` — the interactivity root
- * written by `SearchInput` / `Select` (`/ui/<id>/value`) and `Tabs`
+ * written by `SearchInput` / `Select` / `Chips` (`/ui/<id>/value`) and `Tabs`
  * (`/ui/<id>/tab`), which Table's `search` / `filters` bind back to — and
  * `/route` (runtime): the current router state `{ page, params }`.
  */
@@ -34,6 +36,7 @@ import { z } from "zod";
 // Relative (not `@/`) so `scripts/generate-catalog-schema.ts` can run under plain
 // `bun run` — bun does not resolve the vite alias from tsconfig.app.json.
 import { SWARM_SDK_METHODS, type SwarmSdkMethod } from "../swarm-sdk";
+import { ICON_NAMES } from "./icon-names";
 
 // ─── Action schemas (also exported for the discovery endpoint mirror) ───────
 
@@ -80,6 +83,38 @@ export const appActionActionSchema = z.object({
 });
 
 /**
+ * One step of an action chain. Mirrors `@json-render/core`'s `ActionBinding`
+ * but stays loose on `params` because Table/Form resolve the scoped `$row` /
+ * `$form` expressions themselves before handing the binding to
+ * `ActionProvider.execute` (see `action-params.ts` for why json-render's own
+ * `$item` cannot be used here). Declared up here because `ui.toast`'s
+ * `undo.actions` nests a chain.
+ */
+const actionChainSchema = z.array(
+  z.object({
+    action: z.string(),
+    params: z.record(z.string(), z.unknown()).optional(),
+  }),
+);
+
+/**
+ * `ui.toast` — show a sonner toast. `undo.actions` is a chain run when the
+ * viewer presses the toast's Undo button, through the same handlers as any
+ * other chain (so `app.mutate` / `app.action` work there).
+ */
+export const uiToastActionSchema = z.object({
+  message: z.string(),
+  description: z.string().optional(),
+  tone: z.enum(["success", "error", "info", "warning"]).optional(),
+  undo: z
+    .object({
+      label: z.string().optional(),
+      actions: actionChainSchema,
+    })
+    .optional(),
+});
+
+/**
  * `app.navigate` — client-side router navigation to another page of the same
  * app (`/apps/:id/p/<page>?<params>`). `params` REPLACE the current route
  * params wholesale (no merging); values may be `$row` / `$form` sentinels when
@@ -99,6 +134,15 @@ export const appNavigateActionSchema = z.object({
  * this token and app JSON in the wild binds to it.
  */
 const spacing = z.enum(["none", "xs", "sm", "md", "lg", "xl"]);
+
+/** The curated lucide set (`./icon-names`). Every `icon` prop takes one of these. */
+const iconName = z.enum(ICON_NAMES);
+
+/**
+ * A single-key shortcut ("/", "n", "?"). Pressing it anywhere on the page
+ * (outside text fields, without Ctrl/Cmd/Alt) triggers the control.
+ */
+const shortcutKey = z.string().min(1).max(12);
 
 export type SpacingToken = z.infer<typeof spacing>;
 
@@ -120,6 +164,12 @@ const stackProps = z.object({
    * button rows should set it so they don't crush on phones.
    */
   collapseBelow: z.enum(["sm", "md", "lg"]).optional(),
+  /**
+   * Entrance motion for the direct children, first mount only. `rise`
+   * (default) fades them in and lifts them 4px, staggered; `fade` is opacity
+   * only; `none` turns it off.
+   */
+  motion: z.enum(["rise", "fade", "none"]).optional(),
 });
 
 /** Grid tracks are capped at 6 — beyond that a page is a table, not a layout. */
@@ -161,6 +211,9 @@ const dividerProps = z.object({
 const tabsTabSchema = z.object({
   key: z.string(),
   label: z.string().optional(),
+  icon: iconName.optional(),
+  /** Small count pill after the label; a literal or a bound number. */
+  count: z.number().optional(),
 });
 
 const tabsProps = z.object({
@@ -168,6 +221,8 @@ const tabsProps = z.object({
   id: z.string(),
   tabs: z.array(tabsTabSchema).min(1),
   defaultTab: z.string().optional(),
+  /** `line` (default) is the tab strip; `segmented` is a compact segmented control. */
+  variant: z.enum(["line", "segmented"]).optional(),
 });
 
 const searchInputProps = z.object({
@@ -175,11 +230,34 @@ const searchInputProps = z.object({
   id: z.string(),
   placeholder: z.string().optional(),
   label: z.string().optional(),
+  /** Key that focuses the field (usually "/"); shown as a keycap hint. */
+  shortcut: shortcutKey.optional(),
+});
+
+const chipOptionSchema = z.union([
+  z.string(),
+  z.object({ value: z.string(), label: z.string().optional(), icon: iconName.optional() }),
+]);
+
+const chipsProps = z.object({
+  /** State id — the selection lands at `/ui/<id>/value`. */
+  id: z.string(),
+  options: z.array(chipOptionSchema).min(1),
+  /** Several chips at once: the value is a string array instead of one string. */
+  multiple: z.boolean().optional(),
+  /** Accessible name of the chip group. */
+  label: z.string().optional(),
 });
 
 const selectOptionSchema = z.union([
   z.string(),
-  z.object({ value: z.string(), label: z.string().optional() }),
+  z.object({
+    value: z.string(),
+    label: z.string().optional(),
+    icon: iconName.optional(),
+    /** Secondary text, right-aligned in the option row (e.g. a role). */
+    hint: z.string().optional(),
+  }),
 ]);
 
 const selectProps = z.object({
@@ -189,6 +267,12 @@ const selectProps = z.object({
   placeholder: z.string().optional(),
   label: z.string().optional(),
   clearable: z.boolean().optional(),
+  /** Type-to-filter list. On by default once there are more than 8 options. */
+  searchable: z.boolean().optional(),
+  /** Pick several: the value is a string array instead of one string. */
+  multiple: z.boolean().optional(),
+  /** Placeholder of the filter field when the list is searchable. */
+  searchPlaceholder: z.string().optional(),
 });
 
 const markdownProps = z.object({
@@ -224,19 +308,40 @@ const buttonProps = z.object({
    * the same name.
    */
   busyWith: z.string().optional(),
+  icon: iconName.optional(),
+  /** Which side of the label the icon sits on. Defaults to `start`. */
+  iconPosition: z.enum(["start", "end"]).optional(),
+  /** Shown next to the check for ~1.5s after the `busyWith` action finishes ok. */
+  successLabel: z.string().optional(),
+  size: z.enum(["sm", "default", "lg"]).optional(),
+  /** Single key that presses the button; rendered as a keycap inside it. */
+  shortcut: shortcutKey.optional(),
+  /** Tooltip shown on hover and focus. */
+  hint: z.string().optional(),
 });
 
-const metricProps = z.object({
+/** Metric trend: an arrow plus toned text (up = success, down = error, flat = muted). */
+const metricTrendSchema = z.object({
+  direction: z.enum(["up", "down", "flat"]),
   label: z.string(),
-  value: z.union([z.string(), z.number()]),
-  /** Usually `{ "$state": "/queries/<name>/loading" }` — skeleton while true. */
-  loading: z.boolean().optional(),
 });
 
 const alertProps = z.object({
   message: z.string(),
   tone: z.enum(["info", "success", "warning", "error"]).optional(),
   title: z.string().optional(),
+  /** Overrides the tone's default icon. */
+  icon: iconName.optional(),
+  /** Renders a button inside the callout that emits the element's `press` event. */
+  actionLabel: z.string().optional(),
+});
+
+const iconProps = z.object({
+  name: iconName,
+  size: z.enum(["sm", "md", "lg"]).optional(),
+  tone: z.enum(["default", "muted", "success", "warning", "error", "info"]).optional(),
+  /** Accessible name. Without it the icon is decorative (hidden from screen readers). */
+  label: z.string().optional(),
 });
 
 /** Status-pill tones map onto the dashboard's semantic status tokens. */
@@ -256,21 +361,94 @@ export type BadgeTone = (typeof BADGE_TONES)[number];
 const badgeProps = z.object({
   text: z.union([z.string(), z.number()]),
   tone: z.enum(BADGE_TONES).optional(),
+  icon: iconName.optional(),
+  /**
+   * A lifecycle value (pending, in_progress, completed, failed, ...) renders
+   * the dashboard status chip with its icon; any other value falls back to
+   * the toned pill.
+   */
+  status: z.string().optional(),
+  /** `tag` (default) uppercase chip, `status` sentence-case pill, `count` numeric pill, `beta` BETA tag. */
+  variant: z.enum(["tag", "status", "count", "beta"]).optional(),
+  /** Tooltip shown on hover. */
+  hint: z.string().optional(),
 });
 
-/**
- * A single action dispatch inside a `rowActions` / `onSubmit` chain. Mirrors
- * `@json-render/core`'s `ActionBinding` but stays loose on `params` because
- * Table/Form resolve the scoped `$row` / `$form` expressions themselves before
- * handing the binding to `ActionProvider.execute` (see `action-params.ts` for
- * why json-render's own `$item` cannot be used here).
- */
-const actionChainSchema = z.array(
-  z.object({
-    action: z.string(),
-    params: z.record(z.string(), z.unknown()).optional(),
-  }),
-);
+const metricProps = z.object({
+  label: z.string(),
+  value: z.union([z.string(), z.number()]),
+  /** Usually `{ "$state": "/queries/<name>/loading" }` — skeleton while true. */
+  loading: z.boolean().optional(),
+  icon: iconName.optional(),
+  /** Tints the icon tile. */
+  tone: z.enum(BADGE_TONES).optional(),
+  /** A short line under the value. */
+  detail: z.string().optional(),
+  /** One-sentence explanation in an info tooltip next to the label. */
+  info: z.string().optional(),
+  trend: metricTrendSchema.optional(),
+});
+
+const progressProps = z.object({
+  value: z.number(),
+  /** The value that means 100%. Defaults to 100. */
+  max: z.number().positive().optional(),
+  /** Bar color. Ignored by `ring`, which always draws the done arc. */
+  tone: z.enum(BADGE_TONES).optional(),
+  label: z.string().optional(),
+  variant: z.enum(["bar", "ring"]).optional(),
+  /** Show the percent (bar) or `value / max` (ring). Defaults to true. */
+  showValue: z.boolean().optional(),
+});
+
+const emptyStateProps = z.object({
+  icon: iconName.optional(),
+  title: z.string(),
+  body: z.string().optional(),
+  /** Renders a button that emits the element's `press` event. */
+  actionLabel: z.string().optional(),
+});
+
+const copyButtonProps = z.object({
+  value: z.union([z.string(), z.number()]),
+  /** Visible text. Without it the button is icon-only. */
+  label: z.string().optional(),
+});
+
+const kbdProps = z.object({
+  keys: z.array(z.string()).min(1),
+});
+
+const skeletonProps = z.object({
+  shape: z.enum(["line", "block", "rows", "metric", "card"]),
+  /** How many lines, rows or tiles. */
+  count: z.number().int().min(1).max(20).optional(),
+  /** Block height in pixels (`block` only). */
+  height: z.number().int().min(8).max(800).optional(),
+});
+
+const spinnerProps = z.object({
+  variant: z.enum(["ring", "ellipsis", "bars"]).optional(),
+  size: z.enum(["sm", "md"]).optional(),
+  /** Visible text next to the spinner, also its accessible name. */
+  label: z.string().optional(),
+});
+
+const avatarStackProps = z.object({
+  /** Display names; each becomes an initials avatar. */
+  users: z.array(z.string()),
+  /** Avatars shown before the `+N` overflow count. Defaults to 4. */
+  max: z.number().int().min(1).max(20).optional(),
+});
+
+const sectionProps = z.object({
+  title: z.string(),
+  description: z.string().optional(),
+  /** Fold the body under a toggle header. */
+  collapsible: z.boolean().optional(),
+  /** Initial open state for a collapsible section. Defaults to true. */
+  defaultOpen: z.boolean().optional(),
+});
 
 const tableColumnSchema = z.object({
   key: z.string(),
@@ -280,12 +458,47 @@ const tableColumnSchema = z.object({
    * `string` / `enum` are accepted aliases of `text` — agents naturally mirror
    * the MODEL column kinds here, and a mirrored kind must never reject a page.
    */
-  kind: z.enum(["text", "string", "number", "boolean", "date", "badge", "enum"]).optional(),
-  /** For `kind: "badge"` — cell value → badge tone. Falls back to `neutral`. */
+  kind: z
+    .enum([
+      "text",
+      "string",
+      "number",
+      "boolean",
+      "date",
+      "badge",
+      "enum",
+      "status",
+      "user",
+      "agent",
+      "relative",
+      "duration",
+      "progress",
+      "copy",
+      "switch",
+      "link",
+    ])
+    .optional(),
+  /** For `kind: "badge"` / `"status"` — cell value → tone. Falls back to `neutral`. */
   tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
   width: z.number().optional(),
   /** Pin the column to an edge so it survives horizontal scroll (id, actions). */
   pinned: z.enum(["left", "right"]).optional(),
+  /** Cell alignment. Numbers, durations and progress default to `end`. */
+  align: z.enum(["start", "end"]).optional(),
+  /** `middle` keeps both ends of long ids and paths visible. Defaults to `end`. */
+  truncate: z.enum(["end", "middle"]).optional(),
+  /** Icon in the column header. */
+  icon: iconName.optional(),
+  /** Row field shown as a hover tooltip on the cell. */
+  tooltip: z.string().optional(),
+  /** For `kind: "progress"` — the value that means 100%. Defaults to 100. */
+  max: z.number().positive().optional(),
+  /**
+   * For `kind: "switch"` — chain run when the switch is flipped. `$row` is the
+   * row with this column already set to the new value. Omit it and the switch
+   * is read-only.
+   */
+  onChange: actionChainSchema.optional(),
 });
 
 /** Copy overrides for a row action's `AlertDialog` confirmation step. */
@@ -319,6 +532,9 @@ const tableRowActionSchema = z.object({
     .optional(),
   /** Action chain run per row; params may reference `$row` / `$rowIndex`. */
   actions: actionChainSchema,
+  icon: iconName.optional(),
+  /** `menu` moves the action into the row's "More" menu. Defaults to `inline`. */
+  placement: z.enum(["inline", "menu"]).optional(),
 });
 
 const tableProps = z.object({
@@ -341,7 +557,18 @@ const tableProps = z.object({
    * Usually `{ "<column>": { "$state": "/ui/<selectId>/value" } }`.
    */
   filters: z
-    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]).nullable())
+    .record(
+      z.string(),
+      z
+        .union([
+          z.string(),
+          z.number(),
+          z.boolean(),
+          // "Cell is one of" — what a multiple `Chips` writes. Empty = filter off.
+          z.array(z.union([z.string(), z.number(), z.boolean()])),
+        ])
+        .nullable(),
+    )
     .optional(),
   /**
    * Page the grid instead of one endless scroll region. Defaults to
@@ -350,6 +577,38 @@ const tableProps = z.object({
   pagination: z.boolean().optional(),
   /** Row density — `compact` tightens row height for dense readouts. */
   density: z.enum(["comfortable", "compact"]).optional(),
+  /** Row field holding the stable row id. Defaults to `id`. */
+  rowId: z.string().optional(),
+  /** Chain run when a row is clicked; params may reference `$row` / `$rowIndex`. */
+  onRowClick: actionChainSchema.optional(),
+  /**
+   * Id of the row to highlight, usually the open Drawer's route param
+   * (`{ "$state": "/route/params/<param>" }`).
+   */
+  selectedId: z.union([z.string(), z.number()]).nullish(),
+  /**
+   * Phone layout (below 768px). `list` renders one card row per record;
+   * `scroll` keeps the grid with horizontal scroll. Defaults to `list`, or to
+   * `scroll` when the table has row actions but no `onRowClick`.
+   */
+  mobile: z.enum(["list", "scroll"]).optional(),
+  /** Which columns fill the phone row. Defaults to the first text and status columns. */
+  mobileFields: z
+    .object({
+      title: z.string(),
+      subtitle: z.string().optional(),
+      meta: z.union([z.string(), z.array(z.string())]).optional(),
+      status: z.string().optional(),
+    })
+    .optional(),
+  /** Shown instead of the grid when there are no rows. Overrides `emptyMessage`. */
+  emptyState: z
+    .object({
+      icon: iconName.optional(),
+      title: z.string(),
+      body: z.string().optional(),
+    })
+    .optional(),
 });
 
 const formFieldSchema = z.object({
@@ -388,6 +647,13 @@ const drawerProps = z.object({
   description: z.string().optional(),
   side: z.enum(["right", "left"]).optional(),
   size: z.enum(["sm", "md", "lg", "xl"]).optional(),
+  /**
+   * Buttons in a sticky footer. Same shape and confirm rules as Table
+   * `rowActions` (destructive variants confirm; an `app.mutate` delete always
+   * confirms), minus `placement`. Chains have no `$row`; read the open record
+   * with `$state` (e.g. `/route/params/<param>`).
+   */
+  actions: z.array(tableRowActionSchema.omit({ placement: true })).optional(),
 });
 
 const detailListFieldSchema = z.object({
@@ -400,8 +666,24 @@ const detailListFieldSchema = z.object({
    * smart relative time; `string`/`enum` are aliases of `text`), plus `code`
    * for a monospace block (raw JSON / provenance values).
    */
-  kind: z.enum(["text", "string", "number", "boolean", "date", "badge", "enum", "code"]).optional(),
-  /** For `kind: "badge"` — value → badge tone. Falls back to `neutral`. */
+  kind: z
+    .enum([
+      "text",
+      "string",
+      "number",
+      "boolean",
+      "date",
+      "badge",
+      "enum",
+      "code",
+      "status",
+      "user",
+      "relative",
+      "copy",
+      "json",
+    ])
+    .optional(),
+  /** For `kind: "badge"` / `"status"` — value → badge tone. Falls back to `neutral`. */
   tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
 });
 
@@ -506,6 +788,10 @@ export type SelectOption = z.infer<typeof selectOptionSchema>;
 export type DetailListField = z.infer<typeof detailListFieldSchema>;
 export type DrawerProps = z.infer<typeof drawerProps>;
 export type KanbanColumn = z.infer<typeof kanbanColumnSchema>;
+export type ChipOption = z.infer<typeof chipOptionSchema>;
+export type DrawerAction = NonNullable<z.infer<typeof drawerProps>["actions"]>[number];
+export type MetricTrend = z.infer<typeof metricTrendSchema>;
+export type UiToastParams = z.infer<typeof uiToastActionSchema>;
 
 // ─── Catalog ────────────────────────────────────────────────────────────────
 
@@ -523,7 +809,7 @@ export const swarmCatalogSpec = {
       props: stackProps,
       slots: ["default"],
       description:
-        "THE primary layout primitive — a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. For rows, set `collapseBelow` (sm|md|lg) so the row stacks vertically on narrow viewports — filter bars should always set it. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages.",
+        "THE primary layout primitive \u2014 a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. For rows, set `collapseBelow` (sm|md|lg) so the row stacks vertically on narrow viewports \u2014 filter bars should always set it. `motion` (rise|fade|none, default rise) is the entrance of the direct children on first paint: a 200ms fade plus a 4px rise, staggered 30ms; it never replays on data polls, nested Stacks inherit the parent's entrance, and reduced-motion viewers get a short fade. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages.",
     },
     Grid: {
       props: gridProps,
@@ -546,7 +832,7 @@ export const swarmCatalogSpec = {
       props: tabsProps,
       slots: ["default"],
       description:
-        'Tabbed sections. POSITIONAL children: children[i] is the body of tabs[i], so declare exactly as many children as tabs, in the same order. Only the active tab is visible but every child stays mounted, so polled Tables in background tabs keep their data warm. The active key is mirrored into state at `/ui/<id>/tab`, so other components can bind `{ "$state": "/ui/<id>/tab" }`. `defaultTab` picks the initial key (defaults to the first tab).',
+        'Tabbed sections. POSITIONAL children: children[i] is the body of tabs[i], so declare exactly as many children as tabs, in the same order. Only the active tab is visible but every child stays mounted, so polled Tables in background tabs keep their data warm. The active key is mirrored into state at `/ui/<id>/tab`, so other components can bind `{ "$state": "/ui/<id>/tab" }`. `defaultTab` picks the initial key (defaults to the first tab). Tab entries take an optional `icon` and `count` (a small count pill; a literal or a bound number). `variant: "segmented"` renders a compact segmented control instead of the tab strip (same state and warm panels).',
     },
     Container: {
       props: containerProps,
@@ -575,35 +861,88 @@ export const swarmCatalogSpec = {
     SearchInput: {
       props: searchInputProps,
       description:
-        'Free-text search box. Writes the debounced (~200ms) query into state at `/ui/<id>/value`; bind it into a Table with `"search": { "$state": "/ui/<id>/value" }`. Purely client-side — it filters rows the page already polled, it does not re-run the query.',
+        'Free-text search box. Writes the debounced (~200ms) query into state at `/ui/<id>/value`; bind it into a Table with `"search": { "$state": "/ui/<id>/value" }`. Purely client-side \u2014 it filters rows the page already polled, it does not re-run the query. `shortcut` (usually `"/"`) shows a keycap hint and focuses the field when pressed outside a text field.',
     },
     Select: {
       props: selectProps,
       description:
-        'Dropdown filter/picker. `options` are plain strings or `{ value, label }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button.',
+        'Dropdown filter/picker. `options` are plain strings or `{ value, label?, icon?, hint? }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button. `searchable` adds a type-to-filter field (on by default past 8 options; `searchPlaceholder` sets its hint). `multiple` picks several: the value is a string array (empty = nothing picked), which a Table filter reads as "cell is one of".',
     },
     Button: {
       props: buttonProps,
       description:
-        'Interactive button. Wire to actions via `on.press`. `variant: "destructive-outline"` is the canonical red-outlined destructive look (standalone deletes should use it, not solid red). `disabled` accepts a constant or a bound boolean; `busyWith: "<actionName>"` disables the button and shows a spinner while that custom action is running.',
+        'Interactive button. Wire to actions via `on.press`. `variant: "destructive-outline"` is the canonical red-outlined destructive look (standalone deletes should use it, not solid red). `disabled` accepts a constant or a bound boolean; `busyWith: "<actionName>"` swaps the label for a spinner (presses ignored) while that custom action is running, then shows a check plus `successLabel` for ~1.5s when it finishes ok. `icon` + `iconPosition` (start|end) add an icon from the curated set; `size` sm|default|lg. `shortcut` (one key, e.g. `"n"`) shows a keycap inside the button and presses it from anywhere on the page (not while typing in a field, not with Ctrl/Cmd/Alt). `hint` is a hover tooltip.',
     },
     Metric: {
       props: metricProps,
       description:
-        'Single label/value tile for status pages. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads.',
+        'Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: "up"|"down"|"flat", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash.',
     },
     Alert: {
       props: alertProps,
-      description: "Status-toned inline alert.",
+      description:
+        "Status-toned inline alert. `icon` overrides the tone's default icon. `actionLabel` adds a button inside the callout that emits the element's `press` event (wire it with `on.press`).",
     },
     Badge: {
       props: badgeProps,
-      description: "Status pill (uppercase tag chip) with a semantic tone.",
+      description:
+        "Small chip. `variant`: `tag` (default, the uppercase status chip with a tone dot), `status` (11px sentence-case pill with a dot or icon), `count` (compact rounded numeric pill), `beta` (the BETA tag; `hint` is its tooltip). `tone` is neutral|success|active|error|info|pending|warning|paused; `icon` replaces the dot. `status` takes a lifecycle value (pending, in_progress, completed, failed, cancelled, paused, ...) and renders the dashboard status chip with its icon and label \u2014 any other value falls back to a toned pill showing `text`. `hint` adds a hover tooltip.",
+    },
+    Icon: {
+      props: iconProps,
+      description:
+        "One icon from the curated lucide set (`plus`, `refresh-cw`, `search`, `filter`, `download`, `upload`, `external-link`, `copy`, `check`, `x`, `trash-2`, `pencil`, `eye`, `calendar`, `clock`, `user`, `users`, `bot`, `git-pull-request`, `git-branch`, `github`, `slack`, `mail`, `link`, `file-text`, `folder`, `database`, `zap`, `sparkles`, `flag`, `star`, `tag`, `alert-triangle`, `info`, `circle-check`, `trending-up`, `trending-down`, `dollar-sign`, `activity`, `rocket`). The same names work on every `icon` prop (Button, Badge, Metric, Alert, Tabs entries, Chips options, EmptyState, Table columns, row actions and Drawer actions). Decorative unless `label` is set. `size` sm|md|lg, `tone` default|muted|success|warning|error|info.",
+    },
+    Progress: {
+      props: progressProps,
+      description:
+        'Progress readout. `value` against `max` (default 100), usually bound to state. `variant: "bar"` (default) is a toned bar (`tone` neutral|success|active|error|info|pending|warning|paused) with an optional `label` above it; `"ring"` is the dashboard progress ring (done arc). `showValue` (default true) prints the percent (bar) or `value / max` (ring).',
+    },
+    EmptyState: {
+      props: emptyStateProps,
+      description:
+        "Centered empty state: `icon` (curated set, default inbox), `title`, optional `body`. `actionLabel` adds a button that emits the element's `press` event — wire it with `on.press` like a Button.",
+    },
+    CopyButton: {
+      props: copyButtonProps,
+      description:
+        "Copies `value` to the clipboard; the icon swaps to a check on copy. `label` is the visible text; without it the button is icon-only.",
+    },
+    Kbd: {
+      props: kbdProps,
+      description:
+        'Keycaps for a keyboard shortcut, one per entry in `keys` (e.g. `["⌘", "K"]`). Display only.',
+    },
+    Skeleton: {
+      props: skeletonProps,
+      description:
+        "Loading placeholder. `shape`: `line` (text lines), `block` (one box, `height` in px, default 128), `rows` (table-like rows), `metric` (stat tiles), `card` (a card sketch). `count` repeats lines, rows or tiles. Pair with `visible` on a query's `loading` state.",
+    },
+    Spinner: {
+      props: spinnerProps,
+      description:
+        'Inline busy indicator with `role=status`. `variant` ring|ellipsis|bars (default: the dashboard spinner), `size` sm|md, `label` shown next to it (and its accessible name; defaults to an sr-only "Loading").',
+    },
+    AvatarStack: {
+      props: avatarStackProps,
+      description:
+        "Overlapping initials avatars for `users` (display names), up to `max` (default 4) then a `+N` count; hover lists every name.",
+    },
+    Section: {
+      props: sectionProps,
+      slots: ["default"],
+      description:
+        "Titled section around its children: `title`, optional `description`. `collapsible` folds the body under a toggle header (`defaultOpen`, default true).",
+    },
+    Chips: {
+      props: chipsProps,
+      description:
+        'Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`. Writes the selection to `/ui/<id>/value`: one string or `null` (pressing the selected chip clears it), or with `multiple` a string array (empty = nothing picked). Bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }` — an array filter matches rows whose cell is one of the values. `label` names the group for screen readers.',
     },
     Table: {
       props: tableProps,
       description:
-        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height.',
+        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` (runs the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (http(s) URL, opens in a new tab). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon` and `tooltip` (a row field shown on hover). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu).',
     },
     Form: {
       props: formProps,
@@ -614,17 +953,17 @@ export const swarmCatalogSpec = {
       props: drawerProps,
       slots: ["default"],
       description:
-        'Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ "panel": { "$row": "id" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl width.',
+        'Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set \u2014 open it with `app.navigate` (e.g. a rowAction setting `{ "panel": { "$row": "id" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed \u2014 unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ "$state": "/route/params/<param>" }`.',
     },
     DetailList: {
       props: detailListProps,
       description:
-        'Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
+        'Read-only label/value detail view for ONE record. Bind `data` to a single row \u2014 usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `code` (monospace block) and `json` (collapsible JSON tree). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
     },
     Kanban: {
       props: kanbanProps,
       description:
-        'Kanban board: one card per row, grouped into `columns` by the row\'s `columnField`. Bind `data`/`loading` to a named query. `titleField` is the card title; `cardFields` add label/value lines with Table column kinds (badge tones, relative dates). Dragging a card to another column runs `onMove` with `$row` = the moved row, `columnField` already set to the new column — typically `[{ "action": "app.mutate", "params": { "model": "<m>", "op": "update", "rowId": { "$row": "id" }, "values": { "<columnField>": { "$row": "<columnField>" } } } }]`. Without `onMove` the board is read-only. `onCardClick` runs with `$row` (e.g. an `app.navigate` that opens a Drawer).',
+        'Kanban board: one card per row, grouped into `columns` by the row\'s `columnField`. Bind `data`/`loading` to a named query. `titleField` is the card title; `cardFields` add label/value lines with the DetailList field kinds (badge tones, status, user, relative, copy, ...). Dragging a card to another column runs `onMove` with `$row` = the moved row, `columnField` already set to the new column — typically `[{ "action": "app.mutate", "params": { "model": "<m>", "op": "update", "rowId": { "$row": "id" }, "values": { "<columnField>": { "$row": "<columnField>" } } } }]`. Without `onMove` the board is read-only. `onCardClick` runs with `$row` (e.g. an `app.navigate` that opens a Drawer).',
     },
     Calendar: {
       props: calendarProps,
@@ -655,6 +994,11 @@ export const swarmCatalogSpec = {
     "swarm.call": {
       params: swarmCallActionSchema,
       description: "Raw HTTP call to a swarm `/api/*` endpoint with the viewer's bearer.",
+    },
+    "ui.toast": {
+      params: uiToastActionSchema,
+      description:
+        'Show a toast: `message`, optional `description`, `tone` success|error|info|warning (default info). `undo: { label?, actions }` adds an Undo button (label defaults to "Undo") that runs `actions` as a chain — e.g. an `app.mutate` that restores the row a delete just removed.',
     },
     "app.mutate": {
       params: appMutateActionSchema,

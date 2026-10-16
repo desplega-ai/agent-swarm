@@ -10,7 +10,12 @@
 
 import { findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
-import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
+import {
+  findOrCreateUserByEmail,
+  findUserByEmail,
+  findUserByExternalId,
+  linkIdentity,
+} from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { azureDevOpsContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -36,7 +41,7 @@ type HandlerResult = { created: boolean; taskId?: string };
 const processedEvents = new Map<string, number>();
 const DEDUP_TTL_MS = 60_000;
 
-function isDuplicate(key: string): boolean {
+export function isDuplicate(key: string): boolean {
   const now = Date.now();
   // Cleanup expired
   for (const [k, ts] of processedEvents) {
@@ -49,7 +54,7 @@ function isDuplicate(key: string): boolean {
 
 // ── Helpers ──
 
-function escapeRegExp(value: string): string {
+export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -143,13 +148,15 @@ export function commentedPayloadOf(
   return { comment, pullRequest };
 }
 
-function warnMalformed(event: { eventType?: string; resourceVersion?: string } | null | undefined) {
+export function warnMalformed(
+  event: { eventType?: string; resourceVersion?: string } | null | undefined,
+) {
   console.warn(
     `[AzureDevOps] Ignoring ${event?.eventType} event with resourceVersion ${event?.resourceVersion ?? "unknown"}: required resource fields are missing`,
   );
 }
 
-async function findLeadAgent() {
+export async function findLeadAgent() {
   const agents = await getAllAgents();
   return (
     agents.find((a) => a.role === "lead" && a.status === "idle") ??
@@ -173,7 +180,7 @@ function externalIdOf(identity: AzureDevOpsIdentityRef): string {
  * linked identity (`uniqueName`) → email when `uniqueName` is one → unmapped
  * tracker entry for operator triage.
  */
-async function resolveAzureDevOpsSender(
+export async function resolveAzureDevOpsSender(
   identity: AzureDevOpsIdentityRef,
   sampleEventType: string,
   sampleContext: string,
@@ -192,6 +199,15 @@ async function resolveAzureDevOpsSender(
     return linked.id;
   }
 
+  await recordUnmappedIdentity(externalId, sampleEventType, sampleContext);
+  return undefined;
+}
+
+async function recordUnmappedIdentity(
+  externalId: string,
+  sampleEventType: string,
+  sampleContext: string,
+): Promise<void> {
   await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${externalId}:meta`,
@@ -204,14 +220,42 @@ async function resolveAzureDevOpsSender(
     expiresAt: Date.now() + UNMAPPED_TTL_MS,
   });
   await incrKv(UNMAPPED_NAMESPACE, `${externalId}:count`, 1);
-  return undefined;
+}
+
+/**
+ * Authorize an actor to trigger a task: a swarm user already linked to the
+ * identity (or owning its sign-in email), or a sign-in name listed in
+ * AZURE_DEVOPS_ALLOWED_ACTORS (comma-separated). Unlike
+ * `resolveAzureDevOpsSender` this never creates users for strangers. Returns
+ * the `users.id`, or null after recording the actor for operator triage.
+ */
+export async function authorizeAzureDevOpsActor(
+  identity: AzureDevOpsIdentityRef,
+  sampleEventType: string,
+  sampleContext: string,
+): Promise<string | null> {
+  const externalId = externalIdOf(identity);
+  const known =
+    (await findUserByExternalId("azure-devops", externalId)) ??
+    (externalId.includes("@") ? await findUserByEmail(externalId) : null);
+  if (known) return known.id;
+
+  const allowed = (process.env.AZURE_DEVOPS_ALLOWED_ACTORS ?? "")
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.includes(externalId.toLowerCase())) {
+    return (await resolveAzureDevOpsSender(identity, sampleEventType, sampleContext)) ?? null;
+  }
+  await recordUnmappedIdentity(externalId, sampleEventType, sampleContext);
+  return null;
 }
 
 /**
  * Render an Azure DevOps identity for agent-visible text: the resolved
  * canonical name or the explicit UNKNOWN sentinel.
  */
-async function renderAzureDevOpsIdentity(identity: AzureDevOpsIdentityRef): Promise<string> {
+export async function renderAzureDevOpsIdentity(identity: AzureDevOpsIdentityRef): Promise<string> {
   return renderIdentity(await resolveIdentity("azure-devops", externalIdOf(identity)));
 }
 

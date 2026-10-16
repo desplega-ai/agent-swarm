@@ -1,10 +1,11 @@
 import type { App } from "@slack/bolt";
-import type { ChatUpdateArguments } from "@slack/web-api";
+import type { ChatUpdateArguments, WebClient } from "@slack/web-api";
 import { cancelTask, getAgentById, getLeadAgent, getTaskById } from "../be/db";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
+import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
 import { ignoreSlackInbound, noteSlackInboundSideEffect } from "./inbound-dispatch";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
@@ -13,6 +14,22 @@ type ChatUpdatePayload = ChatUpdateArguments & {
   unfurl_links: false;
   unfurl_media: false;
 };
+
+async function postExternalChannelNotice(
+  client: WebClient,
+  channelId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: EXTERNAL_CHANNEL_BLOCKED_REPLY,
+    });
+  } catch (error) {
+    console.error("[Slack] Failed to post external channel notice:", error);
+  }
+}
 
 export function registerActionHandlers(app: App): void {
   // "View Full Logs" — URL button, just ack (Slack opens the link automatically)
@@ -30,6 +47,12 @@ export function registerActionHandlers(app: App): void {
 
     const triggerId = "trigger_id" in body ? body.trigger_id : undefined;
     if (!triggerId) return;
+
+    const channelId = "channel" in body ? body.channel?.id : undefined;
+    if (channelId && (await shouldBlockChannel(client, channelId))) {
+      await postExternalChannelNotice(client, channelId, body.user.id);
+      return ignoreSlackInbound("external_channel");
+    }
 
     try {
       await client.views.open({
@@ -76,6 +99,11 @@ export function registerActionHandlers(app: App): void {
     const originalTask = await getTaskById(taskId);
     if (!originalTask || !originalTask.slackChannelId) {
       return ignoreSlackInbound("follow_up_target_missing");
+    }
+
+    if (await shouldBlockChannel(client, originalTask.slackChannelId)) {
+      await postExternalChannelNotice(client, originalTask.slackChannelId, body.user.id);
+      return ignoreSlackInbound("external_channel");
     }
 
     const lead = await getLeadAgent();

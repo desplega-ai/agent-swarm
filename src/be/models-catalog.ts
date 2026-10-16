@@ -1,3 +1,4 @@
+import { openAICompatibleProviderIds, registryCatalogSections } from "@desplega/model-catalog";
 import { loadModelsDevCache, type ModelsDevCache, type ModelsDevModel } from "./modelsdev-cache";
 
 /**
@@ -15,13 +16,18 @@ import { loadModelsDevCache, type ModelsDevCache, type ModelsDevModel } from "./
  * same snapshot as its own fallback while the request is in flight.
  */
 
-/** Mirrors the provider groups used by the direct harness and ACP model pickers. */
+/**
+ * Mirrors the provider groups used by the direct harness and ACP model
+ * pickers, plus every OpenAI-compatible registry provider
+ * (`@desplega/model-catalog`).
+ */
 export const CATALOG_PROVIDER_IDS = [
   "openrouter",
   "anthropic",
   "openai",
   "amazon-bedrock",
   "opencode",
+  ...openAICompatibleProviderIds(),
 ] as const;
 
 export type CatalogProviderId = (typeof CATALOG_PROVIDER_IDS)[number];
@@ -164,12 +170,31 @@ function mergePinnedEntries(catalog: ModelsCatalog): void {
 }
 
 /**
+ * Registry-synthesized sections (`catalog: "registry"` entries such as
+ * `helmcode`) are never on models.dev, so the live catalog built from it
+ * lacks them. Fill them from the bundled snapshot, which carries them
+ * (`loadModelsDevCache`); models already present (an overlay row) win.
+ */
+function mergeRegistrySections(catalog: ModelsCatalog): void {
+  const snapshot = bundledSnapshotCatalog();
+  for (const providerId of Object.keys(registryCatalogSections()) as CatalogProviderId[]) {
+    const section = snapshot[providerId];
+    if (!section) continue;
+    catalog[providerId] ??= { ...section, models: {} };
+    for (const [modelId, model] of Object.entries(section.models)) {
+      catalog[providerId].models[modelId] ??= model;
+    }
+  }
+}
+
+/**
  * Install a freshly built live catalog (already merged with the persistent
  * table + overlay by `src/be/model-catalog-store.ts`). Pinned snapshot entries
  * are re-merged so they never drop out of the picker.
  */
 export function setLiveModelsCatalog(catalog: ModelsCatalog, updatedAt: number | null): void {
   mergePinnedEntries(catalog);
+  mergeRegistrySections(catalog);
   liveCatalog = catalog;
   liveUpdatedAt = updatedAt;
 }

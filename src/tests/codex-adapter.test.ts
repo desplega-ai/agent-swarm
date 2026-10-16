@@ -2044,8 +2044,12 @@ describe("buildCodexConfig — context-mode + features", () => {
     expect(mcp["context-mode"]?.tool_timeout_sec).toBe(120);
   });
 
-  test("excludes the 'context-mode' entry when CONTEXT_MODE_DISABLED=true", async () => {
-    process.env.CONTEXT_MODE_DISABLED = "true";
+  test.each([
+    "true",
+    "1",
+    "TRUE",
+  ])("excludes the 'context-mode' entry when CONTEXT_MODE_DISABLED=%s", async (value) => {
+    process.env.CONTEXT_MODE_DISABLED = value;
     globalThis.fetch = stubFetch({ servers: [], total: 0 });
     const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
     const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
