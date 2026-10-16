@@ -15,6 +15,7 @@ import {
   markdownToSlack,
   splitSlackSectionText,
 } from "./blocks";
+import { completedStatusIcon } from "./reaction-shortcode";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { slackTaskOutput } from "./task-output";
 
@@ -67,7 +68,7 @@ export function formatInlineCompletionOutputChunks(opts: {
   taskId: string;
   output: string;
 }): string[] {
-  const header = `✅ *${opts.agentName}* completed with output (${getTaskLink(opts.taskId)}):\n\n`;
+  const header = `${completedStatusIcon()} *${opts.agentName}* completed with output (${getTaskLink(opts.taskId)}):\n\n`;
   const slackOutput = markdownToSlack(opts.output.trim());
   return splitSlackSectionText(header + slackOutput);
 }
@@ -169,7 +170,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
           thread_ts: task.slackThreadTs,
           text:
             task.slackReplySent || i > 0
-              ? `✅ ${agentName} completed${i > 0 ? ` (continued ${i + 1}/${blockBatches.length})` : ""}`
+              ? `${completedStatusIcon()} ${agentName} completed${i > 0 ? ` (continued ${i + 1}/${blockBatches.length})` : ""}`
               : body,
           username: getAgentDisplayName(agent),
           icon_emoji: getAgentEmoji(agent),
@@ -324,7 +325,7 @@ export async function updateToFinal(
     };
     completionBlockBatches = buildCompletedBlockBatches(completionOpts);
     blocks = completionBlockBatches[0] ?? buildCompletedBlocks(completionOpts);
-    text = task.slackReplySent ? `✅ ${agentName} completed` : body;
+    text = task.slackReplySent ? `${completedStatusIcon()} ${agentName} completed` : body;
   } else if (task.status === "cancelled") {
     blocks = buildCancelledBlocks({ agentName, taskId: task.id });
     text = "Task cancelled";
@@ -351,7 +352,7 @@ export async function updateToFinal(
         await sendWithPersona(app.client, {
           channel: task.slackChannelId,
           thread_ts: task.slackThreadTs ?? messageTs,
-          text: `✅ ${agentName} completed (continued ${i + 1}/${completionBlockBatches.length})`,
+          text: `${completedStatusIcon()} ${agentName} completed (continued ${i + 1}/${completionBlockBatches.length})`,
           username: getAgentDisplayName(agent),
           icon_emoji: getAgentEmoji(agent),
           blocks: completionBlockBatches[i],

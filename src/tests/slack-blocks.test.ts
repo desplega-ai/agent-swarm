@@ -192,6 +192,42 @@ describe("buildCompletedBlocks", () => {
   });
 });
 
+describe("completed status icon override", () => {
+  test("buildCompletedBlocks and tree lines use SLACK_STATUS_ICON_COMPLETED", () => {
+    process.env.SLACK_STATUS_ICON_COMPLETED = "bee-lgtm";
+    try {
+      const card = buildCompletedBlocks({
+        agentName: "Alpha",
+        taskId: "abcdef12-3456-7890-abcd-ef1234567890",
+        body: "Task output here",
+      });
+      expect(card[0].text.text.startsWith(":bee-lgtm: *Alpha*")).toBe(true);
+
+      const tree = buildTreeBlocks([
+        {
+          taskId: makeTaskId("icon0001"),
+          agentName: "Lead",
+          status: "completed",
+          children: [
+            {
+              taskId: makeTaskId("icon0002"),
+              agentName: "Worker",
+              status: "failed",
+              children: [],
+            },
+          ],
+        },
+      ]);
+      const text = tree[0].text.text;
+      expect(text).toContain(":bee-lgtm: *Lead*");
+      expect(text).toContain("❌ *Worker*");
+      expect(text).not.toContain("✅");
+    } finally {
+      delete process.env.SLACK_STATUS_ICON_COMPLETED;
+    }
+  });
+});
+
 describe("buildFailedBlocks", () => {
   test("returns single-line header + error section", () => {
     const blocks = buildFailedBlocks({
