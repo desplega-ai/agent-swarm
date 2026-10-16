@@ -58,7 +58,7 @@ Call `store-progress` with a non-completed status and `progress` starting with `
 | Key | Default | Notes |
 |---|---|---|
 | `mode` | `shadow` | `off`, `shadow`, or `enforce` |
-| `threshold` | `0.75` | A dimension scoring below this fails |
+| `threshold` | `0.5` | A dimension scoring below this fails |
 | `timeoutMs` | `4000` | Jev call timeout, capped at 4000 (the dispatcher cancels a handler at 5 s) |
 | `maxBlocksPerTask` | `1` | Blocks per task in `enforce`; after that the gate records and lets it through |
 | `provider` | `auto` | `auto`, `typesafe`, or `openrouter`. See [Jev transport](#jev-transport) |

@@ -139,7 +139,7 @@ describe("defaults", () => {
   test("a new install defaults to shadow", () => {
     expect(mod.cfgOf(undefined)).toMatchObject({
       mode: "shadow",
-      threshold: 0.75,
+      threshold: 0.5,
       timeoutMs: 4000,
       maxBlocksPerTask: 1,
       provider: "auto",
@@ -224,7 +224,7 @@ describe("block", () => {
     const first = await handler(completion("Great question! Let me walk you through..."), ctx);
     expect(first).toMatchObject({ action: "block" });
     expect(first.reason).toContain("Alice's stated preferences");
-    expect(first.reason).toContain("verbosity (0.20 vs 0.75)");
+    expect(first.reason).toContain("verbosity (0.20 vs 0.5)");
     expect(first.reason).toContain("very terse");
     expect(counters).toMatchObject({ total: 1, fail: 1, blocked: 1, "dim:verbosity": 1 });
     expect(counters[`blocks:${TASK_ID}`]).toBe(1);
@@ -233,6 +233,23 @@ describe("block", () => {
     const second = await handler(completion("Still long."), ctx);
     expect(second).toBeUndefined();
     expect(counters).toMatchObject({ total: 2, fail: 2, blocked: 1, escaped: 1 });
+  });
+
+  test("enforce with the default threshold passes a 0.6 score", async () => {
+    jevScores({ verbosity: 0.6, tone: 0.9, language: 0.95 });
+    const { ctx, counters } = makeCtx({ mode: "enforce" });
+    expect(await handler(completion("Picked B."), ctx)).toBeUndefined();
+    expect(counters).toMatchObject({ total: 1, pass: 1 });
+    expect(counters.blocked).toBeUndefined();
+  });
+
+  test("enforce with threshold 0.75 blocks a 0.6 score", async () => {
+    jevScores({ verbosity: 0.6, tone: 0.9, language: 0.95 });
+    const { ctx, counters } = makeCtx({ mode: "enforce", threshold: 0.75 });
+    const result = await handler(completion("Picked B."), ctx);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("verbosity (0.60 vs 0.75)");
+    expect(counters).toMatchObject({ total: 1, fail: 1, blocked: 1 });
   });
 
   test("shadow records the failure and never blocks", async () => {

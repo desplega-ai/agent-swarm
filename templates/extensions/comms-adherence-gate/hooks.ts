@@ -29,7 +29,7 @@ import { z } from "zod";
 export const config = z.object({
   mode: z.enum(["off", "shadow", "enforce"]).default("shadow"),
   /** A dimension scoring below this fails. */
-  threshold: z.number().min(0).max(1).default(0.75),
+  threshold: z.number().min(0).max(1).default(0.5),
   timeoutMs: z.number().int().positive().default(4000),
   maxBlocksPerTask: z.number().int().min(0).default(1),
   provider: z.enum(["auto", "typesafe", "openrouter"]).default("auto"),
