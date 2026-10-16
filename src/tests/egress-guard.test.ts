@@ -544,10 +544,23 @@ describe("redirect body collection", () => {
 
   const URL_ = "https://api.example.com/upload";
   const sent: number[] = [];
+  // Set per test: the first request answers with this redirect, and the
+  // hook runs when a request starts, before its body is read.
+  let redirectFirst: number | null = null;
+  let onRequest = () => {};
   const base = (async (_input: string | URL | Request, init?: RequestInit) => {
+    onRequest();
     sent.push(init?.body ? (await new Response(init.body).arrayBuffer()).byteLength : 0);
+    if (redirectFirst !== null && sent.length === 1) {
+      return new Response(null, { status: redirectFirst, headers: { location: "/next" } });
+    }
     return new Response("ok");
   }) as typeof fetch;
+  afterEach(() => {
+    sent.length = 0;
+    redirectFirst = null;
+    onRequest = () => {};
+  });
 
   // Each layer gets a streamed POST body; the broker takes its substituting path.
   const LAYERS = {
@@ -607,26 +620,47 @@ describe("redirect body collection", () => {
       expect((cancelReason as Error | null)?.name).toBe("AbortError");
     });
 
-    test(`${layer}: a body over the cap rejects and cancels the source`, async () => {
-      sent.length = 0;
+    // Chunks of a quarter of the cap; past the cap the source waits for the
+    // request to start, so a layer that read the whole body first never sends.
+    const CHUNK = MAX_REPLAY_BODY_BYTES / 4;
+    const TOTAL_CHUNKS = 64;
+    const overCapSource = () => {
+      let requestStarted = () => {};
+      const started = new Promise<void>((resolve) => {
+        requestStarted = resolve;
+      });
+      onRequest = () => requestStarted();
       let pulled = 0;
-      let cancelled = false;
-      const source = new ReadableStream({
-        pull(controller) {
-          // One MiB per pull, closing just past the cap.
-          if (pulled * 1024 * 1024 > MAX_REPLAY_BODY_BYTES) controller.close();
-          else controller.enqueue(new Uint8Array(1024 * 1024));
+      return new ReadableStream({
+        async pull(controller) {
+          if (pulled === TOTAL_CHUNKS) return controller.close();
+          if (pulled * CHUNK > MAX_REPLAY_BODY_BYTES) await started;
+          controller.enqueue(new Uint8Array(CHUNK));
           pulled++;
         },
-        cancel() {
-          cancelled = true;
-        },
       });
-      const outcome = await settled(upload(make(), source));
-      expect(outcome).toBeInstanceOf(RequestBodyTooLargeError);
-      expect((outcome as Error).message).toContain("32 MiB");
-      expect(cancelled).toBe(true);
-      expect(sent).toEqual([]);
+    };
+
+    test(`${layer}: a body over the cap is sent as it is read, not held first`, async () => {
+      expect(await settled(upload(make(), overCapSource()))).toBe("resolved");
+      expect(sent).toEqual([CHUNK * TOTAL_CHUNKS]);
+    });
+
+    test(`${layer}: a body over the cap cannot follow a 307/308`, async () => {
+      for (const status of [307, 308]) {
+        sent.length = 0;
+        redirectFirst = status;
+        const outcome = await settled(upload(make(), overCapSource()));
+        expect(outcome).toBeInstanceOf(RequestBodyTooLargeError);
+        expect((outcome as Error).message).toContain("1 MiB");
+        expect(sent).toEqual([CHUNK * TOTAL_CHUNKS]);
+      }
+    });
+
+    test(`${layer}: a body over the cap still follows a 303 as a GET`, async () => {
+      redirectFirst = 303;
+      expect(await settled(upload(make(), overCapSource()))).toBe("resolved");
+      expect(sent).toEqual([CHUNK * TOTAL_CHUNKS, 0]);
     });
 
     test(`${layer}: a failing source rejects with its error and releases the stream`, async () => {
@@ -659,21 +693,17 @@ describe("redirect body collection", () => {
       return { source, state, finishCleanup: () => finishCleanup() };
     };
 
-    test(`${layer}: a body over the cap rejects before slow source cleanup ends`, async () => {
-      sent.length = 0;
-      const { source, state, finishCleanup } = slowCancelSource((controller) => {
-        controller.enqueue(new Uint8Array(1024 * 1024));
+    test(`${layer}: control: a body at the cap is sent again on a 307`, async () => {
+      redirectFirst = 307;
+      let pulled = 0;
+      const source = new ReadableStream({
+        pull(controller) {
+          if (pulled++ < 4) controller.enqueue(new Uint8Array(CHUNK));
+          else controller.close();
+        },
       });
-      try {
-        const outcome = await settled(upload(make(), source));
-        expect(outcome).toBeInstanceOf(RequestBodyTooLargeError);
-        expect(state.cancelled).toBe(true);
-        expect(state.cleanedUp).toBe(false);
-        expect(source.locked).toBe(false);
-        expect(sent).toEqual([]);
-      } finally {
-        finishCleanup();
-      }
+      expect(await settled(upload(make(), source))).toBe("resolved");
+      expect(sent).toEqual([MAX_REPLAY_BODY_BYTES, MAX_REPLAY_BODY_BYTES]);
     });
 
     test(`${layer}: an already-aborted signal rejects before slow source cleanup ends`, async () => {
@@ -694,20 +724,6 @@ describe("redirect body collection", () => {
       }
     });
   }
-
-  test("control: a body at the cap is sent whole", async () => {
-    sent.length = 0;
-    const chunks = MAX_REPLAY_BODY_BYTES / (1024 * 1024);
-    let pulled = 0;
-    const source = new ReadableStream({
-      pull(controller) {
-        if (pulled++ < chunks) controller.enqueue(new Uint8Array(1024 * 1024));
-        else controller.close();
-      },
-    });
-    expect(await settled(upload(LAYERS.guard(), source))).toBe("resolved");
-    expect(sent).toEqual([MAX_REPLAY_BODY_BYTES]);
-  });
 });
 
 // The name this machine is called by: the system resolver answers with one of

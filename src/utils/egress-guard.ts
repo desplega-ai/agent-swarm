@@ -377,16 +377,16 @@ export function pinToAddress(url: URL, address: string, init: RequestInit): [URL
 }
 
 /**
- * Largest stream body held in memory to send again on a 307/308 hop. Sending
- * it copies it once more, so a request peaks near 64 MiB, the same budget as
- * the script SDK response limit inside the 512 MiB script process.
+ * Largest stream body held in memory to send again on a 307/308 hop. A longer
+ * stream is sent as it is read and cannot be resent, so a request holds at
+ * most about this much extra, however large its body.
  */
-export const MAX_REPLAY_BODY_BYTES = 32 * 1024 * 1024;
+export const MAX_REPLAY_BODY_BYTES = 1024 * 1024;
 
 export class RequestBodyTooLargeError extends Error {
   constructor(limitBytes: number) {
     super(
-      `Request body exceeds ${limitBytes / (1024 * 1024)} MiB: a streamed body is held in memory to resend on a 307/308 redirect. Send a smaller body or use redirect: "manual"`,
+      `Cannot resend a streamed request body over ${limitBytes / (1024 * 1024)} MiB on a 307/308 redirect: it is sent as it is read, not kept in memory. Send a smaller or non-streamed body, or use redirect: "manual"`,
     );
     this.name = "RequestBodyTooLargeError";
   }
@@ -401,17 +401,24 @@ function chunkBytes(chunk: unknown): Uint8Array {
   throw new TypeError("Request body stream yielded a chunk that is not bytes or a string");
 }
 
+export type ReplayableBody = {
+  body: RequestInit["body"] | undefined;
+  /** False for a stream over the cap: a redirect that resends it must fail. */
+  replayable: boolean;
+};
+
 /**
- * A body that can be sent again on a 307/308 hop: a stream is read into memory
- * once, up to `maxBytes`. Abort, overflow and a failing stream reject and
+ * Prepares a body for a fetch that may follow a 307/308 hop. A stream is read
+ * into memory up to `maxBytes`; a longer one is passed on unbuffered (the read
+ * part first) and marked not replayable. Abort and a failing stream reject and
  * cancel the source.
  */
 export async function replayableBody(
   body: RequestInit["body"] | undefined,
   signal?: AbortSignal | null,
   maxBytes = MAX_REPLAY_BODY_BYTES,
-): Promise<RequestInit["body"] | undefined> {
-  if (!(body instanceof ReadableStream)) return body ?? undefined;
+): Promise<ReplayableBody> {
+  if (!(body instanceof ReadableStream)) return { body: body ?? undefined, replayable: true };
   const reader = body.getReader();
   // Cancelling the reader settles a pending read, so an abort never waits on the source.
   const onAbort = () => {
@@ -420,6 +427,7 @@ export async function replayableBody(
   signal?.addEventListener("abort", onAbort, { once: true });
   const chunks: Uint8Array[] = [];
   let size = 0;
+  let overCap = false;
   try {
     for (;;) {
       signal?.throwIfAborted();
@@ -428,24 +436,45 @@ export async function replayableBody(
       if (done) break;
       const bytes = chunkBytes(value);
       size += bytes.byteLength;
-      if (size > maxBytes) throw new RequestBodyTooLargeError(maxBytes);
       chunks.push(bytes);
+      if (size > maxBytes) {
+        overCap = true;
+        break;
+      }
     }
   } catch (error) {
     // Start cancellation but never wait on the source's cleanup to reject.
     reader.cancel(error).catch(() => {});
+    reader.releaseLock();
     throw error;
   } finally {
     signal?.removeEventListener("abort", onAbort);
-    reader.releaseLock();
   }
+  if (overCap) {
+    // The fetch reads the rest straight from the source and cancels it on abort.
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks.splice(0)) controller.enqueue(chunk);
+      },
+      async pull(controller) {
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(chunkBytes(value));
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    });
+    return { body: stream, replayable: false };
+  }
+  reader.releaseLock();
   const out = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
     out.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return out;
+  return { body: out, replayable: true };
 }
 
 /**
@@ -469,7 +498,8 @@ export function createGuardedFetch(
     let headers = new Headers(init?.headers ?? request?.headers);
     const signal = init?.signal ?? request?.signal;
     let body: RequestInit["body"] | undefined = init?.body ?? (request ? request.body : undefined);
-    if (mode === "follow") body = await replayableBody(body, signal);
+    let replayable = true;
+    if (mode === "follow") ({ body, replayable } = await replayableBody(body, signal));
 
     for (let hop = 0; ; hop++) {
       const address = await assertEgressAllowed(url, options);
@@ -501,6 +531,8 @@ export function createGuardedFetch(
         headers,
         body,
       }));
+      if (!replayable && body !== undefined)
+        throw new RequestBodyTooLargeError(MAX_REPLAY_BODY_BYTES);
       url = next;
     }
   };

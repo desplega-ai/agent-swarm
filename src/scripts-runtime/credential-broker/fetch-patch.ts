@@ -1,7 +1,9 @@
 import {
   MAX_REDIRECTS,
+  MAX_REPLAY_BODY_BYTES,
   nextHopRequest,
   REDIRECT_STATUSES,
+  RequestBodyTooLargeError,
   replayableBody,
 } from "../../utils/egress-guard";
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "./types";
@@ -140,9 +142,13 @@ export function patchFetchWithCredentialBroker(
 
     const callerInit = cloneRequestInit(input, init);
     const redirectMode = callerInit.redirect ?? "follow";
-    // A 307/308 sends the body again, so a stream (a Request body) is read once here.
+    // A 307/308 sends the body again, so a short stream (a Request body) is read
+    // once here; a longer one is sent unbuffered and cannot follow such a hop.
+    let replayable = true;
     if (redirectMode === "follow") {
-      callerInit.body = await replayableBody(callerInit.body, callerInit.signal);
+      const prepared = await replayableBody(callerInit.body, callerInit.signal);
+      callerInit.body = prepared.body;
+      replayable = prepared.replayable;
     }
     const mergedInit: RequestInit = {
       ...callerInit,
@@ -170,6 +176,9 @@ export function patchFetchWithCredentialBroker(
       headers,
       body: callerInit.body ?? undefined,
     });
+    if (!replayable && hopRequest.body !== undefined) {
+      throw new RequestBodyTooLargeError(MAX_REPLAY_BODY_BYTES);
+    }
     return patchedFetch(
       next.href,
       { ...callerInit, ...hopRequest, redirect: redirectMode },
