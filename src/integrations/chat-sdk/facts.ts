@@ -1,7 +1,12 @@
 import type { Message, Thread } from "chat";
 
 /** Why a message counts as meant for the swarm. `none`: it reached the router unaddressed. */
-export type ChatAddressedReason = "dm" | "mention" | "reply-to-bot" | "requester-follow-up" | "none";
+export type ChatAddressedReason =
+  | "dm"
+  | "mention"
+  | "reply-to-bot"
+  | "requester-follow-up"
+  | "none";
 
 /**
  * Facts about one inbound message that only core can read: the chat it came
@@ -104,7 +109,8 @@ export function formatChatHeaderFacts(
   addressed: ChatAddressedReason,
 ): string {
   const parts = [adapter];
-  if (facts.chatType) parts.push(facts.title ? `${facts.chatType} "${facts.title}"` : facts.chatType);
+  if (facts.chatType)
+    parts.push(facts.title ? `${facts.chatType} "${facts.title}"` : facts.chatType);
   if (facts.isForum) parts.push(facts.topic ? `forum topic ${facts.topic}` : "forum");
   parts.push(`from: ${facts.from}`, `addressed: ${addressed}`);
   if (facts.replyToSnippet) parts.push(`reply-to: "${facts.replyToSnippet}"`);

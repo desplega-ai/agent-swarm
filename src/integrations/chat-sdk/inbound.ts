@@ -131,7 +131,9 @@ export async function handleChatInbound(
   if (addressed === "none" && (facts.chatType === "group" || facts.chatType === "supergroup")) {
     const unaddressed = await classifyUnaddressedGroupMessage(thread, message.author.userId, text);
     if (unaddressed === "chatter") {
-      console.log(`[chat-sdk] ${thread.id}: unaddressed group message from a non-requester, ignored`);
+      console.log(
+        `[chat-sdk] ${thread.id}: unaddressed group message from a non-requester, ignored`,
+      );
       return;
     }
     if (unaddressed === "requester-follow-up") addressed = unaddressed;

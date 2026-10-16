@@ -18,8 +18,8 @@ import {
 import { linkIdentity } from "../be/users";
 import { resetFileStorageProviderForTests } from "../fs/registry";
 import { drainBackground } from "../integrations/chat-sdk/background";
-import { CHAT_CHANNELS_NAMESPACE, routeChatMessage } from "../integrations/chat-sdk/router";
 import { formatChatRelayText } from "../integrations/chat-sdk/relay";
+import { CHAT_CHANNELS_NAMESPACE, routeChatMessage } from "../integrations/chat-sdk/router";
 import { getChatInstance } from "../integrations/chat-sdk/runtime";
 import { isChatThreadBuffered } from "../integrations/chat-sdk/thread-buffer";
 import { chatSdkContextKey } from "../tasks/context-key";
@@ -529,7 +529,8 @@ describe("Chat SDK requester and group addressing", () => {
     await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot book a table", ALICE));
     await flushChatBuffers();
     const [first] = await chatTasks(chatId);
-    const endedAt = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+    const endedAt = (minutesAgo: number) =>
+      new Date(Date.now() - minutesAgo * 60_000).toISOString();
     await getDbClient().run(
       "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
       [endedAt(60), first!.id],
