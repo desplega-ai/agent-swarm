@@ -7,7 +7,7 @@ import {
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
-import { initAzureDevOps } from "../azure-devops";
+import { initAzureDevOps, initAzureDevOpsOutbound } from "../azure-devops";
 import { drainApi, isApiDraining } from "../be/api-drain";
 import {
   closeDb,
@@ -104,6 +104,7 @@ import { handleMcpServers } from "./mcp-servers";
 import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
 import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
+import { handleModelProfiles } from "./model-profiles";
 import { handleModelsCatalog } from "./models-catalog";
 import { handleOAuthCallback, startOAuthPendingGc, stopOAuthPendingGc } from "./oauth-callback";
 import { handleGenericOAuth } from "./oauth-generic";
@@ -376,6 +377,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleDbQuery(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
+        () => handleModelProfiles(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams, myAgentId),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnections(req, res, pathSegments, queryParams, myAgentId),
@@ -666,6 +668,13 @@ try {
 }
 
 try {
+  const { ensureModelProfilesSeeded } = await import("../be/boot-seeds");
+  await ensureModelProfilesSeeded();
+} catch (err) {
+  console.error("[startup] Failed to seed model profiles:", err);
+}
+
+try {
   const { ensureRbacSeeded } = await import("../be/boot-seeds");
   ensureRbacSeeded();
 } catch (err) {
@@ -785,6 +794,7 @@ httpServer
 
     // Initialize Azure DevOps service-hook handler (if configured)
     initAzureDevOps();
+    initAzureDevOpsOutbound();
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();

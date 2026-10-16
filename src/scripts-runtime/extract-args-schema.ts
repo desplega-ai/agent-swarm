@@ -10,7 +10,7 @@
 import { pathToFileURL } from "node:url";
 import { toJSONSchema } from "zod";
 
-async function createShims(tmpdir: string): Promise<void> {
+async function createShims(moduleDir: string): Promise<void> {
   const runtimeDir = process.env.SCRIPT_RUNTIME_DIR;
   const shims: [string, URL][] = [
     [
@@ -35,7 +35,7 @@ async function createShims(tmpdir: string): Promise<void> {
     ]),
   ];
   for (const [name, url] of shims) {
-    const dir = `${tmpdir}/node_modules/${name}`;
+    const dir = `${moduleDir}/node_modules/${name}`;
     await Bun.$`mkdir -p ${dir}`.quiet();
     await Bun.write(`${dir}/package.json`, JSON.stringify({ type: "module", main: "index.ts" }));
     await Bun.write(`${dir}/index.ts`, `export * from ${JSON.stringify(url.href)};\n`);
@@ -52,14 +52,15 @@ if (!sourceFile || !resultFile || !tmpdir) {
 }
 
 try {
-  await createShims(tmpdir);
+  // Subdirectory, not the tmpdir itself: this harness runs with cwd = tmpdir,
+  // and Bun (>= 1.3.12) snapshots the cwd listing at startup — a file or
+  // node_modules written into cwd after launch is invisible to the module
+  // resolver. See the same fix in eval-harness.ts.
+  const moduleDir = `${tmpdir}/user-module`;
+  await createShims(moduleDir);
 
   const source = await Bun.file(sourceFile).text();
-  // Subdirectory, not the tmpdir itself: this harness runs with cwd = tmpdir,
-  // and Bun (>= 1.3.12) snapshots the cwd listing at startup — a file written
-  // into cwd after launch is invisible to the module resolver. See the same
-  // fix in eval-harness.ts.
-  const userModulePath = `${tmpdir}/user-module/user-script.ts`;
+  const userModulePath = `${moduleDir}/user-script.ts`;
   await Bun.write(userModulePath, source);
 
   let mod: Record<string, unknown>;

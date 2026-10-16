@@ -89,6 +89,7 @@ export const SDK_TOOL_NAME_MAP = {
   // ── model catalog ──
   modelCatalog_refresh: "model-catalog-refresh", // external: fetches models.dev
   modelCatalog_overlayUpsert: "model-catalog-overlay-upsert",
+  modelProfile_list: "list-model-profiles",
 
   // ── slack ──
   slack_read: "slack-read",
@@ -189,6 +190,9 @@ export const SDK_TOOL_NAME_MAP = {
   // ── human input ──
   request_humanInput: "request-human-input",
   approval_cancel: "cancel-approval-request", // destructive
+
+  // ── decisions ──
+  systemOne_decide: "system-one-decide",
 } as const;
 
 export const SDK_ALLOWLIST = Object.keys(SDK_TOOL_NAME_MAP) as Array<

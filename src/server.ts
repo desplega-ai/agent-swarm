@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
-import { ensurePricingSeeded, ensureRbacSeeded } from "./be/boot-seeds";
+import { ensureModelProfilesSeeded, ensurePricingSeeded, ensureRbacSeeded } from "./be/boot-seeds";
 import { initDb } from "./be/db";
 import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { isSteeringEnabled } from "./be/steering";
@@ -81,6 +81,7 @@ import {
   registerModelCatalogOverlayUpsertTool,
   registerModelCatalogRefreshTool,
 } from "./tools/model-catalog";
+import { registerListModelProfilesTool } from "./tools/model-profiles/list-model-profiles";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerGetOauthAccessTokenTool } from "./tools/oauth-access-token";
 import { registerPollTaskTool } from "./tools/poll-task";
@@ -176,6 +177,7 @@ import {
 } from "./tools/swarm-config";
 import { registerSwarmXTool } from "./tools/swarm-x";
 // Task pool capability
+import { registerSystemOneDecideTool } from "./tools/system-one-decide";
 import { registerTaskActionTool } from "./tools/task-action";
 // Tracker capability
 import {
@@ -414,6 +416,11 @@ export async function createServer(
   // manual-override constants for runtime-fee / ACU pricing.
   ensurePricingSeeded();
   startPricingRefreshLoop();
+  try {
+    await ensureModelProfilesSeeded();
+  } catch (err) {
+    console.error("[server] Failed to seed model profiles:", err);
+  }
 
   try {
     ensureRbacSeeded();
@@ -477,6 +484,7 @@ export async function createServer(
     registerGetTasksTool(server);
     registerGetMetricsTool(server);
     registerSendTaskTool(server);
+    registerListModelProfilesTool(server);
     registerGetTaskDetailsTool(server);
     registerStoreProgressTool(server);
     registerMyAgentInfoTool(server);
@@ -611,6 +619,7 @@ export async function createServer(
     registerGetWorkflowRunTool(server);
     registerRetryWorkflowRunTool(server);
     registerCancelWorkflowRunTool(server);
+    registerSystemOneDecideTool(server);
     registerRequestHumanInputTool(server);
     registerCancelApprovalRequestTool(server);
   }

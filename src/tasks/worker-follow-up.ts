@@ -179,13 +179,22 @@ export function getNextResumeGeneration(parent: Pick<AgentTask, "tags">): number
 export function inheritedModelSelection(
   parent: Pick<
     AgentTask,
-    "model" | "modelTier" | "modelSource" | "modelAlias" | "resolvedModel" | "claudeSessionId"
+    | "model"
+    | "modelTier"
+    | "modelSource"
+    | "modelAlias"
+    | "resolvedModel"
+    | "claudeSessionId"
+    | "profile"
   >,
-): Pick<CreateTaskOptions, "model" | "modelTier"> {
+): Pick<CreateTaskOptions, "model" | "modelTier" | "profile"> {
   const model = taskModelPin(parent);
+  // The task's own profile travels like its tier; an agent-default profile
+  // (`resolvedProfile` only) is re-resolved by the child's claim.
   return {
     ...(model ? { model } : {}),
     ...(parent.modelTier ? { modelTier: parent.modelTier } : {}),
+    ...(parent.profile ? { profile: parent.profile } : {}),
   };
 }
 

@@ -757,9 +757,8 @@ export async function handleWebhooks(
       payload.message &&
       !isInboxAllowed(payload.message.inbox_id, process.env.AGENTMAIL_INBOX_DOMAIN_FILTER)
     ) {
-      const domain = payload.message.inbox_id.split("@")[1] ?? "unknown";
       console.log(
-        `[AgentMail] Ignoring event for inbox domain "${domain}" (not in AGENTMAIL_INBOX_DOMAIN_FILTER)`,
+        `[AgentMail] Ignoring event for inbox "${payload.message.inbox_id}" (not in AGENTMAIL_INBOX_DOMAIN_FILTER)`,
       );
       return true;
     }

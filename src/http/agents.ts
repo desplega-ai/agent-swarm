@@ -28,6 +28,11 @@ import {
   updateAgentStatus,
   upsertSwarmConfig,
 } from "../be/db";
+import {
+  getModelProfileByName,
+  MODEL_PROFILE_CONFIG_KEY,
+  modelProfileRefError,
+} from "../be/db/model-profiles";
 import { createEvent } from "../be/events";
 import { setAgentHarnessCliVersion } from "../be/harness-model-support";
 import {
@@ -278,7 +283,7 @@ const updateAgentRuntimeRoute = route({
   pattern: ["api", "agents", null, "runtime"],
   summary: "Update an agent's runtime harness and default model",
   description:
-    "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support.",
+    "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist and run on `harness_provider`, and it cannot be sent with `model`. Sending `model`, or changing the model or effort override by any path, clears the default profile.",
   tags: ["Agents"],
   params: z.object({ id: z.string() }),
   query: z.object({ repoId: z.string().optional() }),
@@ -287,6 +292,7 @@ const updateAgentRuntimeRoute = route({
     model: z.string().trim().min(1).nullable().optional(),
     allow_custom_model: z.boolean().optional().default(false),
     reasoning_effort: ReasoningEffortSchema.nullable().optional(),
+    profile: z.string().trim().min(1).nullable().optional(),
     acp: AcpRuntimeConfigSchema.optional(),
     claude: ClaudeRuntimeConfigSchema.optional(),
   }),
@@ -1129,8 +1135,28 @@ export async function handleAgentsRest(
   if (updateAgentRuntimeRoute.match(req.method, pathSegments)) {
     const parsed = await updateAgentRuntimeRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const { harness_provider, model, allow_custom_model, reasoning_effort, acp, claude } =
+    const { harness_provider, model, allow_custom_model, reasoning_effort, profile, acp, claude } =
       parsed.body;
+
+    if (typeof profile === "string") {
+      if (model !== undefined) {
+        jsonError(res, "Send `profile` or `model`, not both", 400);
+        return true;
+      }
+      const picked = await getModelProfileByName(profile);
+      if (!picked) {
+        jsonError(res, `Unknown model profile "${profile}"`, 400);
+        return true;
+      }
+      if (picked.harness !== harness_provider) {
+        jsonError(
+          res,
+          `Model profile "${profile}" runs on the ${picked.harness} harness, not ${harness_provider}`,
+          400,
+        );
+        return true;
+      }
+    }
 
     if (acp && harness_provider !== "acp") {
       jsonError(res, "ACP configuration requires harness_provider=acp", 400);
@@ -1250,6 +1276,22 @@ export async function handleAgentsRest(
           });
         }
 
+        // Written after the overrides above: changing either of them clears
+        // MODEL_PROFILE, so a stale default never beats a fresh override.
+        if (model !== undefined || profile === null) {
+          await deleteSwarmConfigByKey("agent", parsed.params.id, MODEL_PROFILE_CONFIG_KEY);
+        } else if (profile !== undefined) {
+          await upsertSwarmConfig({
+            scope: "agent",
+            scopeId: parsed.params.id,
+            key: MODEL_PROFILE_CONFIG_KEY,
+            value: profile,
+            description: "Default model profile, set via PATCH /api/agents/{id}/runtime",
+            // Read by the API at claim only; workers never need it in their env.
+            exportToEnv: false,
+          });
+        }
+
         if (claude?.transport === null) {
           await deleteSwarmConfigByKey("agent", parsed.params.id, "CLAUDE_TRANSPORT");
         } else if (claude?.transport !== undefined) {
@@ -1339,6 +1381,11 @@ export async function handleAgentsRest(
     } catch (error) {
       if (error instanceof ClaudeTransportConflictError) {
         jsonError(res, error.message, 400);
+        return true;
+      }
+      // The profile was deleted between the check above and this write.
+      if (modelProfileRefError(error) === "missing") {
+        jsonError(res, `Unknown model profile "${profile}"`, 400);
         return true;
       }
       throw error;

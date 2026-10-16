@@ -936,15 +936,29 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
       }
     }
 
+    const decided = await this.decide(config);
+    if (!decided.ok) return { status: "failed", error: decided.error };
+    if (!config.humanReview) return { status: "success", output: decided.output };
+    return this.reviewDecision(config, config.humanReview, decided.output, context, meta);
+  }
+
+  /**
+   * One decision from the provider, without the review band: resolve the target,
+   * send, validate. The credential stays in this process; the `system-one-decide`
+   * tool calls this so scripts get Jev answers without holding a key.
+   */
+  async decide(
+    config: SystemOneDecisionConfig,
+  ): Promise<{ ok: true; output: SystemOneDecisionOutput } | { ok: false; error: string }> {
     const providerId = config.provider;
     const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[providerId];
 
     // A provider with no default sends no `model` when the node sets none.
     const model = config.model ?? provider.defaultModel;
     const modelProblem = systemOneModelProblem(providerId, model);
-    if (modelProblem) return { status: "failed", error: modelProblem };
+    if (modelProblem) return { ok: false, error: modelProblem };
     const target = await this.resolveTarget(providerId, model);
-    if (!target.ok) return { status: "failed", error: target.error };
+    if (!target.ok) return { ok: false, error: target.error };
     const { apiKey, endpoint } = target;
 
     const wire = provider.wire ?? SYSTEM_ONE_WIRE;
@@ -959,13 +973,13 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
       config.timeoutMs,
       config.maxRetries,
     );
-    if (!sent.ok) return { status: "failed", error: scrub(sent.error) };
+    if (!sent.ok) return { ok: false, error: scrub(sent.error) };
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(sent.text);
     } catch {
-      return { status: "failed", error: "SystemOne response was not valid JSON" };
+      return { ok: false, error: "SystemOne response was not valid JSON" };
     }
     let decision: SystemOneDecisionOutput;
     try {
@@ -978,18 +992,14 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     } catch (err) {
       if (err instanceof SystemOneWireError) {
         const withId = sent.requestId ? `${err.message} [request ${sent.requestId}]` : err.message;
-        return { status: "failed", error: scrub(withId) };
+        return { ok: false, error: scrub(withId) };
       }
       if (err instanceof SystemOneContractError) {
-        return {
-          status: "failed",
-          error: scrub(`SystemOne response failed validation: ${err.message}`),
-        };
+        return { ok: false, error: scrub(`SystemOne response failed validation: ${err.message}`) };
       }
       throw err;
     }
-    if (!config.humanReview) return { status: "success", output: decision };
-    return this.reviewDecision(config, config.humanReview, decision, context, meta);
+    return { ok: true, output: decision };
   }
 
   /**

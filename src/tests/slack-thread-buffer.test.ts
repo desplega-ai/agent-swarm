@@ -1,16 +1,21 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
   closeDb,
   createAgent,
   createTaskExtended,
   createUser,
+  getDbClient,
   getLatestActiveTaskInThread,
   getMostRecentTaskInThread,
   getSlackTasksInThread,
   initDb,
 } from "../be/db";
+import { installExtension, setExtensionState } from "../be/extensions/db";
 import { type IdentityActor, linkIdentity } from "../be/users";
+import { registerLoaded, unregister } from "../extensions/dispatcher";
+import { ensureExtensionAgent } from "../extensions/identity";
+import { cleanExtensionTmpRoot, loadExtension } from "../extensions/loader";
 import { registerMessageHandler } from "../slack/handlers";
 import {
   bufferThreadMessage,
@@ -18,6 +23,7 @@ import {
   instantFlush,
   isThreadBuffered,
 } from "../slack/thread-buffer";
+import { loadBundleFixture } from "./fixtures/extensions/load";
 
 process.env.SLACK_RENDER_V2 = "false";
 
@@ -72,6 +78,27 @@ afterAll(() => {
     // ignore if files don't exist
   }
 });
+
+async function loadBlockingExtension(reason: string) {
+  const bundle = await loadBundleFixture("minimal");
+  const name = "slack-buffer-block-test";
+  bundle.manifest = { ...bundle.manifest, name };
+  bundle.files[bundle.manifest.assets.hooks] = `
+import { block, type SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => block(${JSON.stringify(reason)}));
+};
+export default extension;
+`;
+  const installed = await installExtension(bundle);
+  const record = await setExtensionState(installed.extension.id, {
+    agentId: await ensureExtensionAgent(name),
+  });
+  if (!record) throw new Error("Failed to load the blocking Slack test extension");
+  const loaded = await loadExtension({ record, ...bundle });
+  registerLoaded(loaded);
+  return loaded;
+}
 
 describe("Slack thread buffer", () => {
   describe("ADDITIVE_SLACK thread ingress", () => {
@@ -612,4 +639,74 @@ describe("Slack thread buffer", () => {
       expect(task!.task).toContain("solo message");
     });
   });
+
+  test(
+    "logs a blocked pre-task.create once at info level with its reason scrubbed",
+    async () => {
+      const secret = `ghp_${"Z".repeat(36)}`;
+      const extensionName = "slack-buffer-block-test";
+      const loaded = await loadBlockingExtension(`Ticket required: ${secret}`);
+      const info = spyOn(console, "info").mockImplementation(() => {});
+      const error = spyOn(console, "error").mockImplementation(() => {});
+      const channelId = "C_BLOCKED_FLUSH";
+      const threadTs = "14000.0001";
+
+      try {
+        bufferThreadMessage(channelId, threadTs, "follow-up", "U1", "14000.0002");
+        await instantFlush(`${channelId}:${threadTs}`);
+
+        expect(info).toHaveBeenCalledTimes(1);
+        expect(info.mock.calls[0]?.[0]).toBe("[Slack] pre.task.create blocked:");
+        expect(info.mock.calls[0]?.[1]).toBe(extensionName);
+        expect(String(info.mock.calls[0]?.[2])).toContain("[REDACTED:");
+        expect(String(info.mock.calls[0]?.[2])).not.toContain(secret);
+        expect(error).not.toHaveBeenCalled();
+        expect(await getMostRecentTaskInThread(channelId, threadTs)).toBeNull();
+      } finally {
+        unregister(loaded.record.id);
+        await loaded.dispose();
+        info.mockRestore();
+        error.mockRestore();
+        await cleanExtensionTmpRoot();
+      }
+    },
+    { timeout: 15_000 },
+  );
+
+  test(
+    "does not treat unexpected task creation errors as blocked",
+    async () => {
+      const triggerName = "fail_slack_buffer_task_creation";
+      const failure = "simulated Slack task creation failure";
+      const channelId = "C_UNEXPECTED_FLUSH";
+      const threadTs = "14000.0003";
+      const info = spyOn(console, "info").mockImplementation(() => {});
+      const error = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await getDbClient().run(`DROP TRIGGER IF EXISTS ${triggerName}`);
+        await getDbClient().run(`
+          CREATE TRIGGER ${triggerName}
+          BEFORE INSERT ON agent_tasks
+          WHEN NEW.slackChannelId = '${channelId}'
+          BEGIN
+            SELECT RAISE(ABORT, '${failure}');
+          END
+        `);
+
+        bufferThreadMessage(channelId, threadTs, "follow-up", "U1", "14000.0004");
+        await instantFlush(`${channelId}:${threadTs}`);
+
+        expect(info).not.toHaveBeenCalled();
+        expect(error).toHaveBeenCalledTimes(1);
+        expect(String(error.mock.calls[0]?.[1])).toContain(failure);
+        expect(await getMostRecentTaskInThread(channelId, threadTs)).toBeNull();
+      } finally {
+        await getDbClient().run(`DROP TRIGGER IF EXISTS ${triggerName}`);
+        info.mockRestore();
+        error.mockRestore();
+      }
+    },
+    { timeout: 15_000 },
+  );
 });

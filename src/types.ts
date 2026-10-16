@@ -429,6 +429,31 @@ export const ProviderNameSchema = z.enum([
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
 // ============================================================================
+// Model Profiles (runbooks/model-tiers.md § Model profiles)
+// ============================================================================
+
+/** Lowercase, starts with a letter or digit; dots, dashes and underscores allowed. */
+export const ModelProfileNameSchema = z
+  .string()
+  .trim()
+  .regex(/^[a-z0-9][a-z0-9._-]{0,99}$/, "lowercase letters, digits, '.', '_' or '-', max 100");
+
+export const ModelProfileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  harness: ProviderNameSchema,
+  model: z.string(),
+  effort: ReasoningEffortSchema.nullable(),
+  allowCustomModel: z.boolean(),
+  description: z.string().nullable(),
+  /** `tier:<tier>` (boot seed), `agent-config` (made from an agent's MODEL_OVERRIDE), or null. */
+  seededFrom: z.string().nullable(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type ModelProfile = z.infer<typeof ModelProfileSchema>;
+
+// ============================================================================
 // Task Steering Messages
 // ============================================================================
 //
@@ -686,6 +711,11 @@ export const AgentTaskSchema = z
     // REASONING_EFFORT_OVERRIDE, dropped when the harness/model cannot take
     // it). Reported at session start; unset when the harness default applied.
     resolvedEffort: ReasoningEffortSchema.optional(),
+    // Model profile (runbooks/model-tiers.md § Model profiles): `profile` is
+    // the creator's ask, `resolvedProfile` the name claim applied (the ask or
+    // the agent's default). Unset when no profile applied.
+    profile: z.string().optional(),
+    resolvedProfile: z.string().optional(),
 
     // Schedule linking (optional — set when task was created by a schedule).
     // z.string(): also reachable verbatim from the create-task query param.
@@ -817,6 +847,7 @@ export const CreateTaskOptionsSchema = z.object({
   model: z.string().optional(),
   modelTier: ModelTierSchema.optional(),
   effort: ReasoningEffortSchema.optional(),
+  profile: z.string().optional(),
   scheduleId: z.string().optional(),
   workflowRunId: z.string().optional(),
   workflowRunStepId: z.string().optional(),
@@ -2403,7 +2434,11 @@ export const TriggerConfigSchema = z
     }),
     z.object({
       type: z.literal("event"),
-      eventName: z.literal("slack.message"),
+      eventName: z.enum([
+        "slack.message",
+        "azure-devops.work_item.assigned",
+        "azure-devops.work_item.commented",
+      ]),
     }),
   ])
   .superRefine((trigger, ctx) => {

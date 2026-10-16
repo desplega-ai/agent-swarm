@@ -30,6 +30,7 @@
     "mcp-servers",
     "memory",
     "metrics",
+    "models",
     "oauth",
     "onboarding",
     "pages",

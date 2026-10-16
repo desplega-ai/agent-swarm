@@ -41,7 +41,9 @@ import { AgentTaskSchema, BudgetRefusedTriggerSchema, TaskAttachmentSchema } fro
 import { ensure } from "../utils/business-use";
 import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { readsRepoSecrets } from "./config";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
@@ -208,8 +210,14 @@ async function attachmentsForTrigger(
  * previous claim record is overwritten for the same reason.
  */
 async function claimModelFields(
-  task: TaskModelPinFields & { id: string },
-  agent: Parameters<typeof recordClaimModelResolution>[1],
+  task: TaskModelPinFields & {
+    id: string;
+    profile?: string | null;
+    effort?: string | null;
+    vcsRepo?: string | null;
+  },
+  agent: Parameters<typeof recordClaimModelResolution>[1] & { isLead?: boolean },
+  auth: HttpRequestAuth | null,
 ): Promise<Awaited<ReturnType<typeof recordClaimModelResolution>> & { model: string | undefined }> {
   const pin = taskModelPin(task);
   const cleared = {
@@ -217,11 +225,14 @@ async function claimModelFields(
     resolvedModel: undefined,
     modelSource: undefined,
     modelAlias: undefined,
+    resolvedProfile: undefined,
   };
   try {
     return {
       ...cleared,
-      ...(await recordClaimModelResolution({ ...task, model: pin }, agent)),
+      ...(await recordClaimModelResolution({ ...task, model: pin }, agent, {
+        includeRepoSecrets: readsRepoSecrets(auth, agent),
+      })),
     };
   } catch (error) {
     console.warn(`[/api/poll] model resolution failed for task ${task.id}:`, error);
@@ -495,7 +506,7 @@ export async function handlePoll(
                 triggerSurface: assignedTriggerSurface,
                 task: {
                   ...pendingTask,
-                  ...(await claimModelFields(pendingTask, agent)),
+                  ...(await claimModelFields(pendingTask, agent, getRequestAuth(req))),
                   status: "in_progress",
                   attachments: await attachmentsForTrigger(pendingTask.id),
                 },
@@ -639,7 +650,7 @@ export async function handlePoll(
                     triggerSurface: claimedTriggerSurface,
                     task: {
                       ...claimed,
-                      ...(await claimModelFields(claimed, agent)),
+                      ...(await claimModelFields(claimed, agent, getRequestAuth(req))),
                       attachments: await attachmentsForTrigger(claimed.id),
                     },
                     ...(claimedRequestedBy && { requestedBy: claimedRequestedBy }),

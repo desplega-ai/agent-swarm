@@ -18,6 +18,7 @@ import {
   isExtensionAgent,
   isLinearTrackerContextKey,
 } from "@/be/db";
+import { modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
@@ -150,6 +151,14 @@ export const sendTaskInputSchema = z
     effort: ReasoningEffortSchema.optional().describe(
       "Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies.",
     ),
+    profile: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe(
+        "Model profile name (see list-model-profiles): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with model and modelTier. A set `effort` still wins over the profile's.",
+      ),
     allowDuplicate: z
       .boolean()
       .default(false)
@@ -281,6 +290,7 @@ export async function sendTaskHandler(
     modelTier,
     allowCustomModel,
     effort,
+    profile,
     allowDuplicate,
     slackChannelId,
     slackThreadTs,
@@ -474,6 +484,13 @@ export async function sendTaskHandler(
     agentId: effectiveAgentId,
   });
   if (modelError) return toolErr(modelError, { data: { yourAgentId: creatorAgentId } });
+  const profileError = await taskProfileError({
+    profile,
+    model: normalizedModel.model,
+    modelTier: normalizedModel.modelTier,
+    agentId: effectiveAgentId,
+  });
+  if (profileError) return toolErr(profileError, { data: { yourAgentId: creatorAgentId } });
   const effectiveRoutingReason =
     requestedAgentId !== undefined
       ? requestedRoutingReason
@@ -508,6 +525,7 @@ export async function sendTaskHandler(
     model: normalizedModel.model,
     modelTier: normalizedModel.modelTier,
     effort,
+    profile,
     slackChannelId,
     slackThreadTs,
     slackUserId,
@@ -647,7 +665,7 @@ export async function sendTaskHandler(
       : toolErr(guard.message, { data: guardData });
   }
 
-  const result = await getDbClient().transaction(async () => {
+  const created = getDbClient().transaction(async () => {
     // Authoritative re-check: the reads above are separated from the INSERT by
     // the whole handler, so only a guard inside this transaction can see a
     // concurrent send-task's committed task.
@@ -742,6 +760,11 @@ export async function sendTaskHandler(
       message: `Task "${newTask.id}" sent to agent "${agent.name}".`,
       task: newTask,
     };
+  });
+  const result = await created.catch((error: unknown) => {
+    // The profile was deleted between taskProfileError and the insert.
+    if (modelProfileRefError(error) !== "missing") throw error;
+    return { success: false, message: `Unknown model profile "${profile}".`, task: undefined };
   });
 
   const data = {

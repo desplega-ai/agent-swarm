@@ -47,11 +47,14 @@ export const registerScriptUpsertTool = (server: McpServer) => {
             name?: unknown;
             version?: unknown;
             contentDeduped?: unknown;
+            warnings?: unknown;
           };
           const name = typeof body.name === "string" ? body.name : args.name;
           const version = typeof body.version === "number" ? ` v${body.version}` : "";
           const deduped = body.contentDeduped ? " (content unchanged — deduped)" : "";
-          return `Script \`${name}\`${version} saved.${deduped}`;
+          const warnings = Array.isArray(body.warnings) ? body.warnings.map(String) : [];
+          const note = warnings.length > 0 ? `\n${warnings.join("\n")}` : "";
+          return `Script \`${name}\`${version} saved.${deduped}${note}`;
         },
       }),
   );

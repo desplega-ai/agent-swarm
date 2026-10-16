@@ -56,8 +56,8 @@ afterAll(async () => {
 });
 
 describe("seed-scripts catalog", () => {
-  test("manifest holds 27 unique, well-described scripts", () => {
-    expect(SEED_SCRIPTS.length).toBe(27);
+  test("manifest holds 28 unique, well-described scripts", () => {
+    expect(SEED_SCRIPTS.length).toBe(28);
     const names = SEED_SCRIPTS.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
     for (const s of SEED_SCRIPTS) {

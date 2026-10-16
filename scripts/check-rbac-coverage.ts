@@ -93,6 +93,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
     "proxies to /api/extensions which enforces extension.write / GET is ungated",
   "src/tools/extension-list.ts":
     "proxies to /api/extensions which enforces extension.write / GET is ungated",
+  "src/tools/model-profiles/list-model-profiles.ts":
+    "read-only, like the ungated GET /api/model-profiles",
   "src/tools/get-metrics.ts": PIN_REASON,
   "src/tools/get-swarm.ts": PIN_REASON,
   "src/tools/join-swarm.ts": PIN_REASON,
@@ -140,6 +142,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/slack-list-channels.ts": PIN_REASON,
   "src/tools/slack-reply.ts": PIN_REASON,
   "src/tools/swarm-x.ts": PIN_REASON,
+  "src/tools/system-one-decide.ts":
+    "same posture as an ungated system-one-decision workflow node; the credential never leaves the server",
   "src/tools/tracker/tracker-link-task.ts": PIN_REASON,
   "src/tools/tracker/tracker-map-agent.ts": PIN_REASON,
   "src/tools/tracker/tracker-status.ts": PIN_REASON,

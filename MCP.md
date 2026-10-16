@@ -28,6 +28,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [get-tasks](#get-tasks)
   - [get-metrics](#get-metrics)
   - [send-task](#send-task)
+  - [list-model-profiles](#list-model-profiles)
   - [get-task-details](#get-task-details)
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
@@ -122,6 +123,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [get-workflow-run](#get-workflow-run)
   - [retry-workflow-run](#retry-workflow-run)
   - [cancel-workflow-run](#cancel-workflow-run)
+  - [system-one-decide](#system-one-decide)
   - [request-human-input](#request-human-input)
   - [cancel-approval-request](#cancel-approval-request)
 - [Skills Tools](#skills-tools)
@@ -303,6 +305,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
+| `profile` | `string` | No | - | Model profile name (see list-model-profiles): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with model and modelTier. A set `effort` still wins over the profile's. |
 | `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. |
 | `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
 | `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
@@ -311,6 +314,16 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `requestedByUserId` | `string` | No | - | Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. Only lead agents can name a user other than the requester of their current task. |
 | `followUpConfig` | `unknown` | No | - | Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows. |
 | `outputSchema` | `object` | No | - | Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. |
+
+### list-model-profiles
+
+**List Model Profiles**
+
+List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on send-task to run that task on it, or set it as an agent's default through PATCH /api/agents/{id}/runtime. A profile runs only on its own harness. Filter by `harness` to see what an agent on that harness can run.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
 
 ### get-task-details
 
@@ -472,6 +485,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only used with 'create' action. |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
+| `profile` | `string` | No | - | Model profile name for the created pool task (see list-model-profiles); only workers on its harness claim it. Exclusive with model and modelTier. Only used with 'create' action. |
 | `requiredCapabilities` | `array` | No | - | Capabilities required for pool routing. |
 | `leadOnly` | `boolean` | No | false | Structured authorization constraint: only Lead agents may claim this privileged task. |
 
@@ -1522,6 +1536,21 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 | `runId` | `string` | Yes | - | Workflow run ID to cancel |
 | `reason` | `string` | No | - | Optional reason for cancellation |
 
+### system-one-decide
+
+**Ask a SystemOne decision model**
+
+Send a state and typed questions (noul, choice, score) to a SystemOne decision host such as Jev, and return the validated answers. Same request, provider list, credentials and validation as the `system-one-decision` workflow node, without its human review band. The provider credential is a global secret that stays on the server; this tool never returns it.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `unknown` | No | - | Decision host (default typesafe) |
+| `model` | `string` | No | - | Provider model id (default: the provider's) |
+| `state` | `unknown` | Yes | - | The state to decide on |
+| `questions` | `object` | Yes | - | Questions by id, each `{ type: 'noul' | 'choice' | 'score', instructions, criteria }` |
+| `timeoutMs` | `number` | No | - | Time budget for the call, retries included (default 30000) |
+| `maxRetries` | `number` | No | - | Retries on transient failures inside the time budget (default 2) |
+
 ### request-human-input
 
 **Request human input**
@@ -1533,6 +1562,7 @@ Create an approval request and return at once with the request id and URL. The a
 | `title` | `string` | Yes | - | Title of the approval request |
 | `questions` | `array` | Yes | - | Questions to ask the human |
 | `timeoutSeconds` | `number` | No | - | Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). |
+| `detached` | `boolean` | No | - | Do not attach the request to your current task, so no hitl-follow-up task is created. For scripts that read the request's status themselves. |
 
 ### cancel-approval-request
 

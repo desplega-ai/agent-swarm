@@ -242,6 +242,22 @@ describe("/api/scripts HTTP", () => {
     expect(await second.json()).toEqual({ name: "double", version: 2, contentDeduped: false });
   });
 
+  test("upsert saves a quickjs-incompatible script and returns advisory warnings", async () => {
+    const res = await upsert({
+      name: "uses-process",
+      // The script typings omit process, but a cast still typechecks.
+      source:
+        "export default async (): Promise<string> => (globalThis as any).process.env.HOME ?? '';",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      name: "uses-process",
+      version: 1,
+      contentDeduped: false,
+      warnings: ["quickjs compat (process, line 1): process is not available under quickjs"],
+    });
+  });
+
   test("upsert typecheck failures return diagnostics and do not write rows", async () => {
     const res = await upsert({
       name: "bad-types",

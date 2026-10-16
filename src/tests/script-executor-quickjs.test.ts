@@ -69,6 +69,9 @@ const server = Bun.serve({
 afterAll(() => server.stop(true));
 
 const baseUrl = `http://127.0.0.1:${server.port}`;
+// The documented binary body caps (scripts-runtime guide).
+const MAX_BINARY_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_PENDING_BINARY_BODY_BYTES = 64 * 1024 * 1024;
 const executor = new QuickJSScriptExecutor();
 
 function input(source: string, overrides: Partial<ExecutorInput> = {}): ExecutorInput {
@@ -294,6 +297,35 @@ export default async (args: T) => explode(args);
     expect(output.runtimeError?.message).toContain("fetch body must be a string");
   });
 
+  // Parity with native lives in script-executor-conformance.test.ts. These
+  // are the documented limits of the shims.
+  test("shims refuse what they do not implement, with a clear error", async () => {
+    const output = await executor.run(
+      input(`export default async () => {
+  const attempt = (run) => { try { run(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+  return {
+    latin1: attempt(() => new TextDecoder("latin1")),
+    floatRandom: attempt(() => crypto.getRandomValues(new Float64Array(2))),
+    subtle: typeof crypto.subtle,
+  };
+};`),
+    );
+    expect(output.result).toEqual({
+      latin1: 'RangeError: quickjs executor: TextDecoder supports utf-8 only, not "latin1"',
+      floatRandom: "TypeError: crypto.getRandomValues: the argument must be an integer TypedArray",
+      subtle: "undefined",
+    });
+  });
+
+  test("binary bodies reach the host through ctx.stdlib.fetch too", async () => {
+    const output = await executor.run(
+      input(
+        `export default async (_args, ctx) => (await ctx.stdlib.fetch("${baseUrl}/echo", { method: "POST", body: new TextEncoder().encode("é!") })).json();`,
+      ),
+    );
+    expect(output.result).toMatchObject({ method: "POST", body: "é!" });
+  });
+
   test("user config values stay redacted until unwrapped", async () => {
     const output = await executor.run(
       input(`export default async (_args, ctx) => {
@@ -435,6 +467,70 @@ export default async (args: T) => explode(args);
     );
     expect(output.result).toContain("Too many pending host calls");
   });
+
+  // The sandbox controls bodyBase64, so these call the bridge directly, past
+  // the prelude's own encoding, and check that no request reaches the server.
+  const bridgeSend = `const send = async (bodyBase64: unknown) =>
+    JSON.parse(await (globalThis as any).__host_call("fetch", JSON.stringify([{ url: "${baseUrl}/sink", method: "POST", bodyBase64 }]))).error?.message ?? "sent";`;
+
+  test("rejects a malformed binary body before any fetch starts", async () => {
+    const before = requests.length;
+    const output = await executor.run(
+      input(`export default async () => {
+  ${bridgeSend}
+  return [await send(123), await send({ length: 4 }), await send("!!!!"), await send("AAA"), await send("AA=A")];
+};`),
+    );
+    expect(output.result).toEqual([
+      "fetch bodyBase64 must be a string",
+      "fetch bodyBase64 must be a string",
+      "fetch bodyBase64 is not valid base64",
+      "fetch bodyBase64 is not valid base64",
+      "fetch bodyBase64 is not valid base64",
+    ]);
+    expect(requests.length).toBe(before);
+  });
+
+  test("rejects an oversized binary body before any fetch starts", async () => {
+    const before = requests.length;
+    const encodedLimit = Math.ceil(MAX_BINARY_BODY_BYTES / 3) * 4;
+    const output = await executor.run(
+      input(`export default async () => {
+  ${bridgeSend}
+  return {
+    encoded: await send("A".repeat(${encodedLimit + 4})),
+    decoded: await send("A".repeat(${encodedLimit})),
+    atLimit: await send("A".repeat(${encodedLimit - 4}) + "AA=="),
+  };
+};`),
+    );
+    const tooLarge = `fetch binary body exceeds the ${MAX_BINARY_BODY_BYTES}-byte limit of the quickjs executor`;
+    expect(output.result).toEqual({ encoded: tooLarge, decoded: tooLarge, atLimit: "sent" });
+    // Only the body at the limit reached the server.
+    expect(requests.length).toBe(before + 1);
+  });
+
+  test("caps the binary bodies one run can have pending", async () => {
+    const before = { ...hang };
+    const encodedLimit = Math.ceil(MAX_BINARY_BODY_BYTES / 3) * 4;
+    const output = await executor.run(
+      input(
+        `export default async () => {
+  // Decodes to exactly MAX_BINARY_BODY_BYTES; four fill the per-run budget.
+  const args = JSON.stringify([{ url: "${baseUrl}/hang", method: "POST", bodyBase64: "A".repeat(${encodedLimit - 4}) + "AA==" }]);
+  const call = async () => JSON.parse(await (globalThis as any).__host_call("fetch", args)).error?.message ?? "sent";
+  const held = [call(), call(), call(), call()];
+  return call();
+};`,
+        { resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 1024, wallClockMs: 10_000 } },
+      ),
+    );
+    expect(output.result).toBe(
+      `Pending fetch binary bodies in one script run exceed ${MAX_PENDING_BINARY_BODY_BYTES} bytes`,
+    );
+    expect(await waitFor(() => hang.started === before.started + 4)).toBe(true);
+    expect(await waitFor(() => hang.aborted === before.aborted + 4)).toBe(true);
+  }, 30_000);
 
   test("queues runs beyond the pool size", async () => {
     const outputs = await Promise.all(

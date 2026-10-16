@@ -49,6 +49,13 @@ const operatorOrUser: LegacyRule = {
   evaluate: (principal) => principal.kind === "operator" || principal.kind === "user",
 };
 
+/** The shared API key only: swarm-wide settings that no session user or agent may change. */
+const operatorOnly: LegacyRule = {
+  name: "operator-only",
+  denyReason: "requires operator authentication",
+  evaluate: (principal) => principal.kind === "operator",
+};
+
 const leadOrOperatorOrUser: LegacyRule = {
   name: "lead-or-operator-or-user",
   denyReason: "requires lead agent, operator, or user authentication",
@@ -313,6 +320,7 @@ export const LEGACY_POLICY = {
   // Lead tokens retain config.read.secrets. This exception does not grant config administration.
   "models.catalog.write": leadOrOperator,
   "models.harness-support.write": agentOrOperator,
+  "models.profiles.write": operatorOnly,
   "skill.create.swarm": leadOnly,
   "skill.install.any": leadOnly,
   "skill.install.global": leadOnly,

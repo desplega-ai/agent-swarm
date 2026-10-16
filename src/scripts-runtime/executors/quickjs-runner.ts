@@ -13,6 +13,7 @@ import { table } from "../stdlib/table";
 import { SwarmConfig } from "../swarm-config";
 import { bundleForQuickJS, USER_SCRIPT_FILE } from "./quickjs-bundle";
 import { SANDBOX_EPILOGUE, SANDBOX_PRELUDE } from "./quickjs-prelude";
+import { SANDBOX_WEB_SHIMS } from "./quickjs-web-shims";
 import type { SourceMapReader } from "./sourcemap";
 import type {
   ExecutorOutput,
@@ -37,6 +38,13 @@ const BUNDLE_FILE = USER_SCRIPT_FILE.replace(/\.ts$/, ".js");
 const MAX_CONCURRENT_HOST_CALLS = 16;
 // Host calls and timers that one run can have in flight or queued.
 const MAX_PENDING_HOST_CALLS = 1024;
+// A binary fetch body crosses the bridge as base64 and is decoded on the host.
+// One body decodes to at most this many bytes, and the binary bodies a run has
+// queued or in flight total at most MAX_PENDING_BINARY_BODY_BYTES. Both are
+// checked before decoding, so a rejected request never reaches fetch.
+const MAX_BINARY_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_BINARY_BODY_BASE64_LENGTH = Math.ceil(MAX_BINARY_BODY_BYTES / 3) * 4;
+const MAX_PENDING_BINARY_BODY_BYTES = 64 * 1024 * 1024;
 // After a run ends, its host calls are aborted. Wait this long for them to settle.
 const HOST_CALL_SETTLE_MS = 1_000;
 
@@ -46,6 +54,9 @@ export type QuickJSJobResult = {
   leakedHostCalls: number;
 };
 const MAX_STACK_BYTES = 1024 * 1024;
+// Bun's getRandomValues has no 64 KiB quota, so neither does the sandbox. This
+// bound only keeps one sync host call's JSON reply small.
+const MAX_RANDOM_BYTES = 1024 * 1024;
 const TIMEOUT_EXIT_CODE = 124;
 
 type ErrorPayload = { name: string; message: string; stack: string };
@@ -126,12 +137,51 @@ type SandboxRequest = {
   method?: string;
   headers?: [string, string][];
   body?: string;
+  /** Binary body, base64-encoded by the sandbox. */
+  bodyBase64?: string;
   retries?: number;
   timeoutMs?: number;
 };
 
+const FETCH_PATHS = new Set(["fetch", "stdlib.fetch", "stdlib.fetchJson"]);
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * Checks a sandbox fetch request's base64 body without decoding it and returns
+ * its decoded size (0 when there is none). The sandbox controls the value, so
+ * the type, alphabet and size are checked before the host allocates anything.
+ */
+function binaryBodySize(request: unknown): number {
+  if (!request || typeof request !== "object") return 0;
+  const encoded = (request as { bodyBase64?: unknown }).bodyBase64;
+  if (encoded === undefined) return 0;
+  if (typeof encoded !== "string") throw new TypeError("fetch bodyBase64 must be a string");
+  if (encoded.length > MAX_BINARY_BODY_BASE64_LENGTH) {
+    throw new RangeError(
+      `fetch binary body exceeds the ${MAX_BINARY_BODY_BYTES}-byte limit of the quickjs executor`,
+    );
+  }
+  if (encoded.length % 4 !== 0 || !BASE64_RE.test(encoded)) {
+    throw new TypeError("fetch bodyBase64 is not valid base64");
+  }
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  const size = (encoded.length / 4) * 3 - padding;
+  if (size > MAX_BINARY_BODY_BYTES) {
+    throw new RangeError(
+      `fetch binary body exceeds the ${MAX_BINARY_BODY_BYTES}-byte limit of the quickjs executor`,
+    );
+  }
+  return size;
+}
+
 function requestInit(request: SandboxRequest): RequestInit {
-  return { method: request.method, headers: request.headers, body: request.body };
+  if (request.bodyBase64 === undefined) {
+    return { method: request.method, headers: request.headers, body: request.body };
+  }
+  // Already checked by binaryBodySize when the call was accepted.
+  const bytes = Buffer.from(request.bodyBase64, "base64");
+  const body = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { method: request.method, headers: request.headers, body };
 }
 
 async function serializeResponse(response: Response, operation: string) {
@@ -223,6 +273,16 @@ function dispatchSync(config: SwarmConfig, op: string, value: unknown): unknown 
       return Redacted.meta(redactedFor(config, value));
     case "config.has":
       return typeof value === "string" && config.get(value) !== undefined;
+    case "crypto.random": {
+      if (
+        !Number.isInteger(value) ||
+        (value as number) < 0 ||
+        (value as number) > MAX_RANDOM_BYTES
+      ) {
+        throw new Error(`crypto.random needs a byte count between 0 and ${MAX_RANDOM_BYTES}`);
+      }
+      return Array.from(crypto.getRandomValues(new Uint8Array(value as number)));
+    }
     case "table":
       return table(value as Array<Record<string, unknown>>);
     default:
@@ -287,6 +347,7 @@ class HostCallScope {
   private readonly waiters: Array<() => void> = [];
   private readonly outerFetch = globalThis.fetch;
   private active = 0;
+  private bodyBytes = 0;
 
   constructor() {
     const outer = this.outerFetch;
@@ -306,8 +367,11 @@ class HostCallScope {
     return this.controller.signal;
   }
 
-  /** Track a host call. `limited` calls share the per-run concurrency budget. */
-  call<T>(run: () => Promise<T>, limited: boolean): Promise<T> {
+  /**
+   * Track a host call. `limited` calls share the per-run concurrency budget.
+   * `bodyBytes` counts against the per-run binary body budget until it settles.
+   */
+  call<T>(run: () => Promise<T>, limited: boolean, bodyBytes = 0): Promise<T> {
     if (this.ops.size >= MAX_PENDING_HOST_CALLS) {
       return Promise.reject(
         new Error(
@@ -315,12 +379,21 @@ class HostCallScope {
         ),
       );
     }
+    if (this.bodyBytes + bodyBytes > MAX_PENDING_BINARY_BODY_BYTES) {
+      return Promise.reject(
+        new RangeError(
+          `Pending fetch binary bodies in one script run exceed ${MAX_PENDING_BINARY_BODY_BYTES} bytes`,
+        ),
+      );
+    }
+    this.bodyBytes += bodyBytes;
     const op = limited ? this.limited(run) : run();
     this.ops.add(op);
-    void op.then(
-      () => this.ops.delete(op),
-      () => this.ops.delete(op),
-    );
+    const settle = () => {
+      this.ops.delete(op);
+      this.bodyBytes -= bodyBytes;
+    };
+    void op.then(settle, settle);
     return op;
   }
 
@@ -491,7 +564,10 @@ async function evaluateJob(
   define("__host_call", (pathHandle, argsHandle) => {
     const path = ctx.getString(pathHandle);
     const callArgs = JSON.parse(ctx.getString(argsHandle)) as unknown[];
-    return bridge(() => host.call(() => dispatchCall(hostCtx, path, callArgs, host.signal), true));
+    return bridge(async () => {
+      const bodyBytes = FETCH_PATHS.has(path) ? binaryBodySize(callArgs?.[0]) : 0;
+      return host.call(() => dispatchCall(hostCtx, path, callArgs, host.signal), true, bodyBytes);
+    });
   });
   define("__host_sync", (opHandle, valueHandle) => {
     let envelope: unknown;
@@ -538,6 +614,7 @@ async function evaluateJob(
     const init = `globalThis.__swarm_shape = ${JSON.stringify(shape)};\nglobalThis.__swarm_args = ${JSON.stringify(args)};`;
     const ok =
       evaluate(init, "swarm-init.js") &&
+      evaluate(SANDBOX_WEB_SHIMS, "swarm-web-shims.js") &&
       evaluate(SANDBOX_PRELUDE, "swarm-prelude.js") &&
       evaluate(bundle.code, BUNDLE_FILE) &&
       evaluate(SANDBOX_EPILOGUE, "swarm-epilogue.js");
