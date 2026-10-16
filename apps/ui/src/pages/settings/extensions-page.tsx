@@ -1,4 +1,5 @@
 import { AlertTriangle, Blocks, PanelRightOpen, Plus } from "lucide-react";
+import { useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useExtensions } from "@/api/hooks/use-extensions";
 import type { Extension } from "@/api/types";
@@ -85,7 +86,13 @@ function ExtensionCard({ extension, onDetails }: { extension: Extension; onDetai
         <span className="text-xs text-muted-foreground">
           Updated {formatSmartTime(extension.updatedAt)}
         </span>
-        <Button type="button" size="sm" variant="outline" onClick={onDetails}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-extension-details={extension.id}
+          onClick={onDetails}
+        >
           <PanelRightOpen className="h-4 w-4" />
           Details
         </Button>
@@ -105,8 +112,18 @@ export default function ExtensionsPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id?: string }>();
   const { data: extensions, isLoading, error } = useExtensions();
+  const installButton = useRef<HTMLButtonElement>(null);
 
   if (isLoading) return <PageSkeleton />;
+
+  /** The card's Details control, else (deleted card) the page's install button. */
+  function sheetFocusFallback(extensionId: string) {
+    return (
+      document.querySelector<HTMLElement>(
+        `[data-extension-details="${CSS.escape(extensionId)}"]`,
+      ) ?? installButton.current
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
@@ -114,7 +131,12 @@ export default function ExtensionsPage() {
         title="Extensions"
         description="Bundles that hook into swarm orchestration — task creation, follow-up, Slack routing, heartbeat remediation, and tool calls."
         action={
-          <Button type="button" size="sm" onClick={() => navigate("/settings/extensions/new")}>
+          <Button
+            ref={installButton}
+            type="button"
+            size="sm"
+            onClick={() => navigate("/settings/extensions/new")}
+          >
             <Plus className="h-4 w-4" />
             Install extension
           </Button>
@@ -156,6 +178,7 @@ export default function ExtensionsPage() {
       <ExtensionDetailSheet
         extensionId={id ?? null}
         onClose={() => void navigate("/settings/extensions")}
+        focusFallback={sheetFocusFallback}
       />
     </div>
   );

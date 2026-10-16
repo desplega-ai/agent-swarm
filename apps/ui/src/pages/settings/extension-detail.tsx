@@ -409,21 +409,27 @@ function ManifestAssets({ assets }: { assets: ExtensionManifest["assets"] }) {
  */
 export function ExtensionDetail({
   extensionId,
+  active,
   onDeleted,
 }: {
   extensionId: string;
+  /** False while the sheet closes: render cached data, fetch nothing. */
+  active: boolean;
   onDeleted: () => void;
 }) {
-  const { data: bundle, isLoading, error } = useExtension(extensionId);
-  const { data: versions } = useExtensionVersions(extensionId);
-  const { data: runs } = useExtensionRuns(extensionId);
-  const { data: typeDefsText } = useExtensionTypeDefs();
-
   const patch = usePatchExtension(extensionId);
   const enable = useEnableExtension(extensionId);
   const disable = useDisableExtension(extensionId);
   const activate = useActivateExtensionVersion(extensionId);
   const remove = useDeleteExtension(extensionId);
+
+  // Stop fetching once a delete starts: its success drops these caches, and a
+  // still-enabled observer would re-create them and poll the 404.
+  const live = active && !remove.isPending && !remove.isSuccess;
+  const { data: bundle, isLoading, error } = useExtension(extensionId, { enabled: live });
+  const { data: versions } = useExtensionVersions(extensionId, { enabled: live });
+  const { data: runs } = useExtensionRuns(extensionId, { enabled: live });
+  const { data: typeDefsText } = useExtensionTypeDefs();
 
   const [priority, setPriority] = useState("0");
   const [configText, setConfigText] = useState("{}");
@@ -460,6 +466,8 @@ export function ExtensionDetail({
   }
 
   if (!bundle) {
+    // Deleted: the cache entry is gone and the sheet is sliding out.
+    if (!live) return null;
     return (
       <Alert variant="destructive">
         <AlertDescription>
@@ -747,36 +755,60 @@ export function ExtensionDetail({
 }
 
 /**
- * Focus the sheet panel itself on open. Radix would otherwise focus the first
- * button, which here is Delete or Install.
+ * Focus handling for a sheet opened without a SheetTrigger, where Radix would
+ * return focus to <body> on close. Open focuses the panel itself (not its first
+ * button, Delete or Install) and remembers what had focus; close returns there,
+ * or to `fallback()` when nothing did (deep link) or it left the page (deleted
+ * card).
  */
-export function focusSheetPanel(event: Event) {
-  event.preventDefault();
-  if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+export function useSheetFocus(fallback: () => HTMLElement | null) {
+  const opener = useRef<HTMLElement | null>(null);
+  return {
+    onOpenAutoFocus(event: Event) {
+      const active = document.activeElement;
+      opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
+      event.preventDefault();
+      if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+    },
+    onCloseAutoFocus(event: Event) {
+      event.preventDefault();
+      const target = opener.current?.isConnected ? opener.current : fallback();
+      opener.current = null;
+      target?.focus();
+    },
+  };
 }
 
 /**
  * Right-side sheet over the installed-extensions grid. Open while
  * `extensionId` is set; the route `/settings/extensions/:id` drives it, so
  * deep links land on the grid with this sheet open. Full width on small
- * screens.
+ * screens. `focusFallback` names where focus goes on close when the opener is
+ * gone.
  */
 export function ExtensionDetailSheet({
   extensionId,
   onClose,
+  focusFallback,
 }: {
   extensionId: string | null;
   onClose: () => void;
+  focusFallback: (extensionId: string) => HTMLElement | null;
 }) {
-  // Keep the last id so the body stays rendered while the sheet animates closed.
+  const open = !!extensionId;
+  // Keep the last id so the body stays rendered while the sheet animates
+  // closed; its queries stop with `open`, so a closed or deleted extension is
+  // never polled.
   const [shownId, setShownId] = useState(extensionId);
   if (extensionId && extensionId !== shownId) setShownId(extensionId);
-  const { data: bundle } = useExtension(shownId ?? undefined);
+  // Cache reader only: the body's query owns fetching and polling.
+  const { data: bundle } = useExtension(shownId ?? undefined, { enabled: false });
   const extension = bundle?.extension;
+  const focus = useSheetFocus(() => (shownId ? focusFallback(shownId) : null));
 
   return (
-    <Sheet open={!!extensionId} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" onOpenAutoFocus={focusSheetPanel}>
+    <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" {...focus}>
         <SheetHeader className="border-b border-border px-6 py-4 pr-12">
           <SheetTitle className="flex min-w-0 items-center gap-2">
             <span className="truncate font-mono">{extension?.name ?? "Extension"}</span>
@@ -793,7 +825,14 @@ export function ExtensionDetailSheet({
           </SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-          {shownId && <ExtensionDetail key={shownId} extensionId={shownId} onDeleted={onClose} />}
+          {shownId && (
+            <ExtensionDetail
+              key={shownId}
+              extensionId={shownId}
+              active={open}
+              onDeleted={onClose}
+            />
+          )}
         </div>
       </SheetContent>
     </Sheet>

@@ -12,27 +12,45 @@ export function useExtensions() {
   });
 }
 
-export function useExtension(id: string | undefined) {
+/**
+ * Per-extension queries take `enabled: false` to stop fetching and polling
+ * while keeping the cache key, so a closing sheet can still render the last
+ * data without refetching (or re-creating) a removed query.
+ */
+interface ExtensionQueryOptions {
+  enabled?: boolean;
+}
+
+export function useExtension(
+  id: string | undefined,
+  { enabled = true }: ExtensionQueryOptions = {},
+) {
   return useQuery({
     queryKey: ["extension", id],
     queryFn: () => api.fetchExtension(id as string),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
-export function useExtensionVersions(id: string | undefined) {
+export function useExtensionVersions(
+  id: string | undefined,
+  { enabled = true }: ExtensionQueryOptions = {},
+) {
   return useQuery({
     queryKey: ["extension-versions", id],
     queryFn: () => api.fetchExtensionVersions(id as string),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
-export function useExtensionRuns(id: string | undefined, limit = 50) {
+export function useExtensionRuns(
+  id: string | undefined,
+  { enabled = true, limit = 50 }: ExtensionQueryOptions & { limit?: number } = {},
+) {
   return useQuery({
     queryKey: ["extension-runs", id, limit],
     queryFn: () => api.fetchExtensionRuns(id as string, limit),
-    enabled: !!id,
+    enabled: enabled && !!id,
     refetchInterval: RUNS_REFETCH_MS,
   });
 }

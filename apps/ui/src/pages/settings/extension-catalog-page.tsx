@@ -1,5 +1,5 @@
 import { ArrowLeft, Blocks, Download, ExternalLink, PanelRightOpen, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ExtensionInstallError } from "@/api/client";
@@ -28,7 +28,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { focusSheetPanel } from "./extension-detail";
+import { useSheetFocus } from "./extension-detail";
 
 /** Display order for known asset kinds; unknown kinds follow alphabetically. */
 const ASSET_ORDER = ["scripts", "schedules", "skills", "workflows"];
@@ -170,7 +170,13 @@ function CatalogCard({
         </div>
       </CardContent>
       <CardFooter className="flex-wrap justify-end gap-2 px-5">
-        <Button type="button" size="sm" variant="ghost" onClick={onDetails}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          data-catalog-details={item.name}
+          onClick={onDetails}
+        >
           <PanelRightOpen className="h-4 w-4" />
           Details
         </Button>
@@ -183,6 +189,7 @@ function CatalogCard({
 /**
  * Details for one catalog template: the manifest summary the catalog serves,
  * its README, and the install action. Full width on small screens.
+ * `focusFallback` names where focus goes on close when the opener is gone.
  */
 function CatalogDetailSheet({
   item,
@@ -191,6 +198,7 @@ function CatalogDetailSheet({
   installError,
   onInstall,
   onClose,
+  focusFallback,
 }: {
   item: ExtensionCatalogItem | null;
   installing: boolean;
@@ -198,14 +206,16 @@ function CatalogDetailSheet({
   installError: InstallErrorState | null;
   onInstall: (item: ExtensionCatalogItem) => void;
   onClose: () => void;
+  focusFallback: (name: string) => HTMLElement | null;
 }) {
   // Keep the last item so the body stays rendered while the sheet animates closed.
   const [shown, setShown] = useState(item);
   if (item && item !== shown) setShown(item);
+  const focus = useSheetFocus(() => (shown ? focusFallback(shown.name) : null));
 
   return (
     <Sheet open={!!item} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-2xl" onOpenAutoFocus={focusSheetPanel}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-2xl" {...focus}>
         <SheetHeader className="border-b border-border px-6 py-4 pr-12">
           <SheetTitle className="flex min-w-0 items-center gap-2">
             <span className="truncate font-mono">{shown?.name ?? "Extension"}</span>
@@ -283,8 +293,17 @@ export default function ExtensionCatalogPage() {
   const { data: catalog, isLoading, error } = useExtensionCatalog();
   const install = useInstallExtension();
   const [installError, setInstallError] = useState<InstallErrorState | null>(null);
+  const backLink = useRef<HTMLAnchorElement>(null);
 
   if (isLoading) return <PageSkeleton />;
+
+  /** The template card's Details control, else the page's Back link. */
+  function sheetFocusFallback(name: string) {
+    return (
+      document.querySelector<HTMLElement>(`[data-catalog-details="${CSS.escape(name)}"]`) ??
+      backLink.current
+    );
+  }
 
   const selectedName = searchParams.get(TEMPLATE_PARAM);
   const selected = (catalog ?? []).find((item) => item.name === selectedName) ?? null;
@@ -334,7 +353,7 @@ export default function ExtensionCatalogPage() {
         description="Predefined bundles shipped with this server. Installing adds the extension disabled; enable it from its details. Reinstalling stages a new version only when the bundle changed."
         action={
           <Button type="button" size="sm" variant="ghost" asChild>
-            <Link to="/settings/extensions">
+            <Link ref={backLink} to="/settings/extensions">
               <ArrowLeft className="h-4 w-4" />
               Back
             </Link>
@@ -381,6 +400,7 @@ export default function ExtensionCatalogPage() {
         installError={installError}
         onInstall={handleInstall}
         onClose={() => setSelected(null)}
+        focusFallback={sheetFocusFallback}
       />
     </div>
   );
