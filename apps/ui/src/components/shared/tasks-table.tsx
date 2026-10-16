@@ -348,6 +348,7 @@ const TASK_TYPE_META: Record<string, { label: string; icon: IconCmp }> = {
   // Inbound integrations
   "agentmail-message": { label: "AgentMail message", icon: Mail },
   "agentmail-reply": { label: "AgentMail reply", icon: Mail },
+  "azure-devops-work-item": { label: "Azure Boards work item", icon: Globe },
   "github-comment": { label: "GitHub comment", icon: Github },
   "github-issue": { label: "GitHub issue", icon: Github },
   "github-pr": { label: "GitHub PR", icon: GitPullRequest },

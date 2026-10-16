@@ -25,7 +25,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getPage, incrementPageViewCount } from "../be/db";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
-import { feedbackOverlayScripts, isPageFeedbackRequested } from "../pages/feedback-overlay";
+import {
+  feedbackKeyGuardScript,
+  feedbackOverlayScripts,
+  isPageFeedbackRequested,
+} from "../pages/feedback-overlay";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
 import { getNodeEnv } from "../utils/node-env";
@@ -170,8 +174,8 @@ const PAGE_HEAD_DEFAULTS = `<base target="_blank">
   }
 </style>`;
 
-function injectBrowserSdk(html: string): string {
-  const injection = `${PAGE_HEAD_DEFAULTS}<script>${BROWSER_SDK_JS}</script><script>${SWARM_UI_JS}</script>`;
+function injectBrowserSdk(html: string, headFirst = ""): string {
+  const injection = `${headFirst}${PAGE_HEAD_DEFAULTS}<script>${BROWSER_SDK_JS}</script><script>${SWARM_UI_JS}</script>`;
   // Use the first occurrence of `<head>` (case-insensitive). A page that
   // doesn't have a `<head>` element (raw fragment) still gets the SDK at the
   // front of the document.
@@ -646,10 +650,12 @@ export async function handlePagesPublic(
   // text/html — inject SDK + serve. Append the self-print snippet when the
   // export button requested it, and the feedback overlay when
   // `?__swarm-feedback` is on (the overlay hides itself in print).
+  // The feedback key guard goes first in <head> so it runs before page scripts.
+  const feedback = isPageFeedbackRequested(queryParams);
   const html =
-    injectBrowserSdk(page.body) +
+    injectBrowserSdk(page.body, feedback ? feedbackKeyGuardScript() : "") +
     (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "") +
-    (isPageFeedbackRequested(queryParams) ? feedbackOverlayScripts(page.id) : "");
+    (feedback ? feedbackOverlayScripts(page.id) : "");
   const headers: Record<string, string> = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",

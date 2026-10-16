@@ -7,7 +7,7 @@ import {
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
-import { initAzureDevOps } from "../azure-devops";
+import { initAzureDevOps, initAzureDevOpsOutbound } from "../azure-devops";
 import { drainApi, isApiDraining } from "../be/api-drain";
 import {
   closeDb,
@@ -794,6 +794,7 @@ httpServer
 
     // Initialize Azure DevOps service-hook handler (if configured)
     initAzureDevOps();
+    initAzureDevOpsOutbound();
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();

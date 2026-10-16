@@ -127,6 +127,9 @@ describe("page feedback", () => {
     const html = await res.text();
     expect(html).toContain(`window.__swarmFeedback = {"pageId":"${pageId}"};`);
     expect(html).toContain("swarm-feedback-root");
+    // The key guard is served before the page's own markup and scripts.
+    expect(html.indexOf("__swarmFeedbackKeys")).toBeGreaterThan(-1);
+    expect(html.indexOf("__swarmFeedbackKeys")).toBeLessThan(html.indexOf("<h1>Hello</h1>"));
     // The agent-authored body and the SDK are still served.
     expect(html).toContain("<h1>Hello</h1>");
     expect(html).toContain("class SwarmSDK");

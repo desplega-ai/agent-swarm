@@ -1,3 +1,5 @@
+import { providerBaseUrl, providerForModel, providerKeyVars } from "@desplega/model-catalog";
+import { selectCredential } from "../../utils/credentials";
 import { DEFAULT_MODEL, resolveCredential } from "../../utils/internal-ai/credentials";
 import {
   getOpenRouterAttributionHeaders,
@@ -25,6 +27,26 @@ export async function resolveWorkflowLlmConfig(
   env: NodeJS.ProcessEnv = process.env,
   options: { requireKind?: "openrouter" | "openai" } = {},
 ): Promise<WorkflowLlmConfig> {
+  // `nan/<model>`, `helmcode/<model>`, ...: an OpenAI-compatible registry
+  // provider is reached with its own key and base URL, never through OpenRouter.
+  const registryProvider = options.requireKind ? undefined : providerForModel(requestedModel);
+  if (registryProvider && requestedModel) {
+    const keyVar = providerKeyVars(registryProvider).find((name) => env[name]?.trim());
+    if (!keyVar) {
+      throw new Error(
+        `No ${registryProvider.displayName} credential found for ${requestedModel}. Set ${registryProvider.envVar}.`,
+      );
+    }
+    return {
+      // The API hydrates global config verbatim, so a key may still be a
+      // comma pool; workflow calls skip the runner's per-task pick.
+      apiKey: selectCredential(env[keyVar] as string, undefined, keyVar).selected,
+      baseURL: providerBaseUrl(registryProvider, env),
+      headers: {},
+      model: requestedModel.slice(registryProvider.id.length + 1),
+    };
+  }
+
   const credential = await resolveCredential({ env });
   if (!credential) {
     throw new Error("No workflow LLM credential found. Set OPENROUTER_API_KEY or OPENAI_API_KEY.");

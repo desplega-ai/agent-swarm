@@ -808,6 +808,21 @@ function computeIsSensitiveKey(key: string): boolean {
   return false;
 }
 
+/**
+ * Every form of a credential value a consumer may send: the raw value, its
+ * trimmed form, and each trimmed member of a comma pool. `selectCredential`
+ * trims the key it hands out, so a padded singleton reaches the provider (and
+ * its error echo) without the padding.
+ */
+function credentialCandidates(value: string): string[] {
+  const candidates = new Set([value, value.trim()]);
+  if (value.includes(",")) {
+    for (const member of value.split(",")) candidates.add(member.trim());
+  }
+  candidates.delete("");
+  return [...candidates];
+}
+
 function buildCache(): ScrubCache {
   const entries: EnvValueEntry[] = [];
   const seen = new Set<string>();
@@ -816,14 +831,7 @@ function buildCache(): ScrubCache {
     if (!rawValue) continue;
     if (!isSensitiveKey(key)) continue;
 
-    // Credential pools: a single env var may hold a comma-separated list of
-    // tokens that the runner rotates through. Scrub each component too.
-    const candidates = rawValue.includes(",")
-      ? [rawValue, ...rawValue.split(",").map((s) => s.trim())]
-      : [rawValue];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
+    for (const candidate of credentialCandidates(rawValue)) {
       if (candidate.length < MIN_VALUE_LENGTH) continue;
       for (const form of escapedForms(candidate)) {
         if (seen.has(form)) continue;
@@ -1089,14 +1097,13 @@ export function registerVolatileSecret(value: string, name: string): void {
  * Register the sensitive values of an env map that is not `process.env`
  * (a runner's per-task env, an adapter's session env). A key picked from a
  * credential pool, or a row admitted after boot, lives only there, so the
- * env pass never sees it. Comma-separated pools register each member too.
+ * env pass never sees it. Comma-separated pools register each member too,
+ * and padded values register their trimmed form.
  */
 export function registerEnvSecrets(env: Record<string, string | undefined>): void {
   for (const [key, value] of Object.entries(env)) {
     if (!value || !isSensitiveKey(key)) continue;
-    registerVolatileSecret(value, key);
-    if (!value.includes(",")) continue;
-    for (const member of value.split(",")) registerVolatileSecret(member.trim(), key);
+    for (const candidate of credentialCandidates(value)) registerVolatileSecret(candidate, key);
   }
 }
 

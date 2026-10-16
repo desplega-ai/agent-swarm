@@ -773,19 +773,21 @@ export const INTEGRATIONS: IntegrationDef[] = [
       },
       {
         key: "AGENTMAIL_INBOX_DOMAIN_FILTER",
-        label: "Inbox domain filter",
+        label: "Inbox filter",
         type: "text",
         advanced: true,
-        placeholder: "support.example.com",
-        helpText: "Only process mail addressed to these inbox domains.",
+        placeholder: "bot@example.com,support.example.com",
+        helpText:
+          "Only process mail addressed to these inboxes. Comma-separated full addresses (exact match) or domains.",
       },
       {
         key: "AGENTMAIL_SENDER_DOMAIN_FILTER",
-        label: "Sender domain filter",
+        label: "Sender filter",
         type: "text",
         advanced: true,
-        placeholder: "example.com",
-        helpText: "Only accept mail from senders in these domains (allow-list).",
+        placeholder: "me@gmail.com,example.com",
+        helpText:
+          "Only accept mail from these senders (allow-list). Comma-separated full addresses (exact match) or domains.",
       },
     ],
   },

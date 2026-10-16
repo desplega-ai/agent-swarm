@@ -611,7 +611,7 @@ export async function handleScriptRuns(
     if (!parsed) return true;
     const result = await executeRawLlm(parsed.body);
     if (result.status === "failed") {
-      json(res, { error: result.error }, 500);
+      jsonError(res, result.error, 500);
       return true;
     }
     rawLlmRoute.respond(res, 200, result.output);

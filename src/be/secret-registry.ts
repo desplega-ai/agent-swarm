@@ -77,8 +77,12 @@ export function encodedForms(value: string): string[] {
 /** Register a stored secret value, plus its encoded forms, with the scrubber. */
 export function registerStoredSecret(value: string | null | undefined, name: string): void {
   if (!value) return;
-  registerVolatileSecret(value, name);
-  for (const form of encodedForms(value)) registerVolatileSecret(form, name);
+  // Config values are hydrated verbatim but consumed trimmed.
+  for (const candidate of new Set([value, value.trim()])) {
+    if (!candidate) continue;
+    registerVolatileSecret(candidate, name);
+    for (const form of encodedForms(candidate)) registerVolatileSecret(form, name);
+  }
 }
 
 export interface SecretRegistryLoadResult {

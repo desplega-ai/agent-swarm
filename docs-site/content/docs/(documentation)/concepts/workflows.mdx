@@ -273,7 +273,7 @@ The webhook payload supplies `event` and `pull_request`. A nonmatching event end
 | `webhook` | HTTP POST to `/api/workflows/:id/trigger` with optional verification |
 | `schedule` | References a schedule by ID — the schedule creates workflow runs at configured times |
 | `manual` | Triggered via the `trigger-workflow` MCP tool or dashboard UI |
-| `event` | Starts from a named internal event; `slack.message` is currently supported |
+| `event` | Starts from a named internal event; `slack.message`, `azure-devops.work_item.assigned` and `azure-devops.work_item.commented` are supported |
 
 An event trigger uses `{ "type": "event", "eventName": "slack.message" }`. The Slack message payload becomes the workflow's `triggerData` and contains `channel`, `text`, `user`, `ts`, and `threadTs`; any configured `triggerSchema` is applied before a run starts.
 

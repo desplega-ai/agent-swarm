@@ -3,6 +3,7 @@
  * and resolving the bot identity behind the PAT. Uses raw fetch, no SDK.
  */
 
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   getAzureDevOpsOrgUrl,
   getAzureDevOpsToken,
@@ -163,7 +164,9 @@ export async function likeAzureDevOpsComment(
   try {
     const resp = await fetch(url, { method: "POST", headers: headers() });
     if (!resp.ok) {
-      console.error(`[AzureDevOps] Failed to like comment: ${resp.status} ${await resp.text()}`);
+      console.error(
+        `[AzureDevOps] Failed to like comment: ${resp.status} ${scrubSecrets(await resp.text())}`,
+      );
     }
   } catch (err) {
     console.error(`[AzureDevOps] Error liking comment:`, err);
@@ -189,9 +192,56 @@ export async function postAzureDevOpsPullRequestComment(
       }),
     });
     if (!resp.ok) {
-      console.error(`[AzureDevOps] Failed to post comment: ${resp.status} ${await resp.text()}`);
+      console.error(
+        `[AzureDevOps] Failed to post comment: ${resp.status} ${scrubSecrets(await resp.text())}`,
+      );
     }
   } catch (err) {
     console.error(`[AzureDevOps] Error posting comment:`, err);
+  }
+}
+
+/** One JSON Patch operation on a work item. */
+export interface WorkItemFieldOp {
+  op: "add" | "replace";
+  path: string; // e.g. "/fields/System.State"
+  value: unknown;
+}
+
+/**
+ * Update work-item fields with one JSON Patch call. Returns whether it
+ * succeeded; failures are logged, never thrown, since callers are
+ * fire-and-forget lifecycle mirrors. The project segment is optional here.
+ * @see https://learn.microsoft.com/rest/api/azure/devops/wit/work-items/update
+ */
+export async function updateWorkItemFields(
+  orgBaseUrl: string,
+  workItemId: number,
+  ops: WorkItemFieldOp[],
+): Promise<boolean> {
+  const orgUrl = credentialedOrgUrl(orgBaseUrl);
+  if (!orgUrl) return false;
+  try {
+    const resp = await fetch(
+      `${orgUrl}/_apis/wit/workitems/${workItemId}?api-version=${API_VERSION}`,
+      {
+        method: "PATCH",
+        headers: { ...headers(), "Content-Type": "application/json-patch+json" },
+        body: JSON.stringify(ops),
+        redirect: "error",
+      },
+    );
+    if (!resp.ok) {
+      console.error(
+        `[AzureDevOps] Failed to update work item #${workItemId}: ${resp.status} ${scrubSecrets(await resp.text())}`,
+      );
+    }
+    return resp.ok;
+  } catch (err) {
+    console.error(
+      `[AzureDevOps] Error updating work item #${workItemId}:`,
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    );
+    return false;
   }
 }
