@@ -1,7 +1,7 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   useActivateExtensionVersion,
@@ -14,10 +14,15 @@ import {
   useExtensionVersions,
   usePatchExtension,
 } from "@/api/hooks/use-extensions";
-import type { ExtensionManifest, ExtensionRun, ExtensionVersion } from "@/api/types";
+import type {
+  ExtensionManifest,
+  ExtensionRun,
+  ExtensionStatus,
+  ExtensionVersion,
+} from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { DataGrid } from "@/components/shared/data-grid";
-import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -36,11 +41,25 @@ import { InfoRow } from "@/components/ui/info-row";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageHeader } from "@/components/ui/page-header";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime } from "@/lib/utils";
-import { statusBadgeVariant } from "./extensions-page";
+
+/** Status to badge variant. `error` and `auto-disabled` both need attention. */
+export function statusBadgeVariant(
+  status: ExtensionStatus,
+): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "enabled") return "default";
+  if (status === "error" || status === "auto-disabled") return "destructive";
+  return "outline";
+}
 
 /** Bundle paths Monaco should render as TypeScript; anything else shows as plain text. */
 const TS_FILE = /\.(?:[cm]?[jt]sx?)$/;
@@ -386,16 +405,18 @@ function ManifestAssets({ assets }: { assets: ExtensionManifest["assets"] }) {
  * One installed extension: its manifest and the active snapshot's files
  * (read-only — bundles come from the catalog, see `/settings/extensions/new`),
  * enable/disable, priority and config, the version list, and the tail of the
- * run log.
+ * run log. Rendered by {@link ExtensionDetailSheet}.
  */
-export default function ExtensionDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const extensionId = id ?? "";
-
-  const { data: bundle, isLoading, error } = useExtension(id);
-  const { data: versions } = useExtensionVersions(id);
-  const { data: runs } = useExtensionRuns(id);
+export function ExtensionDetail({
+  extensionId,
+  onDeleted,
+}: {
+  extensionId: string;
+  onDeleted: () => void;
+}) {
+  const { data: bundle, isLoading, error } = useExtension(extensionId);
+  const { data: versions } = useExtensionVersions(extensionId);
+  const { data: runs } = useExtensionRuns(extensionId);
   const { data: typeDefsText } = useExtensionTypeDefs();
 
   const patch = usePatchExtension(extensionId);
@@ -430,30 +451,25 @@ export default function ExtensionDetailPage() {
     [typeDefsText],
   );
 
-  if (isLoading) return <PageSkeleton />;
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner className="size-3.5" /> Loading extension…
+      </div>
+    );
+  }
 
   if (!bundle) {
     return (
-      <div className="flex flex-col flex-1 min-h-0 gap-6">
-        <PageHeader
-          title="Extension not found"
-          action={
-            <Button type="button" size="sm" variant="ghost" asChild>
-              <Link to="/settings/extensions">
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Link>
-            </Button>
-          }
-        />
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>
-              {error instanceof Error ? error.message : String(error)}
-            </AlertDescription>
-          </Alert>
-        )}
-      </div>
+      <Alert variant="destructive">
+        <AlertDescription>
+          {error
+            ? error instanceof Error
+              ? error.message
+              : String(error)
+            : "Extension not found."}
+        </AlertDescription>
+      </Alert>
     );
   }
 
@@ -501,7 +517,7 @@ export default function ExtensionDetailPage() {
         toast.success(`Deleted ${extension.name}`, {
           description: parts.length > 0 ? parts.join(", ") : undefined,
         });
-        void navigate("/settings/extensions");
+        onDeleted();
       },
       onError: (err) => setSaveError(err.message),
     });
@@ -515,66 +531,47 @@ export default function ExtensionDetailPage() {
     remove.isPending;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-6">
-      <PageHeader
-        title={
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="truncate">{extension.name}</span>
-            <Badge variant={statusBadgeVariant(extension.status)} size="tag">
-              {extension.status}
-            </Badge>
-          </div>
-        }
-        description={`Active v${extension.activeVersion} of ${extension.version} · ${extension.consecutiveFailures} consecutive failures`}
-        action={
-          <div className="flex items-center gap-2">
-            <Button type="button" size="sm" variant="ghost" asChild>
-              <Link to="/settings/extensions">
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Link>
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive-outline"
-              disabled={busy}
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
-            {extension.enabled ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  disable.mutate(undefined, {
-                    onError: (err) => setSaveError(err.message),
-                  })
-                }
-              >
-                Disable
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy}
-                onClick={() =>
-                  enable.mutate(undefined, {
-                    onError: (err) => setSaveError(err.message),
-                  })
-                }
-              >
-                Enable
-              </Button>
-            )}
-          </div>
-        }
-      />
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="destructive-outline"
+          disabled={busy}
+          onClick={() => setConfirmDelete(true)}
+        >
+          <Trash2 className="h-4 w-4" />
+          Delete
+        </Button>
+        {extension.enabled ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() =>
+              disable.mutate(undefined, {
+                onError: (err) => setSaveError(err.message),
+              })
+            }
+          >
+            Disable
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              enable.mutate(undefined, {
+                onError: (err) => setSaveError(err.message),
+              })
+            }
+          >
+            Enable
+          </Button>
+        )}
+      </div>
 
       {saveError && (
         <Alert variant="destructive">
@@ -595,7 +592,7 @@ export default function ExtensionDetailPage() {
           <CardTitle>Bundle</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <InfoRow label="Manifest version">
               <span className="font-mono text-xs">{manifest.version}</span>
             </InfoRow>
@@ -746,5 +743,59 @@ export default function ExtensionDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/**
+ * Focus the sheet panel itself on open. Radix would otherwise focus the first
+ * button, which here is Delete or Install.
+ */
+export function focusSheetPanel(event: Event) {
+  event.preventDefault();
+  if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+}
+
+/**
+ * Right-side sheet over the installed-extensions grid. Open while
+ * `extensionId` is set; the route `/settings/extensions/:id` drives it, so
+ * deep links land on the grid with this sheet open. Full width on small
+ * screens.
+ */
+export function ExtensionDetailSheet({
+  extensionId,
+  onClose,
+}: {
+  extensionId: string | null;
+  onClose: () => void;
+}) {
+  // Keep the last id so the body stays rendered while the sheet animates closed.
+  const [shownId, setShownId] = useState(extensionId);
+  if (extensionId && extensionId !== shownId) setShownId(extensionId);
+  const { data: bundle } = useExtension(shownId ?? undefined);
+  const extension = bundle?.extension;
+
+  return (
+    <Sheet open={!!extensionId} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" onOpenAutoFocus={focusSheetPanel}>
+        <SheetHeader className="border-b border-border px-6 py-4 pr-12">
+          <SheetTitle className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono">{extension?.name ?? "Extension"}</span>
+            {extension && (
+              <Badge variant={statusBadgeVariant(extension.status)} size="tag">
+                {extension.status}
+              </Badge>
+            )}
+          </SheetTitle>
+          <SheetDescription>
+            {extension
+              ? `Active v${extension.activeVersion} of ${extension.version} · ${extension.consecutiveFailures} consecutive failures`
+              : "Installed extension"}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          {shownId && <ExtensionDetail key={shownId} extensionId={shownId} onDeleted={onClose} />}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
