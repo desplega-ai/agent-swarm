@@ -653,8 +653,21 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
     // === session_compact → PreCompact ===
     // Re-anchor the model on its task once compaction has summarized the
     // history. `context` fires before every LLM call, so it cannot carry this.
-    pi.on("session_compact", async () => {
+    pi.on("session_compact", async (event, ctx) => {
       if (!config.taskId) return;
+
+      // The one real compaction signal: shaped like the claude runner's rows.
+      fireAndForget(`${config.apiUrl}/api/tasks/${config.taskId}/context`, {
+        method: "POST",
+        headers: apiHeaders(config),
+        body: JSON.stringify({
+          eventType: "compaction",
+          sessionId: `pi-${config.taskId}`,
+          compactTrigger: event.reason === "manual" ? "manual" : "auto",
+          preCompactTokens: event.compactionEntry?.tokensBefore,
+          contextTotalTokens: ctx.getContextUsage?.()?.contextWindow,
+        }),
+      });
 
       const taskDetails = await fetchTaskDetails(config);
       if (taskDetails) {
@@ -667,14 +680,15 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
     pi.on("context", async (_event, ctx) => {
       if (!config.taskId) return undefined;
 
-      // Report context usage as a compaction event
+      // Per-call usage snapshot: "progress", as the claude/codex runner posts
+      // per-turn usage. Only session_compact reports a compaction.
       const usage = ctx.getContextUsage?.();
       if (usage) {
         fireAndForget(`${config.apiUrl}/api/tasks/${config.taskId}/context`, {
           method: "POST",
           headers: apiHeaders(config),
           body: JSON.stringify({
-            eventType: "compaction",
+            eventType: "progress",
             sessionId: `pi-${config.taskId}`,
             contextUsedTokens: usage.tokens ?? undefined,
             contextTotalTokens: usage.contextWindow,
