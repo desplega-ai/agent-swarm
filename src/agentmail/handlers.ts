@@ -91,32 +91,42 @@ function extractNameFromField(from: string): string | undefined {
 }
 
 /**
- * Check if an inbox domain is allowed by the filter.
- * Returns true if no filter is set or the inbox domain matches.
+ * Check an email address against comma-separated filter entries.
+ * An entry containing "@" matches that exact address; a bare entry matches any
+ * address on that domain. Comparison is case-insensitive.
  */
-export function isInboxAllowed(inboxId: string, filter: string | undefined): boolean {
-  if (!filter) return true;
-  const allowedDomains = filter.split(",").map((d) => d.trim().toLowerCase());
-  const inboxDomain = inboxId.split("@")[1]?.toLowerCase();
-  return !!inboxDomain && allowedDomains.includes(inboxDomain);
+function matchesAddressFilter(email: string, filter: string): boolean {
+  const address = email.trim().toLowerCase();
+  const domain = address.split("@")[1];
+  if (!domain) return false;
+  return filter
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .some((entry) => (entry.includes("@") ? entry === address : entry === domain));
 }
 
 /**
- * Check if a sender domain is allowed by the filter.
- * Returns true if no filter is set or at least one sender domain matches.
+ * Check if an inbox address is allowed by the filter (full addresses or domains).
+ * Returns true if no filter is set or the inbox matches an entry.
+ */
+export function isInboxAllowed(inboxId: string, filter: string | undefined): boolean {
+  if (!filter) return true;
+  return matchesAddressFilter(inboxId, filter);
+}
+
+/**
+ * Check if a sender address is allowed by the filter (full addresses or domains).
+ * Returns true if no filter is set or at least one sender matches an entry.
  */
 export function isSenderAllowed(
   from: AgentMailMessage["from_"],
   filter: string | undefined,
 ): boolean {
   if (!filter) return true;
-  const allowedDomains = filter.split(",").map((d) => d.trim().toLowerCase());
   const fromAddresses = Array.isArray(from) ? from : [from || ""];
   return fromAddresses.some((addr) => {
     const emailMatch = addr.match(/<([^>]+)>/);
-    const email = emailMatch?.[1] ?? addr;
-    const domain = email.split("@")[1]?.toLowerCase();
-    return !!domain && allowedDomains.includes(domain);
+    return matchesAddressFilter(emailMatch?.[1] ?? addr, filter);
   });
 }
 

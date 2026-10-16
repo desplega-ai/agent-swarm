@@ -21,19 +21,19 @@ The `register-agentmail-inbox` MCP tool requires the `agentmail` capability, whi
 ```bash
 AGENTMAIL_WEBHOOK_SECRET=your-svix-secret
 
-# Optional: filter incoming webhooks by domain
+# Optional: filter incoming webhooks by address or domain
 AGENTMAIL_INBOX_DOMAIN_FILTER=yourdomain.com
-AGENTMAIL_SENDER_DOMAIN_FILTER=gmail.com,company.com
+AGENTMAIL_SENDER_DOMAIN_FILTER=me@gmail.com,company.com
 ```
 
-### Domain Filtering
+### Address and Domain Filtering
 
-You can restrict which emails are processed using domain filters:
+You can restrict which emails are processed using address or domain filters:
 
-- **`AGENTMAIL_INBOX_DOMAIN_FILTER`** — Only process webhooks for inboxes on the specified domains. Emails to inboxes on other domains are excluded from task routing.
-- **`AGENTMAIL_SENDER_DOMAIN_FILTER`** — Only process emails from senders on the specified domains. Emails from other sender domains are excluded from task routing.
+- **`AGENTMAIL_INBOX_DOMAIN_FILTER`** — Only process webhooks for the specified inboxes or inbox domains. Emails to other inboxes are excluded from task routing.
+- **`AGENTMAIL_SENDER_DOMAIN_FILTER`** — Only process emails from the specified senders or sender domains. Emails from other senders are excluded from task routing.
 
-Both accept comma-separated domain lists and are optional. When not set, all domains are allowed.
+Both accept a comma-separated list and are optional. An entry with `@` (such as `me@gmail.com`) matches that exact address. A bare domain (such as `company.com`) matches any address on that domain. Matching is case-insensitive, and one list can mix both forms. When not set, all addresses are allowed.
 
 ## How It Works
 
