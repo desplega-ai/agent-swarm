@@ -24,6 +24,7 @@ import {
   clearVolatileSecretsForTesting,
   refreshSecretScrubberCache,
 } from "../utils/secret-scrubber";
+import { executeRawLlm } from "../workflows/executors/raw-llm";
 import { randomToken } from "./synthetic-secret-helpers";
 
 const TEST_DB_PATH = "./test-script-runs-http.sqlite";
@@ -663,11 +664,20 @@ describe("durable launch source with an embedded secret", () => {
 });
 
 describe("POST /api/internal/raw-llm failure", () => {
-  test("does not echo a provider error that carries the NaN key", async () => {
+  const KEY_VARS = ["NAN_API_KEY", "HELMCODE_API_NAN"] as const;
+
+  // The provider echoes the key it received; `selectCredential` sends it
+  // trimmed, so a padded config value must still be redacted.
+  async function withNanKey(
+    keyVar: (typeof KEY_VARS)[number],
+    pad: string,
+    fn: (dummy: string, calls: () => number) => Promise<void>,
+  ) {
     const dummy = `nan-${randomToken(32)}`;
-    const previousKey = process.env.NAN_API_KEY;
+    const previous = Object.fromEntries(KEY_VARS.map((name) => [name, process.env[name]]));
     const previousFetch = globalThis.fetch;
-    process.env.NAN_API_KEY = dummy;
+    for (const name of KEY_VARS) delete process.env[name];
+    process.env[keyVar] = `${pad}${dummy}${pad}`;
     refreshSecretScrubberCache();
     let calls = 0;
     globalThis.fetch = (async () => {
@@ -678,22 +688,50 @@ describe("POST /api/internal/raw-llm failure", () => {
       );
     }) as unknown as typeof fetch;
     try {
-      const response = await dispatch("/api/internal/raw-llm", {
-        method: "POST",
-        agentId,
-        body: JSON.stringify({ prompt: "hi", model: "nan/qwen3.8-flash" }),
-      });
-      expect(calls).toBe(1);
-      expect(response.status).toBe(500);
-      expect(response.text).not.toContain(dummy);
-      const body = (await response.json()) as { error: string };
-      expect(body.error).toContain("LLM call failed");
-      expect(body.error).toContain("[REDACTED:");
+      await fn(dummy, () => calls);
     } finally {
       globalThis.fetch = previousFetch;
-      if (previousKey === undefined) delete process.env.NAN_API_KEY;
-      else process.env.NAN_API_KEY = previousKey;
+      for (const name of KEY_VARS) {
+        if (previous[name] === undefined) delete process.env[name];
+        else process.env[name] = previous[name];
+      }
       refreshSecretScrubberCache();
     }
-  });
+  }
+
+  for (const keyVar of KEY_VARS) {
+    for (const pad of ["", "  "]) {
+      const label = pad ? "padded" : "unpadded";
+      test(`does not echo a provider error that carries the ${label} ${keyVar} key`, async () => {
+        await withNanKey(keyVar, pad, async (dummy, calls) => {
+          const response = await dispatch("/api/internal/raw-llm", {
+            method: "POST",
+            agentId,
+            body: JSON.stringify({ prompt: "hi", model: "nan/qwen3.8-flash" }),
+          });
+          expect(calls()).toBe(1);
+          expect(response.status).toBe(500);
+          expect(response.text).not.toContain(dummy);
+          const body = (await response.json()) as { error: string };
+          expect(body.error).toContain("LLM call failed");
+          expect(body.error).toContain(`[REDACTED:${keyVar}]`);
+        });
+      });
+    }
+
+    test(`scrubs the fallback-port error for a padded ${keyVar} key`, async () => {
+      await withNanKey(keyVar, "  ", async (dummy, calls) => {
+        const result = await executeRawLlm({
+          prompt: "hi",
+          model: "nan/qwen3.8-flash",
+          fallbackPort: "fallback",
+        });
+        expect(calls()).toBe(1);
+        expect(result.status).toBe("success");
+        expect(result.error).toContain("using fallback port");
+        expect(result.error).not.toContain(dummy);
+        expect(result.error).toContain(`[REDACTED:${keyVar}]`);
+      });
+    });
+  }
 });
