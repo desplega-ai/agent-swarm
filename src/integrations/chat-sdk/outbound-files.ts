@@ -14,6 +14,7 @@ import {
 } from "@/fs/provider";
 import { getFileStorageProvider } from "@/fs/registry";
 import type { TaskAttachment } from "@/types";
+import { createValueScrubber } from "@/utils/secret-scrubber";
 import { SHARED_FILE_INTENT } from "./attachments";
 import { errorMessage } from "./logger";
 import { ChatFileTooLargeError, type OutboundChatFile } from "./outbound";
@@ -94,6 +95,9 @@ export function chatFileOfPath(path: string, access: CallerAgentFs): OutboundCha
   const segments = pathSegments(path);
   const name = segments.at(-1)!;
   const key = segments.map(encodeURIComponent).join("/");
+  // The caller's key can be shorter than the global scrubber's floor, so a
+  // storage error body or transport error is scrubbed of it by exact value.
+  const keyScrubber = createValueScrubber([{ value: access.apiKey, name: "AGENT_FS_API_KEY" }]);
   return {
     name,
     load: async (maxBytes) => {
@@ -104,10 +108,11 @@ export function chatFileOfPath(path: string, access: CallerAgentFs): OutboundCha
           new AgentFsProvider(access),
         );
       } catch (error) {
+        if (error instanceof ChatFileTooLargeError) throw error;
         if (error instanceof FilesError && error.code === "Unauthorized") {
           throw new Error("your agent-fs credential cannot read this path");
         }
-        throw error;
+        throw new Error(keyScrubber.text(error instanceof Error ? error.message : String(error)));
       }
     },
   };

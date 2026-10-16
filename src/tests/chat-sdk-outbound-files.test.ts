@@ -1,4 +1,13 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,15 +37,19 @@ const MB = 1024 * 1024;
 const PDF_BYTES = new TextEncoder().encode("%PDF-1.4\n% test document\n%%EOF\n");
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 const savedEnv = new Map(
-  ["AGENT_FS_LOCAL_DIR", "AGENT_FS_API_URL", "API_AGENT_FS_API_KEY"].map((key) => [
-    key,
-    process.env[key],
-  ]),
+  [
+    "AGENT_FS_LOCAL_DIR",
+    "AGENT_FS_API_URL",
+    "AGENT_FS_DEFAULT_ORG_ID",
+    "AGENT_FS_DEFAULT_DRIVE_ID",
+    "API_AGENT_FS_API_KEY",
+  ].map((key) => [key, process.env[key]]),
 );
 
 let harness: TelegramHarness;
 let lead: Agent;
 let worker: Agent;
+let leaky: Agent;
 let server: McpServer;
 let fsDir: string;
 let nextChatId = 660_000;
@@ -48,6 +61,8 @@ const AGENT_FS_DRIVE = "shared-drive";
 const API_FS_KEY = "api-owned-fs-key";
 const WORKER_FS_KEY = "worker-fs-key";
 const LEAD_FS_KEY = "lead-fs-key";
+// Shorter than the global scrubber's floor, so only an exact-value scrub hides it.
+const SHORT_FS_KEY = "local-pass";
 const PRIVATE_BYTES = new TextEncoder().encode("private: not for the worker\n");
 const agentFsFiles = new Map<string, { bytes: Uint8Array; type: string }>([
   ["thoughts/worker/reports/q3.pdf", { bytes: PDF_BYTES, type: "application/pdf" }],
@@ -69,6 +84,11 @@ function startAgentFs(): ReturnType<typeof Bun.serve> {
         return new Response("not found", { status: 404 });
       }
       const key = decodeURIComponent(path.slice(prefix.length, -"/raw".length));
+      if (key === "thoughts/leaky/broken.pdf") {
+        return new Response(`storage failed using ${auth?.replace(/^Bearer /, "")}`, {
+          status: 500,
+        });
+      }
       const file = agentFsFiles.get(key);
       if (!file) return new Response("not found", { status: 404 });
       const allowed =
@@ -123,6 +143,27 @@ async function chatTask(chatId: number, agentId: string): Promise<AgentTask> {
   });
 }
 
+/**
+ * Make the API's file provider an agent-fs provider on the stand-in, holding
+ * the key that reads every file, as a deployment with agent-fs has. Path
+ * attachments must still be read with the caller's key.
+ */
+function useApiAgentFsProvider(): void {
+  process.env.AGENT_FS_API_URL = agentFs.url.origin;
+  process.env.AGENT_FS_DEFAULT_ORG_ID = AGENT_FS_ORG;
+  process.env.AGENT_FS_DEFAULT_DRIVE_ID = AGENT_FS_DRIVE;
+  resetFileStorageProviderForTests();
+  expect(getFileStorageProvider().id).toBe("agent-fs");
+}
+
+/** Back to the local provider the task attachment tests store their bytes in. */
+function useLocalFileProvider(): void {
+  delete process.env.AGENT_FS_API_URL;
+  delete process.env.AGENT_FS_DEFAULT_ORG_ID;
+  delete process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+  resetFileStorageProviderForTests();
+}
+
 /** Store bytes through the active provider and record them as an attachment of `taskId`. */
 async function attach(
   taskId: string,
@@ -159,8 +200,7 @@ beforeAll(async () => {
   await removeDbFiles();
   fsDir = await mkdtemp(join(tmpdir(), "chat-sdk-outbound-fs-"));
   process.env.AGENT_FS_LOCAL_DIR = fsDir;
-  delete process.env.AGENT_FS_API_URL;
-  resetFileStorageProviderForTests();
+  useLocalFileProvider();
   initDb(TEST_DB_PATH);
   lead = await createAgent({
     id: crypto.randomUUID(),
@@ -171,6 +211,12 @@ beforeAll(async () => {
   worker = await createAgent({
     id: crypto.randomUUID(),
     name: "ChatFilesWorker",
+    isLead: false,
+    status: "idle",
+  });
+  leaky = await createAgent({
+    id: crypto.randomUUID(),
+    name: "ChatFilesShortKey",
     isLead: false,
     status: "idle",
   });
@@ -190,6 +236,13 @@ beforeAll(async () => {
   ] as const) {
     await upsertSwarmConfig({ scope: "agent", scopeId: agent.id, key: "AGENT_FS_API_KEY", value });
   }
+  await upsertSwarmConfig({
+    scope: "agent",
+    scopeId: leaky.id,
+    key: "AGENT_FS_API_KEY",
+    value: SHORT_FS_KEY,
+    isSecret: true,
+  });
   server = new McpServer({ name: "chat-files-test", version: "1.0.0" });
   registerChatReplyTool(server);
   registerChatPostTool(server);
@@ -227,7 +280,10 @@ describe("telegramAttachmentType", () => {
   });
 });
 
-describe("chat-reply attachments", () => {
+describe("chat-reply agent-fs paths", () => {
+  beforeEach(useApiAgentFsProvider);
+  afterEach(useLocalFileProvider);
+
   test("an agent-fs PDF arrives as a document after the text", async () => {
     const chatId = nextChatId;
     const task = await chatTask(chatId, worker.id);
@@ -344,6 +400,61 @@ describe("chat-reply attachments", () => {
     expect(callsTo(chatId)).toEqual([]);
   });
 
+  /** The tool result and the thread's failure note for one path the read of which fails. */
+  async function failedRead(path: string): Promise<{ result: string; note: string }> {
+    const chatId = nextChatId;
+    const task = await chatTask(chatId, leaky.id);
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": leaky.id, "x-source-task-id": task.id },
+      { text: "x", attachments: [path] },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    expect((result.structuredContent.unsentFiles as unknown[]).length).toBe(1);
+    const calls = callsTo(chatId);
+    expect(calls.map((call) => call.method)).toEqual([
+      expect.stringMatching(/^send(Rich)?Message$/),
+      expect.stringMatching(/^send(Rich)?Message$/),
+    ]);
+    return { result: JSON.stringify(result), note: textOf(calls[1]!.body) };
+  }
+
+  test("a storage error body naming the caller's short key does not leak it", async () => {
+    const { result, note } = await failedRead("thoughts/leaky/broken.pdf");
+
+    // The stand-in put the key in its 500 body; the key reached it as the bearer.
+    expect(agentFsRequests.map((request) => request.auth)).toEqual([`Bearer ${SHORT_FS_KEY}`]);
+    expect(note).toContain("broken.pdf: could not be read (storage failed using [REDACTED:");
+    expect(result).not.toContain(SHORT_FS_KEY);
+    expect(note).not.toContain(SHORT_FS_KEY);
+  });
+
+  test("a transport error naming the caller's short key does not leak it", async () => {
+    const realFetch = globalThis.fetch;
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/thoughts/leaky/offline.pdf/")) {
+        const auth = new Headers(init?.headers).get("authorization") ?? "";
+        throw new TypeError(`connect failed using ${auth.replace(/^Bearer /, "")}`);
+      }
+      return realFetch(input, init);
+    }) as typeof fetch);
+    try {
+      const { result, note } = await failedRead("thoughts/leaky/offline.pdf");
+
+      expect(note).toContain("offline.pdf: could not be read (connect failed using [REDACTED:");
+      expect(result).not.toContain(SHORT_FS_KEY);
+      expect(note).not.toContain(SHORT_FS_KEY);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
+
+describe("chat-reply attachments", () => {
   test("a task attachment id sends the file; an image goes as a photo", async () => {
     const chatId = nextChatId;
     const task = await chatTask(chatId, worker.id);
