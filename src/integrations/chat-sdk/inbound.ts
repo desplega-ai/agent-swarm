@@ -2,12 +2,15 @@ import type { Adapter, Message, Thread } from "chat";
 import { z } from "zod";
 import {
   getAgentById,
+  getAgentWorkingOnContextKey,
   getAllAgents,
   getLatestActiveTaskByContextKey,
   getLatestTaskByContextKey,
   getLeadAgent,
   isExtensionAgent,
 } from "@/be/db";
+import { resolveIdentity } from "@/be/identity";
+import { recordUnmappedIdentity } from "@/be/unmapped-identities";
 import { dispatchPre } from "@/extensions/dispatcher";
 import { resolveTemplate } from "@/prompts/resolver";
 import { chatSdkContextKey } from "@/tasks/context-key";
@@ -24,16 +27,19 @@ import {
   toChatFiles,
 } from "./attachments";
 import { getChatThreadResetAt } from "./commands";
+import { type ChatAddressedReason, formatChatHeaderFacts, readChatMessageFacts } from "./facts";
 import { errorMessage } from "./logger";
 import { emitChatMessageSent } from "./outbound";
 import {
   type ChatAgentMatch,
   type ChatRouteTarget,
+  chatOwnerWindowStart,
+  getChatChannelMapping,
   routeChatMessage,
   stripRoutingTokens,
 } from "./router";
 import { getChatInstance } from "./runtime";
-import { readPersistedThreadHistory } from "./state";
+import { readPersistedThreadHistory, SqliteChatState } from "./state";
 import { formatChatSteeringAck, requestChatThreadSteering } from "./steering";
 import {
   bufferChatMessage,
@@ -109,6 +115,28 @@ export async function handleChatInbound(
   if (immediate) text = text.replace(/^!now\s*/i, "").trim();
   const attachments = message.attachments ?? [];
 
+  const facts = readChatMessageFacts(thread, message);
+  const isDirectMessage = kind === "dm" || thread.isDM;
+  const mentioned = kind === "mention" || message.isMention === true;
+  let addressed: ChatAddressedReason = isDirectMessage
+    ? "dm"
+    : facts.replyToBot
+      ? "reply-to-bot"
+      : mentioned
+        ? "mention"
+        : "none";
+  // A Telegram group is one shared conversation, not a thread about the task:
+  // an unaddressed message there is side chatter unless its sender asked for
+  // the thread's open task. Chatter neither steers nor reaches the router.
+  if (addressed === "none" && (facts.chatType === "group" || facts.chatType === "supergroup")) {
+    const unaddressed = await classifyUnaddressedGroupMessage(thread, message.author.userId, text);
+    if (unaddressed === "chatter") {
+      console.log(`[chat-sdk] ${thread.id}: unaddressed group message from a non-requester, ignored`);
+      return;
+    }
+    if (unaddressed === "requester-follow-up") addressed = unaddressed;
+  }
+
   // A thread with messages already waiting keeps its order: append, do not steer past them.
   if (!immediate && attachments.length === 0 && text && !isChatThreadBuffered(thread.id)) {
     const steering = await requestChatThreadSteering({
@@ -148,8 +176,10 @@ export async function handleChatInbound(
       text,
       userId: message.author.userId,
       userName: message.author.userName || undefined,
-      botMentioned: kind === "mention" || message.isMention === true,
-      isDirectMessage: kind === "dm" || thread.isDM,
+      botMentioned: mentioned || facts.replyToBot,
+      isDirectMessage,
+      addressed,
+      facts,
       attachments,
     });
     // Subscribed-thread messages may be dropped by the router at flush time;
@@ -157,6 +187,67 @@ export async function handleChatInbound(
     if (kind !== "subscribed") startTypingKeepalive(adapter, thread.id);
   }
   if (immediate) await instantFlushChat(thread.id);
+}
+
+const REQUESTER_KEY_PREFIX = "swarm:requester:";
+const REQUESTER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Platform user id of whoever asked for the thread's latest task. */
+async function rememberChatThreadRequester(threadId: string, userId: string): Promise<void> {
+  try {
+    await new SqliteChatState().set(`${REQUESTER_KEY_PREFIX}${threadId}`, userId, REQUESTER_TTL_MS);
+  } catch (error) {
+    console.warn(`[chat-sdk] Could not store the thread requester: ${errorMessage(error)}`);
+  }
+}
+
+/**
+ * An unaddressed message outside a DM. `routable`: a `swarm#` token or an
+ * agent channel mapping routes it whoever sent it. `requester-follow-up`: its
+ * sender asked for the thread's task and the owner window is open. Anything
+ * else is `chatter`.
+ */
+async function classifyUnaddressedGroupMessage(
+  thread: Thread,
+  senderId: string,
+  text: string,
+): Promise<"routable" | "requester-follow-up" | "chatter"> {
+  if (/swarm#/i.test(text)) return "routable";
+  if ((await getChatChannelMapping(thread.adapter.name, thread.channelId))?.agentId) {
+    return "routable";
+  }
+  const owner = await getAgentWorkingOnContextKey(
+    chatSdkContextKey(thread.id),
+    "chat",
+    chatOwnerWindowStart(),
+  );
+  if (!owner) return "chatter";
+  const requester = await new SqliteChatState().get<string>(`${REQUESTER_KEY_PREFIX}${thread.id}`);
+  return requester === senderId ? "requester-follow-up" : "chatter";
+}
+
+/**
+ * Canonical user behind a chat sender, through the same identity registry as
+ * Slack: `(<adapter>, <platform user id>)` in `user_external_ids`. An unknown
+ * sender goes to the Unmapped tracker and the task has no requester.
+ */
+async function resolveChatRequester(
+  adapter: string,
+  item: ChatBufferedMessage,
+): Promise<string | undefined> {
+  // Telegram `sender_chat` posts (anonymous admins, linked channels) are no person.
+  if (!item.userId || item.userId.startsWith("chat:")) return undefined;
+  try {
+    const resolution = await resolveIdentity(adapter, item.userId);
+    if (resolution.status === "resolved") return resolution.userId;
+    await recordUnmappedIdentity(adapter, item.userId, {
+      sampleEventType: "chat.message",
+      sampleContext: `${item.facts.from}: ${item.text}`,
+    });
+  } catch (error) {
+    console.warn(`[chat-sdk] Could not resolve the requester: ${errorMessage(error)}`);
+  }
+  return undefined;
 }
 
 /**
@@ -265,6 +356,8 @@ export async function flushChatThread(
     .join("\n---\n");
   const botMentioned = items.some((item) => item.botMentioned);
   const isDirectMessage = items.some((item) => item.isDirectMessage);
+  // The task's requester: the first sender who addressed the swarm.
+  const requester = items.find((item) => item.addressed !== "none") ?? first;
 
   // After `/reset` the thread's earlier tasks are not context: the new task gets
   // no parent and no thread history older than the reset.
@@ -285,6 +378,9 @@ export async function flushChatThread(
       text: rawText,
       botMentioned,
       isDirectMessage,
+      ...(first.facts.chatType ? { chatType: first.facts.chatType } : {}),
+      ...(first.facts.isForum ? { isForum: true } : {}),
+      replyToBot: items.some((item) => item.facts.replyToBot),
       ...(mostRecentTask ? { threadContext: { adapter, threadId } } : {}),
     },
     {
@@ -364,9 +460,19 @@ export async function flushChatThread(
     mostRecentTask && thread
       ? await getChatThreadContext(thread, new Set(items.map((item) => item.messageId)), resetAt)
       : "";
-  const description = threadContext
-    ? `${resolveTemplate("chat.message.thread_context", { thread_messages: threadContext }).text}\n\n${marked}`
-    : marked;
+  const header = resolveTemplate("chat.message.header", {
+    chat_facts: formatChatHeaderFacts(adapter, requester.facts, requester.addressed),
+  }).text;
+  const description = [
+    header,
+    threadContext
+      ? resolveTemplate("chat.message.thread_context", { thread_messages: threadContext }).text
+      : "",
+    marked,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const requestedByUserId = await resolveChatRequester(adapter, requester);
 
   const latestActive = await getLatestActiveTaskByContextKey(contextKey, "chat");
   const dependsOn = !immediate && latestActive ? [latestActive.id] : undefined;
@@ -382,6 +488,7 @@ export async function flushChatThread(
       priority: 70,
       contextKey,
       dependsOn,
+      requestedByUserId,
       parentTaskId: mostRecentTask?.id,
       // A human message in the thread: never answer it in the previous task's
       // structured-output contract.
@@ -404,6 +511,7 @@ export async function flushChatThread(
     }
   }
   if (created > 0) {
+    await rememberChatThreadRequester(threadId, requester.userId);
     await subscribe(thread);
     // Subscribed-thread messages start typing only here, once a task exists.
     startTypingKeepalive(adapter, threadId);

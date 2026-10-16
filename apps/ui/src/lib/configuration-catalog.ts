@@ -1214,6 +1214,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/chat-sdk`,
       },
       {
+        key: "CHAT_SDK_OWNER_WINDOW_MINUTES",
+        label: "Chat SDK owner window",
+        description:
+          "How long after a chat task ends its thread still routes follow-ups to the same agent. In a Telegram group, the requester's plain messages count only inside this window. 0 keeps it only while the task is open.",
+        kind: "number",
+        unit: "min",
+        defaultValue: "15",
+        placeholder: "15",
+        docsUrl: `${DOCS}integrations/chat-sdk`,
+      },
+      {
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         description:

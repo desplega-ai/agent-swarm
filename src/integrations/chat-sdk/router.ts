@@ -91,6 +91,20 @@ export function stripRoutingTokens(text: string): string {
     .trim();
 }
 
+const DEFAULT_OWNER_WINDOW_MINUTES = 15;
+
+/**
+ * Start of the thread-owner window: a thread keeps its owner while the
+ * owner's task is open and for `CHAT_SDK_OWNER_WINDOW_MINUTES` (default 15,
+ * 0 = only while open) after it ends. Read per call, so a change applies at once.
+ */
+export function chatOwnerWindowStart(now: number = Date.now()): string {
+  const raw = process.env.CHAT_SDK_OWNER_WINDOW_MINUTES?.trim();
+  const value = raw ? Number(raw) : Number.NaN;
+  const minutes = Number.isFinite(value) && value >= 0 ? value : DEFAULT_OWNER_WINDOW_MINUTES;
+  return new Date(now - minutes * 60_000).toISOString();
+}
+
 async function leadMatch(reachable: Agent[], matchedText: string): Promise<ChatAgentMatch> {
   const lead = reachable.find((agent) => agent.isLead) ?? (await getLeadAgent());
   return { agent: lead, reason: "skill", matchedText };
@@ -99,7 +113,8 @@ async function leadMatch(reachable: Agent[], matchedText: string): Promise<ChatA
 /**
  * Port of `src/slack/router.ts` for Chat SDK threads. Order: `swarm#<uuid>`,
  * `swarm#all`, KV channel mapping (agent, or workflow for a mention or DM), the
- * thread owner (lead when the owner is offline), the lead for a mention or DM.
+ * thread owner inside its window (lead when the owner is offline), the lead
+ * for a mention or DM.
  * Returns null when the message is not addressed to the swarm.
  */
 export async function routeChatMessage(
@@ -148,7 +163,11 @@ export async function routeChatMessage(
     );
   }
 
-  const owner = await getAgentWorkingOnContextKey(chatSdkContextKey(ctx.threadId), "chat");
+  const owner = await getAgentWorkingOnContextKey(
+    chatSdkContextKey(ctx.threadId),
+    "chat",
+    chatOwnerWindowStart(),
+  );
   if (owner && (await isAgentReachable(owner))) {
     return {
       kind: "agents",

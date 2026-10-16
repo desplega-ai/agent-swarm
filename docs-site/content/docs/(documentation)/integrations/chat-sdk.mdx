@@ -12,7 +12,8 @@ The channel is off by default. A configuration change saved on the dashboard app
 ## What it does
 
 - **Inbound on mention or DM.** A bot mention or a direct message creates a task with `source: "chat"`. By default the Lead gets it.
-- **Thread follow-ups.** A reply in the same thread steers the running task, or becomes a follow-up task.
+- **Thread follow-ups.** A reply in the same thread steers the running task, or becomes a follow-up task. In a Telegram group, only messages meant for the bot count: see [Telegram groups](#telegram-groups).
+- **Who and where.** Each task records the person who asked (`requestedByUserId`) and starts with a `[chat]` line: the chat, the sender and why the bot took the message.
 - **Results back in the thread.** When a task ends, the swarm posts its output to the thread it came from.
 - **Attachments.** Files sent with a message become task attachments.
 - **Tools and a skill.** Agents use the `chat-*` MCP tools and the built-in `chat-sdk` skill.
@@ -35,6 +36,7 @@ The channel reads these keys from the environment or from global swarm config:
 | `CHAT_SDK_ENABLED` | `true` to start the channel. Default `false`. A saved change applies within a few seconds. |
 | `CHAT_SDK_ADAPTERS` | JSON object. Each key is an adapter name (`telegram`, `slack`, `discord`, `teams`), each value is the adapter config. A saved change applies within a few seconds. |
 | `CHAT_SDK_BUFFER_MS` | How long a thread collects messages before it creates one task. Default `10000` (10 s), 1 to 600000. No restart needed. |
+| `CHAT_SDK_OWNER_WINDOW_MINUTES` | How long after a task ends its thread keeps the same owner. Default `15`, 0 to 1440. `0` keeps the owner only while the task is open. No restart needed. |
 | `CHAT_SDK_API_URL_OVERRIDES` | Environment only, for development and tests. JSON of platform API base URLs by adapter name, for example `{"telegram":"http://127.0.0.1:8081"}`. Never set it in production. |
 
 ### Secrets by reference
@@ -112,7 +114,7 @@ For local development without a public URL, set `mode` to `polling`. The adapter
 | `allowedUserIds` | no | Telegram user ids allowed to use the bot. Everyone is allowed when empty. |
 | `userName` | no | The bot username for mention detection. Default: the name from `getMe`. |
 
-In a group with BotFather privacy mode on (the default), Telegram sends the bot only commands and messages that mention it. To let the bot see every group message, send `/setprivacy` to BotFather, turn privacy off, then remove the bot from the group and add it again.
+In a group with BotFather privacy mode on (the default), Telegram sends the bot only commands meant for it, replies to its messages and messages that mention it. A plain follow-up from the requester never arrives: reply to the bot or mention it. To let the bot see every group message, send `/setprivacy` to BotFather, turn privacy off, then remove the bot from the group and add it again.
 
 ### Slack
 
@@ -259,9 +261,13 @@ A Teams thread id contains the service URL of the conversation, and the adapter 
 ## How it works
 
 1. **Buffer.** A mention or a DM opens a thread buffer. More messages in the same thread join it for `CHAT_SDK_BUFFER_MS` (10 s by default). A message that starts with `!now` flushes the buffer at once. One flush creates one task.
-2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent, or a workflow when the message mentions the bot or is a DM, so a plain reply in a subscribed thread never starts a second run), the agent that owns the thread, and then the Lead. A `pre.chat.route` extension can change the target.
-3. **Task.** The task gets `source: "chat"` and a context key `task:chat-sdk:{adapter}:{encoded thread id}`. Later tasks in the same thread share the key. The task text includes the recent thread messages.
+2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent, or a workflow when the message mentions the bot or is a DM, so a plain reply in a subscribed thread never starts a second run), the agent that owns the thread (while its task is open, and for `CHAT_SDK_OWNER_WINDOW_MINUTES` after it ends), and then the Lead for a mention or DM. A `pre.chat.route` extension can change the target.
+3. **Task.** The task gets `source: "chat"` and a context key `task:chat-sdk:{adapter}:{encoded thread id}`. Later tasks in the same thread share the key. The task text starts with a header such as `[chat] telegram · supergroup "Life" · from: Taras (@tarasyarema) · addressed: reply-to-bot`, then the recent thread messages. `addressed` is `dm`, `mention`, `reply-to-bot`, `requester-follow-up` or `none`. The sender is resolved through the user registry as the `<adapter>` identity kind with the platform user id (for Telegram, `telegram` and `from.id`). A known sender becomes the task's `requestedByUserId`, so times and per-user preferences apply. An unknown sender appears in the People page **Unmapped** tab; link it there.
 4. **Steer or follow up.** When the Lead's task for the thread is in progress, a new plain reply steers that task, and the bot posts a short acknowledgement. Otherwise the reply waits in the buffer and becomes a follow-up task that depends on the previous one.
+
+### Telegram groups
+
+In a Telegram group or supergroup, the bot takes a message only when it is meant for the bot: it mentions the bot, it replies to one of the bot's messages, or its sender asked for the thread's task and the owner window is open. Everything else is side chatter. It neither steers the running task nor creates a task. A `swarm#` token or an agent channel mapping still routes any message. A reply to the bot counts as a mention whatever `TELEGRAM_MENTION_ON_REPLY` says. DMs and other adapters' threads are unchanged.
 5. **Attachments.** Files are downloaded once per flush and attached to each new task. Files larger than 50 MB are skipped, and the task text says so.
 6. **Relay.** When a task ends (completed, failed or cancelled), a database trigger records a relay obligation. A watcher posts the task output to the thread and marks the row delivered. Lead follow-up tasks on the same thread are relayed too, so delegated results reach the user. When a Lead task is resumed after a shutdown or a crash, the resume task relays the final answer. A worker task, or its resume, does not relay: its result reaches the thread through the Lead follow-up. A failed post retries with backoff, up to 10 minutes between tries. After 24 hours the swarm stops and records the last error. Delivery is at least once: a crash between the post and the record can send a message twice.
 7. **Typing.** The bot shows the typing indicator from the first buffered message until it posts the reply. The indicator stops when the flush creates no task, and it stops after 15 minutes at most.
