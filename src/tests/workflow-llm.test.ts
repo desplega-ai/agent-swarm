@@ -102,6 +102,26 @@ describe("resolveWorkflowLlmConfig", () => {
     expect(config.model).toBe("deepseek-v4-flash");
   });
 
+  test("hands the SDK one key from a canonical NaN key pool", async () => {
+    const pool = ["nan-pool-a", "nan-pool-b", "nan-pool-c"];
+    for (let i = 0; i < 20; i++) {
+      const config = await resolveWorkflowLlmConfig("nan/qwen3.8-flash", {
+        NAN_API_KEY: ` ${pool.join(", ")} `,
+      });
+      expect(pool).toContain(config.apiKey);
+    }
+  });
+
+  test("hands the SDK one key from an alias NaN key pool", async () => {
+    const pool = ["nan-alias-a", "nan-alias-b"];
+    for (let i = 0; i < 20; i++) {
+      const config = await resolveWorkflowLlmConfig("nan/deepseek-v4-flash", {
+        HELMCODE_API_NAN: pool.join(","),
+      });
+      expect(pool).toContain(config.apiKey);
+    }
+  });
+
   test("fails a registry-provider model without its key instead of falling back to OpenRouter", async () => {
     await expect(
       resolveWorkflowLlmConfig("nan/qwen3.8-flash", { OPENROUTER_API_KEY: "sk-or-test" }),

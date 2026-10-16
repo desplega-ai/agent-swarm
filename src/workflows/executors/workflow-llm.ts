@@ -1,4 +1,5 @@
 import { providerBaseUrl, providerForModel, providerKeyVars } from "@desplega/model-catalog";
+import { selectCredential } from "../../utils/credentials";
 import { DEFAULT_MODEL, resolveCredential } from "../../utils/internal-ai/credentials";
 import {
   getOpenRouterAttributionHeaders,
@@ -37,7 +38,9 @@ export async function resolveWorkflowLlmConfig(
       );
     }
     return {
-      apiKey: (env[keyVar] as string).trim(),
+      // The API hydrates global config verbatim, so a key may still be a
+      // comma pool; workflow calls skip the runner's per-task pick.
+      apiKey: selectCredential(env[keyVar] as string, undefined, keyVar).selected,
       baseURL: providerBaseUrl(registryProvider, env),
       headers: {},
       model: requestedModel.slice(registryProvider.id.length + 1),

@@ -661,3 +661,39 @@ describe("durable launch source with an embedded secret", () => {
     }
   });
 });
+
+describe("POST /api/internal/raw-llm failure", () => {
+  test("does not echo a provider error that carries the NaN key", async () => {
+    const dummy = `nan-${randomToken(32)}`;
+    const previousKey = process.env.NAN_API_KEY;
+    const previousFetch = globalThis.fetch;
+    process.env.NAN_API_KEY = dummy;
+    refreshSecretScrubberCache();
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response(
+        JSON.stringify({ error: { message: `Invalid API key: ${dummy}`, type: "auth" } }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const response = await dispatch("/api/internal/raw-llm", {
+        method: "POST",
+        agentId,
+        body: JSON.stringify({ prompt: "hi", model: "nan/qwen3.8-flash" }),
+      });
+      expect(calls).toBe(1);
+      expect(response.status).toBe(500);
+      expect(response.text).not.toContain(dummy);
+      const body = (await response.json()) as { error: string };
+      expect(body.error).toContain("LLM call failed");
+      expect(body.error).toContain("[REDACTED:");
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.NAN_API_KEY;
+      else process.env.NAN_API_KEY = previousKey;
+      refreshSecretScrubberCache();
+    }
+  });
+});
