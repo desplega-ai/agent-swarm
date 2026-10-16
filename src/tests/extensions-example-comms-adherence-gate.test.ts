@@ -124,7 +124,7 @@ const makeCtx = (
 const completion = (output: string, extra: Record<string, unknown> = {}) => ({
   tool: "store-progress",
   args: { taskId: TASK_ID, status: "completed", output, ...extra },
-  requestInfo: { callOrigin: "mcp" },
+  requestInfo: { callOrigin: "mcp", agentId: "agent-1" },
 });
 
 beforeEach(() => {
@@ -188,7 +188,7 @@ describe("pass", () => {
     expect(call.body.state.latest_request).toBe("which option did you pick?");
   });
 
-  test("non-Slack tasks, requesters without prefs and non-completions skip Jev", async () => {
+  test("non-Slack tasks, requesters without prefs, non-completions and other agents' tasks skip Jev", async () => {
     jevScores(0.1);
     const cases: Array<[any, Row]> = [
       [completion("x"), taskRow({ source: "mcp", slackThreadTs: null })],
@@ -200,6 +200,9 @@ describe("pass", () => {
       ],
       [{ ...completion("x"), tool: "send-task" }, taskRow()],
       [{ ...completion("x"), requestInfo: { callOrigin: "extension" } }, taskRow()],
+      // Another agent's task, or a caller with no agent id.
+      [completion("x"), taskRow({ agentId: "agent-2" })],
+      [{ ...completion("x"), requestInfo: { callOrigin: "mcp" } }, taskRow()],
       [completion("x", { taskId: "not-a-uuid" }), taskRow()],
     ];
     for (const [event, row] of cases) {

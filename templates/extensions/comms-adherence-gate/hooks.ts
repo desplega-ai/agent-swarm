@@ -346,6 +346,10 @@ const extension: SwarmExtension = (api) => {
       const threadOpening = String(cell(row, 6, "askHead") ?? "");
       const ask = latestAsk(String(cell(row, 7, "askTail") ?? ""));
 
+      // Judge only the caller's own task, so no agent can ship another task's
+      // thread and preferences to the external judge.
+      if (!agentId || agentId !== event.requestInfo?.agentId) return;
+
       // Only where the text actually reaches a human in Slack.
       if (source !== "slack" && !slackThreadTs) return;
       if (!commsRaw) return; // no stated preferences -> nothing to judge against
