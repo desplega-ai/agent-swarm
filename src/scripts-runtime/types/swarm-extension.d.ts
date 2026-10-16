@@ -67,6 +67,7 @@ declare module "swarm-extension" {
     sourceTaskId?: string | undefined;
     outputSchema?: Record<string, unknown> | undefined;
     inheritParentOutputSchema?: boolean | undefined;
+    inheritParentRequester?: boolean | undefined;
     inheritParentRoutingAffinity?: boolean | undefined;
     inheritParentFollowUpConfig?: boolean | undefined;
     followUpConfig?:

@@ -2622,7 +2622,11 @@ export async function createTaskExtended(
       }
 
       // Attribution
-      if (parent.requestedByUserId && !options.requestedByUserId) {
+      if (
+        parent.requestedByUserId &&
+        !options.requestedByUserId &&
+        options.inheritParentRequester !== false
+      ) {
         options.requestedByUserId = parent.requestedByUserId;
         requestedByUserIdInherited = true;
       }

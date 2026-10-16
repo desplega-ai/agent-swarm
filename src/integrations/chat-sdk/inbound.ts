@@ -35,6 +35,7 @@ import {
   type ChatRouteTarget,
   chatOwnerWindowStart,
   getChatChannelMapping,
+  hasRoutingToken,
   routeChatMessage,
   stripRoutingTokens,
 } from "./router";
@@ -204,7 +205,7 @@ async function rememberChatThreadRequester(threadId: string, userId: string): Pr
 }
 
 /**
- * An unaddressed message outside a DM. `routable`: a `swarm#` token or an
+ * An unaddressed message outside a DM. `routable`: a routing token or an
  * agent channel mapping routes it whoever sent it. `requester-follow-up`: its
  * sender asked for the thread's task and the owner window is open. Anything
  * else is `chatter`.
@@ -214,7 +215,7 @@ async function classifyUnaddressedGroupMessage(
   senderId: string,
   text: string,
 ): Promise<"routable" | "requester-follow-up" | "chatter"> {
-  if (/swarm#/i.test(text)) return "routable";
+  if (hasRoutingToken(text)) return "routable";
   if ((await getChatChannelMapping(thread.adapter.name, thread.channelId))?.agentId) {
     return "routable";
   }
@@ -492,6 +493,8 @@ export async function flushChatThread(
       dependsOn,
       requestedByUserId,
       parentTaskId: mostRecentTask?.id,
+      // The parent's requester asked an earlier message: an unknown sender stays unattributed.
+      inheritParentRequester: false,
       // A human message in the thread: never answer it in the previous task's
       // structured-output contract.
       inheritParentOutputSchema: false,

@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   closeDb,
   createAgent,
+  createTaskExtended,
   createUser,
   getDbClient,
   getKv,
@@ -575,5 +576,100 @@ describe("Chat SDK requester and group addressing", () => {
     expect(tasks[0]!.task).toStartWith(
       '[chat] telegram · supergroup "Life" · from: Bob (@bob) · addressed: reply-to-bot · reply-to: "Shall I send the invoice?"\n\n',
     );
+  });
+
+  test("an unknown sender in a known requester's thread does not inherit that requester", async () => {
+    const chatId = -3008;
+    const alice = await createUser({ name: "Alice", timezone: "Europe/Madrid" });
+    await linkIdentity(alice.id, "telegram", String(ALICE.from.id), ACTOR);
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot plan the offsite", ALICE));
+    await flushChatBuffers();
+    const [first] = await chatTasks(chatId);
+    expect((await getTaskById(first!.id))?.requestedByUserId).toBe(alice.id);
+
+    // Bob is not linked to any user.
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot and book my train", BOB));
+    await flushChatBuffers();
+    const tasks = await chatTasks(chatId);
+    expect(tasks).toHaveLength(2);
+    const second = await getTaskById(tasks[1]!.id);
+    expect(second?.parentTaskId).toBe(first!.id);
+    expect(second?.requestedByUserId).toBeUndefined();
+  });
+
+  test("a non-requester's malformed swarm# token is chatter: no task, no steering", async () => {
+    const chatId = -3009;
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot draft the agenda", ALICE));
+    await flushChatBuffers();
+    const [first] = await chatTasks(chatId);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+      first!.id,
+    ]);
+
+    await postTelegramUpdate(groupUpdate(chatId, "Carol, what does swarm# mean?", BOB));
+    await postTelegramUpdate(groupUpdate(chatId, "swarm#everyone is it a hashtag?", CAROL));
+    await flushChatBuffers();
+    expect(await chatTasks(chatId)).toHaveLength(1);
+    expect(await steeringBodies(first!.id)).toEqual([]);
+
+    // Control: once the task is done, a real token from a non-requester still routes.
+    await getDbClient().run(
+      "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+      [new Date().toISOString(), first!.id],
+    );
+    await postTelegramUpdate(groupUpdate(chatId, `swarm#${worker.id} check the numbers`, BOB));
+    await flushChatBuffers();
+    const tasks = await chatTasks(chatId);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1]!.agentId).toBe(worker.id);
+  });
+
+  test("only a Telegram group expires the thread owner; DMs and other adapters keep continuity", async () => {
+    const finishedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    async function seedFinishedOwner(threadId: string): Promise<void> {
+      const task = await createTaskExtended("earlier ask", {
+        agentId: worker.id,
+        source: "chat",
+        contextKey: chatSdkContextKey(threadId),
+      });
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+        [finishedAt, task.id],
+      );
+    }
+    const continuity = {
+      kind: "agents",
+      matches: [
+        {
+          agent: expect.objectContaining({ id: worker.id }),
+          reason: "continuity",
+          matchedText: "thread follow-up",
+        },
+      ],
+    };
+    const contexts = [
+      { adapter: "telegram", channelId: "telegram:3101", threadId: "telegram:3101", dm: true },
+      { adapter: "slack", channelId: "slack:C3101", threadId: "slack:C3101:1700000000.000100" },
+      { adapter: "discord", channelId: "discord:g1:c3101", threadId: "discord:g1:c3101:t1" },
+      { adapter: "teams", channelId: "teams:c3101", threadId: "teams:c3101:m1" },
+    ];
+    for (const { dm: isDirectMessage = false, ...ctx } of contexts) {
+      await seedFinishedOwner(ctx.threadId);
+      expect(
+        await routeChatMessage("one more thing", { ...ctx, botMentioned: false, isDirectMessage }),
+      ).toEqual(continuity);
+    }
+
+    // Control: a Telegram group thread with the same history has no owner.
+    await seedFinishedOwner("telegram:-3101");
+    expect(
+      await routeChatMessage("one more thing", {
+        adapter: "telegram",
+        channelId: "telegram:-3101",
+        threadId: "telegram:-3101",
+        botMentioned: false,
+        isDirectMessage: false,
+      }),
+    ).toBeNull();
   });
 });

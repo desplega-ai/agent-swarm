@@ -1217,7 +1217,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "CHAT_SDK_OWNER_WINDOW_MIN",
         label: "Chat SDK owner window",
         description:
-          "How long after a chat task ends its thread still routes follow-ups to the same agent. In a Telegram group, the requester's plain messages count only inside this window. 0 keeps it only while the task is open.",
+          "Telegram groups only: how long after a chat task ends the group still routes follow-ups to the same agent, and the requester's plain messages still count. 0 keeps it only while the task is open. DMs and other adapters' threads keep their owner.",
         kind: "number",
         unit: "min",
         defaultValue: "15",
