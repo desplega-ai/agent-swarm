@@ -83,6 +83,12 @@ const FEEDBACK_OVERLAY_JS = `
   var host = document.createElement('swarm-feedback-root');
   host.setAttribute('data-swarm-feedback', '');
   var root = host.attachShadow({ mode: 'open' });
+  // Keys typed into the overlay stay in the overlay. Out of the shadow root the
+  // event target is retargeted to the host, so a page's "ignore keys from
+  // textarea" check misses and Space/arrows drive the page (e.g. slide decks).
+  ['keydown', 'keyup', 'keypress'].forEach(function (type) {
+    root.addEventListener(type, function (e) { e.stopPropagation(); });
+  });
   var style = document.createElement('style');
   style.textContent = [
     ':host { all: initial; }',

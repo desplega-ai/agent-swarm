@@ -72,6 +72,7 @@
         "@types/bun": "latest",
         "@typescript/native-preview": "7.0.0-dev.20260707.2",
         "dependency-cruiser": "^18.0.0",
+        "happy-dom": "^20.14.5",
         "konsistent": "1.0.0-beta.1",
         "openapi-typescript": "^7",
         "oxlint": "1.78.0",
