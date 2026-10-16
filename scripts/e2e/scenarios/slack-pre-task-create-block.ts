@@ -1,14 +1,33 @@
-import { asRecord, expect, expectStatus } from "../http";
+import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
   ask,
   claim,
   findSlackTask,
-  finish,
   registerLead,
   waitForBotReply,
+  waitForEyes,
   waitForReaction,
 } from "./slack-helpers";
+
+async function setAdditiveSlack(ctx: ScenarioContext, enabled: boolean): Promise<void> {
+  const priorConnections = ctx.slack.apiCalls("apps.connections.open").length;
+  const response = await ctx.api("PUT", "/api/config", {
+    body: {
+      scope: "global",
+      scopeId: null,
+      key: "ADDITIVE_SLACK",
+      value: String(enabled),
+      isSecret: false,
+    },
+  });
+  expectStatus(response, [200], `set ADDITIVE_SLACK=${enabled}`);
+  const reconnected = await pollUntil(
+    () => ctx.slack.apiCalls("apps.connections.open").length > priorConnections,
+    15_000,
+  );
+  expect(reconnected, "Slack did not reconnect after updating ADDITIVE_SLACK");
+}
 
 async function installBlockingTemplate(ctx: ScenarioContext): Promise<string> {
   const installed = await ctx.api("POST", "/api/extensions/install", {
@@ -34,21 +53,24 @@ export const slackPreTaskCreateBlock: Scenario = {
   order: 175,
   async run(ctx) {
     let extensionId: string | undefined;
+    let restoreAdditiveSlack = false;
     try {
-      // Create an existing task first so the next human reply goes through the
-      // additive thread buffer rather than the top-level mention path.
       const leadId = await registerLead(ctx, `e2e-blocked-flush-lead-${ctx.nonce}`);
       const root = await ask(ctx, `start a thread for block test ${ctx.nonce}`);
       await waitForBotReply(ctx, root.ts);
       const rootTask = await findSlackTask(ctx, root.ts);
       const rootTaskId = String(rootTask.id);
       await claim(ctx, leadId, rootTaskId);
-      await finish(ctx, leadId, rootTaskId, {
-        status: "completed",
-        output: "The original task is complete.",
-      });
 
       extensionId = await installBlockingTemplate(ctx);
+      restoreAdditiveSlack = true;
+      await setAdditiveSlack(ctx, true);
+      const existingThreadMessageTimestamps = new Set(
+        ctx.slack
+          .messages("general")
+          .filter((message) => message.thread_ts === root.ts)
+          .map((message) => message.ts),
+      );
       const followUp = await ctx.slack.postMessage({
         channel: "general",
         user: "alice",
@@ -56,6 +78,7 @@ export const slackPreTaskCreateBlock: Scenario = {
         text: "please add this follow-up",
       });
 
+      await waitForEyes(ctx, followUp.ts);
       await waitForReaction(ctx, followUp.ts, "no_entry");
 
       const tasksResponse = await ctx.api("GET", "/api/tasks?source=slack&fields=full&limit=100");
@@ -67,22 +90,22 @@ export const slackPreTaskCreateBlock: Scenario = {
         "A task was created even though pre.task.create blocked the buffered follow-up",
       );
 
-      // Wait past the normal debounce/flush window and ensure no standard
-      // "batched into task" or "queued pending completion" feedback was posted.
-      await new Promise((resolve) => setTimeout(resolve, 12_000));
       const threadMessages = ctx.slack
         .messages("general")
         .filter((message) => message.thread_ts === root.ts);
       expect(
-        !threadMessages.some((message) =>
-          /follow-up message\(s\) (?:batched into task|queued pending completion)/i.test(
-            JSON.stringify(message),
-          ),
+        threadMessages.every(
+          (message) =>
+            message.ts === followUp.ts || existingThreadMessageTimestamps.has(message.ts),
         ),
-        "Normal buffer-flush feedback was posted for a blocked task",
+        "A feedback or tree message was posted for a blocked task",
       );
     } finally {
-      if (extensionId) await cleanupExtension(ctx, extensionId);
+      try {
+        if (restoreAdditiveSlack) await setAdditiveSlack(ctx, false);
+      } finally {
+        if (extensionId) await cleanupExtension(ctx, extensionId);
+      }
     }
   },
 };

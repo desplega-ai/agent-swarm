@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { z } from "zod";
 import { insertExtensionRun, setExtensionState } from "../be/extensions/db";
@@ -122,12 +122,18 @@ export async function removeExtensionTmpRoot(): Promise<void> {
 
 export async function loadExtension(input: LoadableExtension): Promise<LoadedExtension> {
   const { record } = input;
-  const directory = `${EXTENSIONS_TMP_ROOT}/${record.name}/${record.contentHash}`;
+  const directory = resolve(EXTENSIONS_TMP_ROOT, record.name, record.contentHash);
 
   try {
     const bundlePath = (path: string): string => {
       const filePath = resolve(directory, path);
-      if (!isSafeBundlePath(path) || !filePath.startsWith(`${directory}/`)) {
+      const relativePath = relative(directory, filePath);
+      if (
+        !isSafeBundlePath(path) ||
+        relativePath === ".." ||
+        relativePath.startsWith(`..${sep}`) ||
+        isAbsolute(relativePath)
+      ) {
         throw new Error(`Unsafe bundle file path: ${JSON.stringify(path)}`);
       }
       return filePath;
@@ -138,8 +144,7 @@ export async function loadExtension(input: LoadableExtension): Promise<LoadedExt
     );
     await Bun.$`mkdir -p ${directory}`.quiet();
     for (const [filePath, content] of files) {
-      const parent = filePath.slice(0, filePath.lastIndexOf("/"));
-      await Bun.$`mkdir -p ${parent}`.quiet();
+      await Bun.$`mkdir -p ${dirname(filePath)}`.quiet();
       await Bun.write(filePath, content);
     }
     await writeRuntimeShims(directory);
