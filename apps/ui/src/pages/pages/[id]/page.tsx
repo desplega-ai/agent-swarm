@@ -104,7 +104,7 @@ function pageFrameQuery(searchParams: URLSearchParams): string {
 
 /**
  * Query param that turns on the in-page feedback overlay (served by the API
- * on `/p/:id`, see `src/artifact-sdk/feedback-overlay.ts`). It is a normal
+ * on `/p/:id`, see `src/pages/feedback-overlay.ts`). It is a normal
  * forwarded param, so the iframe, "Open" and "Full" links all carry it.
  */
 const FEEDBACK_PARAM = "__swarm-feedback";

@@ -49,10 +49,6 @@
     "layer": 1,
     "sources": ["src/prompts/", "src/heartbeat/templates.ts"]
   },
-  "@swarm/artifacts": {
-    "layer": 1,
-    "sources": ["src/artifact-sdk/"]
-  },
   "@swarm/scripts": {
     "layer": 1,
     "sources": ["src/scripts-runtime/"]

@@ -2299,7 +2299,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -2313,7 +2313,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -4823,6 +4823,8 @@ export interface paths {
                         isSecret?: boolean;
                         envPath?: string | null;
                         description?: string | null;
+                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
+                        exportToEnv?: boolean;
                     };
                 };
             };
@@ -5320,62 +5322,6 @@ export interface paths {
                 };
             };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ecosystem": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get PM2 ecosystem config for agent services */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description PM2 ecosystem config */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            apps: {
-                                name: string;
-                                script: string;
-                                cwd?: string;
-                                interpreter?: string;
-                                args?: string[];
-                                env?: {
-                                    [key: string]: string;
-                                };
-                            }[];
-                        };
-                    };
-                };
-                /** @description Missing X-Agent-ID */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7613,6 +7559,148 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/chat/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-adapter status. `health` is `disabled` for an adapter that is not running. Never contains secret values. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            enabled: boolean;
+                            slackClash: boolean;
+                            error?: string;
+                            adapters: {
+                                /** @enum {string} */
+                                name: "telegram" | "slack" | "discord" | "teams";
+                                configured: boolean;
+                                enabled: boolean;
+                                /** @enum {string} */
+                                health: "ok" | "error" | "disabled" | "incomplete";
+                                error?: string;
+                                webhookUrl: string;
+                                mode?: string;
+                                gateway?: {
+                                    /** @enum {string} */
+                                    state: "running" | "backoff" | "stopped";
+                                    since: string;
+                                    restarts: number;
+                                };
+                                guilds?: {
+                                    count: number;
+                                    names: string[];
+                                };
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/chat/telegram/register-webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register this swarm's public Telegram webhook URL and secret token with the Bot API (setWebhook), then return getWebhookInfo. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Webhook registered */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            webhookUrl: string;
+                            webhookInfo: {
+                                url: string;
+                                has_custom_certificate?: boolean;
+                                pending_update_count?: number;
+                                last_error_date?: number;
+                                last_error_message?: string;
+                                max_connections?: number;
+                                ip_address?: string;
+                                allowed_updates?: string[];
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Telegram is not configured for webhook mode */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only the lead agent or a dashboard user can register the webhook */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The Telegram Bot API rejected the call */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -11744,7 +11832,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -11765,6 +11853,8 @@ export interface paths {
                                 modelAlias?: string;
                                 /** @enum {string} */
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
+                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                 requestedByUserId?: string;
@@ -11837,7 +11927,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -11866,6 +11956,15 @@ export interface paths {
                 };
                 /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -11990,6 +12089,8 @@ export interface paths {
                         /** @enum {string} */
                         provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                         model?: string;
+                        /** @enum {string|null} */
+                        effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
                         providerMeta?: {
                             /** @enum {string} */
                             transport?: "cli" | "sdk";
@@ -12132,7 +12233,7 @@ export interface paths {
                          */
                         onUnsupported?: "degrade" | "fail";
                         /** @enum {string} */
-                        source?: "ui" | "mcp" | "script" | "slack" | "api";
+                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
                         requestedByUserId?: string;
                     };
                 };
@@ -12780,6 +12881,14 @@ export interface paths {
                         "application/json": {
                             tasks: (components["schemas"]["AgentTask"] & {
                                 attachments: components["schemas"]["TaskAttachment"][];
+                                requestedBy?: {
+                                    id?: string;
+                                    name: string;
+                                    email?: string;
+                                    role?: string;
+                                    notes?: string;
+                                    comms?: components["schemas"]["UserCommsPrefs"];
+                                };
                             })[];
                         };
                     };
@@ -17065,6 +17174,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/script-connections/{id}/sql-query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run one read-only query on a SQL script connection */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        sql: string;
+                        params?: unknown[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Query rows or a scrubbed error */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            ok: true;
+                            rows: {
+                                [key: string]: unknown;
+                            }[];
+                            rowCount: number;
+                            truncated: boolean;
+                        } | {
+                            /** @enum {boolean} */
+                            ok: false;
+                            error: string;
+                        };
+                    };
+                };
+                /** @description Invalid SQL connection or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not allowed to invoke this SQL connection */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Script connection or agent not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session-logs": {
         parameters: {
             query?: never;
@@ -17228,6 +17421,7 @@ export interface paths {
                         sessionId: string;
                         agentId: string;
                         totalCostUsd: number;
+                        harnessCostBilled?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;
@@ -17667,7 +17861,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -19779,48 +19973,6 @@ export interface paths {
                                     lastSuccessAt?: string;
                                 };
                             };
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/services": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List all registered services */
-        get: {
-            parameters: {
-                query?: {
-                    status?: string;
-                    agentId?: string;
-                    name?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Service list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            services: components["schemas"]["Service"][];
                         };
                     };
                 };
@@ -22825,6 +22977,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/chat/{adapter}/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle Chat SDK platform webhooks (Telegram, Slack, Discord, Teams) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Chat SDK adapter name, e.g. telegram */
+                    adapter: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Adapter response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid platform signature or secret token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Teams activity whose serviceUrl is not a Bot Framework host */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Chat SDK disabled or adapter not configured */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 1 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Adapter configured but failed to start */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflow-runs/{runId}/events": {
         parameters: {
             query?: never;
@@ -24362,7 +24596,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -24430,6 +24664,8 @@ export interface components {
             resolvedModel?: string;
             modelSource?: string;
             modelAlias?: string;
+            /** @enum {string} */
+            resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;
@@ -24685,6 +24921,7 @@ export interface components {
             createdAt: string;
             lastUpdatedAt: string;
             encrypted: boolean;
+            exportToEnv: boolean;
         };
         ContextSnapshot: {
             /** Format: uuid */
@@ -25058,7 +25295,7 @@ export interface components {
             /** @enum {string} */
             deliveredMode?: "steer" | "queue";
             /** @enum {string} */
-            source: "ui" | "mcp" | "script" | "slack" | "api";
+            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
             senderLabel?: string;
             /** @enum {string} */
             createdByKind: "user" | "agent" | "system";
@@ -25086,6 +25323,11 @@ export interface components {
             metadata?: string;
             /** Format: date-time */
             createdAt: string;
+        };
+        UserCommsPrefs: {
+            tone?: string;
+            language?: string;
+            verbosity?: string;
         };
         Page: {
             id: string;
@@ -25154,11 +25396,6 @@ export interface components {
             changedBy: string | null;
             changedAt: string;
             changeReason: string | null;
-        };
-        UserCommsPrefs: {
-            tone?: string;
-            language?: string;
-            verbosity?: string;
         };
         BudgetRefusedTrigger: {
             /** @enum {string} */
@@ -25429,39 +25666,6 @@ export interface components {
             mcpServerId: string;
             isActive: boolean;
             installedAt: string;
-        };
-        Service: {
-            /** Format: uuid */
-            id: string;
-            agentId: string;
-            name: string;
-            /** @default 3000 */
-            port: number;
-            description?: string;
-            /** Format: uri */
-            url?: string;
-            /** @default /health */
-            healthCheckPath: string;
-            /**
-             * @default starting
-             * @enum {string}
-             */
-            status: "starting" | "healthy" | "unhealthy" | "stopped";
-            script: string;
-            cwd?: string;
-            interpreter?: string;
-            args?: string[];
-            env?: {
-                [key: string]: string;
-            };
-            /** @default {} */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            lastUpdatedAt: string;
         };
         TaskTemplate: {
             id: string;
@@ -26657,7 +26861,7 @@ export interface operations {
     script_connections_list: {
         parameters: {
             query?: {
-                kind?: "openapi" | "graphql" | "mcp";
+                kind?: "openapi" | "graphql" | "mcp" | "sql";
                 scope?: "global" | "agent" | "repo";
                 scopeId?: string;
             };
@@ -26679,7 +26883,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
@@ -26933,6 +27137,64 @@ export interface operations {
                     kind: "mcp";
                     /** Format: uuid */
                     mcpServerId: string;
+                } | {
+                    /** Format: uuid */
+                    id?: string;
+                    slug: string;
+                    displayName?: string;
+                    /** @enum {string} */
+                    scope?: "global" | "agent" | "repo";
+                    scopeId?: string | null;
+                    allowedHosts?: string[];
+                    /** Format: uuid */
+                    credentialBindingId?: string | null;
+                    auth?: {
+                        /** @enum {string} */
+                        type: "none";
+                    } | {
+                        /** @enum {string} */
+                        type: "bearer";
+                        secret?: string;
+                        configKey?: string;
+                        template?: string;
+                        hosts?: string[];
+                    } | {
+                        /** @enum {string} */
+                        type: "header";
+                        headerName: string;
+                        secret?: string;
+                        configKey?: string;
+                        template?: string;
+                        hosts?: string[];
+                    } | {
+                        /** @enum {string} */
+                        type: "query";
+                        paramName: string;
+                        secret?: string;
+                        configKey?: string;
+                        template?: string;
+                        hosts?: string[];
+                    } | {
+                        /** @enum {string} */
+                        type: "oauth";
+                        authorizationId: string;
+                        configKey?: string;
+                        template?: string;
+                        hosts?: string[];
+                    };
+                    configKey?: string;
+                    headerTemplate?: string;
+                    queryTemplate?: string;
+                    /** @enum {string} */
+                    authKind?: "config" | "oauth";
+                    oauthAuthorizationId?: string;
+                    enabled?: boolean;
+                    /** @enum {string} */
+                    kind: "sql";
+                    dsn?: {
+                        secret?: string;
+                        configKey?: string;
+                    };
                 };
             };
         };
@@ -26949,7 +27211,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
@@ -27050,7 +27312,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
@@ -27217,7 +27479,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
@@ -27333,7 +27595,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;

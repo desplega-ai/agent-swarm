@@ -1,5 +1,5 @@
 {
-  "title": "API Reference v1.171.1",
+  "title": "API Reference v2.0.0",
   "description": "REST API reference for agent-swarm.dev",
   "root": true,
   "pages": [
@@ -17,7 +17,6 @@
     "config",
     "core",
     "debug",
-    "ecosystem",
     "events",
     "extensions",
     "external-apis",

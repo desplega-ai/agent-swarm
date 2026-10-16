@@ -3,6 +3,7 @@ import type { EntityPresentDetailsArguments, WebClient } from "@slack/web-api";
 import { getAgentById, getTaskById } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getTaskUrl } from "./blocks";
+import { shouldBlockChannel } from "./external-channel";
 import { isUserAllowed } from "./handlers";
 import { slackTaskOutput } from "./task-output";
 
@@ -27,6 +28,10 @@ async function getDetails(event: DetailsEvent, client: WebClient): Promise<Detai
   }
 
   if (!event.user || !event.channel || !(await isUserAllowed(client, event.user))) {
+    return { error: { status: "restricted" } };
+  }
+
+  if (await shouldBlockChannel(client, event.channel)) {
     return { error: { status: "restricted" } };
   }
 

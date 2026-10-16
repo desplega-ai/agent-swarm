@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
+import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import { createApiRegistryClient } from "../scripts-runtime/api-client";
 import { runScript } from "../scripts-runtime/loader";
 import {
@@ -8,6 +9,7 @@ import {
 } from "../scripts-runtime/response-limit";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const savedEnv = { ...process.env };
 const originalFetch = globalThis.fetch;
@@ -94,54 +96,72 @@ describe("runScript", () => {
     expect(output.result).toEqual({ status: 200, parsed: { ok: true } });
   });
 
-  spawnTest("ctx.swarm bridge round-trips kv_set then kv_get", async () => {
-    const entries = new Map<string, unknown>();
-    const server = Bun.serve({
-      port: 0,
-      async fetch(req) {
-        expect(req.headers.get("authorization")).toBe(
-          "Bearer example-runtime-test-secret-1234567890",
-        );
-        expect(req.headers.get("x-agent-id")).toBe("agent-1");
+  spawnTest(
+    "ctx.swarm bridge respects URL overrides and PORT fallback",
+    async () => {
+      const entries = new Map<string, unknown>();
+      const agentId = crypto.randomUUID();
+      const server = Bun.serve({
+        hostname: "localhost",
+        port: 0,
+        async fetch(req) {
+          expect(req.headers.get("authorization")).toBe(
+            "Bearer example-runtime-test-secret-1234567890",
+          );
+          expect(req.headers.get("x-agent-id")).toBe(agentId);
 
-        const url = new URL(req.url);
-        if (req.method === "PUT" && url.pathname.startsWith("/api/kv/")) {
-          const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
-          const body = (await req.json()) as { value: unknown };
-          entries.set(key, body.value);
-          return Response.json({ key, value: body.value });
-        }
-        if (req.method === "GET" && url.pathname.startsWith("/api/kv/")) {
-          const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
-          return Response.json({ key, value: entries.get(key) ?? null });
-        }
-        return Response.json({ error: "not found" }, { status: 404 });
-      },
-    });
+          const url = new URL(req.url);
+          if (req.method === "PUT" && url.pathname.startsWith("/api/kv/")) {
+            const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
+            const body = (await req.json()) as { value: unknown };
+            entries.set(key, body.value);
+            return Response.json({ key, value: body.value });
+          }
+          if (req.method === "GET" && url.pathname.startsWith("/api/kv/")) {
+            const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
+            return Response.json({ key, value: entries.get(key) ?? null });
+          }
+          return Response.json({ error: "not found" }, { status: 404 });
+        },
+      });
 
-    try {
-      const output = await runScript({
-        agentId: "agent-1",
-        mcpBaseUrl: `http://127.0.0.1:${server.port}`,
-        resources,
-        source: `
+      try {
+        const baseUrl = `http://localhost:${server.port}`;
+        for (const urlSource of ["input", "MCP_BASE_URL", "PORT"] as const) {
+          delete process.env.PORT;
+          process.env.MCP_BASE_URL = "http://unused.invalid";
+          if (urlSource === "MCP_BASE_URL") {
+            process.env.MCP_BASE_URL = baseUrl;
+          } else if (urlSource === "PORT") {
+            delete process.env.MCP_BASE_URL;
+            process.env.PORT = String(server.port);
+          }
+
+          const output = await runScript({
+            agentId,
+            mcpBaseUrl: urlSource === "input" ? baseUrl : undefined,
+            resources,
+            source: `
           export default async (_args, ctx) => {
             await ctx.swarm.kv_set({ key: "bridge-smoke", value: { ok: true } });
             return await ctx.swarm.kv_get({ key: "bridge-smoke" });
           };
         `,
-      });
+          });
 
-      expect(output.error).toBeUndefined();
-      expect(output.result).toEqual({
-        success: true,
-        status: 200,
-        data: { key: "bridge-smoke", value: { ok: true } },
-      });
-    } finally {
-      server.stop(true);
-    }
-  });
+          expect(output.error, `${urlSource}: ${output.stderr}`).toBeUndefined();
+          expect(output.result, urlSource).toEqual({
+            success: true,
+            status: 200,
+            data: { key: "bridge-smoke", value: { ok: true } },
+          });
+        }
+      } finally {
+        server.stop(true);
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   spawnTest("ctx.swarm.kv_get forwards path/offset/limit as a view query", async () => {
     const seen: string[] = [];
@@ -453,38 +473,69 @@ describe("runScript", () => {
     }
   });
 
-  spawnTest("zod import works in compiled binary mode (SCRIPT_RUNTIME_DIR)", async () => {
-    const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
-    await Bun.$`mkdir -p ${tmpdir}`;
-    try {
-      const runtimeSrc = fileURLToPath(new URL("../scripts-runtime", import.meta.url));
-      await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
-      await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
-      await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();
-      const zodEntry = Bun.resolveSync("zod", import.meta.dir);
-      await Bun.$`bun build ${zodEntry} --target bun --no-splitting --outfile ${tmpdir}/zod.bundle.js`.quiet();
+  spawnTest(
+    "zod and zod/mini run and extract schemas from staged runtime bundles",
+    async () => {
+      const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
+      await Bun.$`mkdir -p ${tmpdir}`;
+      try {
+        const runtimeSrc = fileURLToPath(new URL("../scripts-runtime", import.meta.url));
+        for (const [entry, bundle] of [
+          [`${runtimeSrc}/extract-args-schema.ts`, "extract-args-schema"],
+          [`${runtimeSrc}/eval-harness.ts`, "eval-harness"],
+          [`${runtimeSrc}/stdlib/index.ts`, "stdlib"],
+          [`${runtimeSrc}/swarm-sdk.ts`, "swarm-sdk"],
+          [Bun.resolveSync("zod", import.meta.dir), "zod"],
+          [`${runtimeSrc}/zod-mini-bundle.ts`, "zod-mini"],
+        ]) {
+          expectChildOk(
+            await runChild([
+              "bun",
+              "build",
+              entry!,
+              "--target",
+              "bun",
+              "--no-splitting",
+              "--outfile",
+              `${tmpdir}/${bundle}.bundle.js`,
+            ]),
+            `build ${bundle}`,
+          );
+        }
 
-      process.env.SCRIPT_RUNTIME_DIR = tmpdir;
+        process.env.SCRIPT_RUNTIME_DIR = tmpdir;
 
-      const output = await runScript({
-        agentId: "agent-1",
-        args: { name: "test" },
-        resources,
-        source: `
-          import { z } from "zod";
+        for (const moduleName of ["zod", "zod/mini"]) {
+          const source = `
+          import { z } from "${moduleName}";
           export const argsSchema = z.object({ name: z.string() });
           export default async (args: z.infer<typeof argsSchema>) => ({ greeting: "hello " + args.name });
-        `,
-      });
+        `;
+          const output = await runScript({
+            agentId: "agent-1",
+            args: { name: "test" },
+            resources,
+            source,
+          });
 
-      expect(output.error).toBeUndefined();
-      expect(output.result).toEqual({ greeting: "hello test" });
-      expect(output.exitCode).toBe(0);
-    } finally {
-      delete process.env.SCRIPT_RUNTIME_DIR;
-      await Bun.$`rm -rf ${tmpdir}`;
-    }
-  });
+          expect(output.error).toBeUndefined();
+          expect(output.result).toEqual({ greeting: "hello test" });
+          expect(output.exitCode).toBe(0);
+          const schema = await extractArgsJsonSchema(source);
+          expect(schema).not.toBeNull();
+          expect(JSON.parse(schema!)).toMatchObject({
+            type: "object",
+            required: ["name"],
+            properties: { name: { type: "string" } },
+          });
+        }
+      } finally {
+        delete process.env.SCRIPT_RUNTIME_DIR;
+        await Bun.$`rm -rf ${tmpdir}`;
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   spawnTest("argsSchema rejects invalid args with a formatted Zod error", async () => {
     const output = await runScript({
@@ -506,25 +557,30 @@ describe("runScript", () => {
     expect(output.stderr).toContain("repo");
   });
 
-  spawnTest("argsSchema applies .default() values when fields are omitted", async () => {
-    const output = await runScript({
-      agentId: "agent-1",
-      args: { repo: "owner/name" },
-      resources,
-      source: `
-        import { z } from "zod";
+  for (const [moduleName, limit] of [
+    ["zod", "z.number().default(10)"],
+    ["zod/mini", "z._default(z.number(), 10)"],
+  ]) {
+    spawnTest(`${moduleName} argsSchema supplies defaults when fields are omitted`, async () => {
+      const output = await runScript({
+        agentId: "agent-1",
+        args: { repo: "owner/name" },
+        resources,
+        source: `
+        import * as z from "${moduleName}";
         export const argsSchema = z.object({
           repo: z.string(),
-          limit: z.number().default(10),
+          limit: ${limit},
         });
         export default async (args: z.infer<typeof argsSchema>) => ({ repo: args.repo, limit: args.limit });
       `,
-    });
+      });
 
-    expect(output.error).toBeUndefined();
-    expect(output.result).toEqual({ repo: "owner/name", limit: 10 });
-    expect(output.exitCode).toBe(0);
-  });
+      expect(output.error).toBeUndefined();
+      expect(output.result).toEqual({ repo: "owner/name", limit: 10 });
+      expect(output.exitCode).toBe(0);
+    });
+  }
 
   spawnTest("script without argsSchema still works (backward-compat)", async () => {
     const output = await runScript({

@@ -10,13 +10,13 @@ Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools
 Every tool group is gated by a capability flag on the API server, controlled by the `CAPABILITIES` environment variable (or a `CAPABILITIES` global swarm-config entry, which takes precedence at server creation). When unset, the defaults apply:
 
 - **Enabled by default:** `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
-- **Disabled by default:** `messaging` (post/read messages, channels), `services` (background service registry), `prompt-templates`, `swarm-x` (external command routes), `agentmail`, `kapso` (WhatsApp)
+- **Disabled by default:** `messaging` (post/read messages, channels), `prompt-templates`, `swarm-x` (external command routes), `agentmail`, `kapso` (WhatsApp), `chat-sdk` (added automatically when `CHAT_SDK_ENABLED=true`)
 
 Setting `CAPABILITIES` **replaces** the whole list — it is not additive. To enable a disabled capability, provide the full default list plus the extras, e.g. `CAPABILITIES=core,task-pool,...,repo,messaging`. Sections below note when a tool group is disabled by default.
 
 Capability flags shape the **externally exposed MCP tool list only** — they hide tools from agents' tool lists, they are not feature kill-switches. The scripts SDK bridge always builds a full-surface server instance, so scripts keep their full typed SDK (governed by the [scripts SDK allowlist](/docs/guides/scripts-only-mode)) regardless of `CAPABILITIES`. HTTP REST routes are generally not gated either.
 
-Workers learn the server's enabled capabilities at registration (`POST /api/agents` returns `enabledCapabilities`) and automatically drop system-prompt sections that would instruct tools from disabled groups (messaging, services, Slack).
+Workers learn the server's enabled capabilities at registration (`POST /api/agents` returns `enabledCapabilities`) and automatically drop system-prompt sections that would instruct tools from disabled groups (messaging, Slack). The `services` capability was removed with the service registry; a leftover `services` entry in `CAPABILITIES` is ignored.
 
 ## Tool Search & Annotations
 
@@ -228,6 +228,7 @@ Set or update a configuration value. Upserts by (scope, scopeId, key).
 | `scopeId` | uuid | No | Agent ID or repo ID (required for `agent`/`repo` scopes) |
 | `isSecret` | boolean | No | Mask value in API responses |
 | `description` | string | No | Human-readable description |
+| `exportToEnv` | boolean | No | Export the row into agent process env (default `true` on create; omitted on update keeps the stored flag). See [Config rows in agent env](/docs/ui/configuration#config-rows-in-agent-env) |
 
 ### get-config
 
@@ -577,14 +578,6 @@ Compare two versions of a context file. Shows a unified diff.
 | `versionId` | uuid | Yes | The newer version ID |
 | `compareToVersionId` | uuid | No | The older version (default: previous) |
 
-## Service Tools
-
-Requires the `services` capability (**disabled by default**).
-
-### register-service / unregister-service / list-services / update-service-status
-
-Manage HTTP service discovery. Registry entries are keyed by the calling agent's ID/URL, and `register-service` only accepts project-owned executables under `/workspace` or `/home/worker` with safe interpreters/args. See [Service Discovery](/docs/concepts/services) for details.
-
 ## Scheduling Tools
 
 ### create-schedule / list-schedules / update-schedule / patch-schedule / delete-schedule / run-schedule-now
@@ -928,7 +921,7 @@ Create a personal skill from SKILL.md content. Parses frontmatter for name, desc
 
 ### skill-get
 
-Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global. In swarm scope the ownerless skill wins, then your own, then the only agent-owned one; when several other agents own that name, it errors with their IDs: pass skillId instead.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1151,7 +1144,7 @@ the generated `.d.ts` and rejects on diagnostics.
 | `description` | string | No | Human-readable script description |
 | `intent` | string | No | Why this script exists |
 
-A script may also export a Zod schema named `argsSchema` describing its expected arguments. On upsert the runtime extracts it, converts it to JSON Schema via `zod`'s `toJSONSchema`, and stores it on the catalog entry as `argsJsonSchema` — so callers can discover a script's argument shape before running it. The export is optional; scripts without it simply have a `null` `argsJsonSchema`.
+A script may also export a Zod schema named `argsSchema` describing its expected arguments. On upsert the runtime extracts it, converts it to JSON Schema via `zod`'s `toJSONSchema`, and stores it on the catalog entry as `argsJsonSchema` — so callers can discover a script's argument shape before running it. The export is optional; scripts without it simply have a `null` `argsJsonSchema`. The schema can be written with either `zod` or `zod/mini` (`import * as z from "zod/mini"`); Mini uses functional forms such as `z.optional(z.string())`.
 
 There is no ambient task context: pass values such as `taskId` through `args`.
 Inline and named scripts receive `ctx.swarm`, registered `ctx.api` / `ctx.mcp`

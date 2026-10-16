@@ -289,6 +289,8 @@ function makeBinaryStubDir(): string {
     writeFileSync(file, "#!/bin/sh\nexit 0\n");
     chmodSync(file, 0o755);
   }
+  // HARNESS_PROVIDER=opencode checks for the in-process SDK, not a binary.
+  writeFileSync(join(dir, "opencode-sdk.js"), "");
   return dir;
 }
 
@@ -335,6 +337,7 @@ describe.skipIf(process.platform === "win32")("docker-entrypoint.sh provider cha
             PATH: [stubDir, "/usr/bin", "/bin"].join(delimiter),
             HARNESS_PROVIDER: provider,
             ACP_TARGET: "opencode",
+            OPENCODE_SDK_PATH: join(stubDir, "opencode-sdk.js"),
           },
         });
         await rm(stubDir, { recursive: true, force: true });

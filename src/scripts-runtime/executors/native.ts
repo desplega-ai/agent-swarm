@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   detachedProcessGroup,
   registerProcessGroup,
@@ -112,6 +112,7 @@ async function writeBareImportShims(tmpdir: string): Promise<void> {
       ["stdlib", `${runtimeDir}/stdlib.bundle.js`],
       ["swarm-sdk", `${runtimeDir}/swarm-sdk.bundle.js`],
       ["zod", `${runtimeDir}/zod.bundle.js`],
+      ["zod/mini", `${runtimeDir}/zod-mini.bundle.js`],
     ];
     for (const [name, bundlePath] of shims) {
       const dir = `${tmpdir}/node_modules/${name}`;
@@ -119,16 +120,16 @@ async function writeBareImportShims(tmpdir: string): Promise<void> {
       await Bun.write(`${dir}/package.json`, JSON.stringify({ type: "module", main: "index.js" }));
       await Bun.write(
         `${dir}/index.js`,
-        `export * from ${JSON.stringify(`file://${bundlePath}`)};\n`,
+        `export * from ${JSON.stringify(pathToFileURL(bundlePath).href)};\n`,
       );
     }
     return;
   }
   await writeBareImportShim(tmpdir, "stdlib", new URL("../stdlib/index.ts", import.meta.url));
   await writeBareImportShim(tmpdir, "swarm-sdk", new URL("../swarm-sdk.ts", import.meta.url));
-  // Allow `import { z } from "zod"` in user scripts (for argsSchema definitions).
-  const zodEntry = Bun.resolveSync("zod", import.meta.dir);
-  await writeBareImportShim(tmpdir, "zod", new URL(`file://${zodEntry}`));
+  for (const name of ["zod", "zod/mini"]) {
+    await writeBareImportShim(tmpdir, name, pathToFileURL(Bun.resolveSync(name, import.meta.dir)));
+  }
 }
 
 function harnessCommand(

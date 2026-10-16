@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-const SCRIPT_ALLOWED_BARE_IMPORTS = ["swarm-sdk", "stdlib", "zod"] as const;
+const SCRIPT_ALLOWED_BARE_IMPORTS = ["swarm-sdk", "stdlib", "zod", "zod/mini"] as const;
 const FORBIDDEN_HINTS = new Set(["node:", "bun:", "fs", "child_process", "crypto", "bun:sqlite"]);
 
 export type ImportAllowlistOptions = {

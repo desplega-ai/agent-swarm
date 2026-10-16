@@ -42,6 +42,11 @@ import {
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
+import {
+  type ClaudeFlagSettings,
+  claudeFlagSettings,
+  mergeClaudeSettingsArgs,
+} from "./claude-flag-settings";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -923,6 +928,8 @@ class ClaudeSession implements ProviderSession {
     private readonly runSessionSummary: (
       opts: RunStopHookSessionSummaryOpts,
     ) => Promise<void> = runStopHookSessionSummarySubprocess,
+    /** Validated session settings; `createSession` already merged caller `--settings` into them. */
+    private readonly flagSettings: ClaudeFlagSettings = claudeFlagSettings(),
   ) {
     this.taskFileKey = taskFileKey;
     this.contextWindowSize = getContextWindowSize(model);
@@ -1034,6 +1041,10 @@ class ClaudeSession implements ProviderSession {
       "--allow-dangerously-skip-permissions",
       "--permission-mode",
       "bypassPermissions",
+      // Skip both on-disk copies of claudeMd; the system prompt already carries it.
+      // createSession merged caller `--settings` into these, so this is the only one.
+      "--settings",
+      JSON.stringify(this.flagSettings),
     ];
 
     // Queued steering needs `--input-format stream-json`, which is mutually
@@ -1360,9 +1371,20 @@ export class ClaudeAdapter implements ProviderAdapter {
       );
     }
     const isLegacyBridgeCompat = isLegacyClaudeBridgeCompatBinary(claudeBinaryRaw);
-    const effectiveClaudeBinaryArgv = useClaudeBridge
+    const [claudeExecutable = "claude", ...claudePrefixArgs] = useClaudeBridge
       ? withClaudeBridgeAuthArgs(claudeBinaryArgv, sourceEnv)
       : claudeBinaryArgv;
+    // Validate and merge caller `--settings` (CLAUDE_BINARY prefix and
+    // additionalArgs) once, before any log, write, or Claude spawn. An unusable
+    // value throws here, so nothing below runs. Every spawn (the version probe
+    // and the session) then gets the stripped argv plus this one settings value.
+    const {
+      argLists: [prefixArgs = [], additionalArgs = []],
+      settings: flagSettings,
+    } = mergeClaudeSettingsArgs([claudePrefixArgs, config.additionalArgs ?? []], config.cwd);
+    const effectiveClaudeBinaryArgv = [claudeExecutable, ...prefixArgs];
+    sessionConfig.additionalArgs = additionalArgs;
+    const flagSettingsArgs = ["--settings", JSON.stringify(flagSettings)];
     const isInteractiveTmuxClaude = isLegacyBridgeCompat || useClaudeBridge;
     const configuredClaudeBinaryRaw = resolveClaudeBinary(sourceEnv);
     if (isLegacyClaudeBridgeCompatBinary(configuredClaudeBinaryRaw)) {
@@ -1371,6 +1393,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       );
     }
 
+    // Caller settings are already stripped from this argv; never log their contents.
     console.log(
       `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${effectiveClaudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, legacyBridgeCompat: ${isLegacyBridgeCompat})`,
     );
@@ -1456,7 +1479,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     let harnessVersion: string | undefined;
     try {
       const probe = registerProcessGroup(
-        Bun.spawn([...effectiveClaudeBinaryArgv, "--version"], {
+        Bun.spawn([...effectiveClaudeBinaryArgv, ...flagSettingsArgs, "--version"], {
           detached: detachedProcessGroup,
           env: sourceEnv,
           stdin: "ignore",
@@ -1504,6 +1527,7 @@ export class ClaudeAdapter implements ProviderAdapter {
         taskFileKey,
         sessionMcpConfig,
         claudeBinaryArgv: effectiveClaudeBinaryArgv,
+        settings: flagSettings,
         systemPromptFile,
         harnessVariant,
         harnessVariantMeta,
@@ -1524,6 +1548,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       harnessVariantMeta,
       queueSteeringSupported,
       this.runSessionSummary,
+      flagSettings,
     );
   }
 

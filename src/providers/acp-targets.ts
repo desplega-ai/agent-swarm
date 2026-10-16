@@ -1,8 +1,12 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeGrokModel } from "@desplega/model-catalog";
-import type { Config } from "@opencode-ai/sdk";
+import {
+  baseUrlOverride,
+  normalizeGrokModel,
+  providerBaseUrl,
+  providerForModel,
+} from "@desplega/model-catalog";
 import { clampContextPercent, getContextWindowSize } from "../utils/context-window";
 import {
   ACP_TARGET_IDS,
@@ -10,7 +14,11 @@ import {
   getAcpTargetCatalogEntry,
   isAcpTarget,
 } from "./acp-target-catalog";
-import { applyOpenRouterBaseUrlOverride } from "./opencode-adapter";
+import {
+  applyOpenRouterBaseUrlOverride,
+  buildOpenAICompatibleProviderBlock,
+  type OpencodeConfig,
+} from "./opencode-adapter";
 import { applyReasoningEffort } from "./reasoning-effort";
 import type { CostData, CostModelUsage, ProviderEvent, ProviderSessionConfig } from "./types";
 
@@ -141,8 +149,52 @@ function withOpencodeConfig(env: Record<string, string>, model: string): void {
     }
   }
   if (model.trim()) value.model = model.trim();
-  applyOpenRouterBaseUrlOverride(value as Config, env);
+  withCustomProviderBlock(value as OpencodeConfig, model.trim(), env);
+  applyOpenRouterBaseUrlOverride(value as OpencodeConfig, env);
   env[key] = JSON.stringify(value);
+}
+
+/**
+ * OpenCode ships no provider for a registry entry models.dev does not list
+ * (`catalog: "registry"`, e.g. `helmcode`), so its models need the custom
+ * block. The key stays an `{env:…}` reference: the ACP subprocess env is the
+ * forwarded per-task env, where the var holds one picked key, so no literal
+ * key lands in `OPENCODE_CONFIG_CONTENT`. A built-in registry provider
+ * (`nan`) only gets `options.baseURL` when `<ID>_BASE_URL` is set. Values the
+ * operator already set in `OPENCODE_CONFIG_CONTENT` win over the defaults.
+ */
+function withCustomProviderBlock(
+  config: OpencodeConfig,
+  model: string,
+  env: Record<string, string>,
+): void {
+  const provider = providerForModel(model);
+  if (!provider) return;
+  const existing = config.provider?.[provider.id];
+  if (provider.catalog !== "registry") {
+    const baseURL = baseUrlOverride(provider, env);
+    if (!baseURL) return;
+    config.provider = {
+      ...config.provider,
+      [provider.id]: { ...existing, options: { baseURL, ...existing?.options } },
+    };
+    return;
+  }
+  const block = buildOpenAICompatibleProviderBlock(
+    provider,
+    `{env:${provider.envVar}}`,
+    model.slice(provider.id.length + 1),
+    providerBaseUrl(provider, env),
+  );
+  config.provider = {
+    ...config.provider,
+    [provider.id]: {
+      ...block,
+      ...existing,
+      options: { ...block.options, ...existing?.options },
+      models: { ...block.models, ...existing?.models },
+    },
+  };
 }
 
 function parseCommand(command: string, args: string | undefined): string[] {
@@ -253,7 +305,7 @@ const geminiTargetProfile: AcpTargetProfile = {
 /**
  * Copilot CLI has no system-prompt flag. Under `--acp` it reads custom
  * instructions from the git root, the cwd, and every directory listed in
- * COPILOT_CUSTOM_INSTRUCTIONS_DIRS. Verified against 1.0.96: from those extra
+ * COPILOT_CUSTOM_INSTRUCTIONS_DIRS. Verified against 1.0.97: from those extra
  * directories it loads `.github/instructions/*.instructions.md`, but not
  * `AGENTS.md`. So the swarm prompt goes into a per-task directory outside the
  * repo, and the repo's own AGENTS.md is never touched.
@@ -307,7 +359,7 @@ const copilotTargetProfile: AcpTargetProfile = {
   },
 };
 
-/** Qwen Code's `--auth-type` choices (0.25.1). `qwen-oauth` needs a browser, so it is left out. */
+/** Qwen Code's `--auth-type` choices (0.25.2). `qwen-oauth` needs a browser, so it is left out. */
 const QWEN_AUTH_TYPES = ["openai", "openai-responses", "anthropic", "gemini", "vertex-ai"] as const;
 
 // Qwen Code is a Gemini CLI fork: QWEN_SYSTEM_MD replaces its built-in prompt

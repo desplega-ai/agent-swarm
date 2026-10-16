@@ -1,8 +1,8 @@
 # Pages — DB-backed Static Artifacts
 
 DB-backed static content (HTML or JSON) served by the API directly. Cheap,
-versioned, share-able by URL. The lighter-weight cousin of `artifacts` —
-no PM2, no tunnels, no port allocation, no `services` registry row.
+versioned, share-able by URL. No server process, no tunnel, no port
+allocation.
 
 A page should be a clean human-facing artifact, not a raw dump with a URL. This
 skill covers both halves: **how to publish** a page, and **the taste baseline**
@@ -13,7 +13,7 @@ every page should meet.
 > (e.g. `CAPABILITIES=core,task-pool,pages`). If the tool is missing from
 > your MCP list, this is why.
 
-## When to use Pages vs Artifacts
+## When to use Pages vs Apps
 
 | You need… | Use |
 |---|---|
@@ -21,12 +21,11 @@ every page should meet.
 | A JSON status payload + a few buttons that call swarm APIs | **Pages** (`contentType: 'application/json'`) |
 | To share an output via a URL with no server logic | **Pages** |
 | Analysis that should be linkable and bookmarkable | **Pages** |
-| Custom routes, websockets, server-side logic | The **`artifacts`** skill |
-| File uploads or per-request computation | The **`artifacts`** skill |
+| Persistent records, queries, and server-side actions | The **`apps`** skill |
+| Large or binary files (PNG, MP4, exports) | The **`agent-fs`** skill |
 
 Rule of thumb: if the content is a snapshot (you can write the full HTML/JSON
-in a single call), use pages. If the content is a *running program*, use
-artifacts.
+in a single call), use pages. If it needs stored data and actions, use apps.
 
 Do **not** use pages for:
 
@@ -533,9 +532,8 @@ human-facing summary.
 
 ## See Also
 
-- The **`artifacts`** skill — durable storage (agent-fs, shared workspace) plus
-  full custom Hono apps with PM2 + a tunneled subdomain. Use it for interactive
-  servers, not static content.
+- The **`apps`** skill — schema-backed records, named queries, and actions.
+- The **`agent-fs`** skill — durable file storage and share links.
 - The **`kv-storage`** skill — page-scoped state via `swarmSdk.kv`.
 - `runbooks/secret-scrubbing.md` — egress scrubbing details.
 - SPA listing: `${APP_URL}/pages` — the same `APP_URL` used for share links above.

@@ -1,3 +1,4 @@
+import { Braces } from "lucide-react";
 import { useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
@@ -21,7 +22,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { type ConfigFormData, emptyConfigForm } from "@/hooks/use-swarm-config";
+import { compactJson, parseJsonContainer, prettyJson } from "@/lib/json-value";
+import { isEnvExportRestrictedKey } from "../../../../../../src/utils/config-env-export";
 
 export function ConfigEntryDialog({
   open,
@@ -41,22 +45,34 @@ export function ConfigEntryDialog({
           scope: editEntry.scope,
           scopeId: editEntry.scopeId ?? "",
           key: editEntry.key,
-          value: editEntry.isSecret ? "" : editEntry.value,
+          // The stored value, secrets included (masked until revealed), so an
+          // edit starts from what is there. A JSON value opens formatted.
+          value: editEntry.isSecret ? editEntry.value : prettyJson(editEntry.value),
           isSecret: editEntry.isSecret,
           description: editEntry.description ?? "",
+          exportToEnv: editEntry.exportToEnv,
         }
       : emptyConfigForm,
   );
+  const exportRestricted = isEnvExportRestrictedKey(form.key);
+  // A JSON object or array is edited in a text area (formatted or raw) and
+  // stored on one line. The editor stays a text area while the text is being
+  // edited, even when it does not parse for a moment.
+  const isJson = parseJsonContainer(form.value) !== undefined;
+  const [jsonEditor, setJsonEditor] = useState(isJson);
+  const [pretty, setPretty] = useState(isJson);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSubmit(form);
+    const value = compactJson(form.value);
+    const data = { ...form, value };
+    onSubmit(exportRestricted ? { ...data, exportToEnv: false } : data);
     onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>{editEntry ? "Edit Config Entry" : "Add Config Entry"}</DialogTitle>
@@ -134,7 +150,29 @@ export function ConfigEntryDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="config-value">Value</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="config-value">Value</Label>
+                {jsonEditor && !form.isSecret && (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    disabled={!isJson}
+                    title={isJson ? undefined : "Not valid JSON yet"}
+                    onClick={() => {
+                      setForm({
+                        ...form,
+                        value: pretty ? compactJson(form.value) : prettyJson(form.value),
+                      });
+                      setPretty((prev) => !prev);
+                    }}
+                  >
+                    <Braces />
+                    {pretty ? "Raw" : "Formatted"}
+                  </Button>
+                )}
+              </div>
               {form.isSecret ? (
                 <SecretInput
                   id="config-value"
@@ -144,14 +182,37 @@ export function ConfigEntryDialog({
                   autoComplete="new-password"
                   required
                 />
+              ) : jsonEditor ? (
+                <Textarea
+                  id="config-value"
+                  value={form.value}
+                  onChange={(e) => setForm({ ...form, value: e.target.value })}
+                  spellCheck={false}
+                  className="max-h-[50vh] min-h-32 font-mono text-xs"
+                  required
+                />
               ) : (
                 <Input
                   id="config-value"
                   placeholder="config value"
                   value={form.value}
-                  onChange={(e) => setForm({ ...form, value: e.target.value })}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    // Pasted JSON moves to the text area, formatted.
+                    const json = parseJsonContainer(value) !== undefined;
+                    setForm({ ...form, value: json ? prettyJson(value) : value });
+                    if (json) {
+                      setJsonEditor(true);
+                      setPretty(true);
+                    }
+                  }}
                   required
                 />
+              )}
+              {jsonEditor && !form.isSecret && (
+                <p className="text-xs text-muted-foreground">
+                  JSON value. Saved compacted on one line, whichever view you edit in.
+                </p>
               )}
             </div>
             <div className="space-y-2">
@@ -169,6 +230,24 @@ export function ConfigEntryDialog({
                 onCheckedChange={(checked) => setForm({ ...form, isSecret: checked })}
               />
               <Label htmlFor="config-secret">Secret value</Label>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="config-export-to-env"
+                  checked={form.exportToEnv && !exportRestricted}
+                  disabled={exportRestricted}
+                  onCheckedChange={(checked) => setForm({ ...form, exportToEnv: checked })}
+                />
+                <Label htmlFor="config-export-to-env">Export to agent env</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {exportRestricted
+                  ? "Only the API server reads this key, so it never reaches agent shells."
+                  : form.exportToEnv
+                    ? "Agent shells see this value in their environment."
+                    : "Kept out of agent shells. Agents use it through a connection or script credential binding."}
+              </p>
             </div>
           </div>
           <DialogFooter>

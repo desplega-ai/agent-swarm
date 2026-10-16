@@ -12,6 +12,7 @@ import "../heartbeat/templates";
 import "../tools/templates";
 import "../commands/templates";
 import "../slack/templates";
+import "../integrations/chat-sdk/templates";
 import "../prompts/session-templates";
 
 const TEST_DB_PATH = "./test-prompt-remaining.sqlite";
@@ -33,6 +34,7 @@ async function ensureTemplatesRegistered(): Promise<void> {
   await import(`../tools/templates?t=${ts}`);
   await import(`../commands/templates?t=${ts}`);
   await import(`../slack/templates?t=${ts}`);
+  await import(`../integrations/chat-sdk/templates?t=${ts}`);
   await import(`../prompts/session-templates?t=${ts}`);
 }
 
@@ -115,6 +117,22 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("heartbeat.checklist");
   });
 
+  test("Heartbeat checklist puts the live status after the standing orders and instructions", () => {
+    // The status changes every tick; the orders and instructions usually do
+    // not, so they lead the text and the status goes last.
+    const { text } = resolveTemplate("heartbeat.checklist", {
+      system_status: "STATUS_MARKER",
+      heartbeat_content: "ORDERS_MARKER",
+    });
+    const orders = text.indexOf("ORDERS_MARKER");
+    const instructions = text.indexOf("## Instructions");
+    const status = text.indexOf("## Current System Status");
+    expect(orders).toBeGreaterThan(-1);
+    expect(instructions).toBeGreaterThan(orders);
+    expect(status).toBeGreaterThan(instructions);
+    expect(text.trimEnd()).toEndWith("STATUS_MARKER");
+  });
+
   test("Task lifecycle templates are registered (3 task_lifecycle)", () => {
     const all = getAllTemplateDefinitions();
     const eventTypes = all.map((d) => d.eventType);
@@ -142,6 +160,11 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("slack.assistant.suggested_prompts");
     expect(eventTypes).toContain("slack.assistant.offline");
     expect(eventTypes).toContain("slack.message.thread_context");
+  });
+
+  test("Chat SDK templates are registered (1 system)", () => {
+    const eventTypes = getAllTemplateDefinitions().map((d) => d.eventType);
+    expect(eventTypes).toContain("chat.message.thread_context");
   });
 });
 
@@ -607,5 +630,17 @@ Alice: Hello
 </thread_context>`;
 
     expect(result.text).toBe(expected);
+  });
+
+  test("chat.message.thread_context produces the same block as Slack", () => {
+    const result = resolveTemplate("chat.message.thread_context", {
+      thread_messages: "Alice: Hello\n[Agent]: Hi there!",
+    });
+
+    expect(result.skipped).toBe(false);
+    expect(result.text).toBe(`<thread_context>
+Alice: Hello
+[Agent]: Hi there!
+</thread_context>`);
   });
 });

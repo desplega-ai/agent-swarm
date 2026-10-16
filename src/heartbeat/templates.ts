@@ -11,14 +11,14 @@ import { registerTemplate } from "../prompts/registry";
 // Heartbeat checklist
 // ============================================================================
 
+// Standing orders and instructions come before the live status: they are
+// usually identical from one tick to the next, so they can form a cacheable
+// prefix of the task text, and the status that changes every tick goes last.
 registerTemplate({
   eventType: "heartbeat.checklist",
   header: "",
   defaultBody: `Task Type: Heartbeat Checklist
 Goal: Review system status and your standing orders, take action if needed.
-
-## Current System Status [auto-generated]
-{{system_status}}
 
 ## Your Standing Orders (snapshot from HEARTBEAT.md)
 {{heartbeat_content}}
@@ -29,7 +29,7 @@ Goal: Review system status and your standing orders, take action if needed.
 1. **Read your HEARTBEAT.md** — run \`read /workspace/HEARTBEAT.md\` to get the latest standing orders (the snapshot above may be slightly stale).
 2. **Prune tracked HEARTBEAT items FIRST.** Active Blockers + Watch Items + Open Discussion combined must stay at ≤10 items; 20 is the absolute max only when genuinely super busy. This cap does not apply to evergreen Standing Orders / Governance / Playbook-index reference sections. Before adding anything, re-check every tracked item against its lift trigger and remove anything resolved, stale, or past its trigger date. Lift incident detail to memory; never keep it inline in HEARTBEAT.md. Every new tracked item must include an explicit lift trigger + date; if it has no removal condition, do not add it. If the tracked list is already at/over cap, prune before (or instead of) adding — the cap is binding.
 3. **Run seeded heartbeat data-gathering.** Use \`script-run\` with the global scripts \`schedule-health\` and \`task-failure-audit\`, both with args \`{ "days": 1, "publishPage": false }\`. They report failing schedules and failure clusters. Check any other standing order in HEARTBEAT.md yourself. Scripts can read Slack too (\`ctx.swarm.slack_read\` or the seeded \`slack-thread-flatten\` script), so a recurring Slack check can be scripted.
-4. Review the system status above plus the script results for anything that needs attention (stalled tasks, idle workers with available work, anomalies).
+4. Review the system status below plus the script results for anything that needs attention (stalled tasks, idle workers with available work, anomalies).
 5. **CRITICAL — Reboot failure triage:** Failures with reason "worker session not found" or "worker session heartbeat is stale" indicate tasks that were INTERRUPTED by a server restart. These are NOT "expected auto-cleanup" — they represent work that was lost mid-execution. For each such failure:
    - Check what the task was (via \`get-task-details\` with the task ID from the failure)
    - If a retry task was auto-created (tagged \`reboot-retry\`), verify it is progressing
@@ -39,7 +39,10 @@ Goal: Review system status and your standing orders, take action if needed.
 7. If something needs attention — take action now using your available tools (create tasks, post to Slack, cancel stuck tasks, etc.).
 8. If everything looks healthy and no standing orders are actionable — complete this task with a brief "All clear" summary. You may NOT say "All clear" if reboot-related failures exist that haven't been triaged.
 9. Do NOT create another heartbeat-checklist task — the system handles scheduling.
-10. **Update HEARTBEAT.md only after pruning.** Keep it current, but keep tracked items capped: remove resolved items, add only dated lift-triggered items, and lift detail to memory instead of growing the file.`,
+10. **Update HEARTBEAT.md only after pruning.** Keep it current, but keep tracked items capped: remove resolved items, add only dated lift-triggered items, and lift detail to memory instead of growing the file.
+
+## Current System Status [auto-generated]
+{{system_status}}`,
   variables: [
     {
       name: "system_status",

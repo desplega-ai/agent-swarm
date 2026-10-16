@@ -146,9 +146,9 @@ const PROFILE_FIELD_DETAILS: Record<
   },
   claudeMd: {
     label:
-      "claudeMd (/workspace/CLAUDE.md for non-Claude harnesses; ~/.claude/CLAUDE.md for Claude)",
+      "claudeMd (~/.claude/CLAUDE.md for Claude; /workspace/CLAUDE.md for non-Claude harnesses, which Claude excludes from its memory load)",
     recoveryGuidance:
-      "Inspect and shrink the live CLAUDE.md source first, moving durable tail content into memory. After a worker restart, non-Claude harnesses can use /workspace/CLAUDE.md.pre-boot-<timestamp>.bak as the fallback copy; Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step.",
+      "Inspect and shrink the live CLAUDE.md source first, moving durable tail content into memory. Claude edits ~/.claude/CLAUDE.md; editing /workspace/CLAUDE.md does not reach a Claude session. After a worker restart, non-Claude harnesses can use /workspace/CLAUDE.md.pre-boot-<timestamp>.bak as the fallback copy; Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step.",
   },
   toolsMd: {
     label: `toolsMd (${TOOLS_MD_PATH})`,
@@ -510,7 +510,9 @@ export function planClaudeMdSync(state: {
  * materializes from the `claudeMd` DB field at boot (`runner.ts`) and that the
  * base-prompt truncation notice tells NON-Claude harnesses (codex/pi/opencode)
  * to edit. Distinct from CLAUDE_MD_PATH; this is the FS→DB source for the
- * non-Claude providers that previously had no sync path at all.
+ * non-Claude providers that previously had no sync path at all. Written for
+ * every harness (a container can live-swap providers), but Claude sessions
+ * skip it via `claudeMdExcludes` (`src/providers/claude-flag-settings.ts`).
  */
 export const WORKSPACE_CLAUDE_MD_PATH = "/workspace/CLAUDE.md";
 

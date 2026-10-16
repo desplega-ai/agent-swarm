@@ -667,6 +667,48 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     expect(resolveAcpTarget(config).env(config).OPENCODE_CONFIG_CONTENT).toBe(content);
   });
 
+  test("OpenCode preset adds the helmcode block with an {env:} key reference, never the key", () => {
+    const sentinel = "sk-helmcode-acp-sentinel-0123456789";
+    const config = baseConfig({
+      model: "helmcode/glm5.3",
+      env: {
+        ACP_TARGET: "opencode",
+        HELMCODE_API_KEY: sentinel,
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          provider: { helmcode: { options: { timeout: 1000 } } },
+        }),
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(env.HELMCODE_API_KEY).toBe(sentinel);
+    expect(env.OPENCODE_CONFIG_CONTENT).not.toContain(sentinel);
+    const helmcode = JSON.parse(env.OPENCODE_CONFIG_CONTENT!).provider.helmcode;
+    expect(helmcode).toMatchObject({
+      npm: "@ai-sdk/openai-compatible",
+      name: "Helmcode",
+      env: [],
+      options: {
+        baseURL: "https://api.helmcode.com/v1",
+        apiKey: "{env:HELMCODE_API_KEY}",
+        timeout: 1000,
+      },
+    });
+    expect(helmcode.models["glm5.3"]).toMatchObject({
+      tool_call: true,
+      limit: { context: 1048576, output: 32768 },
+    });
+  });
+
+  test("OpenCode preset adds no custom block for a nan model", () => {
+    const config = baseConfig({
+      model: "nan/glm5.3-flash",
+      env: { ACP_TARGET: "opencode", NAN_API_KEY: "example-test-key" },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(env.NAN_API_KEY).toBe("example-test-key");
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!).provider?.helmcode).toBeUndefined();
+  });
+
   test("OpenCode preset injects gateway even without a model fallback", () => {
     const config = baseConfig({
       model: "",

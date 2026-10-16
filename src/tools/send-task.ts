@@ -378,6 +378,30 @@ export async function sendTaskHandler(
   const effectiveParentTask = effectiveParentTaskId
     ? await getTaskById(effectiveParentTaskId)
     : null;
+  // The child inherits the parent's contextKey (its Slack or chat thread) and requester, and
+  // thread-scoped tools trust that binding. An agent can only build on a parent it owns or
+  // created; otherwise a worker could mint access to a foreign thread.
+  if (ctx.kind === "owner" && creatorAgentId && effectiveParentTask) {
+    const caller = await getAgentById(creatorAgentId);
+    const decision = can({
+      principal: { kind: "agent", agentId: creatorAgentId, isLead: caller?.isLead ?? false },
+      verb: "task.parent.attach",
+      resource: {
+        kind: "task",
+        taskId: effectiveParentTask.id,
+        requestedByUserId: effectiveParentTask.requestedByUserId,
+        creatorAgentId: effectiveParentTask.creatorAgentId,
+        agentId: effectiveParentTask.agentId,
+      },
+      source: "mcp",
+    });
+    if (!decision.allow) {
+      return toolErr(
+        `You don't have context for parent task ${effectiveParentTask.id}. Only its assignee, its creator, or a lead can create a child task under it.`,
+        { data: { yourAgentId: creatorAgentId } },
+      );
+    }
+  }
   if (effectiveParentTask?.routingAffinityInvalid) {
     return toolErr("Cannot continue a task with an invalid routing affinity.", {
       data: { yourAgentId: creatorAgentId },

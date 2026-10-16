@@ -1,5 +1,10 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { type BasePromptArgs, getBasePrompt, truncateRepoClaudeMd } from "../prompts/base-prompt";
+import {
+  type BasePromptArgs,
+  getBasePrompt,
+  getTaskContextPrompt,
+  truncateRepoClaudeMd,
+} from "../prompts/base-prompt";
 import { generateDefaultClaudeMd, generateDefaultIdentityMd } from "../prompts/defaults";
 import type { ProviderTraits } from "../providers/types";
 
@@ -377,7 +382,7 @@ describe("getBasePrompt: persona injection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Agent notes (CLAUDE.md): codex, opencode, pi only, only when edited
+// 4. Agent notes (CLAUDE.md): local providers, only when edited
 // ---------------------------------------------------------------------------
 
 describe("getBasePrompt: agent notes section", () => {
@@ -385,18 +390,9 @@ describe("getBasePrompt: agent notes section", () => {
   const EDITED = "# Agent: Ada\n\nAlways run `bun run tsc:check` before you push.";
   const notesAgent = { name: "Ada", role: "worker" };
 
-  test("claude never gets the section, even when the notes are edited", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      name: "Ada",
-      provider: "claude",
-      claudeMd: EDITED,
-    });
-    expect(result).not.toContain(NOTES_HEADER);
-    expect(result).not.toContain("Always run `bun run tsc:check` before you push.");
-  });
-
-  for (const provider of ["codex", "opencode", "pi"] as const) {
+  // Claude excludes ~/.claude/CLAUDE.md from its memory load
+  // (claude-flag-settings.ts), so the system prompt is its only copy.
+  for (const provider of ["claude", "codex", "opencode", "pi"] as const) {
     test(`${provider} gets the section when the notes are edited`, async () => {
       const result = await getBasePrompt({
         ...minimalArgs,
@@ -408,6 +404,17 @@ describe("getBasePrompt: agent notes section", () => {
       expect(result).toContain("Always run `bun run tsc:check` before you push.");
     });
   }
+
+  test("claude truncates notes over 20k characters and points at its own file", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      provider: "claude",
+      claudeMd: "x".repeat(25_000),
+    });
+    expect(result).toContain("[...truncated, see ~/.claude/CLAUDE.md for full content]");
+    expect(result).not.toContain("x".repeat(20_000));
+  });
 
   test("codex skips notes that equal the generated default", async () => {
     const result = await getBasePrompt({
@@ -598,11 +605,15 @@ describe("getBasePrompt: slack section", () => {
 
   test("a scripts-only worker with a Slack task gets the scripts-only variant only", async () => {
     enableSlack();
-    const result = await getBasePrompt({
+    const system = await getBasePrompt({ ...minimalArgs, scriptsOnly: true });
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       scriptsOnly: true,
       slackContext: { channelId: "C0SAMPLE", threadTs: "123.456" },
     });
+    // The channel id is per task, so the note rides in the task prompt.
+    expect(system).not.toContain(SCRIPTS_ONLY_SLACK_HEADER);
+    expect(system).not.toContain(SLACK_HEADER);
     expect(result).toContain(SCRIPTS_ONLY_SLACK_HEADER);
     expect(result).toContain("C0SAMPLE");
     expect(result).not.toContain(SLACK_HEADER);
@@ -610,7 +621,7 @@ describe("getBasePrompt: slack section", () => {
 
   test("a scripts-only lead with a Slack task gets neither variant", async () => {
     enableSlack();
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       role: "lead",
       scriptsOnly: true,
@@ -786,14 +797,14 @@ describe("getBasePrompt: tools and skills section", () => {
 // 10. Repository
 // ---------------------------------------------------------------------------
 
-describe("getBasePrompt: repository section", () => {
+describe("getTaskContextPrompt: repository section", () => {
   const CLONE_PATH = "/workspace/repos/my-repo";
   const CLONE_SENTENCE = "This task's repository is cloned locally. `get-repos` returns the path.";
   const CODE_QUALITY_LINE =
     "You MUST use the `code-quality` skill before you push, open a PR, or review one.";
 
   test("a local claude worker gets the clone sentence and no clone path literal", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       traits: localTraits,
       repoContext: { claudeMd: "Repo rules here.", clonePath: CLONE_PATH },
@@ -804,7 +815,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("claude does not get the repo CLAUDE.md inlined", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       provider: "claude",
       traits: localTraits,
@@ -814,7 +825,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("opencode inlines the repo CLAUDE.md with the clone path", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       provider: "opencode",
       traits: localTraits,
@@ -826,7 +837,7 @@ describe("getBasePrompt: repository section", () => {
 
   test("opencode truncates a repo CLAUDE.md over 12k with an on-disk pointer", async () => {
     const huge = "x".repeat(30_000);
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       provider: "opencode",
       traits: localTraits,
@@ -838,7 +849,7 @@ describe("getBasePrompt: repository section", () => {
 
   test("opencode keeps a repo CLAUDE.md under the cap verbatim", async () => {
     const small = "y".repeat(5_000);
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       provider: "opencode",
       traits: localTraits,
@@ -849,7 +860,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("shows the repo warning when one is set", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       repoContext: { clonePath: CLONE_PATH, warning: "Repo is stale" },
     });
@@ -857,7 +868,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("surfaces auto-stashed work when entries exist", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       traits: localTraits,
       repoContext: {
@@ -871,7 +882,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("says nothing about stashes when the list is empty", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       traits: localTraits,
       repoContext: { clonePath: CLONE_PATH, autoStashes: [] },
@@ -880,7 +891,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("null guidelines tell the agent to ask the lead", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       repoContext: { clonePath: CLONE_PATH, guidelines: null },
     });
@@ -889,7 +900,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("full guidelines render PR checks, merge policy, and review guidance", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       repoContext: {
         clonePath: CLONE_PATH,
@@ -911,7 +922,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("all-empty guidelines render no guidelines block", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       repoContext: {
         clonePath: CLONE_PATH,
@@ -923,7 +934,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("allowMerge true renders the merge policy even with empty arrays", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       repoContext: {
         clonePath: CLONE_PATH,
@@ -935,7 +946,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("a remote worker keeps the guidelines but loses the clone sentence", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       provider: "devin",
       traits: remoteTraits,
@@ -957,7 +968,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("the code-quality pointer is present with MCP", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       traits: localTraits,
       repoContext: { clonePath: CLONE_PATH },
@@ -966,7 +977,7 @@ describe("getBasePrompt: repository section", () => {
   });
 
   test("the code-quality pointer is absent for a remote worker", async () => {
-    const result = await getBasePrompt({
+    const result = await getTaskContextPrompt({
       ...minimalArgs,
       traits: remoteTraits,
       repoContext: { clonePath: CLONE_PATH },
@@ -1033,18 +1044,6 @@ describe("getBasePrompt: size budget", () => {
       claudeMd: big(40_000),
       skillsSummary: [{ name: "commit", description: "Create a commit" }],
       mcpServers: ["linear"],
-      slackContext: { channelId: "C0SAMPLE" },
-      repoContext: {
-        claudeMd: big(60_000),
-        clonePath: "/workspace/repos/big-repo",
-        warning: "Repo is stale",
-        guidelines: {
-          prChecks: ["bun run lint"],
-          mergeChecks: ["CI green"],
-          allowMerge: true,
-          review: ["Read the runbook"],
-        },
-      },
     });
     expect(result.length).toBeLessThan(120_000);
   });
@@ -1070,7 +1069,7 @@ describe("getBasePrompt: output hygiene", () => {
       args: { ...minimalArgs, name: "Ada", traits: remoteTraits, provider: "devin" },
     },
     {
-      label: "codex worker with skills and a repo",
+      label: "codex worker with skills",
       args: {
         ...minimalArgs,
         name: "Ada",
@@ -1078,19 +1077,24 @@ describe("getBasePrompt: output hygiene", () => {
         traits: { ...localTraits, nativeSkillDiscovery: false, steerModes: ["queue"] },
         skillsSummary: [{ name: "commit", description: "Create a commit" }],
         mcpServers: ["linear"],
-        repoContext: {
-          clonePath: "/workspace/repos/my-repo",
-          guidelines: {
-            prChecks: ["bun run lint"],
-            mergeChecks: [],
-            allowMerge: false,
-            review: [],
-          },
-        },
       },
     },
     { label: "scripts-only worker", args: { ...minimalArgs, name: "Ada", scriptsOnly: true } },
   ];
+
+  test("the task context renders no em dash and no triple newline", async () => {
+    const result = await getTaskContextPrompt({
+      ...minimalArgs,
+      provider: "codex",
+      traits: localTraits,
+      repoContext: {
+        clonePath: "/workspace/repos/my-repo",
+        guidelines: { prChecks: ["bun run lint"], mergeChecks: [], allowMerge: false, review: [] },
+      },
+    });
+    expect(result).not.toContain(EM_DASH);
+    expect(result).not.toMatch(/\n{3,}/);
+  });
 
   for (const variant of hygieneVariants) {
     test(`${variant.label} renders no em dash`, async () => {

@@ -45,6 +45,7 @@ import {
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { findUserById } from "../be/users";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
+import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
@@ -76,6 +77,7 @@ import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
+import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route } from "./route-def";
 import { jsonError, parseBody } from "./utils";
 
@@ -110,6 +112,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   modelSource: true,
   modelAlias: true,
   effort: true,
+  resolvedEffort: true,
   provider: true,
   requestedByUserId: true,
   progress: true,
@@ -308,6 +311,10 @@ const createTask = route({
       description:
         "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
     },
+    403: {
+      description:
+        "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
+    },
     422: {
       description: "Task creation blocked by an extension",
       schema: z.object({
@@ -357,6 +364,8 @@ const updateSession = route({
       claudeSessionId: z.string().min(1),
       provider: ProviderNameSchema.exclude(["devin"]).optional(),
       model: z.string().optional(),
+      // Effort the session runs at; null when the harness default applies.
+      effort: ReasoningEffortSchema.nullable().optional(),
       providerMeta: z.object({ transport: z.enum(["cli", "sdk"]).optional() }).optional(),
       harnessVariant: z.string().optional(),
       harnessVariantMeta: z.record(z.string(), z.unknown()).optional(),
@@ -592,7 +601,14 @@ const listPausedTasks = route({
     200: {
       description: "Paused task list",
       schema: z.object({
-        tasks: z.array(AgentTaskSchema.extend({ attachments: z.array(TaskAttachmentSchema) })),
+        tasks: z.array(
+          AgentTaskSchema.extend({
+            attachments: z.array(TaskAttachmentSchema),
+            // Same requester projection a fresh task_assigned trigger carries,
+            // so a resumed session gets the same requester-profile prompt.
+            requestedBy: TaskRequestedBySchema.optional(),
+          }),
+        ),
       }),
     },
   },
@@ -954,6 +970,41 @@ export async function handleTasks(
     const parentTask = parsed.body.parentTaskId
       ? await getTaskById(parsed.body.parentTaskId)
       : null;
+    // The child inherits the parent's thread context, so an agent caller must own or
+    // have created the parent. Operator and user callers keep their access.
+    const principal = await resolveTaskWritePrincipal(req, myAgentId);
+    if (
+      parentTask &&
+      !can({
+        principal,
+        verb: "task.parent.attach",
+        resource: {
+          kind: "task",
+          taskId: parentTask.id,
+          requestedByUserId: parentTask.requestedByUserId,
+          creatorAgentId: parentTask.creatorAgentId,
+          agentId: parentTask.agentId,
+        },
+        source: "http",
+      }).allow
+    ) {
+      jsonError(res, `You don't have context for parent task ${parentTask.id}.`, 403);
+      return true;
+    }
+    // A chat-sdk contextKey binds the task to a chat thread that its assignee and creator
+    // may then read and post to. An agent may only name a thread other than the parent's
+    // with the lead's chat post permission.
+    if (
+      principal.kind === "agent" &&
+      parsed.body.contextKey &&
+      parsed.body.contextKey !== parentTask?.contextKey &&
+      chatThreadOfContextKey(parsed.body.contextKey) &&
+      !can({ principal, verb: "integration.chat.post", resource: { kind: "none" }, source: "http" })
+        .allow
+    ) {
+      jsonError(res, "Permission denied: only a lead can bind a task to a chat thread.", 403);
+      return true;
+    }
     let assetKey: string | undefined;
     try {
       const inheritedKey = parentTask?.key;
@@ -1083,6 +1134,7 @@ export async function handleTasks(
       parsed.body.model,
       "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
       "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
+      "effort" in parsed.body ? parsed.body.effort : undefined,
     );
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -1667,10 +1719,14 @@ export async function handleTasks(
     }
     const pausedTasks = await getPausedTasksForAgent(myAgentId);
     const tasks = await Promise.all(
-      pausedTasks.map(async (task) => ({
-        ...task,
-        attachments: await getTaskAttachments(task.id),
-      })),
+      pausedTasks.map(async (task) => {
+        const requestedBy = await buildTaskRequestedBy(task);
+        return {
+          ...task,
+          attachments: await getTaskAttachments(task.id),
+          ...(requestedBy && { requestedBy }),
+        };
+      }),
     );
     listPausedTasks.respond(res, 200, { tasks });
     return true;

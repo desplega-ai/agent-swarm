@@ -8,6 +8,7 @@ import {
   isReservedConfigKey,
   reservedKeyError,
   validateConfigValue,
+  validateExportToEnv,
 } from "@/be/swarm-config-guard";
 import { scheduleIntegrationsReload } from "@/http/core";
 import { can } from "@/rbac";
@@ -26,6 +27,7 @@ const configEntryShape = z.looseObject({
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
   encrypted: z.boolean().optional(),
+  exportToEnv: z.boolean().optional(),
 });
 
 export const registerSetConfigTool = (server: McpServer) => {
@@ -34,7 +36,7 @@ export const registerSetConfigTool = (server: McpServer) => {
     {
       title: "Set Config",
       description:
-        "Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use scope='global' for server-wide settings, 'agent' for agent-specific, or 'repo' for repo-specific. Set isSecret=true to mask the value in API responses.",
+        "Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use scope='global' for server-wide settings, 'agent' for agent-specific, or 'repo' for repo-specific. Set isSecret=true to mask the value in API responses. Set exportToEnv=false to keep the row out of agent process env (agents then reach it through a connection or script credential binding).",
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({
@@ -63,13 +65,22 @@ export const registerSetConfigTool = (server: McpServer) => {
           .string()
           .optional()
           .describe("Optional human-readable description of this config entry."),
+        exportToEnv: z
+          .boolean()
+          .optional()
+          .describe(
+            "Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
         config: configEntryShape.optional(),
       }),
     },
-    async ({ scope, scopeId, key, value, isSecret, envPath, description }, requestInfo) => {
+    async (
+      { scope, scopeId, key, value, isSecret, envPath, description, exportToEnv },
+      requestInfo,
+    ) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
@@ -114,7 +125,8 @@ export const registerSetConfigTool = (server: McpServer) => {
           });
         }
 
-        const validationError = validateConfigValue(key, value);
+        const validationError =
+          validateConfigValue(key, value) ?? validateExportToEnv(key, exportToEnv);
         if (validationError) {
           return toolErr(validationError, { data: { yourAgentId: requestInfo.agentId } });
         }
@@ -127,6 +139,7 @@ export const registerSetConfigTool = (server: McpServer) => {
           isSecret,
           envPath,
           description,
+          exportToEnv,
         });
 
         if (scope === "global") {

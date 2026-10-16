@@ -28,7 +28,8 @@ export type AgentTaskSource =
   | "workflow"
   | "linear"
   | "jira"
-  | "comb";
+  | "comb"
+  | "chat";
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
@@ -389,7 +390,10 @@ export interface AgentTask {
   modelSource?: ModelSource;
   /** The `latest:` alias `resolvedModel` came from, when any. */
   modelAlias?: string;
+  /** Effort the task asked for; usually unset, the agent's setting applies. */
   effort?: ReasoningEffortLevel;
+  /** Effort the session ran at (task effort, else the agent's setting). */
+  resolvedEffort?: ReasoningEffortLevel;
   scheduleId?: string;
   parentTaskId?: string;
   dir?: string;
@@ -601,6 +605,42 @@ export interface ConnectorCodeResponse {
 export interface McpUserConfigResponse {
   mcpBaseUrl: string;
   mcpUserUrl: string;
+}
+
+/** `GET /api/integrations/chat/status`. Never carries secret values. */
+export interface ChatSdkAdapterStatus {
+  name: "telegram" | "slack" | "discord" | "teams";
+  configured: boolean;
+  /** False when the entry carries `enabled: false`: configured and kept, not started. */
+  enabled: boolean;
+  /** `incomplete`: saved with a missing field or an unresolvable `$config`; `error` names it. */
+  health: "ok" | "error" | "disabled" | "incomplete";
+  error?: string;
+  webhookUrl: string;
+  mode?: string;
+  gateway?: { state: "running" | "backoff" | "stopped"; since: string; restarts: number };
+  /** Discord only, while the Gateway runs: the servers the bot was invited to. */
+  guilds?: { count: number; names: string[] };
+}
+
+export interface ChatSdkStatusResponse {
+  enabled: boolean;
+  slackClash: boolean;
+  /** Config problem that keeps every adapter from starting. */
+  error?: string;
+  adapters: ChatSdkAdapterStatus[];
+}
+
+/** `POST /api/integrations/chat/telegram/register-webhook`. */
+export interface ChatSdkTelegramWebhookResponse {
+  webhookUrl: string;
+  webhookInfo: {
+    url: string;
+    pending_update_count?: number;
+    last_error_date?: number;
+    last_error_message?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface CreateUserInput {
@@ -1028,29 +1068,6 @@ export interface TaskWithLogs extends AgentTask {
 
 export type ServiceStatus = "starting" | "healthy" | "unhealthy" | "stopped";
 
-export interface Service {
-  id: string;
-  agentId: string;
-  name: string;
-  port: number;
-  description?: string;
-  url?: string;
-  healthCheckPath: string;
-  status: ServiceStatus;
-  script: string;
-  cwd?: string;
-  interpreter?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-  lastUpdatedAt: string;
-}
-
-export interface ServicesResponse {
-  services: Service[];
-}
-
 /**
  * Phase 2 + Phase 12b: tells the UI where `totalCostUsd` came from so we can
  * render a badge. See `SessionCostSourceSchema` in `src/types.ts`.
@@ -1328,6 +1345,8 @@ export interface SwarmConfig {
   // True when the row's value is stored as ciphertext server-side. Plaintext
   // rows return encrypted=false. Mirrors SwarmConfigSchema in src/types.ts.
   encrypted: boolean;
+  // Whether workers export this row into agent process env.
+  exportToEnv: boolean;
 }
 
 export interface SwarmConfigsResponse {

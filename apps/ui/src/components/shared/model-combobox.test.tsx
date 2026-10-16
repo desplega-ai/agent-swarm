@@ -11,7 +11,9 @@ mock.module("@/lib/cost-format", () => require("../../lib/cost-format"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { ModelCombobox, formatCacheRates } = await import("./model-combobox");
-const { findModelOption, modelGroupsForSchedule } = await import("../../lib/agent-runtime-models");
+const { findModelOption, modelGroupsForHarness, modelGroupsForSchedule } = await import(
+  "../../lib/agent-runtime-models"
+);
 
 const groups = modelGroupsForSchedule(null);
 
@@ -45,6 +47,26 @@ describe("ModelCombobox", () => {
 
   test("a legacy CLI alias renders as its catalog entry", () => {
     expect(render("opus")).toContain("Opus (");
+  });
+
+  test("a NaN route shows its model name and the NaN glyph, not a vendor logo", () => {
+    const catalog = {
+      nan: { id: "nan", models: { "glm5.3-flash": { id: "glm5.3-flash", name: "GLM 5.3 Flash" } } },
+    };
+    const piGroups = modelGroupsForHarness("pi", [], {}, null, catalog);
+    const html = renderToStaticMarkup(
+      <ModelCombobox
+        value="nan/glm5.3-flash"
+        onChange={() => {}}
+        groups={piGroups}
+        selected={findModelOption("nan/glm5.3-flash", piGroups)}
+        placeholder="Default"
+      />,
+    );
+    expect(html).toContain("GLM 5.3 Flash");
+    // The struck-through number sign's diagonal bar.
+    expect(html).toContain('transform="rotate(45 12 12)"');
+    expect(html).not.toContain("mask-image");
   });
 });
 

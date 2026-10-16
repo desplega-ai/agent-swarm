@@ -1,10 +1,9 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { ReasoningEffortLevel } from "@/api/types";
-import { ModelLabel } from "@/components/shared/model-logo";
+import { ModelEffortLabel } from "@/components/shared/model-effort-label";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { statusLabel } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
-import { TaskEffortMark } from "./task-effort-mark";
 
 /**
  * Height of the compact bar, in rem. The page publishes it as
@@ -104,8 +103,7 @@ export function TaskStickyBar({
         </button>
         {model ? (
           <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <ModelLabel model={model} />
-            <TaskEffortMark effort={effort} />
+            <ModelEffortLabel model={model} effort={effort} effortClassName="" />
           </span>
         ) : null}
         {action ? <div className="flex shrink-0 items-center gap-1.5">{action}</div> : null}

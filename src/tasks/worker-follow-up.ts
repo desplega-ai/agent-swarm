@@ -32,6 +32,7 @@ import {
 } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+import { taskModelPin } from "./model-pin";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
@@ -165,23 +166,8 @@ export function getNextResumeGeneration(parent: Pick<AgentTask, "tags">): number
  * reboot retry) must carry: the parent's portable `modelTier`, plus its
  * concrete `model` only when that `model` was a task-level pin.
  *
- * `agent_tasks.model` is not always the creator's pin: the worker reports the
- * model it actually ran on `POST /api/tasks/{id}/session`, which overwrites the
- * column. So the pin is read from the claim-time record instead:
- *   - `modelSource = "model"`: the task's own `model` won at claim. A `latest:`
- *     alias survives only in `modelAlias` (the session report replaced `model`
- *     with the concrete id), so the alias is what travels.
- *   - `modelSource = "fallback:cli-unsupported:model"`: the task's own
- *     `latest:` alias won, then the claiming CLI rejected what it resolved to.
- *     The alias in `modelAlias` travels, with or without a `modelTier`.
- *   - `modelSource = "fallback:cli-unsupported"` (a tier layer's alias fell
- *     back) is not a pin. Rows written before the `:model` variant existed are
- *     ambiguous; one with a `modelAlias` and no `modelTier` can only have come
- *     from a `model` alias, so its alias travels. With a `modelTier` it stays
- *     ambiguous and only the tier travels.
- *   - no claim record and no session: `model` is still the creator's value.
- * Anything else (a tier layer won, or `model` is just the session report) is
- * not a pin and is left off, so the resume resolves on its claiming worker.
+ * The pin rules live in `taskModelPin` (`./model-pin`); anything that is not
+ * a pin is left off, so the resume resolves on its claiming worker.
  *
  * `resolvedModel`, `modelSource` and `modelAlias` themselves are NOT copied:
  * claim time writes all three together for the task being claimed, and the
@@ -196,20 +182,7 @@ export function inheritedModelSelection(
     "model" | "modelTier" | "modelSource" | "modelAlias" | "resolvedModel" | "claudeSessionId"
   >,
 ): Pick<CreateTaskOptions, "model" | "modelTier"> {
-  let model: string | undefined;
-  if (parent.modelSource === "model") {
-    model = parent.modelAlias ?? parent.model;
-  } else if (parent.modelSource === "fallback:cli-unsupported:model" && parent.modelAlias) {
-    model = parent.modelAlias;
-  } else if (
-    parent.modelSource === "fallback:cli-unsupported" &&
-    parent.modelAlias &&
-    !parent.modelTier
-  ) {
-    model = parent.modelAlias;
-  } else if (!parent.modelSource && !parent.resolvedModel && !parent.claudeSessionId) {
-    model = parent.model;
-  }
+  const model = taskModelPin(parent);
   return {
     ...(model ? { model } : {}),
     ...(parent.modelTier ? { modelTier: parent.modelTier } : {}),

@@ -306,6 +306,23 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
       try {
         const committed = await getDbClient().transaction(async () => {
+          // The transaction's write lock makes admission atomic with the INSERT.
+          if (watchedTaskIds.length) {
+            const existing = await getDbClient().get<{ scheduleId: string; parentTaskId: string }>(
+              `SELECT w.scheduleId, s.parentTaskId FROM deferred_task_waits w
+               JOIN scheduled_tasks s ON s.id = w.scheduleId
+               JOIN deferred_task_wait_members m ON m.scheduleId = w.scheduleId
+               WHERE w.status = 'pending' AND s.enabled = 1 AND s.targetAgentId = ?
+                 AND m.taskId IN (${watchedTaskIds.map(() => "?").join(", ")})
+               LIMIT 1`,
+              [agent.id, ...watchedTaskIds],
+            );
+            if (existing) {
+              throw new DeferAbortedError(
+                `Pending watcher ${existing.scheduleId} (task ${existing.parentTaskId}) already watches these tasks for this agent.`,
+              );
+            }
+          }
           const watchedAgentNames: string[] = [];
           for (const watchedId of watchedTaskIds) {
             if (watchedId === taskId)

@@ -32,9 +32,15 @@ import {
 } from "@json-render/react";
 import { AlertCircle } from "lucide-react";
 import type React from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCallout } from "@/components/ui/alert-callout";
-import { createSwarmActionHandlers, swarmCatalog, swarmComponents } from "@/lib/json-render";
+import {
+  type ActionHandlerMap,
+  createSwarmActionHandlers,
+  createToastActionHandler,
+  swarmCatalog,
+  swarmComponents,
+} from "@/lib/json-render";
 
 // Re-exported for backwards compatibility with existing importers of the
 // action schemas / catalog (they now live in `@/lib/json-render`).
@@ -75,6 +81,8 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
     handlers: Record<string, (params: Record<string, unknown>) => Promise<void>>;
   };
   type CompiledErr = { kind: "err"; parseError: string };
+  // `ui.toast`'s Undo runs its chain through the current handler map.
+  const handlersRef = useRef<ActionHandlerMap | null>(null);
   const compiled = useMemo<CompiledOk | CompiledErr>(() => {
     let spec: unknown;
     try {
@@ -93,6 +101,10 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
       onResponse: (result) => updateState({ lastResponse: result }),
       onError: (actionError) => updateState({ actionError }),
     });
+    const toastActions = createToastActionHandler({
+      getHandlers: () => handlersRef.current,
+      onError: (actionError) => updateState({ actionError }),
+    });
     const unsupported = (action: string) => async () => {
       updateState({
         actionError: `${action} is only available inside a swarm app (/apps/:id).`,
@@ -102,6 +114,7 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
       components: swarmComponents,
       actions: {
         ...swarmActions,
+        ...toastActions,
         "app.mutate": unsupported("app.mutate"),
         "app.refresh": unsupported("app.refresh"),
         "app.action": unsupported("app.action"),
@@ -119,6 +132,9 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
     );
     return { kind: "ok", spec, registry, handlers: handlerMap };
   }, [body, fetchImpl]);
+  useEffect(() => {
+    handlersRef.current = compiled.kind === "ok" ? compiled.handlers : null;
+  }, [compiled]);
 
   if (compiled.kind === "err") {
     return (

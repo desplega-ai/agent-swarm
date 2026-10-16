@@ -56,8 +56,8 @@ afterAll(async () => {
 });
 
 describe("seed-scripts catalog", () => {
-  test("manifest holds 27 unique, well-described scripts", () => {
-    expect(SEED_SCRIPTS.length).toBe(27);
+  test("manifest holds 28 unique, well-described scripts", () => {
+    expect(SEED_SCRIPTS.length).toBe(28);
     const names = SEED_SCRIPTS.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
     for (const s of SEED_SCRIPTS) {
@@ -1102,6 +1102,19 @@ describe("script typecheck resolves zod in compiled-binary mode", () => {
     }
     expect(failures).toEqual([]);
   }, 60_000); // typechecks every catalog script; ~10 s on a loaded 4-core CI runner under --parallel=4
+
+  test("Mini functional schemas typecheck against staged declarations only", async () => {
+    const base = await makeTmpDir();
+    await stageSlimZod(base);
+    process.env[ENV_KEY] = base;
+
+    const result = await typecheckScript(`
+      import * as z from "zod/mini";
+      export const argsSchema = z.object({ name: z.string(), count: z.optional(z.int()) });
+      export default async (args: z.infer<typeof argsSchema>) => args.name.repeat(args.count ?? 1);
+    `);
+    expect(result).toEqual({ ok: true });
+  });
 
   test("typecheck fails when zod is not staged — the production gap, now guarded", async () => {
     // An empty SCRIPT_TYPES_DIR simulates the compiled binary BEFORE this fix:

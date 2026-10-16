@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import { OPENAI_COMPATIBLE_PROVIDERS } from "@desplega/model-catalog";
 import {
   CREDENTIAL_POOL_VARS,
+  deriveProviderFromKeyType,
   getModelAwareCredentialVars,
   resolveCredentialPools,
   selectRandomCredential,
@@ -123,6 +125,35 @@ describe("resolveCredentialPools", () => {
     expect(["example-oauth1", "example-oauth2"]).toContain(env.CLAUDE_CODE_OAUTH_TOKEN!);
     expect(["example-apikey1", "example-apikey2"]).toContain(env.ANTHROPIC_API_KEY!);
   });
+
+  it("pools NAN_API_KEY alone for an opencode nan/* model", async () => {
+    const env: Record<string, string | undefined> = {
+      NAN_API_KEY: "example-nan-a,example-nan-b,example-nan-c",
+      OPENROUTER_API_KEY: "example-or-a,example-or-b",
+    };
+    const selections = await resolveCredentialPools(env, {
+      provider: "opencode",
+      model: "nan/glm5.3-flash",
+    });
+    expect(["example-nan-a", "example-nan-b", "example-nan-c"]).toContain(env.NAN_API_KEY!);
+    expect(selections).toHaveLength(1);
+    expect(selections[0]?.keyType).toBe("NAN_API_KEY");
+    expect(selections[0]?.total).toBe(3);
+    // OpenRouter is not relevant to a nan/* model and stays untouched.
+    expect(env.OPENROUTER_API_KEY).toBe("example-or-a,example-or-b");
+  });
+
+  it("pools HELMCODE_API_KEY alone for a pi helmcode/* model", async () => {
+    const env: Record<string, string | undefined> = {
+      HELMCODE_API_KEY: "example-helm-a,example-helm-b",
+    };
+    const selections = await resolveCredentialPools(env, {
+      provider: "pi",
+      model: "helmcode/glm5.3",
+    });
+    expect(["example-helm-a", "example-helm-b"]).toContain(env.HELMCODE_API_KEY!);
+    expect(selections.map((s) => s.keyType)).toEqual(["HELMCODE_API_KEY"]);
+  });
 });
 
 describe("validateClaudeCredentials", () => {
@@ -198,6 +229,23 @@ describe("CREDENTIAL_POOL_VARS", () => {
   it("contains expected env var names", () => {
     expect(CREDENTIAL_POOL_VARS).toContain("CLAUDE_CODE_OAUTH_TOKEN");
     expect(CREDENTIAL_POOL_VARS).toContain("ANTHROPIC_API_KEY");
+    expect(CREDENTIAL_POOL_VARS).toContain("NAN_API_KEY");
+    expect(CREDENTIAL_POOL_VARS).toContain("HELMCODE_API_KEY");
+  });
+
+  it("pools only the canonical NaN var; the alias is normalized by the runner", () => {
+    expect(OPENAI_COMPATIBLE_PROVIDERS.nan.aliasEnvVars).toEqual(["HELMCODE_API_NAN"]);
+    expect(CREDENTIAL_POOL_VARS as readonly string[]).not.toContain("HELMCODE_API_NAN");
+  });
+});
+
+describe("deriveProviderFromKeyType", () => {
+  it("tags NaN and Helmcode keys as pi, like OpenRouter", () => {
+    for (const keyType of ["NAN_API_KEY", "HELMCODE_API_NAN", "HELMCODE_API_KEY"]) {
+      expect(deriveProviderFromKeyType(keyType)).toBe("pi");
+    }
+    expect(deriveProviderFromKeyType("OPENROUTER_API_KEY")).toBe("pi");
+    expect(deriveProviderFromKeyType("SOMETHING_ELSE")).toBe("claude");
   });
 });
 
@@ -265,5 +313,49 @@ describe("getModelAwareCredentialVars", () => {
   it("handles Anthropic-prefixed models via OpenRouter", () => {
     const vars = getModelAwareCredentialVars("opencode", "anthropic/claude-sonnet-4-20250514");
     expect(vars).not.toContain("OPENAI_API_KEY");
+  });
+
+  it("routes nan/* and helmcode/* to their own key on pi and opencode", () => {
+    for (const provider of ["pi", "opencode"]) {
+      expect(getModelAwareCredentialVars(provider, "nan/glm5.3-flash")).toEqual(["NAN_API_KEY"]);
+      expect(getModelAwareCredentialVars(provider, "helmcode/glm5.3")).toEqual([
+        "HELMCODE_API_KEY",
+      ]);
+      // Only the exact prefix routes: a look-alike is any other provider/model.
+      const other = getModelAwareCredentialVars(provider, "other/x");
+      expect(getModelAwareCredentialVars(provider, "helmcodex/x")).toEqual(other);
+      expect(getModelAwareCredentialVars(provider, "nanx/y")).toEqual(other);
+      expect(other).not.toContain("NAN_API_KEY");
+      expect(other).not.toContain("HELMCODE_API_KEY");
+    }
+  });
+
+  it("keeps OpenRouter and bare-id routing byte-identical", () => {
+    for (const provider of ["pi", "opencode"]) {
+      expect(
+        getModelAwareCredentialVars(provider, "openrouter/deepseek/deepseek-v4-flash"),
+      ).toEqual(["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]);
+      expect(getModelAwareCredentialVars(provider, "openai/gpt-5")).toEqual([
+        "OPENROUTER_API_KEY",
+        "ANTHROPIC_API_KEY",
+      ]);
+      expect(getModelAwareCredentialVars(provider, "gpt-4o")).toEqual([
+        "OPENROUTER_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+      ]);
+      // A NaN model routed through OpenRouter is still an OpenRouter model.
+      expect(getModelAwareCredentialVars(provider, "openrouter/nan/glm5.3")).toEqual([
+        "OPENROUTER_API_KEY",
+        "ANTHROPIC_API_KEY",
+      ]);
+    }
+  });
+
+  it("does not apply the nan/helmcode prefix routing to other harnesses", () => {
+    expect(getModelAwareCredentialVars("claude", "nan/glm5.3")).toEqual([
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "ANTHROPIC_API_KEY",
+    ]);
   });
 });

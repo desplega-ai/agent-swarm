@@ -1,3 +1,4 @@
+import { ModelEffortLabel } from "@/components/shared/model-effort-label";
 import { ReasoningEffortIcon } from "@/components/shared/reasoning-effort-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
@@ -18,24 +19,17 @@ export function AgentModelCell({ display, liveCatalog }: AgentModelCellProps) {
 
   const configured = getAgentModelPresentation(display.configured, liveCatalog);
   const lastUsed = getAgentModelPresentation(display.lastUsed, liveCatalog);
-  // "off" is a real, explicit setting but not visually distinct enough to
-  // warrant a badge next to the model name — only show one for low/medium/high/xhigh.
-  const showBadge = display.reasoningEffort && display.reasoningEffort !== "off";
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span className="inline-flex max-w-full min-w-0 cursor-default items-center gap-1.5 text-xs leading-none">
-          <ProviderIcon provider={primary.providerId} className="text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-            {primary.label}
-          </span>
-          {showBadge ? (
-            <ReasoningEffortIcon
-              level={display.reasoningEffort}
-              className="h-3 w-3 shrink-0 text-muted-foreground"
-            />
-          ) : null}
+          <ModelEffortLabel
+            model={primary.raw}
+            effort={display.reasoningEffort}
+            catalog={liveCatalog}
+            className="flex-1 font-medium text-foreground"
+          />
           {display.diverged ? (
             <span className="shrink-0 text-[11px] font-medium text-status-warning-strong">
               next task

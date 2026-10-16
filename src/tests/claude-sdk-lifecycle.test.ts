@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeAdapter, getTaskFilePath } from "../providers/claude-adapter";
+import { userClaudeMdExclude } from "../providers/claude-flag-settings";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
@@ -148,6 +149,152 @@ describe("Claude SDK production adapter lifecycle", () => {
             argument === "--system-prompt" && fixtureState.argv[index + 1] === "",
         ),
       ).toBeFalse();
+      // The SDK forwards `settings` as `--settings`: Claude skips both agent CLAUDE.md copies.
+      const settingsAt = fixtureState.argv.indexOf("--settings");
+      expect(settingsAt).toBeGreaterThan(-1);
+      expect(JSON.parse(fixtureState.argv[settingsAt + 1] ?? "")).toMatchObject({
+        claudeMdExcludes: ["/workspace/CLAUDE.md", userClaudeMdExclude()],
+      });
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "merges caller --settings from additionalArgs and CLAUDE_BINARY into the SDK's one flag",
+    async () => {
+      const directory = await temporaryDirectory();
+      const stateFile = join(directory, "settings-state.json");
+      const settingsFile = join(directory, "caller-settings.json");
+      await Bun.write(
+        settingsFile,
+        JSON.stringify({ model: "from-file", claudeMdExcludes: ["/repo/CLAUDE.md"] }),
+      );
+      const sessionConfig = config(directory, "queue", stateFile);
+      sessionConfig.env = {
+        ...sessionConfig.env,
+        CLAUDE_BINARY: `${process.execPath} ${fixturePath} --settings ${settingsFile}`,
+      };
+      sessionConfig.additionalArgs = [
+        `--settings=${JSON.stringify({ env: { X: "kept" }, claudeMdExcludes: ["/other/CLAUDE.md"] })}`,
+      ];
+      const session = await new ClaudeAdapter(async () => {}).createSession(sessionConfig);
+      // Queue mode records argv once it has the initial plus two queued messages.
+      await session.deliverSteering?.({ mode: "queue", text: "queued-message-a" });
+      await session.deliverSteering?.({ mode: "queue", text: "queued-message-b" });
+      await session.waitForCompletion();
+
+      await waitForFile(stateFile);
+      const { argv } = JSON.parse(await Bun.file(stateFile).text()) as { argv: string[] };
+      const settingsFlags = argv.filter(
+        (arg) => arg === "--settings" || arg.startsWith("--settings="),
+      );
+      expect(settingsFlags).toEqual(["--settings"]);
+      expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "")).toEqual({
+        model: "from-file",
+        env: { X: "kept" },
+        claudeMdExcludes: [
+          "/repo/CLAUDE.md",
+          "/other/CLAUDE.md",
+          "/workspace/CLAUDE.md",
+          userClaudeMdExclude(),
+        ],
+      });
+      expect(argv).not.toContain(settingsFile);
+      // The version probe carries the same merged settings value.
+      const spawns = (await Bun.file(`${stateFile}.spawns`).text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      const probe = spawns.find((args) => args.at(-1) === "--version") ?? [];
+      expect(probe).toEqual([
+        "--settings",
+        argv[argv.indexOf("--settings") + 1] ?? "",
+        "--version",
+      ]);
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "invalid caller --settings refuses to start: no Claude child spawns",
+    async () => {
+      const directory = await temporaryDirectory();
+      // Built at runtime so no single source literal looks like a credential.
+      const sentinel = ["settings", "sentinel", crypto.randomUUID()].join("-");
+      await Bun.write(join(directory, "broken.json"), "{nope");
+      await Bun.write(join(directory, "array.json"), "[1]");
+      const cases: [string[], string][] = [
+        [["--settings", "missing.json"], "cannot be read (ENOENT)"],
+        [["--settings", "broken.json"], "is not valid JSON"],
+        [["--settings", `{"env":{"TOKEN":"${sentinel}"`], "is not valid JSON"],
+        [["--settings=array.json"], "is not a JSON object"],
+        [["--settings", "--max-turns", "3"], "--settings has no value"],
+        [["--settings", '--settings={"model":"x"}'], "--settings has no value"],
+      ];
+      for (const [index, [additionalArgs, message]] of cases.entries()) {
+        const stateFile = join(directory, `invalid-${index}.json`);
+        const sessionConfig = { ...config(directory, "cancel", stateFile), additionalArgs };
+        let summaries = 0;
+        const error = await new ClaudeAdapter(async () => {
+          summaries++;
+        })
+          .createSession(sessionConfig)
+          .then(
+            () => undefined,
+            (err: unknown) => err,
+          );
+
+        expect((error as Error).name).toBe("ClaudeSettingsConfigError");
+        expect((error as Error).message).toContain(message);
+        expect((error as Error).message).not.toContain(sentinel);
+        // The fixture records every start, the `--version` probe included.
+        expect(await Bun.file(`${stateFile}.spawns`).exists()).toBeFalse();
+        expect(summaries).toBe(0);
+        expect(
+          await Bun.file(getTaskFilePath(`${process.pid}-${sessionConfig.taskId}`)).exists(),
+        ).toBeFalse();
+      }
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "invalid CLAUDE_BINARY prefix --settings never reaches logs, errors, or a spawn",
+    async () => {
+      const directory = await temporaryDirectory();
+      const sentinel = ["prefix", "sentinel", crypto.randomUUID()].join("-");
+      const inline = `{"env":{"TOKEN":"${sentinel}"`;
+      const logged: string[] = [];
+      const capture = (...args: unknown[]) => {
+        logged.push(args.map(String).join(" "));
+      };
+      const logSpy = spyOn(console, "log").mockImplementation(capture);
+      const warnSpy = spyOn(console, "warn").mockImplementation(capture);
+      const errorSpy = spyOn(console, "error").mockImplementation(capture);
+      try {
+        for (const [index, flag] of [`--settings=${inline}`, `--settings ${inline}`].entries()) {
+          const stateFile = join(directory, `prefix-${index}.json`);
+          const sessionConfig = config(directory, "cancel", stateFile);
+          sessionConfig.env = {
+            ...sessionConfig.env,
+            CLAUDE_BINARY: `${process.execPath} ${fixturePath} ${flag}`,
+          };
+          const error = await new ClaudeAdapter(async () => {}).createSession(sessionConfig).then(
+            () => undefined,
+            (err: unknown) => err,
+          );
+
+          expect((error as Error).name).toBe("ClaudeSettingsConfigError");
+          expect((error as Error).message).toContain("inline JSON is not valid JSON");
+          expect((error as Error).message).not.toContain(sentinel);
+          expect(await Bun.file(`${stateFile}.spawns`).exists()).toBeFalse();
+        }
+      } finally {
+        logSpy.mockRestore();
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+      }
+      expect(logged.filter((line) => line.includes(sentinel))).toEqual([]);
     },
     { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
   );

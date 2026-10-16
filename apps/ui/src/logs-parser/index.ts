@@ -94,6 +94,7 @@ export function itemsToParsedMessages(items: NormalizedItem[]): ParsedMessage[] 
       content: [block],
       iteration: item.iteration,
       timestamp: item.createdAt,
+      ...(item.parentToolUseId ? { parentToolUseId: item.parentToolUseId } : {}),
     });
   }
 

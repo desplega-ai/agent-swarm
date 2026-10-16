@@ -235,10 +235,10 @@ export interface SwarmSdk {
   // --- slack ---
   slack_read(args?: { inboxMessageId?: string; taskId?: string; channelId?: string; threadTs?: string; limit?: number; includeFiles?: boolean }): Promise<unknown>;
   slack_listChannels(args?: { types?: Array<"public" | "private" | "dm" | "mpim">; limit?: number }): Promise<unknown>;
+  // --- chat sdk ---
+  chat_readThread(args: { threadId: string; limit?: number }): Promise<unknown>;
   // --- messaging ---
   message_read(args?: { channel?: string; limit?: number; since?: string; unreadOnly?: boolean; mentionsOnly?: boolean; markAsRead?: boolean }): Promise<unknown>;
-  // --- services ---
-  service_list(args?: { agentId?: string; name?: string; status?: "starting" | "healthy" | "unhealthy" | "stopped"; includeOwn?: boolean }): Promise<unknown>;
   // --- context / profiles ---
   context_history(args?: { agentId?: string; field?: "soulMd" | "identityMd" | "toolsMd" | "claudeMd" | "setupScript"; limit?: number }): Promise<unknown>;
   context_diff(args: { versionId: string; compareToVersionId?: string }): Promise<unknown>;
@@ -281,7 +281,7 @@ export interface SwarmSdk {
   task_action(args: Record<string, unknown>): Promise<unknown>;
 
   // --- write: config ---
-  config_set(args: { key: string; value: unknown; scope?: "global" | "agent" | "repo"; scopeId?: string; isSecret?: boolean }): Promise<unknown>;
+  config_set(args: { key: string; value: unknown; scope?: "global" | "agent" | "repo"; scopeId?: string; isSecret?: boolean; exportToEnv?: boolean }): Promise<unknown>;
   config_delete(args: { id: string }): Promise<unknown>;
 
   // --- write: model catalog ---
@@ -311,16 +311,18 @@ export interface SwarmSdk {
   slack_delete(args: { channelId: string; messageTs: string }): Promise<unknown>;
   slack_update(args: { channelId: string; messageTs: string; message: string }): Promise<unknown>;
 
+  // --- write: chat sdk ---
+  chat_reply(args: { text: string }): Promise<unknown>;
+  chat_post(args: { adapter: "telegram" | "slack" | "discord" | "teams"; threadId?: string; channelId?: string; text: string }): Promise<unknown>;
+  chat_openDm(args: { adapter: "telegram" | "slack" | "discord" | "teams"; userId: string }): Promise<unknown>;
+  chat_registerChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams"; channelId: string; agentId?: string; workflowId?: string; name?: string }): Promise<unknown>;
+  chat_unregisterChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams"; channelId: string }): Promise<unknown>;
+
   // --- write: messaging (internal) ---
   message_post(args: { channel?: string; content: string; to?: string }): Promise<unknown>;
 
   // --- write: profiles ---
   profile_update(args: Record<string, unknown>): Promise<unknown>;
-
-  // --- write: services ---
-  service_register(args: Record<string, unknown>): Promise<unknown>;
-  service_unregister(args: { name: string }): Promise<unknown>;
-  service_updateStatus(args: { name: string; status: "starting" | "healthy" | "unhealthy" | "stopped" }): Promise<unknown>;
 
   // --- write: schedules ---
   schedule_create(args: Record<string, unknown>): Promise<unknown>;
@@ -437,6 +439,16 @@ export interface SwarmSdk {
   // --- human input ---
   request_humanInput(args: Record<string, unknown>): Promise<unknown>;
   approval_cancel(args: { requestId: string; reason?: string }): Promise<unknown>;
+
+  // --- decisions ---
+  systemOne_decide(args: {
+    provider?: "typesafe" | "openrouter" | "laya" | "openai" | "cloudflare";
+    model?: string;
+    state: string | string[] | Record<string, unknown>;
+    questions: Record<string, Record<string, unknown>>;
+    timeoutMs?: number;
+    maxRetries?: number;
+  }): Promise<unknown>;
 }
 
 export interface ScriptStdlib {

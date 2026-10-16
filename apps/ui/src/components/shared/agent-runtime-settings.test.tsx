@@ -19,6 +19,8 @@ afterAll(async () => {
 
 /** Every `updateRuntime.mutate` payload, oldest first. */
 const saves: Array<Record<string, unknown>> = [];
+/** Every `setHarnessProvider.mutate` payload (the Devin path), oldest first. */
+const harnessSwitches: Array<Record<string, unknown>> = [];
 // Mocks of shared modules keep every export of the real module: in one `bun test`
 // process the first file to register a specifier fixes its export names, and a
 // later file importing another name fails to link.
@@ -30,6 +32,12 @@ mock.module("@/api/hooks/use-agents", () => ({
   useUpdateAgentRuntime: () => ({
     mutate: (input: Record<string, unknown>) => {
       saves.push(input);
+    },
+    isPending: false,
+  }),
+  useSetAgentHarnessProvider: () => ({
+    mutate: (input: Record<string, unknown>) => {
+      harnessSwitches.push(input);
     },
     isPending: false,
   }),
@@ -68,6 +76,7 @@ mock.module("@/api/hooks/use-models-catalog", () => ({
 mock.module("@/api/types", () => require("../../api/types"));
 mock.module("@/components/shared/harness-icon", () => require("./harness-icon"));
 mock.module("@/components/shared/model-combobox", () => require("./model-combobox"));
+mock.module("@/components/shared/model-effort-label", () => require("./model-effort-label"));
 mock.module("@/components/shared/provider-icon", () => require("./provider-icon"));
 mock.module("@/components/shared/reasoning-effort-icon", () => require("./reasoning-effort-icon"));
 mock.module("@/components/ui/alert-callout", () => require("../ui/alert-callout"));
@@ -85,6 +94,7 @@ mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
 mock.module("@/lib/acp-target-catalog", () => require("../../lib/acp-target-catalog"));
 mock.module("@/lib/agent-runtime-models", () => require("../../lib/agent-runtime-models"));
 mock.module("@/lib/cost-format", () => require("../../lib/cost-format"));
+mock.module("@/lib/model-vendor", () => require("../../lib/model-vendor"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { TooltipProvider } = await import("../ui/tooltip");
@@ -135,17 +145,34 @@ describe("AgentRuntimeSettings", () => {
   });
 
   test("shows a cloud harness read-only instead of as an editable Claude runtime", () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "managed-model" }];
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "claude-managed" }} />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("Runtime editor unavailable");
+    expect(html).toContain("managed-model");
+    expect(html).not.toContain("Save");
+  });
+
+  test("edits a Devin agent's harness without model or effort controls", () => {
     resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "devin-model" }];
+    envPresence = { DEVIN_API_KEY: true, DEVIN_ORG_ID: false };
     const html = renderToStaticMarkup(
       <TooltipProvider>
         <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "devin" }} />
       </TooltipProvider>,
     );
 
-    expect(html).toContain("Runtime editor unavailable");
+    expect(html).not.toContain("Runtime editor unavailable");
     expect(html).toContain("Devin");
+    expect(html).toContain("Save");
     expect(html).toContain("devin-model");
-    expect(html).not.toContain("Save");
+    expect(html).toContain("Not set in swarm config: DEVIN_ORG_ID.");
+    expect(html).not.toContain("Reasoning effort");
+    expect(html).not.toContain("Allow unsupported/custom model");
   });
 
   test("shows the configured Bridge conflict for an effective SDK selection", () => {
@@ -480,6 +507,41 @@ async function pickModel(container: HTMLElement, current: string, next: string) 
 async function save(container: HTMLElement) {
   await click([...container.querySelectorAll("button")].find((b) => b.textContent === "Save"));
 }
+
+describe("AgentRuntimeSettings Devin harness", () => {
+  beforeEach(() => {
+    resolvedConfigs = [];
+    runtimeMetadata = cliRuntime;
+    runtimeError = false;
+    envPresence = ALL_KEYS;
+    saves.length = 0;
+    harnessSwitches.length = 0;
+    document.body.innerHTML = "";
+  });
+
+  test("switching a worker to Devin saves through the harness-provider path only", async () => {
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "Claude", "Devin");
+    expect(view.container.textContent).toContain("Devin runs in Cognition");
+    expect(view.container.textContent).not.toContain("Reasoning effort");
+    expect(view.container.textContent).not.toContain("requires a missing provider key");
+    expect(view.container.textContent).not.toContain("per 1M tokens");
+    await save(view.container);
+    expect(harnessSwitches).toEqual([{ id: "agent-1", harnessProvider: "devin" }]);
+    expect(saves).toEqual([]);
+    await view.unmount();
+  });
+
+  test("switching a Devin agent back to a local harness uses the runtime editor", async () => {
+    const view = await mountSettings("devin");
+    await pickSelect(view.container, "Devin", "Codex");
+    await save(view.container);
+    expect(harnessSwitches).toEqual([]);
+    expect(saves).toHaveLength(1);
+    expect(saves[0]?.harnessProvider).toBe("codex");
+    await view.unmount();
+  });
+});
 
 describe("AgentRuntimeSettings reasoning effort", () => {
   beforeEach(() => {

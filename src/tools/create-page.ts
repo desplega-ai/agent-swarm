@@ -21,7 +21,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
-import { createPage, getPage, getPageBySlug, getPageVersions, updatePage } from "@/be/db";
+import { createPage, getPage, getPageBySlug, updatePage } from "@/be/db";
+import { getPageEditCounter } from "@/be/db/page-versions";
 import { snapshotPage } from "@/pages/version";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AssetKeySchema, PageAuthModeSchema, PageContentTypeSchema } from "@/types";
@@ -43,17 +44,6 @@ function getApiBaseUrl(): string {
 
 function getAppBaseUrl(): string {
   return getAppUrl();
-}
-
-/**
- * Edit counter for a page — `MAX(page_versions.version) + 1`. Returned to
- * the agent as `version` so they have a monotonic "this page has been
- * edited N times" signal. Mirrors the value returned by
- * `PUT /api/pages/:id` (see src/http/pages.ts:pageEditCounter).
- */
-async function pageEditCounter(pageId: string): Promise<number> {
-  const versions = await getPageVersions(pageId);
-  return versions.length > 0 ? versions[0]!.version + 1 : 1;
 }
 
 export const registerCreatePageTool = (server: McpServer) => {
@@ -217,7 +207,7 @@ export const registerCreatePageTool = (server: McpServer) => {
 
       const apiUrl = `${getApiBaseUrl()}/p/${id}`;
       const appUrl = `${getAppBaseUrl()}/pages/${id}`;
-      const version = await pageEditCounter(id);
+      const version = await getPageEditCounter(id);
 
       return toolOk(`Page "${input.title}" saved (slug=${finalSlug}, version=${version}).`, {
         details: `API: ${apiUrl}\n  App: ${appUrl}`,

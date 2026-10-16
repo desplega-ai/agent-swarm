@@ -48,36 +48,47 @@ function errorMessage(data: unknown): string {
   return "unknown MCP proxy error";
 }
 
+/** POST to the swarm API as the script's agent; throws unless the reply is `{ ok: true }`. */
+export async function postSwarmJson(
+  config: SwarmConfig,
+  path: string,
+  body: unknown,
+  label: string,
+): Promise<Record<string, unknown>> {
+  const baseUrl = Redacted.value(config.mcpBaseUrl).replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new Error(`${label} failed with ${response.status}: ${errorMessage(data)}`);
+  }
+  if (!data || typeof data !== "object" || (data as { ok?: unknown }).ok !== true) {
+    throw new Error(`${label} failed: ${errorMessage(data)}`);
+  }
+  return data as Record<string, unknown>;
+}
+
 export function createMcpRegistryClient(
   descriptors: ScriptMcpConnectionDescriptor[] = [],
   config: SwarmConfig,
 ): ScriptMcpRegistryClient {
   const registry: ScriptMcpRegistryClient = {};
-  const baseUrl = Redacted.value(config.mcpBaseUrl).replace(/\/$/, "");
 
   for (const descriptor of descriptors) {
     const client: ScriptMcpRegistryClient[string] = {};
     for (const { tool, methodName: toolMethod } of methodNames(descriptor.tools)) {
       client[toolMethod] = async (rawArgs = {}) => {
-        const response = await fetch(
-          `${baseUrl}/api/script-connections/${encodeURIComponent(descriptor.connectionId)}/mcp-call`,
-          {
-            method: "POST",
-            headers: headers(config),
-            body: JSON.stringify({ tool: tool.name, arguments: rawArgs ?? {} }),
-          },
+        const data = await postSwarmJson(
+          config,
+          `/api/script-connections/${encodeURIComponent(descriptor.connectionId)}/mcp-call`,
+          { tool: tool.name, arguments: rawArgs ?? {} },
+          `ctx.mcp.${descriptor.slug}.${toolMethod}`,
         );
-        const text = await response.text();
-        const data = text ? JSON.parse(text) : {};
-        if (!response.ok) {
-          throw new Error(
-            `ctx.mcp.${descriptor.slug}.${toolMethod} failed with ${response.status}: ${errorMessage(data)}`,
-          );
-        }
-        if (!data || typeof data !== "object" || (data as { ok?: unknown }).ok !== true) {
-          throw new Error(`ctx.mcp.${descriptor.slug}.${toolMethod} failed: ${errorMessage(data)}`);
-        }
-        return (data as { result: unknown }).result;
+        return data.result;
       };
     }
     registry[descriptor.slug] = client;

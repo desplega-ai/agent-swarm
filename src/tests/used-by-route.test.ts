@@ -61,10 +61,14 @@ const configValue = async (key: string) =>
 
 describe("POST /api/used-by", () => {
   const originalFetch = globalThis.fetch;
+  const savedEnvWebsite = process.env.SWARM_ORG_WEBSITE;
+  const savedEnvName = process.env.SWARM_ORG_NAME;
   let proxied: Array<{ url: string; body: Record<string, unknown> }>;
   let proxyStatus: number;
 
   beforeAll(async () => {
+    delete process.env.SWARM_ORG_WEBSITE;
+    delete process.env.SWARM_ORG_NAME;
     await removeDbFiles();
     initDb(TEST_DB_PATH);
     await createAgent({ id: WORKER_ID, name: "Worker", isLead: false, status: "idle" });
@@ -75,6 +79,8 @@ describe("POST /api/used-by", () => {
   });
 
   afterAll(async () => {
+    if (savedEnvWebsite !== undefined) process.env.SWARM_ORG_WEBSITE = savedEnvWebsite;
+    if (savedEnvName !== undefined) process.env.SWARM_ORG_NAME = savedEnvName;
     globalThis.fetch = originalFetch;
     closeDb();
     await removeDbFiles();

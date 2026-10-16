@@ -42,18 +42,49 @@ export const ELEMENT_KEYS = new Set([
   "repeat",
   "watch",
 ]);
-const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs"]);
+const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs", "Chips"]);
 
 /**
  * Props that hold a plain action chain (an array of `{ action, params }`),
- * keyed by component type. Table's `rowActions[].actions` is nested one level
- * deeper and handled separately.
+ * keyed by component type. Chains nested one level deeper (an array prop
+ * whose items each carry a chain) are listed in `ITEM_ACTION_CHAINS`.
  */
 const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
+  Table: ["onRowClick"],
   Form: ["onSubmit"],
   Kanban: ["onMove", "onCardClick"],
   Calendar: ["onSelect"],
 };
+
+/**
+ * `[arrayProp, chainKey]` pairs: every item of `props[arrayProp]` carries an
+ * action chain under `chainKey` (Table `rowActions[].actions`, Table
+ * `columns[].onChange`, Drawer footer `actions[].actions`).
+ */
+const ITEM_ACTION_CHAINS: Record<string, readonly (readonly [string, string])[]> = {
+  Table: [
+    ["rowActions", "actions"],
+    ["columns", "onChange"],
+  ],
+  Drawer: [["actions", "actions"]],
+};
+
+/** Every `[path, chain]` nested in an element's item-chain props. */
+function itemActionChains(type: unknown, props: Record<string, unknown>, propsPath: string) {
+  const chains: { path: string; chain: unknown }[] = [];
+  for (const [arrayProp, chainKey] of ITEM_ACTION_CHAINS[String(type)] ?? []) {
+    const items = props[arrayProp];
+    if (!Array.isArray(items)) continue;
+    for (const [index, item] of items.entries()) {
+      if (!isPlainObject(item) || !Object.hasOwn(item, chainKey)) continue;
+      chains.push({
+        path: `${propsPath}.${arrayProp}.${index}.${chainKey}`,
+        chain: item[chainKey],
+      });
+    }
+  }
+  return chains;
+}
 
 /** Props naming a row field of the bound `data` query's model, per type. */
 const DATA_FIELD_PROPS: Record<string, readonly string[]> = {
@@ -373,14 +404,17 @@ function actionParams(
     }
     if (op === "update" || op === "delete") {
       const rowId = params.rowId;
+      // A `$state` binding is the Drawer-footer shape: the open record's id
+      // lives at `/route/params/<param>` (both chain runners resolve it).
       const validRowId =
         typeof rowId === "string" ||
+        isStateBinding(rowId) ||
         (isPlainObject(rowId) && typeof rowId.$row === "string" && Object.keys(rowId).length === 1);
       if (!validRowId) {
         result.issues.push(
           issue(
             appendPath(paramsPath, "rowId"),
-            "is required for update and delete and must be a string or $row binding",
+            "is required for update and delete and must be a string, $row, or $state binding",
           ),
         );
       }
@@ -415,6 +449,20 @@ function actionParams(
       result.issues.push(
         issue(appendPath(paramsPath, "name"), `unknown app action "${String(params.name)}"`),
       );
+    }
+  } else if (step.action === "ui.toast") {
+    // The Undo chain runs through the same handlers as any other chain, so
+    // its steps get the same per-action checks (models, queries, actions).
+    const undo = toastUndoChain(step);
+    if (Array.isArray(undo)) {
+      const undoResult = validateActionChain(
+        undo,
+        appendPath(appendPath(paramsPath, "undo"), "actions"),
+        definition,
+        catalog,
+      );
+      result.issues.push(...undoResult.issues);
+      result.stateRefs.push(...undoResult.stateRefs);
     }
   }
 
@@ -689,8 +737,20 @@ function visitActionChain(
   const normalized = allowSingle && isPlainObject(chain) ? [chain] : chain;
   if (!Array.isArray(normalized)) return;
   for (const [index, step] of normalized.entries()) {
-    if (isPlainObject(step)) visit(step, appendPath(path, index));
+    if (!isPlainObject(step)) continue;
+    const stepPath = appendPath(path, index);
+    visit(step, stepPath);
+    // `ui.toast` nests a whole chain (the Undo button) inside its params.
+    const undo = toastUndoChain(step);
+    if (undo !== undefined) visitActionChain(undo, `${stepPath}.params.undo.actions`, visit, false);
   }
+}
+
+/** The `undo.actions` chain of a `ui.toast` step, when it has one. */
+function toastUndoChain(step: Record<string, unknown>): unknown {
+  if (step.action !== "ui.toast" || !isPlainObject(step.params)) return undefined;
+  const undo = step.params.undo;
+  return isPlainObject(undo) && Object.hasOwn(undo, "actions") ? undo.actions : undefined;
 }
 
 function visitPageActionSteps(
@@ -712,16 +772,12 @@ function visitPageActionSteps(
     }
 
     if (!isPlainObject(rawElement.props)) continue;
-    if (rawElement.type === "Table" && Array.isArray(rawElement.props.rowActions)) {
-      for (const [index, rowAction] of rawElement.props.rowActions.entries()) {
-        if (!isPlainObject(rowAction)) continue;
-        visitActionChain(
-          rowAction.actions,
-          `${elementPath}.props.rowActions.${index}.actions`,
-          visit,
-          false,
-        );
-      }
+    for (const { path, chain } of itemActionChains(
+      rawElement.type,
+      rawElement.props,
+      `${elementPath}.props`,
+    )) {
+      visitActionChain(chain, path, visit, false);
     }
     for (const prop of PROP_ACTION_CHAINS[String(rawElement.type)] ?? []) {
       visitActionChain(rawElement.props[prop], `${elementPath}.props.${prop}`, visit, false);
@@ -1251,9 +1307,14 @@ export function validatePage(
 
     if (component) {
       const propsPath = appendPath(elementPath, "props");
+      const itemChainPaths = new Set(
+        isPlainObject(rawElement.props)
+          ? itemActionChains(type, rawElement.props, propsPath).map(({ path }) => path)
+          : [],
+      );
       const actionChainPath = (path: string): boolean =>
         (PROP_ACTION_CHAINS[String(type)] ?? []).some((prop) => path === `${propsPath}.${prop}`) ||
-        (type === "Table" && /^.+\.rowActions\.\d+\.actions$/.test(path));
+        itemChainPaths.has(path);
       const propsResult = validateSchema(
         Object.hasOwn(rawElement, "props") ? rawElement.props : {},
         component.props,
@@ -1334,6 +1395,15 @@ export function validatePage(
             queryModel.model,
             issues,
           );
+          for (const prop of ["onRowClick", "columns"] as const) {
+            collectRowFieldIssues(
+              rawElement.props[prop],
+              `${elementPath}.props.${prop}`,
+              queryModel.modelName,
+              queryModel.model,
+              issues,
+            );
+          }
         }
       } else if (type === "DetailList") {
         const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
@@ -1479,24 +1549,16 @@ export function validatePage(
       }
     }
 
-    if (
-      type === "Table" &&
-      isPlainObject(rawElement.props) &&
-      Array.isArray(rawElement.props.rowActions)
-    ) {
-      for (const [rowActionIndex, rowAction] of rawElement.props.rowActions.entries()) {
-        if (!isPlainObject(rowAction) || !Object.hasOwn(rowAction, "actions")) continue;
-        const chainResult = validateActionChain(
-          rowAction.actions,
-          `${elementPath}.props.rowActions.${rowActionIndex}.actions`,
-          definition,
-          catalog,
-        );
+    if (isPlainObject(rawElement.props)) {
+      for (const { path, chain } of itemActionChains(
+        type,
+        rawElement.props,
+        `${elementPath}.props`,
+      )) {
+        const chainResult = validateActionChain(chain, path, definition, catalog);
         issues.push(...chainResult.issues);
         stateRefs.push(...chainResult.stateRefs);
       }
-    }
-    if (isPlainObject(rawElement.props)) {
       for (const prop of PROP_ACTION_CHAINS[String(type)] ?? []) {
         if (!Object.hasOwn(rawElement.props, prop)) continue;
         const chainResult = validateActionChain(

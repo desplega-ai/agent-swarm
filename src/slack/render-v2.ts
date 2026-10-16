@@ -961,14 +961,16 @@ export async function childOutcomeContent(
   );
 }
 
-// A deferred wake continues a human conversation even though the scheduler
-// assigns source="schedule". Its answer must not depend on delegation cards.
-function isSlackContinuation(task: AgentTask): boolean {
+// A lead deferred wake continues the human conversation. Worker wakes report
+// through their lead follow-up instead of posting their own outcome cards.
+async function isSlackContinuation(task: AgentTask): Promise<boolean> {
   return (
     task.source === "schedule" &&
     task.taskType === "deferred" &&
     !!task.slackChannelId &&
-    !!task.slackThreadTs
+    !!task.slackThreadTs &&
+    !!task.agentId &&
+    !!(await getAgentById(task.agentId))?.isLead
   );
 }
 
@@ -981,7 +983,7 @@ function isSlackContinuation(task: AgentTask): boolean {
 function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): boolean {
   return (
     task.source !== "slack" &&
-    !isSlackContinuation(task) &&
+    !(task.source === "schedule" && task.taskType === "deferred") &&
     !!task.slackChannelId &&
     !!task.slackThreadTs &&
     (task.status === "completed" || task.status === "failed") &&
@@ -991,10 +993,10 @@ function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): b
   );
 }
 
-function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): boolean {
+async function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): Promise<boolean> {
   return (
     ((task.source === "slack" && isAskOutcomeStatus(task.status)) ||
-      (isSlackContinuation(task) && isOutcomeStatus(task.status))) &&
+      ((await isSlackContinuation(task)) && isOutcomeStatus(task.status))) &&
     task.createdAt >= activatedAt
   );
 }
@@ -1016,7 +1018,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
     const agentName = await agentDisplayNameFor(member);
     const card = await getSlackOutcomeMessage(member.id);
     if (card?.permalink) {
-      lines.push(`↳ ${glyph} ${agentName} — ${card.permalink}`);
+      lines.push(`↳ ${glyph} ${agentName} — [result](${card.permalink})`);
       continue;
     }
     const raw = outcomeText(
@@ -1431,48 +1433,34 @@ export async function streamOutcomeCard(
   });
 }
 
-/**
- * The body a resolved deferral card is rewritten to. The ⏳ block promised
- * the thread an answer; this is that promise being kept in place, instead of
- * in a second card below it — `isAnsweredByDeferralCard` keeps the wake-up
- * from posting one, so the answer lands in the thread exactly once. It is
- * the card the wake-up would have posted, collapsed the same way when the
- * wake-up already answered by hand with `slack-reply`.
- *
- * A wake-up that deferred again does post its own card — the next ⏳ in the
- * chain, which its own wake-up resolves — so this card only points at it.
- */
+/** Render the latest wait or final result into the chain's original card. */
 async function resolvedDeferralContent(
   wake: AgentTask,
 ): Promise<{ text: string; blocks?: unknown[] }> {
-  if (!isDeferredTask(wake)) {
-    const content = await outcomeContent(wake, wake.slackReplySent);
-    const presentation = await outcomePresentation(wake, content);
-    const captions = await outcomeCaptionBlocks(wake, content);
-    return { text: presentation, blocks: [{ type: "markdown", text: presentation }, ...captions] };
-  }
-  const card = await getSlackOutcomeMessage(wake.id);
-  const pointer = card?.permalink ? ` — ${card.permalink}` : ".";
-  return { text: `↪️ Resumed by ${await agentDisplayNameFor(wake)} and deferred again${pointer}` };
+  const content = await outcomeContent(wake, wake.slackReplySent);
+  const presentation = await outcomePresentation(wake, content);
+  const captions = await outcomeCaptionBlocks(wake, content);
+  return { text: presentation, blocks: [{ type: "markdown", text: presentation }, ...captions] };
 }
 
-/**
- * True when `task` is a wake-up whose answer goes into its deferral's ⏳ card
- * (`refreshResolvedDeferralCards`), so it must not post an outcome card of
- * its own. False — and the wake-up posts its own card as before — when it
- * deferred again, when the deferral never got a card, and when the in-place
- * rewrite was abandoned.
- */
+/** A continuation uses the first retained, usable deferral card in its chain. */
 async function isAnsweredByDeferralCard(
   task: AgentTask,
   threadTasks: readonly AgentTask[],
 ): Promise<boolean> {
-  if (!isSlackContinuation(task) || !task.parentTaskId || isDeferredTask(task)) return false;
-  const deferred = threadTasks.find((candidate) => candidate.id === task.parentTaskId);
-  // Mirrors getResolvableDeferralOutcomes: only a `deferredAt` card is rewritten.
-  if (!deferred?.deferredAt) return false;
-  const card = await getSlackOutcomeMessage(deferred.id);
-  return !!card?.finalizedAt && !isPendingSlackMessage(card) && !card.deferralAbandonedAt;
+  const seen = new Set<string>();
+  let current = task;
+  while ((await isSlackContinuation(current)) && current.parentTaskId && !seen.has(current.id)) {
+    seen.add(current.id);
+    const deferred = threadTasks.find((candidate) => candidate.id === current.parentTaskId);
+    if (!deferred?.deferredAt) return false;
+    const card = await getSlackOutcomeMessage(deferred.id);
+    if (card) {
+      return !!card.finalizedAt && !isPendingSlackMessage(card) && !card.deferralAbandonedAt;
+    }
+    current = deferred;
+  }
+  return false;
 }
 
 /**
@@ -1490,6 +1478,8 @@ const TRANSIENT_SLACK_ERROR_CODES = new Set([
   "service_unavailable",
   "fatal_error",
   "request_timeout",
+  // The external-channel guard could not classify the channel; Slack may answer next time.
+  "external_channel_unverified",
 ]);
 
 export function slackErrorCode(error: unknown): string | undefined {
@@ -1539,9 +1529,8 @@ const deferralRefreshAttempts = new Map<string, number>();
  *
  * Runs after the tree loop and independently of it: resolution needs only
  * the retained outcome `ts`, so it must not be skipped when the thread has
- * no other pending render work. After, so a wake-up that deferred again has
- * already posted the card this one points at. Each card is rewritten exactly
- * once (`deferral_resolved_at`).
+ * no other pending render work. Re-defers update the same card; the final
+ * result marks it resolved (`deferral_resolved_at`).
  *
  * The marker is also burned when Slack refuses the rewrite for good, and when
  * an unclassifiable failure has used up its attempts — a card that can never
@@ -1562,10 +1551,14 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
         ts: card.ts,
         ...content,
       });
-      await markSlackDeferralResolved(card.id);
+      if (isDeferredTask(wake)) {
+        await updateSlackMessageRecord(card.id, {});
+      } else {
+        await markSlackDeferralResolved(card.id);
+      }
       deferralRefreshAttempts.delete(card.id);
       // The rewrite is the wake-up's outcome, so it settles the ask's reaction.
-      await finalizeTerminalSlackReactions([wake]);
+      if (!isDeferredTask(wake)) await finalizeTerminalSlackReactions([wake]);
     } catch (error) {
       const attempts = (deferralRefreshAttempts.get(card.id) ?? 0) + 1;
       deferralRefreshAttempts.set(card.id, attempts);
@@ -1652,7 +1645,7 @@ export async function processSlackRenderV2(): Promise<void> {
       // not represent immediately active outcome work, so avoid waking an old
       // tree solely to verify its permalink on every render tick.
       const isDirectCandidate =
-        taskNeedsDirectOutcome(task, activatedAt) &&
+        (await taskNeedsDirectOutcome(task, activatedAt)) &&
         isOutcomeStatus(task.status) &&
         !(await isAnsweredByDeferralCard(task, tasks));
       const isChildCandidate =
@@ -1751,7 +1744,7 @@ export async function processSlackRenderV2(): Promise<void> {
 
     for (const task of tasks) {
       if (!isSlackRenderV2Enabled()) return;
-      if (!taskNeedsDirectOutcome(task, activatedAt)) continue;
+      if (!(await taskNeedsDirectOutcome(task, activatedAt))) continue;
       const card = await getSlackOutcomeMessage(task.id);
       if (card && isSettledSlackMessage(card)) continue;
       if (await isAnsweredByDeferralCard(task, tasks)) continue;

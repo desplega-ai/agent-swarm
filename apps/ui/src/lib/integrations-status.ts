@@ -29,7 +29,16 @@ export type EnvPresence = Readonly<Record<string, boolean>>;
 
 const RESERVED_KEYS: ReadonlySet<string> = new Set(["api_key", "secrets_encryption_key"]);
 
-const TRUTHY_VALUES: ReadonlySet<string> = new Set(["true", "1", "yes"]);
+export const TRUTHY_VALUES: ReadonlySet<string> = new Set(["true", "1", "yes"]);
+
+/**
+ * Effective values the env-presence map cannot carry. `chatSdkEnabled` comes
+ * from `GET /api/integrations/chat/status` (`enabled`), which reads the value
+ * the API runs with, so `CHAT_SDK_ENABLED=false` in the env is not enabled.
+ */
+export interface LiveIntegrationState {
+  chatSdkEnabled?: boolean;
+}
 
 function isReservedKey(key: string): boolean {
   return RESERVED_KEYS.has(key.toLowerCase());
@@ -68,6 +77,7 @@ export function deriveIntegrationStatus(
   def: IntegrationDef,
   configs: SwarmConfig[],
   envPresence: EnvPresence = {},
+  live: LiveIntegrationState = {},
 ): IntegrationStatus {
   // Disabled signal: only derivable from DB rows (env-presence is boolean-only,
   // so we can't tell <PREFIX>_DISABLE=true from =false when set via deploy env).
@@ -93,6 +103,8 @@ export function deriveIntegrationStatus(
     if (bot && credential) return "configured";
     return bot || credential ? "partial" : "none";
   }
+
+  if (def.id === "chat-sdk") return deriveChatSdkStatus(configs, envPresence, live);
 
   const groups = def.configGroups ?? [];
   if (groups.length > 0) {
@@ -164,4 +176,42 @@ function deriveGroupedStatus(
   if (!hasAnyFieldPresent) return "none";
   if (hasAnyRequiredGroup) return hasAnyRequiredPresent ? "partial" : "none";
   return "configured";
+}
+
+/**
+ * Chat SDK: `configured` when `CHAT_SDK_ENABLED` is true and
+ * `CHAT_SDK_ADAPTERS` parses to a non-empty object, `partial` when only one
+ * of them is set. Env presence cannot show a value, so an env-only
+ * `CHAT_SDK_ENABLED` counts as enabled only when the live status says so.
+ * Until the live status loads, presence is the fallback.
+ */
+function deriveChatSdkStatus(
+  configs: SwarmConfig[],
+  envPresence: EnvPresence,
+  live: LiveIntegrationState,
+): IntegrationStatus {
+  const enabledRow = findConfigForKey(configs, "CHAT_SDK_ENABLED");
+  const enabled = enabledRow
+    ? TRUTHY_VALUES.has(enabledRow.value.trim().toLowerCase())
+    : envPresence.CHAT_SDK_ENABLED === true && live.chatSdkEnabled !== false;
+  const adaptersRow = findConfigForKey(configs, "CHAT_SDK_ADAPTERS");
+  const adapters = adaptersRow
+    ? isNonEmptyJsonObject(adaptersRow.value)
+    : envPresence.CHAT_SDK_ADAPTERS === true;
+  if (enabled && adapters) return "configured";
+  return enabled || adapters ? "partial" : "none";
+}
+
+function isNonEmptyJsonObject(value: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Object.keys(parsed).length > 0
+    );
+  } catch {
+    return false;
+  }
 }

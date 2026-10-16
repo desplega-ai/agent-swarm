@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { SwarmConfig } from "../api/types";
 import {
   effortAfterChange,
   effortLevelsFor,
@@ -370,5 +371,93 @@ describe("grok harness models", () => {
       "xhigh",
     ]);
     expect(effortLevelsFor("grok", "grok-unknown", catalog)).toEqual([]);
+  });
+});
+
+describe("Vercel AI Gateway on the open harnesses", () => {
+  for (const harness of ["pi", "opencode"] as const) {
+    test(`${harness}: the snapshot group lists every chat model and no embedding model`, () => {
+      const groups = modelGroupsForHarness(harness, [], { AI_GATEWAY_API_KEY: true });
+      const vercel = groups.find((g) => g.provider === "Vercel AI Gateway");
+      expect(vercel).toMatchObject({ requiredKey: "AI_GATEWAY_API_KEY", enabled: true });
+      const ids = vercel?.models.map((m) => m.id) ?? [];
+      expect(ids.length).toBeGreaterThan(200);
+      expect(ids).toContain("vercel/zai/glm-5.3");
+      expect(ids).toContain("vercel/anthropic/claude-sonnet-4.6");
+      expect(ids).not.toContain("vercel/voyage/voyage-code-3");
+      expect(vercel?.models.every((m) => m.providerId === "vercel")).toBe(true);
+    });
+  }
+});
+
+describe("NaN and Helmcode on the open harnesses", () => {
+  const catalog = live({
+    nan: { "glm5.3-flash": { name: "GLM 5.3 Flash" }, "qwen3.6": { name: "Qwen 3.6" } },
+    helmcode: { gemma4: { name: "Gemma 4" }, "deepseek-v4-flash": { name: "DeepSeek V4 Flash" } },
+  });
+  const group = (groups: ReturnType<typeof modelGroupsForHarness>, provider: string) =>
+    groups.find((g) => g.provider === provider);
+
+  for (const harness of ["pi", "opencode"] as const) {
+    test(`${harness}: both groups list their routes and are locked without a key`, () => {
+      const groups = modelGroupsForHarness(harness, [], {}, null, catalog);
+      const nan = group(groups, "NaN");
+      const helmcode = group(groups, "Helmcode");
+      expect(nan).toMatchObject({ requiredKey: "NAN_API_KEY", enabled: false });
+      expect(helmcode).toMatchObject({ requiredKey: "HELMCODE_API_KEY", enabled: false });
+      expect(nan?.models.map((m) => [m.id, m.providerId])).toEqual([
+        ["nan/glm5.3-flash", "nan"],
+        ["nan/qwen3.6", "nan"],
+      ]);
+      expect(helmcode?.models.map((m) => [m.id, m.providerId])).toEqual([
+        ["helmcode/deepseek-v4-flash", "helmcode"],
+        ["helmcode/gemma4", "helmcode"],
+      ]);
+      // Listed right after OpenRouter.
+      expect(groups.slice(0, 3).map((g) => g.provider)).toEqual(["OpenRouter", "NaN", "Helmcode"]);
+    });
+  }
+
+  test("the HELMCODE_API_NAN alias unlocks NaN only", () => {
+    const groups = modelGroupsForHarness("pi", [], { HELMCODE_API_NAN: true }, null, catalog);
+    expect(group(groups, "NaN")?.enabled).toBe(true);
+    expect(group(groups, "Helmcode")?.enabled).toBe(false);
+  });
+
+  test("a stored alias config row unlocks NaN too", () => {
+    const row = { key: "HELMCODE_API_NAN", value: "********" } as SwarmConfig;
+    const groups = modelGroupsForHarness("opencode", [row], {}, null, catalog);
+    expect(group(groups, "NaN")?.enabled).toBe(true);
+  });
+
+  test("HELMCODE_API_KEY unlocks Helmcode only", () => {
+    const groups = modelGroupsForHarness("pi", [], { HELMCODE_API_KEY: true }, null, catalog);
+    expect(group(groups, "Helmcode")?.enabled).toBe(true);
+    expect(group(groups, "NaN")?.enabled).toBe(false);
+  });
+
+  test("NAN_API_KEY unlocks NaN, and neither key unlocks OpenRouter", () => {
+    const groups = modelGroupsForHarness("pi", [], { NAN_API_KEY: true }, null, catalog);
+    expect(group(groups, "NaN")?.enabled).toBe(true);
+    expect(group(groups, "OpenRouter")?.enabled).toBe(false);
+  });
+
+  test("the claude and codex pickers never list them", () => {
+    for (const harness of ["claude", "codex"] as const) {
+      const groups = modelGroupsForHarness(harness, [], { NAN_API_KEY: true }, null, catalog);
+      expect(groups.flatMap((g) => g.models).some((m) => /^(nan|helmcode)\//.test(m.id))).toBe(
+        false,
+      );
+    }
+  });
+
+  test("a reported route resolves to its provider glyph", () => {
+    expect(findKnownModel("nan/glm5.3-flash", catalog)).toMatchObject({
+      label: "GLM 5.3 Flash",
+      providerId: "nan",
+    });
+    expect(findKnownModel("helmcode/gemma4", catalog)?.providerId).toBe("helmcode");
+    // A route the catalog does not list keeps the glyph through the snapshot prefix.
+    expect(findKnownModel("helmcode/not-a-model-yet")?.providerId).toBe("helmcode");
   });
 });

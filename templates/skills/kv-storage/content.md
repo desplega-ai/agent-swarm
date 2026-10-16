@@ -287,8 +287,8 @@ value so you can detect a clobber.
 ## See also
 
 - The **`pages`** skill — companion skill for authed pages and `swarmSdk.kv`.
-- The **`artifacts`** skill — for anything too big or too binary for KV.
+- The **`agent-fs`** skill — for anything too big or too binary for KV.
 - `src/be/migrations/061_kv_store.sql` — schema (`kv_entries`)
 - `src/http/kv.ts` — REST handler + namespace resolution
 - `src/tools/kv/*` — MCP tool registrars
-- `src/artifact-sdk/browser-sdk.ts` — `swarmSdk.kv` for pages
+- `src/pages/browser-sdk.ts` — `swarmSdk.kv` for pages

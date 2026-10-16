@@ -47,7 +47,6 @@ RUN for attempt in 1 2 3; do \
 COPY packages/model-catalog/ ./packages/model-catalog/
 COPY packages/model-routing/ ./packages/model-routing/
 COPY src/ ./src/
-COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
 # Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
 COPY slack-manifest.json ./
@@ -55,7 +54,9 @@ COPY tsconfig.json ./
 # --bytecode --format=esm (Bun 1.4 lifted the CJS-only restriction): the binary
 # boots on every container start AND every hook invocation, so the ~4x faster
 # startup (388 -> 81 ms measured) is worth the ~130 MB larger binary.
-RUN bun build ./src/cli.tsx ./src/providers/pi-binary-root/src/extensions/codemode/worker.ts --root ./src/providers/pi-binary-root --compile --bytecode --format=esm --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
+# --compile-autoload-package-json lets modules loaded from disk at runtime
+# (the global `@opencode/sdk`) resolve their own node_modules imports.
+RUN bun build ./src/cli.tsx ./src/providers/pi-binary-root/src/extensions/codemode/worker.ts --root ./src/providers/pi-binary-root --compile --bytecode --format=esm --compile-autoload-package-json --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
 
 # ─── Stage: worker-base — minimal system + all harness CLIs ──────────────────
 FROM ubuntu:24.04 AS worker-base
@@ -128,7 +129,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.296
+ARG CLAUDE_CODE_VERSION=2.1.301
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -154,7 +155,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.162.1
+ARG CODEX_VERSION=0.163.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -185,19 +186,23 @@ RUN mkdir -p /home/worker/.codex && \
       > /home/worker/.codex/config.toml && \
     chown -R worker:worker /home/worker/.codex
 
-# Install opencode CLI + SDK (alternative harness, selected via HARNESS_PROVIDER=opencode)
-# CLI version must match SDK version — the SDK spawns `opencode serve` and parses
-# its stdout for the listening URL (see node_modules/@opencode-ai/sdk/dist/server.js).
-# The installer drops the binary at ~/.opencode/bin/opencode and only modifies
-# ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
-# update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.19.0
-RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
+# Install OpenCode 2 (HARNESS_PROVIDER=opencode, and the `opencode acp` target).
+# The adapter runs `@opencode/sdk` in-process, loading it from the global npm
+# root at runtime: its native modules (pty, file watcher) cannot be bundled into
+# the compiled binary. The SDK installs as root with --ignore-scripts, so no
+# package code runs (its optional tree-sitter grammars would try a node-gyp
+# build). The CLI, needed only by the ACP target, must run its postinstall to
+# fetch its platform binary, so it installs as `worker` into ~/.opencode.
+# One version for both: they ship from the same release.
+ARG OPENCODE_VERSION=2.0.30
+RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
+    npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
+    && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
+    && /home/worker/.opencode/bin/opencode --version
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.19.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
-    npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION} \
+    npm install -g --ignore-scripts @opencode/sdk@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
 
@@ -230,7 +235,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.16.1
+ARG AGENT_FS_VERSION=0.16.3
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -335,7 +340,6 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<EOF
   "name": "global-deps",
   "private": true,
   "dependencies": {
-    "pm2": "6.0.14",
     "@desplega.ai/wts": "0.2.3",
     "@desplega.ai/agent-fs": "${AGENT_FS_VERSION}"
   },
@@ -379,13 +383,11 @@ ENV LEAD_SYSTEM_PROMPT=""
 ENV LEAD_SYSTEM_PROMPT_FILE=""
 ENV STARTUP_SCRIPT_STRICT=false
 ENV TEMPLATE_REGISTRY_URL=https://templates.agent-swarm.dev
-ENV PM2_HOME=/workspace/.pm2
 ENV PATH="/home/worker/.local/bin:/home/worker/.bun/bin:$PATH"
-ENV OPENCODE_SWARM_PLUGIN_PATH=/home/worker/.config/opencode/plugins/agent-swarm.ts
 
 VOLUME ["/logs"]
 
-# Expose service port for PM2 processes
+# Port for web services an agent runs itself
 EXPOSE 3000
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
@@ -441,18 +443,10 @@ RUN mkdir -p /home/worker/.pi/agent/skills /home/worker/.codex/skills /home/work
     chown -R worker:worker /home/worker/.pi/agent/skills /home/worker/.codex/skills \
       /home/worker/.opencode/skills /home/worker/.agents
 
-# Copy opencode plugin (used when HARNESS_PROVIDER=opencode).
-# OPENCODE_SWARM_PLUGIN_PATH (ENV in worker-base) tells OpencodeAdapter exactly
-# where to find the plugin. The plugin entrypoint imports adjacent vendored
-# helpers (`./opencode-auth`, `./summarize`) — opencode's plugin loader runs
-# the TS files inside its own bundled Bun runtime, which only exposes
-# `@opencode-ai/{plugin,sdk}`, so the helpers are vendored next to it. Tests
-# live in a sibling `tests/` subdirectory and are intentionally NOT copied
-# (opencode auto-discovers `.ts` files here and would load them as plugins).
-RUN mkdir -p /home/worker/.config/opencode/plugins/lib && \
+# OpenCode 2 runs in-process with the swarm plugin passed as an object, so no
+# plugin files are copied; only the config dir must stay worker-owned.
+RUN mkdir -p /home/worker/.config/opencode && \
     chown -R worker:worker /home/worker/.config
-COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
-COPY --chown=worker:worker plugin/opencode-plugins/lib/ /home/worker/.config/opencode/plugins/lib/
 
 # Workspace directories (bind-mounted or volume-backed at runtime) + entrypoint
 RUN mkdir -p /workspace/personal /workspace/shared /logs && \
@@ -571,8 +565,8 @@ RUN case "$TARGETARCH" in \
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.1-alpha.2
-ARG DSH_SHA512=0a4444d2e00e83695d2f65697c5e1c351b25d7bf021f99ccfbc62494fae5319979967d0a8557dde36749b919603976669298b3091beb552f0b00bf8629f824d3
+ARG DSH_VERSION=0.2.1-alpha.4
+ARG DSH_SHA512=9e724fdd4c83d257650311f4057841501604def23bc340c40a772acc0975128b47a61139976820c1e9e86b15e22122600d31dce4157d25623a614e4f488f487e
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -587,9 +581,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791878731-g2f7fd0
-ARG AMP_SHA512_AMD64=9ff33cb89bcadf271ea4330e71c07619341d2ed15b00ff9c8a06a706887ff3dcb00892574c98f50d328fb3fcf163863233358ed8b737bf2a26ff987ba5bef449
-ARG AMP_SHA512_ARM64=1f03438ecc6059f948984c0edf445a039626fcf703992247f7e2e7a62d7e5ef508b8247863d5b6c4319d685220e158fd4672d7ef67fababaf15ff5b26364c201
+ARG AMP_VERSION=0.0.1792123242-g03edc7
+ARG AMP_SHA512_AMD64=5003a2ab19255b68a3142d4b4516e95065ecd8915151c70878fdad7976fd1e3ac693f7a29803ba8b722a01b712ac65d774ebe668dd43ba3436050f4c3357e9ac
+ARG AMP_SHA512_ARM64=a8584c42cb2f9577d0b813ec08f5d4c1ad22f739de2d625433394df32c7d74e110df3f8a9c5ec1ad412f600c3dec2fd61261ab08b894b7034fe670e1e17cae65
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -624,7 +618,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.63.0
+ARG GEMINI_CLI_VERSION=0.64.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -637,7 +631,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.96
+ARG COPILOT_CLI_VERSION=1.0.98
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -647,8 +641,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.25.1), so none run as root.
-ARG QWEN_CODE_VERSION=0.25.1
+# scripts are not needed for ACP (verified on 0.25.2), so none run as root.
+ARG QWEN_CODE_VERSION=0.25.2
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -677,9 +671,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.30.0
-ARG KIRO_CLI_SHA256_AMD64=df252365e8f8a3aa9ddf543060892c915af072b660a5527c0895351654b912f8
-ARG KIRO_CLI_SHA256_ARM64=6788ac56d4e10d08fd488aff083a64b0dd7edc440f45f8e5a21f6130995f6850
+ARG KIRO_CLI_VERSION=2.31.1
+ARG KIRO_CLI_SHA256_AMD64=22eef4c19c42782316b0e24cdd3399024760eec9056b4298751cb99f33795ace
+ARG KIRO_CLI_SHA256_ARM64=cf3fc7681cca9677e18c0d22371fe60d7921ca73ea9d751d78f9cb470c0dce6d
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -697,9 +691,9 @@ RUN case "$TARGETARCH" in \
 # pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
 # the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
 # and both pins together.
-ARG GROK_VERSION=1.0.52
-ARG GROK_SHA512_AMD64=838e6eb07f5e7fc3e22411152df7a590a7b5de2c71ee98de9916fa10306aa7e9caae40f1e309fa55d1684ce5549de049ee35e3f610a4237e2786eb2032d59756
-ARG GROK_SHA512_ARM64=6b0790c873e2e6bfaa306d01529d571f6d91ed119e40d621a9032978f96c8f219eb1de7fbfbf4740fb3d3c890a2e3adc5f8bb3e5c1457bc45c9e42aee49e7308
+ARG GROK_VERSION=1.0.60
+ARG GROK_SHA512_AMD64=ecf56f2ecf5db6892b0be7c891643b15048146425f36e02f932ddee467e68eab0495eccdf5e1be31407106e098ad6cdb9a206c45b73c9ea4ec46bf4ac07a0ad3
+ARG GROK_SHA512_ARM64=c76554c411cbdff279bb29befea635caf3cf34516f7717e744a6915994b53531c7d09af528e8e64637a8d0851ac0f1353c22bba67e0c0ed1c16ae5e9330b2523
 RUN case "$TARGETARCH" in \
       amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
       arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \
@@ -730,7 +724,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.39.0",
+    "agent-browser": "0.39.1",
     "playwright": "1.58.0"
   },
   "overrides": {
@@ -883,18 +877,10 @@ RUN mkdir -p /home/worker/.pi/agent/skills /home/worker/.codex/skills /home/work
     chown -R worker:worker /home/worker/.pi/agent/skills /home/worker/.codex/skills \
       /home/worker/.opencode/skills /home/worker/.agents
 
-# Copy opencode plugin (used when HARNESS_PROVIDER=opencode).
-# OPENCODE_SWARM_PLUGIN_PATH (ENV in worker-base) tells OpencodeAdapter exactly
-# where to find the plugin. The plugin entrypoint imports adjacent vendored
-# helpers (`./opencode-auth`, `./summarize`) — opencode's plugin loader runs
-# the TS files inside its own bundled Bun runtime, which only exposes
-# `@opencode-ai/{plugin,sdk}`, so the helpers are vendored next to it. Tests
-# live in a sibling `tests/` subdirectory and are intentionally NOT copied
-# (opencode auto-discovers `.ts` files here and would load them as plugins).
-RUN mkdir -p /home/worker/.config/opencode/plugins/lib && \
+# OpenCode 2 runs in-process with the swarm plugin passed as an object, so no
+# plugin files are copied; only the config dir must stay worker-owned.
+RUN mkdir -p /home/worker/.config/opencode && \
     chown -R worker:worker /home/worker/.config
-COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
-COPY --chown=worker:worker plugin/opencode-plugins/lib/ /home/worker/.config/opencode/plugins/lib/
 
 # Workspace directories (bind-mounted or volume-backed at runtime) + entrypoint
 RUN mkdir -p /workspace/personal /workspace/shared /logs && \

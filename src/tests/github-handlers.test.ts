@@ -421,3 +421,38 @@ describe("no github email enrichment", () => {
     expect(await getKv(UNMAPPED_NAMESPACE, "triage-target:count")).toBeNull();
   });
 });
+
+// ── Every no-task comment path logs why ──
+
+describe("comment skip reasons", () => {
+  async function skippedReasons(events: CommentEvent[]): Promise<string[]> {
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      for (const event of events) {
+        expect((await handleComment(event, "issue_comment")).created).toBe(false);
+      }
+      return logSpy.mock.calls
+        .map((args) => String(args[0]))
+        .filter((line) => line.startsWith("[GitHub] Skipped issue_comment."));
+    } finally {
+      logSpy.mockRestore();
+    }
+  }
+
+  test("edited, unmentioned and duplicate comments each log a reason", async () => {
+    const mention = `@${GITHUB_BOT_NAME} please review`;
+    const edited = { ...makeCommentEvent("skip-edit", mention), action: "edited" };
+    edited.comment = { ...edited.comment, id: 7001 };
+    const noMention = makeCommentEvent("skip-plain", "no ping here");
+    noMention.comment = { ...noMention.comment, id: 7002 };
+    const first = makeCommentEvent("skip-dup", mention);
+    first.comment = { ...first.comment, id: 7003 };
+
+    expect((await handleComment(first, "issue_comment")).created).toBe(true);
+    expect(await skippedReasons([edited, noMention, first])).toEqual([
+      "[GitHub] Skipped issue_comment.edited by skip-edit on test/repo comment 7001: action is not created",
+      "[GitHub] Skipped issue_comment.created by skip-plain on test/repo comment 7002: no bot mention",
+      "[GitHub] Skipped issue_comment.created by skip-dup on test/repo comment 7003: duplicate delivery",
+    ]);
+  });
+});

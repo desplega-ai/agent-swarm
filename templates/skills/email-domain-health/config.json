@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "email-domain-health",
+  "displayName": "Email Domain Health",
+  "slug": "email-domain-health",
+  "title": "Email Domain Health",
+  "description": "Build a scheduled email domain health monitor: ask the user for domains, providers, test inbox, schedule and alert rules, then build a checks script (SPF, DKIM, DMARC, MX, provider records, blocklists with positive controls), a daily test send with score capture, bounce rate, run history in a Swarm App, and alerts only on a new red or a score drop. Orchestrates the swarm-scripts, apps, scheduling and composio-gmail skills.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["email", "deliverability", "dns", "monitoring", "apps"]
+}

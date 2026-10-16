@@ -30,6 +30,7 @@ import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import pkg from "../package.json";
 import type { DbRetentionSweepMetric, SpanOptions, SwarmSpan, SwarmSpanKind } from "./otel";
+import { getNodeEnv } from "./utils/node-env";
 import { scrubSecrets } from "./utils/secret-scrubber";
 
 type AttributeValue = string | number | boolean | string[] | number[] | boolean[];
@@ -174,7 +175,7 @@ export async function boot(serviceRole: string, options: BootOptions = {}): Prom
 
   const configuredResourceAttributes = parseResourceAttributes();
   const deploymentEnvironment =
-    configuredResourceAttributes["deployment.environment"] || process.env.NODE_ENV || "development";
+    configuredResourceAttributes["deployment.environment"] || getNodeEnv() || "development";
   const serviceName = resolveServiceName(serviceRole);
   sdk = new NodeSDK({
     resource: resourceFromAttributes({

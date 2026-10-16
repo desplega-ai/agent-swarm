@@ -12,11 +12,11 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { feedbackOverlayScripts, isPageFeedbackRequested } from "../artifact-sdk/feedback-overlay";
 import { closeDb, createAgent, getTaskById, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { handlePagesPublic } from "../http/pages-public";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { feedbackOverlayScripts, isPageFeedbackRequested } from "../pages/feedback-overlay";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pages-feedback.sqlite";

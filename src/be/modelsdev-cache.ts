@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { withRegistryCatalogSections } from "@desplega/model-catalog";
 
 export interface ModelsDevCostBlock {
   input?: number;
@@ -53,6 +54,11 @@ const parsedCaches = new Map<string, WeakRef<ModelsDevCache>>();
  * fetches the live catalog from `GET /api/models-catalog`
  * (`src/be/models-catalog.ts`) and only falls back to its bundled copy of
  * this snapshot when that request hasn't resolved.
+ *
+ * The result also carries the sections of the OpenAI-compatible registry
+ * providers models.dev does not list (`helmcode`), synthesized from the
+ * registry (`withRegistryCatalogSections`), so every snapshot consumer
+ * (catalog, pricing seed, tier resolution) sees them like any other section.
  */
 export function loadModelsDevCache(): ModelsDevCache | null {
   const explicitPath = process.env.MODELSDEV_CACHE_PATH;
@@ -67,7 +73,9 @@ export function loadModelsDevCache(): ModelsDevCache | null {
     const memoized = parsedCaches.get(candidate)?.deref();
     if (memoized) return memoized;
     try {
-      const parsed = JSON.parse(readFileSync(candidate, "utf-8")) as ModelsDevCache;
+      const parsed = withRegistryCatalogSections(
+        JSON.parse(readFileSync(candidate, "utf-8")) as ModelsDevCache,
+      );
       parsedCaches.set(candidate, new WeakRef(parsed));
       return parsed;
     } catch {

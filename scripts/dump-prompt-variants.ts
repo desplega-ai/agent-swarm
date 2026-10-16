@@ -21,7 +21,13 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { type BasePromptArgs, getBasePrompt } from "../src/prompts/base-prompt";
+import {
+  type BasePromptArgs,
+  getBasePrompt,
+  getTaskContextPrompt,
+  type RepoContext,
+  type TaskContextPromptArgs,
+} from "../src/prompts/base-prompt";
 import { getAllTemplateDefinitions } from "../src/prompts/registry";
 import { resolveTemplateAsync } from "../src/prompts/resolver";
 import type { ProviderTraits } from "../src/providers/types";
@@ -100,7 +106,7 @@ const SKILLS = [
 
 const MCP_SERVERS = ["linear"];
 
-const REPO_CONTEXT: NonNullable<BasePromptArgs["repoContext"]> = {
+const REPO_CONTEXT: RepoContext = {
   clonePath: "/workspace/personal/repos/example-repo",
   claudeMd: "# Example Repo\n\nUse bun. Run `bun test` before pushing.\n",
   autoStashes: [{ ref: "stash@{0}", message: "WIP: half-done refactor" }],
@@ -125,11 +131,14 @@ const IDENTITY = {
 
 type Env = Record<string, string | undefined>;
 
+/** Agent-level args plus the per-task context that rides in the task prompt. */
+type VariantArgs = BasePromptArgs & Pick<TaskContextPromptArgs, "repoContext" | "slackContext">;
+
 interface Variant {
   id: string;
   title: string;
   env: Env;
-  args: BasePromptArgs;
+  args: VariantArgs;
   notes: string;
 }
 
@@ -150,7 +159,7 @@ function v(
   title: string,
   provider: keyof typeof TRAITS,
   role: "lead" | "worker",
-  extra: Partial<BasePromptArgs>,
+  extra: Partial<VariantArgs>,
   env: Env,
   notes: string,
 ): Variant {
@@ -169,7 +178,7 @@ function v(
   };
 }
 
-const kitchenSinkArgs: Partial<BasePromptArgs> = {
+const kitchenSinkArgs: Partial<VariantArgs> = {
   serverCapabilities: FULL_SERVER_CAPS,
   capabilities: ["artifacts", "pages", "services"],
   ...IDENTITY,
@@ -373,7 +382,7 @@ async function renderTaskPrompts(): Promise<string> {
   out.push(
     "These are what the harness receives as the *user turn* when a trigger fires. Built by `buildPromptForTrigger` / `buildResumePrompt` in `src/commands/runner.ts`.",
     "",
-    "Final turn prompt = `[context preamble] + trigger prompt + [memories] + [working-directory note]`, with an optional profile-sync-rejection banner prepended.",
+    "Final turn prompt = `[context preamble] + trigger prompt + [memories] + [working-directory note] + [task context: repository, scripts-only Slack, requester profile, cwd warning]`, with an optional profile-sync-rejection banner prepended.",
     "",
   );
 
@@ -585,7 +594,13 @@ async function main() {
 
   for (const variant of VARIANTS) {
     applyEnv(variant.env);
-    const rendered = await getBasePrompt(variant.args);
+    // The system prompt, then the per-task context the runner appends to the
+    // task prompt (repository, scripts-only Slack), so one file shows both.
+    const system = await getBasePrompt(variant.args);
+    const taskContext = await getTaskContextPrompt(variant.args);
+    const rendered = taskContext
+      ? `${system}\n\n<!-- task prompt context (not in the system prompt) -->\n\n${taskContext}\n`
+      : system;
     const file = `system/${variant.id}.md`;
     await Bun.write(join(outDir, file), rendered);
     index.push(

@@ -1,0 +1,42 @@
+{
+  "event": {
+    "id": "01DEMO0OPENONCALL0000000001",
+    "event_type": "incident.triggered",
+    "resource_type": "incident",
+    "occurred_at": "2026-10-16T01:12:04.000Z",
+    "agent": null,
+    "client": null,
+    "data": {
+      "id": "Q0OPENONCALL01",
+      "type": "incident",
+      "self": "https://api.pagerduty.com/incidents/Q0OPENONCALL01",
+      "html_url": "https://example.pagerduty.com/incidents/Q0OPENONCALL01",
+      "number": 1042,
+      "status": "triggered",
+      "incident_key": "checkout-api-5xx",
+      "created_at": "2026-10-16T01:12:04Z",
+      "title": "checkout-api: POST /checkout 5xx rate 38% over 5m (threshold 2%)",
+      "service": {
+        "id": "PCHECKOUT",
+        "type": "service_reference",
+        "summary": "checkout-api",
+        "html_url": "https://example.pagerduty.com/services/PCHECKOUT"
+      },
+      "assignees": [],
+      "escalation_policy": {
+        "id": "PEPOLICY",
+        "type": "escalation_policy_reference",
+        "summary": "Checkout on-call"
+      },
+      "teams": [],
+      "priority": {
+        "id": "PPRIO1",
+        "type": "priority_reference",
+        "summary": "P1"
+      },
+      "urgency": "high",
+      "conference_bridge": null,
+      "resolve_reason": null
+    }
+  }
+}

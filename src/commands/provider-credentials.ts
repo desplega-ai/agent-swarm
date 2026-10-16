@@ -18,6 +18,13 @@
  * runs the predicate itself — it just reads the agent row.
  */
 
+import {
+  type OpenAICompatibleProvider,
+  openAICompatibleKeyVars,
+  openAICompatibleProviders,
+  providerBaseUrl,
+  providerKeyFromEnv,
+} from "@desplega/model-catalog";
 import { deriveDefaultRoute, validateRoute } from "@desplega/model-routing";
 import { ACP_TARGET_IDS, isAcpTarget } from "../providers/acp-target-catalog";
 import { checkAmpCredentials, liveTestAmpCredentials } from "../providers/amp-adapter";
@@ -116,8 +123,13 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   ],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY", "DEVIN_ORG_ID"],
-  opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
-  pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
+  opencode: [
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    ...openAICompatibleKeyVars(),
+  ],
+  pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", ...openAICompatibleKeyVars()],
   // The ACP target owns its auth; custom targets still need a command.
   acp: [],
   dsh: ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"],
@@ -324,6 +336,29 @@ async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
 }
 
 /**
+ * `GET <baseUrl>/models` with a Bearer key against an OpenAI-compatible
+ * registry provider (NaN, Helmcode). Lists models, runs no inference.
+ * `baseUrl` defaults to the registry entry; the probe passes the
+ * `<ID>_BASE_URL` override, and tests inject a fake server.
+ */
+export async function checkOpenAICompatibleProvider(
+  provider: OpenAICompatibleProvider,
+  apiKey: string,
+  baseUrl: string = provider.baseUrl,
+): Promise<LiveValidationResult> {
+  const r = await timedFetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (r.ok) return { ok: true, latency_ms: r.latency_ms };
+  return {
+    ok: false,
+    error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+    latency_ms: r.latency_ms,
+  };
+}
+
+/**
  * Mirror of the disk check in `checkCodexCredentials` — true when the worker
  * has a materialised `~/.codex/auth.json`, which is the canonical "logged in"
  * state for codex (whether the entrypoint wrote it from `CODEX_OAUTH`, from
@@ -365,7 +400,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `claude`         | default route: Foundry / Bedrock / Vertex → gateway (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`) → `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | the route's own `/v1/models`; OAuth presence-only; cloud routes skipped |
  * | `claude-managed` | `ANTHROPIC_API_KEY` (managed agents always use API key + managed envs)  | Anthropic `/v1/models`         |
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
- * | `opencode`       | auth.json (file) → `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` | file presence-only, otherwise provider's `/v1/models` |
+ * | `opencode`       | auth.json (file) → `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → each registry provider key (`NAN_API_KEY` or `HELMCODE_API_NAN`, `HELMCODE_API_KEY`) | file presence-only, otherwise provider's `/v1/models` |
  * | `pi`             | auth.json (file) → provider API keys, including model-specific keys   | file/model-specific key presence-only, otherwise provider's `/v1/models` |
  * | `acp`            | target-specific (the ACP target process owns its own auth)              | presence-only (validated by the target process) |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
@@ -459,17 +494,28 @@ export async function validateProviderCredentials(
         // decision, including any injected filesystem probe used by reports.
         if (status.ready && status.satisfiedBy === "file") return presenceCheckOk();
         // Preserve the live-probe order for supported env keys:
-        // OPENROUTER → ANTHROPIC → OPENAI.
+        // OPENROUTER → ANTHROPIC → OPENAI, then the OpenAI-compatible
+        // registry providers in declaration order (NaN, canonical key or
+        // alias → Helmcode) at their `<ID>_BASE_URL`, so existing env
+        // combinations keep their probe.
         if (env.OPENROUTER_API_KEY) return checkOpenRouter(env.OPENROUTER_API_KEY);
         if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
         if (env.OPENAI_API_KEY) return checkOpenAiApiKey(env.OPENAI_API_KEY);
+        for (const direct of openAICompatibleProviders()) {
+          const key = providerKeyFromEnv(direct, env);
+          if (key) {
+            return checkOpenAICompatibleProvider(direct, key, providerBaseUrl(direct, env));
+          }
+        }
         // Model-specific keys (e.g. GEMINI_API_KEY) can satisfy readiness
         // without a probeable endpoint. The harness validates them at inference.
         if (status.ready) return presenceCheckOk();
         return {
           ok: false,
-          error:
-            "No usable credential found (OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY).",
+          error: `No usable credential found (OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, ${openAICompatibleProviders()
+            .map((p) => p.envVar)
+            .join(", ")
+            .replace(/, (?=[^,]*$)/, ", or ")}).`,
           latency_ms: Date.now() - startedAt,
         };
       }

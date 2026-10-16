@@ -686,6 +686,8 @@ The following events are already emitted on `workflowEventBus` today and are usa
 | `workflow.child.finished` | `src/be/db.ts` (`updateWorkflowRun`, terminal status of a run with a `parentStepId`) | `{ childRunId, parentStepId }` |
 | `agentmail.message.received` | `src/agentmail/handlers.ts:168` | inbox/message keyed payload |
 | `slack.message` | `src/slack/handlers.ts` | `{ channel, text, user, ts, threadTs }` |
+| `chat.message.received` | `src/integrations/chat-sdk/inbound.ts` | `{ adapter, channelId, threadId, userId, text, messageId }` |
+| `chat.message.sent` | `src/integrations/chat-sdk/outbound.ts` (relay, `chat-reply`, `chat-post`) and `inbound.ts` (steering acknowledgement) | `{ adapter, channelId, threadId, text, taskId?, messageId? }` |
 | `github.pull_request.<action>` | `src/http/webhooks.ts:177` | full GitHub PR payload |
 | `github.issue.<action>` | `src/http/webhooks.ts:192` | GitHub issue payload |
 | `github.issue_comment.created` | `src/http/webhooks.ts:202` | comment payload |

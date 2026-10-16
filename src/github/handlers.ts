@@ -877,20 +877,27 @@ export async function handleComment(
     comment.body.slice(0, 100),
   );
 
+  const skip = (reason: string) => {
+    console.log(
+      `[GitHub] Skipped ${eventType}.${action} by ${sender.login} on ${repository.full_name} comment ${comment.id}: ${reason}`,
+    );
+    return { created: false };
+  };
+
   // Only handle created action
   if (action !== "created") {
-    return { created: false };
+    return skip("action is not created");
   }
 
   // Check for @agent-swarm mention in comment
   if (!detectMention(comment.body)) {
-    return { created: false };
+    return skip("no bot mention");
   }
 
   // Deduplicate
   const eventKey = `comment:${repository.full_name}:${comment.id}`;
   if (isDuplicate(eventKey)) {
-    return { created: false };
+    return skip("duplicate delivery");
   }
 
   // Find lead agent (may be null - task will be unassigned)
@@ -932,7 +939,7 @@ export async function handleComment(
   );
 
   if (result.skipped) {
-    return { created: false };
+    return skip("github.comment.mentioned template is skipped");
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)

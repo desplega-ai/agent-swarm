@@ -1,3 +1,4 @@
+import { openAICompatibleProviders, providerKeyVars } from "@desplega/model-catalog";
 import { type ReactNode, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useSubscriptionPlans } from "@/api/hooks/use-api-keys";
@@ -20,6 +21,12 @@ const PAY_AS_YOU_GO_LABELS: Record<string, string> = {
   OPENAI_API_KEY: "OpenAI API key",
   OPENROUTER_API_KEY: "OpenRouter API key",
   DEEPSEEK_API_KEY: "DeepSeek API key",
+  // OpenAI-compatible registry providers, canonical key and aliases.
+  ...Object.fromEntries(
+    openAICompatibleProviders().flatMap((p) =>
+      providerKeyVars(p).map((name) => [name, `${p.displayName} API key`]),
+    ),
+  ),
   DEVIN_API_KEY: "Devin API key",
 };
 

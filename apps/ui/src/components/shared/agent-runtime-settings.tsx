@@ -1,9 +1,13 @@
-import { nearestReasoningLevel } from "@desplega/model-catalog";
+import { nearestReasoningLevel, openAICompatibleKeyVars } from "@desplega/model-catalog";
 import { AlertTriangle, ArrowUpCircle, Info, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useAgentRuntime, useUpdateAgentRuntime } from "@/api/hooks/use-agents";
+import {
+  useAgentRuntime,
+  useSetAgentHarnessProvider,
+  useUpdateAgentRuntime,
+} from "@/api/hooks/use-agents";
 import { useResolvedConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
@@ -24,6 +28,7 @@ import {
   ModelCombobox,
   ModelStatusBadge,
 } from "@/components/shared/model-combobox";
+import { ModelEffortLabel } from "@/components/shared/model-effort-label";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import {
   AUTO_DESCRIPTION,
@@ -72,6 +77,14 @@ type ClaudeTransportValue = ClaudeTransport | "inherit";
 const RUNTIME_EDIT_MIN_VERSION = "1.77.2";
 const ACP_RUNTIME_EDIT_MIN_VERSION = "1.142.0";
 
+/**
+ * Devin runs in Cognition's cloud, so the runtime API (local harnesses) cannot
+ * set it. The editor switches to it through PATCH /harness-provider instead,
+ * which sets only the harness: model and effort do not apply.
+ */
+type EditorHarness = LocalHarnessProvider | "devin";
+const DEVIN_CREDENTIAL_KEYS = ["DEVIN_API_KEY", "DEVIN_ORG_ID"];
+
 const CREDENTIAL_KEYS = [
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
@@ -82,6 +95,9 @@ const CREDENTIAL_KEYS = [
   "AMP_API_KEY",
   "CURSOR_API_KEY",
   "XAI_API_KEY",
+  // OpenAI-compatible registry provider keys, canonical and alias.
+  ...openAICompatibleKeyVars(),
+  ...DEVIN_CREDENTIAL_KEYS,
 ];
 
 function configuredModel(configs: { key: string; value: string }[] | undefined): string {
@@ -157,11 +173,15 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const runtimeQuery = useAgentRuntime(agent.id);
   const envPresenceQuery = useEnvPresence(CREDENTIAL_KEYS);
   const updateRuntime = useUpdateAgentRuntime();
+  const setHarnessProvider = useSetAgentHarnessProvider();
   const gate = useFeatureGate(RUNTIME_EDIT_MIN_VERSION);
   const acpGate = useFeatureGate(ACP_RUNTIME_EDIT_MIN_VERSION);
 
   const configs = configsQuery.data ?? [];
   const [harness, setHarness] = useState<LocalHarnessProvider>(initialHarness);
+  // The local harness state keeps its own default underneath a Devin pick, so
+  // switching back to a local harness restores a valid model.
+  const [devinSelected, setDevinSelected] = useState(agent.harnessProvider === "devin");
   const [model, setModel] = useState(() => configuredModel(configs));
   const [customMode, setCustomMode] = useState(false);
   const [effort, setEffort] = useState<EffortValue>("");
@@ -179,8 +199,12 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const [acpModelEnvKey, setAcpModelEnvKey] = useState(() =>
     configuredValue(configs, "ACP_MODEL_ENV_KEY"),
   );
-  const modelSelectionEnabled = harnessSupportsModelSelection(harness);
-  const acpSelected = harness === "acp";
+  const modelSelectionEnabled = !devinSelected && harnessSupportsModelSelection(harness);
+  const acpSelected = !devinSelected && harness === "acp";
+  const claudeSelected = !devinSelected && harness === "claude";
+  const missingDevinKeys = DEVIN_CREDENTIAL_KEYS.filter(
+    (key) => envPresenceQuery.data?.[key] === false,
+  );
 
   const liveBedrockStatus = useMemo<LiveBedrockStatus | null>(
     () =>
@@ -215,6 +239,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     [harness, model, liveCatalog],
   );
   const shownEffort: EffortValue = effort && effortLevels.includes(effort) ? effort : "";
+  const shownConfiguredModel = devinSelected ? configuredModel(configs) : model;
   const acpModelGroups = useMemo(
     () => modelGroupsForAcpTarget(acpTarget, liveCatalog),
     [acpTarget, liveCatalog],
@@ -226,12 +251,12 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     claudeTransport === "inherit" ? inheritedClaudeTransport : claudeTransport;
   const persistedClaudeTransport = runtimeQuery.data?.claude.transport;
   const claudeBridgeConflict =
-    harness === "claude" &&
+    claudeSelected &&
     runtimeQuery.data?.claude.bridgeEffective === true &&
     selectedClaudeTransport === "sdk";
   const claudeRuntimeUnsupported = runtimeQuery.data === null;
   const claudeRuntimeUnavailable =
-    harness === "claude" && (runtimeQuery.isError || runtimeQuery.data === undefined);
+    claudeSelected && (runtimeQuery.isError || runtimeQuery.data === undefined);
 
   // Re-syncs the editable fields from PERSISTED settings only when those
   // settings actually change. The async inputs (env presence, Bedrock probe,
@@ -241,6 +266,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   // guard.
   const syncKey = [
     agent.id,
+    agent.harnessProvider,
     initialHarness,
     configuredModel(configs),
     configuredEffort(configs),
@@ -264,6 +290,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       liveCatalog,
     );
     setHarness(initialHarness);
+    setDevinSelected(agent.harnessProvider === "devin");
     setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups, liveCatalog));
     setEffort(harnessSupportsModelSelection(initialHarness) ? configuredEffort(configs) : "");
     setAcpTarget(configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"));
@@ -272,7 +299,15 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     setAcpArgs(invocation.args.join("\n"));
     setAcpEnvKeys(configuredStringList(configs, "ACP_TARGET_ENV_KEYS", /\s*,\s*/).join("\n"));
     setAcpModelEnvKey(configuredValue(configs, "ACP_MODEL_ENV_KEY"));
-  }, [syncKey, configs, initialHarness, envPresenceQuery.data, liveBedrockStatus, liveCatalog]);
+  }, [
+    syncKey,
+    agent.harnessProvider,
+    configs,
+    initialHarness,
+    envPresenceQuery.data,
+    liveBedrockStatus,
+    liveCatalog,
+  ]);
 
   useEffect(() => {
     if (persistedClaudeTransport === undefined) return;
@@ -288,6 +323,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   function changeModel(nextModel: string) {
     setModel(nextModel);
     resetUnsupportedEffort(harness, nextModel);
+  }
+
+  function changeEditorHarness(next: EditorHarness) {
+    setDevinSelected(next === "devin");
+    if (next !== "devin") changeHarness(next);
   }
 
   function changeHarness(nextHarness: LocalHarnessProvider) {
@@ -312,6 +352,16 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   }
 
   function save() {
+    if (devinSelected) {
+      setHarnessProvider.mutate(
+        { id: agent.id, harnessProvider: "devin" },
+        {
+          onSuccess: () => toast.success("Runtime settings updated"),
+          onError: (err) => toast.error(err instanceof Error ? err.message : "Update failed"),
+        },
+      );
+      return;
+    }
     if (modelSelectionEnabled && !model.trim()) return;
     if (acpSelected && acpTarget === "custom" && !acpCommand.trim()) return;
     if (claudeBridgeConflict || claudeRuntimeUnavailable) return;
@@ -355,11 +405,15 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   }
 
   const disabledChoice =
-    !customMode && modelOption
+    !devinSelected && !customMode && modelOption
       ? !groups.find((g) => g.provider === modelOption.provider)?.enabled
       : false;
 
-  if (agent.harnessProvider && !isLocalHarness(agent.harnessProvider)) {
+  if (
+    agent.harnessProvider &&
+    agent.harnessProvider !== "devin" &&
+    !isLocalHarness(agent.harnessProvider)
+  ) {
     return <UnsupportedHarnessNotice agent={agent} configuredModel={model} />;
   }
 
@@ -381,7 +435,10 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <div className="w-full space-y-3 sm:w-56">
           <div className="space-y-1.5">
             <Label>Harness</Label>
-            <Select value={harness} onValueChange={(v) => changeHarness(v as LocalHarnessProvider)}>
+            <Select
+              value={devinSelected ? "devin" : harness}
+              onValueChange={(v) => changeEditorHarness(v as EditorHarness)}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -394,11 +451,19 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
                     </span>
                   </SelectItem>
                 ))}
+                {/* Devin cannot run a lead: a lead needs the swarm MCP, which Devin sessions lack. */}
+                <SelectItem value="devin" disabled={agent.isLead}>
+                  <span className="flex items-center gap-2">
+                    <HarnessIcon harness="devin" className="h-4 w-4 opacity-100" />
+                    {HARNESS_LABEL.devin}
+                    {agent.isLead ? " (workers only)" : null}
+                  </span>
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {harness === "claude" ? (
+          {claudeSelected ? (
             <div className="space-y-1.5">
               <Label htmlFor="claude-transport">Transport</Label>
               {runtimeQuery.data ? (
@@ -588,6 +653,18 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         </div>
       ) : null}
 
+      {devinSelected ? (
+        <AlertCallout tone={missingDevinKeys.length > 0 ? "warning" : "info"} icon={Info}>
+          <p className="text-muted-foreground">
+            Devin runs in Cognition&apos;s cloud. The worker needs <code>DEVIN_API_KEY</code> and{" "}
+            <code>DEVIN_ORG_ID</code>; model and effort settings do not apply.
+            {missingDevinKeys.length > 0
+              ? ` Not set in swarm config: ${missingDevinKeys.join(", ")}.`
+              : null}
+          </p>
+        </AlertCallout>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         {modelSelectionEnabled ? (
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -599,6 +676,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
           onClick={save}
           disabled={
             updateRuntime.isPending ||
+            setHarnessProvider.isPending ||
             claudeRuntimeUnavailable ||
             claudeBridgeConflict ||
             (acpSelected && !acpGate.supported) ||
@@ -619,39 +697,37 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       ) : null}
 
       <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-        <span>
-          Configured: <code>{model || "unset"}</code>
+        <span className="flex min-w-0 items-center gap-1.5">
+          Configured:{" "}
+          {shownConfiguredModel ? (
+            <ModelEffortLabel
+              model={shownConfiguredModel}
+              effort={modelSelectionEnabled ? shownEffort || null : null}
+              catalog={liveCatalog ?? undefined}
+              className="text-foreground"
+              title={shownConfiguredModel}
+            />
+          ) : (
+            <code>unset</code>
+          )}
         </span>
-        <span>
-          Last used: <code>{latestModel?.model ?? "not reported"}</code>
+        <span className="flex min-w-0 items-center gap-1.5">
+          Last used:{" "}
+          {latestModel?.model ? (
+            <ModelEffortLabel
+              model={latestModel.model}
+              effort={latestModel.reasoningEffort}
+              catalog={liveCatalog ?? undefined}
+              className="text-foreground"
+              title={latestModel.model}
+            />
+          ) : (
+            <code>not reported</code>
+          )}
         </span>
-        {modelSelectionEnabled ? (
-          <>
-            <span className="flex items-center gap-1.5">
-              Effort:{" "}
-              <ReasoningEffortIcon
-                level={shownEffort || undefined}
-                className="text-muted-foreground"
-              />{" "}
-              <code>{shownEffort ? REASONING_EFFORT_LABEL[shownEffort] : AUTO_LABEL}</code>
-            </span>
-            <span className="flex items-center gap-1.5">
-              Last effort:{" "}
-              <ReasoningEffortIcon
-                level={latestModel?.reasoningEffort}
-                className="text-muted-foreground"
-              />{" "}
-              <code>
-                {latestModel?.reasoningEffort
-                  ? REASONING_EFFORT_LABEL[latestModel.reasoningEffort]
-                  : "not reported"}
-              </code>
-            </span>
-          </>
-        ) : null}
       </div>
 
-      {modelOption?.cost || modelOption?.status || modelOption?.releaseDate ? (
+      {!devinSelected && (modelOption?.cost || modelOption?.status || modelOption?.releaseDate) ? (
         <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
           <ModelStatusBadge status={modelOption.status} />
           {modelOption.cost ? (

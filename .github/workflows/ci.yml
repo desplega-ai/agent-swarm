@@ -298,12 +298,12 @@ jobs:
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   # Resolve "the latest timings snapshot" ONCE per run and hand the same files
-  # to both shards as an artifact. The primary key never exists at restore time
+  # to every shard as an artifact. The primary key never exists at restore time
   # (save-timings creates it at the end of this run), so every restore goes
   # through the prefix fallback, and that resolves to the newest matching cache
   # at the moment of the call. If each shard restored on its own, a save landing
-  # between the two calls would give them different snapshots; --shard assigns
-  # files from the durations it is given, so the two shards would split two
+  # between two calls would give them different snapshots; --shard assigns
+  # files from the durations it is given, so two shards would split two
   # different lists (one file in both, another in neither) and the run would
   # stay green. Pattern from Bun's docs (docs/test/parallel, "Balancing with
   # --timings"); nothing on the very first run, when --shard splits by count.
@@ -332,7 +332,7 @@ jobs:
       # include-hidden-files: upload-artifact treats every path under a
       # dot-directory as hidden and would upload nothing from .bun-test-timings.
       - name: Hand the snapshot to the shards
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: timings-snapshot
           path: .bun-test-timings
@@ -340,7 +340,7 @@ jobs:
           retention-days: 1
 
   test:
-    name: Run Tests (${{ matrix.shard }}/2)
+    name: Run Tests (${{ matrix.shard }}/4)
     needs: restore-timings
     runs-on: ubuntu-latest
     # Checkout only. Cache + artifact steps use the runner token, and the
@@ -350,7 +350,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
+    # Real Postgres for the read-only checks in src/tests/script-connections-sql.test.ts.
+    # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout repository
@@ -365,10 +379,10 @@ jobs:
         run: bun install --frozen-lockfile
 
       # The per-file durations resolved once by restore-timings (see that job for
-      # why both shards must read the SAME files). Each shard writes only its own
+      # why every shard must read the SAME files). Each shard writes only its own
       # durations to next/N.json; save-timings merges them into the next cache.
       - name: Download test timings
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: timings-snapshot
           path: .bun-test-timings
@@ -376,19 +390,21 @@ jobs:
       - name: Run tests
         id: tests
         # apps/evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
-        # (separate bun package with its own deps + CI test step). 2 shards x
+        # (separate bun package with its own deps + CI test step). 4 shards x
         # --parallel=4 to match merge-gate.yml's partitioning so ci-timings
         # PR-vs-main wall-clock comparisons are apples-to-apples. --parallel runs
         # each test file in its own worker process (implies --isolate); the
         # restored per-file durations balance files across shards by total time.
         # Main's save-timings cache is what PR runs restore from.
+        env:
+          SQL_CONNECTION_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
         run: |
           start=$(date +%s%3N)
           set +e
           mkdir -p .bun-test-timings/next .bun-test-results
           echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
           # shellcheck disable=SC2046
-          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/4 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
             --reporter=junit --reporter-outfile=.bun-test-results/junit-${{ matrix.shard }}.xml \
             $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
@@ -400,7 +416,7 @@ jobs:
 
       - name: Upload this shard's test timings
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-timings-${{ matrix.shard }}
           path: .bun-test-timings/next/${{ matrix.shard }}.json
@@ -411,7 +427,7 @@ jobs:
       # console reporter). The JUnit file is the full-fidelity record.
       - name: Upload this shard's test results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unit-test-results-${{ matrix.shard }}
           path: .bun-test-results/junit-${{ matrix.shard }}.xml
@@ -434,7 +450,7 @@ jobs:
           set -euo pipefail
           if [ ! -s "$REPORT" ]; then echo "no JUnit report; skipping"; exit 0; fi
           bun scripts/ci-unit-test-report.ts --junit "$REPORT" --out .bun-test-results/payload.json \
-            --shard ${{ matrix.shard }}/2 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
+            --shard ${{ matrix.shard }}/4 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
             --status "${{ steps.tests.outputs.status || 'unknown' }}"
           echo "payload=.bun-test-results/payload.json" >> "$GITHUB_OUTPUT"
 
@@ -484,7 +500,7 @@ jobs:
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
               actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
-                        shard:{index:$idx, total:2}, job:("test (\($idx)/2)")}]}')
+                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
@@ -501,7 +517,7 @@ jobs:
     permissions: {}
     steps:
       - name: Download per-shard timings
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: test-timings-*
           path: .bun-test-timings

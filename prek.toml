@@ -109,6 +109,17 @@ stages = ["pre-push"]
 fail_fast = true
 
 [[repos.hooks]]
+id = "check-node-env-access"
+name = "NODE_ENV runtime-read check"
+language = "system"
+entry = "bash scripts/check-node-env-access.sh"
+# Compiled binaries inline process.env.NODE_ENV; src/ must use getNodeEnv().
+files = '^(src/|scripts/check-node-env-access\.sh$)'
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
+
+[[repos.hooks]]
 id = "pi-skills-freshness"
 name = "Pi-skills freshness check"
 language = "system"
