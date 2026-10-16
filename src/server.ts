@@ -177,6 +177,7 @@ import {
 } from "./tools/swarm-config";
 import { registerSwarmXTool } from "./tools/swarm-x";
 // Task pool capability
+import { registerSystemOneDecideTool } from "./tools/system-one-decide";
 import { registerTaskActionTool } from "./tools/task-action";
 // Tracker capability
 import {
@@ -618,6 +619,7 @@ export async function createServer(
     registerGetWorkflowRunTool(server);
     registerRetryWorkflowRunTool(server);
     registerCancelWorkflowRunTool(server);
+    registerSystemOneDecideTool(server);
     registerRequestHumanInputTool(server);
     registerCancelApprovalRequestTool(server);
   }
