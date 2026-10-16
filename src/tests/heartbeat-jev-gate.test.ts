@@ -22,7 +22,8 @@ type Fixture = {
   prevOutput?: string | null;
   failed?: Array<Record<string, unknown>>;
   approvalStatus?: string;
-  jev?: (url: string, init: RequestInit) => Promise<Response>;
+  /** Stands in for `ctx.swarm.systemOne_decide`; returns the bridge result. */
+  jev?: (args: Record<string, any>) => Promise<unknown>;
 };
 
 function fakeCtx(f: Fixture) {
@@ -30,7 +31,7 @@ function fakeCtx(f: Fixture) {
   const calls = {
     prompts: [] as any[],
     kvSets: 0,
-    fetches: [] as Array<{ url: string; init: RequestInit }>,
+    decides: [] as Array<Record<string, any>>,
     approvalReads: 0,
   };
   const table = (columns: string[], rows: unknown[][]) => ({
@@ -107,19 +108,31 @@ function fakeCtx(f: Fixture) {
           data: { requestId: "req-1", url: "https://app.example/approval-requests/req-1" },
         };
       },
+      systemOne_decide: async (args: Record<string, any>) => {
+        calls.decides.push(args);
+        if (!f.jev) throw new Error("no Jev stub");
+        return f.jev(args);
+      },
     },
     stdlib: {
-      fetch: async (url: string, init: RequestInit) => {
-        calls.fetches.push({ url, init });
-        if (!f.jev) throw new Error("no Jev stub");
-        return f.jev(url, init);
+      fetch: async () => {
+        throw new Error("the gate must not fetch Jev from the script realm");
       },
     },
   };
   return { ctx, calls, kv };
 }
 
-const jevSays = (p: number) => async () => Response.json({ answers: { act: { noul: p } } });
+const jevSays = (p: number) => async () => ({
+  success: true,
+  status: 200,
+  data: { success: true, model: "jev-latest", answers: { act: { type: "noul", noul: p } } },
+});
+const jevFails = (message: string) => async () => ({
+  success: true,
+  status: 200,
+  data: { success: false, message },
+});
 const run = (ctx: unknown, args: Record<string, unknown> = {}) =>
   gate({ leadAgentId: LEAD, ...args }, ctx) as Promise<any>;
 
@@ -133,22 +146,21 @@ afterAll(() => {
 });
 
 describe("heartbeat-jev-gate with a provider", () => {
-  test("quiet below the threshold; the key travels only as a placeholder", async () => {
+  test("quiet below the threshold; Jev is asked through the server, with no credential", async () => {
     const { ctx, calls } = fakeCtx({ configs: { TYPESAFE_API_KEY: "x" }, jev: jevSays(0.12) });
     const verdict = await run(ctx);
     expect(verdict).toEqual({
       quiet: true,
       reason: "jev p(needs action)=0.120 < 0.5 via typesafe",
     });
-    expect(calls.fetches).toHaveLength(1);
-    const { url, init } = calls.fetches[0]!;
-    expect(url).toBe("https://api.typesafe.ai/v1/systemone");
-    expect((init.headers as Record<string, string>).Authorization).toBe(
-      "Bearer [REDACTED:TYPESAFE_API_KEY]",
-    );
-    const body = JSON.parse(String(init.body));
-    expect(body.model).toBe("jev-latest");
-    expect(body.questions.act.type).toBe("noul");
+    expect(calls.decides).toHaveLength(1);
+    const args = calls.decides[0]!;
+    expect(args.provider).toBe("typesafe");
+    expect(args.model).toBe("jev-latest");
+    expect(args.questions.act.type).toBe("noul");
+    expect(args.timeoutMs).toBe(25_000);
+    expect(args.maxRetries).toBe(0);
+    expect(JSON.stringify(args)).not.toMatch(/REDACTED|API_KEY|authorization/i);
     expect(calls.prompts).toHaveLength(0);
     expect(calls.kvSets).toBe(0);
   });
@@ -220,49 +232,41 @@ describe("heartbeat-jev-gate with a provider", () => {
     expect(verdict.state.now).toBe("2026-10-15 16:00 Europe/Madrid");
   });
 
-  test("openrouter is used when it is the only key, and skipped behind a gateway", async () => {
-    const direct = fakeCtx({ configs: { OPENROUTER_API_KEY: "x" }, jev: jevSays(0.9) });
-    expect((await run(direct.ctx)).reason).toContain("via openrouter");
-    expect(direct.calls.fetches[0]!.url).toBe("https://openrouter.ai/api/alpha/decisions");
-    expect((direct.calls.fetches[0]!.init.headers as Record<string, string>).Authorization).toBe(
-      "Bearer [REDACTED:OPENROUTER_API_KEY]",
-    );
-
-    const gateway = fakeCtx({
-      configs: { OPENROUTER_API_KEY: "x", OPENROUTER_BASE_URL: "https://gateway.example/v1" },
-      jev: jevSays(0.9),
+  test("openrouter is used when it is the only key", async () => {
+    const { ctx, calls } = fakeCtx({ configs: { OPENROUTER_API_KEY: "x" }, jev: jevSays(0.9) });
+    expect((await run(ctx)).reason).toContain("via openrouter");
+    expect(calls.decides[0]).toMatchObject({
+      provider: "openrouter",
+      model: "~typesafe/jev-latest",
     });
-    const verdict = await run(gateway.ctx);
-    expect(verdict.reason).toStartWith("jev-gate inactive:");
-    expect(gateway.calls.fetches).toHaveLength(0);
   });
 
-  test("a Jev error throws, so the heartbeat records a fail-open error verdict", async () => {
-    const http500 = fakeCtx({
-      configs: { TYPESAFE_API_KEY: "x" },
-      jev: async () => new Response("down", { status: 500 }),
+  test("a refused decision throws, so the heartbeat records a fail-open error verdict", async () => {
+    const refused = fakeCtx({
+      configs: { OPENROUTER_API_KEY: "x" },
+      jev: jevFails("OPENROUTER_BASE_URL points at a gateway."),
     });
-    await expect(run(http500.ctx)).rejects.toThrow("jev typesafe: HTTP 500");
+    await expect(run(refused.ctx)).rejects.toThrow(
+      "jev openrouter: OPENROUTER_BASE_URL points at a gateway.",
+    );
 
-    const rejected = fakeCtx({
+    const bridgeDown = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
-      jev: async () => new Response("no", { status: 401 }),
+      jev: async () => ({ success: false, status: 500, data: { error: "boom" } }),
     });
-    await expect(run(rejected.ctx)).rejects.toThrow("TYPESAFE_API_KEY rejected (HTTP 401)");
+    await expect(run(bridgeDown.ctx)).rejects.toThrow("jev typesafe: boom");
 
     const malformed = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
-      jev: async () => Response.json({ answers: {} }),
+      jev: async () => ({ success: true, status: 200, data: { success: true, answers: {} } }),
     });
     await expect(run(malformed.ctx)).rejects.toThrow("no numeric answers.act.noul");
   });
 
-  test("a Jev call past the timeout throws", async () => {
-    const { ctx } = fakeCtx({
-      configs: { TYPESAFE_API_KEY: "x" },
-      jev: () => new Promise<Response>(() => {}),
-    });
-    await expect(run(ctx, { jevTimeoutMs: 20 })).rejects.toThrow("timed out after 20ms");
+  test("jevTimeoutMs is the server-side time budget", async () => {
+    const { ctx, calls } = fakeCtx({ configs: { TYPESAFE_API_KEY: "x" }, jev: jevSays(0.1) });
+    await run(ctx, { jevTimeoutMs: 5_000 });
+    expect(calls.decides[0]!.timeoutMs).toBe(5_000);
   });
 });
 
@@ -293,7 +297,7 @@ describe("heartbeat-jev-gate without a provider", () => {
     inactive(second);
     expect(second.reason).toContain("awaiting answer");
     expect(calls.prompts).toHaveLength(1);
-    expect(calls.fetches).toHaveLength(0);
+    expect(calls.decides).toHaveLength(0);
   });
 
   test("a rejection is stored as declined; later ticks neither ask nor poll", async () => {

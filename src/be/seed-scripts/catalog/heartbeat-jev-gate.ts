@@ -25,7 +25,7 @@ export const argsSchema = z.object({
   jevTimeoutMs: z
     .number()
     .int()
-    .positive()
+    .min(1_000)
     .max(45_000)
     .optional()
     .describe("Abandon the Jev call after this many ms (default 25000); the gate deadline is 60 s"),
@@ -36,25 +36,15 @@ const KV_KEY = "setup";
 // Measured per decision in the 2026-10-15 heartbeat replay (229 states).
 const COST_PER_DECISION = "$0.00004";
 
-// The egress layer swaps each placeholder for the stored key, only toward the
-// host listed in the default credential bindings. The key never enters this script.
+// Jev is called through `ctx.swarm.systemOne_decide`: the API server reads the
+// key and sends the request, so no key ever enters this script's realm. The
+// server also refuses OpenRouter when the effective OPENROUTER_BASE_URL (stored
+// config or deployment env) points at a gateway.
 const PROVIDERS = {
-  typesafe: {
-    keyName: "TYPESAFE_API_KEY",
-    endpoint: "https://api.typesafe.ai/v1/systemone",
-    model: "jev-latest",
-    auth: "Bearer [REDACTED:TYPESAFE_API_KEY]",
-  },
-  openrouter: {
-    keyName: "OPENROUTER_API_KEY",
-    endpoint: "https://openrouter.ai/api/alpha/decisions",
-    model: "~typesafe/jev-latest",
-    auth: "Bearer [REDACTED:OPENROUTER_API_KEY]",
-  },
+  typesafe: { keyName: "TYPESAFE_API_KEY", model: "jev-latest" },
+  openrouter: { keyName: "OPENROUTER_API_KEY", model: "~typesafe/jev-latest" },
 } as const;
 type ProviderId = keyof typeof PROVIDERS;
-
-const OPENROUTER_DEFAULT_BASE = "https://openrouter.ai/api/v1";
 
 // Worded exactly as in the replay that set the 0.5 threshold; changing it voids that result.
 const QUESTIONS = {
@@ -266,11 +256,7 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
 
   const usable: Record<ProviderId, boolean> = {
     typesafe: cfg(PROVIDERS.typesafe.keyName) !== "",
-    // A gateway base URL means OPENROUTER_API_KEY may be a gateway token; never
-    // send it to openrouter.ai (same rule as the system-one-decision node).
-    openrouter:
-      cfg(PROVIDERS.openrouter.keyName) !== "" &&
-      [OPENROUTER_DEFAULT_BASE, ""].includes(cfg("OPENROUTER_BASE_URL").replace(/\/+$/, "")),
+    openrouter: cfg(PROVIDERS.openrouter.keyName) !== "",
   };
   const candidates: ProviderId[] =
     providerPref === "typesafe"
@@ -339,26 +325,19 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
   const target = PROVIDERS[provider];
   const state = await buildState(ctx, leadId, Date.now(), timeZone);
 
-  const jevTimeoutMs = a.jevTimeoutMs ?? 25_000;
-  let timer: any;
-  const res: Response = await Promise.race([
-    ctx.stdlib.fetch(target.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: target.auth },
-      body: JSON.stringify({ state, model: target.model, questions: QUESTIONS }),
-    }),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`jev ${provider} timed out after ${jevTimeoutMs}ms`)),
-        jevTimeoutMs,
-      );
-    }),
-  ]).finally(() => clearTimeout(timer));
-  if (res.status === 401 || res.status === 403) {
-    throw new Error(`jev ${provider}: ${target.keyName} rejected (HTTP ${res.status})`);
+  // The server enforces the time budget. No retries, as in the replay.
+  const res: any = await ctx.swarm.systemOne_decide({
+    provider,
+    model: target.model,
+    state,
+    questions: QUESTIONS,
+    timeoutMs: a.jevTimeoutMs ?? 25_000,
+    maxRetries: 0,
+  });
+  const body: any = res?.data ?? res;
+  if (res?.success === false || body?.success === false) {
+    throw new Error(`jev ${provider}: ${String(body?.message ?? body?.error ?? `HTTP ${res?.status}`).slice(0, 250)}`);
   }
-  if (!res.ok) throw new Error(`jev ${provider}: HTTP ${res.status}`);
-  const body: any = await res.json();
   const p = body?.answers?.act?.noul;
   if (typeof p !== "number" || !Number.isFinite(p)) {
     throw new Error(`jev ${provider}: response has no numeric answers.act.noul`);

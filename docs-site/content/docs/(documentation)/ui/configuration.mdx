@@ -127,12 +127,15 @@ probability and provider in `reason`. On a wake verdict, `summary` lists the fai
 tracked items behind it. One decision costs about $0.00004.
 
 Jev needs one of two global secrets, set on the Secrets page; a key set only in the API's
-environment is not detected. The script never reads the key:
-the script egress layer adds it to requests bound for the host that issued it.
+environment is not detected. The key never enters the script: it calls the
+`system-one-decide` tool, and the API server reads the key and sends the request, the same way a
+`system-one-decision` workflow node does.
 
 - `TYPESAFE_API_KEY`: TypeSafe's decisions API at `api.typesafe.ai`.
-- `OPENROUTER_API_KEY`: OpenRouter's decisions API at `openrouter.ai`. Skipped when
-  `OPENROUTER_BASE_URL` points at a gateway, since the key may then be a gateway token.
+- `OPENROUTER_API_KEY`: OpenRouter's decisions API at `openrouter.ai`. Refused when the
+  effective `OPENROUTER_BASE_URL` (stored or in the API's environment) points at a gateway, since
+  the key may then be a gateway token. The tick then reports an `error` verdict and the checklist
+  runs.
 
 With neither key, the first tick creates one approval request asking a person to add a key or
 decline, and links it in the heartbeat log's gate `reason`. No Slack message is sent. Until a

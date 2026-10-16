@@ -8,7 +8,7 @@ The script credential broker is the scripts-runtime credential injection layer. 
 - A binding is `{ configKey, allowedHosts, headerTemplate?, queryTemplate?, scope, scopeId?, active? }`.
 - `runScript()` reads the active bindings for the calling agent, resolves `configKey` values with the same `getResolvedConfig()` pattern used by MCP server env/header config resolution, and passes only resolved bindings to the subprocess.
 - `eval-harness.ts` installs the fetch patch. Substitution happens only in headers/query parameters and only when the request hostname is in `allowedHosts`.
-- The legacy `GITHUB_TOKEN -> api.github.com` behavior is represented as a default binding, as are `TYPESAFE_API_KEY -> api.typesafe.ai` and `OPENROUTER_API_KEY -> openrouter.ai` for the Jev heartbeat gate.
+- The legacy `GITHUB_TOKEN -> api.github.com` behavior is represented as a default binding.
 
 Example binding document:
 

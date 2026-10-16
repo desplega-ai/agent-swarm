@@ -17,24 +17,4 @@ export const DEFAULT_CREDENTIAL_BINDINGS: CredentialBinding[] = [
     active: true,
     authKind: "config",
   },
-  // Jev decisions hosts, used by the seeded heartbeat-jev-gate script. Each key
-  // is sent only to the host that issued it.
-  {
-    configKey: "TYPESAFE_API_KEY",
-    allowedHosts: ["api.typesafe.ai"],
-    headerTemplate: "Authorization: Bearer [REDACTED:TYPESAFE_API_KEY]",
-    scope: "global",
-    scopeId: null,
-    active: true,
-    authKind: "config",
-  },
-  {
-    configKey: "OPENROUTER_API_KEY",
-    allowedHosts: ["openrouter.ai"],
-    headerTemplate: "Authorization: Bearer [REDACTED:OPENROUTER_API_KEY]",
-    scope: "global",
-    scopeId: null,
-    active: true,
-    authKind: "config",
-  },
 ];

@@ -122,6 +122,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [get-workflow-run](#get-workflow-run)
   - [retry-workflow-run](#retry-workflow-run)
   - [cancel-workflow-run](#cancel-workflow-run)
+  - [system-one-decide](#system-one-decide)
   - [request-human-input](#request-human-input)
   - [cancel-approval-request](#cancel-approval-request)
 - [Skills Tools](#skills-tools)
@@ -1514,6 +1515,21 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 |-----------|------|----------|---------|-------------|
 | `runId` | `string` | Yes | - | Workflow run ID to cancel |
 | `reason` | `string` | No | - | Optional reason for cancellation |
+
+### system-one-decide
+
+**Ask a SystemOne decision model**
+
+Send a state and typed questions (noul, choice, score) to a SystemOne decision host such as Jev, and return the validated answers. Same request, provider list, credentials and validation as the `system-one-decision` workflow node, without its human review band. The provider credential is a global secret that stays on the server; this tool never returns it.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `unknown` | No | - | Decision host (default typesafe) |
+| `model` | `string` | No | - | Provider model id (default: the provider's) |
+| `state` | `unknown` | Yes | - | The state to decide on |
+| `questions` | `object` | Yes | - | Questions by id, each `{ type: 'noul' | 'choice' | 'score', instructions, criteria }` |
+| `timeoutMs` | `number` | No | - | Time budget for the call, retries included (default 30000) |
+| `maxRetries` | `number` | No | - | Retries on transient failures inside the time budget (default 2) |
 
 ### request-human-input
 

@@ -181,6 +181,9 @@ export const SDK_TOOL_NAME_MAP = {
   // ── human input ──
   request_humanInput: "request-human-input",
   approval_cancel: "cancel-approval-request", // destructive
+
+  // ── decisions ──
+  systemOne_decide: "system-one-decide",
 } as const;
 
 export const SDK_ALLOWLIST = Object.keys(SDK_TOOL_NAME_MAP) as Array<

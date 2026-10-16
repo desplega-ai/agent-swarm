@@ -143,6 +143,9 @@ export const DEFERRED_TOOLS = new Set([
   "request-human-input",
   "cancel-approval-request",
 
+  // Decisions (1)
+  "system-one-decide",
+
   // Skills (12)
   "skill-create",
   "skill-update",
