@@ -38,10 +38,24 @@ COPY tsconfig.json ./
 # The compiled API binary cannot share its /$bunfs/ virtual filesystem with
 # spawned subprocesses — bun run /$bunfs/eval-harness.ts fails in the harness
 # subprocess. Pre-building to real .js files on disk fixes this.
+#
+# just-bash (ctx.fs / ctx.sh) stays out of the harness bundle: inlined, it
+# grows the bundle from ~250 KB to ~4.5 MB and every native run parses it.
+# It gets its own bundles under scripts-runtime/node_modules, which the
+# harness resolves only on the first ctx.fs / ctx.sh call.
 RUN mkdir -p scripts-runtime script-workflows-runtime && \
     bun build ./src/scripts-runtime/eval-harness.ts \
       --target bun --no-splitting \
+      --external just-bash --external @desplega.ai/agent-fs-just-bash \
       --outfile ./scripts-runtime/eval-harness.bundle.js && \
+    bun build ./node_modules/just-bash/dist/bundle/index.js \
+      --target bun --no-splitting \
+      --outfile ./scripts-runtime/node_modules/just-bash/index.js && \
+    echo '{"type":"module","main":"index.js"}' > ./scripts-runtime/node_modules/just-bash/package.json && \
+    bun build ./node_modules/@desplega.ai/agent-fs-just-bash/dist/index.js \
+      --target bun --no-splitting \
+      --outfile ./scripts-runtime/node_modules/@desplega.ai/agent-fs-just-bash/index.js && \
+    echo '{"type":"module","main":"index.js"}' > ./scripts-runtime/node_modules/@desplega.ai/agent-fs-just-bash/package.json && \
     bun build ./src/scripts-runtime/extract-args-schema.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/extract-args-schema.bundle.js && \

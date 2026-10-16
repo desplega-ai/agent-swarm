@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { placeholderForConfigKey } from "../scripts-runtime/credential-broker";
 import { NativeScriptExecutor } from "../scripts-runtime/executors/native";
 import { QuickJSScriptExecutor } from "../scripts-runtime/executors/quickjs";
@@ -241,3 +242,36 @@ function suite(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean
 
 suite("native", () => new NativeScriptExecutor(), true);
 suite("quickjs", () => new QuickJSScriptExecutor(), false);
+
+// Mirrors the Dockerfile bundle step: just-bash stays out of the harness bundle
+// and resolves from scripts-runtime/node_modules on the first ctx.fs / ctx.sh call.
+test.skipIf(SKIP_SANDBOX_SPAWN_TESTS)(
+  "compiled-binary mode: harness stays small and loads just-bash lazily",
+  async () => {
+    const dir = `${process.env.TMPDIR ?? "/tmp"}/script-fs-bundle-${crypto.randomUUID()}`;
+    const runtimeSrc = fileURLToPath(new URL("../scripts-runtime", import.meta.url));
+    const modules = fileURLToPath(new URL("../../node_modules", import.meta.url));
+    const adapterDir = `${dir}/node_modules/@desplega.ai/agent-fs-just-bash`;
+    const packageJson = JSON.stringify({ type: "module", main: "index.js" });
+    try {
+      await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --external just-bash --external @desplega.ai/agent-fs-just-bash --outfile ${dir}/eval-harness.bundle.js`.quiet();
+      await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${dir}/stdlib.bundle.js`.quiet();
+      await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${dir}/swarm-sdk.bundle.js`.quiet();
+      await Bun.$`bun build ${modules}/just-bash/dist/bundle/index.js --target bun --no-splitting --outfile ${dir}/node_modules/just-bash/index.js`.quiet();
+      await Bun.$`bun build ${modules}/@desplega.ai/agent-fs-just-bash/dist/index.js --target bun --no-splitting --outfile ${adapterDir}/index.js`.quiet();
+      await Bun.write(`${dir}/node_modules/just-bash/package.json`, packageJson);
+      await Bun.write(`${adapterDir}/package.json`, packageJson);
+
+      expect(Bun.file(`${dir}/eval-harness.bundle.js`).size).toBeLessThan(1024 * 1024);
+
+      process.env.SCRIPT_RUNTIME_DIR = dir;
+      const output = await new NativeScriptExecutor().run(input(ROUND_TRIP));
+      expect(output.error).toBeUndefined();
+      expect((output.result as Record<string, unknown>).readBack).toBe("from-bash\n");
+    } finally {
+      delete process.env.SCRIPT_RUNTIME_DIR;
+      await Bun.$`rm -rf ${dir}`;
+    }
+  },
+  { timeout: 60_000 },
+);
