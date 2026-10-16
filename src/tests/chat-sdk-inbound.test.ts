@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -422,6 +422,67 @@ describe("Chat SDK inbound voice notes and size limit", () => {
       mimeType: "audio/ogg",
       sizeBytes: voiceBytes.byteLength,
     });
+  });
+
+  test("a short transcription key echoed in a provider or network error stays out of logs and task text", async () => {
+    const shortKey = "local-pass";
+    const stt = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () =>
+        Response.json(
+          {
+            error: {
+              message: `Incorrect API key provided: ${shortKey}. Check your credentials.`,
+            },
+          },
+          { status: 401 },
+        ),
+    });
+    const realFetch = globalThis.fetch;
+    const warnings: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    });
+    process.env.TRANSCRIPTION_API_KEY = shortKey;
+    process.env.TRANSCRIPTION_BASE_URL = `http://127.0.0.1:${stt.port}/v1`;
+    try {
+      harness.mock.addFile("voice/note-401.oga", voiceBytes);
+      await postTelegramUpdate(voiceUpdate(2111, "voice/note-401.oga"));
+      await flushChatBuffers();
+
+      // The network-error branch: the transport error echoes the key.
+      globalThis.fetch = Object.assign(
+        (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+          String(input instanceof Request ? input.url : input).endsWith("/audio/transcriptions")
+            ? Promise.reject(new TypeError(`connect failed, bearer ${shortKey} refused`))
+            : realFetch(input, init),
+        realFetch,
+      );
+      harness.mock.addFile("voice/note-net.oga", voiceBytes);
+      await postTelegramUpdate(voiceUpdate(2112, "voice/note-net.oga"));
+      await flushChatBuffers();
+    } finally {
+      globalThis.fetch = realFetch;
+      warn.mockRestore();
+      stt.stop(true);
+      delete process.env.TRANSCRIPTION_API_KEY;
+      delete process.env.TRANSCRIPTION_BASE_URL;
+    }
+
+    for (const [chatId, failure] of [
+      [2111, "Incorrect API key provided: [REDACTED:TRANSCRIPTION_API_KEY]"],
+      [2112, "connect failed, bearer [REDACTED:TRANSCRIPTION_API_KEY] refused"],
+    ] as const) {
+      const tasks = await chatTasks(chatId);
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.task).toContain(`(transcription failed: ${failure}`);
+      expect(tasks[0]!.task).not.toContain(shortKey);
+      expect(await getTaskAttachments(tasks[0]!.id)).toHaveLength(1);
+    }
+    const transcriptionWarnings = warnings.filter((line) => line.includes("could not transcribe"));
+    expect(transcriptionWarnings).toHaveLength(2);
+    expect(warnings.join("\n")).not.toContain(shortKey);
   });
 
   test("without a transcription provider the voice note is attached with a one-line note", async () => {

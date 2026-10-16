@@ -6,7 +6,7 @@
  * `whisper-1`) pick the service. Read at call time, so a config reload
  * applies without a restart.
  */
-import { scrubSecrets } from "./secret-scrubber";
+import { createValueScrubber, scrubSecrets } from "./secret-scrubber";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "whisper-1";
@@ -38,6 +38,10 @@ export async function transcribeAudio(input: {
     /\/+$/,
     "",
   );
+  // scrubSecrets skips known values under 12 chars, and a self-hosted key can
+  // be shorter, so the submitted key is scrubbed by value from every error.
+  const keyScrubber = createValueScrubber([{ value: apiKey, name: TRANSCRIPTION_API_KEY_ENV }]);
+  const scrub = (text: string) => scrubSecrets(keyScrubber.text(text));
   const form = new FormData();
   const type = input.mimeType ?? input.data.type;
   form.append("file", type ? new Blob([input.data], { type }) : input.data, input.filename);
@@ -55,9 +59,7 @@ export async function transcribeAudio(input: {
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new TranscriptionError(`no answer within ${TRANSCRIPTION_TIMEOUT_MS / 1000} s`);
     }
-    throw new TranscriptionError(
-      scrubSecrets(error instanceof Error ? error.message : String(error)),
-    );
+    throw new TranscriptionError(scrub(error instanceof Error ? error.message : String(error)));
   }
   const payload = (await response.json().catch(() => null)) as {
     text?: unknown;
@@ -68,7 +70,7 @@ export async function transcribeAudio(input: {
       typeof payload?.error?.message === "string"
         ? payload.error.message
         : `HTTP ${response.status}`;
-    throw new TranscriptionError(scrubSecrets(detail));
+    throw new TranscriptionError(scrub(detail));
   }
   return payload.text.trim();
 }
