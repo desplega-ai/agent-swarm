@@ -35,6 +35,7 @@ import getChildOutputsSrc from "./catalog/get-child-outputs.ts" with { type: "te
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
 import githubIssuesPullSrc from "./catalog/github-issues-pull.ts" with { type: "text" };
 import groupCountSrc from "./catalog/group-count.ts" with { type: "text" };
+import heartbeatJevGateSrc from "./catalog/heartbeat-jev-gate.ts" with { type: "text" };
 import jsonQuerySrc from "./catalog/json-query.ts" with { type: "text" };
 import linearIssueSrc from "./catalog/linear-issue.ts" with { type: "text" };
 import memoryDedupCheckSrc from "./catalog/memory-dedup-check.ts" with { type: "text" };
@@ -111,6 +112,14 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "Keep an app's synced rows fresh on a schedule or on demand; the script a targetType:'script' schedule points at to sync an app.",
     source: asText(appSyncRunSrc),
+  },
+  {
+    name: "heartbeat-jev-gate",
+    description:
+      "Heartbeat checklist gate backed by Jev (TypeSafe or OpenRouter decisions API): scores a compact swarm state and returns {quiet, reason, summary} for HEARTBEAT_CHECKLIST_GATE_SCRIPT.",
+    intent:
+      "Skip quiet Lead heartbeat checklist ticks with a cheap Jev decision; with no Jev credential it asks a human once, then stays a no-op until a key is added.",
+    source: asText(heartbeatJevGateSrc),
   },
   {
     name: "fetch-readable",
