@@ -336,8 +336,8 @@ Two settings control the policy. Both apply to new runs after a config reload.
 | `SCRIPT_EGRESS_ALLOW_PRIVATE` | `false` | `true` allows private, loopback and link-local destinations. |
 | `SCRIPT_EGRESS_ALLOWLIST` | empty | Comma-separated `host[:port]` patterns. A leading `*.` matches subdomains. When set, scripts can reach only these hosts, public or private. Empty means any public host. |
 
-`ctx.swarm` and `ctx.mcp` still reach the swarm API: only those host calls are
-exempt from the policy. A direct script request to the swarm API's address
+`ctx.swarm`, `ctx.mcp` and SQL connection queries (`ctx.api.<slug>.query`)
+still reach the swarm API: only those host calls are exempt from the policy. A direct script request to the swarm API's address
 follows the configured policy like any other host. Script code cannot read the
 credential the host uses for those calls: `Redacted.value(ctx.swarm.config.apiKey)` and
 `Redacted.value(ctx.swarm.config.runtimeInstanceId)` throw

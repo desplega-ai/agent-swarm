@@ -170,6 +170,7 @@ function callable(target: unknown, name: string): (...args: unknown[]) => Promis
 /** Runs an async host call that the sandbox requested. Only these paths exist. */
 async function dispatchCall(
   hostCtx: RuntimeCtx,
+  sqlApiSlugs: ReadonlySet<string>,
   path: string,
   args: unknown[],
   signal: AbortSignal,
@@ -217,9 +218,11 @@ async function dispatchCall(
     const name = rest.join(".");
     const client = own(hostCtx[kind], first);
     const method = callable(own(client, name), `ctx.${kind}.${first}.${name}`);
-    // ctx.mcp goes through the swarm API's MCP proxy; ctx.api calls the
-    // connection's own host and stays under the egress policy.
-    return kind === "mcp" ? swarmHostCalls.run(true, () => method(...args)) : method(...args);
+    // ctx.mcp goes through the swarm API's MCP proxy, and so does a SQL
+    // connection's ctx.api query. Other ctx.api calls go to the connection's
+    // own host and stay under the egress policy.
+    const viaSwarm = kind === "mcp" || sqlApiSlugs.has(first);
+    return viaSwarm ? swarmHostCalls.run(true, () => method(...args)) : method(...args);
   }
   throw new Error(`unknown quickjs host call: ${path}`);
 }
@@ -448,6 +451,9 @@ async function evaluateJob(
     apiConnections: job.configPayload.apiConnections,
     mcpConnections: job.configPayload.mcpConnections,
   });
+  const sqlApiSlugs = new Set(
+    (job.configPayload.apiConnections ?? []).filter((c) => c.kind === "sql").map((c) => c.slug),
+  );
   const shape = {
     hasRuntimeInstanceId: config.runtimeInstanceId !== undefined,
     api: Object.fromEntries(Object.entries(hostCtx.api).map(([slug, c]) => [slug, Object.keys(c)])),
@@ -517,7 +523,9 @@ async function evaluateJob(
   define("__host_call", (pathHandle, argsHandle) => {
     const path = ctx.getString(pathHandle);
     const callArgs = JSON.parse(ctx.getString(argsHandle)) as unknown[];
-    return bridge(() => host.call(() => dispatchCall(hostCtx, path, callArgs, host.signal), true));
+    return bridge(() =>
+      host.call(() => dispatchCall(hostCtx, sqlApiSlugs, path, callArgs, host.signal), true),
+    );
   });
   define("__host_sync", (opHandle, valueHandle) => {
     let envelope: unknown;
