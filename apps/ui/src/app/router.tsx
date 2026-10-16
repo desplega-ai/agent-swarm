@@ -15,7 +15,6 @@ const TaskDetailPage = lazyRoute(() => import("@/pages/tasks/[id]/page"));
 const SessionsPage = lazyRoute(() => import("@/pages/sessions/page"));
 const SessionDetailPage = lazyRoute(() => import("@/pages/sessions/[rootTaskId]/page"));
 const ChatPage = lazyRoute(() => import("@/pages/chat/page"));
-const ServicesPage = lazyRoute(() => import("@/pages/services/page"));
 const SchedulesPage = lazyRoute(() => import("@/pages/schedules/page"));
 const ScheduleDetailPage = lazyRoute(() => import("@/pages/schedules/[id]/page"));
 const UsageContent = lazyRoute(() =>
@@ -154,7 +153,6 @@ export const router = createBrowserRouter([
       { path: "sessions/:rootTaskId", element: <SessionDetailPage /> },
       { path: "chat", element: <ChatPage /> },
       { path: "chat/:channelId", element: <ChatPage /> },
-      { path: "services", element: <ServicesPage /> },
       { path: "schedules", element: <SchedulesPage /> },
       { path: "schedules/:id", element: <ScheduleDetailPage /> },
       { path: "workflows", element: <WorkflowsPage /> },

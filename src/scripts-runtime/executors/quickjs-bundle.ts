@@ -37,33 +37,38 @@ export type QuickJSBundle =
 
 type BuildConfigWithFiles = Parameters<typeof Bun.build>[0] & { files: Record<string, string> };
 
-let zodEntryCache: string | null | undefined;
+const zodEntryCache = new Map<string, string | null>();
 
 /**
  * Prefer zod's real ESM sources, which tree-shake well. The prebuilt
  * `zod.bundle.js` of the API image barely tree-shakes (~340 KB against ~87 KB
  * for z.object + z.string().email()), so it is only the last fallback.
  */
-export async function resolveZodEntry(): Promise<string | null> {
-  if (zodEntryCache !== undefined) return zodEntryCache;
+export async function resolveZodEntry(
+  moduleName: "zod" | "zod/mini" = "zod",
+): Promise<string | null> {
   const runtimeDir = process.env.SCRIPT_RUNTIME_DIR;
+  const cacheKey = `${runtimeDir ?? ""}:${moduleName}`;
+  if (zodEntryCache.has(cacheKey)) return zodEntryCache.get(cacheKey)!;
+  const esmPath = moduleName === "zod" ? "index.js" : "mini/index.js";
+  const bundleName = moduleName === "zod" ? "zod" : "zod-mini";
   const candidates: Array<() => string | undefined> = [
-    () => (runtimeDir ? `${runtimeDir}/zod-esm/index.js` : undefined),
-    () => Bun.resolveSync("zod", import.meta.dir),
-    () => (runtimeDir ? `${runtimeDir}/zod.bundle.js` : undefined),
+    () => (runtimeDir ? `${runtimeDir}/zod-esm/${esmPath}` : undefined),
+    () => Bun.resolveSync(moduleName, import.meta.dir),
+    () => (runtimeDir ? `${runtimeDir}/${bundleName}.bundle.js` : undefined),
   ];
   for (const candidate of candidates) {
     try {
       const path = candidate();
       if (path && (await Bun.file(path).exists())) {
-        zodEntryCache = path;
+        zodEntryCache.set(cacheKey, path);
         return path;
       }
     } catch {
       // Try the next candidate. Bun.resolveSync throws inside the compiled binary.
     }
   }
-  zodEntryCache = null;
+  zodEntryCache.set(cacheKey, null);
   return null;
 }
 
@@ -89,7 +94,6 @@ export async function bundleForQuickJS(source: string): Promise<QuickJSBundle> {
     return cached;
   }
 
-  const zodEntry = await resolveZodEntry();
   let result: Awaited<ReturnType<typeof Bun.build>>;
   try {
     result = await Bun.build({
@@ -117,9 +121,12 @@ export async function bundleForQuickJS(source: string): Promise<QuickJSBundle> {
               contents: args.path === "stdlib" ? STDLIB_MODULE : SWARM_SDK_MODULE,
               loader: "js",
             }));
-            build.onResolve({ filter: /^zod$/ }, () => {
+            build.onResolve({ filter: /^zod(?:\/mini)?$/ }, async (args) => {
+              const zodEntry = await resolveZodEntry(args.path as "zod" | "zod/mini");
               if (!zodEntry) {
-                throw new Error("zod is not available to the quickjs executor in this deployment");
+                throw new Error(
+                  `${args.path} is not available to the quickjs executor in this deployment`,
+                );
               }
               return { path: zodEntry };
             });

@@ -1,3 +1,9 @@
+import {
+  openAICompatibleBaseUrlVars,
+  openAICompatibleKeyVars,
+  providerForModel,
+  providerKeyVars,
+} from "@desplega/model-catalog";
 import type { ApiClient } from "./http";
 import { asRecord, expect, expectStatus, pollUntil } from "./http";
 import { knownSecrets, redactSecrets } from "./redact";
@@ -18,15 +24,30 @@ const DEFAULT_MODELS: Record<string, string> = {
   // xAI's cheapest model (`grok models` with an API key).
   grok: "grok-build-0.1",
 };
+// OpenAI-compatible registry providers: keys (canonical and alias) and their
+// `<ID>_BASE_URL` overrides, forwarded to pi/opencode workers.
+const OPENAI_COMPATIBLE_KEYS = [...openAICompatibleKeyVars(), ...openAICompatibleBaseUrlVars()];
+
+/** Key requirement for a registry `<id>/*` model on pi/opencode, else null. */
+function openAICompatibleKeyRequirement(model: string): { ok: boolean; message: string } | null {
+  const provider = providerForModel(model);
+  if (!provider) return null;
+  const names = providerKeyVars(provider);
+  return {
+    ok: names.some((name) => !!process.env[name]),
+    message: `${provider.id}/* models require ${names.join(" or ")}`,
+  };
+}
+
 const PROVIDER_CREDENTIAL_KEYS = {
   claude: { keys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"], fallbackKeys: [] },
   codex: { keys: ["CODEX_OAUTH", "OPENAI_API_KEY"], fallbackKeys: [] },
   pi: {
-    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
+    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", ...OPENAI_COMPATIBLE_KEYS],
     fallbackKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   },
   opencode: {
-    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
+    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", ...OPENAI_COMPATIBLE_KEYS],
     fallbackKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   },
   dsh: {
@@ -130,7 +151,13 @@ function workerEnv(
 }
 
 function requireCredential(provider: string): void {
-  if (provider === "claude") {
+  const directKey =
+    provider === "pi" || provider === "opencode"
+      ? openAICompatibleKeyRequirement(modelFor(provider))
+      : null;
+  if (directKey) {
+    expect(directKey.ok, directKey.message);
+  } else if (provider === "claude") {
     expect(
       process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY,
       "Claude requires CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY",

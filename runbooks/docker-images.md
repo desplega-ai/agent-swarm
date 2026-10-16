@@ -22,7 +22,7 @@ CI tracks uncompressed amd64 sizes over time via the **ci-metrics** swarm script
 prek, builder            pinned prek binary + compiled agent-swarm binary
 worker-base              minimal apt set + bun + ALL four harness CLIs +
                          context-mode CLI + npx-skills installs + base
-                         /opt/global-deps (pm2, wts, agent-fs) + settings/ENVs
+                         /opt/global-deps (wts, agent-fs) + settings/ENVs
 ├─ worker-slim (target)  worker-base + leaf block. CI + E2E image.
 └─ worker-full-base      + dev toolchain, glab, Playwright libs + chromium,
                          postgres/redis servers, /opt/global-deps-full
@@ -186,7 +186,7 @@ Compressed pull size ≈ 35–45 % of uncompressed on-disk size.
 `Dockerfile.worker` rebuilds happen via `bun run docker:build:worker` locally, and on every push to `main` via `.github/workflows/docker-and-deploy.yml` (which publishes `worker-full` as `:latest`/`:{VERSION}`/`:sha-*` AND `worker-slim` as `:slim`/`:{VERSION}-slim`/`:sha-*-slim`). PRs build only the `worker-slim` target in the merge gate. After local changes:
 
 ```bash
-bun run docker:build:worker && bun run pm2-restart
+docker compose -f docker-compose.local.yml up --build
 ```
 
 See [ci.md](./ci.md) for the full Docker CI flow, and the docs-site "Published Artifacts" page for the consumer-facing inventory.

@@ -556,6 +556,40 @@ describe("Slack renderer v2", () => {
     });
   }
 
+  for (const delegationEnabled of [false, true]) {
+    for (const status of ["completed", "failed"] as const) {
+      test(`worker deferred ${status} wake posts no outcome with delegation=${delegationEnabled}`, async () => {
+        process.env.SLACK_RENDER_V2_DELEGATION = String(delegationEnabled);
+        if (delegationEnabled) await ensureSlackDelegationActivation();
+        const worker = await createAgent({ name: "Fast Coder", isLead: false, status: "idle" });
+        const { channelId, threadTs } = uniqueSlackAddress("C_WORKER_WAKE");
+        const wake = await createTaskExtended("Check PR #2136 CI at the expected head", {
+          agentId: worker.id,
+          source: "schedule",
+          taskType: "deferred",
+          slackChannelId: channelId,
+          slackThreadTs: threadTs,
+          contextKey: slackContextKey({ channelId, threadTs }),
+        });
+        await startTask(wake.id);
+        await ensureSlackThreadTree([wake.id]);
+        await processSlackRenderV2();
+        if (status === "failed") {
+          await failTask(wake.id, "CI is failing at expected head");
+        } else {
+          await completeTask(wake.id, "CI is green at expected head");
+        }
+        calls.length = 0;
+
+        await processSlackRenderV2();
+        await processSlackRenderV2();
+
+        expect(await getSlackOutcomeMessage(wake.id)).toBeNull();
+        expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+      });
+    }
+  }
+
   test("does not relay an ordinary scheduled task without Slack context", async () => {
     const schedule = await createScheduledTask({
       name: "ordinary-maintenance",
@@ -2474,7 +2508,7 @@ describe("Slack renderer v2", () => {
     expect(calls).toContainEqual(doneReaction);
   });
 
-  test("a wake-up that deferred again posts the next ⏳ card, and the old card points at it", async () => {
+  test("re-defers retain one ⏳ card through multiple wakes and the final result", async () => {
     const lead = await createAgent({ name: "Chained Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_DEFER_CHAIN");
     const ask = await createTaskExtended("answer when the build is done", {
@@ -2513,18 +2547,60 @@ describe("Slack renderer v2", () => {
     calls.length = 0;
     await processSlackRenderV2();
 
-    // The chain continues on a new ⏳ card, which the next wake-up resolves.
-    const next = calls.find((call) => call.method === "chat.startStream");
-    expect(next?.payload.markdown_text).toBe("⏳ Checking back later");
-    const nextCard = await getSlackOutcomeMessage(wake.id);
-    expect(nextCard?.permalink).toBeTruthy();
-    // The old card hands over to it rather than repeating the new ETA.
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect(await getSlackOutcomeMessage(wake.id)).toBeNull();
     const rewrite = calls.find(
       (call) => call.method === "chat.update" && call.payload.ts === card?.ts,
     );
-    expect(rewrite?.payload.text).toBe(
-      `↪️ Resumed by ${lead.name} and deferred again — ${nextCard?.permalink}`,
-    );
+    expect(rewrite?.payload.text).toBe("⏳ Checking back later");
+    expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeUndefined();
+
+    const nextSchedule = await createScheduledTask({
+      ...schedule,
+      name: "deferred-chain-next",
+      parentTaskId: wake.id,
+    });
+    const nextWake = await createStandaloneScheduleTask(nextSchedule);
+    await startTask(nextWake.id);
+    await completeTask(nextWake.id, "Waiting on Builder — or today at 21:00 at the latest", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect(
+      calls.find((call) => call.method === "chat.update" && call.payload.ts === card?.ts)?.payload
+        .text,
+    ).toBe("⏳ Waiting on Builder");
+
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card?.ts),
+    ).toHaveLength(0);
+
+    const finalSchedule = await createScheduledTask({
+      ...schedule,
+      name: "deferred-chain-final",
+      parentTaskId: nextWake.id,
+    });
+    const finalWake = await createStandaloneScheduleTask(finalSchedule);
+    await startTask(finalWake.id);
+    await completeTask(finalWake.id, "The build passed.");
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect(
+      calls.find((call) => call.method === "chat.update" && call.payload.ts === card?.ts)?.payload
+        .text,
+    ).toContain("The build passed.");
+    expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeTruthy();
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card?.ts),
+    ).toHaveLength(0);
   });
 
   test("a wake-up that failed closes the deferral card as failed, not as done", async () => {
@@ -3659,7 +3735,9 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
         String(call.payload.markdown_text).includes("**Results**"),
     );
     expect(conclusionStream).toBeDefined();
-    expect(String(conclusionStream?.payload.markdown_text)).toContain(childCard!.permalink);
+    expect(String(conclusionStream?.payload.markdown_text)).toContain(
+      `↳ ✅ ${worker.name} — [result](${childCard!.permalink})`,
+    );
     expect(calls).toContainEqual({
       method: "reactions.add",
       payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },

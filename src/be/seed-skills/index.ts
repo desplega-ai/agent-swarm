@@ -16,8 +16,6 @@ import agentBrowserContent from "../../../templates/skills/agent-browser/content
 };
 import appsConfig from "../../../templates/skills/apps/config.json" with { type: "text" };
 import appsContent from "../../../templates/skills/apps/content.md" with { type: "text" };
-import artifactsConfig from "../../../templates/skills/artifacts/config.json" with { type: "text" };
-import artifactsContent from "../../../templates/skills/artifacts/content.md" with { type: "text" };
 import askUserConfig from "../../../templates/skills/ask-user/config.json" with { type: "text" };
 import askUserContent from "../../../templates/skills/ask-user/content.md" with { type: "text" };
 import assetNamespacesConfig from "../../../templates/skills/asset-namespaces/config.json" with {
@@ -38,6 +36,8 @@ import brainstormingConfig from "../../../templates/skills/brainstorming/config.
 import brainstormingContent from "../../../templates/skills/brainstorming/content.md" with {
   type: "text",
 };
+import chatSdkConfig from "../../../templates/skills/chat-sdk/config.json" with { type: "text" };
+import chatSdkContent from "../../../templates/skills/chat-sdk/content.md" with { type: "text" };
 import codeQualityConfig from "../../../templates/skills/code-quality/config.json" with {
   type: "text",
 };
@@ -96,6 +96,12 @@ import downloadTaskAttachmentConfig from "../../../templates/skills/download-tas
 import downloadTaskAttachmentContent from "../../../templates/skills/download-task-attachment/content.md" with {
   type: "text",
 };
+import emailDomainHealthConfig from "../../../templates/skills/email-domain-health/config.json" with {
+  type: "text",
+};
+import emailDomainHealthContent from "../../../templates/skills/email-domain-health/content.md" with {
+  type: "text",
+};
 import engineeringStandardsConfig from "../../../templates/skills/engineering-standards/config.json" with {
   type: "text",
 };
@@ -144,6 +150,8 @@ import planningConfig from "../../../templates/skills/planning/config.json" with
 import planningContent from "../../../templates/skills/planning/content.md" with { type: "text" };
 import qaConfig from "../../../templates/skills/qa/config.json" with { type: "text" };
 import qaContent from "../../../templates/skills/qa/content.md" with { type: "text" };
+import qaLoomConfig from "../../../templates/skills/qa-loom/config.json" with { type: "text" };
+import qaLoomContent from "../../../templates/skills/qa-loom/content.md" with { type: "text" };
 import questioningConfig from "../../../templates/skills/questioning/config.json" with {
   type: "text",
 };
@@ -268,9 +276,11 @@ import wtsExpertConfig from "../../../templates/skills/wts-expert/config.json" w
 import wtsExpertContent from "../../../templates/skills/wts-expert/content.md" with {
   type: "text",
 };
+import type { Skill } from "../../types";
 import {
   computeContentHash,
   createSkill,
+  deleteSkill,
   deleteSkillFile,
   getDbClient,
   getSkillByName,
@@ -278,7 +288,9 @@ import {
   updateSkill,
   upsertSkillFiles,
 } from "../db";
+import { deleteSeedState, getSeedState } from "../seed/state-db";
 import type { Seeder, SeedItem } from "../seed/types";
+import { parseSkillContent } from "../skill-parser";
 import bundledFilesManifest from "./bundled-files.generated.json";
 import { buildSkillContent, type SkillTemplateConfig } from "./render";
 
@@ -319,11 +331,11 @@ const BUILT_IN_SKILL_FILES = bundledFilesManifest as Record<string, SeedSkillFil
 const BUILT_IN_SKILL_SOURCES = [
   { config: agentBrowserConfig, body: agentBrowserContent },
   { config: appsConfig, body: appsContent },
-  { config: artifactsConfig, body: artifactsContent },
   { config: askUserConfig, body: askUserContent },
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
   { config: brainstormingConfig, body: brainstormingContent },
+  { config: chatSdkConfig, body: chatSdkContent },
   { config: codeQualityConfig, body: codeQualityContent },
   { config: codeReviewingConfig, body: codeReviewingContent },
   { config: commsConfig, body: commsContent },
@@ -335,6 +347,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: delegateWorkConfig, body: delegateWorkContent },
   { config: designDocsConfig, body: designDocsContent },
   { config: downloadTaskAttachmentConfig, body: downloadTaskAttachmentContent },
+  { config: emailDomainHealthConfig, body: emailDomainHealthContent },
   { config: engineeringStandardsConfig, body: engineeringStandardsContent },
   { config: heartbeatRunbookConfig, body: heartbeatRunbookContent },
   { config: implementingConfig, body: implementingContent },
@@ -347,6 +360,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: phaseRunningConfig, body: phaseRunningContent },
   { config: planningConfig, body: planningContent },
   { config: qaConfig, body: qaContent },
+  { config: qaLoomConfig, body: qaLoomContent },
   { config: questioningConfig, body: questioningContent },
   { config: researchingConfig, body: researchingContent },
   { config: reviewOfferedTaskConfig, body: reviewOfferedTaskContent },
@@ -524,6 +538,94 @@ async function syncSeededSkillFiles(skillId: string, files: SeedSkillFile[]): Pr
   if (files.length > 0) await upsertSkillFiles(skillId, files);
 }
 
+/**
+ * Skills this catalog used to seed and no longer ships. Dropping a template
+ * alone leaves its last seeded row live on every existing install, so agents
+ * keep reading instructions for a removed feature. `artifacts` documented the
+ * PM2 + localtunnel serving path, removed together with PM2.
+ */
+export const RETIRED_SEED_SKILLS: readonly string[] = ["artifacts"];
+
+/**
+ * True when every user-editable column outside the seed hash still holds what
+ * `skillsSeeder.apply` writes. The seed hash covers only content,
+ * systemDefault, userInvocable and bundled files, so an edit to any other
+ * column (description, model, allowedTools, source fields, ...) is invisible
+ * to it. The seeder writes the description from the same config as the
+ * content's frontmatter, so a pristine row's description equals the
+ * frontmatter one; every other column keeps its insert default.
+ */
+function metadataAsSeeded(skill: Skill, fileCount: number): boolean {
+  let seededDescription: string;
+  try {
+    seededDescription = parseSkillContent(skill.content).description;
+  } catch {
+    return false;
+  }
+
+  return (
+    skill.description === seededDescription &&
+    skill.type === "personal" &&
+    skill.isComplex === fileCount > 0 &&
+    skill.isEnabled &&
+    !skill.disableModelInvocation &&
+    skill.allowedTools === null &&
+    skill.model === null &&
+    skill.effort === null &&
+    skill.context === null &&
+    skill.agent === null &&
+    skill.sourceUrl === null &&
+    skill.sourceRepo === null &&
+    skill.sourcePath === null &&
+    skill.sourceBranch === "main" &&
+    skill.sourceHash === null &&
+    skill.lastFetchedAt === null
+  );
+}
+
+/**
+ * Delete each retired skill the seeder still owns: a `seed_state` row exists,
+ * the live copy hashes to what was last seeded, and its metadata is as seeded.
+ * A skill the seeder never recorded, or one a user edited since (content,
+ * files or metadata), is left in place.
+ */
+export async function retireSeedSkills(
+  names: readonly string[] = RETIRED_SEED_SKILLS,
+): Promise<string[]> {
+  const retired: string[] = [];
+
+  for (const name of names) {
+    const existing = await getSkillByName(name, "swarm");
+    if (!existing) continue;
+
+    const state = await getSeedState("skill", name);
+    if (!state) continue;
+
+    const liveFiles = (await getSkillFiles(existing.id)).map((file) => ({
+      path: file.path,
+      content: file.content,
+    }));
+    const liveHash = skillSeedHash(
+      existing.content,
+      existing.systemDefault,
+      liveFiles,
+      existing.userInvocable,
+    );
+    if (liveHash !== state.seededHash || !metadataAsSeeded(existing, liveFiles.length)) {
+      console.warn(`[seed:skill] kept retired skill "${name}": edited since it was seeded`);
+      continue;
+    }
+
+    await getDbClient().transaction(async () => {
+      await deleteSkill(existing.id);
+      await deleteSeedState("skill", name);
+    });
+    retired.push(name);
+  }
+
+  return retired;
+}
+
 type SkillSeedItem = SeedItem & { skill: SeedSkill };
 
 export const skillsSeeder: Seeder<SkillSeedItem> = {
@@ -611,4 +713,6 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
       await syncSeededSkillFiles(created.id, skill.files);
     });
   },
+
+  retire: () => retireSeedSkills(),
 };

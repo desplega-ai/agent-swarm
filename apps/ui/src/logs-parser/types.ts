@@ -58,6 +58,8 @@ export interface NormalizedItem {
   diff?: unknown;
   meta?: unknown;
   raw?: unknown;
+  /** The Agent/Task call that spawned the sub-agent which emitted this item (claude). */
+  parentToolUseId?: string;
   /** Extra source-row ids aggregated into this item (e.g. opencode stream deltas). */
   coveredRecIds?: string[];
   /** Lifecycle state for items merged across started/completed events by id (e.g. codex unknown items). */
@@ -141,6 +143,8 @@ export interface ParsedMessage {
   model?: string;
   iteration: number;
   timestamp: string;
+  /** Set when a sub-agent emitted this message: the id of the call that spawned it. */
+  parentToolUseId?: string;
 }
 
 export interface UnwrappedResult {

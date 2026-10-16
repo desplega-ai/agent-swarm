@@ -15,7 +15,7 @@ import { unlink } from "node:fs/promises";
 import net from "node:net";
 import { runInNewContext } from "node:vm";
 import type { Subprocess } from "bun";
-import { BROWSER_SDK_JS } from "../artifact-sdk/browser-sdk";
+import { BROWSER_SDK_JS } from "../pages/browser-sdk";
 import { signPageSession, verifyPageSession } from "../utils/page-session";
 import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 

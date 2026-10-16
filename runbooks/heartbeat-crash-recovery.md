@@ -785,7 +785,7 @@ Notes:
 
 - The wait only covers tasks held by workers that pinged in the last 30s. A silent worker's tasks belong to the heartbeat sweep.
 - Workers older than this feature ignore the header, so the API waits the full cap when one holds a task.
-- The drain is opt-in. Enabled, it also fires on an API-only restart (pm2, a Helm roll of the API Deployment, `docker restart`): live workers supersede their in-flight tasks, which would otherwise keep running. Set it only where the API and the workers stop together.
+- The drain is opt-in. Enabled, it also fires on an API-only restart (a local restart, a Helm roll of the API Deployment, `docker restart`): live workers supersede their in-flight tasks, which would otherwise keep running. Set it only where the API and the workers stop together.
 - `API_DRAIN_MAX_MS` plus the API's close time must stay under the orchestrator's stop grace period for the API.
 
 ---

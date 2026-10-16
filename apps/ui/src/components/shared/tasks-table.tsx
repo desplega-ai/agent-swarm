@@ -18,6 +18,7 @@ import {
   ListTodo,
   Mail,
   MessageCircleReply,
+  MessageSquare,
   MessagesSquare,
   Plug,
   Search,
@@ -38,8 +39,10 @@ import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, User } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { DataGrid } from "@/components/shared/data-grid";
+import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
-import { ProviderIcon } from "@/components/shared/provider-icon";
+import { ModelEffortLabel } from "@/components/shared/model-effort-label";
+import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,10 +56,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
-import { getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
+import {
+  describeModelResolution,
+  taskDisplayEffort,
+  taskDisplayModel,
+} from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
@@ -68,7 +74,6 @@ export type TasksTableColumnId =
   | "source"
   | "cost"
   | "model"
-  | "effort"
   | "agent"
   | "user"
   | "elapsed"
@@ -88,7 +93,6 @@ export const TOGGLEABLE_COLUMNS: { id: TasksTableColumnId; label: string }[] = [
   { id: "source", label: "Source" },
   { id: "cost", label: "Cost" },
   { id: "model", label: "Model" },
-  { id: "effort", label: "Effort" },
   { id: "agent", label: "Agent" },
   { id: "user", label: "Requested by" },
   { id: "elapsed", label: "Elapsed" },
@@ -130,6 +134,7 @@ const SOURCE_ICON: Record<string, IconCmp> = {
   linear: Code2,
   jira: Globe,
   comb: FolderOpen,
+  chat: MessageSquare,
 };
 
 function SourcePill({ value }: { value: string | undefined }) {
@@ -214,26 +219,34 @@ function ModelCell({
   task,
   liveCatalog,
 }: {
-  task: Pick<AgentTask, "model" | "modelTier" | "resolvedModel" | "modelSource" | "modelAlias">;
+  task: Pick<
+    AgentTask,
+    | "model"
+    | "modelTier"
+    | "resolvedModel"
+    | "modelSource"
+    | "modelAlias"
+    | "effort"
+    | "resolvedEffort"
+  >;
   liveCatalog?: LiveModelsCatalog;
 }) {
   const shown = taskDisplayModel(task);
+  const effort = taskDisplayEffort(task);
   if (!shown && !task.modelTier) return DASH;
   if (!shown) {
     return (
-      <Badge variant="outline" size="tag">
+      <Badge variant="outline" size="tag" className="gap-1">
         tier: {modelTierLabel(task.modelTier)}
+        <EffortMark effort={effort} />
       </Badge>
     );
   }
-  const presentation = getAgentModelPresentation(shown, liveCatalog);
-  const cell = (
-    <span className="inline-flex items-center gap-1.5">
-      <ProviderIcon provider={presentation?.providerId} className="h-3.5 w-3.5" />
-      <span className="truncate">{presentation?.label ?? shown}</span>
-    </span>
-  );
-  const lines = describeModelResolution(task);
+  const cell = <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} />;
+  const lines = [
+    ...describeModelResolution(task),
+    ...(effort ? [`Effort: ${REASONING_EFFORT_LABEL[effort]}`] : []),
+  ];
   if (lines.length === 0) return cell;
   return (
     <Tooltip>
@@ -244,16 +257,6 @@ function ModelCell({
         ))}
       </TooltipContent>
     </Tooltip>
-  );
-}
-
-function EffortCell({ value }: { value: AgentTask["effort"] | undefined }) {
-  if (!value) return DASH;
-  return (
-    <Badge variant="outline" size="tag" className="gap-1 font-mono">
-      <Zap className="h-2.5 w-2.5 shrink-0" />
-      {value}
-    </Badge>
   );
 }
 
@@ -653,20 +656,10 @@ export function TasksTable({
         _id: "model",
         field: "model",
         headerName: "Model",
-        width: 180,
+        width: 200,
         ...fixed,
         cellRenderer: (p: { data?: AgentTask }) => (
           <ModelCell task={p.data ?? {}} liveCatalog={modelsCatalog?.providers} />
-        ),
-      },
-      {
-        _id: "effort",
-        field: "effort",
-        headerName: "Effort",
-        width: 100,
-        ...fixed,
-        cellRenderer: (p: { value: AgentTask["effort"] | undefined }) => (
-          <EffortCell value={p.value} />
         ),
       },
       {

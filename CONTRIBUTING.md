@@ -115,8 +115,8 @@ bun run dev:http
 cd apps/ui && bun run dev
 # → https://ui.swarm.localhost:1355
 
-# Or start everything with PM2
-bun run pm2-start
+# Or run API + lead + worker in Docker
+docker compose -f docker-compose.local.yml up --build
 ```
 
 **Environment:** Set these in your `.env`:

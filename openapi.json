@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.171.1",
+    "version": "2.0.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -172,7 +172,8 @@
               "workflow",
               "linear",
               "jira",
-              "comb"
+              "comb",
+              "chat"
             ],
             "default": "mcp"
           },
@@ -374,6 +375,17 @@
           },
           "modelAlias": {
             "type": "string"
+          },
+          "resolvedEffort": {
+            "type": "string",
+            "enum": [
+              "off",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
           },
           "scheduleId": {
             "type": "string"
@@ -1399,6 +1411,9 @@
           },
           "encrypted": {
             "type": "boolean"
+          },
+          "exportToEnv": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1412,7 +1427,8 @@
           "description",
           "createdAt",
           "lastUpdatedAt",
-          "encrypted"
+          "encrypted",
+          "exportToEnv"
         ]
       },
       "ContextSnapshot": {
@@ -2923,7 +2939,8 @@
               "mcp",
               "script",
               "slack",
-              "api"
+              "api",
+              "chat"
             ]
           },
           "senderLabel": {
@@ -3043,6 +3060,20 @@
           "eventType",
           "createdAt"
         ]
+      },
+      "UserCommsPrefs": {
+        "type": "object",
+        "properties": {
+          "tone": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "verbosity": {
+            "type": "string"
+          }
+        }
       },
       "Page": {
         "type": "object",
@@ -3329,20 +3360,6 @@
           "changedAt",
           "changeReason"
         ]
-      },
-      "UserCommsPrefs": {
-        "type": "object",
-        "properties": {
-          "tone": {
-            "type": "string"
-          },
-          "language": {
-            "type": "string"
-          },
-          "verbosity": {
-            "type": "string"
-          }
-        }
       },
       "BudgetRefusedTrigger": {
         "type": "object",
@@ -4413,93 +4430,6 @@
           "mcpServerId",
           "isActive",
           "installedAt"
-        ]
-      },
-      "Service": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 50
-          },
-          "port": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 65535,
-            "default": 3000
-          },
-          "description": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "healthCheckPath": {
-            "type": "string",
-            "default": "/health"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "starting",
-              "healthy",
-              "unhealthy",
-              "stopped"
-            ],
-            "default": "starting"
-          },
-          "script": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cwd": {
-            "type": "string"
-          },
-          "interpreter": {
-            "type": "string"
-          },
-          "args": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "env": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {},
-            "default": {}
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "lastUpdatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "agentId",
-          "name",
-          "script",
-          "createdAt",
-          "lastUpdatedAt"
         ]
       },
       "TaskTemplate": {
@@ -10255,7 +10185,6 @@
                               "prompt-templates",
                               "mcp",
                               "profiles",
-                              "services",
                               "scheduling",
                               "memory",
                               "workflows",
@@ -10269,6 +10198,7 @@
                               "repo",
                               "agentmail",
                               "kapso",
+                              "chat-sdk",
                               "swarm-x"
                             ]
                           }
@@ -10318,7 +10248,6 @@
                               "prompt-templates",
                               "mcp",
                               "profiles",
-                              "services",
                               "scheduling",
                               "memory",
                               "workflows",
@@ -10332,6 +10261,7 @@
                               "repo",
                               "agentmail",
                               "kapso",
+                              "chat-sdk",
                               "swarm-x"
                             ]
                           }
@@ -15734,6 +15664,10 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "exportToEnv": {
+                    "type": "boolean",
+                    "description": "Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads."
                   }
                 },
                 "required": [
@@ -16663,82 +16597,6 @@
           },
           "404": {
             "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ecosystem": {
-      "get": {
-        "summary": "Get PM2 ecosystem config for agent services",
-        "tags": [
-          "Ecosystem"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "PM2 ecosystem config",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "apps": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "script": {
-                            "type": "string"
-                          },
-                          "cwd": {
-                            "type": "string"
-                          },
-                          "interpreter": {
-                            "type": "string"
-                          },
-                          "args": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "env": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "string"
-                            }
-                          }
-                        },
-                        "required": [
-                          "name",
-                          "script"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "apps"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing X-Agent-ID",
             "content": {
               "application/json": {
                 "schema": {
@@ -21099,6 +20957,247 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/chat/status": {
+      "get": {
+        "summary": "Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL.",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-adapter status. `health` is `disabled` for an adapter that is not running. Never contains secret values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "slackClash": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "adapters": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "enum": [
+                              "telegram",
+                              "slack",
+                              "discord",
+                              "teams"
+                            ]
+                          },
+                          "configured": {
+                            "type": "boolean"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "health": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "error",
+                              "disabled",
+                              "incomplete"
+                            ]
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "webhookUrl": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "type": "string"
+                          },
+                          "gateway": {
+                            "type": "object",
+                            "properties": {
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "running",
+                                  "backoff",
+                                  "stopped"
+                                ]
+                              },
+                              "since": {
+                                "type": "string"
+                              },
+                              "restarts": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "since",
+                              "restarts"
+                            ]
+                          },
+                          "guilds": {
+                            "type": "object",
+                            "properties": {
+                              "count": {
+                                "type": "number"
+                              },
+                              "names": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "count",
+                              "names"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "configured",
+                          "enabled",
+                          "health",
+                          "webhookUrl"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "slackClash",
+                    "adapters"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/chat/telegram/register-webhook": {
+      "post": {
+        "summary": "Register this swarm's public Telegram webhook URL and secret token with the Bot API (setWebhook), then return getWebhookInfo.",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "webhookUrl": {
+                      "type": "string"
+                    },
+                    "webhookInfo": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "has_custom_certificate": {
+                          "type": "boolean"
+                        },
+                        "pending_update_count": {
+                          "type": "number"
+                        },
+                        "last_error_date": {
+                          "type": "number"
+                        },
+                        "last_error_message": {
+                          "type": "string"
+                        },
+                        "max_connections": {
+                          "type": "number"
+                        },
+                        "ip_address": {
+                          "type": "string"
+                        },
+                        "allowed_updates": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "webhookUrl",
+                    "webhookInfo"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Telegram is not configured for webhook mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the lead agent or a dashboard user can register the webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The Telegram Bot API rejected the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -29856,7 +29955,8 @@
                                   "workflow",
                                   "linear",
                                   "jira",
-                                  "comb"
+                                  "comb",
+                                  "chat"
                                 ],
                                 "default": "mcp"
                               },
@@ -29919,6 +30019,17 @@
                                 "type": "string"
                               },
                               "effort": {
+                                "type": "string",
+                                "enum": [
+                                  "off",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              },
+                              "resolvedEffort": {
                                 "type": "string",
                                 "enum": [
                                   "off",
@@ -30170,7 +30281,8 @@
                       "workflow",
                       "linear",
                       "jira",
-                      "comb"
+                      "comb",
+                      "chat"
                     ]
                   },
                   "outputSchema": {
@@ -30234,6 +30346,16 @@
           },
           "400": {
             "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
             "content": {
               "application/json": {
                 "schema": {
@@ -30426,6 +30548,21 @@
                       "model": {
                         "type": "string"
                       },
+                      "effort": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "off",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          null
+                        ]
+                      },
                       "providerMeta": {
                         "type": "object",
                         "properties": {
@@ -30613,7 +30750,8 @@
                       "mcp",
                       "script",
                       "slack",
-                      "api"
+                      "api",
+                      "chat"
                     ]
                   },
                   "requestedByUserId": {
@@ -31530,6 +31668,33 @@
                                 "items": {
                                   "$ref": "#/components/schemas/TaskAttachment"
                                 }
+                              },
+                              "requestedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "email": {
+                                    "type": "string"
+                                  },
+                                  "role": {
+                                    "type": "string"
+                                  },
+                                  "notes": {
+                                    "type": "string"
+                                  },
+                                  "comms": {
+                                    "$ref": "#/components/schemas/UserCommsPrefs"
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ]
                               }
                             },
                             "required": [
@@ -38393,7 +38558,8 @@
               "enum": [
                 "openapi",
                 "graphql",
-                "mcp"
+                "mcp",
+                "sql"
               ]
             },
             "required": false,
@@ -38453,7 +38619,8 @@
                               "raw",
                               "openapi",
                               "mcp",
-                              "graphql"
+                              "graphql",
+                              "sql"
                             ]
                           },
                           "scope": {
@@ -39585,6 +39752,274 @@
                       "kind",
                       "mcpServerId"
                     ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "slug": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "displayName": {
+                        "type": "string",
+                        "maxLength": 160
+                      },
+                      "scope": {
+                        "type": "string",
+                        "enum": [
+                          "global",
+                          "agent",
+                          "repo"
+                        ]
+                      },
+                      "scopeId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "allowedHosts": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "credentialBindingId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "format": "uuid"
+                      },
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "bearer"
+                                ]
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "header"
+                                ]
+                              },
+                              "headerName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "headerName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "query"
+                                ]
+                              },
+                              "paramName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "paramName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "oauth"
+                                ]
+                              },
+                              "authorizationId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "authorizationId"
+                            ]
+                          }
+                        ]
+                      },
+                      "configKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "headerTemplate": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "queryTemplate": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "authKind": {
+                        "type": "string",
+                        "enum": [
+                          "config",
+                          "oauth"
+                        ]
+                      },
+                      "oauthAuthorizationId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "sql"
+                        ]
+                      },
+                      "dsn": {
+                        "type": "object",
+                        "properties": {
+                          "secret": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "configKey": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "slug",
+                      "kind"
+                    ]
                   }
                 ]
               }
@@ -39620,7 +40055,8 @@
                             "raw",
                             "openapi",
                             "mcp",
-                            "graphql"
+                            "graphql",
+                            "sql"
                           ]
                         },
                         "scope": {
@@ -39995,7 +40431,8 @@
                             "raw",
                             "openapi",
                             "mcp",
-                            "graphql"
+                            "graphql",
+                            "sql"
                           ]
                         },
                         "scope": {
@@ -40544,7 +40981,8 @@
                             "raw",
                             "openapi",
                             "mcp",
-                            "graphql"
+                            "graphql",
+                            "sql"
                           ]
                         },
                         "scope": {
@@ -40946,7 +41384,8 @@
                             "raw",
                             "openapi",
                             "mcp",
-                            "graphql"
+                            "graphql",
+                            "sql"
                           ]
                         },
                         "scope": {
@@ -44487,6 +44926,145 @@
         }
       }
     },
+    "/api/script-connections/{id}/sql-query": {
+      "post": {
+        "summary": "Run one read-only query on a SQL script connection",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sql": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100000
+                  },
+                  "params": {
+                    "type": "array",
+                    "items": {},
+                    "maxItems": 100
+                  }
+                },
+                "required": [
+                  "sql"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query rows or a scrubbed error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          }
+                        },
+                        "rowCount": {
+                          "type": "number"
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "rows",
+                        "rowCount",
+                        "truncated"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "error"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid SQL connection or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to invoke this SQL connection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Script connection or agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/session-logs": {
       "post": {
         "summary": "Store session logs",
@@ -44672,6 +45250,9 @@
                   },
                   "totalCostUsd": {
                     "type": "number"
+                  },
+                  "harnessCostBilled": {
+                    "type": "boolean"
                   },
                   "taskId": {
                     "type": "string"
@@ -45694,7 +46275,8 @@
                                       "workflow",
                                       "linear",
                                       "jira",
-                                      "comb"
+                                      "comb",
+                                      "chat"
                                     ],
                                     "default": "mcp"
                                   },
@@ -51013,68 +51595,6 @@
         }
       }
     },
-    "/api/services": {
-      "get": {
-        "summary": "List all registered services",
-        "tags": [
-          "Stats"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "status",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "agentId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "name",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Service list",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "services": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Service"
-                      }
-                    }
-                  },
-                  "required": [
-                    "services"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/scheduled-tasks": {
       "get": {
         "summary": "List scheduled tasks",
@@ -56088,6 +56608,81 @@
           },
           "503": {
             "description": "Kapso integration not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/chat/{adapter}/webhook": {
+      "post": {
+        "summary": "Handle Chat SDK platform webhooks (Telegram, Slack, Discord, Teams)",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Chat SDK adapter name, e.g. telegram"
+            },
+            "required": true,
+            "description": "Chat SDK adapter name, e.g. telegram",
+            "name": "adapter",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Adapter response"
+          },
+          "401": {
+            "description": "Invalid platform signature or secret token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Teams activity whose serviceUrl is not a Bot Framework host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Chat SDK disabled or adapter not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Adapter configured but failed to start",
             "content": {
               "application/json": {
                 "schema": {

@@ -9,7 +9,6 @@ import {
   MessageSquare,
   PauseCircle,
   PlayCircle,
-  Server,
   Settings,
   UserPlus,
   XCircle,
@@ -49,7 +48,6 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Repos", path: "/settings/repos", icon: FolderGit2 },
   { label: "Pages", path: "/pages", icon: Globe, gate: { minVersion: "1.79.0" } },
   { label: "Metrics", path: "/usage/metrics", icon: BarChart3, gate: { minVersion: "1.79.0" } },
-  { label: "Services", path: "/services", icon: Server },
 ];
 
 export function CommandMenu() {

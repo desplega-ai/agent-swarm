@@ -1,3 +1,4 @@
+import { openAICompatibleKeyVars } from "@desplega/model-catalog";
 import { type ProviderName, ProviderNameSchema } from "../types";
 
 const SUPPORTED_PROVIDERS = ProviderNameSchema.options;
@@ -11,22 +12,30 @@ function hasEnvValue(
 }
 
 /**
+ * LLM keys that make "pi" the default harness when no Claude credential is
+ * set: OpenRouter plus every OpenAI-compatible registry key (canonical or alias).
+ */
+const PI_DEFAULT_KEY_VARS = ["OPENROUTER_API_KEY", ...openAICompatibleKeyVars()];
+
+/**
  * Credential-aware default for when HARNESS_PROVIDER is unset or invalid.
  * Unconditionally defaulting to "claude" leaves an OpenRouter-only swarm —
  * e.g. every auto-deployed swarm, which is provisioned with
  * OPENROUTER_API_KEY and NEVER an Anthropic credential — unable to
- * authenticate at all. Prefer "pi" when an OpenRouter key is present and no
- * Claude credential is; otherwise keep the original "claude" default.
+ * authenticate at all. Prefer "pi" when an OpenRouter key or an
+ * OpenAI-compatible registry key (NaN, Helmcode; canonical or alias) is
+ * present and no Claude credential is; otherwise keep the original "claude"
+ * default.
  */
 function credentialAwareDefault(
   resolvedEnv: Record<string, string | undefined>,
   fallbackEnv: Record<string, string | undefined>,
 ): ProviderName {
-  const hasOpenRouterKey = hasEnvValue("OPENROUTER_API_KEY", resolvedEnv, fallbackEnv);
+  const hasPiKey = PI_DEFAULT_KEY_VARS.some((key) => hasEnvValue(key, resolvedEnv, fallbackEnv));
   const hasClaudeCredential =
     hasEnvValue("ANTHROPIC_API_KEY", resolvedEnv, fallbackEnv) ||
     hasEnvValue("CLAUDE_CODE_OAUTH_TOKEN", resolvedEnv, fallbackEnv);
-  return hasOpenRouterKey && !hasClaudeCredential ? "pi" : "claude";
+  return hasPiKey && !hasClaudeCredential ? "pi" : "claude";
 }
 
 /**
@@ -36,8 +45,8 @@ function credentialAwareDefault(
  *   1. `resolvedEnv.HARNESS_PROVIDER` — value coming from `swarm_config`
  *      (overlay produced by `fetchResolvedEnv`, scoped repo > agent > global).
  *   2. `fallbackEnv.HARNESS_PROVIDER` — raw `process.env`.
- *   3. Credential-aware default — "pi" when an OpenRouter key is present and
- *      no Anthropic credential is (see `credentialAwareDefault`), else
+ *   3. Credential-aware default — "pi" when an OpenRouter or registry
+ *      provider key is present and no Anthropic credential is (see `credentialAwareDefault`), else
  *      `"claude"`.
  *
  * Invalid values (anything outside `ProviderNameSchema`) log a warning and

@@ -11,6 +11,7 @@
     "sentry",
     "agentmail",
     "kapso",
+    "chat-sdk",
     "composio",
     "salesforce",
     "microsoft-graph",

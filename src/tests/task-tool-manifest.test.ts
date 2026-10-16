@@ -27,6 +27,20 @@ describe("task tool manifests", () => {
     ]);
   });
 
+  test("chat-reply only preloads for a task carrying a chat-sdk contextKey", () => {
+    const manifest = parseTaskToolManifest('{"taskTypes":{"review":["chat-reply","script-run"]}}');
+    expect(selectTaskTools(manifest, { taskType: "review" })).toEqual(["script-run"]);
+    expect(
+      selectTaskTools(manifest, { taskType: "review", contextKey: "task:slack:C123:1700.1" }),
+    ).toEqual(["script-run"]);
+    expect(
+      selectTaskTools(manifest, {
+        taskType: "review",
+        contextKey: "task:chat-sdk:telegram:555001",
+      }),
+    ).toEqual(["chat-reply", "script-run"]);
+  });
+
   test("config writes reject unknown tools, invalid shapes, and oversized selections", () => {
     for (const value of [
       "not json",

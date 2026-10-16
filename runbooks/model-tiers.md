@@ -34,6 +34,23 @@ Each harness/provider maps the same tier to its own concrete model:
 
 Update `DEFAULT_MODEL_TIER_MAP` and this table together when defaults change.
 
+### NaN- or Helmcode-only swarms
+
+The `pi` and `opencode` defaults are `openrouter/...` models. A worker whose only LLM credential is a NaN or Helmcode key defaults to `pi`, but a `modelTier` task still resolves to the OpenRouter default and fails because `OPENROUTER_API_KEY` is missing. Set the tier config keys for both harnesses to models the key can run, for example:
+
+```
+MODEL_TIER_PI_SMOL=nan/glm5.3-flash
+MODEL_TIER_PI_REGULAR=nan/glm5.3-flash
+MODEL_TIER_PI_SMART=nan/qwen3.6
+MODEL_TIER_PI_ULTRA=nan/qwen3.6
+MODEL_TIER_OPENCODE_SMOL=nan/glm5.3-flash
+MODEL_TIER_OPENCODE_REGULAR=nan/glm5.3-flash
+MODEL_TIER_OPENCODE_SMART=nan/qwen3.6
+MODEL_TIER_OPENCODE_ULTRA=nan/qwen3.6
+```
+
+For Helmcode, use `helmcode/<id>` values (`helmcode/glm5.3-flash`, `helmcode/deepseek-v4-flash`, ...). `latest:` aliases cannot target these providers, so the values must be concrete ids. A task with neither `model` nor `modelTier` runs the agent's `MODEL_OVERRIDE`, so set that to a `nan/` or `helmcode/` model as well.
+
 ## Overrides
 
 Three layers can override the defaults. From highest to lowest:
@@ -46,7 +63,7 @@ Any layer (and a task's `model`) may hold:
 
 - a concrete model id (`claude-opus-5-5`, `gpt-5.6-sol`, `openrouter/deepseek/deepseek-v4-pro`),
 - a CLI alias the harness resolves itself (`opus`, `sonnet`),
-- a moving alias `latest:<anthropic|openai|openrouter>/<target>[@stable|@any]`, resolved by the server against the `model_catalog` table (plus overlay; the vendored snapshot when the table is empty). Grammar: `packages/model-catalog/src/resolve-alias.ts`.
+- a moving alias `latest:<anthropic|openai|openrouter>/<target>[@stable|@any]`, resolved by the server against the `model_catalog` table (plus overlay; the vendored snapshot when the table is empty). Grammar: `packages/model-catalog/src/resolve-alias.ts`. There is no `latest:` form for `nan` or `helmcode` models.
 
 ### `latest:` guardrails
 
@@ -98,6 +115,10 @@ It writes `resolvedModel`, `modelSource` and `modelAlias` (the `latest:` alias, 
 
 `GET /api/models-catalog/tiers` previews layers 3 and 4 for every provider and tier, with `latest:` aliases resolved against the current catalog and without recording a resolution. It ignores per-worker overrides and per-task models. The dashboard Configuration page uses it for the `MODEL_TIER_*` rows.
 
+A claim reads the task's own pin (`taskModelPin` in `src/tasks/model-pin.ts`), not the `model` column: the session report overwrites `model` with the model that ran, so a row claimed again (or a paused task resumed after a restart) would otherwise replay its previous run's model over the agent's current `MODEL_OVERRIDE`. Without a pin the trigger carries no `model`, and a claim that resolves nothing clears the previous run's `resolvedModel`, `modelSource` and `modelAlias`.
+
+The session report also records `resolvedEffort`: the reasoning effort the session ran at (task `effort`, else the agent's `REASONING_EFFORT_OVERRIDE`, null when the harness or model cannot take it). `effort` stays the requested value.
+
 The worker still runs `resolveTaskModelSelection` locally. When the server sent a `resolvedModel`, the worker uses it; if its local result differs (for example a stale override sent before a restart, or a tier-config value the worker does not read), it logs `model resolution mismatch ... using server value`. Without a server value (older API) the worker keeps the local order: task `model`, `modelTier` with its env overrides, `MODEL_OVERRIDE`, then the adapter default.
 
 This is deliberate: pool claims, delegations, workflow fan-out, and schedules resolve against the worker that actually runs the task, not the agent or API process that created it. Schedules and workflow steps store only `model`/`modelTier`; each spawned task records its own resolution.
@@ -116,11 +137,11 @@ A concrete `model` or `latest:` alias must also run on the harness that will run
 | `claude-managed` | `anthropic` | same as `claude` | `latest:anthropic/...` |
 | `codex` | `openai` | an `openai` id that passes `isHarnessCatalogModel("codex", id)` | `latest:openai/...` |
 | `grok` | `xai` | a `grok-*` or `xai` id, bare or `xai/`-qualified (the adapter drops the prefix; the API catalog has no `xai` section, so `xai/<id>` needs `allowCustomModel`), or `openrouter/<vendor>/<id>`; another vendor's catalog id or namespace is refused | `latest:openrouter/...` |
-| `pi`, `opencode` | none pinned | any catalog model, bare or provider-qualified | any |
+| `pi`, `opencode` | none pinned | any catalog model, bare or provider-qualified, including `nan/<id>` and `helmcode/<id>` | any |
 | `dsh`, `cursor`, `devin`, `acp` | free-form | any string | any |
 | `amp` | none (`src/utils/amp-models.ts`) | a mode (`low`, `medium`, `high`, `ultra`) or a `provider/model` pin (for example `openai/gpt-5-nano`) | none |
 
-A provider-qualified id on a pinned harness must name the harness section: `anthropic/claude-opus-5-5` runs on `claude`, `openrouter/anthropic/claude-opus-5.5` does not. An id the catalog does not know in any section passes this check (the catalog membership check above decides it). This includes an uncatalogued id in the harness's own namespace: `openai/private-deployment-1` on `codex` passes with `allowCustomModel` and fails without it. A known id that the harness does not run (`openai/gpt-4o` on `codex`) fails even with the flag. A bare shortname such as `opus` on `codex` therefore passes; legacy shortnames become `modelTier` before any create-time check anyway, and `modelTier` is never rejected.
+A provider-qualified id on a pinned harness must name the harness section: `anthropic/claude-opus-5-5` runs on `claude`, `openrouter/anthropic/claude-opus-5.5` does not. Likewise `nan/<id>` and `helmcode/<id>` run only on `pi` and `opencode`; `claude` and `codex` reject them with the mismatch message below. An id the catalog does not know in any section passes this check (the catalog membership check above decides it). This includes an uncatalogued id in the harness's own namespace: `openai/private-deployment-1` on `codex` passes with `allowCustomModel` and fails without it. A known id that the harness does not run (`openai/gpt-4o` on `codex`) fails even with the flag. A bare shortname such as `opus` on `codex` therefore passes; legacy shortnames become `modelTier` before any create-time check anyway, and `modelTier` is never rejected.
 
 Where the rule applies:
 

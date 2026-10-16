@@ -87,4 +87,68 @@ export type PullRequestCommentedEvent = ServiceHookEvent<
   { comment: AzureDevOpsComment; pullRequest: AzureDevOpsPullRequest }
 >;
 
-export type AzureDevOpsWebhookEvent = PullRequestCreatedEvent | PullRequestCommentedEvent;
+/**
+ * Azure Boards work-item fields (`resource.fields` on created / commented /
+ * deleted / restored, `resource.revision.fields` on updated). Identities are
+ * strings of the form `"Display Name <unique@name>"`, not identity objects.
+ */
+export interface AzureDevOpsWorkItemFields {
+  "System.TeamProject"?: string;
+  "System.WorkItemType"?: string;
+  "System.State"?: string;
+  "System.Title"?: string;
+  "System.Description"?: string; // HTML
+  "System.AssignedTo"?: string;
+  "System.ChangedBy"?: string;
+  "System.History"?: string; // HTML of the latest comment (commented events only)
+  [field: string]: unknown;
+}
+
+/** `resource` of created / commented / deleted / restored events. */
+export interface AzureDevOpsWorkItem {
+  id: number;
+  rev: number;
+  fields: AzureDevOpsWorkItemFields;
+  url?: string;
+  /** Present on `workitem.commented`: identifies the comment and its edit version. */
+  commentVersionRef?: { commentId: number; version: number };
+}
+
+/**
+ * `resource` of `workitem.updated`. `id` is the update id; the work item is
+ * `workItemId`. `fields` holds only the changed fields; the full state is in
+ * `revision.fields`.
+ */
+export interface AzureDevOpsWorkItemUpdate {
+  id: number;
+  workItemId: number;
+  rev: number;
+  url?: string;
+  revisedBy: AzureDevOpsIdentityRef;
+  fields?: Record<string, { oldValue?: unknown; newValue?: unknown }>;
+  revision: { id: number; rev: number; fields: AzureDevOpsWorkItemFields };
+}
+
+/** `workitem.created` */
+export type WorkItemCreatedEvent = ServiceHookEvent<"workitem.created", AzureDevOpsWorkItem>;
+
+/** `workitem.updated` */
+export type WorkItemUpdatedEvent = ServiceHookEvent<"workitem.updated", AzureDevOpsWorkItemUpdate>;
+
+/** `workitem.commented`: `commentVersionRef.commentId` identifies the comment. */
+export type WorkItemCommentedEvent = ServiceHookEvent<"workitem.commented", AzureDevOpsWorkItem>;
+
+/** `workitem.deleted`: `resource.url` points at the recycle bin. */
+export type WorkItemDeletedEvent = ServiceHookEvent<"workitem.deleted", AzureDevOpsWorkItem>;
+
+/** `workitem.restored` */
+export type WorkItemRestoredEvent = ServiceHookEvent<"workitem.restored", AzureDevOpsWorkItem>;
+
+export type AzureDevOpsWebhookEvent =
+  | PullRequestCreatedEvent
+  | PullRequestCommentedEvent
+  | WorkItemCreatedEvent
+  | WorkItemUpdatedEvent
+  | WorkItemCommentedEvent
+  | WorkItemDeletedEvent
+  | WorkItemRestoredEvent;

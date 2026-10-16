@@ -391,6 +391,7 @@ export const AgentTaskSourceSchema = z.enum([
   "linear",
   "jira",
   "comb",
+  "chat",
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
@@ -446,7 +447,7 @@ export const SteeringStatusSchema = z.enum([
 ]);
 export type SteeringStatus = z.infer<typeof SteeringStatusSchema>;
 
-export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api"]);
+export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api", "chat"]);
 export type SteeringSource = z.infer<typeof SteeringSourceSchema>;
 
 export const SteeringMessageSchema = z
@@ -681,6 +682,10 @@ export const AgentTaskSchema = z
     resolvedModel: z.string().optional(),
     modelSource: z.string().optional(),
     modelAlias: z.string().optional(),
+    // The effort the session ran at (task effort, else the agent's
+    // REASONING_EFFORT_OVERRIDE, dropped when the harness/model cannot take
+    // it). Reported at session start; unset when the harness default applied.
+    resolvedEffort: ReasoningEffortSchema.optional(),
 
     // Schedule linking (optional — set when task was created by a schedule).
     // z.string(): also reachable verbatim from the create-task query param.
@@ -1458,7 +1463,7 @@ export type ChannelType = z.infer<typeof ChannelTypeSchema>;
 export type Channel = z.infer<typeof ChannelSchema>;
 export type ChannelMessage = z.infer<typeof ChannelMessageSchema>;
 
-// Service Types (for PM2/background services)
+// Service Types (removed PM2 service registry; kept with the services table)
 export const ServiceStatusSchema = z.enum(["starting", "healthy", "unhealthy", "stopped"]);
 
 export const ServiceSchema = z
@@ -1834,6 +1839,10 @@ export const SwarmConfigSchema = z
     // auto-encrypted during initDb; if that fails, boot aborts before normal API
     // reads occur.
     encrypted: z.boolean(),
+    // Whether workers export this row into agent process env. False keeps it
+    // server-side (connections, script credential bindings). Always false for
+    // keys only the API server reads (src/utils/config-env-export.ts).
+    exportToEnv: z.boolean(),
   })
   .openapi("SwarmConfig");
 
@@ -2625,6 +2634,7 @@ export type AgentTaskSummary = Pick<
   | "modelSource"
   | "modelAlias"
   | "effort"
+  | "resolvedEffort"
   | "provider"
   | "requestedByUserId"
   | "progress"

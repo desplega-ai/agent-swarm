@@ -8,8 +8,8 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 |----------|--------------------|---------|-------|
 | Claude Code | `claude` | `ClaudeAdapter` | CLI by default; optional Agent SDK transport |
 | Codex | `codex` | `CodexAdapter` | Starts a fresh `codex app-server` for each task. OpenAI/ChatGPT OAuth |
-| opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary; agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) |
-| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
+| opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary, plus NaN (`nan/*`) and Helmcode (`helmcode/*`); agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) and [NaN and Helmcode](#nan-and-helmcode-pi-opencode) below |
+| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, NaN (`nan/*`), Helmcode (`helmcode/*`), or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode`, `gemini`, `copilot`, `qwen`, `kiro` and `goose` presets or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
@@ -17,6 +17,53 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
+
+## NaN and Helmcode (pi, opencode)
+
+NaN and Helmcode are OpenAI-compatible, flat-rate providers. Their models run
+on `pi`, `opencode` and the ACP `opencode` target only; `claude` and `codex` reject `nan/*` and
+`helmcode/*` with the existing harness mismatch error.
+
+- **Keys**: `NAN_API_KEY` (alias `HELMCODE_API_NAN`; `NAN_API_KEY` wins when
+  both are set) and `HELMCODE_API_KEY`. Operators enter them on the dashboard
+  Integrations page (NaN and Helmcode cards); no restart is needed. The runner
+  copies the alias into `NAN_API_KEY` once per task, so downstream code reads
+  only `NAN_API_KEY`.
+- **Pools**: both vars take comma-separated values. Each task gets one key,
+  routed by model prefix (`nan/*` → `NAN_API_KEY`, `helmcode/*` →
+  `HELMCODE_API_KEY`). On opencode the adapter hands the picked key to the
+  provider config of the active model's provider, `openrouter` included, so
+  an `OPENROUTER_API_KEY` pool also works there.
+- **pi `models.json`**: each pi session loads its own copy, written to a temp
+  dir from the shared `<agentDir>/models.json` plus that session's env
+  (registry provider blocks, `<ID>_BASE_URL`, the OpenRouter gateway), and
+  removed when the session ends. Nothing writes the shared file, so
+  concurrent sessions never read each other's endpoints. A `providers.<id>`
+  block already in the shared file is user-authored and wins.
+- **Scrubbing**: per-task keys exist only in the task env, so the runner and
+  the pi adapter register them with the scrubber. pi's error events, failure
+  reason, adapter log and native `sessions/*.jsonl` are scrubbed.
+- **Model ids**: NaN ids known to support tool calls are the seven in the
+  provider registry, `packages/model-catalog/src/openai-compatible-providers.ts` (`nan/deepseek-v4-flash`,
+  `nan/glm5.3`, `nan/glm5.3-flash`, `nan/qwen3.6`, `nan/qwen3.8-flash`,
+  `nan/gemma4`, `nan/mimo-v2.6-flash`); other `nan/<id>` catalog ids are
+  accepted but untested. Helmcode: `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`,
+  `helmcode/qwen3.6`, `helmcode/gemma4`. Helmcode is not on models.dev; its
+  catalog section is synthesized from the registry (`catalog: "registry"`).
+  To add a provider, see "Adding a provider" in the harness configuration guide.
+- **Per-key caps**: NaN allows 60 RPM and 7 concurrent requests in total on
+  the base plan (10 on premium), 5 per model on `qwen3.6`, `gemma4` and the
+  `mimo` models. Helmcode allows 100 RPM, 2M TPM, and 5 concurrent requests
+  per model (10 on the GLM family, DeepSeek V4 Flash and Qwen 3.8 Flash). One
+  shared key across a fleet hits these fast; use a pool.
+- **Pricing**: $0 rows under `pi` and `opencode`, so sessions record $0 with
+  `costSource: "pricing-table"`. See `src/providers/pricing-sources.md`.
+- **Default harness**: with no `HARNESS_PROVIDER` and no Anthropic
+  credential, a NaN or Helmcode key makes the worker default to `pi`. Tier
+  defaults still point at `openrouter/...`; NaN- or Helmcode-only swarms set
+  `MODEL_TIER_PI_*` and `MODEL_TIER_OPENCODE_*` (see
+  [model-tiers.md](./model-tiers.md)).
+- **`latest:` aliases** do not cover these providers.
 
 ## Grok (`grok`)
 
@@ -168,7 +215,7 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.2.1-alpha.2` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.1-alpha.4` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
@@ -226,7 +273,7 @@ What the patch sets, and why:
 Still missing: live steering (`steerModes: []`) and native resume (follow-ups use
 the context preamble). Developer-preview compatibility can change.
 
-Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.2/packages/bundle/headless/README.md)
+Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.4/packages/bundle/headless/README.md)
 and the installed CLI's top-level and headless help.
 
 ## Cursor (`cursor`)
@@ -343,9 +390,9 @@ The dashboard runtime editor is the preferred configuration path. Selecting ACP 
 
 OpenCode runs `opencode acp`. Before the first prompt, the adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` config option. It also injects the model into `OPENCODE_CONFIG_CONTENT` before spawn, because the process environment cannot be changed after `session/new`; that startup value is the fallback when the target omits or rejects the protocol option. Missing or rejected options are logged and do not fail the session.
 
-Gemini runs `gemini --acp`. Gemini CLI 0.63.0 advertises no ACP `model` option, so `MODEL_OVERRIDE` reaches it as `GEMINI_MODEL` at spawn. Before spawn, the adapter writes the system prompt to a fresh `mkdtemp` directory outside the task `cwd` and sets `GEMINI_SYSTEM_MD` to that file; an empty prompt keeps Gemini's built-in one. The preset sets `GEMINI_CLI_TRUST_WORKSPACE=true` and forwards only the Gemini API key, Vertex AI and base-URL keys listed in `src/providers/acp-target-catalog.ts`. The full worker image pins the CLI with `GEMINI_CLI_VERSION` in `Dockerfile.worker`.
+Gemini runs `gemini --acp`. Gemini CLI 0.64.0 advertises no ACP `model` option, so `MODEL_OVERRIDE` reaches it as `GEMINI_MODEL` at spawn. Before spawn, the adapter writes the system prompt to a fresh `mkdtemp` directory outside the task `cwd` and sets `GEMINI_SYSTEM_MD` to that file; an empty prompt keeps Gemini's built-in one. The preset sets `GEMINI_CLI_TRUST_WORKSPACE=true` and forwards only the Gemini API key, Vertex AI and base-URL keys listed in `src/providers/acp-target-catalog.ts`. The full worker image pins the CLI with `GEMINI_CLI_VERSION` in `Dockerfile.worker`.
 
-Copilot runs `copilot --acp` (GitHub Copilot CLI, baked pinned into `worker-full-base` via `COPILOT_CLI_VERSION`; the entrypoint FATALs with an install hint when the binary is missing). Copilot advertises no `model` config option, so `MODEL_OVERRIDE` goes to `COPILOT_MODEL` before spawn. The env allowlist is `COPILOT_GITHUB_TOKEN`, the `COPILOT_PROVIDER_*` BYOK keys, `COPILOT_HOME`, `COPILOT_MODEL`, `GH_HOST`, and proxy vars; `GITHUB_TOKEN`/`GH_TOKEN` are deliberately not forwarded. `COPILOT_AUTO_UPDATE=false` is forced. BYOK with a model Copilot does not know needs `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` set to the real window: the first turn is about 150k tokens of tool definitions, and the default budget rejects it. The CLI has no system-prompt flag: the adapter writes the prompt to `.github/instructions/agent-swarm.instructions.md` under a per-task tmp dir and prepends that dir to `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verified on 1.0.96: extra dirs load `.github/instructions/*.instructions.md`, not `AGENTS.md`). No file in the task cwd is touched; `cleanupSystemPromptArtifact` removes the dir when the session ends or fails to start.
+Copilot runs `copilot --acp` (GitHub Copilot CLI, baked pinned into `worker-full-base` via `COPILOT_CLI_VERSION`; the entrypoint FATALs with an install hint when the binary is missing). Copilot advertises no `model` config option, so `MODEL_OVERRIDE` goes to `COPILOT_MODEL` before spawn. The env allowlist is `COPILOT_GITHUB_TOKEN`, the `COPILOT_PROVIDER_*` BYOK keys, `COPILOT_HOME`, `COPILOT_MODEL`, `GH_HOST`, and proxy vars; `GITHUB_TOKEN`/`GH_TOKEN` are deliberately not forwarded. `COPILOT_AUTO_UPDATE=false` is forced. BYOK with a model Copilot does not know needs `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` set to the real window: the first turn is about 150k tokens of tool definitions, and the default budget rejects it. The CLI has no system-prompt flag: the adapter writes the prompt to `.github/instructions/agent-swarm.instructions.md` under a per-task tmp dir and prepends that dir to `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verified on 1.0.97: extra dirs load `.github/instructions/*.instructions.md`, not `AGENTS.md`). No file in the task cwd is touched; `cleanupSystemPromptArtifact` removes the dir when the session ends or fails to start.
 
 Qwen Code runs `qwen --acp --auth-type <QWEN_AUTH_TYPE, default openai>` (baked pinned via `QWEN_CODE_VERSION`). A fresh worker has no `~/.qwen/settings.json`, and without an auth type the CLI waits for an interactive `/auth`, so the preset always passes one; `qwen-oauth` is rejected because it needs a browser. The default `openai` type reads `OPENAI_API_KEY` and `OPENAI_BASE_URL` (unset means DashScope, not OpenAI). `MODEL_OVERRIDE` goes on argv as `--model`; the ACP `model` option is skipped because it wants a `<id>(<authType>)` value. Like Gemini, the system prompt goes to a `mkdtemp` file outside the task `cwd` and `QWEN_SYSTEM_MD` points at it (this replaces Qwen's built-in prompt); the file is removed when the session ends. Qwen loads the swarm MCP tools lazily, through its tool search.
 
@@ -804,5 +851,5 @@ Offer review and mention sessions do not count toward this limit.
 Unset, invalid, or nonpositive values keep the existing continuous runner behavior.
 The runner stops acquiring work when completed and active sessions reach the limit.
 After the limit completes with no active session, the runner uses its normal shutdown routine and exits with code 0.
-Shutdown terminates process groups, emits telemetry, saves PM2 state, and sends `/close` with `runtimeShutdown: true`.
+Shutdown terminates process groups, emits telemetry, and sends `/close` with `runtimeShutdown: true`.
 Docker pools with a per-task lifecycle inject a limit of 1.

@@ -4,6 +4,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
+import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { parseSlackTs } from "@/slack/message-text";
 import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -59,6 +60,11 @@ export const registerSlackUpdateTool = (server: McpServer) => {
       const app = getSlackApp();
       if (!app) {
         return toolErr("Slack not configured.");
+      }
+
+      const blockReason = await getChannelBlockReason(app.client, channelId);
+      if (blockReason) {
+        return toolErr(externalChannelToolError(channelId, blockReason));
       }
 
       try {

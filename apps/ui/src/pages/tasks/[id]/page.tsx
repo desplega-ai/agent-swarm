@@ -32,8 +32,9 @@ import { useUsers } from "@/api/hooks/use-users";
 import type { AgentLog, AgentTask, AgentTaskStatus } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
-import { ModelLabel } from "@/components/shared/model-logo";
+import { ModelEffortLabel } from "@/components/shared/model-effort-label";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import type { SessionLogView } from "@/components/shared/session-log-messages";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
@@ -57,7 +58,11 @@ import { modelTierLabel } from "@/lib/model-tiers";
 import { parseStructuredOutput } from "@/lib/structured-output";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { linkTaskIds } from "@/lib/task-links";
-import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
+import {
+  describeModelResolution,
+  taskDisplayEffort,
+  taskDisplayModel,
+} from "@/lib/task-model-resolution";
 import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -70,7 +75,6 @@ import {
   useTaskActions,
 } from "./task-actions";
 import { TaskDetailsRail, taskRunSummary, taskRunTime } from "./task-details-rail";
-import { TaskEffortMark } from "./task-effort-mark";
 import { TaskSourceLine } from "./task-source-line";
 import {
   STICKY_BAR_HEIGHT,
@@ -668,26 +672,24 @@ export default function TaskDetailPage() {
   // unclaimed ones fall back to the requested `model`, then to whatever the
   // session_costs entries report.
   const displayModel = taskDisplayModel(task) ?? costs?.[0]?.model;
+  const displayEffort = taskDisplayEffort(task);
   const creatorName =
     task.creatorAgentId && task.creatorAgentId !== task.agentId
       ? (agentNames.get(task.creatorAgentId) ?? null)
       : null;
 
-  // HERO CHIPS: status, model (with the effort icon when the task sets one)
+  // HERO CHIPS: status, model (with the effort icon when the task records one)
   // and agent, then the tags as plain text. The harness, type, priority and
   // source are in Technical details. In the wide layout the model chip takes
   // focus and its tooltip has the exact model id. The narrow layout shows the
   // plain chip: a 44 px focus target would not fit the chip row, a hover
   // tooltip would cover the tabs under it, and Details lists the model id.
   const modelBadge = displayModel ? (
-    <>
-      <ModelLabel model={displayModel} />
-      <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
-    </>
+    <ModelEffortLabel model={displayModel} effort={displayEffort} />
   ) : task.modelTier ? (
     <>
       {modelTierLabel(task.modelTier)} tier
-      <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
+      <EffortMark effort={displayEffort} className="text-muted-foreground" />
     </>
   ) : null;
   // `outline-none`: the chips show the Badge's amber focus ring only, not the
@@ -705,7 +707,7 @@ export default function TaskDetailPage() {
         {describeModelResolution(task).map((line) => (
           <div key={line}>{line}</div>
         ))}
-        {task.effort ? <div>Effort: {REASONING_EFFORT_LABEL[task.effort]}</div> : null}
+        {displayEffort ? <div>Effort: {REASONING_EFFORT_LABEL[displayEffort]}</div> : null}
       </TooltipContent>
     </Tooltip>
   ) : modelBadge ? (
@@ -911,7 +913,7 @@ export default function TaskDetailPage() {
             title={headerTitle}
             status={task.status}
             model={displayModel}
-            effort={task.effort}
+            effort={displayEffort}
             action={<TaskPrimaryAction model={actions} />}
             onTitleClick={() => scrollToTop(centerScroller)}
           />

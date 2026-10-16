@@ -4,6 +4,7 @@ export {
   postAzureDevOpsPullRequestComment,
   resetAzureDevOpsBotIdCache,
   resolveAzureDevOpsBotId,
+  resolveAzureDevOpsBotUniqueName,
 } from "./api";
 export {
   AZURE_DEVOPS_BOT_NAME,
@@ -15,6 +16,15 @@ export {
   verifyAzureDevOpsWebhook,
 } from "./auth";
 export {
+  handleWorkItemCommented,
+  handleWorkItemCreated,
+  handleWorkItemDeleted,
+  handleWorkItemRestored,
+  handleWorkItemUpdated,
+  updatedPayloadOf,
+  workItemOf,
+} from "./boards-sync";
+export {
   commentedPayloadOf,
   createdPullRequestOf,
   handlePullRequestCommented,
@@ -24,4 +34,9 @@ export type {
   AzureDevOpsWebhookEvent,
   PullRequestCommentedEvent,
   PullRequestCreatedEvent,
+  WorkItemCommentedEvent,
+  WorkItemCreatedEvent,
+  WorkItemDeletedEvent,
+  WorkItemRestoredEvent,
+  WorkItemUpdatedEvent,
 } from "./types";

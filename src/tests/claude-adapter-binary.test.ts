@@ -38,6 +38,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WORKSPACE_CLAUDE_MD_PATH } from "../commands/profile-sync";
 import {
   ClaudeAdapter,
   parseClaudeBinary,
@@ -48,6 +49,7 @@ import {
   resolveClaudeBridgeEnabled,
   resolveClaudeTrustDirs,
 } from "../providers/claude-adapter";
+import { ClaudeSettingsConfigError, userClaudeMdExclude } from "../providers/claude-flag-settings";
 import type { ProviderSessionConfig } from "../providers/types";
 import { setFlockForTests } from "../utils/file-lock";
 import { holdFileLock } from "./fixtures/hold-file-lock";
@@ -694,6 +696,8 @@ describe("CLAUDE_BINARY env override", () => {
   let spawnSpy: ReturnType<typeof spyOn>;
   let whichSpy: ReturnType<typeof spyOn>;
   let spawnedArgs: Array<readonly string[]>;
+  /** Every non-git spawn, including the `--version` probe. */
+  let claudeSpawns: Array<readonly string[]>;
   let spawnedEnvs: Array<Record<string, string> | undefined>;
 
   beforeEach(async () => {
@@ -712,9 +716,11 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-test-token";
 
     spawnedArgs = [];
+    claudeSpawns = [];
     spawnedEnvs = [];
     spawnSpy = spyOn(Bun, "spawn").mockImplementation(((cmd: readonly string[], opts?: unknown) => {
       if (isGit(cmd)) return (realSpawn as (...a: unknown[]) => unknown)(cmd, opts);
+      claudeSpawns.push(cmd);
       if (cmd.at(-1) !== "--version") {
         spawnedArgs.push(cmd);
         spawnedEnvs.push((opts as { env?: Record<string, string> } | undefined)?.env);
@@ -767,6 +773,144 @@ describe("CLAUDE_BINARY env override", () => {
     expect(spawnedArgs).toHaveLength(1);
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("claude");
+  });
+
+  test("excludes both on-disk agent CLAUDE.md copies from Claude's memory load", async () => {
+    const adapter = new ClaudeAdapter();
+    await createCompletedSession(adapter, makeConfig());
+
+    const argv = spawnedArgs[0];
+    const at = argv.indexOf("--settings");
+    expect(at).toBeGreaterThan(0);
+    expect(JSON.parse(argv[at + 1] ?? "")).toEqual({
+      claudeMdExcludes: [WORKSPACE_CLAUDE_MD_PATH, userClaudeMdExclude()],
+    });
+  });
+
+  test("merges caller --settings from additionalArgs and CLAUDE_BINARY into one flag", async () => {
+    const settingsDir = await mkdtemp(join(tmpdir(), "claude-settings-merge-"));
+    try {
+      await writeFile(
+        join(settingsDir, "caller.json"),
+        JSON.stringify({ model: "from-file", claudeMdExcludes: ["/repo/CLAUDE.md"] }),
+      );
+      process.env.CLAUDE_BINARY = `claude --settings=${join(settingsDir, "caller.json")}`;
+      const adapter = new ClaudeAdapter();
+      await createCompletedSession(
+        adapter,
+        makeConfig({
+          cwd: settingsDir,
+          additionalArgs: [
+            "--settings",
+            JSON.stringify({
+              env: { X: "kept" },
+              claudeMdExcludes: [WORKSPACE_CLAUDE_MD_PATH, "/other/CLAUDE.md"],
+            }),
+            "--max-turns",
+            "3",
+          ],
+        }),
+      );
+
+      const argv = spawnedArgs[0];
+      const settingsFlags = argv.filter(
+        (arg) => arg === "--settings" || arg.startsWith("--settings="),
+      );
+      expect(settingsFlags).toEqual(["--settings"]);
+      expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "")).toEqual({
+        model: "from-file",
+        env: { X: "kept" },
+        claudeMdExcludes: [
+          "/repo/CLAUDE.md",
+          WORKSPACE_CLAUDE_MD_PATH,
+          "/other/CLAUDE.md",
+          userClaudeMdExclude(),
+        ],
+      });
+      expect(argv[0]).toBe("claude");
+      expect(argv.slice(argv.indexOf("--max-turns"), argv.indexOf("--max-turns") + 2)).toEqual([
+        "--max-turns",
+        "3",
+      ]);
+      // The version probe runs with the same stripped prefix and merged settings.
+      const probe = claudeSpawns.find((cmd) => cmd.at(-1) === "--version") ?? [];
+      expect(probe).toEqual([
+        "claude",
+        "--settings",
+        argv[argv.indexOf("--settings") + 1] ?? "",
+        "--version",
+      ]);
+    } finally {
+      await rm(settingsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("invalid caller --settings refuses to start: no Claude child spawns", async () => {
+    const settingsDir = await mkdtemp(join(tmpdir(), "claude-settings-invalid-"));
+    // Built at runtime so no single source literal looks like a credential.
+    const sentinel = ["settings", "sentinel", crypto.randomUUID()].join("-");
+    try {
+      await writeFile(join(settingsDir, "broken.json"), "{nope");
+      await writeFile(join(settingsDir, "array.json"), "[1]");
+      const cases: [string[], string][] = [
+        [["--settings", "missing.json"], "cannot be read (ENOENT)"],
+        [["--settings", "broken.json"], "is not valid JSON"],
+        [["--settings", `{"env":{"TOKEN":"${sentinel}"`], "is not valid JSON"],
+        [["--settings=array.json"], "is not a JSON object"],
+        [["--settings", "--max-turns", "3"], "--settings has no value"],
+        [["--settings", '--settings={"model":"x"}'], "--settings has no value"],
+      ];
+      for (const [additionalArgs, message] of cases) {
+        claudeSpawns = [];
+        const adapter = new ClaudeAdapter();
+        const error = await adapter
+          .createSession(makeConfig({ cwd: settingsDir, additionalArgs }))
+          .then(
+            () => undefined,
+            (err: unknown) => err,
+          );
+        expect(error).toBeInstanceOf(ClaudeSettingsConfigError);
+        expect((error as Error).message).toContain(message);
+        expect((error as Error).message).not.toContain(sentinel);
+        // Counts the `--version` probe too: validation runs before every spawn.
+        expect(claudeSpawns).toEqual([]);
+        // ...and before the trust pre-seed writes ~/.claude.json.
+        expect(await Bun.file(join(homeDir, ".claude.json")).exists()).toBeFalse();
+      }
+    } finally {
+      await rm(settingsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("invalid CLAUDE_BINARY prefix --settings never reaches logs, errors, or a spawn", async () => {
+    const sentinel = ["prefix", "sentinel", crypto.randomUUID()].join("-");
+    const inline = `{"env":{"TOKEN":"${sentinel}"`;
+    const logged: string[] = [];
+    const capture = (...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    };
+    const logSpy = spyOn(console, "log").mockImplementation(capture);
+    const warnSpy = spyOn(console, "warn").mockImplementation(capture);
+    const errorSpy = spyOn(console, "error").mockImplementation(capture);
+    try {
+      for (const binary of [`claude --settings=${inline}`, `claude --settings ${inline}`]) {
+        process.env.CLAUDE_BINARY = binary;
+        claudeSpawns = [];
+        const error = await new ClaudeAdapter().createSession(makeConfig()).then(
+          () => undefined,
+          (err: unknown) => err,
+        );
+        expect(error).toBeInstanceOf(ClaudeSettingsConfigError);
+        expect((error as Error).message).toContain("inline JSON is not valid JSON");
+        expect((error as Error).message).not.toContain(sentinel);
+        expect(claudeSpawns).toEqual([]);
+      }
+    } finally {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+    expect(logged.filter((line) => line.includes(sentinel))).toEqual([]);
   });
 
   test("legacy bridge override: argv[0] comes from CLAUDE_BINARY", async () => {

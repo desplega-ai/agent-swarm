@@ -19,6 +19,7 @@ import {
   updatePage,
   withFavoriteFlags,
 } from "../be/db";
+import { getPageEditCounter } from "../be/db/page-versions";
 import { snapshotPage } from "../pages/version";
 import { resolveTemplate } from "../prompts/resolver";
 // Side-effect import: registers `task.page.feedback`.
@@ -34,6 +35,7 @@ import {
   PageVersionSchema,
 } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
+import { getNodeEnv } from "../utils/node-env";
 import { issuePageSessionCookie } from "../utils/page-session";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
@@ -226,7 +228,7 @@ const updatePageRoute = route({
 /**
  * POST /api/pages/:id/feedback — turn the element comments collected by the
  * in-page feedback overlay (`?__swarm-feedback`, see
- * `src/artifact-sdk/feedback-overlay.ts`) into one task for the lead. In the
+ * `src/pages/feedback-overlay.ts`) into one task for the lead. In the
  * dashboard the SPA calls it with its bearer for the page it shows. A page
  * opened directly reaches it through the `/@swarm/api/*` page proxy, which
  * pins `X-Page-Id` to the cookie's page, so a page can only file feedback on
@@ -482,17 +484,6 @@ function withShareUrls<T extends { id: string; slug: string }>(
 }
 
 /**
- * Compute the page's "edit counter" — `MAX(page_versions.version) + 1`. Means
- * "this is the N-th edit since the page was created". After the first PUT the
- * value is 2 (one snapshot row → version 1 → counter becomes 2). This is the
- * value POST and PUT return as `version` on the wire.
- */
-async function pageEditCounter(pageId: string): Promise<number> {
-  const versions = await getPageVersions(pageId);
-  return versions.length > 0 ? versions[0]!.version + 1 : 1;
-}
-
-/**
  * Viewer and page-supplied text sits inside a `<page_feedback>` block in the
  * task prompt. Defuse any tag of that name so the text cannot close the block
  * early and pose as instructions.
@@ -536,7 +527,7 @@ function formatFeedbackComments(comments: z.infer<typeof PageFeedbackCommentSche
 }
 
 function isDevRequest(req: IncomingMessage): boolean {
-  if (process.env.NODE_ENV === "production") return false;
+  if (getNodeEnv() === "production") return false;
   // We want `SameSite=Lax` only when the request itself comes from the same
   // local-`http://localhost` origin as the API — same-site loads tolerate
   // Lax without Secure. Anything else (including portless `*.localhost`
@@ -842,7 +833,7 @@ export async function handlePages(
     updatePageRoute.respond(res, 200, {
       id: updated.id,
       key: updated.key,
-      version: await pageEditCounter(updated.id),
+      version: await getPageEditCounter(updated.id),
     });
     return true;
   }

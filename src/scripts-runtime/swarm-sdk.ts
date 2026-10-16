@@ -280,17 +280,6 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       return { method: "DELETE", path: `/api/config/${encodeURIComponent(id)}` };
     }
 
-    // ── services ──
-    case "service_list":
-      return {
-        method: "GET",
-        path: appendQuery("/api/services", {
-          agentId: body.agentId,
-          name: body.name,
-          status: body.status,
-        }),
-      };
-
     // ── workflows ──
     case "workflow_list":
       return {

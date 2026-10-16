@@ -21,6 +21,7 @@
  * API↔worker DB boundary (scripts/check-db-boundary.sh).
  */
 
+import { openAICompatibleKeyVars } from "@desplega/model-catalog";
 import { GITLEAKS_RULES } from "./secret-rules.generated";
 
 /**
@@ -35,9 +36,13 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * 5, the vendored gitleaks rule set, plus hand-written Resend, Google OAuth,
  * Discord webhook, xAI and bare Telegram shapes in pass 2; v6 = pass 5 resumes
  * after the secret, not the match, so adjacent secrets that share a delimiter
- * both redact, and sourcegraph-access-token drops its bare 40-hex branch.
+ * both redact, and sourcegraph-access-token drops its bare 40-hex branch;
+ * v7 = the OpenAI-compatible registry key vars (`NAN_API_KEY`,
+ * `HELMCODE_API_KEY`, and the `HELMCODE_API_NAN` alias no suffix matches).
+ * A new registry entry adds key vars, so it is a rule change too
+ * (`secret-scrubber.test.ts` pins the list to this number).
  */
-export const SCRUBBER_RULES_VERSION = 6;
+export const SCRUBBER_RULES_VERSION = 8;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -52,6 +57,9 @@ const SENSITIVE_KEY_EXACT = new Set<string>([
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
+  // OpenAI-compatible registry key vars, canonical and alias. An alias such
+  // as `HELMCODE_API_NAN` matches no SENSITIVE_KEY_SUFFIXES entry.
+  ...openAICompatibleKeyVars(),
   "SLACK_BOT_TOKEN",
   "SLACK_SIGNING_SECRET",
   "SLACK_CLIENT_SECRET",
@@ -1005,6 +1013,52 @@ export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
   return out as T;
 }
 
+export type ValueScrubber = {
+  text(text: string): string;
+  object<T>(value: T): T;
+};
+
+/**
+ * Redact exact occurrences of the given values, at any length, in one output
+ * boundary that knows which secrets it handed out (a script run's secret
+ * config). The global passes above keep their MIN_VALUE_LENGTH floor; this
+ * one never registers anything swarm-wide. All forms match in a single regex
+ * pass, longest first, so one value's marker is never rewritten by another
+ * value's pass. Object keys are redacted too.
+ */
+export function createValueScrubber(
+  entries: Array<{ value: string; name: string }>,
+): ValueScrubber {
+  const names = new Map<string, string>();
+  for (const { value, name } of entries) {
+    if (!value) continue;
+    for (const form of escapedForms(value)) if (!names.has(form)) names.set(form, name);
+  }
+  if (names.size === 0) return { text: (text) => text, object: (value) => value };
+
+  const pattern = [...names.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
+  const re = new RegExp(pattern, "g");
+  const text = (input: string) =>
+    input.replace(re, (match) => `[REDACTED:${names.get(match) ?? "secret"}]`);
+  const object = <T>(value: T, seen = new WeakSet<object>()): T => {
+    if (typeof value === "string") return text(value) as T;
+    if (value === null || typeof value !== "object") return value;
+    if (seen.has(value)) return "[Circular]" as T;
+    seen.add(value);
+    if (Array.isArray(value)) return value.map((item) => object(item, seen)) as T;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+        text(key),
+        object(child, seen),
+      ]),
+    ) as T;
+  };
+  return { text, object: (value) => object(value) };
+}
+
 /**
  * Force the env-value cache to rebuild on the next scrub call. Callers should
  * invoke this whenever the swarm_config is reloaded (`/internal/reload-config`
@@ -1028,6 +1082,21 @@ export function registerVolatileSecret(value: string, name: string): void {
     if (volatileSecrets.get(form) === name) continue;
     volatileSecrets.set(form, name);
     volatileGeneration++;
+  }
+}
+
+/**
+ * Register the sensitive values of an env map that is not `process.env`
+ * (a runner's per-task env, an adapter's session env). A key picked from a
+ * credential pool, or a row admitted after boot, lives only there, so the
+ * env pass never sees it. Comma-separated pools register each member too.
+ */
+export function registerEnvSecrets(env: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(env)) {
+    if (!value || !isSensitiveKey(key)) continue;
+    registerVolatileSecret(value, key);
+    if (!value.includes(",")) continue;
+    for (const member of value.split(",")) registerVolatileSecret(member.trim(), key);
   }
 }
 

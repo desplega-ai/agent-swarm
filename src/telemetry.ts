@@ -24,6 +24,7 @@ import {
 } from "./telemetry-context";
 import type { PropsFor, TelemetryEventName } from "./telemetry-contract";
 import { isEnvFlagEnabled } from "./utils/env-flag";
+import { getNodeEnv } from "./utils/node-env";
 import { normalizeOrgWebsite } from "./utils/org-website";
 import { getCurrentRequestUserId } from "./utils/request-auth-context";
 
@@ -588,7 +589,7 @@ function getTelemetryEnvironment(): string {
 
   // Do not default from NODE_ENV: shipped Bun/npm installs can report
   // "development" even when the operator did not choose a telemetry cohort.
-  if (process.env.NODE_ENV === "test") return "test";
+  if (getNodeEnv() === "test") return "test";
   return "production";
 }
 

@@ -29,7 +29,6 @@ COPY packages/model-routing/ ./packages/model-routing/
 
 # Copy source files
 COPY src/ ./src/
-COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
 # Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
 COPY slack-manifest.json ./
@@ -43,6 +42,9 @@ RUN mkdir -p scripts-runtime script-workflows-runtime && \
     bun build ./src/scripts-runtime/eval-harness.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/eval-harness.bundle.js && \
+    bun build ./src/scripts-runtime/extract-args-schema.ts \
+      --target bun --no-splitting \
+      --outfile ./scripts-runtime/extract-args-schema.bundle.js && \
     bun build ./src/script-workflows/harness.ts \
       --target bun --no-splitting \
       --outfile ./script-workflows-runtime/harness.bundle.js && \
@@ -55,6 +57,9 @@ RUN mkdir -p scripts-runtime script-workflows-runtime && \
     bun build ./node_modules/zod/index.js \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/zod.bundle.js && \
+    bun build ./src/scripts-runtime/zod-mini-bundle.ts \
+      --target bun --no-splitting \
+      --outfile ./scripts-runtime/zod-mini.bundle.js && \
     bun build ./src/extensions/contract-runtime.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/extensions-contract.bundle.js

@@ -285,43 +285,6 @@ requirements and is not normally invoked by operators.
 agent-swarm codex-hook
 ```
 
-### artifact
-
-Manage agent artifacts — serve static files or Hono apps via localtunnel.
-
-```bash
-# Serve a directory as a public artifact
-agent-swarm artifact serve ./my-report --name my-report
-
-# Serve a Hono app (must export default Hono instance)
-agent-swarm artifact serve ./server.ts --name dashboard
-
-# List active artifacts
-agent-swarm artifact list
-
-# Stop an artifact
-agent-swarm artifact stop my-report
-```
-
-**Subcommands:**
-
-| Subcommand | Description |
-|------------|-------------|
-| `serve <path>` | Serve a directory or script via localtunnel |
-| `list` | List active artifacts from the service registry |
-| `stop <name>` | Stop an artifact and close its tunnel |
-
-**Options for `serve`:**
-
-| Option | Description |
-|--------|-------------|
-| `--name <name>` | Name for the artifact (derived from path if omitted) |
-| `--port <port>` | Local port to use |
-| `--no-auth` | Disable authentication |
-| `--subdomain <sub>` | Request a specific localtunnel subdomain |
-
-Artifacts are registered in the service registry and automatically cleaned up when the session ends (via the Stop hook).
-
 ## Development Commands
 
 These are available when developing Agent Swarm locally:

@@ -13,6 +13,7 @@
  * See runbooks/model-catalog.md.
  */
 
+import { withAgentChatRegistrySections } from "@desplega/model-catalog";
 import { type RuntimeCatalog, setRuntimeModelCatalog } from "../utils/runtime-model-catalog";
 import {
   getActivePricingRow,
@@ -180,7 +181,10 @@ function pickNumber(value: unknown): number | undefined {
 }
 
 /** Project a models.dev payload into `model_catalog` rows for CATALOG_PROVIDER_IDS. */
-export function buildCatalogEntries(cache: ModelsDevCache, checkedAt: number): ModelCatalogEntry[] {
+export function buildCatalogEntries(raw: ModelsDevCache, checkedAt: number): ModelCatalogEntry[] {
+  // A live models.dev payload still carries the embeddings and image models of
+  // the registry gateways (`vercel`); pi and opencode cannot run them.
+  const cache = withAgentChatRegistrySections(raw);
   const entries: ModelCatalogEntry[] = [];
   for (const providerId of CATALOG_PROVIDER_IDS) {
     const provider = cache[providerId];

@@ -154,6 +154,7 @@ export interface ConfigFormData {
   value: string;
   isSecret: boolean;
   description: string;
+  exportToEnv: boolean;
 }
 
 export const emptyConfigForm: ConfigFormData = {
@@ -163,6 +164,7 @@ export const emptyConfigForm: ConfigFormData = {
   value: "",
   isSecret: false,
   description: "",
+  exportToEnv: true,
 };
 
 type SwarmConfigScopeFilter = SwarmConfigScope | "all";
@@ -195,6 +197,9 @@ export function useSwarmConfigTable() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editEntry, setEditEntry] = useState<SwarmConfig | null>(null);
+  // Bumped on every open, so the entry dialog remounts with a fresh form
+  // (a cancelled "Add" otherwise kept its typed values for the next one).
+  const [dialogSession, setDialogSession] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<SwarmConfig | null>(null);
   const [detailEntry, setDetailEntry] = useState<SwarmConfig | null>(null);
   const scopeFilter = coerceScopeFilter(readStringParam(searchParams, "scope", "all"));
@@ -223,11 +228,13 @@ export function useSwarmConfigTable() {
 
   function handleAdd() {
     setEditEntry(null);
+    setDialogSession((n) => n + 1);
     setDialogOpen(true);
   }
 
   const handleEdit = useCallback((entry: SwarmConfig) => {
     setEditEntry(entry);
+    setDialogSession((n) => n + 1);
     setDialogOpen(true);
   }, []);
 
@@ -239,6 +246,7 @@ export function useSwarmConfigTable() {
       value: data.value,
       isSecret: data.isSecret,
       description: data.description || null,
+      exportToEnv: data.exportToEnv,
     });
     setEditEntry(null);
   }
@@ -283,6 +291,7 @@ export function useSwarmConfigTable() {
     agentMap,
     dialogOpen,
     setDialogOpen,
+    dialogSession,
     editEntry,
     setEditEntry,
     deleteTarget,

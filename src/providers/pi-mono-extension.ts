@@ -9,6 +9,7 @@
 import type { ExtensionFactory, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
+import { renderGoalReminder } from "../prompts/goal-reminder";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
@@ -34,7 +35,7 @@ export interface SwarmHooksConfig {
 }
 
 /** Standard headers for swarm API requests */
-function apiHeaders(config: SwarmHooksConfig): Record<string, string> {
+export function apiHeaders(config: SwarmHooksConfig): Record<string, string> {
   return {
     "Content-Type": "application/json",
     ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
@@ -43,12 +44,12 @@ function apiHeaders(config: SwarmHooksConfig): Record<string, string> {
 }
 
 /** Fire-and-forget fetch — logs nothing, swallows errors */
-function fireAndForget(url: string, init: RequestInit): void {
+export function fireAndForget(url: string, init: RequestInit): void {
   void fetch(url, init).catch(() => {});
 }
 
 /** Check if a task has been cancelled */
-async function isTaskCancelled(
+export async function isTaskCancelled(
   config: SwarmHooksConfig,
 ): Promise<{ cancelled: boolean; reason?: string }> {
   try {
@@ -68,7 +69,7 @@ async function isTaskCancelled(
 }
 
 /** Check if agent should stop polling */
-async function checkShouldBlockPolling(config: SwarmHooksConfig): Promise<boolean> {
+export async function checkShouldBlockPolling(config: SwarmHooksConfig): Promise<boolean> {
   try {
     const resp = await fetch(`${config.apiUrl}/me`, {
       method: "GET",
@@ -83,7 +84,7 @@ async function checkShouldBlockPolling(config: SwarmHooksConfig): Promise<boolea
 }
 
 /** Fetch task details for goal reminder */
-async function fetchTaskDetails(
+export async function fetchTaskDetails(
   config: SwarmHooksConfig,
 ): Promise<{ id: string; task: string; progress?: string } | null> {
   try {
@@ -99,9 +100,10 @@ async function fetchTaskDetails(
 }
 
 /** Sync identity files (SOUL.md, IDENTITY.md, TOOLS.md) to server */
-async function syncIdentityFilesToServer(
+export async function syncIdentityFilesToServer(
   config: SwarmHooksConfig,
   changeSource: "self_edit" | "session_sync" = "session_sync",
+  signal?: AbortSignal,
 ): Promise<void> {
   const updates: Record<string, string> = {};
   const paths: Record<string, string> = {
@@ -131,6 +133,7 @@ async function syncIdentityFilesToServer(
       method: "PUT",
       headers: apiHeaders(config),
       body: JSON.stringify({ ...updates, changeSource }),
+      signal,
     });
   } catch {
     /* silently fail */
@@ -174,7 +177,10 @@ async function syncSetupScriptToServer(
 }
 
 /** Auto-index a file written to memory directory */
-async function autoIndexMemoryFile(config: SwarmHooksConfig, editedPath: string): Promise<void> {
+export async function autoIndexMemoryFile(
+  config: SwarmHooksConfig,
+  editedPath: string,
+): Promise<void> {
   try {
     const fileContent = await Bun.file(editedPath).text();
     const isShared = editedPath.startsWith("/workspace/shared/");
@@ -198,7 +204,7 @@ async function autoIndexMemoryFile(config: SwarmHooksConfig, editedPath: string)
 }
 
 /** Fetch concurrent context for lead agents */
-async function fetchConcurrentContext(config: SwarmHooksConfig): Promise<string | null> {
+export async function fetchConcurrentContext(config: SwarmHooksConfig): Promise<string | null> {
   try {
     const resp = await fetch(`${config.apiUrl}/api/concurrent-context`, {
       method: "GET",
@@ -313,26 +319,38 @@ export async function summarizeSessionForPi(
     return;
   }
 
+  let transcript = "";
+  try {
+    const fullTranscript = await Bun.file(sessionFile).text();
+    transcript = fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
+  } catch (err) {
+    console.warn(
+      scrubSecrets(`session_summary skipped (pi): cannot read ${sessionFile}: ${String(err)}`),
+    );
+    return;
+  }
+  await summarizeTranscript(config, "pi", transcript, deps);
+}
+
+/**
+ * Summarize an already-loaded session transcript and index the result. Shared
+ * by pi (transcript file) and opencode (transcript read from its session API).
+ */
+export async function summarizeTranscript(
+  config: SwarmHooksConfig,
+  harness: "pi" | "opencode",
+  transcript: string,
+  deps: SummarizeSessionForPiDeps = {},
+): Promise<void> {
   const _runSummarize = deps.runSummarize ?? runSummarize;
   const _fetchRetrievals = deps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
   const _postRatings = deps.postRatings ?? postRatings;
   const _buildRatings = deps.buildRatingsFromLlm ?? buildRatingsFromLlm;
 
   try {
-    let transcript = "";
-    try {
-      const fullTranscript = await Bun.file(sessionFile).text();
-      transcript = fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
-    } catch (err) {
-      console.warn(
-        scrubSecrets(`session_summary skipped (pi): cannot read ${sessionFile}: ${String(err)}`),
-      );
-      return;
-    }
-
     if (transcript.length <= 100) {
       console.warn(
-        `session_summary skipped (pi): transcript too short (${transcript.length} chars)`,
+        `session_summary skipped (${harness}): transcript too short (${transcript.length} chars)`,
       );
       return;
     }
@@ -341,7 +359,7 @@ export async function summarizeSessionForPi(
     const agentId = config.agentId;
     if (!sourceTaskId || !agentId) {
       console.warn(
-        `session_summary skipped (pi): ${!sourceTaskId ? "task id unavailable" : "agent id unavailable"}`,
+        `session_summary skipped (${harness}): ${!sourceTaskId ? "task id unavailable" : "agent id unavailable"}`,
       );
       return;
     }
@@ -359,7 +377,7 @@ export async function summarizeSessionForPi(
       : [];
 
     const result = await _runSummarize({
-      harness: "pi",
+      harness,
       transcript,
       retrievals,
       taskContext: {
@@ -375,14 +393,14 @@ export async function summarizeSessionForPi(
     });
     // null = no auth resolved or wrapper exhausted retries (already logged inside)
     if (!result) {
-      console.warn("session_summary skipped (pi): summarizer returned no result");
+      console.warn(`session_summary skipped (${harness}): summarizer returned no result`);
       return;
     }
 
     const summary = result.summary.trim();
     if (summary.length <= 20 || summary.toLowerCase().includes("no significant learnings")) {
       console.debug(
-        `session_summary skipped (pi): summary failed quality gate (${summary.length} chars)`,
+        `session_summary skipped (${harness}): summary failed quality gate (${summary.length} chars)`,
       );
       return;
     }
@@ -401,7 +419,11 @@ export async function summarizeSessionForPi(
     });
     if (!indexResp.ok) {
       const text = await indexResp.text().catch(() => "");
-      console.error("session_summary: /api/memory/index POST failed (pi):", indexResp.status, text);
+      console.error(
+        `session_summary: /api/memory/index POST failed (${harness}):`,
+        indexResp.status,
+        scrubSecrets(text),
+      );
       return;
     }
 
@@ -414,12 +436,19 @@ export async function summarizeSessionForPi(
           agentId,
           taskId: sourceTaskId,
           events: ratingEvents,
-        }).catch((err) => console.error("session_summary: postRatings failed (pi):", err));
+        }).catch((err) =>
+          console.error(`session_summary: postRatings failed (${harness}):`, scrubError(err)),
+        );
       }
     }
   } catch (err) {
-    console.error("session_summary failed (pi):", err);
+    console.error(`session_summary failed (${harness}):`, scrubError(err));
   }
+}
+
+/** An error as scrubbed text: the session-summary diagnostics go to stderr. */
+function scrubError(err: unknown): string {
+  return scrubSecrets(err instanceof Error ? (err.stack ?? err.message) : String(err));
 }
 
 /** `customType` of the advisory messages this extension sends to the model. */
@@ -624,21 +653,26 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
     // === session_compact → PreCompact ===
     // Re-anchor the model on its task once compaction has summarized the
     // history. `context` fires before every LLM call, so it cannot carry this.
-    pi.on("session_compact", async () => {
+    pi.on("session_compact", async (event, ctx) => {
       if (!config.taskId) return;
+
+      // The one real compaction signal: shaped like the claude runner's rows.
+      fireAndForget(`${config.apiUrl}/api/tasks/${config.taskId}/context`, {
+        method: "POST",
+        headers: apiHeaders(config),
+        body: JSON.stringify({
+          eventType: "compaction",
+          sessionId: `pi-${config.taskId}`,
+          compactTrigger: event.reason === "manual" ? "manual" : "auto",
+          preCompactTokens: event.compactionEntry?.tokensBefore,
+          contextTotalTokens: ctx.getContextUsage?.()?.contextWindow,
+        }),
+      });
 
       const taskDetails = await fetchTaskDetails(config);
       if (taskDetails) {
-        const reminder = [
-          "=== GOAL REMINDER (injected before context compaction) ===",
-          `Task ID: ${taskDetails.id}`,
-          `Task: ${taskDetails.task}`,
-        ];
-        if (taskDetails.progress) {
-          reminder.push(`Current Progress: ${taskDetails.progress}`);
-        }
-        reminder.push("=== Continue working on this task after compaction ===");
-        sendNudge(pi, reminder.join("\n"));
+        const reminder = await renderGoalReminder(taskDetails);
+        if (reminder) sendNudge(pi, reminder);
       }
     });
 
@@ -646,14 +680,15 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
     pi.on("context", async (_event, ctx) => {
       if (!config.taskId) return undefined;
 
-      // Report context usage as a compaction event
+      // Per-call usage snapshot: "progress", as the claude/codex runner posts
+      // per-turn usage. Only session_compact reports a compaction.
       const usage = ctx.getContextUsage?.();
       if (usage) {
         fireAndForget(`${config.apiUrl}/api/tasks/${config.taskId}/context`, {
           method: "POST",
           headers: apiHeaders(config),
           body: JSON.stringify({
-            eventType: "compaction",
+            eventType: "progress",
             sessionId: `pi-${config.taskId}`,
             contextUsedTokens: usage.tokens ?? undefined,
             contextTotalTokens: usage.contextWindow,

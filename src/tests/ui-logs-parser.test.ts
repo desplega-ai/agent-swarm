@@ -78,6 +78,34 @@ describe("ui logs parser", () => {
     expect(result.items.some((item) => item.kind === "unknown")).toBe(false);
   });
 
+  test("renders only the last cumulative opencode message mirror when no text part exists", () => {
+    const result = normalizeSessionLogs([
+      log("m1", "opencode", 1, {
+        type: "message",
+        role: "assistant",
+        content: "One.",
+        messageId: "msg_1",
+      }),
+      log("m2", "opencode", 2, {
+        type: "message",
+        role: "assistant",
+        content: "One. Two.",
+        messageId: "msg_1",
+      }),
+      log("perm", "opencode", 3, {
+        id: "evt_1",
+        created: 0,
+        type: "permission.asked",
+        data: { sessionID: "ses_1", id: "per_1" },
+      }),
+    ]);
+
+    expect(result.items.map((item) => [item.kind, item.text])).toEqual([
+      ["text", "One. Two."],
+      ["lifecycle", undefined],
+    ]);
+  });
+
   test("drops opencode server transport noise", () => {
     const result = normalizeSessionLogs([
       log("heartbeat", "opencode", 1, { type: "server.heartbeat", properties: {} }),
@@ -1123,6 +1151,49 @@ describe("ui logs parser", () => {
         data: expect.objectContaining({ status: "running" }),
       }),
       { type: "text", text: "Devin update" },
+    ]);
+  });
+
+  test("keeps a Claude sub-agent's parent_tool_use_id on its messages", () => {
+    const messages = parseSessionLogs([
+      log("spawn", "claude", 1, {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "toolu_agent_1", name: "Agent", input: {} }],
+        },
+      }),
+      log("child-call", "claude", 2, {
+        type: "assistant",
+        parent_tool_use_id: "toolu_agent_1",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Look at the fixtures." },
+            { type: "tool_use", id: "toolu_read_1", name: "Read", input: { file_path: "a.ts" } },
+          ],
+        },
+      }),
+      log("child-result", "claude", 3, {
+        type: "user",
+        parent_tool_use_id: "toolu_agent_1",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_read_1", content: "ok" }],
+        },
+      }),
+      log("main-text", "claude", 4, {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { role: "assistant", content: [{ type: "text", text: "Done." }] },
+      }),
+    ]);
+
+    expect(messages.map((m) => [m.id, m.parentToolUseId])).toEqual([
+      ["spawn", undefined],
+      ["child-call", "toolu_agent_1"],
+      ["child-result", "toolu_agent_1"],
+      ["main-text", undefined],
     ]);
   });
 

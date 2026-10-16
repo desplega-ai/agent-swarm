@@ -4,7 +4,7 @@
  *
  * Smoke-tests the full opencode worker path in Docker:
  *   1. basic     — Build image, run task "write hello.txt", assert content + task.provider
- *   2. isolation — Two concurrent tasks show distinct OPENCODE_DATA_HOME dirs
+ *   2. isolation — Two concurrent tasks on one worker: distinct sessions, no log cross-talk
  *
  * Usage:
  *   bun scripts/e2e-docker-opencode.ts
@@ -346,122 +346,100 @@ async function testBasic() {
 
 /**
  * Test: isolation
- * - Two concurrent opencode tasks start simultaneously
- * - Each gets its own OPENCODE_DATA_HOME (verified via container env inspection)
- * - Both tasks complete independently
+ * OpenCode 2 runs one in-process host per task, with no per-task data dir.
+ * One worker (MAX_CONCURRENT_TASKS=2) runs two overlapping tasks; each must
+ * get its own OpenCode session, write only its own file, and store logs that
+ * mention only its own session and marker.
  */
 async function testIsolation() {
   const testName = "isolation";
-  logSection("isolation: Concurrent OPENCODE_DATA_HOME isolation");
+  logSection("isolation: Two concurrent tasks on one OpenCode 2 worker");
 
-  // Register two agents
-  const join1 = await api("POST", "/api/agents", { name: "e2e-opencode-iso-1", role: "worker", status: "online" });
-  const join2 = await api("POST", "/api/agents", { name: "e2e-opencode-iso-2", role: "worker", status: "online" });
-  const agentId1 = join1?.agent?.id ?? join1?.id;
-  const agentId2 = join2?.agent?.id ?? join2?.id;
-
-  if (!agentId1 || !agentId2) {
-    logFail(testName, "Failed to register agents");
+  const join = await api("POST", "/api/agents", {
+    name: "e2e-opencode-iso",
+    role: "worker",
+    status: "online",
+  });
+  const agentId = join?.agent?.id ?? join?.id;
+  if (!agentId) {
+    logFail(testName, `Agent registration failed: ${JSON.stringify(join)}`);
     return;
   }
-  logPass(`${testName}: Two agents registered`);
 
-  // Create two tasks
-  const task1 = await api("POST", "/api/tasks", {
-    task: "Write a file at /workspace/iso-task-1.txt with the content: task-one-done",
-    routingReason: "human_pinned", agentId: agentId1,
-    source: "api",
-  });
-  const task2 = await api("POST", "/api/tasks", {
-    task: "Write a file at /workspace/iso-task-2.txt with the content: task-two-done",
-    routingReason: "human_pinned", agentId: agentId2,
-    source: "api",
-  });
-  const taskId1 = task1?.task?.id ?? task1?.id;
-  const taskId2 = task2?.task?.id ?? task2?.id;
-
-  if (!taskId1 || !taskId2) {
-    logFail(testName, "Failed to create tasks");
-    return;
+  const markers = ["iso-one", "iso-two"];
+  const taskIds: string[] = [];
+  for (const marker of markers) {
+    const created = await api("POST", "/api/tasks", {
+      task: `Use bash to run: sleep 15; echo ${marker} > /workspace/${marker}.txt . Then call store-progress with status completed and output "${marker}".`,
+      routingReason: "human_pinned",
+      agentId,
+      source: "api",
+    });
+    const id = created?.task?.id ?? created?.id;
+    if (!id) {
+      logFail(testName, `Task creation failed: ${JSON.stringify(created)}`);
+      return;
+    }
+    taskIds.push(id);
   }
-  logPass(`${testName}: Two tasks created (${taskId1.slice(0, 8)}, ${taskId2.slice(0, 8)})`);
+  logPass(`${testName}: Two tasks created (${taskIds.map((t) => t.slice(0, 8)).join(", ")})`);
 
-  // Start both containers concurrently
-  let container1: string | null = null;
-  let container2: string | null = null;
-
+  let container: string;
   try {
-    [container1, container2] = await Promise.all([
-      startOpencodeWorker(agentId1, WORKER_PORT_BASE + 10),
-      startOpencodeWorker(agentId2, WORKER_PORT_BASE + 11),
-    ]);
-    logPass(`${testName}: Both containers started`);
+    container = await startOpencodeWorker(agentId, WORKER_PORT_BASE + 10, {
+      MAX_CONCURRENT_TASKS: "2",
+    });
   } catch (err) {
     logFail(testName, `Container start failed: ${err}`);
-    if (container1) await stopContainer(container1);
-    if (container2) await stopContainer(container2);
     return;
   }
 
-  // Check that OPENCODE_DATA_HOME differs between containers
-  // Each container sets OPENCODE_DATA_HOME per-task in the runner/adapter,
-  // so even if not set externally, the adapter creates per-task data dirs.
-  // We inspect the env to verify isolation at the container level.
-  const env1 = await containerExec(container1, ["sh", "-c", "echo TASK_ID=$AGENT_ID"]);
-  const env2 = await containerExec(container2, ["sh", "-c", "echo TASK_ID=$AGENT_ID"]);
-  if (env1.trim() !== env2.trim()) {
-    logPass(`${testName}: Containers have distinct AGENT_ID env (${env1.trim()} vs ${env2.trim()})`);
-  } else {
-    logSkip(`${testName}: AGENT_ID isolation`, "Both containers report same AGENT_ID (may share if same agent)");
+  const finals = await Promise.all(
+    taskIds.map(async (id) => {
+      await pollUntil(async () => {
+        const d = await apiSafe("GET", `/api/tasks/${id}`);
+        const s = d?.task?.status ?? d?.status;
+        return s === "completed" || s === "failed";
+      }, TIMEOUT_MS);
+      const d = await apiSafe("GET", `/api/tasks/${id}`);
+      return d?.task ?? d;
+    }),
+  );
+
+  for (const [i, task] of finals.entries()) {
+    if (task?.status === "completed" && task?.provider === "opencode") {
+      logPass(`${testName}: Task ${i + 1} completed on opencode`);
+    } else {
+      logFail(testName, `Task ${i + 1}: status=${task?.status} provider=${task?.provider}`);
+    }
   }
 
-  // Wait for both tasks to complete
-  const [done1, done2] = await Promise.all([
-    pollUntil(async () => {
-      const d = await apiSafe("GET", `/api/tasks/${taskId1}`);
-      const s = d?.task?.status ?? d?.status;
-      return s === "completed" || s === "failed";
-    }, TIMEOUT_MS),
-    pollUntil(async () => {
-      const d = await apiSafe("GET", `/api/tasks/${taskId2}`);
-      const s = d?.task?.status ?? d?.status;
-      return s === "completed" || s === "failed";
-    }, TIMEOUT_MS),
-  ]);
-
-  const final1 = await apiSafe("GET", `/api/tasks/${taskId1}`);
-  const final2 = await apiSafe("GET", `/api/tasks/${taskId2}`);
-  const status1 = final1?.task?.status ?? final1?.status;
-  const status2 = final2?.task?.status ?? final2?.status;
-
-  if (done1 && status1 === "completed") {
-    logPass(`${testName}: Task 1 completed`);
+  const sessions = finals.map((t) => t?.claudeSessionId);
+  if (sessions[0] && sessions[1] && sessions[0] !== sessions[1]) {
+    logPass(`${testName}: Distinct OpenCode sessions (${sessions.join(" vs ")})`);
   } else {
-    logFail(testName, `Task 1 ended with status: ${status1} (done=${done1})`);
+    logFail(testName, `Sessions not distinct: ${JSON.stringify(sessions)}`);
   }
 
-  if (done2 && status2 === "completed") {
-    logPass(`${testName}: Task 2 completed`);
-  } else {
-    logFail(testName, `Task 2 ended with status: ${status2} (done=${done2})`);
+  for (const [i, id] of taskIds.entries()) {
+    const logs = await apiSafe("GET", `/api/tasks/${id}/session-logs`);
+    const text = JSON.stringify(logs?.logs ?? []);
+    const other = 1 - i;
+    const leaked = [markers[other], sessions[other]].filter((s) => s && text.includes(s));
+    if (text.includes(markers[i]!) && leaked.length === 0) {
+      logPass(`${testName}: Task ${i + 1} logs carry only its own session and marker`);
+    } else {
+      logFail(testName, `Task ${i + 1} logs: own marker=${text.includes(markers[i]!)} leaked=${leaked}`);
+    }
+    const content = (await containerExec(container, ["cat", `/workspace/${markers[i]}.txt`])).trim();
+    if (content === markers[i]) {
+      logPass(`${testName}: /workspace/${markers[i]}.txt is correct`);
+    } else {
+      logFail(testName, `/workspace/${markers[i]}.txt = '${content.slice(0, 80)}'`);
+    }
   }
 
-  // Verify tasks ran under opencode provider
-  const provider1 = final1?.task?.provider ?? final1?.provider;
-  const provider2 = final2?.task?.provider ?? final2?.provider;
-  if (provider1 === "opencode" && provider2 === "opencode") {
-    logPass(`${testName}: Both tasks have tasks.provider = 'opencode'`);
-  } else {
-    logSkip(
-      `${testName}: tasks.provider check`,
-      `Got providers: task1=${provider1}, task2=${provider2}`,
-    );
-  }
-
-  await Promise.all([
-    stopContainer(container1),
-    stopContainer(container2),
-  ]);
+  await stopContainer(container);
 }
 
 // ─── Test Router ─────────────────────────────────────────────────────────────

@@ -71,7 +71,7 @@ export const ELEMENT_KEYS = [
 export const MAX_ELEMENT_REF_DEPTH = 5;
 
 /** Components whose `props.id` roots `/ui/<id>/…` interaction state. */
-const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs"]);
+const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs", "Chips"]);
 
 /** Components whose `props.id` roots `/forms/<id>/…` interaction state. */
 const FORM_COMPONENTS = new Set(["Form"]);
@@ -203,7 +203,7 @@ export const REWRITE_COVERAGE: RewriteRule[] = [
   {
     field: "props",
     rewrites: ["state-paths", "interaction-ids", "prop-substitution", "action-app-binding"],
-    note: "deep walk: every $state/$bindState/$cond binding, absolute-path interpolations inside a $template string, `statePath`/`clearStatePath` strings, action chains nested in props (Form.onSubmit, Table.rowActions[].actions) — including their `formId` (an interaction id, namespaced like `props.id`) and their `$app` routing marker — and the interaction `props.id` of Form/SearchInput/Select/Tabs",
+    note: "deep walk: every $state/$bindState/$cond binding, absolute-path interpolations inside a $template string, `statePath`/`clearStatePath` strings, action chains nested in props (Form.onSubmit, Table.rowActions[].actions) — including their `formId` (an interaction id, namespaced like `props.id`) and their `$app` routing marker — and the interaction `props.id` of Form/SearchInput/Select/Tabs/Chips",
   },
   {
     field: "children",

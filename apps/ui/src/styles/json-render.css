@@ -1,0 +1,75 @@
+/* json-render `Stack.motion` — the entrance of a Stack's direct children.
+ *
+ * CSS keyframes only: an animation runs when its element is inserted, and a
+ * React re-render that keeps the element (the app runtime re-renders on every
+ * 5s poll) never restarts it. So blocks rise once on first paint and data
+ * changes never animate (DESIGN.md § Motion).
+ *
+ * `rise`: fade + 4px lift over 200ms on ease-snappy; `fade`: opacity only.
+ * Siblings stagger 30ms, capped at the 10th child so a long list does not
+ * crawl in. A motion Stack nested inside another one does not animate its own
+ * children: the outer entrance already carries them, and compounding the two
+ * would double the delay. Reduced motion: opacity only, 150ms. */
+
+@keyframes json-render-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes json-render-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.json-render-motion-rise > * {
+  animation: json-render-rise 200ms var(--ease-snappy) both;
+}
+
+.json-render-motion-fade > * {
+  animation: json-render-fade 200ms var(--ease-snappy) both;
+}
+
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(2) {
+  animation-delay: 30ms;
+}
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(3) {
+  animation-delay: 60ms;
+}
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(4) {
+  animation-delay: 90ms;
+}
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(5) {
+  animation-delay: 120ms;
+}
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(6) {
+  animation-delay: 150ms;
+}
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(7) {
+  animation-delay: 180ms;
+}
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(8) {
+  animation-delay: 210ms;
+}
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(9) {
+  animation-delay: 240ms;
+}
+:is(.json-render-motion-rise, .json-render-motion-fade) > :nth-child(n + 10) {
+  animation-delay: 270ms;
+}
+
+:is(.json-render-motion-rise, .json-render-motion-fade)
+  :is(.json-render-motion-rise, .json-render-motion-fade)
+  > * {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .json-render-motion-rise > *,
+  .json-render-motion-fade > * {
+    animation-name: json-render-fade;
+    animation-duration: 150ms;
+  }
+}

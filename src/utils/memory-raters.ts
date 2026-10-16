@@ -1,3 +1,7 @@
-// Keep the dependency-free resolver in the plugin bundle so opencode's isolated
-// runtime and the API/other workers execute the same defaults.
-export { getMemoryRaterNames } from "../../plugin/opencode-plugins/lib/memory-raters";
+/** Unset enables citation ratings and self-rating hints; an explicitly empty value disables all raters. */
+export function getMemoryRaterNames(): string[] {
+  return (process.env.MEMORY_RATERS ?? "implicit-citation,explicit-self")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}

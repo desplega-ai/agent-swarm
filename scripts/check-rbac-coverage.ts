@@ -68,6 +68,14 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/runtime-pool-bind-agent.ts": "proxies to HTTP routes enforcing runtime_pool.bind",
   "src/tools/runtime-pool-create-agent.ts": "proxies to HTTP routes enforcing runtime_pool.bind",
   "src/tools/app-list.ts": "app summaries are list-level; per-app filtering is future work",
+  "src/tools/chat-reply.ts":
+    "own-scoped: posts only to the chat thread of a task the caller owns or created",
+  "src/tools/chat-post.ts":
+    "open to all agents per the Chat SDK plan (2026-10-13); Slack's equivalent `slack-post` / `slack-read` is lead-gated, parity is an open decision for the operator",
+  "src/tools/chat-open-dm.ts":
+    "open to all agents per the Chat SDK plan (2026-10-13); Slack's equivalent `slack-post` / `slack-read` is lead-gated, parity is an open decision for the operator",
+  "src/tools/chat-read-thread.ts":
+    "open to all agents per the Chat SDK plan (2026-10-13); Slack's equivalent `slack-post` / `slack-read` is lead-gated, parity is an open decision for the operator",
   "src/tools/create-channel.ts": PIN_REASON,
   "src/tools/create-metric.ts": PIN_REASON,
   "src/tools/create-page.ts": PIN_REASON,
@@ -91,7 +99,6 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/kv/kv-get.ts": PIN_REASON,
   "src/tools/kv/kv-list.ts": PIN_REASON,
   "src/tools/list-channels.ts": PIN_REASON,
-  "src/tools/list-services.ts": PIN_REASON,
   "src/tools/mcp-servers/mcp-server-get.ts": PIN_REASON,
   "src/tools/mcp-servers/mcp-server-list.ts": PIN_REASON,
   "src/tools/memory-get.ts": PIN_REASON,
@@ -108,7 +115,6 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/prompt-templates/set.ts": PIN_REASON,
   "src/tools/read-messages.ts": PIN_REASON,
   "src/tools/register-agentmail-inbox.ts": PIN_REASON,
-  "src/tools/register-service.ts": PIN_REASON,
   "src/tools/repos/get-repos.ts": PIN_REASON,
   "src/tools/request-human-input.ts": PIN_REASON,
   "src/tools/resolve-user.ts": PIN_REASON,
@@ -134,13 +140,13 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/slack-list-channels.ts": PIN_REASON,
   "src/tools/slack-reply.ts": PIN_REASON,
   "src/tools/swarm-x.ts": PIN_REASON,
+  "src/tools/system-one-decide.ts":
+    "same posture as an ungated system-one-decision workflow node; the credential never leaves the server",
   "src/tools/tracker/tracker-link-task.ts": PIN_REASON,
   "src/tools/tracker/tracker-map-agent.ts": PIN_REASON,
   "src/tools/tracker/tracker-status.ts": PIN_REASON,
   "src/tools/tracker/tracker-sync-status.ts": PIN_REASON,
   "src/tools/tracker/tracker-unlink.ts": PIN_REASON,
-  "src/tools/unregister-service.ts": PIN_REASON,
-  "src/tools/update-service-status.ts": PIN_REASON,
   "src/tools/whatsapp-message.ts": PIN_REASON,
   "src/tools/workflows/cancel-workflow-run.ts": PIN_REASON,
   "src/tools/workflows/create-workflow.ts": PIN_REASON,

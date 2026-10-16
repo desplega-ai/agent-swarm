@@ -19,7 +19,6 @@ import {
   getTaskAttachments,
   getTaskById,
   getUnassignedTaskIdsForAgent,
-  getUserById,
   hasCapacity,
   isExtensionAgent,
   recordBudgetRefusalNotification,
@@ -27,7 +26,6 @@ import {
   updateAgentStatusFromCapacity,
   upsertChannelActivityCursor,
 } from "../be/db";
-import { renderIdentity, resolveIdentity } from "../be/identity";
 import {
   parseModelTierOverridesHeader,
   recordClaimModelResolution,
@@ -37,19 +35,14 @@ import { poolTaskRunsOnHarness } from "../be/model-validation";
 import { getRuntimeInstanceById, touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
+import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
 import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
-import {
-  AgentTaskSchema,
-  BudgetRefusedTriggerSchema,
-  TaskAttachmentSchema,
-  UserCommsPrefsSchema,
-  UserSchema,
-} from "../types";
+import { AgentTaskSchema, BudgetRefusedTriggerSchema, TaskAttachmentSchema } from "../types";
 import { ensure } from "../utils/business-use";
 import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
-import { getUserCommsPrefs } from "../utils/requester-comms";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -100,27 +93,11 @@ const PollTriggerAttachmentSchema = TaskAttachmentSchema.pick({
   sizeBytes: true,
 });
 
-// Requester projection sent on `task_assigned` triggers — either the resolved
-// user's identity fields, or (when no `requestedByUserId` is recorded) just a
-// rendered `name` for the UNKNOWN-identity sentinel.
-const PollRequestedBySchema = UserSchema.pick({
-  id: true,
-  name: true,
-  email: true,
-  role: true,
-  notes: true,
-}).extend({
-  // Absent for the UNKNOWN-identity sentinel (Slack-only requester, no users row).
-  id: z.string().optional(),
-  // Structured communication preferences from `users.metadata.comms`.
-  comms: UserCommsPrefsSchema.optional(),
-});
-
 const PollTaskOfferedTriggerSchema = z.object({
   type: z.literal("task_offered"),
   taskId: z.string(),
   task: AgentTaskSchema,
-  requestedBy: PollRequestedBySchema.optional(),
+  requestedBy: TaskRequestedBySchema.optional(),
 });
 
 const PollTaskAssignedTriggerSchema = z.object({
@@ -132,7 +109,7 @@ const PollTaskAssignedTriggerSchema = z.object({
   task: AgentTaskSchema.extend({
     attachments: z.array(PollTriggerAttachmentSchema),
   }),
-  requestedBy: PollRequestedBySchema.optional(),
+  requestedBy: TaskRequestedBySchema.optional(),
 });
 
 // `budget_refused` reuses the canonical `BudgetRefusedTriggerSchema` entity
@@ -204,38 +181,6 @@ const pollTriggers = route({
 const CHANNEL_ACTIVITY_INTERVAL_MS = 60_000; // Check at most once per 60s
 let lastChannelActivityCheckAt = 0;
 
-function getRequesterNotes(notes: string | undefined): string | undefined {
-  return typeof notes === "string" && notes.trim().length > 0 ? notes : undefined;
-}
-
-/**
- * Resolve the requester projection for a task trigger. If the task carries a
- * machine-recorded external id (today: the Slack user field) but no
- * requestedByUserId, render the explicit UNKNOWN sentinel instead of silently
- * omitting the section: never a substituted human (Rule 33 /
- * provenance-or-silence).
- */
-async function buildTriggerRequestedBy(task: {
-  requestedByUserId?: string | null;
-  slackUserId?: string | null;
-}): Promise<z.infer<typeof PollRequestedBySchema> | undefined> {
-  const user = task.requestedByUserId ? await getUserById(task.requestedByUserId) : undefined;
-  if (user) {
-    return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      notes: getRequesterNotes(user.notes),
-      comms: getUserCommsPrefs(user),
-    };
-  }
-  if (task.slackUserId) {
-    return { name: renderIdentity(await resolveIdentity("slack", task.slackUserId)) };
-  }
-  return undefined;
-}
-
 /**
  * Slim attachment projection for the `task_assigned` poll trigger — just
  * enough (id, name, mimeType, sizeBytes) for the worker to build a one-shot
@@ -256,16 +201,31 @@ async function attachmentsForTrigger(
 /**
  * Claim-time model resolution (runbooks/model-tiers.md). Never blocks a claim:
  * a resolution failure leaves the worker on its own local resolution.
+ *
+ * The trigger's `model` is the task's own pin, not the column: a re-claimed
+ * row carries the model its previous session reported, and the worker treats
+ * `task.model` as a pin that beats the agent's current MODEL_OVERRIDE. The
+ * previous claim record is overwritten for the same reason.
  */
 async function claimModelFields(
-  task: { id: string; model?: string | null; modelTier?: string | null },
+  task: TaskModelPinFields & { id: string },
   agent: Parameters<typeof recordClaimModelResolution>[1],
-): Promise<Awaited<ReturnType<typeof recordClaimModelResolution>>> {
+): Promise<Awaited<ReturnType<typeof recordClaimModelResolution>> & { model: string | undefined }> {
+  const pin = taskModelPin(task);
+  const cleared = {
+    model: pin,
+    resolvedModel: undefined,
+    modelSource: undefined,
+    modelAlias: undefined,
+  };
   try {
-    return await recordClaimModelResolution(task, agent);
+    return {
+      ...cleared,
+      ...(await recordClaimModelResolution({ ...task, model: pin }, agent)),
+    };
   } catch (error) {
     console.warn(`[/api/poll] model resolution failed for task ${task.id}:`, error);
-    return {};
+    return cleared;
   }
 }
 
@@ -422,7 +382,7 @@ export async function handlePoll(
           const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
             await recordRuntimeTask(claimedTask.id);
-            const offeredRequestedBy = await buildTriggerRequestedBy(claimedTask);
+            const offeredRequestedBy = await buildTaskRequestedBy(claimedTask);
             return {
               trigger: {
                 type: "task_offered",
@@ -519,8 +479,8 @@ export async function handlePoll(
             });
 
             // Resolve requesting user if available (UNKNOWN sentinel handling
-            // lives in buildTriggerRequestedBy).
-            const assignedRequestedBy = await buildTriggerRequestedBy(pendingTask);
+            // lives in buildTaskRequestedBy).
+            const assignedRequestedBy = await buildTaskRequestedBy(pendingTask);
             // The surface that started the whole chain, so the worker can tag
             // its session events with it (workers cannot read the task tree).
             const assignedTriggerSurface = await resolveTriggerSurface(
@@ -667,7 +627,7 @@ export async function handlePoll(
                     agentId: myAgentId,
                   });
                 });
-                const claimedRequestedBy = await buildTriggerRequestedBy(claimed);
+                const claimedRequestedBy = await buildTaskRequestedBy(claimed);
                 const claimedTriggerSurface = await resolveTriggerSurface(
                   claimed.id,
                   claimed.source,

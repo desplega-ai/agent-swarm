@@ -1173,6 +1173,27 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/agentmail`,
       },
       {
+        key: "CHAT_SDK_ENABLED",
+        label: "Enable Chat SDK channel",
+        description:
+          "Start the Chat SDK channel (Telegram and more) for the adapters configured in CHAT_SDK_ADAPTERS. A change applies within a few seconds.",
+        kind: "boolean",
+        defaultValue: "false",
+        restartRequired: false,
+        docsUrl: `${DOCS}integrations/chat-sdk`,
+      },
+      {
+        key: "CHAT_SDK_BUFFER_MS",
+        label: "Chat SDK buffer window",
+        description:
+          "How long the Chat SDK channel waits for more messages in a thread before it creates one task from them. Start a message with !now to skip the wait.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "10000",
+        placeholder: "10000",
+        docsUrl: `${DOCS}integrations/chat-sdk`,
+      },
+      {
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         description:
@@ -1195,6 +1216,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Require mention for follow-ups",
         description:
           "Only treat a Slack thread reply as a follow-up when the bot is @-mentioned. Off means every reply in the thread is picked up.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_BLOCK_EXTERNAL_CHANNELS",
+        label: "Block external Slack channels",
+        description:
+          "Stop the bot in Slack Connect channels shared with another organization. The swarm ignores messages there, refuses to post or read there, and leaves the channel on join or share. Leaving needs the `channels:manage` and `groups:write` bot scopes.",
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}integrations/slack`,

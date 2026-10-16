@@ -252,13 +252,35 @@ describe("Comb markdown source lines", () => {
     expect(openingTag(images, "span", "Dir")).toContain("data-comb-skip");
   });
 
-  test("a leading YAML block renders as markdown with the file's own lines", () => {
-    const withYaml = render("---\ntitle: Notes\n---\n\nBody text.");
-    expect(withYaml).toMatch(/<hr[^>]*data-line-start="1"/);
-    const heading = openingTag(withYaml, "h2", "title: Notes");
-    expect(heading).toContain('data-line-start="2"');
-    expect(heading).toContain('data-line-end="3"');
-    expect(openingTag(withYaml, "p", "Body text.")).toContain('data-line-start="5"');
+  test("a leading YAML block renders as a key/value table, the body keeps the file's lines", () => {
+    const withYaml = render(
+      "---\ntitle: Notes\npath: thoughts/a/b.md\n---\n\nBody text.\n\n---\n\nAfter.",
+    );
+    expect(withYaml).toContain('data-frontmatter="table"');
+    expect(openingTag(withYaml, "dl", ">title</dt>")).toContain("data-comb-skip");
+    expect(withYaml).toContain(">title</dt>");
+    expect(withYaml).toContain(">Notes</dd>");
+    expect(withYaml).toContain(">thoughts/a/b.md</dd>");
+    expect(withYaml).not.toMatch(/<h2/);
+    expect(openingTag(withYaml, "p", "Body text.")).toContain('data-line-start="6"');
+    // A later `---` is still a rule.
+    expect(withYaml).toMatch(/<hr[^>]*data-line-start="8"/);
+    expect(openingTag(withYaml, "p", "After.")).toContain('data-line-start="10"');
+  });
+
+  test("malformed frontmatter shows the raw block", () => {
+    const bad = render("---\ntitle: [unclosed\n---\nBody.");
+    expect(bad).toContain('data-frontmatter="raw"');
+    expect(bad).toContain("title: [unclosed");
+    expect(bad).toContain("Frontmatter could not be parsed");
+    expect(openingTag(bad, "p", "Body.")).toContain('data-line-start="4"');
+  });
+
+  test("a mermaid fence keeps its source and line stamps until the diagram loads", () => {
+    const html = render("Intro.\n\n```mermaid\nflowchart LR\n  A --> B\n```\n");
+    expect(html).toMatch(/<div[^>]*data-line-start="3"[^>]*data-line-end="6"/);
+    expect(html).toContain("flowchart LR");
+    expect(html).not.toMatch(/<pre[^>]*data-line-start/);
   });
 
   test("inline code keeps the chip style", () => {

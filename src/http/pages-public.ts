@@ -7,7 +7,7 @@
  *
  * Scope of THIS module (step-3):
  *   - `auth_mode === 'public'`: ungated. HTML responses inline-inject the
- *     `BROWSER_SDK_JS` constant from `src/artifact-sdk/browser-sdk.ts` (reused
+ *     `BROWSER_SDK_JS` constant from `src/pages/browser-sdk.ts` (reused
  *     verbatim — no token-injection hook on the client). SVG responses serve
  *     raw bytes with a restrictive CSP and no injected scripts. JSON responses
  *     302-redirect to the SPA `/pages/:id` route (the JSON renderer lives
@@ -23,11 +23,12 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { BROWSER_SDK_JS, SWARM_UI_JS } from "../artifact-sdk/browser-sdk";
-import { feedbackOverlayScripts, isPageFeedbackRequested } from "../artifact-sdk/feedback-overlay";
 import { getPage, incrementPageViewCount } from "../be/db";
+import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
+import { feedbackOverlayScripts, isPageFeedbackRequested } from "../pages/feedback-overlay";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
+import { getNodeEnv } from "../utils/node-env";
 import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -318,7 +319,7 @@ function buildCsp(): string {
   // between Vite ports / portless dev doesn't require restarting the API.
   const configured = getConfiguredAppUrls();
   const devFallbacks =
-    process.env.NODE_ENV === "production"
+    getNodeEnv() === "production"
       ? []
       : [
           "http://localhost:5274",
@@ -459,7 +460,7 @@ function extractPasswordCandidate(
  * `SameSite=Lax` (dev) vs `SameSite=None; Secure` (prod).
  */
 function isLocalhostRequest(req: IncomingMessage): boolean {
-  if (process.env.NODE_ENV === "production") return false;
+  if (getNodeEnv() === "production") return false;
   // Only emit `SameSite=Lax` (no Secure) when the request comes from the
   // SAME http://localhost origin as the API — Lax cookies don't travel on
   // cross-site fetches, so portless `*.localhost` setups (SPA on https

@@ -1,6 +1,5 @@
 import type { WebClient } from "@slack/web-api";
-
-const logger = console;
+import { getChannelExternality } from "./external-channel";
 
 type SlackErrorData = {
   error?: unknown;
@@ -36,20 +35,8 @@ export function slackMissingScopeMessage(error: unknown): string | undefined {
  * are the authoritative org-boundary signal per Slack's API docs.
  */
 async function isKnownExternalChannel(client: WebClient, channelId: string): Promise<boolean> {
-  try {
-    const resp = await client.conversations.info({ channel: channelId });
-    const ch = (resp.channel ?? {}) as {
-      is_ext_shared?: boolean;
-      is_pending_ext_shared?: boolean;
-    };
-    return ch.is_ext_shared === true || ch.is_pending_ext_shared === true;
-  } catch (error) {
-    logger.warn(
-      `[Slack] conversations.info failed for ${channelId}; attempting join fallback:`,
-      error,
-    );
-    return false;
-  }
+  // "unknown" (conversations.info failed) falls through to the join attempt.
+  return (await getChannelExternality(client, channelId)) === "external";
 }
 
 /**

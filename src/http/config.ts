@@ -18,10 +18,12 @@ import { fillOrgLogoFromWebsite } from "../be/org-profile";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   internalConfigKeyError,
+  isApiOnlyConfigKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
   validateConfigValue,
+  validateExportToEnv,
 } from "../be/swarm-config-guard";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
 import { SwarmConfigSchema } from "../types";
@@ -35,16 +37,9 @@ const MAX_ENV_PRESENCE_KEYS = 200;
 const SECRETS_FORCE_MASK_NOTE =
   " (secret values masked: this token cannot read secrets in this scope)";
 
-// Config keys the API server owns for its own use and must NEVER hand out over
-// HTTP — workers/entrypoints read config to build their env, and the agent-fs
-// bootstrap admin key would let a compromised worker administer the shared org.
-// The API materializes these into its own process.env at boot via
-// getInjectableGlobalConfigs, so no HTTP consumer legitimately needs them.
-const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY", "SLACK_SIGNING_SECRET"]);
-
 function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
   return configs.filter(
-    (config) => !API_ONLY_CONFIG_KEYS.has(config.key) && !isInternalConfigKey(config.key),
+    (config) => !isApiOnlyConfigKey(config.key) && !isInternalConfigKey(config.key),
   );
 }
 
@@ -117,6 +112,28 @@ export async function ensureConfigAdmin(
   res: ServerResponse,
   verb: Extract<PermissionVerb, "config.write.any" | "config.delete.any">,
 ): Promise<boolean> {
+  return ensureHttpPermission(
+    req,
+    res,
+    verb,
+    verb === "config.write.any"
+      ? "Writing swarm config requires the lead agent"
+      : "Deleting swarm config requires the lead agent",
+  );
+}
+
+/**
+ * The general form of `ensureConfigAdmin`: operators and users pass, guests
+ * get a plain 403, and an agent principal (session identity first, then the
+ * legacy X-Agent-ID header) must hold `verb`. On denial it writes a 403 with
+ * `forbiddenMessage` and returns false.
+ */
+export async function ensureHttpPermission(
+  req: IncomingMessage,
+  res: ServerResponse,
+  verb: PermissionVerb,
+  forbiddenMessage: string,
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
   if (auth?.kind === "guest") {
@@ -132,13 +149,7 @@ export async function ensureConfigAdmin(
     source: "http",
   });
   if (!decision.allow) {
-    jsonError(
-      res,
-      verb === "config.write.any"
-        ? "Writing swarm config requires the lead agent"
-        : "Deleting swarm config requires the lead agent",
-      403,
-    );
+    jsonError(res, forbiddenMessage, 403);
     return false;
   }
   return true;
@@ -276,6 +287,12 @@ const upsertConfig = route({
     isSecret: z.boolean().optional(),
     envPath: z.string().nullish(),
     description: z.string().nullish(),
+    exportToEnv: z
+      .boolean()
+      .optional()
+      .describe(
+        "Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads.",
+      ),
   }),
   responses: {
     200: { description: "Config entry upserted", schema: SwarmConfigSchema },
@@ -442,7 +459,7 @@ export async function handleConfig(
     const parsed = await upsertConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
-    const { scope, scopeId, key, value, isSecret, envPath, description } = parsed.body;
+    const { scope, scopeId, key, value, isSecret, envPath, description, exportToEnv } = parsed.body;
 
     if (scope === "global" && scopeId) {
       jsonError(res, "Global scope must not have scopeId", 400);
@@ -464,7 +481,8 @@ export async function handleConfig(
       return true;
     }
 
-    const validationError = validateConfigValue(key, value);
+    const validationError =
+      validateConfigValue(key, value) ?? validateExportToEnv(key, exportToEnv);
     if (validationError) {
       jsonError(res, validationError, 400);
       return true;
@@ -480,6 +498,7 @@ export async function handleConfig(
         isSecret: isSecret || false,
         envPath: envPath || null,
         description: description || null,
+        exportToEnv,
       });
       // Auto-reload integrations when a global-scoped config changes so callers
       // (CLI, automation, dashboard) don't have to remember to hit /reload.

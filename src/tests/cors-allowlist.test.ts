@@ -58,6 +58,31 @@ describe("isOriginAllowedForCredentials", () => {
     expect(isOriginAllowedForCredentials("https://evil.example")).toBe(false);
   });
 
+  test("development trusts loopback origins on any port; other modes do not", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "development";
+      delete process.env[ENV_KEY];
+      expect(isOriginAllowedForCredentials("http://localhost:5974")).toBe(true);
+      expect(isOriginAllowedForCredentials("http://127.0.0.1:4173")).toBe(true);
+      expect(isOriginAllowedForCredentials("http://[::1]:3000")).toBe(true);
+      expect(isOriginAllowedForCredentials("https://localhost:8443")).toBe(true);
+      expect(isOriginAllowedForCredentials("http://localhost.evil.example")).toBe(false);
+      expect(isOriginAllowedForCredentials("http://evil.example:5974")).toBe(false);
+      // A custom allowlist does not switch the loopback rule off in development.
+      process.env[ENV_KEY] = "https://app.example";
+      expect(isOriginAllowedForCredentials("http://localhost:5974")).toBe(true);
+
+      process.env.NODE_ENV = "production";
+      expect(isOriginAllowedForCredentials("http://localhost:5974")).toBe(false);
+      delete process.env.NODE_ENV;
+      expect(isOriginAllowedForCredentials("http://localhost:5974")).toBe(false);
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   test("denies arbitrary origins when CORS_ALLOWED_ORIGINS is blank", () => {
     process.env[ENV_KEY] = "  ";
     expect(isOriginAllowedForCredentials("https://evil.example")).toBe(false);

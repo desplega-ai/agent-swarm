@@ -68,7 +68,6 @@ Each worker container includes:
 
 - **Languages**: Python 3, Node.js 22, Bun
 - **Build tools**: gcc, g++, make, cmake
-- **Process manager**: PM2 (for background services)
 - **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
 - **Agent tools**: `wts` (git worktree manager), `agent-fs` (persistent shared filesystem)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
@@ -127,7 +126,6 @@ agent-swarm/
 │   │   ├── db.ts        # SQLite database
 │   │   └── migrations/  # Database migration system
 │   ├── workflows/      # Workflow automation engine (DAG executor, triggers, nodes)
-│   ├── artifact-sdk/    # Artifact SDK (serve files/apps via localtunnel)
 │   ├── providers/       # AI provider adapters (formatCommand for provider-aware prompts)
 │   │   ├── types.ts     # ProviderAdapter interface
 │   │   ├── claude-adapter.ts  # Claude Code adapter
@@ -162,7 +160,6 @@ agent-swarm/
 | Database | SQLite (via `bun:sqlite`) |
 | AI Runtime | Claude Code (default) or pi-mono — selected via `HARNESS_PROVIDER`. See [Harness Configuration](/docs/guides/harness-configuration) |
 | Containerization | Docker |
-| Process Management | PM2 |
 | Memory Embeddings | OpenAI `text-embedding-3-small` |
 | Dashboard | React + Vite |
 | Schema Validation | Zod |

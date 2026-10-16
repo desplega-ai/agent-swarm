@@ -1174,13 +1174,6 @@ describe("Stats & Metadata", () => {
     expect(Array.isArray(body.logs)).toBe(true);
   });
 
-  test("GET /api/services — returns services list", async () => {
-    const { status, body } = await get("/api/services");
-    expect(status).toBe(200);
-    expect(body.services).toBeDefined();
-    expect(Array.isArray(body.services)).toBe(true);
-  });
-
   test("GET /api/scheduled-tasks — returns scheduled tasks", async () => {
     const { status, body } = await get("/api/scheduled-tasks");
     expect(status).toBe(200);
@@ -1814,24 +1807,6 @@ describe("Memory", () => {
     });
     // May return 200 (success) or 500 (no OPENAI_API_KEY for embeddings)
     expect([200, 500]).toContain(status);
-  });
-});
-
-// ===========================================================================
-// 16. Ecosystem
-// ===========================================================================
-
-describe("Ecosystem", () => {
-  test("GET /ecosystem — missing agent ID header returns 400", async () => {
-    const { status } = await get("/ecosystem");
-    expect(status).toBe(400);
-  });
-
-  test("GET /ecosystem — returns ecosystem config for agent", async () => {
-    const { status, body } = await get("/ecosystem", { agentId: ids.workerAgent });
-    expect(status).toBe(200);
-    expect(body.apps).toBeDefined();
-    expect(Array.isArray(body.apps)).toBe(true);
   });
 });
 

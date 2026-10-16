@@ -21,7 +21,6 @@ import "./config";
 import "./context";
 import "./core";
 import "./db-query";
-import "./ecosystem";
 
 import "./api-keys";
 import "./events";

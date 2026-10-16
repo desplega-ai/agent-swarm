@@ -11,14 +11,17 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { reasoningLevelsForModel } from "@desplega/model-catalog";
 import {
   buildModelsCatalog,
+  type CatalogProviderId,
   getModelsCatalog,
   PINNED_MODELSDEV_ENTRIES,
   resetModelsCatalogForTests,
   updateLiveModelsCatalog,
 } from "../be/models-catalog";
 import type { ModelsDevCache } from "../be/modelsdev-cache";
+import { getContextWindowSize } from "../utils/context-window";
 
 afterEach(() => {
   resetModelsCatalogForTests();
@@ -82,6 +85,14 @@ describe("getModelsCatalog", () => {
     expect(Object.keys(result.providers.openrouter?.models ?? {}).length).toBeGreaterThan(0);
     expect(Object.keys(result.providers.anthropic?.models ?? {}).length).toBeGreaterThan(0);
     expect(Object.keys(result.providers.opencode?.models ?? {}).length).toBeGreaterThan(0);
+    expect(result.providers.nan?.models["glm5.3-flash"]).toBeDefined();
+    expect(Object.keys(result.providers.helmcode?.models ?? {}).sort()).toEqual([
+      "deepseek-v4-flash",
+      "gemma4",
+      "glm5.3",
+      "glm5.3-flash",
+      "qwen3.6",
+    ]);
   });
 
   test("prefers live data after an update", () => {
@@ -99,7 +110,7 @@ describe("getModelsCatalog", () => {
     const result = getModelsCatalog();
     for (const entryPath of PINNED_MODELSDEV_ENTRIES) {
       const slashIndex = entryPath.indexOf("/");
-      const providerId = entryPath.slice(0, slashIndex) as "anthropic" | "amazon-bedrock";
+      const providerId = entryPath.slice(0, slashIndex) as CatalogProviderId;
       const modelId = entryPath.slice(slashIndex + 1);
       expect(result.providers[providerId]?.models[modelId]).toBeDefined();
     }
@@ -116,5 +127,35 @@ describe("getModelsCatalog", () => {
     });
     const result = getModelsCatalog();
     expect(result.providers.anthropic?.models["claude-mythos-5"]?.name).toBe("Live Mythos");
+  });
+});
+
+describe("nan and helmcode sections", () => {
+  test("the registry-synthesized helmcode section survives a live payload that lacks it", () => {
+    // LIVE_CACHE has no helmcode provider: the registry section is refilled.
+    updateLiveModelsCatalog(LIVE_CACHE);
+    const helmcode = getModelsCatalog().providers.helmcode;
+    expect(helmcode?.id).toBe("helmcode");
+    expect(helmcode?.name).toBe("Helmcode");
+    expect(helmcode?.models["glm5.3"]?.limit?.context).toBe(1_048_576);
+    expect(helmcode?.models["qwen3.6"]?.limit?.context).toBe(262_144);
+  });
+
+  test("reasoning levels resolve for helmcode and nan ids on pi and opencode", () => {
+    const catalog = getModelsCatalog().providers;
+    for (const harness of ["pi", "opencode"]) {
+      expect(
+        reasoningLevelsForModel(harness, "helmcode/glm5.3-flash", catalog).length,
+      ).toBeGreaterThan(0);
+      expect(reasoningLevelsForModel(harness, "nan/glm5.3-flash", catalog).length).toBeGreaterThan(
+        0,
+      );
+    }
+  });
+
+  test("context windows come from the catalog sections", () => {
+    expect(getContextWindowSize("helmcode/glm5.3")).toBe(1_048_576);
+    expect(getContextWindowSize("helmcode/gemma4")).toBe(262_144);
+    expect(getContextWindowSize("nan/qwen3.6")).toBe(262_144);
   });
 });

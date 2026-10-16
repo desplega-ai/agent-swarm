@@ -22,8 +22,8 @@ rate by hand should also update this file.
 - **Runtime module**: `src/be/models-catalog.ts`; route in
   `src/http/models-catalog.ts`.
 - Every successful models.dev fetch in the runtime refresh above also updates
-  an in-memory slim catalog (openrouter / anthropic / openai / amazon-bedrock
-  only, picker-relevant fields only). The UI model picker
+  an in-memory slim catalog (openrouter / anthropic / openai / amazon-bedrock /
+  nan / helmcode only, picker-relevant fields only). The UI model picker
   (`apps/ui/src/lib/agent-runtime-models.ts` via `useModelsCatalog()`) prefers
   this over its build-time snapshot, so new models appear without a deploy.
 - Pinned limited-availability entries (`PINNED_MODELSDEV_ENTRIES`) are
@@ -49,7 +49,10 @@ rate by hand should also update this file.
     shortname forms, so they're projected under `provider='pi'` as well.
   - OpenAI models → rows under `provider='codex'`.
   - OpenRouter models → rows under `provider='opencode'`, `provider='pi'` and
-    `provider='dsh'` (dsh strips `openrouter/` at lookup). Any `google/...`
+    `provider='dsh'` (dsh strips `openrouter/` at lookup). These are
+    OpenRouter's model-level list price, the cheapest endpoint's rate, so they
+    under-price a request routed to a dearer endpoint. opencode posts
+    OpenRouter's billed `usage.cost` instead when it has it. Any `google/...`
     row additionally gets projected under `provider='gemini'` (both the
     stripped name and the full `google/...` id) so internal-ai callers find
     a hit either way.
@@ -81,6 +84,25 @@ rate by hand should also update this file.
     `inputTokens`, clamped to zero, so fresh input is priced separately.
     Cursor's own models are not in models.dev: see
     `CURSOR_FIRST_PARTY_PRICING` below.
+  - OpenAI-compatible registry providers: NaN models (models.dev `nan`
+    section) and Helmcode models (the registry-synthesized `helmcode`
+    section, below) → rows under `provider='pi'` and
+    `provider='opencode'`, keyed `nan/<id>` and `helmcode/<id>`, at $0 input
+    and $0 output. Both providers bill a flat rate per key, so a session's
+    marginal cost is $0. `buildModelsDevSeedRows()` projects them, so the rows
+    land at boot seed and on refresh, and sessions record $0 with
+    `costSource: "pricing-table"` rather than `unpriced`.
+
+- **Registry-synthesized `helmcode` section**: Helmcode is not on models.dev.
+  Its five agent models (`deepseek-v4-flash`, `glm5.3`, `glm5.3-flash`,
+  `qwen3.6`, `gemma4`) live in the provider registry
+  (`packages/model-catalog/src/openai-compatible-providers.ts`,
+  `catalog: "registry"`). `withRegistryCatalogSections` adds the section,
+  at $0, to the snapshot loader (`loadModelsDevCache`), the worker runtime
+  catalog and the dashboard bundle, and the live catalog refills it
+  (`setLiveModelsCatalog`). Model limits are copied from Helmcode's own
+  opencode and pi config pages. Helmcode's resold Claude, GPT and Gemini
+  models are not included.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the
@@ -164,6 +186,18 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
   scheduled increase to $3/M input and $15/M output on 2026-09-01. Claude
   Code's bundled local rate table may be stale-high, so treat its reported USD
   as advisory and use the server-recomputed row for the canonical total.
+- **Claude 5.5 cache reads:** Opus 5.5 and Sonnet 5.5 cache hits cost 0.05x
+  input ($0.20/M and $0.10/M), not the usual 0.1x. Claude Code builds in use
+  around 2026-10-09 still priced Sonnet 5.5 hits at $0.20/M, so their
+  `harnessCostUsd` runs high by `cacheReadTokens × $0.10/M`.
+- **Claude Haiku 5.5 context tier:** a request whose prompt (input + cache
+  reads + cache writes) is over 100k tokens bills every class at 5x: $0.50/M
+  input, $0.05/M cache hit, $0.625/M 5m write, $1/M 1h write, $2.50/M output.
+  It is the only Claude 5.x model with a long-context tier; the others bill the
+  full 1M window at standard rates. The recompute prices Haiku 5.5 at the base
+  tier, so sessions with over-100k requests under-count, and the harness total
+  is the closer figure for them. Same per-request accounting gap as GPT-5.6
+  below.
 - **GPT-5.6 context tier:** above 272k context, the GPT-5.6 family bills
   2× input/cache rates and 1.5× output rates. The current recompute receives
   aggregate session token counts, not enough per-request context information

@@ -27,7 +27,6 @@ let sut: Sut;
 let api: ApiClient;
 let fixtureDir: string;
 let fixturePath: string;
-let pm2StubPath: string;
 let openRouterMock: Bun.Server;
 
 const fixtureSource = `#!/usr/bin/env bun
@@ -248,7 +247,7 @@ async function runTransport(transport: "cli" | "sdk", agentId: string): Promise<
   const home = await mkdtemp(join(fixtureDir, `home-${transport}-`));
   const workerEnv = {
     ...minimalEnv(),
-    PATH: `${pm2StubPath}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: home,
     AGENT_SWARM_API_KEY: sut.apiKey,
     API_KEY: sut.apiKey,
@@ -387,7 +386,7 @@ async function runCredentialRotation(): Promise<void> {
   const observationFile = join(home, "fixture-observation.json");
   const workerEnv = {
     ...minimalEnv(),
-    PATH: `${pm2StubPath}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: home,
     AGENT_SWARM_API_KEY: sut.apiKey,
     API_KEY: sut.apiKey,
@@ -537,12 +536,8 @@ describe("Claude worker transport parity", () => {
     }
     fixtureDir = await mkdtemp("/tmp/claude-worker-parity-");
     fixturePath = join(fixtureDir, "claude-fixture");
-    pm2StubPath = join(fixtureDir, "bin");
-    await Bun.$`mkdir -p ${pm2StubPath}`.quiet();
     await Bun.write(fixturePath, fixtureSource);
-    await Bun.write(join(pm2StubPath, "pm2"), "#!/bin/sh\nexit 0\n");
     await Bun.$`chmod 755 ${fixturePath}`.quiet();
-    await Bun.$`chmod 755 ${join(pm2StubPath, "pm2")}`.quiet();
     openRouterMock = Bun.serve({
       port: 0,
       fetch: () =>

@@ -10,6 +10,13 @@
 //
 // See plan: thoughts/taras/plans/2026-04-21-integrations-ui.md (Phase 1).
 
+import {
+  baseUrlEnvVar,
+  type OpenAICompatibleProviderId,
+  openAICompatibleProviders,
+} from "@desplega/model-catalog";
+import type { ProviderIconKey } from "./agent-runtime-models";
+
 export type IntegrationFieldType = "text" | "password" | "textarea" | "select" | "boolean";
 
 export interface IntegrationField {
@@ -57,7 +64,8 @@ export type IntegrationSpecialFlow =
   | "jira-oauth"
   | "codex-cli"
   | "claude-managed-cli"
-  | "memory-embeddings";
+  | "memory-embeddings"
+  | "chat-sdk";
 
 /** Which agent role(s) the swarm needs to have a given skill installed on. */
 export type AgentRole = "lead" | "worker";
@@ -113,6 +121,11 @@ export interface IntegrationDef {
   iconKey: string;
   /** Optional brand/logo asset path. Falls back to iconKey when unset. */
   logoSrc?: string;
+  /**
+   * Optional `ProviderIcon` glyph (an original drawing, not a vendor mark).
+   * Wins over `logoSrc` and `iconKey` when set.
+   */
+  providerIconKey?: ProviderIconKey;
   /** External docs URL or in-repo docs path. */
   docsUrl: string;
   fields: IntegrationField[];
@@ -149,6 +162,62 @@ export function getIntegrationFields(def: IntegrationDef): IntegrationField[] {
     fields.push(field);
   }
   return fields;
+}
+
+/** Docs section that covers every OpenAI-compatible registry provider. */
+const OPENAI_COMPATIBLE_DOCS_URL =
+  "https://docs.agent-swarm.dev/docs/guides/harness-configuration#nan-and-helmcode";
+
+/**
+ * One integration card per OpenAI-compatible registry provider
+ * (`@desplega/model-catalog`): its key (a credential pool) and its optional
+ * `<ID>_BASE_URL`. No restart: pi and opencode read both from the per-task
+ * env the runner fetches before each task, so a saved value applies on the
+ * next task.
+ */
+function openAICompatibleIntegrations(): IntegrationDef[] {
+  return openAICompatibleProviders().map((p) => {
+    const aliases =
+      p.aliasEnvVars.length > 0 ? ` ${p.aliasEnvVars.join(" and ")} is accepted as an alias.` : "";
+    return {
+      id: p.id,
+      name: p.displayName,
+      description: p.description,
+      category: "llm",
+      iconKey: "route",
+      providerIconKey: p.id as OpenAICompatibleProviderId,
+      docsUrl: OPENAI_COMPATIBLE_DOCS_URL,
+      restartRequired: false,
+      fields: [
+        {
+          key: p.envVar,
+          label: "API key",
+          type: "password",
+          required: true,
+          isSecret: true,
+          placeholder: "sk-...",
+          helpText: `${p.displayName} API key for \`${p.id}/<model>\` on pi and opencode.${aliases}${
+            p.keyNote ? ` ${p.keyNote}` : ""
+          } Comma-separate multiple keys to form a credential pool.`,
+          credentialPool: true,
+        },
+        // A locked provider has one endpoint: no field, so no wrong URL to type.
+        ...(p.baseUrlLocked
+          ? []
+          : [
+              {
+                key: baseUrlEnvVar(p),
+                label: "Base URL",
+                type: "text" as const,
+                isSecret: false,
+                placeholder: p.baseUrl,
+                helpText: `OpenAI-compatible API root. Leave blank for ${p.baseUrl}.`,
+                advanced: true,
+              },
+            ]),
+      ],
+    };
+  });
 }
 
 export const INTEGRATIONS: IntegrationDef[] = [
@@ -305,6 +374,37 @@ export const INTEGRATIONS: IntegrationDef[] = [
         advanced: true,
         placeholder: "https://api.kapso.ai",
         helpText: "Override the Kapso API base URL. Leave blank to use https://api.kapso.ai.",
+      },
+    ],
+  },
+
+  // ------------------------------------------- Chat SDK (Telegram, Slack, ...)
+  {
+    id: "chat-sdk",
+    name: "Chat SDK",
+    description:
+      "Chat with the swarm on Telegram, Slack, Discord, or Microsoft Teams. Mentions and DMs become tasks, results post back to the thread. Agents use the built-in chat-sdk skill (no install).",
+    category: "comm",
+    iconKey: "message-square",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/chat-sdk",
+    specialFlow: "chat-sdk",
+    // No recommendedSkills: the chat-sdk skill is seeded for every agent.
+    fields: [
+      {
+        key: "CHAT_SDK_ENABLED",
+        label: "Enabled",
+        type: "boolean",
+        helpText: "Start the Chat SDK channel. A change applies within a few seconds.",
+      },
+      {
+        key: "CHAT_SDK_ADAPTERS",
+        label: "Adapters (JSON)",
+        type: "textarea",
+        advanced: true,
+        placeholder:
+          '{"telegram":{"botToken":{"$config":"CHAT_SDK_TELEGRAM_BOT_TOKEN"},"secretToken":{"$config":"CHAT_SDK_TELEGRAM_SECRET_TOKEN"},"mode":"webhook"}}',
+        helpText:
+          'One entry per adapter (telegram, slack, discord, teams). Reference secrets as {"$config": "KEY"}, where KEY is a global swarm_config row. Saving replaces the whole object.',
       },
     ],
   },
@@ -828,6 +928,10 @@ export const INTEGRATIONS: IntegrationDef[] = [
       },
     ],
   },
+
+  // ------------------------------------- OpenAI-compatible registry providers
+  // NaN, Helmcode, ...: one card per `@desplega/model-catalog` registry entry.
+  ...openAICompatibleIntegrations(),
 
   // ---------------------------------------------------------------- OpenAI
   {

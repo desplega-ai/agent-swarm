@@ -17,6 +17,7 @@ export {
   useAgentRuntime,
   useAgentRuntimeInstances,
   useAgents,
+  useSetAgentHarnessProvider,
   useUpdateAgentMaxTasks,
   useUpdateAgentName,
   useUpdateAgentProfile,
@@ -147,8 +148,6 @@ export {
   useUpsertOAuthApp,
   useUpsertScriptConnection,
 } from "./use-script-connections";
-export type { ServiceFilters } from "./use-services";
-export { useServices } from "./use-services";
 export type { UseSessionsOptions } from "./use-sessions";
 export { useSession, useSessions } from "./use-sessions";
 export type { SkillFilters } from "./use-skills";

@@ -17,7 +17,7 @@ bridge always builds a full-surface server (its surface is governed by the
 SDK allowlist instead), and HTTP REST routes are generally not gated.
 
 - Enabled by default: `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
-- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `swarm-x`, `messaging`, `services`
+- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `chat-sdk`, `swarm-x`, `messaging`
 
 ## Table of Contents
 
@@ -122,6 +122,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [get-workflow-run](#get-workflow-run)
   - [retry-workflow-run](#retry-workflow-run)
   - [cancel-workflow-run](#cancel-workflow-run)
+  - [system-one-decide](#system-one-decide)
   - [request-human-input](#request-human-input)
   - [cancel-approval-request](#cancel-approval-request)
 - [Skills Tools](#skills-tools)
@@ -187,6 +188,13 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [unregister-kapso-number](#unregister-kapso-number)
   - [send-whatsapp-message](#send-whatsapp-message)
   - [reply-whatsapp-message](#reply-whatsapp-message)
+- [Chat SDK Tools](#chat-sdk-tools)
+  - [chat-reply](#chat-reply)
+  - [chat-post](#chat-post)
+  - [chat-open-dm](#chat-open-dm)
+  - [chat-read-thread](#chat-read-thread)
+  - [register-chat-channel](#register-chat-channel)
+  - [unregister-chat-channel](#unregister-chat-channel)
 - [Swarm X Tools](#swarm-x-tools)
   - [swarm_x](#swarm_x)
 - [Messaging Tools](#messaging-tools)
@@ -195,11 +203,6 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [list-channels](#list-channels)
   - [create-channel](#create-channel)
   - [delete-channel](#delete-channel)
-- [Services Tools](#services-tools)
-  - [register-service](#register-service)
-  - [unregister-service](#unregister-service)
-  - [list-services](#list-services)
-  - [update-service-status](#update-service-status)
 
 ---
 
@@ -483,7 +486,7 @@ Capability: `config` (enabled by default)
 
 **Set Config**
 
-Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use scope='global' for server-wide settings, 'agent' for agent-specific, or 'repo' for repo-specific. Set isSecret=true to mask the value in API responses.
+Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use scope='global' for server-wide settings, 'agent' for agent-specific, or 'repo' for repo-specific. Set isSecret=true to mask the value in API responses. Set exportToEnv=false to keep the row out of agent process env (agents then reach it through a connection or script credential binding).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -494,6 +497,7 @@ Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use
 | `isSecret` | `boolean` | No | - | If true, value is masked in API responses (default: false). |
 | `envPath` | `string` | No | - | Optional: file path to write the value as KEY=VALUE in a .env file. |
 | `description` | `string` | No | - | Optional human-readable description of this config entry. |
+| `exportToEnv` | `boolean` | No | - | Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. |
 
 ### get-config
 
@@ -581,7 +585,7 @@ Add or update hand-verified facts for one model (e.g. a launch models.dev has no
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode. |
+| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, nan, helmcode. |
 | `modelId` | `string` | Yes | - | Model id as models.dev keys it (e.g. claude-opus-5-5). |
 | `name` | `string` | No | - | Display name. |
 | `releaseDate` | `string` | No | - | Release date, YYYY-MM-DD. |
@@ -673,7 +677,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | Yes | - | Stable script name within the selected scope. |
-| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. |
+| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. Schemas can import "zod" or "zod/mini"; Mini uses functional forms such as z.optional(z.string()). |
 | `description` | `string` | No | "" | Human-readable script description. |
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
@@ -1519,6 +1523,21 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 | `runId` | `string` | Yes | - | Workflow run ID to cancel |
 | `reason` | `string` | No | - | Optional reason for cancellation |
 
+### system-one-decide
+
+**Ask a SystemOne decision model**
+
+Send a state and typed questions (noul, choice, score) to a SystemOne decision host such as Jev, and return the validated answers. Same request, provider list, credentials and validation as the `system-one-decision` workflow node, without its human review band. The provider credential is a global secret that stays on the server; this tool never returns it.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `unknown` | No | - | Decision host (default typesafe) |
+| `model` | `string` | No | - | Provider model id (default: the provider's) |
+| `state` | `unknown` | Yes | - | The state to decide on |
+| `questions` | `object` | Yes | - | Questions by id, each `{ type: 'noul' | 'choice' | 'score', instructions, criteria }` |
+| `timeoutMs` | `number` | No | - | Time budget for the call, retries included (default 30000) |
+| `maxRetries` | `number` | No | - | Retries on transient failures inside the time budget (default 2) |
+
 ### request-human-input
 
 **Request human input**
@@ -1530,6 +1549,7 @@ Create an approval request and return at once with the request id and URL. The a
 | `title` | `string` | Yes | - | Title of the approval request |
 | `questions` | `array` | Yes | - | Questions to ask the human |
 | `timeoutSeconds` | `number` | No | - | Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). |
+| `detached` | `boolean` | No | - | Do not attach the request to your current task, so no hitl-follow-up task is created. For scripts that read the request's status themselves. |
 
 ### cancel-approval-request
 
@@ -1586,7 +1606,7 @@ Delete a skill. Only the owning agent or lead can delete.
 
 **Get Skill**
 
-Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global. In swarm scope the ownerless skill wins, then your own, then the only agent-owned one; when several other agents own that name, it errors with their IDs: pass skillId instead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2258,6 +2278,82 @@ Quote-reply a WhatsApp message via Kapso — same as send-whatsapp-message but t
 | `inReplyTo` | `string` | Yes | - | The inbound WAMID to quote-reply (set as context.message_id). |
 | `body` | `string` | Yes | - | Reply text. |
 
+## Chat SDK Tools
+
+*Chat SDK capability - Telegram/Slack/Discord/Teams through the Chat SDK channel (reply, post, DM, read, channel routes)*
+
+Capability: `chat-sdk` — **disabled by default**; set `CHAT_SDK_ENABLED=true` to enable (the `CAPABILITIES` list does not switch it).
+
+### chat-reply
+
+**Reply in the chat thread of this task**
+
+Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user or a short progress note on long work. Markdown is supported; long text is split into several messages.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `text` | `string` | Yes | - | Markdown text to post to the thread. |
+
+### chat-post
+
+**Post to a chat thread or channel**
+
+Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
+| `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100. |
+| `channelId` | `string` | No | - | Full SDK channel id, such as slack:C123. Ignored when threadId is set. |
+| `text` | `string` | Yes | - | Markdown text to post. |
+
+### chat-open-dm
+
+**Open a direct message on a chat platform**
+
+Lead only. Open (or find) the direct-message thread with a user on a Chat SDK adapter and return its threadId. Post to it with chat-post. The userId is the platform user id from a chat message (Telegram numeric id, Slack U..., Discord snowflake, Teams 29:...). Telegram bots can message only users who started a chat with the bot.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
+| `userId` | `string` | Yes | - | Platform user id. |
+
+### chat-read-thread
+
+**Read recent messages of a chat thread**
+
+Read the most recent messages of a Chat SDK thread, oldest first. Every agent can read the thread of its current task. Other threads are lead only. Limits per platform: Telegram has no history API, so you get the history the SDK stored in the swarm database, capped at 100 messages and 7 days. Teams needs the Chat.Read.* Graph permission. Slack and Discord return platform history.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `threadId` | `string` | Yes | - | Full SDK thread id with the adapter prefix, such as telegram:12345. |
+| `limit` | `number` | No | - | Number of messages to return (default ${DEFAULT_LIMIT}). |
+
+### register-chat-channel
+
+**Route a chat channel to an agent or workflow**
+
+Lead-only. Route every swarm-addressed message from one Chat SDK channel (a Telegram group, Slack channel, Discord channel or Teams chat) to a fixed agent or workflow instead of the lead. Give exactly one of agentId or workflowId. A swarm#<agentId> token in a message still wins over the mapping. Remove it with unregister-chat-channel.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
+| `channelId` | `string` | Yes | - | SDK channel id, such as telegram:-100123 or slack:C123 (prefix optional). |
+| `agentId` | `string` | No | - | Agent that receives the channel's tasks. |
+| `workflowId` | `string` | No | - | Workflow whose webhook trigger receives the channel's messages. |
+| `name` | `string` | No | - | Display name for the mapping. |
+
+### unregister-chat-channel
+
+**Remove a chat channel route**
+
+Lead-only. Remove the channel-to-agent or channel-to-workflow route that register-chat-channel stored. Messages from the channel go back to the default route (thread owner, then the lead).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
+| `channelId` | `string` | Yes | - | SDK channel id (prefix optional). |
+
 ## Swarm X Tools
 
 *Swarm-x capability - external command routes mirroring the `agent-swarm x ...` CLI surface*
@@ -2347,63 +2443,4 @@ Deletes a channel and all its messages. Only the lead agent can delete channels.
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | No | - | The ID of the channel to delete. |
 | `name` | `string` | No | - | Channel name (alternative to channelId). |
-
-## Services Tools
-
-*Services capability - PM2/background service registry*
-
-Capability: `services` — **disabled by default**; add `services` to `CAPABILITIES` to enable.
-
-### register-service
-
-**Register Service**
-
-Register a background service (e.g., PM2 process) for discovery by other agents. The service URL is automatically derived from your agent ID (https://{AGENT_ID}.{SWARM_URL}). Each agent can only run one service on port 3000.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `script` | `string` | Yes | - | Path to the script to run (required for PM2 restart). |
-| `description` | `string` | No | - | What this service does. |
-| `healthCheckPath` | `string` | No | - | Health check endpoint path (default: /health). |
-| `cwd` | `string` | No | - | Working directory for the script. |
-| `interpreter` | `string` | No | - | Interpreter to use (e.g., 'node', 'bun'). Auto-detected from extension if not set. |
-| `args` | `array` | No | - | Command line arguments for the script. |
-| `env` | `object` | No | - | Environment variables for the process. |
-| `metadata` | `object` | No | - | Additional metadata. |
-
-### unregister-service
-
-**Unregister Service**
-
-Remove a service from the registry. Use this after stopping a PM2 process. You can only unregister your own services.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `serviceId` | `uuid` | No | - | Service ID to unregister. |
-| `name` | `string` | No | - | Service name to unregister (alternative to serviceId). |
-
-### list-services
-
-**List Services**
-
-Query services registered by agents in the swarm. Use this to discover services exposed by other agents.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `agentId` | `string` | No | - | Filter by specific agent ID. |
-| `name` | `string` | No | - | Filter by service name (partial match). |
-| `status` | `starting \| healthy \| unhealthy \| stopped` | No | - | Filter by health status. |
-| `includeOwn` | `boolean` | No | true | Include services registered by calling agent (default: true). |
-
-### update-service-status
-
-**Update Service Status**
-
-Update the health status of a registered service. Use this after a service becomes healthy or needs to be marked as stopped/unhealthy.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `serviceId` | `uuid` | No | - | Service ID to update. |
-| `name` | `string` | No | - | Service name to update (alternative to serviceId). |
-| `status` | `starting \| healthy \| unhealthy \| stopped` | Yes | - | New status: 'starting', 'healthy', 'unhealthy', or 'stopped'. |
 

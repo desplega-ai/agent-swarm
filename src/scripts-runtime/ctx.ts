@@ -34,7 +34,7 @@ export function buildCtx({
   const swarm = Object.assign(createSwarmSdk(swarmConfig), { config: swarmConfig });
   return {
     swarm,
-    api: createApiRegistryClient(apiConnections),
+    api: createApiRegistryClient(apiConnections, { swarmConfig }),
     mcp: createMcpRegistryClient(mcpConnections, swarmConfig),
     stdlib,
     logger: console,

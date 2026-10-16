@@ -399,6 +399,9 @@
     },
     "modelAlias": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "resolvedEffort": {
+      "exempt": "enum"
     }
   },
   "agentmail_inbox_mappings": {
@@ -3703,6 +3706,73 @@
     },
     "updated_at": {
       "exempt": "timestamp"
+    }
+  },
+  "chat_state_kv": {
+    "key": {
+      "exempt": "identifier"
+    },
+    "value": {
+      "exempt": "byte-exact Chat SDK StateAdapter contract: serialized SDK state must round-trip"
+    }
+  },
+  "chat_subscriptions": {
+    "thread_id": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    }
+  },
+  "chat_locks": {
+    "thread_id": {
+      "exempt": "identifier"
+    },
+    "token": {
+      "exempt": "identifier"
+    }
+  },
+  "chat_lists": {
+    "key": {
+      "exempt": "identifier"
+    },
+    "value": {
+      "exempt": "byte-exact Chat SDK StateAdapter contract: serialized SDK state must round-trip"
+    }
+  },
+  "chat_queue": {
+    "thread_id": {
+      "exempt": "identifier"
+    },
+    "entry": {
+      "exempt": "byte-exact Chat SDK StateAdapter contract: serialized SDK state must round-trip"
+    }
+  },
+  "chat_relay_obligations": {
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "delivered_at": {
+      "exempt": "timestamp"
+    },
+    "last_attempt_at": {
+      "exempt": "timestamp"
+    },
+    "given_up_at": {
+      "exempt": "timestamp"
+    },
+    "last_error": "scrubbed",
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
     }
   }
 }

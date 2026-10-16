@@ -1,4 +1,10 @@
 import { existsSync } from "node:fs";
+import {
+  openAICompatibleProviders,
+  providerForKeyVar,
+  providerForModel,
+  providerKeyVars,
+} from "@desplega/model-catalog";
 import { deriveDefaultRoute, routeCredentialStatus } from "@desplega/model-routing";
 import { type ModelFamily, modelFamilyOf, windowForModelFamily } from "./model-rate-limit-windows";
 
@@ -14,7 +20,26 @@ export const CREDENTIAL_POOL_VARS = [
   "AMP_API_KEY",
   "CURSOR_API_KEY",
   "XAI_API_KEY",
+  // The canonical key var of every OpenAI-compatible registry provider
+  // (`@desplega/model-catalog`). Aliases are normalized into these by the
+  // runner (`normalizeProviderKeyAliases`), so they never pool.
+  ...openAICompatibleProviders().map((p) => p.envVar),
 ] as const;
+
+/**
+ * Copy the first set alias of each registry provider into its canonical key
+ * var when the canonical var is empty (`HELMCODE_API_NAN` → `NAN_API_KEY`).
+ * The runner runs this once per task, so pooling, credential checks, pi's
+ * runtime key and the opencode key splice only read the canonical name. An
+ * explicit canonical value wins. Mutates `env`.
+ */
+export function normalizeProviderKeyAliases(env: Record<string, string | undefined>): void {
+  for (const provider of openAICompatibleProviders()) {
+    if (env[provider.envVar]?.trim()) continue;
+    const alias = provider.aliasEnvVars.find((name) => env[name]?.trim());
+    if (alias) env[provider.envVar] = env[alias];
+  }
+}
 
 /**
  * Which credential env vars are relevant for each harness provider. The
@@ -76,6 +101,10 @@ export function getModelAwareCredentialVars(provider: string, model?: string): r
     return model.startsWith("openrouter/") ? ["OPENROUTER_API_KEY"] : ["XAI_API_KEY"];
   }
   if (!SLASH_MODEL_PROVIDERS.has(provider) || !model) return base;
+  // OpenAI-compatible registry providers own their key: `nan/<id>` and
+  // `helmcode/<id>` never pool an OpenRouter or Anthropic key.
+  const direct = providerForModel(model);
+  if (direct) return [direct.envVar];
   if (model.includes("/")) {
     return base.filter((v) => v !== "OPENAI_API_KEY");
   }
@@ -91,6 +120,8 @@ export function getModelAwareCredentialVars(provider: string, model?: string): r
  * usage with the active worker's HARNESS_PROVIDER.
  */
 export function deriveProviderFromKeyType(keyType: string): string {
+  // OpenAI-compatible registry keys (canonical or alias) default to pi.
+  if (providerForKeyVar(keyType)) return "pi";
   switch (keyType) {
     case "CLAUDE_CODE_OAUTH_TOKEN":
     case "ANTHROPIC_API_KEY":
@@ -210,7 +241,7 @@ function isJsonObject(value: string): boolean {
  * Falls back to random selection from all credentials if no available indices match.
  * A JSON object value (the CODEX_OAUTH blob) is always one credential.
  */
-function splitCredentialPool(value: string): string[] {
+export function splitCredentialPool(value: string): string[] {
   return isJsonObject(value)
     ? [value.trim()]
     : value
@@ -312,20 +343,37 @@ export function validateClaudeCredentials(env: Record<string, string | undefined
 }
 
 /**
+ * One label per OpenAI-compatible registry provider for hints and errors:
+ * `NAN_API_KEY (or HELMCODE_API_NAN)`, `HELMCODE_API_KEY`.
+ */
+export function openAICompatibleKeyLabels(): string[] {
+  return openAICompatibleProviders().map((p) =>
+    p.aliasEnvVars.length > 0 ? `${p.envVar} (or ${p.aliasEnvVars.join(" or ")})` : p.envVar,
+  );
+}
+
+/**
  * Validate that at least one opencode credential is available.
- * Priority: OPENROUTER_API_KEY → ANTHROPIC_API_KEY → OPENAI_API_KEY → ~/.local/share/opencode/auth.json.
+ * Priority: OPENROUTER_API_KEY → ANTHROPIC_API_KEY → OPENAI_API_KEY → each
+ * OpenAI-compatible registry provider's key (canonical or alias, e.g.
+ * NAN_API_KEY or HELMCODE_API_NAN → `nan_api_key`) →
+ * ~/.local/share/opencode/auth.json.
  * Returns the credential type found, or throws if none are available.
  */
 export function validateOpencodeCredentials(
   env: Record<string, string | undefined>,
-): "openrouter_api_key" | "anthropic_api_key" | "openai_api_key" | "auth_file" {
+): "openrouter_api_key" | "anthropic_api_key" | "openai_api_key" | Lowercase<string> | "auth_file" {
   if (env.OPENROUTER_API_KEY) return "openrouter_api_key";
   if (env.ANTHROPIC_API_KEY) return "anthropic_api_key";
   if (env.OPENAI_API_KEY) return "openai_api_key";
+  const direct = openAICompatibleProviders().find((p) => providerKeyVars(p).some((n) => env[n]));
+  if (direct) return direct.envVar.toLowerCase() as Lowercase<string>;
   const authFile = `${process.env.HOME ?? "/root"}/.local/share/opencode/auth.json`;
   if (existsSync(authFile)) return "auth_file";
   throw new Error(
-    "No opencode credentials found. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or provide ~/.local/share/opencode/auth.json.",
+    `No opencode credentials found. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, ${openAICompatibleKeyLabels()
+      .map((label) => `${label}, `)
+      .join("")}or provide ~/.local/share/opencode/auth.json.`,
   );
 }
 

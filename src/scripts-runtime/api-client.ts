@@ -5,6 +5,8 @@ import type {
   ScriptApiParameterDescriptor,
   ScriptApiRegistryClient,
 } from "./api-types";
+import { postSwarmJson } from "./mcp-client";
+import type { SwarmConfig } from "./swarm-config";
 
 type FetchResponse = Awaited<ReturnType<typeof fetch>>;
 type TextResponse = {
@@ -219,12 +221,24 @@ async function throwApiResponseError(
 
 export function createApiRegistryClient(
   descriptors: ScriptApiConnectionDescriptor[] = [],
-  options: { fetch?: typeof fetch } = {},
+  options: { fetch?: typeof fetch; swarmConfig?: SwarmConfig } = {},
 ): ScriptApiRegistryClient {
   const fetchImpl = options.fetch ?? fetch;
   const registry: ScriptApiRegistryClient = {};
   for (const descriptor of descriptors) {
     const client: ScriptApiRegistryClient[string] = {};
+    if (descriptor.kind === "sql") {
+      const { slug, connectionId } = descriptor;
+      client.query = async (sql, params) => {
+        if (!options.swarmConfig) throw new Error(`ctx.api.${slug}.query needs swarm config`);
+        const path = `/api/script-connections/${encodeURIComponent(connectionId)}/sql-query`;
+        const body = { sql, params };
+        const data = await postSwarmJson(options.swarmConfig, path, body, `ctx.api.${slug}.query`);
+        return { rows: data.rows, rowCount: data.rowCount, truncated: data.truncated };
+      };
+      registry[slug] = client;
+      continue;
+    }
     if (descriptor.kind === "graphql") {
       client.graphql = async (query, variables) => {
         if (typeof query !== "string") {
