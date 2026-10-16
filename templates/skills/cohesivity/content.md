@@ -20,9 +20,11 @@ mcp__agent-swarm__get-config(key="COHESIVITY_TENANT_ID", includeSecrets=true)
 
 If the keys exist, use them and skip Step 2. Rows saved with `set-config` reach your shell env from your next task; in the current task, read the values from `get-config`.
 
-## Step 2. Create the tenant (once per swarm)
+## Step 2. Create the tenant (Lead only, once per swarm)
 
-Creating a tenant changes external state. Do it only when the request asks for a backend or a human approves it. One call to Cohesivity's hosted MCP server returns the credentials:
+Only the Lead can write swarm config, so only the Lead creates the tenant. A worker that finds no keys does not call Cohesivity. It sends the bootstrap to the Lead with `send-task` (`leadOnly: true`, task: "Create the swarm's Cohesivity tenant with the cohesivity skill, Step 2"), then continues once the keys are in swarm config. They reach its env on its next task.
+
+Creating a tenant changes external state. The Lead does it only when the request asks for a backend or a human approves it. One call to Cohesivity's hosted MCP server returns the credentials:
 
 ```bash
 curl -sS https://cohesivity.ai/mcp \

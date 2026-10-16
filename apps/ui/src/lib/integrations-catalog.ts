@@ -109,6 +109,12 @@ export interface RecommendedSkill {
    * Only meaningful when `source === 'template'` and `templateRepo` is set.
    */
   installOnSetup?: boolean;
+  /**
+   * Scope passed to `skill-install-remote`. `'swarm'` delivers the skill to
+   * every agent; unset installs it as `global`, which no agent receives until
+   * it is assigned.
+   */
+  installScope?: "swarm";
 }
 
 export interface IntegrationDef {
@@ -888,7 +894,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         roles: ["lead", "worker"],
         reason:
           "How agents share one tenant through swarm config, create it with a single call, and provision and query services without exposing the keys.",
-        installOnSetup: true,
+        installScope: "swarm",
       },
     ],
     fields: [
@@ -897,7 +903,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         label: "Tenant ID",
         type: "text",
         helpText:
-          "Optional. Leave all three fields blank and the first agent that needs a backend creates a tenant and saves it here. Fill them in to reuse an existing project.",
+          "Optional. Leave all three fields blank and the Lead creates a tenant the first time an agent needs a backend, then saves it here. Fill them in to reuse an existing project.",
       },
       {
         key: "COHESIVITY_MANAGEMENT_KEY",

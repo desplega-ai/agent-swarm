@@ -256,7 +256,11 @@ function IntegrationDetailInner({
     await Promise.allSettled(
       autoInstallSkills.map((s) =>
         installRemoteSkill
-          .mutateAsync({ sourceRepo: s.templateRepo!, sourcePath: s.templatePath })
+          .mutateAsync({
+            sourceRepo: s.templateRepo!,
+            sourcePath: s.templatePath,
+            scope: s.installScope,
+          })
           .then(() => {
             toast.success(`Skill "${s.name}" installed automatically.`);
           })
