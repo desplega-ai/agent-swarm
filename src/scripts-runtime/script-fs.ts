@@ -11,10 +11,12 @@ import type { ScriptAgentFsDescriptor } from "./executors/types";
  *   /...   everything else is in-memory scratch that dies with the run
  *
  * Both executors run this on the host side: native inside the harness
- * subprocess, quickjs in the worker thread behind `__host_call`. The agent-fs
- * key never reaches this code. Requests carry the credential-broker
+ * subprocess, quickjs in the worker thread behind `__host_call`. This code
+ * never holds the agent-fs key: requests carry the credential-broker
  * placeholder, and the patched fetch swaps in the agent's own key for the
- * agent-fs host only.
+ * agent-fs host. That keeps the key out of this code and its errors. It is not
+ * a confinement boundary: a script can already read its agent's config
+ * secrets, this key included, through `ctx.swarm.config.get`.
  */
 
 export const AGENT_FS_MOUNT = "/afs";

@@ -1,5 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
+import { deleteSwarmConfig, upsertSwarmConfig } from "../be/db";
+import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import { placeholderForConfigKey } from "../scripts-runtime/credential-broker";
 import { NativeScriptExecutor } from "../scripts-runtime/executors/native";
 import { QuickJSScriptExecutor } from "../scripts-runtime/executors/quickjs";
@@ -242,6 +244,92 @@ function suite(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean
 
 suite("native", () => new NativeScriptExecutor(), true);
 suite("quickjs", () => new QuickJSScriptExecutor(), false);
+
+describe("agent-fs credential resolution (real resolver)", () => {
+  const COORDS = {
+    AGENT_FS_API_URL: "https://fs.example.test",
+    AGENT_FS_DEFAULT_ORG_ID: "org-shared",
+    AGENT_FS_DEFAULT_DRIVE_ID: "drive-shared",
+  };
+  const ENV_KEYS = [...Object.keys(COORDS), AGENT_FS_API_KEY_CONFIG];
+  const savedEnv = new Map<string, string | undefined>();
+  const createdConfigIds: string[] = [];
+
+  async function seed(
+    scope: "global" | "agent" | "repo",
+    scopeId: string | null,
+    key: string,
+    value: string,
+  ) {
+    const row = await upsertSwarmConfig({ scope, scopeId, key, value, isSecret: true });
+    createdConfigIds.push(row.id);
+  }
+
+  async function resolve(agentId: string, repoId?: string) {
+    const out = await buildScriptCredentialBindingsWithFailures({ agentId, repoId });
+    const entries = out.egressSecrets.filter((entry) =>
+      entry.allowedHosts.includes("fs.example.test"),
+    );
+    return { agentFs: out.agentFs, values: entries.map((entry) => entry.value) };
+  }
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
+    Object.assign(process.env, COORDS);
+    delete process.env[AGENT_FS_API_KEY_CONFIG];
+  });
+
+  afterEach(async () => {
+    for (const id of createdConfigIds.splice(0)) await deleteSwarmConfig(id);
+    for (const [key, value] of savedEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  test("mounts with the invoking agent's own key", async () => {
+    const agentId = crypto.randomUUID();
+    await seed("agent", agentId, AGENT_FS_API_KEY_CONFIG, "own-agent-key");
+    const out = await buildScriptCredentialBindingsWithFailures({ agentId });
+    expect(out.agentFs).toEqual({
+      apiUrl: "https://fs.example.test",
+      orgId: "org-shared",
+      driveId: "drive-shared",
+    });
+    // First, so it claims the placeholder before any operator binding.
+    expect(out.egressSecrets[0]).toMatchObject({
+      configKey: AGENT_FS_API_KEY_CONFIG,
+      allowedHosts: ["fs.example.test"],
+      scope: "agent",
+      scopeId: agentId,
+      value: "own-agent-key",
+    });
+  });
+
+  test("an own key wins over a repo override", async () => {
+    const agentId = crypto.randomUUID();
+    const repoId = crypto.randomUUID();
+    await seed("agent", agentId, AGENT_FS_API_KEY_CONFIG, "own-agent-key");
+    await seed("repo", repoId, AGENT_FS_API_KEY_CONFIG, "repo-key");
+    const { agentFs, values } = await resolve(agentId, repoId);
+    expect(agentFs).toBeDefined();
+    expect(values[0]).toBe("own-agent-key");
+  });
+
+  test("no own key: global, repo, env, another agent's and the API key never mount", async () => {
+    const agentId = crypto.randomUUID();
+    const repoId = crypto.randomUUID();
+    await seed("global", null, AGENT_FS_API_KEY_CONFIG, "global-shared-key");
+    await seed("repo", repoId, AGENT_FS_API_KEY_CONFIG, "repo-key");
+    await seed("agent", crypto.randomUUID(), AGENT_FS_API_KEY_CONFIG, "other-agent-key");
+    await seed("global", null, "API_AGENT_FS_API_KEY", "api-bootstrap-key");
+    process.env[AGENT_FS_API_KEY_CONFIG] = "api-env-key";
+    for (const result of [await resolve(agentId), await resolve(agentId, repoId)]) {
+      expect(result.agentFs).toBeUndefined();
+      expect(result.values).toEqual([]);
+    }
+  });
+});
 
 // Mirrors the Dockerfile bundle step: just-bash stays out of the harness bundle
 // and resolves from scripts-runtime/node_modules on the first ctx.fs / ctx.sh call.
