@@ -438,6 +438,16 @@ describe("registerVolatileSecret", () => {
     expect(scrubSecrets("http://127.0.0.1:9/v1")).toBe("http://127.0.0.1:9/v1");
   });
 
+  test("padded singleton values redact their trimmed form", () => {
+    const fromEnv = `opaque${randomToken(20)}`;
+    const fromMap = `opaque${randomToken(20)}`;
+    process.env.PADDED_API_KEY = `  ${fromEnv}\n`;
+    refreshSecretScrubberCache();
+    registerEnvSecrets({ HELMCODE_API_NAN: ` ${fromMap} ` });
+    expect(scrubSecrets(`key: ${fromEnv}`)).toBe("key: [REDACTED:PADDED_API_KEY]");
+    expect(scrubSecrets(`key: ${fromMap}`)).toBe("key: [REDACTED:HELMCODE_API_NAN]");
+  });
+
   test("ignores values shorter than the minimum length", () => {
     registerVolatileSecret("short", "TOO_SHORT");
     const out = scrubSecrets("contains short somewhere");

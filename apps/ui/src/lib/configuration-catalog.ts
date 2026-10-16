@@ -1164,6 +1164,26 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/jira`,
       },
       {
+        key: "AZURE_DEVOPS_WORKITEM_STATE_STARTED",
+        label: "Azure Boards state on task start",
+        description:
+          "State to set on the linked Azure Boards work item when its swarm task starts, e.g. Active (Agile), Committed (Scrum) or Doing (Basic). Names depend on the project process. Empty leaves the state alone.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "Doing",
+        docsUrl: `${DOCS}integrations/azure-devops`,
+      },
+      {
+        key: "AZURE_DEVOPS_WORKITEM_STATE_DONE",
+        label: "Azure Boards state on task completion",
+        description:
+          "State to set on the linked Azure Boards work item when its swarm task completes, e.g. Resolved or Closed (Agile), Done (Scrum, Basic). Empty leaves the state alone.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "Done",
+        docsUrl: `${DOCS}integrations/azure-devops`,
+      },
+      {
         key: "AGENTMAIL_DISABLE",
         label: "Disable AgentMail",
         description:

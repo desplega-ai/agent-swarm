@@ -25,6 +25,43 @@ export function isPageFeedbackRequested(queryParams: URLSearchParams): boolean {
   return value !== "0" && value !== "false";
 }
 
+// Keys typed in the overlay must never reach the page's own key handlers. A
+// listener on the overlay runs too late: page capture listeners on window and
+// document fire first. So this guard is served at the top of <head>, before any
+// page script, and is the first window capture listener. For a key from the
+// overlay it stops dispatch outright and hands the event to the overlay
+// (window.__swarmFeedbackKeys.handle). A press that started in the overlay
+// stays owned until its keyup, so the release is swallowed even after the
+// composer closed and focus moved to the page. Every other key passes through.
+// The overlay script repeats it as a fallback; the second run is a no-op.
+const FEEDBACK_KEY_GUARD_JS = `
+(function () {
+  if (window.__swarmFeedbackKeys) return;
+  var keys = window.__swarmFeedbackKeys = { host: null, handle: null };
+  var owned = {};
+  function id(e) { return e.code || e.key; }
+  function fromOverlay(e) {
+    return !!keys.host && typeof e.composedPath === 'function' && e.composedPath().indexOf(keys.host) !== -1;
+  }
+  function guard(e) {
+    var k = id(e);
+    var mine = fromOverlay(e);
+    if (!mine && !owned[k]) return;
+    if (e.type === 'keydown') {
+      if (mine) owned[k] = true;
+      else if (!e.repeat) { delete owned[k]; return; }
+    }
+    if (e.type === 'keyup') delete owned[k];
+    e.stopImmediatePropagation();
+    if (mine && keys.handle) keys.handle(e);
+  }
+  ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+    window.addEventListener(type, guard, true);
+  });
+  window.addEventListener('blur', function () { owned = {}; });
+})();
+`;
+
 const FEEDBACK_OVERLAY_JS = `
 (function () {
   var cfg = window.__swarmFeedback;
@@ -135,6 +172,7 @@ const FEEDBACK_OVERLAY_JS = `
   var panel = document.createElement('div');
   panel.className = 'panel';
   var composer = null;
+  var composerInput = null;
   root.appendChild(hl);
   root.appendChild(markers);
   root.appendChild(panel);
@@ -207,11 +245,25 @@ const FEEDBACK_OVERLAY_JS = `
     }
     render();
   }
-  document.addEventListener('keydown', function (e) {
-    if (e.key !== 'Escape') return;
+  function onEscape() {
     if (state.draft) { closeComposer(); return; }
     if (state.selecting) setSelecting(false);
+  }
+  // Escape pressed on the page while selecting. Keys typed in the overlay never
+  // get here: the key guard stops them and calls onOverlayKey instead.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') onEscape();
   }, true);
+  function onOverlayKey(e) {
+    if (e.type !== 'keydown') return;
+    if (e.key === 'Escape') { onEscape(); return; }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && composerInput && e.composedPath()[0] === composerInput) {
+      e.preventDefault();
+      commitDraft(composerInput.value);
+    }
+  }
+  window.__swarmFeedbackKeys.host = host;
+  window.__swarmFeedbackKeys.handle = onOverlayKey;
 
   // ─── Composer ──────────────────────────────────────────────────────────
   function openComposer(target) {
@@ -230,9 +282,7 @@ const FEEDBACK_OVERLAY_JS = `
     add.type = 'button';
     cancel.addEventListener('click', closeComposer);
     add.addEventListener('click', function () { commitDraft(input.value); });
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitDraft(input.value); }
-    });
+    composerInput = input;
     row.appendChild(cancel);
     row.appendChild(add);
     composer.appendChild(row);
@@ -253,6 +303,7 @@ const FEEDBACK_OVERLAY_JS = `
   function closeComposer() {
     if (composer) composer.remove();
     composer = null;
+    composerInput = null;
     state.draft = null;
     hideHighlight();
   }
@@ -524,5 +575,13 @@ const FEEDBACK_OVERLAY_JS = `
  */
 export function feedbackOverlayScripts(pageId: string): string {
   const config = JSON.stringify({ pageId }).replace(/</g, "\\u003c");
-  return `<script>window.__swarmFeedback = ${config};</script><script>${FEEDBACK_OVERLAY_JS}</script>`;
+  return `<script>window.__swarmFeedback = ${config};</script><script>${FEEDBACK_KEY_GUARD_JS}${FEEDBACK_OVERLAY_JS}</script>`;
+}
+
+/**
+ * Key guard served at the top of `<head>` when feedback mode is on, so it runs
+ * before any page script and its window capture listeners come first.
+ */
+export function feedbackKeyGuardScript(): string {
+  return `<script>${FEEDBACK_KEY_GUARD_JS}</script>`;
 }
