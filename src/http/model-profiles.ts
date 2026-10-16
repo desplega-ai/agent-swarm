@@ -281,7 +281,7 @@ export async function handleModelProfiles(
       return true;
     }
     // The count above is for the message; the delete re-checks in the same
-    // statement (migration 218 trigger), so a reference written since is a 409.
+    // statement (migration 220 trigger), so a reference written since is a 409.
     const outcome = await deleteModelProfile(current.name);
     if (outcome === "in-use") {
       jsonError(

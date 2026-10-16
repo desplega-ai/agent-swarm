@@ -1,4 +1,4 @@
-// Migration 218 must not change what an agent runs. For each config shape the
+// Migration 220 must not change what an agent runs. For each config shape the
 // test resolves the task the way production does (the real `/api/poll` claim,
 // then the worker's real `fetchRepoConfig` + `fetchResolvedEnv` against this
 // DB) and compares the final model and effort with and without the migrated
@@ -37,10 +37,10 @@ async function removeDbFiles(path: string): Promise<void> {
   }
 }
 
-/** The part of migration 218 that turns agent overrides into profiles. */
+/** The part of migration 220 that turns agent overrides into profiles. */
 function agentOverrideMigrationSql(): string {
   const sql = readFileSync(
-    join(import.meta.dir, "../be/migrations/218_model_profiles.sql"),
+    join(import.meta.dir, "../be/migrations/220_model_profiles.sql"),
     "utf8",
   );
   return sql.slice(sql.indexOf("CREATE TEMP TABLE _model_profile_overrides"));
@@ -83,7 +83,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   const client = getDbClient();
-  // References first: migration 218's triggers refuse deleting a named profile.
+  // References first: migration 220's triggers refuse deleting a named profile.
   await client.run("DELETE FROM agent_tasks");
   await client.run("DELETE FROM swarm_config");
   await client.run("DELETE FROM swarm_repos");
@@ -159,7 +159,7 @@ async function codexAgent(name: string): Promise<string> {
   return agent.id;
 }
 
-/** What the agent runs before migration 218 and after it. */
+/** What the agent runs before migration 220 and after it. */
 async function beforeAndAfterMigration(agentId: string, vcsRepo?: string) {
   const before = await workerSelection(agentId, vcsRepo);
   getDb().exec(agentOverrideMigrationSql());
@@ -167,7 +167,7 @@ async function beforeAndAfterMigration(agentId: string, vcsRepo?: string) {
   return { before, after };
 }
 
-describe("migration 218 keeps exportToEnv = 0 overrides off", () => {
+describe("migration 220 keeps exportToEnv = 0 overrides off", () => {
   test("a withheld effort stays absent while the model stays enabled", async () => {
     const id = await codexAgent("bc-effort-withheld");
     await setRow("global", null, "REASONING_EFFORT_OVERRIDE", "medium");

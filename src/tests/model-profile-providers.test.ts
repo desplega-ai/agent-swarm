@@ -1,7 +1,7 @@
 // Model profiles on the OpenAI-compatible providers pi and opencode run
 // (NaN `nan/*`, Helmcode `helmcode/*`, Vercel AI Gateway `vercel/<vendor>/*`):
 // validation over HTTP, the harness filter, claim, the credential the worker
-// then picks for the claimed model, and migration 218's MODEL_OVERRIDE
+// then picks for the claimed model, and migration 220's MODEL_OVERRIDE
 // conversion.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -229,10 +229,10 @@ describe("claim hands the provider model to the worker, which picks that provide
   }
 });
 
-describe("migration 218 converts provider MODEL_OVERRIDEs", () => {
+describe("migration 220 converts provider MODEL_OVERRIDEs", () => {
   function agentOverrideMigrationSql(): string {
     const sql = readFileSync(
-      join(import.meta.dir, "../be/migrations/218_model_profiles.sql"),
+      join(import.meta.dir, "../be/migrations/220_model_profiles.sql"),
       "utf8",
     );
     return sql.slice(sql.indexOf("CREATE TEMP TABLE _model_profile_overrides"));

@@ -1,4 +1,4 @@
-// The shipped `<harness>-<tier>` seeds, and migration 218's profiles made from
+// The shipped `<harness>-<tier>` seeds, and migration 220's profiles made from
 // agents' MODEL_OVERRIDE + REASONING_EFFORT_OVERRIDE.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -31,10 +31,10 @@ async function removeDbFiles(path: string): Promise<void> {
   }
 }
 
-/** The part of migration 218 that turns agent overrides into profiles. */
+/** The part of migration 220 that turns agent overrides into profiles. */
 function agentOverrideMigrationSql(): string {
   const sql = readFileSync(
-    join(import.meta.dir, "../be/migrations/218_model_profiles.sql"),
+    join(import.meta.dir, "../be/migrations/220_model_profiles.sql"),
     "utf8",
   );
   return sql.slice(sql.indexOf("CREATE TEMP TABLE _model_profile_overrides"));
@@ -52,7 +52,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   const client = getDbClient();
-  // References first: migration 218's triggers refuse deleting a named profile.
+  // References first: migration 220's triggers refuse deleting a named profile.
   await client.run("DELETE FROM agent_tasks");
   await client.run("DELETE FROM swarm_config");
   await client.run("DELETE FROM swarm_repos");
@@ -93,7 +93,7 @@ describe("tier seeds", () => {
   });
 });
 
-describe("migration 218: profiles from agent overrides", () => {
+describe("migration 220: profiles from agent overrides", () => {
   async function agentWith(
     name: string,
     harnessProvider: ProviderName,

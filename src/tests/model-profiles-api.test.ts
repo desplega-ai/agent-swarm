@@ -96,7 +96,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  // References first: migration 218's triggers refuse deleting a named profile.
+  // References first: migration 220's triggers refuse deleting a named profile.
   await getDbClient().run("DELETE FROM agent_tasks");
   await getDbClient().run("DELETE FROM swarm_config WHERE key = 'MODEL_PROFILE'");
   await getDbClient().run("DELETE FROM model_profiles");

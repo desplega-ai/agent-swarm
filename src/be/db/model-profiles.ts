@@ -183,7 +183,7 @@ export async function modelProfileReferences(
 }
 
 /**
- * Which migration-218 reference trigger refused a write: `missing` when a task
+ * Which migration-220 reference trigger refused a write: `missing` when a task
  * or an agent default names a profile that does not exist.
  */
 export function modelProfileRefError(error: unknown): "missing" | null {
@@ -195,7 +195,7 @@ export function modelProfileRefError(error: unknown): "missing" | null {
  * Delete a profile unless a task still holds it (`TASK_HOLDS_PROFILE_SQL`) or
  * an agent default names it. The check is part of the DELETE statement, so a
  * reference written after the caller's own count still makes it `in-use`; the
- * triggers in migration 218 refuse the opposite order (a reference written
+ * triggers in migration 220 refuse the opposite order (a reference written
  * after this delete).
  */
 export async function deleteModelProfile(name: string): Promise<"deleted" | "missing" | "in-use"> {

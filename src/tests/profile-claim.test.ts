@@ -85,7 +85,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   const client = getDbClient();
-  // References first: migration 218's triggers refuse deleting a named profile.
+  // References first: migration 220's triggers refuse deleting a named profile.
   await client.run("DELETE FROM agent_tasks");
   await client.run("DELETE FROM swarm_config WHERE scope IN ('agent', 'repo')");
   await client.run("DELETE FROM swarm_repos");
@@ -149,7 +149,7 @@ describe("a task's own profile", () => {
   });
 
   test("a task naming a missing profile fails fast with a tagged reason", async () => {
-    // Migration 218's triggers keep such a row from existing; the claim still
+    // Migration 220's triggers keep such a row from existing; the claim still
     // refuses one rather than run a model nobody picked.
     const w = await worker("p-missing", "claude");
     const task = await createTaskExtended("work", { agentId: w.id });
