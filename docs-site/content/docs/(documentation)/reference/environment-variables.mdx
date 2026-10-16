@@ -389,6 +389,17 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 2. Have the lead call `register-kapso-number` to point the number at `/api/integrations/kapso/webhook` and store the routing mapping.
 3. Use `send-whatsapp-message` / `reply-whatsapp-message` for the common text path, or the `kapso-whatsapp` skill for templates, media, and reactions.
 
+## Chat SDK (Telegram, Slack, Teams, Discord)
+
+| Variable | Description |
+|----------|-------------|
+| `CHAT_SDK_ENABLED` | Set to `true` to start the Chat SDK channel and enable the `chat-sdk` capability (default: `false`). A saved change applies within a few seconds |
+| `CHAT_SDK_ADAPTERS` | JSON object keyed by adapter name (`telegram`, `slack`, `discord`, `teams`). Values may reference secret config rows as `{"$config": "KEY"}` |
+| `CHAT_SDK_BUFFER_MS` | How long a thread collects messages before it creates one task (default: `10000`, range 1 to 600000) |
+| `CHAT_SDK_API_URL_OVERRIDES` | Environment only, for development and tests. JSON of platform API base URLs by adapter name. Never set it in production |
+
+A `slack` adapter requires `SLACK_DISABLE=true`. See [Chat SDK](/docs/integrations/chat-sdk) for setup.
+
 ## Sentry Integration
 
 | Variable | Description |
