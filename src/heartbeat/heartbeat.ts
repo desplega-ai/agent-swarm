@@ -63,6 +63,7 @@ import { promotePendingSteeringForTask } from "../be/steering";
 import type { HeartbeatAction, HeartbeatClassification } from "../extensions/contract";
 import { dispatchPre, extensionIdForAgent } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
+import { withUnhandledSteering } from "../tasks/successor-steering";
 import {
   createPoolStarvationDecisionTask,
   createRerouteDecisionTask,
@@ -997,7 +998,9 @@ export async function runRebootSweep(): Promise<void> {
                 }
               : sourceAffinity;
 
-            const retryTask = await createTaskExtended(task.task, {
+            // Carry steering the failed task received but never accepted.
+            const retryDescription = await withUnhandledSteering(task.task, task.id);
+            const retryTask = await createTaskExtended(retryDescription, {
               parentTaskId: task.id,
               agentId: preferredAgentId,
               routingReason:

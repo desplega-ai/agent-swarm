@@ -403,6 +403,7 @@ if proposed.action == fail:
 
 promotePendingSteeringForTask(parent)       # pending rows → follow-up tasks, exactly once
 resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
+    # description += "## Unhandled steering from <parent>" (withUnhandledSteering, see below)
     preferredAgentId = undefined
     if parent.agentId:
         cand = getAgentById(parent.agentId)
@@ -617,7 +618,8 @@ preferredAgentId = undefined
 cand = getPinCandidateAgent(task.agentId)                   # reachable agent
 if cand and activeCount(cand) < cand.maxTasks:
     preferredAgentId = cand.id
-createTaskExtended(task.task, parentTaskId=task.id, agentId=preferredAgentId,
+createTaskExtended(withUnhandledSteering(task.task, task.id),
+                    parentTaskId=task.id, agentId=preferredAgentId,
                     tags=[reboot-retry, auto-generated, (reboot-retry-pin if preferredAgentId)],
                     routingAffinity=buildRoutingAffinityFromAgent(task.agentId))
 #   agentId set  → status = pending  (PINNED — never enters the pool)
@@ -727,6 +729,10 @@ A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`
 | `createWorkerTaskFollowUp` (Lead follow-up) | No | Would re-fire the finished task's instructions on the Lead's next delegation |
 | `send-task` without `taskType: "resume"` | No | New work |
 | Everything else with a `parentTaskId` (Slack/AgentMail/VCS thread replies, steering promotion, reroute/pool-starvation decisions, `POST /tasks`, scripts) | No | New work in the same thread |
+
+### Unhandled steering carry-forward
+
+The same three continuations (`createResumeFollowUp`, the `runRebootSweep` retry child, the `defer-task` wake-up) pass their description through `withUnhandledSteering(description, parentId)` (`src/tasks/successor-steering.ts`). Every steering row on the parent that is still `pending` or `delivered` with `handled_at IS NULL` is appended under `## Unhandled steering from <parentId>`, one entry per row with its steering id, sender label and verbatim body (template `task.successor.unhandled_steering`). Terminal transitions only promote `pending` rows, so a `delivered` row the parent never acknowledged otherwise reaches no session. `accept-steer` is id-based, so the successor acknowledges the parent's rows directly; nothing is re-pointed. The wake-up reads the rows when the schedule fires, not when `defer-task` runs. A lookup failure logs and returns the description unchanged.
 
 ---
 

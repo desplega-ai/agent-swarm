@@ -34,6 +34,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { taskModelPin } from "./model-pin";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
+import { withUnhandledSteering } from "./successor-steering";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
 
@@ -562,7 +563,9 @@ export async function createResumeFollowUp(args: {
         leadOnly: true,
       }
     : sourceAffinity;
-  const created = await createTaskExtended(followUpDescription, {
+  // Carry steering the parent received but never accepted.
+  const description = await withUnhandledSteering(followUpDescription, parent.id);
+  const created = await createTaskExtended(description, {
     agentId: preferredAgentId,
     routingReason:
       preferredAgentId === undefined
