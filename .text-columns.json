@@ -2984,6 +2984,9 @@
     },
     "updated_by": {
       "exempt": "identifier"
+    },
+    "exposure": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "swarm_repos": {

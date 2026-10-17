@@ -1336,6 +1336,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#remote-controllers`,
       },
       {
+        key: "SECRET_EXPOSURE_DEFAULT",
+        label: "Default secret exposure",
+        description:
+          "Who may read a secret whose key has no built-in default and no per-row setting: any worker, or only the lead.",
+        kind: "enum",
+        options: ["worker", "lead"],
+        defaultValue: "worker",
+        docsUrl: `${DOCS}ui/configuration#secret-exposure`,
+      },
+      {
         key: "RBAC_ENABLED",
         label: "Enable RBAC",
         description:

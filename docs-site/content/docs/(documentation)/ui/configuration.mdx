@@ -30,6 +30,25 @@ Runtime tokens can read their own resolved secrets and mint tokens for their ass
 Task tokens cannot outlive their parent runtime token.
 Runtime revocation revokes its task tokens and closes their realtime sockets.
 
+### Secret exposure
+
+Every config row has an exposure that says who may read its secret value:
+
+| Exposure | Readers |
+|---|---|
+| `worker` | Any agent. Harness credentials and tools a worker runs. |
+| `lead` | The lead, the operator key, and users with `config.read.secrets`. |
+| `api` | Nobody over HTTP. The API server reads these into its own environment. |
+
+The exposure comes from the row's stored value when set, then from a built-in default for known keys, then from `SECRET_EXPOSURE_DEFAULT` (**Security & access**, default `worker`).
+A new secret row whose key has no built-in default is stored as `lead` unless the writer sets an exposure.
+Rewriting an existing row keeps its stored exposure.
+`API_AGENT_FS_API_KEY` and `SLACK_SIGNING_SECRET` are always `api`.
+Set a row's exposure with the `exposure` field on `PUT /api/config` or the `set-config` tool; `null` clears it.
+Config reads return `exposure` (stored) and `effectiveExposure` (applied).
+Reads do not filter on exposure yet.
+The list routes `GET /api/config` and `GET /api/config/resolved` omit the two pinned keys above, whatever a row stores; other keys stay listed even with a stored `api` override.
+
 ### Dev mode
 
 Set `SWARM_DEV_MODE=true` on the API server, or enable **Dev mode** under **Harness & tools**.

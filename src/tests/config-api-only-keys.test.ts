@@ -9,6 +9,7 @@ import {
 import { closeDb, createAgent, initDb, upsertSwarmConfig } from "../be/db";
 import { handleConfig } from "../http/config";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
 
 // Regression guard for the agent-fs bootstrap-key leak (PR #850 review): the
@@ -66,6 +67,7 @@ beforeAll(async () => {
   server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");
+    if (req.headers["x-test-operator"] === "1") setRequestAuth(req, { kind: "operator" });
     const ok = await handleConfig(req, res, pathSegments, queryParams);
     if (!ok) {
       res.writeHead(404);
@@ -81,9 +83,15 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-async function getJson(path: string): Promise<{ configs: Array<{ key: string; value?: string }> }> {
+async function getJson(
+  path: string,
+  options: { operator?: boolean } = {},
+): Promise<{ configs: Array<{ key: string; value?: string }> }> {
   const res = await fetch(`http://localhost:${port}${path}`, {
-    headers: { Authorization: `Bearer ${API_KEY}` },
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      ...(options.operator ? { "X-Test-Operator": "1" } : {}),
+    },
   });
   return (await res.json()) as { configs: Array<{ key: string; value?: string }> };
 }
@@ -110,5 +118,37 @@ describe("API-only config keys are never served over HTTP", () => {
     expect(configs.some((c) => c.key === BOOTSTRAP_KEY)).toBe(false);
     expect(configs.some((c) => c.key === "SLACK_SIGNING_SECRET")).toBe(false);
     expect(configs.some((c) => c.key === "SOME_WORKER_SECRET")).toBe(true);
+  });
+
+  test("an operator principal gets the same strip on every list route", async () => {
+    for (const path of [
+      "/api/config/resolved?includeSecrets=true",
+      `/api/config/resolved?includeSecrets=true&agentId=${agentId}`,
+      "/api/config?scope=global&includeSecrets=true",
+    ]) {
+      const { configs } = await getJson(path, { operator: true });
+      expect(configs.some((c) => c.key === BOOTSTRAP_KEY)).toBe(false);
+      expect(configs.some((c) => c.key === "SLACK_SIGNING_SECRET")).toBe(false);
+      expect(configs.some((c) => c.key === "SOME_WORKER_SECRET")).toBe(true);
+    }
+  });
+
+  test("a row override cannot widen an API-only key", async () => {
+    const res = await fetch(`http://localhost:${port}/api/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-Test-Operator": "1" },
+      body: JSON.stringify({
+        scope: "global",
+        key: BOOTSTRAP_KEY,
+        value: `synthetic-${crypto.randomUUID()}`,
+        isSecret: true,
+        exposure: "worker",
+      }),
+    });
+    expect(res.status).toBe(400);
+    const { configs } = await getJson("/api/config?scope=global&includeSecrets=true", {
+      operator: true,
+    });
+    expect(configs.some((c) => c.key === BOOTSTRAP_KEY)).toBe(false);
   });
 });

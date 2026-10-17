@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, maskSecrets } from "@/be/db";
 import { upsertSwarmConfigWithPolicyMirror } from "@/be/multi-runtime";
+import { validateExposureWrite } from "@/be/secret-exposure";
 import {
   internalConfigKeyError,
   isInternalConfigKey,
@@ -13,7 +14,7 @@ import {
 import { scheduleIntegrationsReload } from "@/http/core";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
-import { SwarmConfigScopeSchema } from "@/types";
+import { SecretExposureSchema, SwarmConfigScopeSchema } from "@/types";
 
 const configEntryShape = z.looseObject({
   id: z.string().optional(),
@@ -27,6 +28,8 @@ const configEntryShape = z.looseObject({
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
   encrypted: z.boolean().optional(),
+  exposure: z.string().nullable().optional(),
+  effectiveExposure: z.string().optional(),
   exportToEnv: z.boolean().optional(),
 });
 
@@ -65,6 +68,11 @@ export const registerSetConfigTool = (server: McpServer) => {
           .string()
           .optional()
           .describe("Optional human-readable description of this config entry."),
+        exposure: SecretExposureSchema.nullable()
+          .optional()
+          .describe(
+            "Who may read this secret's value: 'worker' (any agent), 'lead' (lead and operator), or 'api' (API server only). Omit to keep the stored value; null clears the override so the key default applies.",
+          ),
         exportToEnv: z
           .boolean()
           .optional()
@@ -78,7 +86,7 @@ export const registerSetConfigTool = (server: McpServer) => {
       }),
     },
     async (
-      { scope, scopeId, key, value, isSecret, envPath, description, exportToEnv },
+      { scope, scopeId, key, value, isSecret, envPath, description, exposure, exportToEnv },
       requestInfo,
     ) => {
       if (!requestInfo.agentId) {
@@ -126,7 +134,9 @@ export const registerSetConfigTool = (server: McpServer) => {
         }
 
         const validationError =
-          validateConfigValue(key, value) ?? validateExportToEnv(key, exportToEnv);
+          validateConfigValue(key, value) ??
+          validateExposureWrite(key, exposure) ??
+          validateExportToEnv(key, exportToEnv);
         if (validationError) {
           return toolErr(validationError, { data: { yourAgentId: requestInfo.agentId } });
         }
@@ -139,6 +149,7 @@ export const registerSetConfigTool = (server: McpServer) => {
           isSecret,
           envPath,
           description,
+          exposure,
           exportToEnv,
         });
 

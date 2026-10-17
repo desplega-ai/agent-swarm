@@ -19,6 +19,8 @@ const configEntryShape = z.looseObject({
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
   encrypted: z.boolean().optional(),
+  exposure: z.string().nullable().optional(),
+  effectiveExposure: z.string().optional(),
   exportToEnv: z.boolean().optional(),
 });
 

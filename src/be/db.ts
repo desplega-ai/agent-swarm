@@ -83,6 +83,7 @@ import type {
   ScriptRunKind,
   ScriptRunListItem,
   ScriptRunStatus,
+  SecretExposure,
   Service,
   ServiceStatus,
   SessionCost,
@@ -210,6 +211,7 @@ import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { emitChildRunFinished, wakeParentsOfDeletedRuns } from "./db/workflow-runs";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
+import { exposureToStampOnInsert, parseStoredExposure, secretExposureFor } from "./secret-exposure";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import {
@@ -6367,6 +6369,7 @@ type SwarmConfigRow = {
   createdAt: string;
   lastUpdatedAt: string;
   encrypted: number; // SQLite boolean: 0 = plaintext, 1 = AES-256-GCM ciphertext
+  exposure: string | null; // 'worker' | 'lead' | 'api'; NULL = code default
   exportToEnv?: number; // SQLite boolean; absent only on pre-215 test schemas
 };
 
@@ -6383,6 +6386,8 @@ const RESERVED_CONFIG_PLACEHOLDER = "[reserved key stored in swarm_config; delet
 
 function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
   const isEncrypted = row.encrypted === 1;
+  const exposure = parseStoredExposure(row.exposure);
+  const effectiveExposure = secretExposureFor({ key: row.key, exposure });
   if (isReservedConfigKey(row.key)) {
     return {
       id: row.id,
@@ -6396,6 +6401,8 @@ function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
       createdAt: row.createdAt,
       lastUpdatedAt: row.lastUpdatedAt,
       encrypted: isEncrypted,
+      exposure,
+      effectiveExposure,
       exportToEnv: effectiveExportToEnv(row.key, row.exportToEnv !== 0),
     };
   }
@@ -6423,6 +6430,8 @@ function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     encrypted: isEncrypted,
+    exposure,
+    effectiveExposure,
     exportToEnv: effectiveExportToEnv(row.key, row.exportToEnv !== 0),
   };
 }
@@ -6632,6 +6641,11 @@ export async function upsertSwarmConfig(data: {
   isSecret?: boolean;
   envPath?: string | null;
   description?: string | null;
+  /**
+   * Omit to keep the stored exposure on UPDATE (and stamp the D2 default on
+   * INSERT). Pass a value to set the override, or null to clear it.
+   */
+  exposure?: SecretExposure | null;
   /** Omitted: an update keeps the stored flag; an insert uses `defaultExportToEnv`. */
   exportToEnv?: boolean;
 }): Promise<SwarmConfig> {
@@ -6674,11 +6688,14 @@ export async function upsertSwarmConfig(data: {
             [data.scope, scopeId, data.key],
           );
 
-    // COALESCE keeps the stored flag when the caller did not send one.
+    // COALESCE keeps the stored flag when the caller did not send one. An
+    // UPDATE also keeps the stored exposure unless the writer names one, so
+    // rewriting a key's value never changes who may read it.
     const written = existing
       ? await getDbClient().get<SwarmConfigRow>(
           `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?,
-             exportToEnv = CASE WHEN ? THEN 0 ELSE COALESCE(?, exportToEnv) END
+             exportToEnv = CASE WHEN ? THEN 0 ELSE COALESCE(?, exportToEnv) END,
+             exposure = CASE WHEN ? THEN ? ELSE exposure END
            WHERE id = ? RETURNING *`,
           [
             storedValue,
@@ -6689,12 +6706,14 @@ export async function upsertSwarmConfig(data: {
             now,
             restricted ? 1 : 0,
             data.exportToEnv === undefined ? null : data.exportToEnv ? 1 : 0,
+            data.exposure === undefined ? 0 : 1,
+            data.exposure ?? null,
             existing.id,
           ],
         )
       : await getDbClient().get<SwarmConfigRow>(
-          `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+          `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv, exposure)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
           [
             crypto.randomUUID(),
             data.scope,
@@ -6708,6 +6727,11 @@ export async function upsertSwarmConfig(data: {
             now,
             encryptedFlag,
             restricted ? 0 : (data.exportToEnv ?? defaultExportToEnv(data.key)) ? 1 : 0,
+            exposureToStampOnInsert({
+              key: data.key,
+              isSecret: isSecret === 1,
+              exposure: data.exposure,
+            }),
           ],
         );
     if (data.scope === "agent" && scopeId) {

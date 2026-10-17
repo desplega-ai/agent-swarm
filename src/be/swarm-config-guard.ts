@@ -448,6 +448,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
+  ...enumValidator("SECRET_EXPOSURE_DEFAULT", ["worker", "lead"]),
   ...shortcodeValidators([
     "SLACK_REACTION_ACCEPTED",
     "SLACK_REACTION_BUFFERED",

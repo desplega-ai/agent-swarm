@@ -4824,6 +4824,11 @@ export interface paths {
                         isSecret?: boolean;
                         envPath?: string | null;
                         description?: string | null;
+                        /**
+                         * @description Who may read this secret's value: worker, lead or api. Omit to keep the stored value; null clears the override so the key default applies.
+                         * @enum {string|null}
+                         */
+                        exposure?: "worker" | "lead" | "api" | null;
                         /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
                         exportToEnv?: boolean;
                     };
@@ -25248,6 +25253,10 @@ export interface components {
             createdAt: string;
             lastUpdatedAt: string;
             encrypted: boolean;
+            /** @enum {string|null} */
+            exposure?: "worker" | "lead" | "api" | null;
+            /** @enum {string} */
+            effectiveExposure?: "worker" | "lead" | "api";
             exportToEnv: boolean;
         };
         ContextSnapshot: {

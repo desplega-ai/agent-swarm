@@ -17,9 +17,9 @@ import {
 } from "../be/multi-runtime";
 import { fillOrgLogoFromWebsite } from "../be/org-profile";
 import { getUserGrant } from "../be/rbac-roles";
+import { isPinnedApiKey, validateExposureWrite } from "../be/secret-exposure";
 import {
   internalConfigKeyError,
-  isApiOnlyConfigKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
@@ -27,7 +27,7 @@ import {
   validateExportToEnv,
 } from "../be/swarm-config-guard";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
-import { SwarmConfigSchema } from "../types";
+import { SecretExposureSchema, SwarmConfigSchema } from "../types";
 import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
@@ -38,9 +38,16 @@ const MAX_ENV_PRESENCE_KEYS = 200;
 const SECRETS_FORCE_MASK_NOTE =
   " (secret values masked: this token cannot read secrets in this scope)";
 
+// Pinned API-only keys belong to the API server and are NEVER handed out over
+// HTTP — workers/entrypoints read config to build their env, and the agent-fs
+// bootstrap admin key would let a compromised worker administer the shared
+// org. The API materializes these into its own process.env at boot via
+// getInjectableGlobalConfigs, so no HTTP consumer legitimately needs them. The
+// key list lives in src/be/secret-exposure.ts. This filters on the registry
+// only: a stored `api` override on any other key does not hide the row yet.
 function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
   return configs.filter(
-    (config) => !isApiOnlyConfigKey(config.key) && !isInternalConfigKey(config.key),
+    (config) => !isPinnedApiKey(config.key) && !isInternalConfigKey(config.key),
   );
 }
 
@@ -307,6 +314,9 @@ const upsertConfig = route({
     isSecret: z.boolean().optional(),
     envPath: z.string().nullish(),
     description: z.string().nullish(),
+    exposure: SecretExposureSchema.nullish().describe(
+      "Who may read this secret's value: worker, lead or api. Omit to keep the stored value; null clears the override so the key default applies.",
+    ),
     exportToEnv: z
       .boolean()
       .optional()
@@ -479,7 +489,8 @@ export async function handleConfig(
     const parsed = await upsertConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
-    const { scope, scopeId, key, value, isSecret, envPath, description, exportToEnv } = parsed.body;
+    const { scope, scopeId, key, value, isSecret, envPath, description, exposure, exportToEnv } =
+      parsed.body;
 
     if (scope === "global" && scopeId) {
       jsonError(res, "Global scope must not have scopeId", 400);
@@ -502,7 +513,9 @@ export async function handleConfig(
     }
 
     const validationError =
-      validateConfigValue(key, value) ?? validateExportToEnv(key, exportToEnv);
+      validateConfigValue(key, value) ??
+      validateExposureWrite(key, exposure) ??
+      validateExportToEnv(key, exportToEnv);
     if (validationError) {
       jsonError(res, validationError, 400);
       return true;
@@ -518,6 +531,7 @@ export async function handleConfig(
         isSecret: isSecret || false,
         envPath: envPath || null,
         description: description || null,
+        exposure,
         exportToEnv,
       });
       // Auto-reload integrations when a global-scoped config changes so callers
