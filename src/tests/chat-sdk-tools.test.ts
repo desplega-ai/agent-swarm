@@ -194,6 +194,8 @@ describe("chat-reply", () => {
       agentId: worker.id,
       source: "chat",
       contextKey: chatSdkContextKey("telegram:991002"),
+      mentionMessageId: "991002:77",
+      mentionChannelId: "telegram:991002",
     });
     const result = await callTool(
       "chat-reply",
@@ -212,6 +214,11 @@ describe("chat-reply", () => {
         String((call.body as { chat_id?: unknown }).chat_id) === "991002",
     );
     expect(sends).toHaveLength(1);
+    // Anchored like the final answer: a reply to the message that started the task.
+    expect(sends[0]?.body.reply_parameters).toEqual({
+      message_id: 77,
+      allow_sending_without_reply: true,
+    });
   });
 });
 

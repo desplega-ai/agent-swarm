@@ -84,6 +84,18 @@ describe("Chat SDK slash commands", () => {
     expect(await chatTasks(3001)).toHaveLength(0);
   });
 
+  test("/start in a fresh DM answers with the welcome and stays out of the / menu", async () => {
+    await postTelegramUpdate(commandUpdate(dm(3003), "/start"));
+    const texts = sentTexts(3003);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain("Each answer arrives as a reply to your message.");
+    expect(texts[0]).toContain("/help");
+    expect(texts[0]).not.toContain("Unknown command");
+    expect(CHAT_COMMANDS.map((c) => c.command)).not.toContain("start");
+    await flushChatBuffers();
+    expect(await chatTasks(3003)).toHaveLength(0);
+  });
+
   test("an unknown command gets the list instead of silence", async () => {
     await postTelegramUpdate(commandUpdate(dm(3002), "/deploy"));
     const texts = sentTexts(3002);

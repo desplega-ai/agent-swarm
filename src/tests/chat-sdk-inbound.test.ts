@@ -204,16 +204,41 @@ describe("Chat SDK inbound pipeline", () => {
     const acksBefore = harness.mock.calls.filter((call) =>
       /^send(Rich)?Message$/.test(call.method),
     ).length;
-    await postTelegramUpdate(telegramUpdate(group(-2005), "also add the charts"));
+    const steer = telegramUpdate(group(-2005), "also add the charts");
+    await postTelegramUpdate(steer);
     await flushChatBuffers();
 
     expect(await chatTasks(-2005)).toHaveLength(1);
     expect(await steeringRows(first!.id)).toEqual([
       { body: "also add the charts", source: "chat" },
     ]);
-    expect(
-      harness.mock.calls.filter((call) => /^send(Rich)?Message$/.test(call.method)).length,
-    ).toBe(acksBefore + 1);
+    const sends = harness.mock.calls.filter((call) => /^send(Rich)?Message$/.test(call.method));
+    expect(sends.length).toBe(acksBefore + 1);
+    // The acknowledgement replies to the steering message.
+    expect(sends.at(-1)?.body.reply_parameters).toEqual({
+      message_id: (steer.message as { message_id: number }).message_id,
+      allow_sending_without_reply: true,
+    });
+  });
+
+  test("two asks back to back each anchor to their own message, not the parent's", async () => {
+    const firstAsk = telegramUpdate(group(-2010), "@swarm_test_bot !now summarize the PR");
+    await postTelegramUpdate(firstAsk);
+    const secondAsk = telegramUpdate(group(-2010), "@swarm_test_bot !now and list the risks");
+    await postTelegramUpdate(secondAsk);
+    await flushChatBuffers();
+
+    const rows = await chatTasks(-2010);
+    expect(rows).toHaveLength(2);
+    const [first, second] = await Promise.all(rows.map((row) => getTaskById(row.id)));
+    const idOf = (update: Record<string, unknown>) =>
+      `-2010:${(update.message as { message_id: number }).message_id}`;
+    expect(first?.mentionMessageId).toBe(idOf(firstAsk));
+    // The second task is a child of the first; `createTask` would copy the
+    // parent's anchor if inbound did not set its own.
+    expect(second?.parentTaskId).toBe(first!.id);
+    expect(second?.mentionMessageId).toBe(idOf(secondAsk));
+    expect(second?.mentionChannelId).toBeTruthy();
   });
 
   test("a Telegram private-chat DM steers too (DMs never reach onSubscribedMessage)", async () => {

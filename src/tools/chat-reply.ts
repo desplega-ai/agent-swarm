@@ -52,6 +52,8 @@ export const registerChatReplyTool = (server: McpServer) => {
           threadId: thread.threadId,
           text,
           taskId: task.id,
+          // Same anchor as the final answer: the message that started this task.
+          replyToMessageId: task.mentionMessageId,
         });
         return toolOk(`Posted to ${thread.adapter} thread ${sent.threadId}.`, {
           data: {

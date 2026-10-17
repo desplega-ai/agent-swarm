@@ -43,19 +43,28 @@ export interface ChatPostResult {
   messageIds: string[];
 }
 
+type SentChunk = { id: string; threadId?: string };
+
 interface PostTarget {
-  post(message: { markdown: string }): Promise<{ id: string; threadId?: string }>;
+  post(message: { markdown: string }): Promise<SentChunk>;
 }
 
+/** `replyFirst` sends the first chunk as a native reply; later chunks are plain posts. */
 async function postChunks(
   adapter: string,
   target: PostTarget,
-  text: string,
+  parts: readonly string[],
+  replyFirst?: (message: { markdown: string }) => Promise<SentChunk>,
 ): Promise<{ messageIds: string[]; threadId?: string }> {
   const messageIds: string[] = [];
   let threadId: string | undefined;
-  for (const chunk of splitChatMessage(text, chatMessageLimit(adapter))) {
-    const sent = await target.post({ markdown: chunk });
+  const limit = chatMessageLimit(adapter);
+  for (const chunk of parts.flatMap((part) => splitChatMessage(part, limit))) {
+    const message = { markdown: chunk };
+    const sent =
+      replyFirst && messageIds.length === 0
+        ? await replyFirst(message)
+        : await target.post(message);
     messageIds.push(sent.id);
     threadId ??= sent.threadId;
   }
@@ -73,25 +82,42 @@ async function postChunks(
  * Delivery is at-least-once: a chunk failure re-posts earlier chunks on retry,
  * and a crash between the send and `markChatRelayDelivered` re-sends the
  * message.
+ *
+ * An array `text` is posted as one message per element, each still split at
+ * the limit; the caller uses it when its own markup must not be cut in two.
+ *
+ * `replyToMessageId` anchors the first chunk to that message on a thread
+ * target. Telegram sends it with `allow_sending_without_reply`, so a deleted
+ * target still gets the message, unthreaded.
  */
 export async function postChatMessage(args: {
   adapter: string;
   threadId?: string;
   channelId?: string;
-  text: string;
+  text: string | readonly string[];
   taskId?: string;
+  replyToMessageId?: string;
 }): Promise<ChatPostResult> {
   // Ids come from tools and stored context keys. Check the Teams origin
   // before the adapter sends its token.
   assertTrustedChatTarget(args.threadId ?? args.channelId ?? "");
   const chat = getChatInstance(args.adapter);
   if (!chat) throw new ChatAdapterUnavailableError(args.adapter);
-  const text = scrubSecrets(args.text);
+  const parts = (typeof args.text === "string" ? [args.text] : args.text).map(scrubSecrets);
+  const text = parts.join("\n\n");
 
   let result: ChatPostResult;
   if (args.threadId) {
     const thread = chat.thread(args.threadId);
-    const sent = await postChunks(args.adapter, thread, text);
+    // Only adapters with a native reply (Telegram in this SDK version) anchor;
+    // the others post unanchored, as before.
+    const replyTo = args.replyToMessageId;
+    const sent = await postChunks(
+      args.adapter,
+      thread,
+      parts,
+      replyTo && thread.adapter.reply ? (message) => thread.reply(replyTo, message) : undefined,
+    );
     result = {
       adapter: args.adapter,
       threadId: thread.id,
@@ -100,7 +126,7 @@ export async function postChatMessage(args: {
     };
   } else if (args.channelId) {
     const channel = chat.channel(args.channelId);
-    const sent = await postChunks(args.adapter, channel, text);
+    const sent = await postChunks(args.adapter, channel, parts);
     result = {
       adapter: args.adapter,
       threadId: sent.threadId ?? channel.id,

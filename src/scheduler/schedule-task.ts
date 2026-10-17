@@ -1,11 +1,24 @@
-import { createTaskExtended, getDbClient } from "@/be/db";
+import { createTaskExtended, getDbClient, getTaskById } from "@/be/db";
 import { carryUnhandledSteering } from "@/be/steering";
-import { scheduleContextKey } from "@/tasks/context-key";
+import { chatThreadOfContextKey, scheduleContextKey } from "@/tasks/context-key";
 import {
   type PreparedTaskCreate,
   prepareTaskWithSiblingAwareness,
 } from "@/tasks/sibling-awareness";
 import type { AgentTask, ScheduledTask } from "@/types";
+
+/**
+ * A defer-task wake-up of a chat task stays in its chat thread, so the chat
+ * relay posts the real answer there (and `/status` and `/cancel` see it).
+ * Every other firing gets the schedule's own key.
+ */
+async function scheduleTaskContextKey(schedule: ScheduledTask): Promise<string> {
+  if (schedule.taskType === "deferred" && schedule.parentTaskId) {
+    const parentKey = (await getTaskById(schedule.parentTaskId))?.contextKey;
+    if (parentKey && chatThreadOfContextKey(parentKey)) return parentKey;
+  }
+  return scheduleContextKey({ scheduleId: schedule.id });
+}
 
 /**
  * Run the `pre.task.create` extension hooks for a schedule firing. Call this OUTSIDE
@@ -35,7 +48,7 @@ export async function prepareStandaloneScheduleTask(
       scheduleId: schedule.id,
       source: "schedule",
       requestedByUserId: schedule.createdBy,
-      contextKey: scheduleContextKey({ scheduleId: schedule.id }),
+      contextKey: await scheduleTaskContextKey(schedule),
       // Set only by `defer-task`. An explicit parent wins over the sibling-awareness
       // auto-wiring (see withSiblingAwareness in src/tasks/sibling-awareness.ts), so
       // the wake-up run continues the deferred task rather than a random sibling.

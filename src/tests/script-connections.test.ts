@@ -632,6 +632,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "219_relabel_pi_context_compactions.sql");
       // 220 reads agents and swarm_config, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "220_model_profiles.sql");
+      // 225 reads agent_tasks.deferredAt, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "225_chat_relay_defer.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

@@ -63,7 +63,19 @@ function helpText(): string {
   return ["Commands:", ...CHAT_COMMANDS.map((c) => `/${c.command}: ${c.description}`)].join("\n");
 }
 
-function shortId(task: AgentTask): string {
+/**
+ * Telegram sends `/start` when a user opens a bot DM. It stays out of
+ * `CHAT_COMMANDS`, so the `/` menu does not list it.
+ */
+function welcomeText(): string {
+  return [
+    "Hi! Send a message here (in a group, mention me) and the swarm picks it up. Each answer arrives as a reply to your message.",
+    "",
+    helpText(),
+  ].join("\n");
+}
+
+export function shortId(task: Pick<AgentTask, "id">): string {
   return task.id.slice(0, 8);
 }
 
@@ -115,6 +127,7 @@ export async function runChatCommand(
 ): Promise<string> {
   const name = command.replace(/^\//, "").toLowerCase();
   if (name === "help") return helpText();
+  if (name === "start") return welcomeText();
   if (!CHAT_COMMANDS.some((c) => c.command === name)) {
     return `Unknown command /${name}.\n${helpText()}`;
   }
