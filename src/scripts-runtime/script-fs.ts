@@ -57,6 +57,13 @@ function notConfigured(path: string): Error {
   );
 }
 
+/** A scratch symlink, or a scratch cp / mv, cannot reach the drive: InMemoryFs would keep the file. */
+function crossDevice(path: string): Error {
+  return new Error(
+    `EXDEV: cross-device link not permitted, '${path}' resolves into the agent-fs drive at ${AGENT_FS_MOUNT}; use an ${AGENT_FS_MOUNT} path`,
+  );
+}
+
 /**
  * Fails an agent-fs response body once it passes SCRIPT_FS_MAX_BYTES. The
  * adapter buffers whole bodies (`arrayBuffer()`, `text()`) for reads, shell
@@ -93,15 +100,15 @@ async function openSession(agentFs: ScriptAgentFsDescriptor | undefined): Promis
   // Loaded on first use, so runs that never touch ctx.fs / ctx.sh skip the import.
   const { Bash, InMemoryFs, MountableFs } = await import("just-bash");
   // just-bash writes its default layout (/bin, /usr, /dev, /proc) into the base
-  // filesystem, so the base must be scratch memory and never the drive. Without
-  // the drive, the base reserves /afs, so `ctx.sh` cannot put a file there that
-  // looks persistent and dies with the run.
+  // filesystem, so the base must be scratch memory and never the drive. The
+  // base reserves /afs, so `ctx.sh` cannot put a file there that looks
+  // persistent and dies with the run.
   const scratch = new InMemoryFs(undefined, { maxTotalBytes: SCRIPT_FS_MAX_BYTES });
   const fs = new MountableFs({
-    base: new ScratchFs(
-      scratch,
-      agentFs ? undefined : { path: AGENT_FS_MOUNT, error: notConfigured },
-    ),
+    base: new ScratchFs(scratch, {
+      path: AGENT_FS_MOUNT,
+      error: agentFs ? crossDevice : notConfigured,
+    }),
   });
   if (agentFs) {
     const { AgentFsFileSystem } = await import("@desplega.ai/agent-fs-just-bash");

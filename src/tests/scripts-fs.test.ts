@@ -238,11 +238,17 @@ function suite(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean
               let normalized = "";
               try { await ctx.fs.writeFile("/tmp/../afs/canonical.md", "bypass"); } catch (e) { normalized = e.message; }
               const shell = await ctx.sh("mkdir -p /afs; echo persisted > /afs/report.md; cat /afs/report.md");
+              const alias = await ctx.sh("ln -s /afs /tmp/link; echo alias > /tmp/link/alias.md");
+              await ctx.fs.writeFile("/tmp/tree/afs/report.md", "scratch");
+              let copied = "";
+              try { await ctx.fs.cp("/tmp/tree", "/", { recursive: true }); } catch (e) { copied = e.message; }
               return {
                 sorted: sorted.stdout,
                 error,
                 normalized,
                 shell,
+                alias,
+                copied,
                 root: (await ctx.sh("ls /")).stdout,
                 exists: await ctx.fs.exists("/afs/x.md"),
                 normalizedExists: await ctx.fs.exists("/tmp/../afs/canonical.md"),
@@ -260,6 +266,11 @@ function suite(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean
         const shell = result.shell as { stdout: string; stderr: string; exitCode: number };
         expect(shell.exitCode).not.toBe(0);
         expect(shell.stdout).not.toContain("persisted");
+        // A symlink alias and a recursive copy into / cannot reach /afs either.
+        const alias = result.alias as { stderr: string; exitCode: number };
+        expect(alias.exitCode).not.toBe(0);
+        expect(alias.stderr).toContain("agent-fs is not configured");
+        expect(result.copied).toContain("agent-fs is not configured");
         expect(result.root).not.toContain("afs");
         expect(result.exists).toBe(false);
         expect(result.normalizedExists).toBe(false);
@@ -355,6 +366,62 @@ test("scratch names and empty entries stay under SCRIPT_FS_MAX_METADATA_BYTES", 
   await fs.rm("/tmp", { recursive: true });
   await fs.writeFile("/tmp/after", "ok");
   expect(await fs.readFile("/tmp/after")).toBe("ok");
+});
+
+// MountableFs sends only literal /afs paths to the drive. Scratch must not reach /afs any other way.
+test("scratch symlinks, cp and mv cannot reach a reserved /afs", async () => {
+  const { fs, sh } = createScriptFs(undefined);
+  const notConfigured = "agent-fs is not configured";
+  for (const command of [
+    "ln -s /afs /tmp/link && echo x > /tmp/link/alias.md",
+    "ln -s /afs/report.md /tmp/alias && echo x > /tmp/alias",
+    "mkdir -p /tmp/d && ln -s ../../afs /tmp/d/up && echo x > /tmp/d/up/r.md",
+    "ln -s / /tmp/root && echo x > /tmp/root/afs/r.md",
+    "ln -s /tmp/hop2 /tmp/hop1 && ln -s /afs /tmp/hop2 && echo x > /tmp/hop1/r.md",
+  ]) {
+    const result = await sh(command);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain(notConfigured);
+  }
+  // just-bash's mkdir and cat report every error as "No such file or directory".
+  expect((await sh("mkdir -p /tmp/root/afs")).exitCode).not.toBe(0);
+  await expect(fs.readFile("/tmp/hop1/r.md")).rejects.toThrow(notConfigured);
+  await expect(fs.readFile("/tmp/alias")).rejects.toThrow(notConfigured);
+  await fs.writeFile("/tmp/tree/afs/report.md", "scratch");
+  await expect(fs.cp("/tmp/tree", "/", { recursive: true })).rejects.toThrow(notConfigured);
+  await expect(fs.mv("/tmp/tree", "/")).rejects.toThrow(notConfigured);
+  await expect(fs.cp("/tmp/tree/afs/report.md", "/tmp/root/afs/r.md")).rejects.toThrow(
+    notConfigured,
+  );
+  // Nothing landed, the source is untouched, and the links themselves can go.
+  expect(await fs.readdir("/")).not.toContain("afs");
+  expect(await fs.readFile("/tmp/tree/afs/report.md")).toBe("scratch");
+  await fs.rm("/tmp/link");
+  expect(await fs.exists("/tmp/link")).toBe(false);
+  // Ordinary symlinks inside scratch still work.
+  expect((await sh("ln -s /tmp/tree /tmp/t && cat /tmp/t/afs/report.md")).stdout).toBe("scratch");
+});
+
+test("with a drive, a scratch symlink into /afs fails with EXDEV", async () => {
+  const { sh } = createScriptFs(agentFs());
+  // The base fails before any request, so the drive's auth does not matter here.
+  const result = await sh("ln -s /afs/notes /tmp/notes && echo x > /tmp/notes/new.md");
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr).toContain("EXDEV");
+  expect(seenAuth.size).toBe(0);
+});
+
+test("removed symlinks give their target bytes back", async () => {
+  const { fs, sh } = createScriptFs(undefined);
+  const target = "x".repeat(4096);
+  // Each cycle charges about 8 KiB of target, so 1100 cycles pass the budget unless removal
+  // credits it. ctx.fs.rm, because just-bash's rm follows a dangling link and fails.
+  for (let i = 0; i < 1100; i++) {
+    const link = await sh(`ln -s ${target} /tmp/link`);
+    expect(link.stderr).toBe("");
+    await fs.rm("/tmp/link", { force: true });
+  }
+  expect((await sh(`ln -s ${target} /tmp/link`)).exitCode).toBe(0);
 });
 
 describe("agent-fs credential resolution (real resolver)", () => {

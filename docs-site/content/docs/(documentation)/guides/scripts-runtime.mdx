@@ -221,8 +221,12 @@ these for the invoking agent:
 
 Without the drive, scratch paths and `ctx.sh` still work. An `/afs` path fails
 with `agent-fs is not configured for this agent (...)`, from `ctx.fs` and from
-shell commands and redirects alike. A file that looks persistent never lands in
+shell commands and redirects alike. A scratch symlink to `/afs`, or a `cp` or
+`mv` into `/`, fails the same way. A file that looks persistent never lands in
 memory.
+
+With the drive, a scratch symlink cannot reach it: a path that goes through a
+symlink into `/afs` fails with `EXDEV`. Use the `/afs` path itself.
 
 `ctx.fs` and `ctx.sh` never hold the key: drive requests carry a
 credential-broker placeholder, and the egress layer puts the agent's key on
