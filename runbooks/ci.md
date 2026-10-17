@@ -42,11 +42,11 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 
 | Job | Local equivalent (run from `apps/ui/`) |
 |---|---|
-| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b && bunx tsgo -b`, then from the repo root `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` |
+| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun check -b`, then from the repo root `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` |
 
 > **Note:** CI uses `tsc -b` (project-references build mode), **not** `tsc --noEmit`. Use `tsc -b` locally to match.
 
-> **tsc vs tsgo:** `bun run tsc:check` and the prek `typecheck` / `ui-typecheck` hooks run `tsgo` (TypeScript 7 native, `@typescript/native-preview`, pinned), about 7x faster. CI keeps TypeScript 5 as the authority (`bun run tsc:check:tsc`, `bunx tsc -b`) and runs tsgo next to it so the tsconfigs stay tsgo-clean. TypeScript 5 stays installed because `scripts/check-promise-sinks.ts` and `scripts/check-floating-promises.ts` use its compiler API. TS 7 removed `baseUrl`: write `paths` relative to the tsconfig (`"./src/*"`).
+> **tsc vs `bun check`:** `bun run tsc:check` and the prek `typecheck` / `ui-typecheck` hooks run `bun check`, Bun's built-in TypeScript 7 type checker (`-b` follows project references like `tsc -b`). It is about 20x faster than tsc 5 on the root project. CI keeps TypeScript 5 as the authority (`bun run tsc:check:tsc`, `bunx tsc -b`) and runs `bun check` next to it so the tsconfigs stay TS 7-clean. Our local loop is `check:local`, not `check`: a package script named `check` would shadow the built-in. TypeScript 5 stays installed because `scripts/check-promise-sinks.ts` and `scripts/check-floating-promises.ts` use its compiler API. TS 7 removed `baseUrl`: write `paths` relative to the tsconfig (`"./src/*"`).
 
 ### ui-e2e.yml secrets and variables
 
@@ -62,12 +62,12 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 
 ## The local check loop
 
-`bun run check` (`scripts/check.sh`) is the inner loop. Run it before every push:
+`bun run check:local` (`scripts/check.sh`) is the inner loop. Run it before every push:
 
 1. `bun install --frozen-lockfile`
 2. Biome, read-only, on changed files in the CI lint scope (`src/`, `apps/evals/`, `apps/ui/`, `packages/ui-e2e/`, `packages/model-routing/`)
 3. `bun run lint:slop`: the anti-slop Oxlint rules over the whole lint scope (about 5 s)
-4. tsgo on the root project, plus `apps/ui` (`tsgo -b`) when it changed
+4. `bun check` on the root project, plus `apps/ui` (`bun check -b`) when it changed
 5. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
 
 "Changed" means committed since the merge-base with `origin/main`, plus uncommitted and untracked edits. It stops at the first failure. It does not scan for secrets; the prek pre-push hooks own that.
@@ -80,7 +80,7 @@ Run this from the repo root before opening a PR. It mirrors merge-gate exactly f
 
 ```bash
 # Root project
-bun run check           # frozen install, Biome on changed files, tsgo, affected tests
+bun run check:local     # frozen install, Biome on changed files, bun check, affected tests
 bun run lint            # whole lint scope; NOT lint:fix — CI fails on warnings, not just errors
 bun run lint:slop       # anti-slop Oxlint rule subset (oxlint.config.ts)
 bun run tsc:check:tsc   # tsc 5, the CI authority

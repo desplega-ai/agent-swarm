@@ -74,8 +74,8 @@ Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
 | `bun run dev:http` | Hot reload, portless: `https://api.swarm.localhost:1355` |
 | `bun run lint:fix` | Lint & format with Biome |
 | `bun run lint:slop` | Anti-slop Oxlint rule subset (`oxlint.config.ts`, vendored plugin in `tools/oxlint/anti-slop/`) |
-| `bun run check` | Agent check loop: frozen install, Biome + tsgo + affected tests on your change |
-| `bun run tsc:check` | Type check with tsgo (`tsc:check:tsc` runs tsc 5, the CI authority) |
+| `bun run check:local` | Agent check loop: frozen install, Biome + `bun check` + affected tests on your change |
+| `bun run tsc:check` | Type check with Bun's built-in `bun check` (`tsc:check:tsc` runs tsc 5, the CI authority) |
 | `bun run test:root` | Run root unit tests (`bun run test:root -- src/tests/<file>.test.ts` for one) |
 | `bun run e2e:ui` | Playwright UI suite: builds `apps/ui`, one seeded API per worker (`-- --grep @smoke`, `-- --no-build`) |
 | `bun run docker:build:worker` | Build Docker worker image (full) |
@@ -320,15 +320,15 @@ Hard rules:
 
 Mirror what `.github/workflows/merge-gate.yml` runs. Full job-by-job breakdown, drift checks, lockfile rules, and "why CI fails" list: [runbooks/ci.md](./runbooks/ci.md).
 
-Inner loop: `bun run check` (`scripts/check.sh`). It runs a frozen install, Biome on changed files, tsgo, and the tests affected by your change (the pre-push hook's scoping). Run it before every push. Secrets scanning stays with the prek hooks.
+Inner loop: `bun run check:local` (`scripts/check.sh`). It runs a frozen install, Biome on changed files, `bun check`, and the tests affected by your change (the pre-push hook's scoping). Run it before every push. Secrets scanning stays with the prek hooks.
 
 Before opening the PR, mirror the rest of the gate (run from repo root):
 
 ```bash
-bun run check
+bun run check:local
 bun run lint           # whole lint scope; NOT lint:fix — CI runs `lint` (read-only)
 bun run lint:slop      # anti-slop Oxlint rule subset
-bun run tsc:check:tsc  # tsc 5, the CI authority (`tsc:check` runs tsgo)
+bun run tsc:check:tsc  # tsc 5, the CI authority (`tsc:check` runs `bun check`)
 bun run test:root -- --parallel=4     # CI: 4 shards x --parallel=4, balanced by cached --timings
 bun run e2e                          # black-box contract suite: boots the API on a free port, no Docker, no LLM
 bun run e2e:ui                       # Playwright UI suite: seeded API per worker, headless Chromium, needs Node 22+

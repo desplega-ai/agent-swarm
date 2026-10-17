@@ -25,7 +25,7 @@ ARG SKILLS_CLI_VERSION=1.5.20
 FROM ghcr.io/j178/prek:v${PREK_VERSION} AS prek
 
 # ─── Stage: builder ──────────────────────────────────────────────────────────
-FROM oven/bun:1.4.0 AS builder
+FROM oven/bun:1.4.3 AS builder
 WORKDIR /build
 # Root package.json declares Bun workspaces (apps/{ui,templates-ui,evals}); their manifests +
 # bunfig.toml (pins linker="hoisted"; the workspace default "isolated" would hide the
@@ -94,7 +94,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
 # Install Bun once, system-wide at /usr/local/bin (shared by root and worker —
 # runbook rule 4: never install a toolchain twice). Runtime `bun i -g` for the
 # worker user still lands in ~/.bun via the BUN_INSTALL ENV set below.
-RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v1.4.0"
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v1.4.3"
 
 # Create non-root user for runtime execution.
 # NOTE: Container entrypoint runs as root (setup, chown, privileged mounts).

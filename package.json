@@ -54,7 +54,7 @@
   "config": {
     "name": "agent-swarm"
   },
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.3",
   "workspaces": [
     "apps/ui",
     "apps/templates-ui",
@@ -109,8 +109,8 @@
     "e2e:codex-oauth-blob": "bun scripts/e2e/codex-oauth-blob.ts",
     "e2e:tsc": "bun tsc --noEmit -p scripts/e2e/tsconfig.json",
     "prepack": "bun run build:cli",
-    "check": "bash scripts/check.sh",
-    "tsc:check": "tsgo --noEmit",
+    "check:local": "bash scripts/check.sh",
+    "tsc:check": "bun check",
     "tsc:check:tsc": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "check:test-spawn-sync": "bash scripts/check-test-spawn-sync.sh",
@@ -183,7 +183,6 @@
     "@opencode/sdk": "2.0.32",
     "@oxlint/plugins": "1.78.0",
     "@types/bun": "latest",
-    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "dependency-cruiser": "^18.0.0",
     "happy-dom": "^20.14.5",
     "konsistent": "1.0.0-beta.1",
