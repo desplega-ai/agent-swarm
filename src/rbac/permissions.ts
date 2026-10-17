@@ -317,6 +317,11 @@ export const PERMISSIONS = {
     description: "Delete a global-scope script.",
     namespace: "script",
   },
+  "script.author": {
+    description:
+      "Run inline script source, save scripts, open an agent MCP session, or expose a script as an API. A user holds it only through a role that lists it; admin's grant-all does not imply it.",
+    namespace: "script",
+  },
   "script.search": {
     description: "Search reusable scripts visible to the caller.",
     namespace: "script",

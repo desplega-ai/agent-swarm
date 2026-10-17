@@ -343,6 +343,9 @@ export const LEGACY_POLICY = {
   "app.use": anyAuthenticated,
   "script.global.write": leadOnly,
   "script.global.delete": leadOnly,
+  // Users never pass the legacy rule: they need an explicit role grant, checked
+  // by src/http/script-author-gate.ts.
+  "script.author": agentOrOperator,
   "script.search": anyAuthenticated,
   "script.api.read.secrets": leadOnly,
   "script.api.create": leadOnly,

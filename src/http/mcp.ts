@@ -13,6 +13,7 @@ import {
   parseTaskToolManifest,
   selectTaskTools,
 } from "@/utils/task-tool-manifest";
+import { hasScriptAuthorRight } from "./script-author-gate";
 
 export type McpTransportActivity = Record<string, number>;
 export type McpSessionAgents = Record<string, string>;
@@ -112,6 +113,23 @@ function validateAgentTokenIdentity(req: IncomingMessage, res: ServerResponse): 
   return undefined;
 }
 
+/**
+ * An agent MCP session exposes script-run and script-upsert under whatever agent X-Agent-ID names.
+ * A user token opens one only with an explicit script.author grant; otherwise it belongs on
+ * /mcp-user. The operator key and agent tokens are unaffected.
+ */
+async function refuseUserWithoutScriptAuthor(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<true | undefined> {
+  if (getRequestAuth(req)?.kind !== "user") return undefined;
+  if (await hasScriptAuthorRight(req, undefined)) return undefined;
+  return forbidden(
+    res,
+    "User tokens need the script.author permission for agent MCP sessions; use /mcp-user instead",
+  );
+}
+
 function headerValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -161,6 +179,8 @@ export async function handleMcp(
 
   const tokenIdentityMismatch = validateAgentTokenIdentity(req, res);
   if (tokenIdentityMismatch) return true;
+
+  if (await refuseUserWithoutScriptAuthor(req, res)) return true;
 
   const agentMismatch = validateBoundAgent(req, res, sessionId, sessionAgents);
   if (agentMismatch) return true;

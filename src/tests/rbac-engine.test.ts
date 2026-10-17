@@ -110,7 +110,7 @@ const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
 // The shared API key alone: dashboard users are denied too.
 const API_KEY_OPERATOR_VERBS: PermissionVerb[] = ["models.profiles.write"];
 
-const AGENT_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.harness-support.write"];
+const AGENT_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.harness-support.write", "script.author"];
 
 const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "memory.edit.any",

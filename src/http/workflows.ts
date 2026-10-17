@@ -47,6 +47,11 @@ import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
+import {
+  rejectScriptDefinitionWithoutAuthor,
+  SCRIPT_AUTHOR_DENIED,
+  scriptDefinitionRefusal,
+} from "./script-author-gate";
 import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -160,6 +165,7 @@ const createWorkflowRoute = route({
   responses: {
     201: { description: "Workflow created", schema: WorkflowSaveResponseSchema },
     400: { description: "Invalid definition" },
+    403: { description: "Definition runs script code and the caller lacks script.author" },
   },
 });
 
@@ -214,6 +220,7 @@ const updateWorkflowRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid definition" },
+    403: { description: "Definition runs script code and the caller lacks script.author" },
     404: { description: "Workflow not found" },
   },
 });
@@ -232,6 +239,7 @@ const patchWorkflowRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid patch or resulting definition" },
+    403: { description: "Definition runs script code and the caller lacks script.author" },
     404: { description: "Workflow not found" },
   },
 });
@@ -250,6 +258,7 @@ const patchWorkflowNodeRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid patch or resulting definition" },
+    403: { description: "Definition runs script code and the caller lacks script.author" },
     404: { description: "Workflow or node not found" },
   },
 });
@@ -281,6 +290,7 @@ const triggerWorkflowRoute = route({
     },
     400: { description: "Workflow is disabled" },
     401: { description: "Unauthorized" },
+    403: { description: "Definition runs script code and the caller lacks script.author" },
     404: { description: "Workflow not found" },
   },
 });
@@ -354,6 +364,7 @@ const retryWorkflowRunRoute = route({
   responses: {
     200: { description: "Retry started", schema: SuccessResponseSchema },
     400: { description: "Cannot retry" },
+    403: { description: "Definition runs script code and the caller lacks script.author" },
   },
 });
 
@@ -576,6 +587,9 @@ export async function handleWorkflows(
   if (createWorkflowRoute.match(req.method, pathSegments)) {
     const parsed = await createWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await rejectScriptDefinitionWithoutAuthor(req, res, myAgentId, parsed.body.definition)) {
+      return true;
+    }
 
     // Validate definition structure
     const validation = validateDefinition(parsed.body.definition, getExecutorRegistry());
@@ -653,6 +667,7 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id, nodeId } = parsed.params;
 
+    const refuseDefinition = await scriptDefinitionRefusal(req, myAgentId);
     const updatedBy0 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
     // Convert single-node patch to bulk patch format
     const result = await patchWorkflowDefinition({
@@ -662,11 +677,16 @@ export async function handleWorkflows(
       snapshotAgentId: myAgentId,
       snapshotOptional: true,
       updates: { updatedBy: updatedBy0 },
+      refuseDefinition,
     });
     if (!result.ok) {
       if (result.reason === "not_found") {
         res.writeHead(404);
         res.end();
+        return true;
+      }
+      if (result.reason === "forbidden") {
+        jsonError(res, SCRIPT_AUTHOR_DENIED, 403);
         return true;
       }
       jsonError(
@@ -687,6 +707,7 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id } = parsed.params;
 
+    const refuseDefinition = await scriptDefinitionRefusal(req, myAgentId);
     const updatedBy1 = await resolveHttpAuditUserId(req, myAgentId);
     const updateArgs: Omit<Parameters<typeof updateWorkflow>[1], "definition"> = {};
     if (parsed.body.key !== undefined) {
@@ -719,11 +740,16 @@ export async function handleWorkflows(
       snapshotAgentId: myAgentId,
       snapshotOptional: true,
       updates: updateArgs,
+      refuseDefinition,
     });
     if (!result.ok) {
       if (result.reason === "not_found") {
         res.writeHead(404);
         res.end();
+        return true;
+      }
+      if (result.reason === "forbidden") {
+        jsonError(res, SCRIPT_AUTHOR_DENIED, 403);
         return true;
       }
       jsonError(
@@ -750,6 +776,16 @@ export async function handleWorkflows(
     if (!existing) {
       res.writeHead(404);
       res.end();
+      return true;
+    }
+    if (
+      await rejectScriptDefinitionWithoutAuthor(
+        req,
+        res,
+        myAgentId,
+        body.definition ?? existing.definition,
+      )
+    ) {
       return true;
     }
 
@@ -866,6 +902,9 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
+    if (await rejectScriptDefinitionWithoutAuthor(req, res, myAgentId, workflow.definition)) {
+      return true;
+    }
     if (!workflow.enabled) {
       jsonError(res, "Workflow is disabled", 400);
       return true;
@@ -924,6 +963,15 @@ export async function handleWorkflows(
   if (retryWorkflowRunRoute.match(req.method, pathSegments)) {
     const parsed = await retryWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    // A retry re-runs nodes from the workflow's current definition (src/workflows/resume.ts).
+    const run = await getWorkflowRun(parsed.params.id);
+    const runWorkflow = run ? await getWorkflow(run.workflowId) : null;
+    if (
+      runWorkflow &&
+      (await rejectScriptDefinitionWithoutAuthor(req, res, myAgentId, runWorkflow.definition))
+    ) {
+      return true;
+    }
     try {
       await retryFailedRun(parsed.params.id, getExecutorRegistry());
     } catch (err) {

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+- RBAC: running inline script source, saving scripts, launching durable script runs, exposing a script as an API, and opening an agent MCP session (`/mcp` with `X-Agent-ID`) now need the new `script.author` permission when the caller is a user token. The default `admin` role does not include it. Operators grant it with `agent-swarm rbac attach <user-id|email> script-author`. The operator key and agent tokens are unchanged.
+
 ## [2.1.0] - 2026-10-17
 
 ### Added

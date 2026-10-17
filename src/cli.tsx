@@ -323,11 +323,15 @@ const COMMAND_HELP: Record<
     examples: `  ${binName} scripts reembed`,
   },
   rbac: {
-    usage: `${binName} rbac bootstrap`,
+    usage: `${binName} rbac bootstrap | rbac attach <user-id|email> <role> | rbac detach <user-id|email> <role>`,
     description:
-      "RBAC role management.\nBootstraps built-in RBAC roles and attaches the default role to users with zero roles.",
+      "RBAC role management.\nbootstrap: seeds built-in RBAC roles and attaches the default role to users with zero roles.\nattach/detach: add or remove a role on a user. Grant script.author with the built-in script-author role.",
     options: "  -h, --help             Show this help",
-    examples: `  ${binName} rbac bootstrap`,
+    examples: [
+      `  ${binName} rbac bootstrap`,
+      `  ${binName} rbac attach alice@example.com script-author`,
+      `  ${binName} rbac detach alice@example.com script-author`,
+    ].join("\n"),
   },
   "codex-login": {
     usage: `${binName} codex-login [options]`,
@@ -441,7 +445,7 @@ function printHelp(command?: string) {
     ["session-summary-stdin", "Generate a Claude session summary (internal, stdin)"],
     ["x", "Execute external command routes"],
     ["scripts", "Reusable scripts maintenance"],
-    ["rbac", "RBAC role management (bootstrap)"],
+    ["rbac", "RBAC role management (bootstrap, attach, detach)"],
     ["docs", "Open documentation (--open to launch in browser)"],
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
     ["claude-managed-setup", "Bootstrap Anthropic Managed Agents (agent + env + skills)"],
@@ -782,7 +786,9 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   console.log("Scripts re-embedded.");
 } else if (args.command === "rbac") {
   const rbacArgs = process.argv.slice(process.argv.indexOf("rbac") + 1);
-  const isValidRbacCommand = rbacArgs.length === 1 && rbacArgs[0] === "bootstrap";
+  const isValidRbacCommand =
+    (rbacArgs.length === 1 && rbacArgs[0] === "bootstrap") ||
+    (rbacArgs.length === 3 && (rbacArgs[0] === "attach" || rbacArgs[0] === "detach"));
   if (args.showHelp || !isValidRbacCommand) {
     printHelp("rbac");
     process.exit(args.showHelp ? 0 : 1);

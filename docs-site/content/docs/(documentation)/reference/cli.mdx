@@ -174,8 +174,23 @@ npx @desplega.ai/agent-swarm rbac bootstrap
 agent-swarm rbac bootstrap
 ```
 
-The command accepts exactly the `bootstrap` subcommand. Anything else prints
-help and exits non-zero.
+### rbac attach / rbac detach
+
+Add or remove a role on a user, by user id or email. Run it where the API's
+database lives. Grant `script.author` with the built-in `script-author` role:
+
+```bash
+agent-swarm rbac attach alice@example.com script-author
+agent-swarm rbac detach alice@example.com script-author
+```
+
+A user needs `script.author` to run inline script source, save scripts, launch
+durable script runs, expose a script as an API, or open an agent MCP session
+(`/mcp` with `X-Agent-ID`). The default `admin` role does not include it. The
+operator key and agent tokens do not need it.
+
+`rbac` accepts only `bootstrap`, `attach <user> <role>`, and
+`detach <user> <role>`. Anything else prints help and exits non-zero.
 
 ### claude-managed-setup
 

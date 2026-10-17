@@ -8,7 +8,7 @@ import { snapshotWorkflow } from "./version";
 export type PatchWorkflowDefinitionResult =
   | { ok: true; workflow: Workflow; version: number | null; definition: WorkflowDefinition }
   | { ok: false; reason: "not_found" }
-  | { ok: false; reason: "patch" | "invalid"; errors: string[] };
+  | { ok: false; reason: "patch" | "invalid" | "forbidden"; errors: string[] };
 
 /**
  * Read a workflow, merge a node patch into its definition, snapshot the
@@ -36,8 +36,14 @@ export async function patchWorkflowDefinition(options: {
   /** HTTP handlers keep updating when the snapshot fails; tools surface it. */
   snapshotOptional?: boolean;
   updates?: Omit<Parameters<typeof updateWorkflow>[1], "definition">;
+  /**
+   * Inspects the merged definition before anything is written. A returned message refuses the
+   * patch with reason "forbidden". Runs inside the transaction, so it sees what will be saved.
+   */
+  refuseDefinition?: (definition: WorkflowDefinition) => Promise<string | null>;
 }): Promise<PatchWorkflowDefinitionResult> {
-  const { id, patch, registry, snapshotAgentId, snapshotOptional, updates } = options;
+  const { id, patch, registry, snapshotAgentId, snapshotOptional, updates, refuseDefinition } =
+    options;
   return await getDbClient().transaction(async (): Promise<PatchWorkflowDefinitionResult> => {
     const existing = await getWorkflow(id);
     if (!existing) return { ok: false, reason: "not_found" };
@@ -57,6 +63,8 @@ export async function patchWorkflowDefinition(options: {
     if (modelErrors.length > 0) {
       return { ok: false, reason: "invalid", errors: modelErrors };
     }
+    const refusal = refuseDefinition ? await refuseDefinition(patchResult.definition) : null;
+    if (refusal) return { ok: false, reason: "forbidden", errors: [refusal] };
 
     let version: number | null = null;
     if (snapshotOptional) {

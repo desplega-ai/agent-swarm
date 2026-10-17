@@ -37431,6 +37431,16 @@
               }
             }
           },
+          "403": {
+            "description": "Schedule runs script code and the caller lacks script.author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Duplicate name",
             "content": {
@@ -38237,6 +38247,16 @@
               }
             }
           },
+          "403": {
+            "description": "Schedule runs script code and the caller lacks script.author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Schedule not found",
             "content": {
@@ -38846,6 +38866,16 @@
               }
             }
           },
+          "403": {
+            "description": "Schedule runs script code and the caller lacks script.author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Schedule not found",
             "content": {
@@ -39232,6 +39262,16 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Schedule runs script code and the caller lacks script.author",
             "content": {
               "application/json": {
                 "schema": {
@@ -44673,6 +44713,16 @@
               }
             }
           },
+          "403": {
+            "description": "Caller lacks script.author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Existing idempotent run returned",
             "content": {
@@ -49796,7 +49846,7 @@
             }
           },
           "403": {
-            "description": "Global write requires lead agent",
+            "description": "Missing script.author, or a global write without a lead agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -50021,6 +50071,16 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks script.author",
             "content": {
               "application/json": {
                 "schema": {
@@ -50890,6 +50950,16 @@
           },
           "400": {
             "description": "Validation error or script has no owning agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks script.author",
             "content": {
               "application/json": {
                 "schema": {
@@ -58189,6 +58259,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Definition runs script code and the caller lacks script.author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -58598,6 +58678,16 @@
               }
             }
           },
+          "403": {
+            "description": "Definition runs script code and the caller lacks script.author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Workflow not found",
             "content": {
@@ -58682,6 +58772,16 @@
           },
           "400": {
             "description": "Invalid patch or resulting definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Definition runs script code and the caller lacks script.author",
             "content": {
               "application/json": {
                 "schema": {
@@ -58871,6 +58971,16 @@
               }
             }
           },
+          "403": {
+            "description": "Definition runs script code and the caller lacks script.author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Workflow or node not found",
             "content": {
@@ -58940,6 +59050,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Definition runs script code and the caller lacks script.author",
             "content": {
               "application/json": {
                 "schema": {
@@ -59250,6 +59370,16 @@
           },
           "400": {
             "description": "Cannot retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Definition runs script code and the caller lacks script.author",
             "content": {
               "application/json": {
                 "schema": {

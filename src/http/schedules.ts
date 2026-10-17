@@ -31,6 +31,10 @@ import {
 } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
+import {
+  rejectScriptDefinitionWithoutAuthor,
+  rejectWithoutScriptAuthor,
+} from "./script-author-gate";
 import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -127,6 +131,7 @@ const createSchedule = route({
   responses: {
     201: { description: "Schedule created", schema: ScheduledTaskSchema },
     400: { description: "Validation error" },
+    403: { description: "Schedule runs script code and the caller lacks script.author" },
     409: { description: "Duplicate name" },
   },
 });
@@ -148,6 +153,7 @@ const runScheduleNow = route({
       }),
     },
     400: { description: "Schedule is disabled" },
+    403: { description: "Schedule runs script code and the caller lacks script.author" },
     404: { description: "Schedule not found" },
   },
 });
@@ -219,6 +225,7 @@ const updateSchedule = route({
   responses: {
     200: { description: "Schedule updated", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
+    403: { description: "Schedule runs script code and the caller lacks script.author" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
   },
@@ -237,6 +244,7 @@ const patchSchedule = route({
   responses: {
     200: { description: "Schedule patched", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
+    403: { description: "Schedule runs script code and the caller lacks script.author" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
   },
@@ -258,6 +266,23 @@ const deleteSchedule = route({
     404: { description: "Schedule not found" },
   },
 });
+
+/**
+ * Writes a 403 and returns true when the schedule would run script code (a script target, or a
+ * workflow target whose definition runs scripts) and the caller lacks script.author.
+ */
+async function rejectScriptTargetWithoutAuthor(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: string | undefined,
+  target: { targetType?: string | null; workflowId?: string | null },
+): Promise<boolean> {
+  if (target.targetType === "script") return await rejectWithoutScriptAuthor(req, res, agentId);
+  if (target.targetType !== "workflow" || !target.workflowId) return false;
+  const workflow = await getWorkflow(target.workflowId);
+  if (!workflow) return false;
+  return await rejectScriptDefinitionWithoutAuthor(req, res, agentId, workflow.definition);
+}
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -393,6 +418,14 @@ export async function handleSchedules(
         return true;
       }
     }
+    if (
+      await rejectScriptTargetWithoutAuthor(req, res, myAgentId, {
+        targetType,
+        workflowId: body.workflowId,
+      })
+    ) {
+      return true;
+    }
 
     const modelError = await explicitModelErrorForAgent({
       model: splitLegacyModelAlias({ model: body.model, modelTier: body.modelTier }).model,
@@ -480,6 +513,7 @@ export async function handleSchedules(
       jsonError(res, "Schedule is disabled", 400);
       return true;
     }
+    if (await rejectScriptTargetWithoutAuthor(req, res, myAgentId, schedule)) return true;
 
     try {
       const { workflowRunIds, task } = await dispatchScheduleTarget(schedule, ["manual-run"]);
@@ -674,6 +708,14 @@ export async function handleSchedules(
         jsonError(res, `Script not found: ${mergedScriptName}`, 400);
         return true;
       }
+    }
+    if (
+      await rejectScriptTargetWithoutAuthor(req, res, myAgentId, {
+        targetType: mergedTargetType,
+        workflowId: mergedWorkflowId,
+      })
+    ) {
+      return true;
     }
 
     if (parsed.body.name && parsed.body.name !== existing.name) {

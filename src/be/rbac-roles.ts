@@ -2,6 +2,7 @@ import type { PermissionVerb } from "../rbac";
 import { PermissionVerbSchema } from "../rbac";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getDb, getDbClient } from "./db";
+import { findUserByEmail, findUserById } from "./users";
 
 export const DEFAULT_ROLE_ID = "rbac-role-admin";
 
@@ -36,6 +37,14 @@ export const BUILTIN_ROLES = [
       "task.fs.mutate",
       "favorite.write.own",
     ],
+  },
+  {
+    id: "rbac-role-script-author",
+    name: "script-author",
+    description: "Run inline script source, save scripts, and open agent MCP sessions.",
+    isBuiltin: true,
+    grantsAll: false,
+    verbs: ["script.author"],
   },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
 
@@ -195,6 +204,22 @@ export async function getUserGrant(userId: string): Promise<EffectiveGrant> {
   }
 
   return { grantsAll: false, verbs };
+}
+
+/**
+ * True when one of the user's roles lists `verb`. A grant-all role does not
+ * count: this is for verbs that must be granted by name (`script.author`).
+ */
+export async function userHasExplicitVerb(userId: string, verb: PermissionVerb): Promise<boolean> {
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found
+     FROM principal_roles pr
+     JOIN role_permissions rp ON rp.roleId = pr.roleId
+     WHERE pr.principalType = 'user' AND pr.principalId = ? AND rp.verb = ?
+     LIMIT 1`,
+    [userId, verb],
+  );
+  return Boolean(row);
 }
 
 export async function attachRole(userId: string, roleName: string): Promise<void> {
@@ -403,8 +428,26 @@ async function getRbacRoleSummary(): Promise<RbacRoleSummaryRow[]> {
   );
 }
 
+async function resolveCliUserId(idOrEmail: string): Promise<string> {
+  const user = (await findUserById(idOrEmail)) ?? (await findUserByEmail(idOrEmail));
+  if (!user) {
+    throw new Error(`Unknown user: ${idOrEmail}`);
+  }
+  return user.id;
+}
+
 export async function runRbacCliCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
+  if ((subcommand === "attach" || subcommand === "detach") && args.length === 3) {
+    ensureRbacSeedsSynced({ quiet: true });
+    const [, userArg, roleName] = args as [string, string, string];
+    const userId = await resolveCliUserId(userArg);
+    if (subcommand === "attach") await attachRole(userId, roleName);
+    else await detachRole(userId, roleName);
+    const roles = (await listUserRoles(userId)).map((role) => role.name);
+    console.log(`Roles for user ${userId}: ${roles.join(", ") || "(none)"}`);
+    return;
+  }
   if (args.length !== 1 || subcommand !== "bootstrap") {
     throw new Error(`Unknown RBAC command: ${args.join(" ") || "(none)"}`);
   }

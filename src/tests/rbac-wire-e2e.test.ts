@@ -440,11 +440,16 @@ describe("MCP gate matrix", () => {
 describe("HTTP gates", () => {
   test("scripts global upsert/delete are lead-only; agent scope is ungated", async () => {
     const source = "export default async function main() { return 1; }";
+    // Every upsert first checks script.author on the request principal: the
+    // shared key with an X-Agent-ID is still the operator.
+    const scriptAuthorAllow = () =>
+      expectRow({ type: "operator", id: null }, "script.author", "allow", null, "http");
 
     const upsertWorker = await api(base, "POST", "/api/scripts/upsert", {
       agentId: WORKER_A,
       body: { name: "e2e-script", source, scope: "global" },
     });
+    scriptAuthorAllow();
     expect(upsertWorker.status).toBe(403);
     expect(upsertWorker.body.error).toContain("Global write requires lead agent");
     expectRow(
@@ -460,14 +465,16 @@ describe("HTTP gates", () => {
       body: { name: "e2e-script", source, scope: "global" },
     });
     expect(upsertLead.status).toBe(200);
+    scriptAuthorAllow();
     expectRow({ type: "agent", id: LEAD }, "script.global.write", "allow", null, "http");
 
-    // agent scope never reaches can() — no audit row.
+    // agent scope never reaches the script.global.write can(): only script.author is audited.
     const upsertAgentScope = await api(base, "POST", "/api/scripts/upsert", {
       agentId: WORKER_A,
       body: { name: "e2e-script-agent", source, scope: "agent" },
     });
     expect(upsertAgentScope.status).toBe(200);
+    scriptAuthorAllow();
 
     const deleteWorker = await api(base, "DELETE", "/api/scripts/e2e-script?scope=global", {
       agentId: WORKER_A,

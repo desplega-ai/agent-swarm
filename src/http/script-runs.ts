@@ -48,6 +48,7 @@ import {
   RawLlmOutputSchema,
 } from "../workflows/executors/raw-llm";
 import { route } from "./route-def";
+import { rejectWithoutScriptAuthor } from "./script-author-gate";
 import { json, jsonError } from "./utils";
 
 const DEFAULT_SCRIPT_RUN_CONCURRENCY_CAP = 10;
@@ -139,21 +140,16 @@ const createScriptRunRoute = route({
   responses: {
     201: { description: "Script run created", schema: scriptRunCreatedSchema },
     400: { description: "Validation or label-lint failure" },
+    403: { description: "Caller lacks script.author" },
     // Idempotency conflict returns the EXISTING run's pointer, not the
     // standard error envelope — declare it so the fallback doesn't lie.
     409: { description: "Existing idempotent run returned", schema: scriptRunCreatedSchema },
     429: { description: "Script run concurrency cap reached" },
   },
-  // Matches the inline `POST /api/scripts/run` route and the `launch-script-run`
-  // MCP tool (src/tools/script-runs.ts, UNGATED_TOOL_FILES pin): open to every
-  // authenticated agent by design, not a permission gate. Execution safety comes
-  // from the shared sandbox (ulimits, clean env, brokered capabilities — see
-  // buildSandboxedCommand / LocalProcessScriptExecutor.start), not from
-  // restricting who may launch a run.
-  rbac: {
-    ungated:
-      "matches POST /api/scripts/run — open to all authenticated agents; constrained by the script execution sandbox, not a permission gate",
-  },
+  // Same gate as the inline `POST /api/scripts/run` route: the body always
+  // carries source. Agents and the operator key pass; a user needs an explicit
+  // script.author grant (src/http/script-author-gate.ts).
+  rbac: { permission: "script.author" },
 });
 
 const listScriptRunsRoute = route({
@@ -368,6 +364,7 @@ export async function handleScriptRuns(
   if (createScriptRunRoute.match(req.method, pathSegments)) {
     const parsed = await createScriptRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await rejectWithoutScriptAuthor(req, res, agentId)) return true;
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 

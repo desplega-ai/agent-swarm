@@ -10,6 +10,7 @@ import {
   getUserGrant,
   listUserRoles,
   runRbacCliCommand,
+  userHasExplicitVerb,
 } from "../be/rbac-roles";
 import type { PermissionVerb } from "../rbac";
 
@@ -324,5 +325,28 @@ describe("runRbacCliCommand", () => {
     } finally {
       logSpy.mockRestore();
     }
+  });
+
+  test("attach and detach grant script.author by name, which admin's grant-all does not", async () => {
+    const user = await createUser({ name: "CLI Script Author", email: "cli-author@example.com" });
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      expect((await getUserGrant(user.id)).grantsAll).toBe(true);
+      expect(await userHasExplicitVerb(user.id, "script.author")).toBe(false);
+
+      await runRbacCliCommand(["attach", "cli-author@example.com", "script-author"]);
+      expect(await roleNames(user.id)).toEqual(["admin", "script-author"]);
+      expect(await userHasExplicitVerb(user.id, "script.author")).toBe(true);
+
+      await runRbacCliCommand(["detach", user.id, "script-author"]);
+      expect(await roleNames(user.id)).toEqual(["admin"]);
+      expect(await userHasExplicitVerb(user.id, "script.author")).toBe(false);
+    } finally {
+      logSpy.mockRestore();
+    }
+    await expect(
+      runRbacCliCommand(["attach", "nobody@example.com", "script-author"]),
+    ).rejects.toThrow("Unknown user: nobody@example.com");
   });
 });

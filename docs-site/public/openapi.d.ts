@@ -16390,6 +16390,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Schedule runs script code and the caller lacks script.author */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Duplicate name */
                 409: {
                     headers: {
@@ -16508,6 +16517,15 @@ export interface paths {
                 };
                 /** @description Schedule is disabled */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Schedule runs script code and the caller lacks script.author */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -16767,6 +16785,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Schedule runs script code and the caller lacks script.author */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Schedule not found */
                 404: {
                     headers: {
@@ -16952,6 +16979,15 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Schedule runs script code and the caller lacks script.author */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -23722,6 +23758,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Definition runs script code and the caller lacks script.author */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -23895,6 +23940,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Definition runs script code and the caller lacks script.author */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Workflow not found */
                 404: {
                     headers: {
@@ -23971,6 +24025,15 @@ export interface paths {
                 };
                 /** @description Invalid patch or resulting definition */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Definition runs script code and the caller lacks script.author */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -24068,6 +24131,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Definition runs script code and the caller lacks script.author */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Workflow or node not found */
                 404: {
                     headers: {
@@ -24125,6 +24197,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Definition runs script code and the caller lacks script.author */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -24349,6 +24430,15 @@ export interface paths {
                 };
                 /** @description Cannot retry */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Definition runs script code and the caller lacks script.author */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -28973,6 +29063,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Caller lacks script.author */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Existing idempotent run returned */
             409: {
                 headers: {
@@ -29390,7 +29489,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Global write requires lead agent */
+            /** @description Missing script.author, or a global write without a lead agent */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -29475,6 +29574,15 @@ export interface operations {
             };
             /** @description Validation error */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Caller lacks script.author */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -29895,6 +30003,15 @@ export interface operations {
             };
             /** @description Validation error or script has no owning agent */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Caller lacks script.author */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
