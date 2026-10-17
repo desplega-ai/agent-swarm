@@ -21,11 +21,13 @@ import {
   buildChatAttachmentText,
   createChatTaskWithFiles,
   fetchChatFiles,
+  formatTooLargeReply,
   toChatFiles,
+  transcribeChatAudio,
 } from "./attachments";
 import { getChatThreadResetAt } from "./commands";
 import { errorMessage } from "./logger";
-import { emitChatMessageSent } from "./outbound";
+import { emitChatMessageSent, postChatMessage } from "./outbound";
 import {
   type ChatAgentMatch,
   type ChatRouteTarget,
@@ -354,7 +356,19 @@ export async function flushChatThread(
   const body = stripRoutingTokens(rawText);
   const files = items.flatMap((item) => toChatFiles(adapter, item.messageId, item.attachments));
   await using inbound = await fetchChatFiles(files);
-  const fileText = buildChatAttachmentText(inbound.files, inbound.failed);
+  const tooLarge = inbound.failed.filter((failure) => failure.tooLarge);
+  if (tooLarge.length > 0) {
+    // The user would otherwise never learn the file was dropped.
+    try {
+      await postChatMessage({ adapter, threadId, text: formatTooLargeReply(tooLarge) });
+    } catch (error) {
+      console.warn(
+        `[chat-sdk] ${threadId}: could not post the too-large reply: ${errorMessage(error)}`,
+      );
+    }
+  }
+  const notes = await transcribeChatAudio(inbound.fetched);
+  const fileText = buildChatAttachmentText(inbound.files, inbound.failed, notes);
   const combined = [body, fileText].filter(Boolean).join("\n\n");
   const marked =
     items.length > 1
