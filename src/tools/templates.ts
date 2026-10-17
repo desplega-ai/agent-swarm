@@ -294,30 +294,3 @@ This work will NOT fall back to the unassigned pool — you are the only re-dele
   ],
   category: "task_lifecycle",
 });
-
-// ============================================================================
-// Unhandled steering carried to a successor task
-//
-// Appended to the task text of a successor (defer-task wake-up, reboot-sweep
-// retry, supersede resume) when steering reached the predecessor but was never
-// acknowledged with `accept-steer` before it ended.
-// ============================================================================
-
-registerTemplate({
-  eventType: "task.successor.unhandled_steering",
-  header: "",
-  defaultBody: `## Unhandled steering from {{predecessor_task_id}}
-
-These steering messages reached task {{predecessor_task_id}} but were not acknowledged before it ended. Act on each one, then call \`accept-steer\` with its steeringMessageId.
-
-{{messages}}`,
-  variables: [
-    { name: "predecessor_task_id", description: "ID of the task the steering was sent to" },
-    {
-      name: "messages",
-      description:
-        "One entry per unhandled message: steering id, sender label, and the body verbatim",
-    },
-  ],
-  category: "task_lifecycle",
-});

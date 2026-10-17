@@ -2,68 +2,59 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
+  claimTask,
   closeDb,
   createAgent,
   createSteeringMessage,
   createTaskExtended,
   getDbClient,
+  getPendingSteeringForAgent,
+  getPendingSteeringForTask,
   getScheduledTaskById,
+  getSteeringMessageById,
   getTaskById,
   initDb,
   markSteeringDelivered,
-  markSteeringHandled,
   startTask,
+  supersedeTask,
 } from "../be/db";
 import { getRebootAffectedTasks, runRebootSweep } from "../heartbeat/heartbeat";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { createResumeFollowUp } from "../tasks/worker-follow-up";
+import { acceptSteerHandler } from "../tools/accept-steer";
 import { registerDeferTaskTool } from "../tools/defer-task";
+import type { AgentTask } from "../types";
 
-// A steer delivered to a task but never accepted must reach the task that
-// carries the work forward once the original ends.
+// A steer that reached a task but was never accepted moves to the task that
+// carries the work forward once the original ends. The successor's own session
+// receives it through the normal live-delivery path and acknowledges it there.
 
 type Tool = { handler: (args: unknown, extra: unknown) => Promise<CallToolResult> };
 
 let workerId: string;
+let replacementId: string;
 let deferTask: Tool;
 
-async function successorText(
-  path: "defer-task wake-up" | "reboot-sweep retry" | "supersede resume",
-  parentId: string,
-): Promise<string> {
-  if (path === "defer-task wake-up") {
-    const result = await deferTask.handler(
-      { taskId: parentId, delayMs: 3_600_000, summary: "Waiting", note: "Check back" },
-      { sessionId: crypto.randomUUID(), requestInfo: { headers: { "x-agent-id": workerId } } },
-    );
-    const { success, scheduleId } = result.structuredContent as {
-      success: boolean;
-      scheduleId?: string;
-    };
-    expect(success).toBe(true);
-    const wake = await createStandaloneScheduleTask((await getScheduledTaskById(scheduleId!))!);
-    expect(wake.parentTaskId).toBe(parentId);
-    return wake.task;
-  }
-  if (path === "reboot-sweep retry") {
-    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
-      new Date(Date.now() - 1000).toISOString(),
-      parentId,
-    ]);
-    await runRebootSweep();
-    const retryTaskId = getRebootAffectedTasks().find(
-      (a) => a.original.id === parentId,
-    )?.retryTaskId;
-    expect(retryTaskId).toBeTruthy();
-    return (await getTaskById(retryTaskId!))!.task;
-  }
-  const resume = await createResumeFollowUp({ parentId, reason: "manual_supersede" });
-  expect(resume.kind).toBe("created");
-  if (resume.kind !== "created") throw new Error("resume not created");
-  return resume.task.task;
+async function makeAgent(name: string) {
+  const { id } = await createAgent({
+    name,
+    isLead: false,
+    status: "idle",
+    capabilities: [],
+    maxTasks: 50,
+  });
+  // A shared role makes either agent eligible for the other's pooled resume.
+  await getDbClient().run("UPDATE agents SET role = 'coder' WHERE id = ?", [id]);
+  return id;
 }
 
-async function steer(taskId: string, body: string, state: "delivered" | "handled") {
+async function inProgressTask(agentId = workerId) {
+  const task = await createTaskExtended("work that gets a successor", { agentId });
+  await startTask(task.id);
+  return task;
+}
+
+async function steer(taskId: string, body: string, state: "pending" | "delivered") {
   const message = await createSteeringMessage({
     taskId,
     body,
@@ -72,18 +63,67 @@ async function steer(taskId: string, body: string, state: "delivered" | "handled
     createdByKind: "agent",
     createdByAgentId: workerId,
   });
-  expect((await markSteeringDelivered(message.id, "queue"))?.status).toBe("delivered");
-  if (state === "handled") {
-    expect((await markSteeringHandled(message.id))?.status).toBe("handled");
+  if (state === "delivered") {
+    expect((await markSteeringDelivered(message.id, "queue"))?.status).toBe("delivered");
   }
   return message;
 }
 
-async function inProgressTask() {
-  const task = await createTaskExtended("work that gets a successor", { agentId: workerId });
-  await startTask(task.id);
-  return task;
+/** Run a session for `taskId` as `agentId`: start it and deliver its pending steering. */
+async function runSession(taskId: string, agentId: string) {
+  const task = await getTaskById(taskId);
+  if (task?.agentId !== agentId) expect(await claimTask(taskId, agentId)).not.toBeNull();
+  if ((await getTaskById(taskId))?.status !== "in_progress") await startTask(taskId);
+  for (const message of await getPendingSteeringForTask(taskId)) {
+    expect((await markSteeringDelivered(message.id, "queue"))?.status).toBe("delivered");
+  }
 }
+
+async function accept(agentId: string, steeringMessageId: string) {
+  return await acceptSteerHandler({ kind: "owner", agentId }, { steeringMessageId });
+}
+
+async function supersede(parentId: string): Promise<AgentTask> {
+  // Same order as POST /api/tasks/{id}/supersede: terminal first, then the resume.
+  expect(
+    await supersedeTask(parentId, { reason: "manual_supersede", resumeTaskId: null }),
+  ).toBeTruthy();
+  const resume = await createResumeFollowUp({ parentId, reason: "manual_supersede" });
+  if (resume.kind !== "created") throw new Error(`resume not created: ${resume.kind}`);
+  return resume.task;
+}
+
+async function deferAndWake(parentId: string): Promise<AgentTask> {
+  const result = await deferTask.handler(
+    { taskId: parentId, delayMs: 3_600_000, summary: "Waiting", note: "Check back" },
+    { sessionId: crypto.randomUUID(), requestInfo: { headers: { "x-agent-id": workerId } } },
+  );
+  const { success, scheduleId } = result.structuredContent as {
+    success: boolean;
+    scheduleId?: string;
+  };
+  expect(success).toBe(true);
+  const wake = await createStandaloneScheduleTask((await getScheduledTaskById(scheduleId!))!);
+  expect(wake.parentTaskId).toBe(parentId);
+  return wake;
+}
+
+async function rebootRetry(parentId: string): Promise<AgentTask> {
+  await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+    new Date(Date.now() - 1000).toISOString(),
+    parentId,
+  ]);
+  await runRebootSweep();
+  const retryTaskId = getRebootAffectedTasks().find((a) => a.original.id === parentId)?.retryTaskId;
+  expect(retryTaskId).toBeTruthy();
+  return (await getTaskById(retryTaskId!))!;
+}
+
+const SUCCESSORS = {
+  "defer-task wake-up": deferAndWake,
+  "reboot-sweep retry": rebootRetry,
+  "supersede resume": supersede,
+} as const;
 
 beforeAll(async () => {
   initDb(":memory:");
@@ -99,57 +139,131 @@ beforeEach(async () => {
   await db.run("DELETE FROM agent_tasks");
   await db.run("DELETE FROM agents");
   await db.run("DELETE FROM active_sessions");
-  workerId = (
-    await createAgent({
-      name: "Steered Worker",
-      isLead: false,
-      status: "idle",
-      capabilities: [],
-      maxTasks: 50,
-    })
-  ).id;
+  workerId = await makeAgent("Steered Worker");
+  replacementId = await makeAgent("Replacement Worker");
 });
 
 afterAll(() => closeDb());
 
-const PATHS = ["defer-task wake-up", "reboot-sweep retry", "supersede resume"] as const;
-
-describe("successor tasks carry unhandled steering", () => {
+describe("successor tasks take over unhandled steering", () => {
   test.each(
-    PATHS,
-  )("%s: a delivered, unaccepted steer appears in the successor text", async (path) => {
+    Object.keys(SUCCESSORS) as Array<keyof typeof SUCCESSORS>,
+  )("%s: a delivered, unaccepted steer moves to the successor and is acknowledged there", async (path) => {
     const parent = await inProgressTask();
-    const body = "Also relay the v12 result.\nKeep the second line verbatim.";
-    const message = await steer(parent.id, body, "delivered");
+    const body = "Also relay the v12 result.";
+    const open = await steer(parent.id, body, "delivered");
+    const handled = await steer(parent.id, "Already acted on this one.", "delivered");
+    expect((await accept(workerId, handled.id)).ok).toBe(true);
 
-    const text = await successorText(path, parent.id);
+    const successor = await SUCCESSORS[path](parent.id);
 
-    expect(text).toContain(`## Unhandled steering from ${parent.id}`);
-    expect(text).toContain(`[steering ${message.id}] From Steered Worker (agent):`);
-    expect(text).toContain(body);
-    expect(text).toContain("accept-steer");
+    expect(await getSteeringMessageById(open.id)).toMatchObject({
+      taskId: successor.id,
+      status: "pending",
+    });
+    // The accepted row stays where it was handled.
+    expect(await getSteeringMessageById(handled.id)).toMatchObject({
+      taskId: parent.id,
+      status: "handled",
+    });
+    // Live delivery is the only path: nothing is copied into the task text.
+    expect(successor.task).not.toContain(open.id);
+    expect(successor.task).not.toContain(body);
+
+    await runSession(successor.id, workerId);
+    expect((await accept(workerId, open.id)).ok).toBe(true);
+    expect((await getSteeringMessageById(open.id))?.status).toBe("handled");
   });
 
-  test.each(PATHS)("%s: an accepted steer stays out of the successor text", async (path) => {
-    const parent = await inProgressTask();
-    const handled = await steer(parent.id, "Already acted on this one.", "handled");
-    // An unaccepted sibling proves the section renders, so the exclusion
-    // comes from the handled filter rather than from no section at all.
-    const open = await steer(parent.id, "Still owed.", "delivered");
+  test("finding 1: a replacement worker acknowledges a steer carried to its resume", async () => {
+    const parent = await inProgressTask(workerId);
+    const message = await steer(parent.id, "Use the new endpoint.", "delivered");
 
-    const text = await successorText(path, parent.id);
+    const resume = await supersede(parent.id);
+    await runSession(resume.id, replacementId);
 
-    expect(text).toContain(`[steering ${open.id}]`);
-    expect(text).not.toContain(handled.id);
-    expect(text).not.toContain("Already acted on this one.");
+    const result = await accept(replacementId, message.id);
+    expect(result.message).not.toContain("assigned to another agent");
+    expect(result.ok).toBe(true);
+    expect((await getSteeringMessageById(message.id))?.status).toBe("handled");
+    // The original worker no longer owns it.
+    expect((await accept(workerId, message.id)).ok).toBe(false);
   });
 
-  test("a parent with only accepted steers gets no section", async () => {
+  test("finding 2: a pending steer carried on supersede is delivered once and acknowledged", async () => {
     const parent = await inProgressTask();
-    await steer(parent.id, "Already acted on this one.", "handled");
+    const message = await steer(parent.id, "Queued before supersede.", "pending");
 
-    const text = await successorText("supersede resume", parent.id);
+    const resume = await supersede(parent.id);
+    expect(resume.task).not.toContain(message.id);
 
-    expect(text).not.toContain("Unhandled steering");
+    // The terminal parent no longer offers it to its agent's live hooks.
+    expect(await getPendingSteeringForTask(parent.id)).toEqual([]);
+    expect(await getPendingSteeringForAgent(workerId)).toEqual([]);
+
+    // Once the resume is claimed, the row is its one live delivery candidate.
+    expect(await claimTask(resume.id, workerId)).not.toBeNull();
+    const queued = await getPendingSteeringForAgent(workerId);
+    expect(queued.map((m) => [m.id, m.taskId])).toEqual([[message.id, resume.id]]);
+
+    await runSession(resume.id, workerId);
+    expect((await accept(workerId, message.id)).ok).toBe(true);
+    expect((await getSteeringMessageById(message.id))?.status).toBe("handled");
+    expect(await getPendingSteeringForAgent(workerId)).toEqual([]);
+    // A second delivery attempt is a no-op on the handled row.
+    expect(await markSteeringDelivered(message.id, "queue")).toBeNull();
+  });
+
+  test("finding 3: a reboot retry after acceptance does not repeat the steer", async () => {
+    const parent = await inProgressTask();
+    const message = await steer(parent.id, "Ship v12, not v11.", "delivered");
+
+    const r1 = await supersede(parent.id);
+    await runSession(r1.id, workerId);
+    expect((await accept(workerId, message.id)).ok).toBe(true);
+
+    const r2 = await rebootRetry(r1.id);
+
+    expect(r2.task).not.toContain(message.id);
+    expect(r2.task).not.toContain("Ship v12, not v11.");
+    expect(await getPendingSteeringForTask(r2.id)).toEqual([]);
+    expect(await getSteeringMessageById(message.id)).toMatchObject({
+      taskId: r1.id,
+      status: "handled",
+    });
+  });
+
+  test("finding 4: P to R1 to R2 via supersede keeps the unaccepted steer", async () => {
+    const parent = await inProgressTask();
+    const message = await steer(parent.id, "Second hop must still see this.", "delivered");
+
+    const r1 = await supersede(parent.id);
+    // R1 receives it but ends without accepting.
+    await runSession(r1.id, workerId);
+    const r2 = await supersede(r1.id);
+
+    expect(await getSteeringMessageById(message.id)).toMatchObject({
+      taskId: r2.id,
+      status: "pending",
+    });
+    await runSession(r2.id, workerId);
+    expect((await accept(workerId, message.id)).ok).toBe(true);
+  });
+
+  test("finding 4: P to W1 to W2 via double deferral keeps the unaccepted steer", async () => {
+    const parent = await inProgressTask();
+    const message = await steer(parent.id, "Survive two deferrals.", "delivered");
+
+    const w1 = await deferAndWake(parent.id);
+    // W1 receives it and defers again without accepting.
+    await runSession(w1.id, workerId);
+    const w2 = await deferAndWake(w1.id);
+
+    expect(await getSteeringMessageById(message.id)).toMatchObject({
+      taskId: w2.id,
+      status: "pending",
+    });
+    await runSession(w2.id, workerId);
+    expect((await accept(workerId, message.id)).ok).toBe(true);
   });
 });

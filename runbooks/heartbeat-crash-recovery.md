@@ -403,7 +403,7 @@ if proposed.action == fail:
 
 promotePendingSteeringForTask(parent)       # pending rows → follow-up tasks, exactly once
 resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
-    # description += "## Unhandled steering from <parent>" (withUnhandledSteering, see below)
+    # after create: carryUnhandledSteering(parent, resume) (see below)
     preferredAgentId = undefined
     if parent.agentId:
         cand = getAgentById(parent.agentId)
@@ -618,10 +618,11 @@ preferredAgentId = undefined
 cand = getPinCandidateAgent(task.agentId)                   # reachable agent
 if cand and activeCount(cand) < cand.maxTasks:
     preferredAgentId = cand.id
-createTaskExtended(withUnhandledSteering(task.task, task.id),
+retry = createTaskExtended(task.task,
                     parentTaskId=task.id, agentId=preferredAgentId,
                     tags=[reboot-retry, auto-generated, (reboot-retry-pin if preferredAgentId)],
                     routingAffinity=buildRoutingAffinityFromAgent(task.agentId))
+carryUnhandledSteering(task, retry)                          # see "Unhandled steering hand-off"
 #   agentId set  → status = pending  (PINNED — never enters the pool)
 #   agentId none → status = unassigned (pool — but still routingAffinity-gated)
 
@@ -730,9 +731,22 @@ A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`
 | `send-task` without `taskType: "resume"` | No | New work |
 | Everything else with a `parentTaskId` (Slack/AgentMail/VCS thread replies, steering promotion, reroute/pool-starvation decisions, `POST /tasks`, scripts) | No | New work in the same thread |
 
-### Unhandled steering carry-forward
+### Unhandled steering hand-off
 
-The same three continuations (`createResumeFollowUp`, the `runRebootSweep` retry child, the `defer-task` wake-up) pass their description through `withUnhandledSteering(description, parentId)` (`src/tasks/successor-steering.ts`). Every steering row on the parent that is still `pending` or `delivered` with `handled_at IS NULL` is appended under `## Unhandled steering from <parentId>`, one entry per row with its steering id, sender label and verbatim body (template `task.successor.unhandled_steering`). Terminal transitions only promote `pending` rows, so a `delivered` row the parent never acknowledged otherwise reaches no session. `accept-steer` is id-based, so the successor acknowledges the parent's rows directly; nothing is re-pointed. The wake-up reads the rows when the schedule fires, not when `defer-task` runs. A lookup failure logs and returns the description unchanged.
+The same three continuations (`createResumeFollowUp`, the `runRebootSweep` retry child, the `defer-task` wake-up in `createStandaloneScheduleTask`) call `carryUnhandledSteering(predecessor, successor)` (`src/be/steering.ts`) right after the successor is created. The wake-up does it inside the schedule-fire transaction, beside the deferred-wait member transfer, so it reads the rows when the schedule fires.
+
+```
+UPDATE task_steering_messages
+   SET task_id = successor, status = 'pending', delivered_mode = NULL, delivered_at = NULL
+ WHERE task_id = predecessor AND status IN ('pending', 'delivered')
+# one task_steering log row per moved message: newValue=pending, metadata.carriedFromTaskId
+```
+
+- **Ownership moves with the row.** `accept-steer` and the `/delivered`, `/handled` and `/undeliverable` callbacks authorize against the assignee of the row's current task. After the hand-off that is the successor's assignee, including a replacement worker that claimed a pooled resume. The authorization rule itself is unchanged.
+- **One delivery path.** A `delivered` row reached a session that has ended, so it returns to `pending` and the successor's session receives it through normal live delivery, with its `[steering <id>]` marker. Nothing is copied into task text, and the terminal predecessor no longer offers the row to its agent's live hooks. A provider without live steering reports it undeliverable, which promotes it to a follow-up task once.
+- **Chains.** Each hop moves whatever is still unacknowledged, so P → R1 → R2 (supersede, reboot retry or repeated deferral) keeps a steer until some session accepts it. An accepted row stays `handled` on the task that accepted it and never moves again.
+- **Order with promotion.** Crash recovery and graceful shutdown promote `pending` rows to follow-up tasks before `createResumeFollowUp`, so only `delivered` rows move there. Manual supersede does not promote, so both move. Completion, failure and cancellation promote `pending` rows, so a deferred task's wake-up and a reboot retry receive only `delivered` rows.
+- A failed hand-off logs and leaves the rows on the predecessor. It never blocks creating the successor.
 
 ---
 

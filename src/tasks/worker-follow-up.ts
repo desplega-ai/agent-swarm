@@ -15,6 +15,7 @@ import {
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
+import { carryUnhandledSteering } from "../be/steering";
 import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
 import {
@@ -34,7 +35,6 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { taskModelPin } from "./model-pin";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
-import { withUnhandledSteering } from "./successor-steering";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
 
@@ -563,9 +563,7 @@ export async function createResumeFollowUp(args: {
         leadOnly: true,
       }
     : sourceAffinity;
-  // Carry steering the parent received but never accepted.
-  const description = await withUnhandledSteering(followUpDescription, parent.id);
-  const created = await createTaskExtended(description, {
+  const created = await createTaskExtended(followUpDescription, {
     agentId: preferredAgentId,
     routingReason:
       preferredAgentId === undefined
@@ -586,6 +584,8 @@ export async function createResumeFollowUp(args: {
     routingAffinity,
     ...inheritedModelSelection(parent),
   });
+  // The resume continues the work, so it takes over unaccepted steering.
+  await carryUnhandledSteering(parent.id, created.id);
 
   if (authorizationDecision) {
     try {

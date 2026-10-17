@@ -1,10 +1,10 @@
 import { createTaskExtended, getDbClient } from "@/be/db";
+import { carryUnhandledSteering } from "@/be/steering";
 import { scheduleContextKey } from "@/tasks/context-key";
 import {
   type PreparedTaskCreate,
   prepareTaskWithSiblingAwareness,
 } from "@/tasks/sibling-awareness";
-import { withUnhandledSteering } from "@/tasks/successor-steering";
 import type { AgentTask, ScheduledTask } from "@/types";
 
 /**
@@ -19,14 +19,8 @@ export async function prepareStandaloneScheduleTask(
   if (!schedule.taskTemplate) {
     throw new Error(`Schedule "${schedule.name}" has no taskTemplate (targetType=agent-task)`);
   }
-  // A defer-task wake-up continues the deferred task, so it carries any
-  // steering that reached the deferred task but was never accepted.
-  const description =
-    schedule.taskType === "deferred" && schedule.parentTaskId
-      ? await withUnhandledSteering(schedule.taskTemplate, schedule.parentTaskId)
-      : schedule.taskTemplate;
   return await prepareTaskWithSiblingAwareness(
-    description,
+    schedule.taskTemplate,
     {
       key: schedule.key,
       creatorAgentId: schedule.createdByAgentId,
@@ -77,6 +71,9 @@ export async function createStandaloneScheduleTask(
        )`,
       [task.id, new Date().toISOString(), schedule.parentTaskId],
     );
+    // The wake-up continues the deferred task, so it takes over steering the
+    // deferred task received but never accepted.
+    await carryUnhandledSteering(schedule.parentTaskId, task.id);
   }
   return task;
 }

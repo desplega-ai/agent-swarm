@@ -12,6 +12,7 @@ import {
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { isSteeringEnabled as readSteeringEnabled } from "../utils/steering-enabled";
 import {
+  createLogEntry,
   createSteeringMessage,
   createTaskExtended,
   getAgentById,
@@ -212,6 +213,50 @@ export async function markSteeringUndeliverable(
       promotedTaskId: promotedTask.id,
     };
   });
+}
+
+/**
+ * Hand a predecessor's unacknowledged steering to the task that continues its
+ * work (defer-task wake-up, reboot-sweep retry, resume follow-up).
+ *
+ * Each row moves to the successor, so its assignee is the one `accept-steer`
+ * authorizes. A `delivered` row reached a session that has ended, so it goes
+ * back to `pending` and the successor's session receives it through normal
+ * live delivery. Nothing is copied into task text: one row, one delivery path.
+ * Handled, promoted and cancelled rows stay on the predecessor.
+ *
+ * Never throws: losing the hand-off must not block creating the successor.
+ */
+export async function carryUnhandledSteering(
+  predecessorTaskId: string,
+  successorTaskId: string,
+): Promise<string[]> {
+  try {
+    const rows = await getDbClient().query<{ id: string }>(
+      `UPDATE task_steering_messages
+         SET task_id = ?, status = 'pending', delivered_mode = NULL, delivered_at = NULL
+         WHERE task_id = ? AND status IN ('pending', 'delivered')
+         RETURNING id`,
+      [successorTaskId, predecessorTaskId],
+    );
+    for (const { id } of rows) {
+      try {
+        await createLogEntry({
+          eventType: "task_steering",
+          taskId: successorTaskId,
+          newValue: "pending",
+          metadata: { steeringMessageId: id, carriedFromTaskId: predecessorTaskId },
+        });
+      } catch {}
+    }
+    return rows.map((row) => row.id);
+  } catch (error) {
+    console.error(
+      `[steering] Failed to carry steering from ${predecessorTaskId} to ${successorTaskId}:`,
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
+    return [];
+  }
 }
 
 /** Single server-side write path for HTTP, MCP, script, and Slack steering. */
