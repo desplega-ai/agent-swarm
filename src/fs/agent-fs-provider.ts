@@ -446,6 +446,7 @@ export class AgentFsProvider implements FileStorageProvider {
 
 // Streams and FormData have no cheap byte length.
 function knownByteLength(body: FileBody): number | undefined {
+  if (typeof body === "string") return Buffer.byteLength(body, "utf8");
   if (ArrayBuffer.isView(body)) return body.byteLength;
   if (body instanceof ArrayBuffer) return body.byteLength;
   if (body instanceof Blob) return body.size;

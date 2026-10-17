@@ -199,6 +199,9 @@ describe("AgentFsProvider", () => {
   });
 
   test.each([
+    ["ASCII string", "hello", undefined, 5],
+    ["UTF-8 string", "é🐝", undefined, 6],
+    ["empty string", "", undefined, 0],
     ["typed-array view", new Uint8Array([0, 1, 2, 3]).subarray(1, 3), undefined, 2],
     ["ArrayBuffer", new ArrayBuffer(4), undefined, 4],
     ["Blob", new Blob(["hello"]), undefined, 5],
