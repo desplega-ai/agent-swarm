@@ -19,6 +19,7 @@ import {
   type OpencodeSession,
   resolveOpencodeSdkSpecifier,
 } from "../providers/opencode-adapter";
+import { createSkillInvokeTracker, type SkillInvoke } from "../providers/skill-invoke";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
@@ -301,6 +302,33 @@ describe("OpencodeAdapter — host and config wiring", () => {
 });
 
 describe("OpencodeSession — event mapping", () => {
+  test("native skill id records a named invocation only after input is available", async () => {
+    const { session } = await startSession([]);
+    const tracker = createSkillInvokeTracker();
+    const invokes: SkillInvoke[] = [];
+    tracker.attach((invoke) => invokes.push(invoke));
+    session.onEvent(tracker.onEvent);
+    const call = { sessionID: SESSION_ID, id: "call_skill" };
+    session.handleOpencodeEvent(ev("session.tool.input.started", { ...call, name: "skill" }));
+    expect(invokes).toEqual([]);
+    session.handleOpencodeEvent(
+      ev("session.tool.input.ended", { ...call, text: '{"id": "deck-script-litmus"}' }),
+    );
+    expect(invokes).toEqual([]);
+    session.handleOpencodeEvent(
+      ev("session.tool.called", { ...call, input: { id: "deck-script-litmus" } }),
+    );
+    session.handleOpencodeEvent(
+      ev("session.tool.success", {
+        ...call,
+        content: [{ type: "text", text: '<skill_content name="deck-script-litmus">' }],
+      }),
+    );
+    session.handleOpencodeEvent(succeeded);
+    await session.waitForCompletion();
+    expect(invokes).toEqual([{ via: "tool", skillName: "deck-script-litmus" }]);
+  });
+
   test("tool, text, step and usage events map to provider events and cost", async () => {
     const { result, emitted, host } = await runSession([
       ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),

@@ -637,7 +637,12 @@ export class OpencodeSession implements ProviderSession {
           type: "tool_start",
           toolCallId: ev.data.id,
           toolName,
-          args: ev.data.input,
+          // OpenCode's native skill tool names the skill with `id`, not `name`.
+          // Normalize only this tool for the shared skill.invoke tracker.
+          args:
+            toolName === "skill" && typeof ev.data.input?.id === "string"
+              ? { ...ev.data.input, name: ev.data.input.id }
+              : ev.data.input,
         });
         break;
       }
