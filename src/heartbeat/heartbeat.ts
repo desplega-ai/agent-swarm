@@ -59,7 +59,7 @@ import { remediateStalledRuntime } from "../be/runtime-pools/recovery";
 import { routePoolTasks } from "../be/runtime-pools/routing";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
-import { promotePendingSteeringForTask } from "../be/steering";
+import { carryUnhandledSteering, promotePendingSteeringForTask } from "../be/steering";
 import type { HeartbeatAction, HeartbeatClassification } from "../extensions/contract";
 import { dispatchPre, extensionIdForAgent } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
@@ -1018,6 +1018,8 @@ export async function runRebootSweep(): Promise<void> {
               // Same work: a task-level model pin must survive the retry.
               ...inheritedModelSelection(task),
             });
+            // The retry continues the work, so it takes over unaccepted steering.
+            await carryUnhandledSteering(task.id, retryTask.id);
             if (authorization.decision) {
               await createLogEntry({
                 eventType: "task_recovery_authorization",

@@ -783,6 +783,7 @@ export async function handleScripts(
       egressSecrets: credentials.egressSecrets,
       failedBindings: credentials.failedBindings,
       userConfig: credentials.userConfig,
+      agentFs: credentials.agentFs,
       apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
     });

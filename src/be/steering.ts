@@ -12,6 +12,7 @@ import {
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { isSteeringEnabled as readSteeringEnabled } from "../utils/steering-enabled";
 import {
+  createLogEntry,
   createSteeringMessage,
   createTaskExtended,
   getAgentById,
@@ -22,6 +23,9 @@ import {
   markSteeringPromoted,
   resumeTask,
 } from "./db";
+
+/** 409 body for a worker callback about a row that moved to a successor task. */
+export const STEERING_MOVED_ERROR = "Steering message moved to another task";
 
 export class SteeringRequestError extends Error {
   constructor(
@@ -180,6 +184,7 @@ export async function promotePendingSteeringForTask(
 export async function markSteeringUndeliverable(
   id: string,
   reason: string,
+  expectedTaskId?: string,
 ): Promise<MarkSteeringUndeliverableResult> {
   if (!reason.trim()) {
     throw new SteeringRequestError("Undeliverable reason must not be empty", 400);
@@ -189,6 +194,11 @@ export async function markSteeringUndeliverable(
     const message = await getSteeringMessageById(id);
     if (!message) {
       throw new SteeringRequestError("Steering message not found", 404);
+    }
+    // A predecessor session's late rejection must not promote a row its
+    // successor now owns.
+    if (expectedTaskId && message.taskId !== expectedTaskId) {
+      throw new SteeringRequestError(STEERING_MOVED_ERROR, 409);
     }
     if (message.status !== "pending") {
       return {
@@ -212,6 +222,53 @@ export async function markSteeringUndeliverable(
       promotedTaskId: promotedTask.id,
     };
   });
+}
+
+/**
+ * Hand a predecessor's unacknowledged steering to the task that continues its
+ * work (defer-task wake-up, reboot-sweep retry, resume follow-up).
+ *
+ * Each row moves to the successor, so its assignee is the one `accept-steer`
+ * authorizes. A `delivered` row goes back to `pending` so the successor's
+ * session receives it. The predecessor's session may still be running at this
+ * point; worker delivery is scoped to the session's own task (poll filter and
+ * the `taskId` fence on the delivered/undeliverable callbacks), so that
+ * session can no longer take or settle a moved row. Nothing is copied into
+ * task text: one row, one delivery path. Handled, promoted and cancelled rows
+ * stay on the predecessor.
+ *
+ * Never throws: losing the hand-off must not block creating the successor.
+ */
+export async function carryUnhandledSteering(
+  predecessorTaskId: string,
+  successorTaskId: string,
+): Promise<string[]> {
+  try {
+    const rows = await getDbClient().query<{ id: string }>(
+      `UPDATE task_steering_messages
+         SET task_id = ?, status = 'pending', delivered_mode = NULL, delivered_at = NULL
+         WHERE task_id = ? AND status IN ('pending', 'delivered')
+         RETURNING id`,
+      [successorTaskId, predecessorTaskId],
+    );
+    for (const { id } of rows) {
+      try {
+        await createLogEntry({
+          eventType: "task_steering",
+          taskId: successorTaskId,
+          newValue: "pending",
+          metadata: { steeringMessageId: id, carriedFromTaskId: predecessorTaskId },
+        });
+      } catch {}
+    }
+    return rows.map((row) => row.id);
+  } catch (error) {
+    console.error(
+      `[steering] Failed to carry steering from ${predecessorTaskId} to ${successorTaskId}:`,
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
+    return [];
+  }
 }
 
 /** Single server-side write path for HTTP, MCP, script, and Slack steering. */

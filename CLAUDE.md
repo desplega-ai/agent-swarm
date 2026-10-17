@@ -37,6 +37,8 @@ Config injection: agent identity + bearer + mcpBaseUrl flow as a JSON `SwarmConf
 
 FS modes: `'none'` = per-run tmpdir (v1 only); `'workspace-rw'` returns 501 in v1 (worker dispatch is v2).
 
+`ctx.fs` / `ctx.sh` (`src/scripts-runtime/script-fs.ts`): just-bash over a `MountableFs`. `/afs` is the invoking agent's default agent-fs drive. It mounts only with the agent's own agent-scoped `AGENT_FS_API_KEY` (never a global or repo row, never `API_AGENT_FS_API_KEY`), and the key rides as a credential-broker placeholder. Every other path is `InMemoryFs`. Both executors run this host-side (under quickjs, that is the API process), so keep its limits: `SCRIPT_FS_MAX_BYTES` (scratch bodies, each shell command, each drive response) and `ScratchFs` in `scratch-fs.ts` (metadata budget, name limits, and `/afs` reserved in scratch, also through symlinks and cp / mv). just-bash and the adapter stay out of the native harness bundle: lazy import plus the Dockerfile externals. Durable script workflows and extensions do not get it.
+
 SDK surface: derived from MCP tool registry at build time via `scripts/bundle-script-types.ts`. Curated allowlist in `src/scripts-runtime/sdk-allowlist.ts`.
 
 Typecheck: `script_upsert` runs `tsc --noEmit` against the generated `.d.ts`; rejects on diagnostics. Inline `script_run` skips typecheck (scratch hot path). The ambient `.d.ts` is assembled per call from a static base plus N **type contributors** (`src/be/scripts/type-contributors.ts` — connections API, MCP tools, per-app types); adding one is a parameter on `scriptSdkTypesWithGeneratedApis` / `scriptStdlibTypesWithGeneratedApis`, never a compiler-host change. Staleness posture: stored scripts are **not** re-typechecked when an app or connection changes.

@@ -51,7 +51,7 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
-import { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
+import { completedStatusIcon, reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
 import {
   _resetSlackSessionStatusForTests,
@@ -346,7 +346,7 @@ async function taskStateGlyph(
     case "paused":
       return "⏸️";
     case "completed":
-      return "✅";
+      return completedStatusIcon();
     case "failed":
       return "❌";
     case "cancelled":
@@ -496,7 +496,9 @@ function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): stri
   // A parked deferral is stored `completed`, but the ask is not answered yet.
   if (tasks.some((task) => isAwaitingWake(task, tasks))) return `🧵 ⏳ waiting — ${duration}`;
   const hasFailure = tasks.some((task) => task.status === "failed");
-  return hasFailure ? `🧵 ❌ done with failures — ${duration}` : `🧵 ✅ done — ${duration}`;
+  return hasFailure
+    ? `🧵 ❌ done with failures — ${duration}`
+    : `🧵 ${completedStatusIcon()} done — ${duration}`;
 }
 
 export async function renderThreadTree(
@@ -909,7 +911,7 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
     const agentName = task.agentId
       ? ((await getAgentById(task.agentId))?.name ?? "Agent")
       : "Agent";
-    return `✅ ${agentName} completed`;
+    return `${completedStatusIcon()} ${agentName} completed`;
   }
   // A deferral is `completed` in the database but unfinished to a human: the
   // work resumes in a wake-up task. Rendering it ✅ told the thread the ask
@@ -917,7 +919,10 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   if (isDeferred) {
     return withStatusLead("⏳", outcomeText(slackTaskOutput(task), "Deferred."));
   }
-  return withStatusLead("✅", outcomeText(slackTaskOutput(task), "Task completed."));
+  return withStatusLead(
+    completedStatusIcon(),
+    outcomeText(slackTaskOutput(task), "Task completed."),
+  );
 }
 
 async function agentDisplayNameFor(task: AgentTask): Promise<string> {
@@ -947,7 +952,7 @@ export async function childOutcomeContent(
     );
   }
   if (slackReplySent && !isDeferredTask(task)) {
-    return `↳ ✅ ${agentName} completed`;
+    return `↳ ${completedStatusIcon()} ${agentName} completed`;
   }
   if (isDeferredTask(task)) {
     return withStatusLead(
@@ -956,7 +961,7 @@ export async function childOutcomeContent(
     );
   }
   return withStatusLead(
-    `↳ ✅ ${agentName} — result:`,
+    `↳ ${completedStatusIcon()} ${agentName} — result:`,
     outcomeText(slackTaskOutput(task), "Task completed."),
   );
 }

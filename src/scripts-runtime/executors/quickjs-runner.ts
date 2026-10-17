@@ -274,6 +274,12 @@ async function dispatchCall(
     const viaSwarm = kind === "mcp" || sqlApiSlugs.has(first);
     return viaSwarm ? swarmHostCalls.run(true, () => method(...args)) : method(...args);
   }
+  if (kind === "fs" && first && rest.length === 0) {
+    return callable(own(hostCtx.fs, first), `ctx.fs.${first}`)(...args);
+  }
+  if (kind === "sh" && first === undefined) {
+    return hostCtx.sh(...(args as Parameters<RuntimeCtx["sh"]>));
+  }
   throw new Error(`unknown quickjs host call: ${path}`);
 }
 
@@ -523,6 +529,8 @@ async function evaluateJob(
     swarmConfig: config,
     apiConnections: job.configPayload.apiConnections,
     mcpConnections: job.configPayload.mcpConnections,
+    agentFs: job.configPayload.agentFs,
+    signal: host.signal,
   });
   const sqlApiSlugs = new Set(
     (job.configPayload.apiConnections ?? []).filter((c) => c.kind === "sql").map((c) => c.slug),
@@ -531,6 +539,7 @@ async function evaluateJob(
     hasRuntimeInstanceId: config.runtimeInstanceId !== undefined,
     api: Object.fromEntries(Object.entries(hostCtx.api).map(([slug, c]) => [slug, Object.keys(c)])),
     mcp: Object.fromEntries(Object.entries(hostCtx.mcp).map(([slug, c]) => [slug, Object.keys(c)])),
+    fs: Object.keys(hostCtx.fs),
   };
   // Accept both shapes, like eval-harness: callers may pass already-serialized JSON.
   const args = typeof job.args === "string" ? JSON.parse(job.args) : (job.args ?? null);

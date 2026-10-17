@@ -15,6 +15,7 @@ import {
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
+import { carryUnhandledSteering } from "../be/steering";
 import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
 import {
@@ -583,6 +584,8 @@ export async function createResumeFollowUp(args: {
     routingAffinity,
     ...inheritedModelSelection(parent),
   });
+  // The resume continues the work, so it takes over unaccepted steering.
+  await carryUnhandledSteering(parent.id, created.id);
 
   if (authorizationDecision) {
     try {

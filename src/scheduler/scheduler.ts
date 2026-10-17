@@ -38,6 +38,7 @@ import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import {
   dispatchDeferredTaskWait,
   initDeferredTaskWaits,
+  prepareDeferredTaskWait,
   reapSpentDeferredSchedules,
   reconcileDeferredTaskWaits,
   stopDeferredTaskWaits,
@@ -107,6 +108,7 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
       agentId,
       egressSecrets: credentials.egressSecrets,
       userConfig: credentials.userConfig,
+      agentFs: credentials.agentFs,
       apiConnections: getScriptApiConnectionDescriptors({ agentId }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
       timeoutMs: 60_000,
@@ -303,6 +305,9 @@ async function throwIfWorkflowNeedsSetup(scheduleId: string, runIds: string[]): 
  * recovery pass, or schedule edit invalidates it before any target is dispatched.
  */
 async function claimScheduleOccurrence(snapshot: ScheduledTask, extraTags: string[]) {
+  // Run extension pre-hooks before opening the claim transaction. The snapshot
+  // guard below still prevents a moved ceiling from consuming this preparation.
+  const preparedWait = await prepareDeferredTaskWait(snapshot.id, "ceiling", extraTags);
   return getDbClient().transaction(async () => {
     const current = await getScheduledTaskById(snapshot.id);
     if (!current?.enabled || !current.nextRunAt || current.nextRunAt !== snapshot.nextRunAt) {
@@ -313,7 +318,9 @@ async function claimScheduleOccurrence(snapshot: ScheduledTask, extraTags: strin
     // Event-driven waits already atomically create their child and consume the
     // ceiling. Keep that transaction (and its afterCommit emits) intact: disabling
     // a one-time schedule first would prevent its wake-up task from being created.
-    const deferred = await dispatchDeferredTaskWait(schedule.id, "ceiling", extraTags);
+    const deferred = preparedWait
+      ? await dispatchDeferredTaskWait(schedule.id, "ceiling", extraTags, undefined, preparedWait)
+      : undefined;
     if (deferred) {
       return {
         schedule,

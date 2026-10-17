@@ -2074,18 +2074,23 @@ export async function getPendingSteeringForAgent(agentId: string): Promise<Steer
   return rows.map(rowToSteeringMessage);
 }
 
+/**
+ * `expectedTaskId` fences a worker callback to the task whose session received
+ * the message: a row handed to a successor in the meantime is left untouched.
+ */
 export async function markSteeringDelivered(
   id: string,
   deliveredMode: SteerMode,
+  expectedTaskId?: string,
 ): Promise<SteeringMessage | null> {
   const row = await getDbClient().get<TaskSteeringMessageRow>(
     `UPDATE task_steering_messages
        SET status = 'delivered',
            delivered_mode = ?,
            delivered_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status = 'pending'
+       WHERE id = ? AND status = 'pending' AND task_id = COALESCE(?, task_id)
        RETURNING *`,
-    [deliveredMode, id],
+    [deliveredMode, id, expectedTaskId ?? null],
   );
 
   if (row) {

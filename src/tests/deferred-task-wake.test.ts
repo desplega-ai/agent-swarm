@@ -21,6 +21,10 @@ import {
   supersedeTask,
   updateScheduledTask,
 } from "../be/db";
+import { installExtension, setExtensionState } from "../be/extensions/db";
+import { listRegistered, registerLoaded, unregister } from "../extensions/dispatcher";
+import { ensureExtensionAgent } from "../extensions/identity";
+import { loadExtension } from "../extensions/loader";
 import {
   dispatchDeferredTaskWait,
   initDeferredTaskWaits,
@@ -32,6 +36,7 @@ import { dispatchScheduleTarget, executeSchedule } from "../scheduler/scheduler"
 import { createResumeFollowUp } from "../tasks/worker-follow-up";
 import { registerDeferTaskTool } from "../tools/defer-task";
 import type { AgentTask } from "../types";
+import { loadBundleFixture } from "./fixtures/extensions/load";
 
 type Result = { structuredContent: { success: boolean; message: string; scheduleId?: string } };
 type Tool = {
@@ -69,7 +74,13 @@ beforeAll(async () => {
     "defer-task"
   ]!;
 });
-afterEach(() => stopDeferredTaskWaits());
+afterEach(async () => {
+  stopDeferredTaskWaits();
+  for (const loaded of listRegistered()) {
+    unregister(loaded.record.id);
+    await loaded.dispose();
+  }
+});
 afterAll(async () => {
   closeDb();
   templateGlobals.__testMigrationTemplate = savedTemplate;
@@ -172,6 +183,72 @@ async function multiFixture(mode?: "all" | "any", event: TaskWakeEvent = "settle
 }
 
 describe("defer-task wakeOn", () => {
+  async function ceilingHook(action: string) {
+    const bundle = await loadBundleFixture("minimal");
+    bundle.manifest = { ...bundle.manifest, name: `ceiling-${crypto.randomUUID()}` };
+    bundle.files["hooks.ts"] = `
+      import { block, modify } from "swarm-extension";
+      export default (api) => {
+        api.on("pre.task.create", () => ${action});
+      };
+    `;
+    const installed = await installExtension(bundle);
+    const record = await setExtensionState(installed.extension.id, {
+      agentId: await ensureExtensionAgent(installed.extension.name),
+    });
+    const loaded = await loadExtension({ record: record!, ...bundle });
+    registerLoaded(loaded);
+    return loaded;
+  }
+
+  test("ceiling honours pre.task.create blocks and leaves the wait pending", async () => {
+    const { schedule } = await fixture();
+    await ceilingHook('block("ceiling denied")');
+    await executeSchedule(schedule);
+    expect(await children(schedule.id)).toHaveLength(0);
+    expect(await waitState(schedule.id)).toMatchObject({ status: "pending", childTaskId: null });
+    expect(await getScheduledTaskById(schedule.id)).toMatchObject({
+      consecutiveErrors: 1,
+      lastErrorMessage: expect.stringContaining("ceiling denied"),
+    });
+  });
+
+  test("ceiling applies pre.task.create payload modifications", async () => {
+    const { schedule } = await fixture();
+    await ceilingHook('modify({ description: "modified ceiling wake" })');
+    await executeSchedule(schedule);
+    const found = await children(schedule.id);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.task).toBe("modified ceiling wake");
+    expect(await waitState(schedule.id)).toMatchObject({ status: "fired", firedBy: "ceiling" });
+  });
+
+  test("a ceiling moved during pre-hook preparation cannot fire the stale occurrence", async () => {
+    const { schedule } = await fixture();
+    const nextRunAt = new Date(Date.now() + 120_000).toISOString();
+    const loaded = await ceilingHook('modify({ description: "stale preparation" })');
+    const handler = loaded.handlers[0]!;
+    const original = handler.handler;
+    handler.handler = async (event, ctx) => {
+      await updateScheduledTask(schedule.id, { nextRunAt });
+      return original(event, ctx);
+    };
+    await executeSchedule(schedule);
+    expect(await children(schedule.id)).toHaveLength(0);
+    expect(await waitState(schedule.id)).toMatchObject({ status: "pending" });
+    expect(await getScheduledTaskById(schedule.id)).toMatchObject({ enabled: true, nextRunAt });
+  });
+
+  test("a stale ceiling snapshot cannot fire after re-defer moves nextRunAt", async () => {
+    const { schedule } = await fixture();
+    const nextRunAt = new Date(Date.now() + 120_000).toISOString();
+    await updateScheduledTask(schedule.id, { nextRunAt });
+    await executeSchedule(schedule);
+    expect(await children(schedule.id)).toHaveLength(0);
+    expect(await waitState(schedule.id)).toMatchObject({ status: "pending" });
+    expect(await getScheduledTaskById(schedule.id)).toMatchObject({ enabled: true, nextRunAt });
+  });
+
   test.each([
     "completed",
     "failed",

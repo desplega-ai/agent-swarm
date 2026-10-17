@@ -6,6 +6,8 @@
 const transport = process.env.BG_FIXTURE_TRANSPORT;
 const controlFile = process.env.BG_FIXTURE_CONTROL;
 const withBackgroundTask = process.env.BG_FIXTURE_BACKGROUND === "1";
+// Touched when stdin reaches EOF, i.e. when the session closes Claude's input.
+const stdinClosedFile = process.env.BG_FIXTURE_STDIN_CLOSED;
 const sessionId = "22222222-2222-4222-8222-222222222222";
 
 if (process.argv.includes("--version")) {
@@ -30,6 +32,10 @@ function backgroundTasksChanged(tasks: Array<Record<string, unknown>>): void {
     uuid: crypto.randomUUID(),
     session_id: sessionId,
   });
+}
+
+function markStdinClosed(): void {
+  if (stdinClosedFile) void Bun.write(stdinClosedFile, "closed\n");
 }
 
 const usage = {
@@ -66,14 +72,37 @@ async function runTurn(): Promise<void> {
       { task_id: "bg-1", task_type: "local_bash", description: "Wait for TLC" },
     ]);
   }
+  writeTurn("Waiting for the background job to finish.");
+
+  // Silent from here on, except for what the test asks for.
+  let handled = 0;
+  for (;;) {
+    const file = Bun.file(controlFile as string);
+    const commands = (await file.exists()) ? (await file.text()).split("\n").filter(Boolean) : [];
+    while (handled < commands.length) {
+      const command = commands[handled++];
+      if (command === "empty") backgroundTasksChanged([]);
+      // The task_notification turn Claude takes after background work settles.
+      if (command === "result") writeTurn("The background job finished.");
+      if (command === "exit") process.exit(0);
+      if (command === "fail") {
+        console.error("Error: fixture process crashed");
+        process.exit(1);
+      }
+    }
+    await Bun.sleep(10);
+  }
+}
+
+function writeTurn(text: string): void {
   writeMessage({
     type: "assistant",
     message: {
-      id: "message-1",
+      id: crypto.randomUUID(),
       type: "message",
       role: "assistant",
       model: "claude-haiku-4-5",
-      content: [{ type: "text", text: "Waiting for the background job to finish." }],
+      content: [{ type: "text", text }],
       stop_reason: "end_turn",
       stop_sequence: null,
       usage,
@@ -89,7 +118,7 @@ async function runTurn(): Promise<void> {
     duration_api_ms: 1,
     is_error: false,
     num_turns: 1,
-    result: "Waiting for the background job to finish.",
+    result: text,
     stop_reason: "end_turn",
     total_cost_usd: 0.001,
     usage,
@@ -99,23 +128,14 @@ async function runTurn(): Promise<void> {
     uuid: crypto.randomUUID(),
     session_id: sessionId,
   });
+}
 
-  // Silent from here on, except for what the test asks for.
-  let handled = 0;
-  for (;;) {
-    const file = Bun.file(controlFile as string);
-    const commands = (await file.exists()) ? (await file.text()).split("\n").filter(Boolean) : [];
-    while (handled < commands.length) {
-      const command = commands[handled++];
-      if (command === "empty") backgroundTasksChanged([]);
-      if (command === "exit") process.exit(0);
-      if (command === "fail") {
-        console.error("Error: fixture process crashed");
-        process.exit(1);
-      }
-    }
-    await Bun.sleep(10);
+/** CLI stream-json input: the prompt and steering arrive on stdin; only EOF matters here. */
+async function drainCliInput(): Promise<void> {
+  for await (const _chunk of Bun.stdin.stream()) {
+    // Ignored.
   }
+  markStdinClosed();
 }
 
 async function readSdkInput(): Promise<void> {
@@ -155,8 +175,13 @@ async function readSdkInput(): Promise<void> {
       }
     }
   }
+  markStdinClosed();
 }
 
-// The CLI transport passes the prompt with -p; the SDK sends it on stdin.
+// The SDK sends the prompt on stdin and the fixture waits for it; the CLI
+// transport also writes it to stdin, but the fixture starts the turn at once.
 if (transport === "sdk") void readSdkInput();
-else await runTurn();
+else {
+  void drainCliInput();
+  await runTurn();
+}

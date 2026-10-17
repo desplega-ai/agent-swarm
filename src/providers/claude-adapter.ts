@@ -1235,14 +1235,18 @@ class ClaudeSession implements ProviderSession {
     try {
       const json = JSON.parse(trimmed);
 
+      this.backgroundKeepalive.observe(json);
       // In stream-json input mode Claude waits for EOF even after emitting a
       // successful result. End stdin at that turn boundary so normal tasks can
       // exit; steering messages written during the turn are already buffered
-      // ahead of the EOF and are still processed as subsequent turns.
-      if (json.type === "result") {
+      // ahead of the EOF and are still processed as subsequent turns. While a
+      // background task is live, keep stdin open for its notification turn.
+      if (
+        json.type === "result" &&
+        !this.backgroundKeepalive.holdInputForBackgroundWork(() => this.closeStdin())
+      ) {
         this.closeStdin();
       }
-      this.backgroundKeepalive.observe(json);
 
       const normalized = normalizeClaudeMessage(json, {
         taskId: this.config.taskId,

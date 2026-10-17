@@ -68,6 +68,28 @@ describe("typecheckScript", () => {
     expect(valid).toEqual({ ok: true });
   });
 
+  test("ctx.fs and ctx.sh typecheck in saved scripts", async () => {
+    const valid = await typecheckScript(`
+      import type { ScriptContext } from "swarm-sdk";
+      export default async function(args: unknown, ctx: ScriptContext) {
+        await ctx.fs.writeFile("/afs/notes/a.md", "hello");
+        const text: string = await ctx.fs.readFile("notes/a.md");
+        const { stdout, exitCode } = await ctx.sh("grep -rn hello .", { cwd: "/afs" });
+        return { text, stdout, exitCode, names: await ctx.fs.readdir("/afs") };
+      }
+    `);
+    expect(valid).toEqual({ ok: true });
+
+    const wrong = await typecheckScript(`
+      import type { ScriptContext } from "swarm-sdk";
+      export default async function(args: unknown, ctx: ScriptContext) {
+        const n: number = await ctx.fs.readFile("/afs/a.md");
+        return n;
+      }
+    `);
+    expect(wrong.ok).toBe(false);
+  });
+
   test("task_defer accepts task wakeOn with a required caller-supplied ceiling", async () => {
     const result = await typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";

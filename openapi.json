@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -31727,6 +31727,9 @@
                       "steer",
                       "queue"
                     ]
+                  },
+                  "taskId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -31777,6 +31780,16 @@
           },
           "404": {
             "description": "Agent or steering message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Steering message moved to another task",
             "content": {
               "application/json": {
                 "schema": {
@@ -31892,6 +31905,9 @@
                   "reason": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "taskId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -31945,6 +31961,16 @@
           },
           "404": {
             "description": "Agent or steering message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Steering message moved to another task",
             "content": {
               "application/json": {
                 "schema": {

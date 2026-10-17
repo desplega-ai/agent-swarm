@@ -53,6 +53,7 @@ export async function runSavedScriptAsAgent(
         egressSecrets: credentials.egressSecrets,
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,
+        agentFs: credentials.agentFs,
         apiConnections: getScriptApiConnectionDescriptors({ agentId: args.agentId }),
         mcpConnections: getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
         ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),

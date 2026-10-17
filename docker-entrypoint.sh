@@ -350,7 +350,7 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     DSH_BIN="${DSH_BINARY:-dsh}"
     if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
-        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-alpha.5 during image provisioning."
+        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-rc.1 during image provisioning."
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
@@ -364,7 +364,7 @@ elif [ "$HARNESS_PROVIDER" = "amp" ]; then
 elif [ "$HARNESS_PROVIDER" = "grok" ]; then
     GROK_BIN="${GROK_BINARY:-grok}"
     if ! command -v "$GROK_BIN" >/dev/null 2>&1; then
-        echo "FATAL: grok CLI not found: '$GROK_BIN'. Use worker-full or install @xai-official/grok@1.0.60 during image provisioning."
+        echo "FATAL: grok CLI not found: '$GROK_BIN'. Use worker-full or install @xai-official/grok@1.0.62 during image provisioning."
         exit 1
     fi
     echo "grok CLI: $(command -v "$GROK_BIN") ($(GROK_DISABLE_AUTOUPDATER=1 "$GROK_BIN" --version 2>/dev/null))"
