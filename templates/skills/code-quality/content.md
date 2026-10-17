@@ -102,7 +102,7 @@ Nothing reaches GitHub without passing `review-post-gate`.
 4. Record the evidence (tests run, controls, "checked, fine" notes, the gate's `logKey`) in your task output and with `script-run name="pr-review-ledger-write"` (`action: "round"`). Never on the PR.
 5. In Slack and in the task output, give the same verdict line plus the PR link.
 
-If the gate cannot run, post only a verdict line built by hand in the format above, and say so in your task output.
+If the gate cannot run, post nothing to GitHub. Keep the draft in your task output and report the gate failure (the error and the time) to the lead.
 
 ### Capture pushback as a rule
 

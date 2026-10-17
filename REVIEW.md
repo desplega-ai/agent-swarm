@@ -4,13 +4,15 @@ Repo-specific checks for the reviewer. The format, tags and posting gate live in
 
 ## What blocks here
 
+The general blocking categories in the `code-quality` skill always apply: red or unexecuted CI, a missing or non-failing regression test, a correctness, security or data-loss bug, or a spec miss. This repo adds:
+
 - Red or unexecuted CI on the exact head you review.
 - A behavior change in root `src/` without a test that names the regression it catches (the test gate below).
 - A test that matches the junk list below.
 - A migration that breaks the migration checks below.
 - A broken architecture invariant from `CLAUDE.md`: worker code importing `src/be/db` or `bun:sqlite`, or reading the API key without `getApiKey()`.
 
-Everything else is a nit (at most 3) or nothing.
+A finding outside the general categories and this list is a nit (at most 3) or nothing.
 
 ## Skip
 
