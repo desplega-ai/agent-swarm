@@ -331,6 +331,7 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
     // --- model profiles ---
     modelProfile_list(args?: { harness?: string }): Promise<unknown>;
+    modelProfile_check(args: { agentId: string; profile: string }): Promise<unknown>;
     // --- slack ---
     slack_read(args?: {
       inboxMessageId?: string;

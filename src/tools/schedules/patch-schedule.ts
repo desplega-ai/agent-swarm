@@ -12,11 +12,19 @@ import {
   isExtensionAgent,
   updateScheduledTask,
 } from "@/be/db";
+import { modelProfileRefError, scheduleProfileUpdate } from "@/be/db/model-profiles";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
 import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
-import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  modelTierDeprecatedOutputSchema,
+  modelTierDeprecation,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
 import {
   AssetKeySchema,
   ModelTierSchema,
@@ -75,7 +83,18 @@ export const patchScheduleInputSchema = z.object({
     ),
   modelTier: ModelTierSchema.nullable()
     .optional()
-    .describe("Portable model tier for tasks created by this schedule. Set to null to clear."),
+    .describe(
+      'Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule, resolved at claim time through the seeded <harness>-<tier> profile. Set to null to clear.',
+    ),
+  profile: z
+    .string()
+    .trim()
+    .min(1)
+    .nullable()
+    .optional()
+    .describe(
+      "Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear.",
+    ),
   allowCustomModel: z
     .boolean()
     .optional()
@@ -104,6 +123,7 @@ const scheduleDataShape = {
   timezone: z.string().optional(),
   model: z.string().optional(),
   modelTier: ModelTierSchema.optional(),
+  profile: z.string().optional(),
   scheduleType: z.string().optional(),
   targetType: ScheduledTaskTargetTypeSchema.optional(),
   workflowId: z.string().optional(),
@@ -125,6 +145,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
         schedule: z.looseObject(scheduleDataShape).optional(),
+        modelTierDeprecated: modelTierDeprecatedOutputSchema.optional(),
       }),
     },
     async (
@@ -149,6 +170,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
         enabled,
         model,
         modelTier,
+        profile,
         allowCustomModel,
       },
       requestInfo,
@@ -260,6 +282,13 @@ export const registerPatchScheduleTool = (server: McpServer) => {
         // A move to another agent re-judges the stored model against the new harness.
         const agentChanged =
           targetAgentId !== undefined && targetAgentId !== schedule.targetAgentId;
+        const profileUpdate = await scheduleProfileUpdate(schedule, {
+          profile,
+          model,
+          modelTier,
+          targetAgentId,
+        });
+        if (profileUpdate.error !== undefined) return toolErr(profileUpdate.error);
         if (model !== undefined || modelTier !== undefined) {
           const normalizedModel = splitLegacyModelAlias({ model, modelTier });
           // A model the schedule already stores is not re-judged, so an unrelated edit still saves.
@@ -275,7 +304,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
           if (modelTier !== undefined || normalizedModel.modelTier) {
             updateData.modelTier = normalizedModel.modelTier ?? null;
           }
-        } else if (agentChanged && schedule.model) {
+        } else if (agentChanged && schedule.model && !profileUpdate.fields.profile) {
           // Harness only: the stored id already passed the catalog check when it was written.
           const modelError = await explicitModelErrorForAgent({
             model: schedule.model,
@@ -284,6 +313,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
           });
           if (modelError) return toolErr(modelError);
         }
+        Object.assign(updateData, profileUpdate.fields);
 
         // Recalculate nextRunAt based on schedule type
         if (schedule.scheduleType === "one_time") {
@@ -339,13 +369,29 @@ export const registerPatchScheduleTool = (server: McpServer) => {
           return toolErr("Failed to update schedule.");
         }
 
+        const modelTierDeprecated = modelTierDeprecation(
+          modelTier,
+          updated.targetAgentId
+            ? (await getAgentById(updated.targetAgentId))?.harnessProvider
+            : null,
+        );
         return toolOk(
           `Patched schedule "${updated.name}". Next run: ${updated.nextRunAt || "disabled"}`,
           {
-            data: { yourAgentId: requestInfo.agentId, schedule: updated },
+            data: {
+              yourAgentId: requestInfo.agentId,
+              schedule: updated,
+              ...(modelTierDeprecated ? { modelTierDeprecated } : {}),
+            },
           },
         );
       } catch (error) {
+        // The profile was deleted between scheduleProfileUpdate and the write.
+        if (modelProfileRefError(error) === "missing") {
+          return toolErr(`Unknown model profile "${profile}".`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
+        }
         const message = error instanceof Error ? error.message : "Unknown error";
         return toolErr(`Failed to update schedule: ${message}`, {
           data: { yourAgentId: requestInfo.agentId },

@@ -583,7 +583,9 @@ export async function handleWorkflows(
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
     }
-    const modelErrors = await workflowModelErrors(parsed.body.definition);
+    const modelErrors = await workflowModelErrors(parsed.body.definition, {
+      vcsRepo: parsed.body.vcsRepo,
+    });
     if (modelErrors.length > 0) {
       jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
       return true;
@@ -762,7 +764,9 @@ export async function handleWorkflows(
         jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
         return true;
       }
-      const modelErrors = await workflowModelErrors(body.definition);
+      const modelErrors = await workflowModelErrors(body.definition, {
+        vcsRepo: body.vcsRepo === undefined ? existing.vcsRepo : body.vcsRepo,
+      });
       if (modelErrors.length > 0) {
         jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
         return true;

@@ -40,6 +40,24 @@ describe("describeModelResolution", () => {
     ).toEqual(["Chosen by: Task model"]);
   });
 
+  test("a profile task names the profile claim applied and the layer", () => {
+    expect(
+      describeModelResolution({
+        modelTier: "smart",
+        resolvedModel: "claude-opus-5-5",
+        modelSource: "profile:tier-alias",
+        resolvedProfile: "claude-smart",
+      }),
+    ).toEqual(["Requested: tier Smart", "Profile: claude-smart", "Chosen by: Tier (via profile)"]);
+    expect(
+      describeModelResolution({
+        profile: "fast-review",
+        resolvedModel: "claude-haiku-4-5",
+        modelSource: "profile:task",
+      }),
+    ).toEqual(["Profile: fast-review", "Chosen by: Task profile"]);
+  });
+
   test("unclaimed tasks have nothing to explain", () => {
     expect(describeModelResolution({ modelTier: "smart" })).toEqual([]);
   });
@@ -49,6 +67,9 @@ describe("describeModelResolution", () => {
       "fallback:cli-unsupported",
       "fallback:cli-unsupported:model",
       "model",
+      "profile:agent-default",
+      "profile:task",
+      "profile:tier-alias",
       "tier-config",
       "tier-default",
       "worker-env",
@@ -56,6 +77,8 @@ describe("describeModelResolution", () => {
     expect(modelSourceLabel("fallback:cli-unsupported:model")).toBe(
       "Fallback (CLI rejected the task's own model)",
     );
+    expect(modelSourceLabel("profile:tier-alias")).toBe("Tier (via profile)");
+    expect(modelSourceLabel("profile:agent-default")).toBe("Agent default profile");
     expect(modelSourceLabel("something-new")).toBe("something-new");
   });
 });

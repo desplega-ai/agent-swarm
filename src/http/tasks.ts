@@ -35,7 +35,11 @@ import {
   updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
-import { modelProfileRefError, taskProfileError } from "../be/db/model-profiles";
+import {
+  getModelProfileByName,
+  modelProfileRefError,
+  taskProfileError,
+} from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import {
   getTaskSteeringFields,
@@ -62,6 +66,7 @@ import {
   AgentTaskStatusSchema,
   AssetKeySchema,
   isTerminalTaskStatus,
+  ModelProfileCredentialsSchema,
   ModelTierSchema,
   OnUnsupportedSchema,
   ProviderNameSchema,
@@ -115,6 +120,8 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   modelAlias: true,
   effort: true,
   resolvedEffort: true,
+  profile: true,
+  resolvedProfile: true,
   provider: true,
   requestedByUserId: true,
   progress: true,
@@ -620,6 +627,9 @@ const listPausedTasks = route({
             // Same requester projection a fresh task_assigned trigger carries,
             // so a resumed session gets the same requester-profile prompt.
             requestedBy: TaskRequestedBySchema.optional(),
+            // The claimed profile's pooled-key allowlist, read again from the
+            // profile, so the recovery spawn picks keys as the claim did.
+            credentialAllowlist: ModelProfileCredentialsSchema.optional(),
           }),
         ),
       }),
@@ -979,16 +989,6 @@ export async function handleTasks(
       jsonError(res, modelError, 400);
       return true;
     }
-    const profileError = await taskProfileError({
-      profile: parsed.body.profile,
-      ...splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier }),
-      agentId: defaultAgentId,
-    });
-    if (profileError) {
-      jsonError(res, profileError, 400);
-      return true;
-    }
-
     const parentTask = parsed.body.parentTaskId
       ? await getTaskById(parsed.body.parentTaskId)
       : null;
@@ -1025,6 +1025,18 @@ export async function handleTasks(
         .allow
     ) {
       jsonError(res, "Permission denied: only a lead can bind a task to a chat thread.", 403);
+      return true;
+    }
+    // The child inherits the parent's repo in createTaskExtended, and the worker
+    // loads that repo's config, so the profile check judges the same pool.
+    const profileError = await taskProfileError({
+      profile: parsed.body.profile,
+      ...splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier }),
+      agentId: defaultAgentId,
+      vcsRepo: parentTask?.vcsRepo,
+    });
+    if (profileError) {
+      jsonError(res, profileError, 400);
       return true;
     }
     let assetKey: string | undefined;
@@ -1762,10 +1774,14 @@ export async function handleTasks(
     const tasks = await Promise.all(
       pausedTasks.map(async (task) => {
         const requestedBy = await buildTaskRequestedBy(task);
+        const profile = task.resolvedProfile
+          ? await getModelProfileByName(task.resolvedProfile)
+          : null;
         return {
           ...task,
           attachments: await getTaskAttachments(task.id),
           ...(requestedBy && { requestedBy }),
+          ...(profile?.credentials && { credentialAllowlist: profile.credentials }),
         };
       }),
     );

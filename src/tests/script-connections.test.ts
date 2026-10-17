@@ -632,6 +632,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "219_relabel_pi_context_compactions.sql");
       // 220 reads agents and swarm_config, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "220_model_profiles.sql");
+      // 226 alters model_profiles (made by the skipped 220) and scheduled_tasks.
+      markMigrationApplied(database, "226_model_profiles_pr2.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

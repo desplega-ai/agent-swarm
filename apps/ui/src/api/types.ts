@@ -40,7 +40,43 @@ export type ModelSource =
   | "tier-config"
   | "tier-default"
   | "fallback:cli-unsupported"
-  | "fallback:cli-unsupported:model";
+  | "fallback:cli-unsupported:model"
+  | "profile:task"
+  | "profile:agent-default"
+  | "profile:tier-alias";
+/**
+ * One row of `GET /api/model-profiles`: a named harness, model and effort.
+ * Not the agent's role profile (`useUpdateAgentProfile`).
+ */
+export interface ModelProfile {
+  id: string;
+  name: string;
+  harness: ProviderName;
+  model: string;
+  effort: ReasoningEffortLevel | null;
+  allowCustomModel: boolean;
+  description: string | null;
+  /** `tier:<tier>` (boot seed), `agent-config`, or null. */
+  seededFrom: string | null;
+  /** Pooled-key allowlist: credential var → allowed key suffixes. Null uses the whole pool. */
+  credentials: Record<string, string[]> | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+/** One check's verdict: only `fail` blocks; `unverified` means nothing to judge yet. */
+export type ModelProfileCheckState = "pass" | "warn" | "fail" | "unverified";
+export interface ModelProfileCheckRow {
+  check: "harness" | "model" | "harness-credentials" | "credential-allowlist";
+  state: ModelProfileCheckState;
+  detail?: string;
+}
+/** `GET /api/agents/{id}/profile-check`: whether an agent can run a model profile. */
+export interface ModelProfileCheckResult {
+  agentId: string;
+  /** False when the primary profile (`profiles[0]`) has a `fail` row. */
+  ok: boolean;
+  profiles: Array<{ name: string; ok: boolean; checks: ModelProfileCheckRow[] }>;
+}
 /** One row of `GET /api/models-catalog/tiers`: what a tier resolves to for a provider. */
 export interface ModelTierPreview {
   provider: string;
@@ -390,6 +426,10 @@ export interface AgentTask {
   modelSource?: ModelSource;
   /** The `latest:` alias `resolvedModel` came from, when any. */
   modelAlias?: string;
+  /** Model profile the creator asked for. */
+  profile?: string;
+  /** Model profile the server applied at claim (the ask, the agent default, or a tier alias). */
+  resolvedProfile?: string;
   /** Effort the task asked for; usually unset, the agent's setting applies. */
   effort?: ReasoningEffortLevel;
   /** Effort the session ran at (task effort, else the agent's setting). */

@@ -234,6 +234,7 @@ export interface SwarmSdk {
   config_list(args?: { scope?: "global" | "agent" | "repo"; scopeId?: string; key?: string; includeSecrets?: boolean }): Promise<unknown>;
   // --- model profiles ---
   modelProfile_list(args?: { harness?: string }): Promise<unknown>;
+  modelProfile_check(args: { agentId: string; profile: string }): Promise<unknown>;
   // --- slack ---
   slack_read(args?: { inboxMessageId?: string; taskId?: string; channelId?: string; threadTs?: string; limit?: number; includeFiles?: boolean }): Promise<unknown>;
   slack_listChannels(args?: { types?: Array<"public" | "private" | "dm" | "mpim">; limit?: number }): Promise<unknown>;

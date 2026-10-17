@@ -32,6 +32,7 @@ export async function prepareStandaloneScheduleTask(
       routingSource: schedule.targetAgentId ? "engine_default" : undefined,
       model: schedule.model,
       modelTier: schedule.modelTier,
+      profile: schedule.profile,
       scheduleId: schedule.id,
       source: "schedule",
       requestedByUserId: schedule.createdBy,

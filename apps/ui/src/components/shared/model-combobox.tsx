@@ -98,6 +98,8 @@ interface ModelComboboxProps {
    * `placeholder` while the value is empty.
    */
   clearLabel?: string;
+  /** Read-only: shows `value` but does not open (a model profile picks the model). */
+  disabled?: boolean;
 }
 
 export function ModelCombobox({
@@ -108,6 +110,7 @@ export function ModelCombobox({
   placeholder = "Select model",
   creatable = false,
   clearLabel,
+  disabled = false,
 }: ModelComboboxProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -136,6 +139,7 @@ export function ModelCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          disabled={disabled}
           className="w-full justify-between font-normal"
         >
           <span className="flex min-w-0 flex-1 items-center gap-2">

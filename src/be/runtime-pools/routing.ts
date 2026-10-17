@@ -17,8 +17,13 @@ import {
   releaseTask,
 } from "../db";
 import { type AgentTaskRow, rowToAgentTask } from "../db/tasks/read";
+import { checkProfileForAgent, runtimeReadsRepoSecrets } from "../model-profile-check";
 import { poolTaskRunsOnHarness } from "../model-validation";
-import { agentsWithLiveRuntime, runtimeStaleThresholdMinutes } from "../multi-runtime";
+import {
+  agentsWithLiveRuntime,
+  liveRuntimeAuthModes,
+  runtimeStaleThresholdMinutes,
+} from "../multi-runtime";
 import { listRuntimePools } from "./db";
 import { isRuntimePoolWakeable } from "./reachability";
 
@@ -162,10 +167,53 @@ export async function routePoolTasks(
     }
     return (agent.maxTasks ?? 1) - count;
   };
-  const eligible = async (agent: Agent, task: AgentTask): Promise<boolean> =>
+  // A task with an explicit `profile` waits for an agent that passes the profile
+  // check, as on the poll's unassigned scan. Memoized per pass. A runtime token's
+  // config read may omit secret repo rows while a shared-key runtime reads them,
+  // so judge the config each runtime that could start the task gets: every live
+  // runtime, plus the token a woken runtime is minted for a wake.
+  const runtimeAuthModes = withLiveRuntime === null ? null : await liveRuntimeAuthModes();
+  const secretViews = (agent: Agent, viaWake: boolean): boolean[] => {
+    if (runtimeAuthModes === null) return [true];
+    const tokenView = runtimeReadsRepoSecrets(agent);
+    const views = (runtimeAuthModes.get(agent.id) ?? []).map((runtimeToken) =>
+      runtimeToken ? tokenView : true,
+    );
+    if (viaWake || !views.length) views.push(tokenView);
+    return [...new Set(views)];
+  };
+  const profileOk = new Map<string, boolean>();
+  const passesProfileCheck = async (
+    agent: Agent,
+    task: AgentTask,
+    viaWake: boolean,
+  ): Promise<boolean> => {
+    if (!task.profile) return true;
+    for (const includeRepoSecrets of secretViews(agent, viaWake)) {
+      const memoKey = JSON.stringify([
+        agent.id,
+        task.profile,
+        task.vcsRepo ?? null,
+        includeRepoSecrets,
+      ]);
+      let ok = profileOk.get(memoKey);
+      if (ok === undefined) {
+        const result = await checkProfileForAgent(agent.id, task.profile, {
+          vcsRepo: task.vcsRepo,
+          includeRepoSecrets,
+        });
+        ok = result?.ok !== false;
+        profileOk.set(memoKey, ok);
+      }
+      if (!ok) return false;
+    }
+    return true;
+  };
+  const eligible = async (agent: Agent, task: AgentTask, viaWake = false): Promise<boolean> =>
     (await headroom(agent)) > 0 &&
     isAgentEligibleForTask(agent, task) &&
-    (await poolTaskRunsOnHarness(task, agent.harnessProvider ?? agent.provider ?? null));
+    (await poolTaskRunsOnHarness(task, agent.harnessProvider ?? agent.provider ?? null)) &&
+    (await passesProfileCheck(agent, task, viaWake));
 
   const assigned: Array<{ taskId: string; agentId: string }> = [];
   const limit = nonnegativeEnv("HEARTBEAT_MAX_AUTO_ASSIGN", 5);
@@ -204,7 +252,7 @@ export async function routePoolTasks(
       ) {
         const candidates: Array<{ agent: Agent; headroom: number }> = [];
         for (const agent of wake) {
-          if (await eligible(agent, task))
+          if (await eligible(agent, task, true))
             candidates.push({ agent, headroom: await headroom(agent) });
         }
         candidates.sort(

@@ -29,6 +29,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [get-metrics](#get-metrics)
   - [send-task](#send-task)
   - [list-model-profiles](#list-model-profiles)
+  - [check-model-profile](#check-model-profile)
   - [get-task-details](#get-task-details)
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
@@ -301,8 +302,8 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `parentTaskId` | `uuid` | No | - | Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided. |
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory. |
 | `vcsRepo` | `string` | No | - | VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context. |
-| `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
+| `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of the assignee's harness. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
 | `profile` | `string` | No | - | Model profile name (see list-model-profiles): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with model and modelTier. A set `effort` still wins over the profile's. |
@@ -324,6 +325,17 @@ List model profiles: named harness + model + effort combinations. Pass a profile
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
+
+### check-model-profile
+
+**Check Model Profile**
+
+Check whether an agent can run a model profile before you pass it as `profile` or set it as the agent's default. Judges the harness, the model, the agent's credential report and the profile's credential allowlist. Each row is pass, warn, fail or unverified; only a fail blocks.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `agentId` | `string` | Yes | - | The agent that would run the profile. |
+| `profile` | `string` | Yes | - | Model profile name (see list-model-profiles). |
 
 ### get-task-details
 
@@ -482,7 +494,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `reason` | `string` | No | - | Reason for rejection (optional for 'reject'). |
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. Only used with 'create' action. |
 | `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims the task, through the seeded <harness>-<tier> profile of its harness. Only used with 'create' action. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only used with 'create' action. |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
 | `profile` | `string` | No | - | Model profile name for the created pool task (see list-model-profiles); only workers on its harness claim it. Exclusive with model and modelTier. Only used with 'create' action. |
@@ -598,7 +610,7 @@ Add or update hand-verified facts for one model (e.g. a launch models.dev has no
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, nan, helmcode. |
+| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, ${openAICompatibleProviderIds().join(", ")}. |
 | `modelId` | `string` | Yes | - | Model id as models.dev keys it (e.g. claude-opus-5-5). |
 | `name` | `string` | No | - | Display name. |
 | `releaseDate` | `string` | No | - | Release date, YYYY-MM-DD. |
@@ -1103,8 +1115,9 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `targetAgentId` | `string` | No | - | Agent to assign tasks to (omit for task pool) |
 | `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
-| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved by each assignee's harness/provider at run time. |
+| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of each assignee's harness. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles): a named harness + model + effort, applied when each task is claimed. Must run on the target agent. Exclusive with model and modelTier. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### defer-task
@@ -1151,7 +1164,8 @@ Update an existing scheduled task. Any registered agent can update schedules.
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule, resolved at claim time through the seeded <harness>-<tier> profile. Set to null to clear. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### patch-schedule
@@ -1181,7 +1195,8 @@ Patch an existing scheduled task by shallow-merging provided fields over the cur
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule, resolved at claim time through the seeded <harness>-<tier> profile. Set to null to clear. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### delete-schedule

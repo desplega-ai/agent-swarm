@@ -24,6 +24,7 @@ import { joinKvPath, type KvShapeEntry, splitKvPath, summarizeKvShape } from "..
 import { withSpan } from "../otel";
 import type { PermissionVerb } from "../rbac/permissions";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
+import { DEFAULT_MODEL_TIER_MAP, type ModelTier, type ProviderName } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -303,6 +304,41 @@ const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined 
   return hint ? WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE : undefined;
 };
 
+/** Result extra for a tool that received `modelTier` (runbooks/model-tiers.md § Model profiles). */
+export type ModelTierDeprecated = { tier: ModelTier; suggestedProfile: string | null };
+
+export const modelTierDeprecatedOutputSchema = z.looseObject({
+  tier: z.string().optional(),
+  suggestedProfile: z.string().nullable().optional(),
+});
+
+/**
+ * `modelTier` is an alias for the seeded `<harness>-<tier>` profile. The
+ * suggestion is null when the harness is unknown (a pool task) or has no seed
+ * for the tier (acp).
+ */
+export function modelTierDeprecation(
+  tier: ModelTier | null | undefined,
+  harness: ProviderName | null | undefined,
+): ModelTierDeprecated | undefined {
+  if (!tier) return undefined;
+  const seeded = harness ? Boolean(DEFAULT_MODEL_TIER_MAP[harness]?.[tier]) : false;
+  return { tier, suggestedProfile: seeded ? `${harness}-${tier}` : null };
+}
+
+const modelTierDeprecatedNudge = (r: SwarmToolResult): string | undefined => {
+  if (!r.ok) return undefined;
+  const note = (
+    r.data as { modelTierDeprecated?: { tier?: unknown; suggestedProfile?: unknown } } | undefined
+  )?.modelTierDeprecated;
+  if (!note) return undefined;
+  const profile =
+    typeof note.suggestedProfile === "string"
+      ? note.suggestedProfile
+      : `<harness>-${String(note.tier)}`;
+  return `modelTier is deprecated: pass profile "${profile}" (same model).`;
+};
+
 /**
  * Central conditional nudges, keyed by tool name. Applied by the finalize
  * pipeline when the tool did not set an explicit nudge. Keep entries to a
@@ -321,6 +357,11 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "patch-workflow": workflowLongScriptTimeoutNudge,
   "patch-workflow-node": workflowLongScriptTimeoutNudge,
   "slack-download-file": slackDownloadFileNudge,
+  "send-task": modelTierDeprecatedNudge,
+  "task-action": modelTierDeprecatedNudge,
+  "create-schedule": modelTierDeprecatedNudge,
+  "update-schedule": modelTierDeprecatedNudge,
+  "patch-schedule": modelTierDeprecatedNudge,
   "slack-read": slackReadNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;

@@ -10,6 +10,7 @@ import {
   maskSecrets,
 } from "../be/db";
 import { modelProfileRefError } from "../be/db/model-profiles";
+import { runtimeReadsRepoSecrets } from "../be/model-profile-check";
 import {
   AGENT_MAX_TASKS_CONFIG_KEY,
   resetAgentMaxTasksMirror,
@@ -60,12 +61,7 @@ export function readsRepoSecrets(
   agent: { isLead?: boolean } | null | undefined,
 ): boolean {
   if (auth?.kind !== "agent" || !auth.runtimeId) return true;
-  return can({
-    principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
-    verb: "config.read.secrets",
-    resource: { kind: "none" },
-    source: "http",
-  }).allow;
+  return runtimeReadsRepoSecrets({ id: auth.agentId, isLead: agent?.isLead });
 }
 
 async function requestSecretReadScope(

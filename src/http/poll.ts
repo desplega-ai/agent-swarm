@@ -26,6 +26,7 @@ import {
   updateAgentStatusFromCapacity,
   upsertChannelActivityCursor,
 } from "../be/db";
+import { checkProfileForAgent } from "../be/model-profile-check";
 import {
   parseModelTierOverridesHeader,
   recordClaimModelResolution,
@@ -37,7 +38,12 @@ import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
 import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
-import { AgentTaskSchema, BudgetRefusedTriggerSchema, TaskAttachmentSchema } from "../types";
+import {
+  AgentTaskSchema,
+  BudgetRefusedTriggerSchema,
+  ModelProfileCredentialsSchema,
+  TaskAttachmentSchema,
+} from "../types";
 import { ensure } from "../utils/business-use";
 import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
@@ -110,6 +116,8 @@ const PollTaskAssignedTriggerSchema = z.object({
   triggerSurface: z.string().optional(),
   task: AgentTaskSchema.extend({
     attachments: z.array(PollTriggerAttachmentSchema),
+    // The claimed profile's pooled-key allowlist. Trigger only, not stored on the task.
+    credentialAllowlist: ModelProfileCredentialsSchema.optional(),
   }),
   requestedBy: TaskRequestedBySchema.optional(),
 });
@@ -226,6 +234,7 @@ async function claimModelFields(
     modelSource: undefined,
     modelAlias: undefined,
     resolvedProfile: undefined,
+    credentialAllowlist: undefined,
   };
   try {
     return {
@@ -560,9 +569,33 @@ export async function handlePoll(
             // worker (runbooks/model-tiers.md § Harness compatibility). Filter before the
             // budget gate so an incompatible first candidate never drives a refusal.
             const harness = agent.harnessProvider ?? agent.provider ?? null;
+            // A pool task with an explicit `profile` also waits for an agent that passes
+            // the profile check, judged on the task repo's config as the worker loads it.
+            // Memoized per poll: one check per profile name and repo.
+            const profileOk = new Map<string, boolean>();
+            const includeRepoSecrets = readsRepoSecrets(getRequestAuth(req), agent);
+            const passesProfileCheck = async (
+              profile: string,
+              vcsRepo: string | null | undefined,
+            ): Promise<boolean> => {
+              const memoKey = JSON.stringify([profile, vcsRepo ?? null]);
+              const cached = profileOk.get(memoKey);
+              if (cached !== undefined) return cached;
+              const result = await checkProfileForAgent(myAgentId, profile, {
+                vcsRepo,
+                includeRepoSecrets,
+              });
+              const ok = result?.ok !== false;
+              profileOk.set(memoKey, ok);
+              return ok;
+            };
             // The filter runs inside the paginated scan, so incompatible rows never use up the limit.
-            const unassignedIds = await getUnassignedTaskIdsForAgent(myAgentId, 5, (task) =>
-              poolTaskRunsOnHarness(task, harness),
+            const unassignedIds = await getUnassignedTaskIdsForAgent(
+              myAgentId,
+              5,
+              async (task) =>
+                (await poolTaskRunsOnHarness(task, harness)) &&
+                (!task.profile || (await passesProfileCheck(task.profile, task.vcsRepo))),
             );
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.

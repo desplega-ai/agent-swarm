@@ -62,6 +62,7 @@ import {
   describeModelResolution,
   taskDisplayEffort,
   taskDisplayModel,
+  taskDisplayProfile,
 } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
@@ -226,6 +227,8 @@ function ModelCell({
     | "resolvedModel"
     | "modelSource"
     | "modelAlias"
+    | "profile"
+    | "resolvedProfile"
     | "effort"
     | "resolvedEffort"
   >;
@@ -233,16 +236,40 @@ function ModelCell({
 }) {
   const shown = taskDisplayModel(task);
   const effort = taskDisplayEffort(task);
-  if (!shown && !task.modelTier) return DASH;
+  const profile = taskDisplayProfile(task);
+  const profileChip = profile ? (
+    <Badge
+      variant="outline"
+      size="tag"
+      className="max-w-32 shrink-0 border-status-info/30 text-status-info-strong"
+      title={`Model profile: ${profile}`}
+    >
+      <span className="truncate">{profile}</span>
+    </Badge>
+  ) : null;
+  if (!shown && !task.modelTier && !profileChip) return DASH;
   if (!shown) {
     return (
-      <Badge variant="outline" size="tag" className="gap-1">
-        tier: {modelTierLabel(task.modelTier)}
-        <EffortMark effort={effort} />
-      </Badge>
+      <span className="flex min-w-0 items-center gap-1.5">
+        {task.modelTier ? (
+          <Badge variant="outline" size="tag" className="gap-1">
+            tier: {modelTierLabel(task.modelTier)}
+            <EffortMark effort={effort} />
+          </Badge>
+        ) : null}
+        {profileChip}
+      </span>
     );
   }
-  const cell = <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} />;
+  const label = <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} />;
+  const cell = profileChip ? (
+    <span className="flex min-w-0 items-center gap-1.5">
+      {label}
+      {profileChip}
+    </span>
+  ) : (
+    label
+  );
   const lines = [
     ...describeModelResolution(task),
     ...(effort ? [`Effort: ${REASONING_EFFORT_LABEL[effort]}`] : []),

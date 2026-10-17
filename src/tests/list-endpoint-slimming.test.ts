@@ -19,6 +19,7 @@ import {
   listWorkflows,
   updateAgentProfile,
 } from "../be/db";
+import { createModelProfile } from "../be/db/model-profiles";
 import type { Page, Workflow } from "../types";
 
 const TEST_DB_PATH = "./test-list-endpoint-slimming.sqlite";
@@ -226,6 +227,22 @@ describe("list-endpoint slimming", () => {
     expect(full).toBeDefined();
     expect(full?.task).toBe(longText);
     expect(full?.totalCostUsd).toBeCloseTo(0.0168, 6);
+  });
+
+  test("getAllTasks — slim keeps the task profile and resolved profile", async () => {
+    await createModelProfile({ name: "slim-profile", harness: "claude", model: "opus" });
+    const task = await createTaskExtended("slim-profile-row", {
+      agentId: "slim-agent-1",
+      profile: "slim-profile",
+    });
+    await getDbClient().run("UPDATE agent_tasks SET resolvedProfile = ? WHERE id = ?", [
+      "slim-profile",
+      task.id,
+    ]);
+
+    const [row] = await getAllTasks({ search: "slim-profile-row", limit: 1 }, { slim: true });
+    expect(row?.profile).toBe("slim-profile");
+    expect(row?.resolvedProfile).toBe("slim-profile");
   });
 
   test("getAllTasks — SQL-side preview matches truncating the full text", async () => {

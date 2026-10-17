@@ -224,6 +224,32 @@ export class ModelWindowExhaustedError extends Error {
   }
 }
 
+/**
+ * Thrown by `resolveCredentialPools` when a model profile's credential
+ * allowlist names no key of a pool the worker holds. The caller must not
+ * spawn the CLI on this error, the same as `ModelWindowExhaustedError`.
+ */
+export class CredentialAllowlistError extends Error {
+  readonly profile: string | null;
+  readonly keyType: string;
+  readonly wanted: string[];
+
+  constructor(opts: { profile?: string | null; keyType: string; wanted: string[] }) {
+    super(
+      `credential allowlist for ${opts.profile ?? "this task"} matches no ${opts.keyType} key (wanted ${opts.wanted.join(", ")})`,
+    );
+    this.name = "CredentialAllowlistError";
+    this.profile = opts.profile ?? null;
+    this.keyType = opts.keyType;
+    this.wanted = opts.wanted;
+  }
+}
+
+/** The last 5 characters of a credential: the suffix stamped on task records and named by allowlists. */
+export function keySuffix(value: string): string {
+  return value.slice(-5);
+}
+
 function isJsonObject(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
@@ -250,10 +276,16 @@ export function splitCredentialPool(value: string): string[] {
         .filter(Boolean);
 }
 
+/**
+ * `allowedIndices` (a profile's credential allowlist, as pool positions)
+ * bounds every pick, including the "all rate-limited, pick anyway" fallbacks.
+ * Indices stay positions in the full pool.
+ */
 export function selectCredential(
   value: string,
   availableIndices?: number[],
   keyType = "ANTHROPIC_API_KEY",
+  allowedIndices?: number[],
 ): CredentialSelection {
   // A CODEX_OAUTH value is one JSON blob ({access, refresh, expires, accountId}),
   // never a comma-separated pool: its commas are field separators. Splitting it
@@ -268,31 +300,43 @@ export function selectCredential(
       selected,
       index: 0,
       total: 1,
-      keySuffix: selected.slice(-5),
+      keySuffix: keySuffix(selected),
       keyType,
       isRateLimitFallback,
     };
   }
 
+  // Every random draw comes from the allowlist when one is given, never the
+  // full pool. An empty list is ignored here: `resolveCredentialPools` throws
+  // `CredentialAllowlistError` before it gets this far.
+  const allowed = allowedIndices?.filter((i) => i >= 0 && i < credentials.length);
+  const drawFrom = allowed && allowed.length > 0 ? allowed : undefined;
+  const pickAny = () =>
+    drawFrom
+      ? drawFrom[Math.floor(Math.random() * drawFrom.length)]!
+      : Math.floor(Math.random() * credentials.length);
+
   let index: number;
   let isRateLimitFallback = false;
   if (availableIndices && availableIndices.length > 0) {
     // Pick randomly from available (non-rate-limited) indices
-    const validIndices = availableIndices.filter((i) => i >= 0 && i < credentials.length);
+    const validIndices = availableIndices.filter(
+      (i) => i >= 0 && i < credentials.length && (!drawFrom || drawFrom.includes(i)),
+    );
     if (validIndices.length > 0) {
       index = validIndices[Math.floor(Math.random() * validIndices.length)]!;
     } else {
       // All available indices out of range — fall back to random from all
-      index = Math.floor(Math.random() * credentials.length);
+      index = pickAny();
       isRateLimitFallback = true;
     }
   } else if (availableIndices && availableIndices.length === 0) {
     // All keys are rate-limited — pick randomly anyway (best effort)
-    index = Math.floor(Math.random() * credentials.length);
+    index = pickAny();
     isRateLimitFallback = true;
   } else {
     // No availability info — pure random (backward compatible)
-    index = Math.floor(Math.random() * credentials.length);
+    index = pickAny();
   }
 
   const selected = credentials[index]!;
@@ -300,7 +344,7 @@ export function selectCredential(
     selected,
     index,
     total: credentials.length,
-    keySuffix: selected.slice(-5),
+    keySuffix: keySuffix(selected),
     keyType,
     isRateLimitFallback,
   };
@@ -486,6 +530,15 @@ export async function resolveCredentialPools(
      * worker can still accept tasks for another model.
      */
     enforceModelCapacity?: boolean;
+    /**
+     * The claimed model profile's credential allowlist (`{ VAR: [suffix] }`).
+     * A pool var with an entry picks only keys whose last 5 characters are
+     * listed, and throws `CredentialAllowlistError` when none match. A var
+     * with no entry, or no allowlist at all, keeps the whole pool.
+     */
+    allowedKeySuffixes?: Record<string, string[]>;
+    /** Profile name for the `CredentialAllowlistError` message. */
+    allowlistProfile?: string;
   },
 ): Promise<CredentialSelection[]> {
   const providerVars = opts?.provider
@@ -506,9 +559,30 @@ export async function resolveCredentialPools(
   for (const envVar of providerVars) {
     const val = env[envVar];
     if (val) {
+      // Allowlist positions in the full pool, so reported key indices are unchanged.
+      const wanted = opts?.allowedKeySuffixes?.[envVar];
+      let allowedIdx: number[] | undefined;
+      if (wanted) {
+        allowedIdx = splitCredentialPool(val).flatMap((key, i) =>
+          wanted.includes(keySuffix(key)) ? [i] : [],
+        );
+        if (allowedIdx.length === 0) {
+          throw new CredentialAllowlistError({
+            profile: opts?.allowlistProfile,
+            keyType: envVar,
+            wanted,
+          });
+        }
+      }
+      const inAllowlist = (i: number) => !allowedIdx || allowedIdx.includes(i);
+
       const info = availableIndicesMap?.[envVar];
-      let available = info?.availableIndices;
-      let modelBlockedCount = info?.modelBlockedIndices?.length ?? 0;
+      let available = allowedIdx
+        ? info?.availableIndices?.filter(inAllowlist)
+        : info?.availableIndices;
+      let modelBlockedCount = allowedIdx
+        ? (info?.modelBlockedIndices?.filter(inAllowlist).length ?? 0)
+        : (info?.modelBlockedIndices?.length ?? 0);
       if (available && window && opts?.localBlocks) {
         const beforeCount = available.length;
         available = available.filter((i) => {
@@ -519,7 +593,7 @@ export async function resolveCredentialPools(
       }
 
       const seatBlockedIndices = info?.seatBlockedIndices ?? [];
-      const seatBlockedCount = seatBlockedIndices.length;
+      const seatBlockedCount = seatBlockedIndices.filter(inAllowlist).length;
       let seatFallbackIndices: number[] | undefined;
 
       // Every key is key-wide rate-limited, blocked by this model's weekly
@@ -538,7 +612,7 @@ export async function resolveCredentialPools(
         if (seatBlockedCount > 0) {
           seatFallbackIndices = splitCredentialPool(val)
             .map((_, i) => i)
-            .filter((i) => !seatBlockedIndices.includes(i));
+            .filter((i) => !seatBlockedIndices.includes(i) && inAllowlist(i));
         }
         if (windowExhausted || seatFallbackIndices?.length === 0) {
           throw new ModelWindowExhaustedError({
@@ -553,8 +627,11 @@ export async function resolveCredentialPools(
       }
 
       const result = seatFallbackIndices
-        ? { ...selectCredential(val, seatFallbackIndices, envVar), isRateLimitFallback: true }
-        : selectCredential(val, available, envVar);
+        ? {
+            ...selectCredential(val, seatFallbackIndices, envVar, allowedIdx),
+            isRateLimitFallback: true,
+          }
+        : selectCredential(val, available, envVar, allowedIdx);
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(

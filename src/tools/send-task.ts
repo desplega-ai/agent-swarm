@@ -28,6 +28,8 @@ import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
   createToolRegistrar,
+  modelTierDeprecatedOutputSchema,
+  modelTierDeprecation,
   type SwarmToolResult,
   swarmToolOutputSchema,
   toolErr,
@@ -137,10 +139,10 @@ export const sendTaskInputSchema = z
       .min(1)
       .optional()
       .describe(
-        "Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
+        "Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
       ),
     modelTier: ModelTierSchema.optional().describe(
-      "Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
+      "Deprecated: pass profile \"<harness>-<tier>\" instead (same model). Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of the assignee's harness. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
     ),
     allowCustomModel: z
       .boolean()
@@ -230,6 +232,7 @@ export const sendTaskInputSchema = z
 export const sendTaskOutputSchema = swarmToolOutputSchema({
   yourAgentId: z.string().optional(),
   task: looseAgentTaskOutputSchema.optional(),
+  modelTierDeprecated: modelTierDeprecatedOutputSchema.optional(),
 });
 
 type SendTaskArgs = z.infer<typeof sendTaskInputSchema>;
@@ -489,6 +492,8 @@ export async function sendTaskHandler(
     model: normalizedModel.model,
     modelTier: normalizedModel.modelTier,
     agentId: effectiveAgentId,
+    // createTaskExtended fills an unset repo from the parent; judge that repo's config.
+    vcsRepo: effectiveVcsRepo || effectiveParentTask?.vcsRepo,
   });
   if (profileError) return toolErr(profileError, { data: { yourAgentId: creatorAgentId } });
   const effectiveRoutingReason =
@@ -767,9 +772,19 @@ export async function sendTaskHandler(
     return { success: false, message: `Unknown model profile "${profile}".`, task: undefined };
   });
 
+  // modelTier aliases the assignee harness's seeded profile; a pool task has no harness yet.
+  const assigneeId = result.task?.agentId ?? result.task?.offeredTo;
+  const modelTierDeprecated =
+    result.success && modelTier
+      ? modelTierDeprecation(
+          modelTier,
+          assigneeId ? (await getAgentById(assigneeId))?.harnessProvider : null,
+        )
+      : undefined;
   const data = {
     yourAgentId: creatorAgentId,
     task: result.task,
+    ...(modelTierDeprecated ? { modelTierDeprecated } : {}),
   };
 
   // Text channel must carry the created task too — most harnesses never show

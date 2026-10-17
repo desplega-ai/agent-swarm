@@ -16,6 +16,11 @@ import {
   updateScheduledTask,
   withFavoriteFlags,
 } from "../be/db";
+import {
+  modelProfileRefError,
+  scheduleProfileUpdate,
+  taskProfileError,
+} from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
 import { getScript } from "../be/scripts/db";
@@ -50,6 +55,8 @@ const scheduleUpdateBodySchema = z.object({
   timezone: z.string().optional(),
   model: z.string().nullable().optional(),
   modelTier: ModelTierSchema.nullable().optional(),
+  /** Model profile for every fired task. Exclusive with model/modelTier; setting one clears the other. */
+  profile: z.string().nullable().optional(),
   /** Accept a `model` the catalog does not list (a custom id). Without it an unknown id is a 400. */
   allowCustomModel: z.boolean().optional(),
   nextRunAt: z.string().nullable().optional(),
@@ -111,6 +118,8 @@ const createSchedule = route({
     timezone: z.string().optional(),
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
+    /** Model profile for every fired task. Exclusive with model/modelTier. */
+    profile: z.string().optional(),
     /** Accept a `model` the catalog does not list (a custom id). Without it an unknown id is a 400. */
     allowCustomModel: z.boolean().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).optional(),
@@ -403,6 +412,16 @@ export async function handleSchedules(
       jsonError(res, modelError, 400);
       return true;
     }
+    const profileError = await taskProfileError({
+      profile: body.profile,
+      model: body.model,
+      modelTier: body.modelTier,
+      agentId: body.targetAgentId,
+    });
+    if (profileError) {
+      jsonError(res, profileError, 400);
+      return true;
+    }
 
     try {
       const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
@@ -448,6 +467,7 @@ export async function handleSchedules(
         nextRunAt,
         timezone: body.timezone,
         ...splitLegacyModelAlias({ model: body.model, modelTier: body.modelTier }),
+        profile: body.profile?.trim() || undefined,
         scheduleType: body.scheduleType,
         targetType: body.targetType,
         workflowId: body.workflowId,
@@ -460,7 +480,12 @@ export async function handleSchedules(
       });
 
       createSchedule.respond(res, 201, schedule);
-    } catch (_error) {
+    } catch (error) {
+      // The profile was deleted between taskProfileError and the insert.
+      if (modelProfileRefError(error) === "missing") {
+        jsonError(res, `Unknown model profile "${body.profile}".`, 400);
+        return true;
+      }
       jsonError(res, "Failed to create schedule", 500);
     }
     return true;
@@ -563,6 +588,11 @@ export async function handleSchedules(
     const agentChanged =
       parsed.body.targetAgentId !== undefined &&
       parsed.body.targetAgentId !== existing.targetAgentId;
+    const profileUpdate = await scheduleProfileUpdate(existing, parsed.body);
+    if (profileUpdate.error !== undefined) {
+      jsonError(res, profileUpdate.error, 400);
+      return true;
+    }
     if (parsed.body.model !== undefined || parsed.body.modelTier !== undefined) {
       const normalizedModel = splitLegacyModelAlias({
         model: parsed.body.model,
@@ -584,7 +614,7 @@ export async function handleSchedules(
       if (parsed.body.modelTier !== undefined || normalizedModel.modelTier) {
         body.modelTier = normalizedModel.modelTier ?? null;
       }
-    } else if (agentChanged && existing.model) {
+    } else if (agentChanged && existing.model && !profileUpdate.fields.profile) {
       // Harness only: the stored id already passed the catalog check when it was written.
       const modelError = await explicitModelErrorForAgent({
         model: existing.model,
@@ -596,6 +626,7 @@ export async function handleSchedules(
         return true;
       }
     }
+    Object.assign(body, profileUpdate.fields);
 
     // Reject updates on completed one-time schedules
     if (existing.scheduleType === "one_time" && !existing.enabled && existing.lastRunAt) {
@@ -720,7 +751,15 @@ export async function handleSchedules(
 
     const updatedBy = await resolveHttpAuditUserId(req, myAgentId);
     if (updatedBy !== null) body.updatedBy = updatedBy;
-    const schedule = await updateScheduledTask(parsed.params.id, body);
+    let schedule: Awaited<ReturnType<typeof updateScheduledTask>>;
+    try {
+      schedule = await updateScheduledTask(parsed.params.id, body);
+    } catch (error) {
+      // The profile was deleted between scheduleProfileUpdate and the write.
+      if (modelProfileRefError(error) !== "missing") throw error;
+      jsonError(res, `Unknown model profile "${body.profile}".`, 400);
+      return true;
+    }
     routeHandle.respond(res, 200, schedule);
     return true;
   }

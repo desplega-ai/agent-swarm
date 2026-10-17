@@ -159,6 +159,8 @@ type AgentTaskSummaryRow = Pick<
   | "modelAlias"
   | "effort"
   | "resolvedEffort"
+  | "profile"
+  | "resolvedProfile"
   | "provider"
   | "requestedByUserId"
   | "progress"
@@ -212,7 +214,7 @@ const LIST_COLUMNS = {
     agent_tasks.offeredTo, agent_tasks.acceptedAt, agent_tasks.parentTaskId,
     agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier,
     agent_tasks.resolvedModel, agent_tasks.modelSource, agent_tasks.modelAlias, agent_tasks.effort,
-    agent_tasks.resolvedEffort,
+    agent_tasks.resolvedEffort, agent_tasks.profile, agent_tasks.resolvedProfile,
     agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
     agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
     agent_tasks.peakContextPercent`,
@@ -395,6 +397,8 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
     resolvedEffort: ReasoningEffortSchema.safeParse(row.resolvedEffort).success
       ? (row.resolvedEffort as ReasoningEffort)
       : undefined,
+    profile: row.profile ?? undefined,
+    resolvedProfile: row.resolvedProfile ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
     progress: row.progress ?? undefined,

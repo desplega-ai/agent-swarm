@@ -81,6 +81,8 @@ import type {
   MetricSaveResponse,
   MetricsListResponse,
   MintTokenResponse,
+  ModelProfile,
+  ModelProfileCheckResult,
   ModelTierPreview,
   OAuthAppDiscoveryResult,
   OAuthAuthorization,
@@ -378,6 +380,24 @@ class ApiClient {
     return res.json();
   }
 
+  /** Model profiles, ordered by harness then name; `harness` keeps one harness's. */
+  async fetchModelProfiles(harness?: string): Promise<{ profiles: ModelProfile[] }> {
+    const query = harness ? `?${new URLSearchParams({ harness })}` : "";
+    const url = `${this.getBaseUrl()}/api/model-profiles${query}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch model profiles: ${res.status}`);
+    return res.json();
+  }
+
+  /** Whether the agent, on its saved harness, can run the profile. Read-only. */
+  async fetchModelProfileCheck(agentId: string, profile: string): Promise<ModelProfileCheckResult> {
+    const query = new URLSearchParams({ profile });
+    const url = `${this.getBaseUrl()}/api/agents/${agentId}/profile-check?${query}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to check model profile: ${res.status}`);
+    return res.json();
+  }
+
   async fetchAgents(includeTasks = true): Promise<AgentsResponse> {
     const url = `${this.getBaseUrl()}/api/agents${includeTasks ? "?include=tasks" : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -476,10 +496,17 @@ class ApiClient {
       | "cursor"
       | "amp"
       | "grok";
-    model: string | null;
+    /** Ignored when `profile` is set. */
+    model?: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
     reasoningEffort?: ReasoningEffortLevel | null;
+    /**
+     * Sets the agent's default model profile (`MODEL_PROFILE`). The server
+     * rejects it next to `model`, and a model or effort change clears it, so
+     * the body then carries neither.
+     */
+    profile?: string;
     acp?: AcpRuntimeConfig;
     claude?: ClaudeRuntimeConfig;
   }): Promise<AgentWithTasks> {
@@ -492,9 +519,15 @@ class ApiClient {
       headers: this.getHeaders(),
       body: JSON.stringify({
         harness_provider: data.harnessProvider,
-        model: data.model,
-        allow_custom_model: data.allowCustomModel ?? false,
-        ...(data.reasoningEffort !== undefined ? { reasoning_effort: data.reasoningEffort } : {}),
+        ...(data.profile
+          ? { profile: data.profile }
+          : {
+              model: data.model,
+              allow_custom_model: data.allowCustomModel ?? false,
+              ...(data.reasoningEffort !== undefined
+                ? { reasoning_effort: data.reasoningEffort }
+                : {}),
+            }),
         ...(data.acp ? { acp: data.acp } : {}),
         ...(data.claude ? { claude: data.claude } : {}),
       }),

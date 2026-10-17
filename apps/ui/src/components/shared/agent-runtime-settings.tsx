@@ -11,12 +11,14 @@ import {
 import { useResolvedConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
+import { useModelProfileCheck, useModelProfiles } from "@/api/hooks/use-model-profiles";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import {
   type AcpSessionConfigOption,
   type AcpTarget,
   type Agent,
   type ClaudeTransport,
+  type ModelProfileCheckRow,
   REASONING_EFFORT_LEVELS,
   type ReasoningEffortLevel,
 } from "@/api/types";
@@ -104,6 +106,25 @@ function configuredModel(configs: { key: string; value: string }[] | undefined):
   return configs?.find((c) => c.key === "MODEL_OVERRIDE")?.value ?? "";
 }
 
+/** The agent's saved default model profile (`MODEL_PROFILE`), or "" for none. */
+function configuredModelProfile(configs: { key: string; value: string }[] | undefined): string {
+  return configs?.find((c) => c.key === "MODEL_PROFILE")?.value ?? "";
+}
+
+/** Select value for "no model profile": Radix Select items cannot use "". */
+const NO_MODEL_PROFILE = "__none__";
+
+const MODEL_PROFILE_CHECK_LABEL: Record<ModelProfileCheckRow["check"], string> = {
+  harness: "Harness",
+  model: "Model",
+  "harness-credentials": "Credentials",
+  "credential-allowlist": "Key allowlist",
+};
+
+function modelProfileCheckLine(row: ModelProfileCheckRow): string {
+  return `${MODEL_PROFILE_CHECK_LABEL[row.check] ?? row.check}: ${row.detail ?? row.state}`;
+}
+
 function configuredEffort(configs: { key: string; value: string }[] | undefined): EffortValue {
   const raw = configs?.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")?.value;
   return (REASONING_EFFORT_LEVELS as readonly string[]).includes(raw ?? "")
@@ -183,6 +204,8 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   // switching back to a local harness restores a valid model.
   const [devinSelected, setDevinSelected] = useState(agent.harnessProvider === "devin");
   const [model, setModel] = useState(() => configuredModel(configs));
+  // "" = no model profile: the model and effort below apply.
+  const [modelProfile, setModelProfile] = useState(() => configuredModelProfile(configs));
   const [customMode, setCustomMode] = useState(false);
   const [effort, setEffort] = useState<EffortValue>("");
   const [claudeTransport, setClaudeTransport] = useState<ClaudeTransportValue>(
@@ -205,6 +228,25 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const missingDevinKeys = DEVIN_CREDENTIAL_KEYS.filter(
     (key) => envPresenceQuery.data?.[key] === false,
   );
+  const modelProfilesQuery = useModelProfiles({ harness });
+  const modelProfiles = modelProfilesQuery.data ?? [];
+  const modelProfileActive = modelSelectionEnabled && modelProfile !== "";
+  const selectedModelProfile = modelProfileActive
+    ? (modelProfiles.find((p) => p.name === modelProfile) ?? null)
+    : null;
+  // The check endpoint judges the agent's SAVED harness. After a harness
+  // switch in the form, the PATCH runs the same check against the new one.
+  const modelProfileCheckable = modelProfileActive && agent.harnessProvider === harness;
+  const modelProfileCheckQuery = useModelProfileCheck(
+    agent.id,
+    modelProfileCheckable ? modelProfile : null,
+  );
+  const modelProfileChecks = modelProfileCheckQuery.data?.profiles[0]?.checks ?? [];
+  const modelProfileFailures = modelProfileChecks.filter((row) => row.state === "fail");
+  const modelProfileNotes = modelProfileChecks.filter(
+    (row) => row.state === "warn" || row.state === "unverified",
+  );
+  const modelProfileFails = modelProfileCheckable && modelProfileFailures.length > 0;
 
   const liveBedrockStatus = useMemo<LiveBedrockStatus | null>(
     () =>
@@ -230,16 +272,23 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       ),
     [harness, configs, envPresenceQuery.data, liveBedrockStatus, liveCatalog],
   );
-  const modelOption = findModelOption(model, groups);
+  // A model profile picks the model and effort: the controls show its values,
+  // and the form's own model and effort stay underneath for "None".
+  const shownModel = selectedModelProfile?.model ?? model;
+  const modelOption = findModelOption(shownModel, groups);
   // Exactly what the API accepts for this harness and model (empty for a custom
   // or unlisted model): the picker offers these and nothing else. An effort the
   // pair cannot take is not sent, whatever the state still holds.
   const effortLevels = useMemo(
-    () => effortLevelsFor(harness, model, liveCatalog),
-    [harness, model, liveCatalog],
+    () => effortLevelsFor(harness, shownModel, liveCatalog),
+    [harness, shownModel, liveCatalog],
   );
-  const shownEffort: EffortValue = effort && effortLevels.includes(effort) ? effort : "";
-  const shownConfiguredModel = devinSelected ? configuredModel(configs) : model;
+  const shownEffort: EffortValue = selectedModelProfile
+    ? (selectedModelProfile.effort ?? "")
+    : effort && effortLevels.includes(effort)
+      ? effort
+      : "";
+  const shownConfiguredModel = devinSelected ? configuredModel(configs) : shownModel;
   const acpModelGroups = useMemo(
     () => modelGroupsForAcpTarget(acpTarget, liveCatalog),
     [acpTarget, liveCatalog],
@@ -270,6 +319,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     initialHarness,
     configuredModel(configs),
     configuredEffort(configs),
+    configuredModelProfile(configs),
     configuredValue(configs, "ACP_TARGET"),
     configuredValue(configs, "ACP_TARGET_COMMAND"),
     configuredValue(configs, "ACP_COMMAND"),
@@ -293,6 +343,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     setDevinSelected(agent.harnessProvider === "devin");
     setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups, liveCatalog));
     setEffort(harnessSupportsModelSelection(initialHarness) ? configuredEffort(configs) : "");
+    setModelProfile(configuredModelProfile(configs));
     setAcpTarget(configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"));
     const invocation = configuredAcpInvocation(configs);
     setAcpCommand(invocation.command);
@@ -339,6 +390,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       liveCatalog,
     );
     setHarness(nextHarness);
+    // A model profile runs on one harness, and the picker lists only the
+    // current harness's, so a pick that does not run on the new one is dropped.
+    if ((selectedModelProfile?.harness ?? harness) !== nextHarness) setModelProfile("");
     if (nextHarness === "acp" && harness !== "acp") setAcpTarget("opencode");
     const nextModel = findModelOption(model, nextGroups)
       ? model
@@ -362,19 +416,28 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       );
       return;
     }
-    if (modelSelectionEnabled && !model.trim()) return;
+    if (modelSelectionEnabled && !modelProfileActive && !model.trim()) return;
+    if (modelProfileFails) return;
     if (acpSelected && acpTarget === "custom" && !acpCommand.trim()) return;
     if (claudeBridgeConflict || claudeRuntimeUnavailable) return;
     updateRuntime.mutate(
       {
         id: agent.id,
         harnessProvider: harness,
-        model: modelSelectionEnabled || acpSelected ? model.trim() || null : null,
-        // The API rejects a model the catalog does not list unless it is flagged custom. A model
-        // only a worker probe lists (a live Bedrock id) is in the picker but not in the catalog.
-        allowCustomModel:
-          modelSelectionEnabled && !findKnownModel(model.trim(), liveCatalog ?? undefined),
-        reasoningEffort: modelSelectionEnabled ? shownEffort || null : null,
+        // The server rejects `profile` next to `model`, and an effort change
+        // clears the profile, so a profile save sends neither. Sending `model`
+        // ("None") clears a saved profile.
+        ...(modelProfileActive
+          ? { profile: modelProfile }
+          : {
+              model: modelSelectionEnabled || acpSelected ? model.trim() || null : null,
+              // The API rejects a model the catalog does not list unless it is flagged custom. A
+              // model only a worker probe lists (a live Bedrock id) is in the picker but not in
+              // the catalog.
+              allowCustomModel:
+                modelSelectionEnabled && !findKnownModel(model.trim(), liveCatalog ?? undefined),
+              reasoningEffort: modelSelectionEnabled ? shownEffort || null : null,
+            }),
         ...(acpSelected
           ? {
               acp:
@@ -405,7 +468,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   }
 
   const disabledChoice =
-    !devinSelected && !customMode && modelOption
+    !devinSelected && !modelProfileActive && !customMode && modelOption
       ? !groups.find((g) => g.provider === modelOption.provider)?.enabled
       : false;
 
@@ -527,18 +590,61 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         </div>
 
         {modelSelectionEnabled ? (
-          <div className="w-full min-w-0 flex-1 space-y-1.5 sm:w-auto sm:min-w-[260px]">
-            <Label>Model</Label>
-            {customMode ? (
-              <Input value={model} onChange={(event) => changeModel(event.target.value)} />
-            ) : (
-              <ModelCombobox
-                value={model}
-                onChange={changeModel}
-                groups={groups}
-                selected={modelOption}
-              />
-            )}
+          <div className="w-full min-w-0 flex-1 space-y-3 sm:w-auto sm:min-w-[260px]">
+            {modelProfiles.length > 0 || modelProfileActive ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="model-profile">Model profile</Label>
+                <Select
+                  value={modelProfile || NO_MODEL_PROFILE}
+                  onValueChange={(value) =>
+                    setModelProfile(value === NO_MODEL_PROFILE ? "" : value)
+                  }
+                >
+                  <SelectTrigger id="model-profile" className="w-full" aria-label="Model profile">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_MODEL_PROFILE}>None (set model below)</SelectItem>
+                    {modelProfiles.map((profile) => (
+                      <SelectItem key={profile.id} value={profile.name}>
+                        {profile.name}
+                      </SelectItem>
+                    ))}
+                    {modelProfileActive && !selectedModelProfile ? (
+                      <SelectItem value={modelProfile}>{modelProfile}</SelectItem>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+                {modelProfileActive ? (
+                  <ModelProfileCheckSummary
+                    loading={modelProfileCheckable && modelProfileCheckQuery.isLoading}
+                    error={modelProfileCheckable && modelProfileCheckQuery.isError}
+                    checkable={modelProfileCheckable}
+                    failures={modelProfileFailures}
+                    notes={modelProfileNotes}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label>Model</Label>
+              {customMode && !modelProfileActive ? (
+                <Input value={model} onChange={(event) => changeModel(event.target.value)} />
+              ) : (
+                <ModelCombobox
+                  value={shownModel}
+                  onChange={changeModel}
+                  groups={groups}
+                  selected={modelOption}
+                  disabled={modelProfileActive}
+                />
+              )}
+              {modelProfileActive ? (
+                <p className="text-xs text-muted-foreground">
+                  Set by the model profile. Choose None to pick a model.
+                </p>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </div>
@@ -642,8 +748,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
             onChange={setEffort}
             levels={effortLevels}
             modelLabel={modelOption?.label ?? null}
+            disabled={modelProfileActive}
           />
-          {effortLevels.length === 0 ? (
+          {effortLevels.length === 0 && !modelProfileActive ? (
             <p className="text-xs text-muted-foreground">
               {model.trim()
                 ? "No reasoning effort applies to this model: the catalog does not list it, or it does not reason."
@@ -668,7 +775,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         {modelSelectionEnabled ? (
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Switch checked={customMode} onCheckedChange={setCustomMode} />
+            <Switch
+              checked={customMode}
+              onCheckedChange={setCustomMode}
+              disabled={modelProfileActive}
+            />
             Allow unsupported/custom model
           </label>
         ) : null}
@@ -680,7 +791,8 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
             claudeRuntimeUnavailable ||
             claudeBridgeConflict ||
             (acpSelected && !acpGate.supported) ||
-            (modelSelectionEnabled && (!model.trim() || disabledChoice)) ||
+            (modelSelectionEnabled && !modelProfileActive && (!model.trim() || disabledChoice)) ||
+            modelProfileFails ||
             (acpSelected && acpTarget === "custom" && !acpCommand.trim())
           }
         >
@@ -757,6 +869,59 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   );
 }
 
+/**
+ * The profile check under the picker: failing rows block Save, warnings and
+ * unverified rows are notes.
+ */
+function ModelProfileCheckSummary({
+  loading,
+  error,
+  checkable,
+  failures,
+  notes,
+}: {
+  loading: boolean;
+  error: boolean;
+  checkable: boolean;
+  failures: ModelProfileCheckRow[];
+  notes: ModelProfileCheckRow[];
+}) {
+  if (!checkable) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Checked against the new harness when you save.
+      </p>
+    );
+  }
+  if (loading) return <p className="text-xs text-muted-foreground">Checking the profile...</p>;
+  if (error) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Could not check the profile. Save checks it again.
+      </p>
+    );
+  }
+  return (
+    <>
+      {failures.length > 0 ? (
+        <AlertCallout tone="error" icon={AlertTriangle}>
+          <p className="font-medium text-foreground">This agent cannot run the profile</p>
+          {failures.map((row) => (
+            <p key={row.check} className="text-muted-foreground">
+              {modelProfileCheckLine(row)}
+            </p>
+          ))}
+        </AlertCallout>
+      ) : null}
+      {notes.map((row) => (
+        <p key={row.check} className="text-xs text-muted-foreground">
+          {modelProfileCheckLine(row)}
+        </p>
+      ))}
+    </>
+  );
+}
+
 function AcpAdvertisedOptions({ options }: { options: AcpSessionConfigOption[] | undefined }) {
   return (
     <div className="space-y-2 border-t border-border pt-3">
@@ -809,6 +974,8 @@ interface ReasoningEffortToggleProps {
   /** The levels the harness accepts for the selected model. Every other level is unavailable. */
   levels: ReadonlyArray<ReasoningEffortLevel>;
   modelLabel: string | null;
+  /** Read-only: a model profile sets the effort. */
+  disabled?: boolean;
 }
 
 function ReasoningEffortSegment({
@@ -864,6 +1031,7 @@ function ReasoningEffortToggle({
   onChange,
   levels,
   modelLabel,
+  disabled = false,
 }: ReasoningEffortToggleProps) {
   return (
     // Seven segments are wider than a phone: the strip scrolls inside its own
@@ -871,7 +1039,7 @@ function ReasoningEffortToggle({
     <div className="inline-flex w-fit max-w-full overflow-x-auto overflow-y-hidden rounded-md border border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <ReasoningEffortSegment
         active={value === ""}
-        disabled={false}
+        disabled={disabled}
         onClick={() => onChange("")}
         bordered={false}
         icon={<ReasoningEffortIcon level={undefined} />}
@@ -887,7 +1055,7 @@ function ReasoningEffortToggle({
             <ReasoningEffortSegment
               key={level}
               active={active}
-              disabled={false}
+              disabled={disabled}
               onClick={() => onChange(active ? "" : level)}
               bordered
               icon={<ReasoningEffortIcon level={level} />}

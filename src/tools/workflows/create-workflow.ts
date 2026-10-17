@@ -132,7 +132,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         if (!validation.valid) {
           return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }
-        const modelErrors = await workflowModelErrors(definition);
+        const modelErrors = await workflowModelErrors(definition, { vcsRepo });
         if (modelErrors.length > 0) {
           return toolErr(`Invalid definition: ${modelErrors.join("; ")}`);
         }

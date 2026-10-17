@@ -1137,6 +1137,74 @@
           "lastUpdatedAt"
         ]
       },
+      "ProfileCheckResult": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "check": {
+                        "type": "string",
+                        "enum": [
+                          "harness",
+                          "model",
+                          "harness-credentials",
+                          "credential-allowlist"
+                        ]
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "pass",
+                          "warn",
+                          "fail",
+                          "unverified"
+                        ]
+                      },
+                      "detail": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "check",
+                      "state"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "ok",
+                "checks"
+              ]
+            }
+          }
+        },
+        "required": [
+          "agentId",
+          "ok",
+          "profiles"
+        ]
+      },
       "AssetSummary": {
         "type": "object",
         "properties": {
@@ -10659,7 +10727,7 @@
       },
       "patch": {
         "summary": "Update an agent's runtime harness and default model",
-        "description": "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist and run on `harness_provider`, and it cannot be sent with `model`. Sending `model`, or changing the model or effort override by any path, clears the default profile.",
+        "description": "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist, run on `harness_provider` and pass the profile check (`GET /api/agents/{id}/profile-check`) against it, and it cannot be sent with `model`. A failing check is a 400 `{ error, check }`; a passing one returns the result as `profileCheck`. Sending `model`, or changing the model or effort override by any path, clears the default profile.",
         "tags": [
           "Agents"
         ],
@@ -10825,7 +10893,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated agent row",
+            "description": "Updated agent row. `profileCheck` is set when the body set `profile`, so warnings show.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10854,6 +10922,9 @@
                             "max",
                             "available"
                           ]
+                        },
+                        "profileCheck": {
+                          "$ref": "#/components/schemas/ProfileCheckResult"
                         }
                       },
                       "required": [
@@ -10866,7 +10937,7 @@
             }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation error, or `{ error, check }` when the profile check fails",
             "content": {
               "application/json": {
                 "schema": {
@@ -11926,6 +11997,61 @@
           },
           "404": {
             "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/profile-check": {
+      "get": {
+        "summary": "Check whether an agent can run a model profile",
+        "description": "Read-only. Judges the profile's harness, model, the agent's credential report and the profile's credential allowlist. Each row is pass, warn, fail or unverified; `ok` is false only when a row fails. Never returns a secret value.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "profile",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileCheckResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or profile not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -25376,6 +25502,21 @@
                               "null"
                             ]
                           },
+                          "credentials": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "additionalProperties": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 5,
+                                "maxLength": 5
+                              },
+                              "minItems": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -25392,6 +25533,7 @@
                           "allowCustomModel",
                           "description",
                           "seededFrom",
+                          "credentials",
                           "createdAt",
                           "lastUpdatedAt"
                         ]
@@ -25409,7 +25551,7 @@
       },
       "post": {
         "summary": "Create a model profile",
-        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. Operator only (the shared API key).",
+        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -25473,6 +25615,21 @@
                       "null"
                     ],
                     "maxLength": 500
+                  },
+                  "credentials": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 5,
+                        "maxLength": 5
+                      },
+                      "minItems": 1
+                    }
                   }
                 },
                 "required": [
@@ -25547,6 +25704,21 @@
                         "null"
                       ]
                     },
+                    "credentials": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 5,
+                          "maxLength": 5
+                        },
+                        "minItems": 1
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -25563,6 +25735,7 @@
                     "allowCustomModel",
                     "description",
                     "seededFrom",
+                    "credentials",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -25687,6 +25860,21 @@
                         "null"
                       ]
                     },
+                    "credentials": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 5,
+                          "maxLength": 5
+                        },
+                        "minItems": 1
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -25703,6 +25891,7 @@
                     "allowCustomModel",
                     "description",
                     "seededFrom",
+                    "credentials",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -25724,7 +25913,7 @@
       },
       "patch": {
         "summary": "Update a model profile",
-        "description": "Changes the model, effort, custom-model flag or description; the name and harness are fixed. Omit a field to keep it; `effort: null` clears it. Applies to tasks claimed after the change. Operator only (the shared API key).",
+        "description": "Changes the model, effort, custom-model flag, description or credential allowlist; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it. Applies to tasks claimed after the change. Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -25777,6 +25966,21 @@
                       "null"
                     ],
                     "maxLength": 500
+                  },
+                  "credentials": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 5,
+                        "maxLength": 5
+                      },
+                      "minItems": 1
+                    }
                   }
                 }
               }
@@ -25846,6 +26050,21 @@
                         "null"
                       ]
                     },
+                    "credentials": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 5,
+                          "maxLength": 5
+                        },
+                        "minItems": 1
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -25862,6 +26081,7 @@
                     "allowCustomModel",
                     "description",
                     "seededFrom",
+                    "credentials",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -25903,7 +26123,7 @@
       },
       "delete": {
         "summary": "Delete a model profile",
-        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
+        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -30789,6 +31009,12 @@
                                   "max"
                                 ]
                               },
+                              "profile": {
+                                "type": "string"
+                              },
+                              "resolvedProfile": {
+                                "type": "string"
+                              },
                               "provider": {
                                 "type": "string",
                                 "enum": [
@@ -32474,6 +32700,18 @@
                                 "required": [
                                   "name"
                                 ]
+                              },
+                              "credentialAllowlist": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 5,
+                                    "maxLength": 5
+                                  },
+                                  "minItems": 1
+                                }
                               }
                             },
                             "required": [
@@ -35141,6 +35379,18 @@
                                           "name"
                                         ]
                                       }
+                                    },
+                                    "credentialAllowlist": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 5,
+                                          "maxLength": 5
+                                        },
+                                        "minItems": 1
+                                      }
                                     }
                                   },
                                   "required": [
@@ -37161,6 +37411,9 @@
                       "ultra"
                     ]
                   },
+                  "profile": {
+                    "type": "string"
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -37338,6 +37591,9 @@
                         "smart",
                         "ultra"
                       ]
+                    },
+                    "profile": {
+                      "type": "string"
                     },
                     "scheduleType": {
                       "type": "string",
@@ -37704,6 +37960,9 @@
                                   "ultra"
                                 ]
                               },
+                              "profile": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -37895,6 +38154,9 @@
                                   "smart",
                                   "ultra"
                                 ]
+                              },
+                              "profile": {
+                                "type": "string"
                               },
                               "scheduleType": {
                                 "type": "string",
@@ -38130,6 +38392,9 @@
                             "smart",
                             "ultra"
                           ]
+                        },
+                        "profile": {
+                          "type": "string"
                         },
                         "scheduleType": {
                           "type": "string",
@@ -38381,6 +38646,9 @@
                         "ultra"
                       ]
                     },
+                    "profile": {
+                      "type": "string"
+                    },
                     "scheduleType": {
                       "type": "string",
                       "enum": [
@@ -38574,6 +38842,12 @@
                       null
                     ]
                   },
+                  "profile": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -38753,6 +39027,9 @@
                         "smart",
                         "ultra"
                       ]
+                    },
+                    "profile": {
+                      "type": "string"
                     },
                     "scheduleType": {
                       "type": "string",
@@ -38968,6 +39245,12 @@
                       null
                     ]
                   },
+                  "profile": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -39147,6 +39430,9 @@
                         "smart",
                         "ultra"
                       ]
+                    },
+                    "profile": {
+                      "type": "string"
                     },
                     "scheduleType": {
                       "type": "string",
@@ -52605,6 +52891,9 @@
                                   "ultra"
                                 ]
                               },
+                              "profile": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -52788,6 +53077,9 @@
                                   "smart",
                                   "ultra"
                                 ]
+                              },
+                              "profile": {
+                                "type": "string"
                               },
                               "scheduleType": {
                                 "type": "string",

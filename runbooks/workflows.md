@@ -75,7 +75,8 @@ Do not include patch bodies, diff hunks, raw `git log --stat` output, downloaded
 - `offerMode`
 - `dir`
 - `vcsRepo`
-- `model`
+- `profile` (preferred way to pick the model: a model profile name, see `list-model-profiles`; exclusive with `model` and `modelTier`). Save rejects a static unknown profile, or one a static `agentId` fails the profile check on (`Node "<id>" config.profile: …`). The node re-checks the interpolated value at run and fails with the check's message. Deleting a profile a definition names is not blocked; the node fails at run.
+- `model` (concrete override; `modelTier` is deprecated, pass `profile: "<harness>-<tier>"` instead)
 - `parentTaskId`
 
 ## Foreach nodes
