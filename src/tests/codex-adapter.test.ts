@@ -2058,6 +2058,23 @@ describe("buildCodexConfig — context-mode + features", () => {
     expect(mcp["context-mode"]).toBeUndefined();
   });
 
+  test("CONTEXT_MODE_DISABLED also turns the installed context-mode plugin off", async () => {
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+
+    // The plugin registers its own MCP server, skills and hooks.
+    expect(merged.plugins).toEqual({ "context-mode@context-mode": { enabled: false } });
+  });
+
+  test("leaves the installed context-mode plugin alone by default", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+
+    expect(merged.plugins).toBeUndefined();
+  });
+
   test("disables apps and enables hooks", async () => {
     delete process.env.CONTEXT_MODE_DISABLED;
     globalThis.fetch = stubFetch({ servers: [], total: 0 });

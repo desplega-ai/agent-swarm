@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 /**
@@ -27,11 +28,29 @@ export function userClaudeMdExclude(home: string = process.env.HOME ?? homedir()
   return join(home, ".claude", "CLAUDE.md");
 }
 
-export type ClaudeFlagSettings = Record<string, unknown> & { claudeMdExcludes: string[] };
+/** Plugin id the worker image installs (`claude plugin install context-mode@context-mode`). */
+export const CONTEXT_MODE_CLAUDE_PLUGIN = "context-mode@context-mode";
 
-/** Flag-level settings (`--settings` / SDK `settings`) for every Claude session. */
+export type ClaudeFlagSettings = Record<string, unknown> & {
+  claudeMdExcludes: string[];
+  enabledPlugins?: Record<string, boolean>;
+};
+
+/**
+ * Flag-level settings (`--settings` / SDK `settings`) for every Claude session.
+ *
+ * `CONTEXT_MODE_DISABLED` also turns the context-mode plugin off for the
+ * session. Dropping only its MCP server left the plugin hooks running: the
+ * SessionStart block and tool tips pointed at `ctx_*` tools the session did
+ * not have, and the PreToolUse hook denied WebFetch.
+ */
 export function claudeFlagSettings(): ClaudeFlagSettings {
-  return { claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()] };
+  return {
+    claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
+    ...(isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false)
+      ? { enabledPlugins: { [CONTEXT_MODE_CLAUDE_PLUGIN]: false } }
+      : {}),
+  };
 }
 
 const SETTINGS_FLAG = "--settings";
@@ -86,7 +105,8 @@ function parseCallerSettings(value: string, cwd: string): Record<string, unknown
  * (CLAUDE_BINARY prefix args, additionalArgs) and folds those values into the
  * session's own flag settings, so the spawned Claude sees exactly one settings
  * value. Caller keys are kept (later values win); `claudeMdExcludes` becomes
- * the deduped union of the caller lists and the workspace exclusion.
+ * the deduped union of the caller lists and the workspace exclusion, and the
+ * session's own `enabledPlugins` entries override the caller's.
  *
  * Fails closed: a missing value (end of argv, or a next token that is another
  * flag) or an unreadable, invalid or non-object value throws
@@ -128,6 +148,15 @@ export function mergeClaudeSettingsArgs(
     return passthrough;
   });
 
-  for (const entry of claudeFlagSettings().claudeMdExcludes) excludes.add(entry);
-  return { argLists: stripped, settings: { ...merged, claudeMdExcludes: [...excludes] } };
+  const own = claudeFlagSettings();
+  for (const entry of own.claudeMdExcludes) excludes.add(entry);
+  const settings: ClaudeFlagSettings = { ...merged, claudeMdExcludes: [...excludes] };
+  if (own.enabledPlugins) {
+    const callerPlugins = isPlainObject(merged.enabledPlugins) ? merged.enabledPlugins : {};
+    settings.enabledPlugins = { ...callerPlugins, ...own.enabledPlugins } as Record<
+      string,
+      boolean
+    >;
+  }
+  return { argLists: stripped, settings };
 }

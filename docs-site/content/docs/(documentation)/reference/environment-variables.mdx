@@ -266,7 +266,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `YOLO` | No | `false` | Continue on errors |
 | `SYSTEM_PROMPT` | No | — | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | — | Path to system prompt file |
-| `CONTEXT_MODE_DISABLED` | No | `false` | Set to `true` to disable the default context-mode MCP wiring for local Claude Code, Codex, and opencode workers. Leaves the worker running but hides/skips the `ctx_*` tools. |
+| `CONTEXT_MODE_DISABLED` | No | `false` | Set to `true` to turn context-mode off for local Claude Code, Codex, and opencode workers. Drops the `ctx_*` MCP server and disables the installed Claude Code and Codex context-mode plugins for the session, so their hooks (SessionStart guidance, tool tips, WebFetch redirect) do not run either. |
 | `SCRIPTS_ONLY_MCP` | No | `false` | Experimental code-mode. Set alongside the API server value so worker prompts explain the reduced eight-tool MCP surface; all other swarm operations remain available through `script-run` and the scripts SDK. |
 | `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | `3` | How often (in turns) the context-mode MCP plugin surfaces its external-MCP guidance nudge, across Claude Code, Codex, and opencode alike |
 | `CONTEXT_PREAMBLE_MAX_TOKENS` | No | `2000` | Token budget for the universal follow-up context preamble prepended to a child task's prompt; applies across all harness providers |

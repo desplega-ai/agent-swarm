@@ -81,6 +81,9 @@ import type {
 
 type CodexConfig = Record<string, CodexConfigValue | undefined>;
 
+/** Plugin id the worker image installs (`codex plugin add context-mode@context-mode`). */
+const CONTEXT_MODE_CODEX_PLUGIN = "context-mode@context-mode";
+
 interface Usage {
   input_tokens: number;
   cached_input_tokens: number;
@@ -542,7 +545,10 @@ export async function buildCodexConfig(
   // context-compression tools. Gated by `CONTEXT_MODE_DISABLED` so builds /
   // deploys without the `context-mode` binary on PATH don't break the session.
   // Same entry shape as the swarm + installed-server stdio entries above.
-  if (!isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false)) {
+  // When disabled, the installed Codex plugin is turned off too: it registers
+  // its own `context-mode` MCP server, skills and hooks.
+  const contextModeDisabled = isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false);
+  if (!contextModeDisabled) {
     mcpServers["context-mode"] = {
       command: "context-mode",
       enabled: true,
@@ -573,6 +579,9 @@ export async function buildCodexConfig(
     show_raw_agent_reasoning: false,
     features: { apps: false, hooks: true, plugin_hooks: true },
     mcp_servers: mcpServers as CodexConfig,
+    ...(contextModeDisabled
+      ? { plugins: { [CONTEXT_MODE_CODEX_PLUGIN]: { enabled: false } } }
+      : {}),
     ...reasoningConfig,
   };
 }

@@ -642,7 +642,8 @@ export async function createSessionMcpConfig(
   // installed Claude plugin — strict-mcp-config only suppresses MCP servers, not
   // hooks. Placed BEFORE mergeMcpConfig so an API-installed server can still
   // override it (unlikely, but safe). Gated by CONTEXT_MODE_DISABLED so builds
-  // and deploys without context-mode don't break.
+  // and deploys without context-mode don't break; the same flag turns the plugin
+  // (and so its hooks) off via `claudeFlagSettings()`.
   //
   // Server key uses the plugin naming convention (`plugin_context-mode_context-mode`)
   // so that the resulting tool names (`mcp__plugin_context-mode_context-mode__ctx_*`)
