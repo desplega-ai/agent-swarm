@@ -60,7 +60,7 @@ SDK selection is incompatible with an effective Claude Bridge or legacy bridge b
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
 | Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `AGENT_FS_PUBLIC_URL`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_STATUS_ICON_COMPLETED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults) |
-| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SCRIPT_NATIVE_REQUIRE_ISOLATION`, `SCRIPT_NATIVE_EXEC_DENY`, `SCRIPT_SANDBOX_UID_BASE`, `SCRIPT_SANDBOX_UID_POOL_SIZE`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `ANONYMIZED_TELEMETRY` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, and the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`) |
 
@@ -188,6 +188,54 @@ which hosts QuickJS scripts can fetch. Off and empty mean any public host and no
 loopback, link-local or metadata address. The allowlist takes comma-separated `host[:port]`
 patterns; config writes reject other shapes. The native executor does not enforce either key
 yet. See [Scripts runtime § Egress policy](/docs/guides/scripts-runtime#egress-policy).
+
+## Native script sandbox
+
+Native script runs, durable script runs and workflow `script` nodes run in a sandboxed
+subprocess. Two layers harden it:
+
+- **Sandbox user.** When the API runs as root, each subprocess runs as a separate uid,
+  `SCRIPT_SANDBOX_UID_BASE` (default 61000) plus a slot from a pool of
+  `SCRIPT_SANDBOX_UID_POOL_SIZE` (default 64). Concurrent runs never share a uid, and leftover
+  processes are killed when a run ends. Runs wait for a free uid when the pool is full.
+  Workflow `script` nodes share one uid, `SCRIPT_SANDBOX_UID_BASE - 1`, because they often
+  reuse fixed `/tmp` paths across runs. A pinned `cwd` must be usable by that uid. The API
+  image's entrypoint sets `umask 077` and makes the data directory mode `700`, so the
+  sandbox user cannot read the database. The drop needs `CHOWN`, `DAC_OVERRIDE`, `FOWNER`,
+  `KILL`, `SETGID` and `SETUID`, which Docker grants by default. Without any of them the API
+  keeps running scripts as its own uid.
+- **Exec deny.** The native script harness installs a seccomp filter before it loads the
+  script. The script then cannot start other programs (`Bun.spawn`, `Bun.$`) or trace other
+  processes. Network access is unchanged. Workflow `script` nodes run shell code by design
+  and do not get this filter. `stdlib.grep` starts `rg`, so it fails under the filter with an
+  error that names `SCRIPT_NATIVE_EXEC_DENY`.
+
+At startup the API runs one probe script through the native executor and reports the result
+as `meta.scripts.sandbox` on `/health`: `hardened` (both layers), `uid-only` (sandbox user
+without the filter), or `none` (the API is not root or cannot change uid). It is `pending` until
+the probe finishes. `meta.scripts.scope` is `native-executor`: the level covers native script
+runs only.
+Durable script runs get the sandbox user but not the filter, and workflow `script` nodes get the
+shared uid and no filter, so `hardened` does not describe them.
+
+`SCRIPT_NATIVE_EXEC_DENY` (default `true`) is the exec-deny switch. Set it to `false` to let
+native scripts start programs again, for example to recover a script after a regression. The
+change applies to the next run without a restart. `/health` reports the effective policy as
+`meta.scripts.execDeny`: `best-effort` (default), `required`, or `off`. With the filter off the
+probe re-runs and the level is at most `uid-only`.
+
+`SCRIPT_NATIVE_REQUIRE_ISOLATION` (default `false`) makes native script runs fail unless the
+level is `hardened`, and makes the filter `required` (a run whose filter fails to install
+fails). It cannot be met with `SCRIPT_NATIVE_EXEC_DENY=false`: that combination refuses every
+native run, so to turn the filter off, turn this off too. On Helm, add those six back if you
+drop capabilities:
+
+```yaml
+securityContext:
+  capabilities:
+    drop: [ALL]
+    add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
+```
 
 ## Editing
 

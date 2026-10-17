@@ -4,11 +4,21 @@ import {
   registerProcessGroup,
   terminateProcessGroup,
 } from "../../utils/process-group";
+import { chownForSandbox, leaseSandboxUid, type SandboxUidLease } from "../../utils/sandbox-uid";
 import {
   buildSandboxedCommand,
   readStreamCapped,
+  type SandboxSpawnOptions,
   sandboxSpawnEnv,
 } from "../../utils/sandboxed-process";
+import {
+  interpretSandboxProbe,
+  nativeSeccompPolicy,
+  requireNativeIsolation,
+  type ScriptSandboxStatus,
+  sandboxProbeInput,
+} from "../sandbox-probe";
+import type { SeccompPolicy } from "../sandbox-seccomp";
 import type { ExecutorInput, ExecutorOutput, ScriptExecutor, ScriptExecutorError } from "./types";
 
 function makeUnsupportedOutput(stderr: string): ExecutorOutput {
@@ -136,20 +146,82 @@ function harnessCommand(
   harnessPath: string,
   input: ExecutorInput,
   env: Record<string, string>,
+  options: SandboxSpawnOptions,
 ): string[] {
-  return buildSandboxedCommand(["bun", "run", harnessPath], env, {
-    virtualMemoryMb: input.resources.memoryMb,
-    cpuTimeSec: input.resources.cpuTimeSec,
-    maxProcs: input.resources.maxProcs,
-    maxFileKb: Math.floor(input.resources.maxFileBytes / 1024),
-    maxFdCount: input.resources.maxFdCount,
-  });
+  return buildSandboxedCommand(
+    ["bun", "run", harnessPath],
+    env,
+    {
+      virtualMemoryMb: input.resources.memoryMb,
+      cpuTimeSec: input.resources.cpuTimeSec,
+      maxProcs: input.resources.maxProcs,
+      maxFileKb: Math.floor(input.resources.maxFileBytes / 1024),
+      maxFdCount: input.resources.maxFdCount,
+    },
+    options,
+  );
+}
+
+let sandboxStatus: ScriptSandboxStatus | undefined;
+let sandboxStatusPromise: Promise<ScriptSandboxStatus> | undefined;
+let probedPolicy: SeccompPolicy | undefined;
+
+/**
+ * Run the sandbox probe once per process and exec-deny policy (see
+ * `sandbox-probe.ts`). The API starts it at boot; `SCRIPT_NATIVE_REQUIRE_ISOLATION`
+ * runs await it. Changing `SCRIPT_NATIVE_EXEC_DENY` at runtime re-runs it.
+ */
+export function getNativeSandboxStatus(): Promise<ScriptSandboxStatus> {
+  const policy = nativeSeccompPolicy();
+  if (sandboxStatusPromise && probedPolicy === policy) return sandboxStatusPromise;
+  probedPolicy = policy;
+  sandboxStatus = undefined;
+  const probe: Promise<ScriptSandboxStatus> = new NativeScriptExecutor()
+    .runUnchecked(sandboxProbeInput())
+    .then((output) => interpretSandboxProbe(output, process.getuid?.()))
+    .catch((error: unknown) => ({
+      level: "none" as const,
+      uidDropped: false,
+      seccomp: false,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+    .then((status) => {
+      // A newer probe for another policy owns the cache now.
+      if (sandboxStatusPromise === probe) sandboxStatus = status;
+      return status;
+    });
+  sandboxStatusPromise = probe;
+  return probe;
+}
+
+/**
+ * The probe result for the current exec-deny policy, or `undefined` while it
+ * has not finished. A policy change since the last probe starts a new one.
+ */
+export function peekNativeSandboxStatus(): ScriptSandboxStatus | undefined {
+  if (probedPolicy !== undefined && probedPolicy !== nativeSeccompPolicy()) {
+    void getNativeSandboxStatus();
+  }
+  return sandboxStatus;
 }
 
 export class NativeScriptExecutor implements ScriptExecutor {
   readonly name = "native";
 
   async run(input: ExecutorInput): Promise<ExecutorOutput> {
+    if (requireNativeIsolation()) {
+      const status = await getNativeSandboxStatus();
+      if (status.level !== "hardened") {
+        return makeUnsupportedOutput(
+          `SCRIPT_NATIVE_REQUIRE_ISOLATION is set, but the native script sandbox is "${status.level}", not "hardened". The API must run as root with the CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID and SETUID capabilities, and the seccomp filter must install${nativeSeccompPolicy() === "off" ? ", but SCRIPT_NATIVE_EXEC_DENY=false turns it off; to run scripts without the filter, turn SCRIPT_NATIVE_REQUIRE_ISOLATION off too" : ""}.`,
+        );
+      }
+    }
+    return this.runUnchecked(input);
+  }
+
+  /** `run` without the isolation requirement; the sandbox probe uses it directly. */
+  async runUnchecked(input: ExecutorInput): Promise<ExecutorOutput> {
     if (input.fsMode === "workspace-rw") {
       return makeUnsupportedOutput("workspace-rw not supported by native executor in v1");
     }
@@ -172,6 +244,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
     let killed = input.signal?.aborted ?? false;
     let removeAbortListener: (() => void) | undefined;
     let proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
+    let uidLease: SandboxUidLease | null = null;
 
     try {
       if (killed) {
@@ -197,6 +270,15 @@ export class NativeScriptExecutor implements ScriptExecutor {
       input.signal?.addEventListener("abort", onExternalAbort, { once: true });
       removeAbortListener = () => input.signal?.removeEventListener("abort", onExternalAbort);
 
+      // An abort before the listener existed fires no event; check it here.
+      if (input.signal?.aborted) killed = true;
+      if (killed) throw new Error("script run aborted before start");
+      uidLease = await leaseSandboxUid(input.signal);
+      if (uidLease) await chownForSandbox(tmpdir, uidLease.user);
+      // Lease and chown are async: the listener may have fired with no child
+      // to terminate. Never spawn after an abort; `finally` releases the lease.
+      if (killed) throw new Error("script run aborted before start");
+
       const timeout = setTimeout(() => {
         timedOut = true;
         if (proc) void terminateProcessGroup(proc.pid);
@@ -204,10 +286,12 @@ export class NativeScriptExecutor implements ScriptExecutor {
 
       const harnessEnv = {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
-        HOME: process.env.HOME ?? "/tmp",
+        // The API's own HOME is not readable by a sandbox uid.
+        HOME: uidLease ? tmpdir : (process.env.HOME ?? "/tmp"),
         LANG: process.env.LANG ?? "C.UTF-8",
         LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
         TMPDIR: tmpdir,
+        SWARM_SCRIPT_SECCOMP: nativeSeccompPolicy(),
         SWARM_SCRIPT_TMPDIR: tmpdir,
         SWARM_SCRIPT_ARGS_FILE: argsFile,
         SWARM_SCRIPT_SOURCE_FILE: sourceFile,
@@ -217,7 +301,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
       };
 
       proc = registerProcessGroup(
-        Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
+        Bun.spawn(harnessCommand(harnessPath, input, harnessEnv, { user: uidLease?.user }), {
           // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
           // binary for argv[0] — the sandboxed command's `env -i` prelude is
           // what actually scrubs the child's environment down to `harnessEnv`
@@ -269,6 +353,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
     } finally {
       removeAbortListener?.();
       if (proc) await terminateProcessGroup(proc.pid);
+      await uidLease?.release();
       await Bun.$`rm -rf ${tmpdir}`;
     }
   }

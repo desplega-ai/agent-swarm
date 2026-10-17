@@ -1,6 +1,7 @@
 import { buildCtx } from "./ctx";
 import { patchFetchWithEgressSubstitution } from "./egress-secrets";
 import type { SwarmConfigPayload } from "./executors/types";
+import { installExecDenyFilter, parseSeccompPolicy } from "./sandbox-seccomp";
 import { ctxSignatureHintFor } from "./script-error-hints";
 import { SwarmConfig } from "./swarm-config";
 
@@ -117,6 +118,16 @@ try {
 
   const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();
   await Bun.write(userModulePath, sourceText);
+
+  // Deny exec (and ptrace-style access) before any user code can run. The
+  // harness itself never execs, so this changes nothing for framework code.
+  const seccompPolicy = parseSeccompPolicy(process.env.SWARM_SCRIPT_SECCOMP);
+  if (seccompPolicy !== "off") {
+    const seccomp = await installExecDenyFilter();
+    if (!seccomp.installed && seccompPolicy === "required") {
+      throw new Error(`Script sandbox: seccomp filter could not be installed (${seccomp.reason})`);
+    }
+  }
 
   if (startedFile) await Bun.write(startedFile, "1");
 

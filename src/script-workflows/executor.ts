@@ -13,6 +13,7 @@ import {
   signalProcessGroup,
   terminateProcessGroup,
 } from "../utils/process-group";
+import { chownForSandbox, leaseSandboxUid, type SandboxUidLease } from "../utils/sandbox-uid";
 import {
   buildSandboxedCommand,
   readStreamCapped,
@@ -344,9 +345,17 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       });
     });
 
+    let uidLease: SandboxUidLease | null = null;
     try {
       await listen(server, socketPath);
+      // After listen, so the capability socket is chowned too: connecting to
+      // a Unix socket needs write permission on the socket file.
+      uidLease = await leaseSandboxUid();
+      if (uidLease) await chownForSandbox(tmpdir, uidLease.user);
     } catch (error) {
+      await uidLease?.release();
+      for (const socket of sockets) socket.destroy();
+      await closeServer(server);
       await rm(tmpdir, { recursive: true, force: true });
       throw error;
     }
@@ -356,7 +365,8 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     // or API base URL; status, heartbeat, and ctx.swarm HTTP stay above it.
     const harnessEnv = {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
-      HOME: process.env.HOME ?? "/tmp",
+      // The API's own HOME is not readable by a sandbox uid.
+      HOME: uidLease ? tmpdir : (process.env.HOME ?? "/tmp"),
       LANG: process.env.LANG ?? "C.UTF-8",
       LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
       TMPDIR: tmpdir,
@@ -373,22 +383,28 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
 
     try {
       proc = registerProcessGroup(
-        Bun.spawn(buildSandboxedCommand(["bun", "run", harnessPath], harnessEnv), {
-          cwd: tmpdir,
-          detached: detachedProcessGroup,
-          // On POSIX, Bun.spawn only needs PATH itself to find the `sh` binary
-          // — the sandboxed command's `env -i` prelude scrubs the child down
-          // to `harnessEnv` above, so no secret rides on this outer env
-          // either. On win32 there is no such prelude, so `sandboxSpawnEnv`
-          // passes `harnessEnv` through directly instead — see
-          // `buildSandboxedCommand`'s win32 doc comment.
-          env: sandboxSpawnEnv(harnessEnv),
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "pipe",
-        }),
+        Bun.spawn(
+          buildSandboxedCommand(["bun", "run", harnessPath], harnessEnv, undefined, {
+            user: uidLease?.user,
+          }),
+          {
+            cwd: tmpdir,
+            detached: detachedProcessGroup,
+            // On POSIX, Bun.spawn only needs PATH itself to find the `sh` binary
+            // — the sandboxed command's `env -i` prelude scrubs the child down
+            // to `harnessEnv` above, so no secret rides on this outer env
+            // either. On win32 there is no such prelude, so `sandboxSpawnEnv`
+            // passes `harnessEnv` through directly instead — see
+            // `buildSandboxedCommand`'s win32 doc comment.
+            env: sandboxSpawnEnv(harnessEnv),
+            stdin: "ignore",
+            stdout: "ignore",
+            stderr: "pipe",
+          },
+        ),
       );
     } catch (error) {
+      await uidLease?.release();
       for (const socket of sockets) socket.destroy();
       await closeServer(server);
       await rm(tmpdir, { recursive: true, force: true });
@@ -411,6 +427,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     const exited = spawned.exited.then(async (processExitCode) => {
       clearInterval(heartbeat);
       await terminateProcessGroup(spawned.pid);
+      await uidLease?.release();
       let stderr = await stderrPromise;
       try {
         if (protocolFailure) throw protocolFailure;

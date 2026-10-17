@@ -33,6 +33,8 @@ Prefer portable `modelTier` (`smol` / `regular` / `smart` / `ultra`) for cross-h
 
 Architecture: API server owns the `scripts` + `script_versions` tables. Workers + the runtime invoke via HTTP. The runtime evaluates user-supplied TS in a `Bun.spawn` subprocess wrapped in `ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`, launched as `bun --no-orphans` (the harness dies with the API and SIGKILLs its whole descendant tree on exit; added by `buildSandboxedCommand` in `src/utils/sandboxed-process.ts`), a wall-clock AbortController (30s default; up to 5m where exposed), and a 1 MB stdout cap.
 
+When the API is root, every sandboxed child runs as a leased per-run uid (`src/utils/sandbox-uid.ts`; callers chown the tmpdir and release the lease), and the native harness installs an exec-deny seccomp filter before importing user code (`src/scripts-runtime/sandbox-seccomp.ts`). `/health` `meta.scripts.sandbox` reports the measured level.
+
 Config injection: agent identity + bearer + mcpBaseUrl flow as a JSON `SwarmConfigPayload` over the subprocess **stdin** — NOT env vars. Bearer is wrapped in `Redacted<string>` inside the script; user code never unwraps. `process.env` carries only Node/Bun defaults. Loader reads the bearer via `getApiKey()` from `src/utils/api-key.ts` (never raw env).
 
 FS modes: `'none'` = per-run tmpdir (v1 only); `'workspace-rw'` returns 501 in v1 (worker dispatch is v2).

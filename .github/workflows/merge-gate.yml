@@ -1006,6 +1006,7 @@ jobs:
         # against main's published (bytecode) worker-slim image, so a non-bytecode PR
         # build would show a fake ~130 MB delta.
         # See agent-fs docs/ci-metrics.md for the script contract.
+        # `smoke` legs load the image (every event) and run that script against it.
         # `cache-from` reads the amd64 BuildKit cache docker-and-deploy.yml pushes to
         # GHCR on main (public packages, so fork PRs read it anonymously). Read-only:
         # no cache-to here. A miss is non-fatal; buildx just builds cold.
@@ -1014,11 +1015,13 @@ jobs:
             target: ""
             metric: image.api
             timing: docker.api
+            smoke: scripts/smoke-api-sandbox.sh
             cache-from: type=registry,ref=ghcr.io/desplega-ai/agent-swarm:buildcache-server-amd64
           - dockerfile: Dockerfile.worker
             target: worker-slim
             metric: image.worker-slim
             timing: docker.worker-slim
+            smoke: ""
             cache-from: |
               type=registry,ref=ghcr.io/desplega-ai/agent-swarm-worker:buildcache-worker-slim-amd64
               type=registry,ref=ghcr.io/desplega-ai/agent-swarm-worker:buildcache-worker-amd64
@@ -1026,6 +1029,7 @@ jobs:
             target: ""
             metric: ""
             timing: docker.evals
+            smoke: ""
             cache-from: ""
 
     steps:
@@ -1046,9 +1050,10 @@ jobs:
           file: ./${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           push: false
-          # Only the image-size step below reads the loaded image, and it runs on
-          # pull_request only. merge_group runs skip the ~90s export + import.
-          load: ${{ matrix.metric != '' && github.event_name == 'pull_request' }}
+          # The smoke step reads the loaded image on every event. Otherwise only the
+          # image-size step does, on pull_request only, so merge_group runs of the
+          # other legs skip the ~90s export + import.
+          load: ${{ matrix.smoke != '' || (matrix.metric != '' && github.event_name == 'pull_request') }}
           tags: test-image:latest
           cache-from: ${{ matrix.cache-from }}
 
@@ -1088,6 +1093,10 @@ jobs:
               actions:[{name:$name, group:"build", durationMs:$dur, status:$status}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
+
+      - name: Smoke-test the built image
+        if: matrix.smoke != ''
+        run: bash ${{ matrix.smoke }} test-image:latest
 
       # Same-sha calls merge server-side, so each matrix leg posts its own metric
       # and they all land in ONE sticky "Docker image sizes" PR comment.

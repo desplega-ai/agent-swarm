@@ -12,6 +12,8 @@
  * (src/scripts-runtime/executors/native.ts).
  */
 
+import { type SandboxUser, setprivPrefix } from "./sandbox-uid";
+
 export interface SandboxResourceLimits {
   /** RLIMIT_AS ceiling, in MB. */
   virtualMemoryMb: number;
@@ -127,6 +129,7 @@ function buildSandboxedCommandCore(
   env: Readonly<Record<string, string>>,
   limits: SandboxResourceLimits,
   profile: { useBashShell: boolean; applyInterpreterFloor: boolean },
+  user?: SandboxUser,
 ): string[] {
   if (process.platform === "win32") return [...innerCommand];
 
@@ -158,23 +161,38 @@ function buildSandboxedCommandCore(
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join(" ");
   const quotedInner = withBunNoOrphans(innerCommand).map(shellQuote).join(" ");
+  // The ulimits above are set before the drop, so they bind the sandbox uid
+  // too. RLIMIT_NPROC then counts only that uid's processes.
+  const dropUid = user ? `${setprivPrefix(user).map(shellQuote).join(" ")} ` : "";
 
   return [
     useBashShell ? "bash" : "sh",
     "-c",
-    `${ulimits}; exec env -i ${envAssignments} ${quotedInner}`,
+    `${ulimits}; exec ${dropUid}env -i ${envAssignments} ${quotedInner}`,
   ];
 }
+
+export type SandboxSpawnOptions = {
+  /** Run the child as this uid/gid (from `leaseSandboxUid`). The API must be root. */
+  user?: SandboxUser;
+};
 
 export function buildSandboxedCommand(
   innerCommand: readonly string[],
   env: Readonly<Record<string, string>>,
   limits: SandboxResourceLimits = DEFAULT_SANDBOX_LIMITS,
+  options: SandboxSpawnOptions = {},
 ): string[] {
-  return buildSandboxedCommandCore(innerCommand, env, limits, {
-    useBashShell: true,
-    applyInterpreterFloor: usesInterpreterSandboxProfile(innerCommand),
-  });
+  return buildSandboxedCommandCore(
+    innerCommand,
+    env,
+    limits,
+    {
+      useBashShell: true,
+      applyInterpreterFloor: usesInterpreterSandboxProfile(innerCommand),
+    },
+    options.user,
+  );
 }
 
 /**

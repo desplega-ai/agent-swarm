@@ -121,6 +121,24 @@ describe("handleCore auth middleware (route() auth.apiKey=false is honored)", ()
     const res = await fetch(`http://localhost:${port}/health`);
     expect(res.status).toBe(200);
   });
+
+  test("/health reports the script sandbox under meta.scripts only", async () => {
+    const body = (await (await fetch(`http://localhost:${port}/health`)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body.status).toBe("ok");
+    expect(body.meta).toEqual({
+      scripts: {
+        sandbox: expect.stringMatching(/^(pending|hardened|uid-only|none)$/),
+        scope: "native-executor",
+        execDeny: expect.stringMatching(/^(best-effort|required|off)$/),
+      },
+    });
+    for (const legacy of ["scriptSandbox", "scriptSandboxScope", "scriptSandboxExecDeny"]) {
+      expect(body).not.toHaveProperty(legacy);
+    }
+  });
 });
 
 describe("handleCore auth middleware (no API_KEY configured)", () => {

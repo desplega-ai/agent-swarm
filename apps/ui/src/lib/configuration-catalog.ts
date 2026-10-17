@@ -1482,6 +1482,46 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "10",
       },
       {
+        key: "SCRIPT_NATIVE_REQUIRE_ISOLATION",
+        label: "Require native script isolation",
+        description:
+          "Refuse native script runs unless the sandbox is hardened: a separate sandbox user plus the exec-deny filter. With the exec-deny filter also off, it refuses every native run. /health reports the level as meta.scripts.sandbox; it covers native script runs only, not durable runs or workflow script nodes.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#native-script-sandbox`,
+      },
+      {
+        key: "SCRIPT_NATIVE_EXEC_DENY",
+        label: "Native script exec-deny filter",
+        description:
+          "Stop native scripts from starting other programs (Bun.spawn, Bun.$, stdlib.grep). Turn off only to recover a script that needs it; the sandbox level then drops below hardened. /health reports the policy as meta.scripts.execDeny.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}ui/configuration#native-script-sandbox`,
+      },
+      {
+        key: "SCRIPT_SANDBOX_UID_BASE",
+        label: "Script sandbox first uid",
+        description:
+          "First uid of the native script sandbox pool, used when the API runs as root. Each concurrent run gets its own uid; workflow script nodes share the uid just below it. Restart the API after changing this setting.",
+        kind: "number",
+        defaultValue: "61000",
+        placeholder: "61000",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#native-script-sandbox`,
+      },
+      {
+        key: "SCRIPT_SANDBOX_UID_POOL_SIZE",
+        label: "Script sandbox uid pool size",
+        description:
+          "Number of sandbox uids (1–1024). Runs wait for a free uid when all are in use. Restart the API after changing this setting.",
+        kind: "number",
+        defaultValue: "64",
+        placeholder: "64",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#native-script-sandbox`,
+      },
+      {
         key: "SEED_AUTOMATIONS_ENABLED",
         label: "Auto-enable zero-config seeded automations",
         description:
