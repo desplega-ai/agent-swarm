@@ -9,6 +9,7 @@ import {
   DEFAULT_SCRIPT_RESOURCES,
   type EgressSecretEntry,
   type ExecutorOutput,
+  type ScriptAgentFsDescriptor,
   type ScriptFsMode,
   type ScriptResourcePolicy,
   type SwarmConfigPayload,
@@ -48,6 +49,7 @@ export type RunScriptInput = {
   failedBindings?: FailedCredentialBinding[];
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
+  agentFs?: ScriptAgentFsDescriptor;
 };
 
 export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr"> & {
@@ -79,6 +81,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
     failedBindings: input.failedBindings ?? [],
     apiConnections: input.apiConnections ?? [],
     mcpConnections: input.mcpConnections ?? [],
+    ...(input.agentFs ? { agentFs: input.agentFs } : {}),
   };
 }
 

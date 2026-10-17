@@ -15,6 +15,14 @@
  * still goes stale. A background job that never settles is bounded too: the
  * keepalive stops once the session has emitted nothing for
  * `BACKGROUND_KEEPALIVE_MAX_IDLE_MS`.
+ *
+ * The same set decides when the session may end. Claude Code only counts its
+ * background-wait ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, 10 minutes by
+ * default) once its input is closed, and then stops live subagents. So a result
+ * that arrives while background work is live must not close input: the session
+ * stays open, Claude takes the task_notification turn, and the result after the
+ * set empties ends it. `holdInputForBackgroundWork` makes that call and bounds
+ * the hold by the same idle cap.
  */
 
 /** Ping interval; well inside the 15-minute stale-session threshold. */
@@ -38,6 +46,8 @@ export class ClaudeBackgroundKeepalive {
   private timer: ReturnType<typeof setInterval> | undefined;
   private lastMessageAt = Date.now();
   private stopped = false;
+  private holdTimer: ReturnType<typeof setTimeout> | undefined;
+  private releaseHold: (() => void) | undefined;
   private readonly intervalMs: number;
   private readonly maxIdleMs: number;
 
@@ -63,11 +73,48 @@ export class ClaudeBackgroundKeepalive {
     else this.clearTimer();
   }
 
+  /**
+   * Call on a result that would otherwise close Claude's input. Returns false
+   * when no non-ambient background task is live: close input now. Returns true
+   * when one is: keep input open. `release` closes it later if the session then
+   * emits nothing for the idle cap; the next result decides otherwise.
+   */
+  holdInputForBackgroundWork(release: () => void): boolean {
+    if (this.stopped || this.liveTaskIds.length === 0) {
+      this.clearHold();
+      return false;
+    }
+    this.releaseHold = release;
+    this.armHold();
+    return true;
+  }
+
   /** Stop pinging for good; call when the session ends. */
   stop(): void {
     this.stopped = true;
     this.liveTaskIds = [];
     this.clearTimer();
+    this.clearHold();
+  }
+
+  private armHold(): void {
+    if (this.holdTimer !== undefined) clearTimeout(this.holdTimer);
+    const remaining = Math.max(0, this.lastMessageAt + this.maxIdleMs - Date.now());
+    this.holdTimer = setTimeout(() => {
+      this.holdTimer = undefined;
+      // Messages since arming moved the deadline; wait out the rest.
+      if (Date.now() - this.lastMessageAt < this.maxIdleMs) return this.armHold();
+      const release = this.releaseHold;
+      this.clearHold();
+      release?.();
+    }, remaining);
+  }
+
+  private clearHold(): void {
+    this.releaseHold = undefined;
+    if (this.holdTimer === undefined) return;
+    clearTimeout(this.holdTimer);
+    this.holdTimer = undefined;
   }
 
   private start(): void {

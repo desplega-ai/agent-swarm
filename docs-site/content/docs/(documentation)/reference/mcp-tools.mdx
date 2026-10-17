@@ -1159,9 +1159,11 @@ A script may also export a Zod schema named `argsSchema` describing its expected
 
 There is no ambient task context: pass values such as `taskId` through `args`.
 Inline and named scripts receive `ctx.swarm`, registered `ctx.api` / `ctx.mcp`
-connection clients, `ctx.stdlib`, and `ctx.logger`. Durable
-`launch-script-run` workflows instead receive `ctx.run` and journaled
-`ctx.step.*` helpers, with no connection clients or `ctx.swarm.config`. See
+connection clients, `ctx.fs` / `ctx.sh` (the agent's agent-fs drive at `/afs`
+plus scratch memory, and a bash interpreter over them), `ctx.stdlib`, and
+`ctx.logger`. Durable `launch-script-run` workflows instead receive `ctx.run`
+and journaled `ctx.step.*` helpers, with no connection clients, no `ctx.fs` /
+`ctx.sh`, and no `ctx.swarm.config`. See
 [Scripts runtime](/docs/guides/scripts-runtime) for the full authoring contract.
 
 ### script-delete

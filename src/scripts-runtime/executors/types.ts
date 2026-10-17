@@ -5,6 +5,12 @@ export type ScriptFsMode = "none" | "workspace-rw";
 
 export type EgressSecretEntry = ResolvedCredentialBinding;
 
+/**
+ * The invoking agent's default agent-fs drive, mounted by `ctx.fs` / `ctx.sh`.
+ * Carries no secret: the agent's key rides as a credential-broker placeholder.
+ */
+export type ScriptAgentFsDescriptor = { apiUrl: string; orgId: string; driveId: string };
+
 export type SwarmConfigPayload = {
   system: {
     apiKey: { value: string; isSecret: true };
@@ -26,6 +32,7 @@ export type SwarmConfigPayload = {
   failedBindings?: FailedCredentialBinding[];
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
+  agentFs?: ScriptAgentFsDescriptor;
 };
 
 export type ScriptResourcePolicy = {

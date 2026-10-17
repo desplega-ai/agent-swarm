@@ -248,6 +248,12 @@ async function dispatchCall(
     const client = own(hostCtx[kind], first);
     return callable(own(client, name), `ctx.${kind}.${first}.${name}`)(...args);
   }
+  if (kind === "fs" && first && rest.length === 0) {
+    return callable(own(hostCtx.fs, first), `ctx.fs.${first}`)(...args);
+  }
+  if (kind === "sh" && first === undefined) {
+    return hostCtx.sh(...(args as Parameters<RuntimeCtx["sh"]>));
+  }
   throw new Error(`unknown quickjs host call: ${path}`);
 }
 
@@ -494,11 +500,14 @@ async function evaluateJob(
     swarmConfig: config,
     apiConnections: job.configPayload.apiConnections,
     mcpConnections: job.configPayload.mcpConnections,
+    agentFs: job.configPayload.agentFs,
+    signal: host.signal,
   });
   const shape = {
     hasRuntimeInstanceId: config.runtimeInstanceId !== undefined,
     api: Object.fromEntries(Object.entries(hostCtx.api).map(([slug, c]) => [slug, Object.keys(c)])),
     mcp: Object.fromEntries(Object.entries(hostCtx.mcp).map(([slug, c]) => [slug, Object.keys(c)])),
+    fs: Object.keys(hostCtx.fs),
   };
   // Accept both shapes, like eval-harness: callers may pass already-serialized JSON.
   const args = typeof job.args === "string" ? JSON.parse(job.args) : (job.args ?? null);
