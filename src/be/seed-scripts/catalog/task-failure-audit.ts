@@ -73,6 +73,7 @@ export default async function taskFailureAudit(args: any, ctx: any) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const res: any = await ctx.swarm.task_list({
     status: "failed",
+    includeHeartbeat: true,
     createdAfter: since,
     limit,
   });
