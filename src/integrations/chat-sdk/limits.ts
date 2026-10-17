@@ -19,6 +19,30 @@ export function chatMessageLimit(adapter: string): number {
   return CHAT_MESSAGE_LIMITS[adapter] ?? FALLBACK_LIMIT;
 }
 
+const MB = 1024 * 1024;
+
+/**
+ * Per-file outbound upload ceiling, in bytes. Every adapter is capped at
+ * 50 MB, the task attachment cap, because a file is read into memory before
+ * it is sent. Telegram's Bot API takes 50 MB per upload (photos 10 MB, see
+ * `TELEGRAM_PHOTO_LIMIT`); Discord takes 10 MB without a server boost.
+ */
+const CHAT_UPLOAD_LIMITS: Record<string, number> = {
+  telegram: 50 * MB,
+  discord: 10 * MB,
+};
+const FALLBACK_UPLOAD_LIMIT = 50 * MB;
+
+/** Telegram sends a larger image with `sendDocument` instead of `sendPhoto`. */
+export const TELEGRAM_PHOTO_LIMIT = 10 * MB;
+
+export function chatUploadLimit(adapter: string): number {
+  return CHAT_UPLOAD_LIMITS[adapter] ?? FALLBACK_UPLOAD_LIMIT;
+}
+
+/** Most files one platform message can carry (Telegram media groups, Discord). */
+export const CHAT_FILES_PER_MESSAGE = 10;
+
 /**
  * Split `text` into chunks of at most `limit` characters. A chunk ends at the
  * last line break inside the window, else at the last space, else at the

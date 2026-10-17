@@ -2,8 +2,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentCurrentTask, getTaskById } from "@/be/db";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
-import { ChatAdapterUnavailableError, postChatMessage } from "@/integrations/chat-sdk/outbound";
+import {
+  ChatAdapterUnavailableError,
+  postChatMessage,
+  unsentFilesSummary,
+} from "@/integrations/chat-sdk/outbound";
+import { resolveChatAttachmentRefs } from "@/integrations/chat-sdk/outbound-files";
 import { chatThreadOfContextKey } from "@/tasks/context-key";
+import { chatAttachmentsSchema } from "@/tools/chat-access";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerChatReplyTool = (server: McpServer) => {
@@ -12,19 +18,23 @@ export const registerChatReplyTool = (server: McpServer) => {
     {
       title: "Reply in the chat thread of this task",
       description:
-        "Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user or a short progress note on long work. Markdown is supported; long text is split into several messages.",
+        "Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it.",
       annotations: { openWorldHint: true },
       inputSchema: z.object({
         text: z.string().min(1).max(20_000).describe("Markdown text to post to the thread."),
+        attachments: chatAttachmentsSchema,
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
         messageId: z.string().optional(),
         adapter: z.string().optional(),
         threadId: z.string().optional(),
+        unsentFiles: z
+          .array(z.looseObject({ name: z.string().optional(), reason: z.string().optional() }))
+          .optional(),
       }),
     },
-    async ({ text }, requestInfo) => {
+    async ({ text, attachments }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr("Agent ID not found.");
       const data = { yourAgentId: requestInfo.agentId };
 
@@ -46,21 +56,33 @@ export const registerChatReplyTool = (server: McpServer) => {
         );
       }
 
+      const resolved = await resolveChatAttachmentRefs(
+        attachments ?? [],
+        task.id,
+        requestInfo.agentId,
+      );
+      if ("error" in resolved) return toolErr(resolved.error, { data });
+
       try {
         const sent = await postChatMessage({
           adapter: thread.adapter,
           threadId: thread.threadId,
           text,
           taskId: task.id,
+          files: resolved.files,
         });
-        return toolOk(`Posted to ${thread.adapter} thread ${sent.threadId}.`, {
-          data: {
-            ...data,
-            messageId: sent.messageIds.at(-1),
-            adapter: sent.adapter,
-            threadId: sent.threadId,
+        return toolOk(
+          `Posted to ${thread.adapter} thread ${sent.threadId}.${unsentFilesSummary(sent.unsentFiles)}`,
+          {
+            data: {
+              ...data,
+              messageId: sent.messageIds.at(-1),
+              adapter: sent.adapter,
+              threadId: sent.threadId,
+              unsentFiles: sent.unsentFiles,
+            },
           },
-        });
+        );
       } catch (error) {
         const message = errorMessage(error);
         return toolErr(
