@@ -62,6 +62,7 @@ function commentSafe(value: string): string {
 }
 
 function tsTypeForColumn(column: Pick<ColumnDef, "kind" | "enum">): string {
+  if (column.kind === "json") return "unknown";
   if (column.kind !== "enum") return column.kind === "date" ? "string" : column.kind;
   return column.enum?.map((value) => JSON.stringify(value)).join(" | ") || "string";
 }
