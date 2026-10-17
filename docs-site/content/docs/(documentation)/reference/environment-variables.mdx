@@ -314,6 +314,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_CONCLUSION_SETTLE_SEC` | Quiet seconds after a closure goes fully terminal before its conclusion card posts (default: `10`) |
 | `SLACK_CONCLUSION_TIMEOUT_MIN` | Idle minutes before a closure concludes with unfinished work and a `warning` reaction (default: `240`) |
 | `SLACK_TREE_STALL_MIN` | Minutes without a task update before the thread tree shows a stalled glyph for that task (default: `15`) |
+| `SLACK_STATUS_ICON_COMPLETED` | "Done" glyph in thread text: task tree, thread header and completed outcome cards. Bare name or `:name:`, rendered as `:name:`. Unset or invalid keeps ✅. A name the workspace lacks shows as literal `:name:`. See [Slack: Acceptance reactions](/docs/integrations/slack#acceptance-reactions) |
 | `SLACK_ALLOWED_EMAIL_DOMAINS` | Comma-separated email domains |
 | `SLACK_ALLOWED_USER_IDS` | Comma-separated user IDs to always allow |
 | `ADDITIVE_SLACK` | Set to `true` to enable non-mention thread message buffering and batching |
