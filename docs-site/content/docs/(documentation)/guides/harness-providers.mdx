@@ -616,6 +616,10 @@ Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeTh
 
 **What your adapter owes the task:** emit `session_init` as early as possible (so the runner can persist the provider session id), emit `tool_start`/`tool_end` faithfully (so the UI shows the agent's work), and emit a `result` with populated `CostData` before your `waitForCompletion()` resolves.
 
+OpenCode's native `skill` tool passes `{ id: "<skill-name>" }`. Its adapter emits
+`tool_start` on `session.tool.called`, after input is available, and adds `name`
+to those arguments so `skill.invoke` telemetry records the skill name.
+
 ### Session-summary transcript sourcing
 
 Memory self-rating hints and server-side citation ratings (`implicit-citation,explicit-self`) default on across harnesses when `MEMORY_RATERS` is unset, including existing deployments. Set `MEMORY_RATERS=` to disable raters; LLM ratings still require an explicit `llm` entry. Config reload preserves the empty opt-out, and deleting an override restores the deployment value (or the runtime default when unset).

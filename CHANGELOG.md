@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-17
+
+### Added
+- Model profiles: a named harness + model + effort that Lead picks per task (`send-task` / `task-action` `profile`) or sets as an agent default; resolved at claim. New `list-model-profiles` tool, operator-only profile API, and a migration that turns each `MODEL_OVERRIDE` into a profile (#2163).
+- Heartbeat: seeded `heartbeat-jev-gate` script for `HEARTBEAT_CHECKLIST_GATE_SCRIPT` skips checklist ticks with nothing to do; `request-human-input` gains `detached` (#2182).
+- Azure DevOps: opt-in work item state transitions (`AZURE_DEVOPS_WORKITEM_STATE_STARTED` / `_DONE`) and workflow triggers (#2169).
+- Slack: `SLACK_STATUS_ICON_COMPLETED` sets the "done" glyph in thread text (#2207).
+- Scripts: quickjs runtime gains URL, TextEncoder/TextDecoder, `setInterval`, crypto and non-string fetch bodies, plus a compat lint at upsert (#2115).
+- Workflows: raw-llm nodes route registry-provider models like `nan/*` to their own endpoint (#2189).
+- AgentMail: inbox and sender filters accept full addresses (#2191).
+- Extensions: `comms-adherence-gate` ships as a catalog template; the UI shows extensions as cards with a details sheet (#2195, #2196).
+
+### Changed
+- agent-fs pins bumped to 0.16.4, 0.17.0 and 0.17.3; worker image bumps for claude-code, codex, opencode, amp, grok, qwen, acp, dsh and anthropic-sdk (#2188, #2208, #2179, #2190).
+- Docs: heartbeat spec synced (#2181).
+
+### Fixed
+- Scheduler: deferred-task ceilings honour extension hooks (#2194).
+- Slack: a buffer flush blocked by a pre-task-create hook is handled cleanly (#2109).
+- Pi: per-call context usage is reported as progress, not compaction (#2183).
+- Scripts: `extract-args-schema` zod shims are staged outside the cwd snapshot (#2185).
+- Pages: keys typed in the feedback overlay no longer reach page scripts (#2187).
+- CI: stale-branch migration checks compare against the base ref; migration tests get more time under shard load (#2197, #2204).
+
 ## [2.0.0] - 2026-10-16
 
 ### Removed
