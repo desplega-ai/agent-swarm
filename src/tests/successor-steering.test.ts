@@ -1,4 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -18,12 +24,22 @@ import {
   startTask,
   supersedeTask,
 } from "../be/db";
+import {
+  type ApiConfig,
+  createSteeringDispatchState,
+  pollAndDispatchSteering,
+} from "../commands/runner";
 import { getRebootAffectedTasks, runRebootSweep } from "../heartbeat/heartbeat";
+import { type CodexHookConfig, collectDeliverableSteering } from "../hooks/codex-hook";
+import { handleTasks } from "../http/tasks";
+import { getPathSegments, parseQueryParams } from "../http/utils";
+import type { ProviderSession, SteerDeliveryResult } from "../providers/types";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { createResumeFollowUp } from "../tasks/worker-follow-up";
 import { acceptSteerHandler } from "../tools/accept-steer";
 import { registerDeferTaskTool } from "../tools/defer-task";
 import type { AgentTask } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 // A steer that reached a task but was never accepted moves to the task that
 // carries the work forward once the original ends. The successor's own session
@@ -265,5 +281,169 @@ describe("successor tasks take over unhandled steering", () => {
     });
     await runSession(w2.id, workerId);
     expect((await accept(workerId, message.id)).ok).toBe(true);
+  });
+});
+
+// The same hand-offs, driven through the worker's real delivery transport (the
+// runner poller and the codex hook) against the real HTTP routes. The runner
+// keeps one dispatch state for its whole process, and a predecessor's session
+// can still be live after its task row turned terminal.
+describe("successor hand-off at the delivery boundary", () => {
+  let server: Server;
+  let apiUrl: string;
+  const originalSteeringEnabled = process.env.STEERING_ENABLED;
+
+  beforeAll(async () => {
+    process.env.STEERING_ENABLED = "true";
+    server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+      res.setHeader("Content-Type", "application/json");
+      const url = req.url ?? "";
+      const callerAgentId = req.headers["x-agent-id"] as string | undefined;
+      if (await handleTasks(req, res, getPathSegments(url), parseQueryParams(url), callerAgentId)) {
+        return;
+      }
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: "Not found" }));
+    });
+    apiUrl = `http://127.0.0.1:${await listenOnFreePort(server)}`;
+  });
+
+  afterAll(async () => {
+    if (originalSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
+    else process.env.STEERING_ENABLED = originalSteeringEnabled;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  const runnerConfig = (): ApiConfig => ({ apiUrl, apiKey: "test-key", agentId: workerId });
+  const hookConfig = (taskId: string): CodexHookConfig => ({
+    apiUrl,
+    apiKey: "test-key",
+    agentId: workerId,
+    taskId,
+  });
+
+  /** A live session that records every steer it receives. */
+  function recordingSession(
+    received: string[],
+    deliver: () => Promise<SteerDeliveryResult> = async () => ({
+      delivered: true,
+      mode: "queue",
+    }),
+  ): ProviderSession {
+    return {
+      sessionId: crypto.randomUUID(),
+      onEvent: () => {},
+      waitForCompletion: async () => ({ exitCode: 0, isError: false }),
+      abort: async () => {},
+      deliverSteering: async (delivery) => {
+        received.push(delivery.text);
+        return await deliver();
+      },
+    };
+  }
+
+  async function sameAgentResume(parentId: string): Promise<AgentTask> {
+    const resume = await supersede(parentId);
+    expect(await claimTask(resume.id, workerId)).not.toBeNull();
+    return resume;
+  }
+
+  test("runner: a hand-off with shared dispatch state delivers to the successor exactly once", async () => {
+    const parent = await inProgressTask();
+    const message = await steer(parent.id, "Runner hand-off steer.", "pending");
+    // One runner process, one dispatch state, two task sessions.
+    const state = createSteeringDispatchState();
+    const toParent: string[] = [];
+    const toResume: string[] = [];
+
+    await pollAndDispatchSteering(runnerConfig(), parent.id, recordingSession(toParent), state);
+    expect(toParent).toHaveLength(1);
+
+    const resume = await sameAgentResume(parent.id);
+    expect(await getSteeringMessageById(message.id)).toMatchObject({
+      taskId: resume.id,
+      status: "pending",
+    });
+
+    const resumeSession = recordingSession(toResume);
+    await pollAndDispatchSteering(runnerConfig(), resume.id, resumeSession, state);
+    await pollAndDispatchSteering(runnerConfig(), resume.id, resumeSession, state);
+
+    expect(toResume).toHaveLength(1);
+    expect(toResume[0]).toContain(message.id);
+    expect(await getSteeringMessageById(message.id)).toMatchObject({
+      taskId: resume.id,
+      status: "delivered",
+    });
+    expect((await accept(workerId, message.id)).ok).toBe(true);
+  });
+
+  test("runner: a predecessor delivery in flight across the hand-off leaves the row to the successor", async () => {
+    const parent = await inProgressTask();
+    const message = await steer(parent.id, "In flight during supersede.", "pending");
+    const state = createSteeringDispatchState();
+    const toParent: string[] = [];
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const deliveryStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+
+    const parentDispatch = pollAndDispatchSteering(
+      runnerConfig(),
+      parent.id,
+      recordingSession(toParent, async () => {
+        started();
+        await released;
+        return { delivered: true, mode: "queue" };
+      }),
+      state,
+    );
+    await deliveryStarted;
+    const resume = await sameAgentResume(parent.id);
+    release();
+    await parentDispatch;
+
+    // The parent's late callback must not mark the successor's row delivered.
+    expect(await getSteeringMessageById(message.id)).toMatchObject({
+      taskId: resume.id,
+      status: "pending",
+    });
+    const toResume: string[] = [];
+    await pollAndDispatchSteering(runnerConfig(), resume.id, recordingSession(toResume), state);
+    expect(toResume).toHaveLength(1);
+    expect((await accept(workerId, message.id)).ok).toBe(true);
+  });
+
+  test("codex hook: a live predecessor's hook takes nothing after the hand-off", async () => {
+    const parent = await inProgressTask();
+    const message = await steer(parent.id, "Hook hand-off steer.", "pending");
+
+    expect(await collectDeliverableSteering(hookConfig(parent.id))).toHaveLength(1);
+
+    const resume = await sameAgentResume(parent.id);
+    // The parent's session is still live and its hook fires again.
+    expect(await collectDeliverableSteering(hookConfig(parent.id))).toEqual([]);
+    expect(await getSteeringMessageById(message.id)).toMatchObject({
+      taskId: resume.id,
+      status: "pending",
+    });
+
+    const toResume = await collectDeliverableSteering(hookConfig(resume.id));
+    expect(toResume).toHaveLength(1);
+    expect(toResume[0]).toContain(message.id);
+    expect((await accept(workerId, message.id)).ok).toBe(true);
+  });
+
+  test("codex hook: without a task id the hook delivers nothing", async () => {
+    const parent = await inProgressTask();
+    const message = await steer(parent.id, "No task id, no delivery.", "pending");
+    const { taskId: _omit, ...agentWide } = hookConfig(parent.id);
+
+    expect(await collectDeliverableSteering(agentWide)).toEqual([]);
+    expect((await getSteeringMessageById(message.id))?.status).toBe("pending");
   });
 });

@@ -8,7 +8,8 @@
  * This hook runs inside the codex lifecycle
  * (registered for SessionStart / PostToolUse / Stop via the managed
  * `/etc/codex/requirements.toml` in the worker image), polls the API for
- * pending steering rows, marks them `delivered`, and injects the rendered
+ * the pending steering rows of its own task (`AGENT_SWARM_TASK_ID`; no task
+ * id, no delivery), marks them `delivered`, and injects the rendered
  * envelope into the model's context:
  *
  *   - SessionStart / PostToolUse → `hookSpecificOutput.additionalContext`
@@ -49,6 +50,8 @@ export interface CodexHookConfig {
   apiUrl: string;
   apiKey: string;
   agentId: string;
+  /** The task this session runs (`AGENT_SWARM_TASK_ID`). Without it the hook delivers nothing. */
+  taskId?: string;
 }
 
 export function resolveCodexHookConfig(
@@ -58,12 +61,20 @@ export function resolveCodexHookConfig(
   const apiKey = getApiKey(env);
   const apiUrl = getMcpBaseUrl();
   if (!agentId || !apiKey || !apiUrl) return null;
-  return { apiUrl, apiKey, agentId };
+  const taskId = env.AGENT_SWARM_TASK_ID || undefined;
+  return { apiUrl, apiKey, agentId, ...(taskId ? { taskId } : {}) };
 }
 
 /**
- * Fetch the agent's pending steering rows, mark each `delivered`, and return
- * the rendered envelopes of the ones whose delivered-POST succeeded.
+ * Fetch this session's task's pending steering rows, mark each `delivered`,
+ * and return the rendered envelopes of the ones whose delivered-POST
+ * succeeded.
+ *
+ * Scoped to `config.taskId`, never agent-wide: a task that has ended can hand
+ * its rows to a successor for the same agent while this session is still
+ * running, and those rows belong to the successor's session. The delivered
+ * POST carries the same `taskId`, so a row moved mid-hook answers 409 and is
+ * not injected.
  *
  * Any error yields an empty result — a hook must never take the harness down
  * over steering, and `pending` rows are retried on the next lifecycle event.
@@ -72,6 +83,8 @@ export async function collectDeliverableSteering(
   config: CodexHookConfig,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string[]> {
+  const taskId = config.taskId;
+  if (!taskId) return [];
   const headers = {
     Authorization: `Bearer ${config.apiKey}`,
     "X-Agent-ID": config.agentId,
@@ -79,10 +92,13 @@ export async function collectDeliverableSteering(
 
   let messages: SteeringMessage[];
   try {
-    const response = await fetchImpl(`${config.apiUrl}/api/steering-messages`, {
-      headers,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    const response = await fetchImpl(
+      `${config.apiUrl}/api/steering-messages?taskId=${encodeURIComponent(taskId)}`,
+      {
+        headers,
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      },
+    );
     if (!response.ok) return [];
     const data = (await response.json()) as { messages?: SteeringMessage[] };
     messages = (data.messages ?? []).filter((message) => message.status === "pending");
@@ -101,7 +117,7 @@ export async function collectDeliverableSteering(
         {
           method: "POST",
           headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "queue" }),
+          body: JSON.stringify({ mode: "queue", taskId }),
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         },
       );

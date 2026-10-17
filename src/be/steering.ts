@@ -24,6 +24,9 @@ import {
   resumeTask,
 } from "./db";
 
+/** 409 body for a worker callback about a row that moved to a successor task. */
+export const STEERING_MOVED_ERROR = "Steering message moved to another task";
+
 export class SteeringRequestError extends Error {
   constructor(
     message: string,
@@ -181,6 +184,7 @@ export async function promotePendingSteeringForTask(
 export async function markSteeringUndeliverable(
   id: string,
   reason: string,
+  expectedTaskId?: string,
 ): Promise<MarkSteeringUndeliverableResult> {
   if (!reason.trim()) {
     throw new SteeringRequestError("Undeliverable reason must not be empty", 400);
@@ -190,6 +194,11 @@ export async function markSteeringUndeliverable(
     const message = await getSteeringMessageById(id);
     if (!message) {
       throw new SteeringRequestError("Steering message not found", 404);
+    }
+    // A predecessor session's late rejection must not promote a row its
+    // successor now owns.
+    if (expectedTaskId && message.taskId !== expectedTaskId) {
+      throw new SteeringRequestError(STEERING_MOVED_ERROR, 409);
     }
     if (message.status !== "pending") {
       return {
@@ -220,10 +229,13 @@ export async function markSteeringUndeliverable(
  * work (defer-task wake-up, reboot-sweep retry, resume follow-up).
  *
  * Each row moves to the successor, so its assignee is the one `accept-steer`
- * authorizes. A `delivered` row reached a session that has ended, so it goes
- * back to `pending` and the successor's session receives it through normal
- * live delivery. Nothing is copied into task text: one row, one delivery path.
- * Handled, promoted and cancelled rows stay on the predecessor.
+ * authorizes. A `delivered` row goes back to `pending` so the successor's
+ * session receives it. The predecessor's session may still be running at this
+ * point; worker delivery is scoped to the session's own task (poll filter and
+ * the `taskId` fence on the delivered/undeliverable callbacks), so that
+ * session can no longer take or settle a moved row. Nothing is copied into
+ * task text: one row, one delivery path. Handled, promoted and cancelled rows
+ * stay on the predecessor.
  *
  * Never throws: losing the hand-off must not block creating the successor.
  */

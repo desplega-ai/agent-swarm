@@ -12748,6 +12748,7 @@ export interface paths {
                     "application/json": {
                         /** @enum {string} */
                         mode: "steer" | "queue";
+                        taskId?: string;
                     };
                 };
             };
@@ -12783,6 +12784,15 @@ export interface paths {
                 };
                 /** @description Agent or steering message not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message moved to another task */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -12891,6 +12901,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         reason: string;
+                        taskId?: string;
                     };
                 };
             };
@@ -12927,6 +12938,15 @@ export interface paths {
                 };
                 /** @description Agent or steering message not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message moved to another task */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
