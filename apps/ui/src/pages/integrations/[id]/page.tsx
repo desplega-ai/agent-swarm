@@ -5,6 +5,7 @@ import {
   Bug,
   ChartLine,
   Cloud,
+  Database,
   ExternalLink,
   GitBranch,
   Github,
@@ -103,6 +104,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "key-round": KeyRound,
   "chart-line": ChartLine,
   cloud: Cloud,
+  database: Database,
 };
 
 function resolveIcon(iconKey: string): LucideIcon {
@@ -254,7 +256,11 @@ function IntegrationDetailInner({
     await Promise.allSettled(
       autoInstallSkills.map((s) =>
         installRemoteSkill
-          .mutateAsync({ sourceRepo: s.templateRepo!, sourcePath: s.templatePath })
+          .mutateAsync({
+            sourceRepo: s.templateRepo!,
+            sourcePath: s.templatePath,
+            scope: s.installScope,
+          })
           .then(() => {
             toast.success(`Skill "${s.name}" installed automatically.`);
           })

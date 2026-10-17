@@ -103,7 +103,7 @@ describe("scrubSecrets — env-based replacement", () => {
       version: SCRUBBER_RULES_VERSION,
       keyVars: [...openAICompatibleKeyVars()].sort(),
     }).toEqual({
-      version: 8,
+      version: 9,
       keyVars: ["AI_GATEWAY_API_KEY", "HELMCODE_API_KEY", "HELMCODE_API_NAN", "NAN_API_KEY"],
     });
   });
@@ -302,6 +302,38 @@ describe("scrubSecrets — regex patterns", () => {
     const out = scrubSecrets("jira=ATATT3xFfGF0abcdefghijklmnopqrstuvwxyz");
     expect(out).toContain("[REDACTED:atlassian_token]");
     expect(out).not.toContain("ATATT3xFfGF0");
+  });
+
+  test("redacts Cohesivity management and application keys", () => {
+    const man = ["coh", "man", randomToken(20)].join("_");
+    const app = ["coh", "app", randomToken(20)].join("_");
+    const out = scrubSecrets(`man=${man} app=${app}`);
+    expect(out).toBe("man=[REDACTED:cohesivity_key] app=[REDACTED:cohesivity_key]");
+  });
+
+  test("redacts fresh Cohesivity keys in a set-config tool call before any env holds them", () => {
+    refreshSecretScrubberCache();
+    const key = ["coh", "man", randomToken(20)].join("_");
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            name: "mcp__agent-swarm__set-config",
+            input: {
+              scope: "global",
+              key: "COHESIVITY_MANAGEMENT_KEY",
+              value: key,
+              isSecret: true,
+            },
+          },
+        ],
+      },
+    });
+    const out = scrubSecrets(line);
+    expect(out).not.toContain(key);
+    expect(JSON.parse(out).message.content[0].input.value).toBe("[REDACTED:cohesivity_key]");
   });
 
   test("redacts tokens adjacent to JSON escape sequences (\\n)", () => {

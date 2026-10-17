@@ -39,7 +39,7 @@ It covers:
 - **Stored secrets (API only):** every value the secret registry loads at boot or registers at a write, plus its encoded forms.
 
 All known values (env and volatile) are matched by one combined, longest-first alternation regex, rebuilt lazily when either set changes, so the cost stays flat as the set grows.
-- **Structural patterns:** GitHub PATs, ACP session tokens (`aseph_`), Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys, plus vendor shapes gitleaks lacks (Resend `re_`, Google `ya29.` and `1//0`, Discord webhooks, xAI `xai-`, bare Telegram bot tokens).
+- **Structural patterns:** GitHub PATs, ACP session tokens (`aseph_`), Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys, plus vendor shapes gitleaks lacks (Resend `re_`, Google `ya29.` and `1//0`, Discord webhooks, xAI `xai-`, bare Telegram bot tokens, Cohesivity `coh_man_` and `coh_app_`).
 - **Vendor shapes (pass 5):** the gitleaks default rule set, vendored at `scripts/vendor/gitleaks/gitleaks.toml` and generated into `src/utils/secret-rules.generated.ts`. A rule runs only when the text contains one of its keywords. A match counts only when its secret clears the rule's entropy floor and no allowlist claims it. Only the secret is replaced, with `[REDACTED:gitleaks:<rule id>]`, so the key name around it stays readable. `generic-api-key`, the curl rules, `private-key` and path-scoped rules are excluded; the generator records each reason in the generated file.
 
 ## TEXT columns

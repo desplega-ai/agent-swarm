@@ -64,6 +64,7 @@ function RecommendedSkillRow({ recommended }: RecommendedSkillRowProps) {
       await installRemote.mutateAsync({
         sourceRepo: recommended.templateRepo,
         sourcePath: recommended.templatePath,
+        scope: recommended.installScope,
       });
       setInstalled(true);
       toast.success(`Skill "${recommended.name}" installed successfully.`);

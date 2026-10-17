@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "cohesivity",
+  "displayName": "Cohesivity",
+  "slug": "cohesivity",
+  "title": "Cohesivity",
+  "description": "Provision a backend for an app you build: Postgres, Redis, object storage, hosting, login and email through one HTTP API, with no account needed to start. Use when a task needs a database, hosting or another backend service and the repo has not picked a provider.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["COHESIVITY_TENANT_ID", "COHESIVITY_MANAGEMENT_KEY", "COHESIVITY_APPLICATION_KEY"],
+  "runAllSeedersCandidate": false,
+  "tags": ["backend", "database", "hosting"]
+}

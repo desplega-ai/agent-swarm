@@ -40,9 +40,10 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * v7 = the OpenAI-compatible registry key vars (`NAN_API_KEY`,
  * `HELMCODE_API_KEY`, and the `HELMCODE_API_NAN` alias no suffix matches).
  * A new registry entry adds key vars, so it is a rule change too
- * (`secret-scrubber.test.ts` pins the list to this number).
+ * (`secret-scrubber.test.ts` pins the list to this number). v9 = Cohesivity
+ * `coh_man_` and `coh_app_` keys in pass 2.
  */
-export const SCRUBBER_RULES_VERSION = 8;
+export const SCRUBBER_RULES_VERSION = 9;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -574,6 +575,11 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   {
     name: "telegram_bot_token",
     re: new RegExp(String.raw`${TB}\d{8,10}:AA[A-Za-z0-9_-]{33}(?![A-Za-z0-9_-])`, "g"),
+  },
+  // Cohesivity management and application keys
+  {
+    name: "cohesivity_key",
+    re: new RegExp(String.raw`${TB}coh_(?:man|app)_[A-Za-z0-9]{16,}\b`, "g"),
   },
 ];
 
