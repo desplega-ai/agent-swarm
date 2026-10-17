@@ -402,6 +402,27 @@ test("scratch symlinks, cp and mv cannot reach a reserved /afs", async () => {
   expect((await sh("ln -s /tmp/tree /tmp/t && cat /tmp/t/afs/report.md")).stdout).toBe("scratch");
 });
 
+test("a write racing a cp or mv into / cannot slip past the preflight", async () => {
+  // Each offset lets the write start at a different point of the cp / mv checks.
+  for (const operation of ["cp", "mv"] as const) {
+    for (let hops = 0; hops < 20; hops++) {
+      const { fs } = createScriptFs(undefined);
+      for (let f = 0; f < 30; f++) await fs.writeFile(`/tmp/tree/f${f}.txt`, "a");
+      const [, write] = await Promise.allSettled([
+        operation === "cp" ? fs.cp("/tmp/tree", "/", { recursive: true }) : fs.mv("/tmp/tree", "/"),
+        (async () => {
+          for (let i = 0; i < hops; i++) await null;
+          await fs.writeFile("/tmp/tree/afs/r.md", "leak");
+        })(),
+      ]);
+      expect(await fs.readdir("/")).not.toContain("afs");
+      // A write that succeeded must stay readable where it was written.
+      if (write.status === "fulfilled")
+        expect(await fs.readFile("/tmp/tree/afs/r.md")).toBe("leak");
+    }
+  }
+});
+
 test("with a drive, a scratch symlink into /afs fails with EXDEV", async () => {
   const { sh } = createScriptFs(agentFs());
   // The base fails before any request, so the drive's auth does not matter here.

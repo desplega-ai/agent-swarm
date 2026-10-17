@@ -60,10 +60,25 @@ export class ScratchFs implements IFileSystem {
    */
   private readonly links = new Set<string>();
 
+  /** The tail of the operation queue. See serial(). */
+  private queue: Promise<unknown> = Promise.resolve();
+
   constructor(inner: InMemoryFs, reserved: ReservedPath) {
     this.inner = inner;
     this.reserved = reserved;
     this.charged = this.entryTotal();
+  }
+
+  /**
+   * Runs one operation at a time, so the checks and the InMemoryFs call they
+   * cover act as one unit. Otherwise a write could land in a tree between a cp
+   * / mv preflight and the copy. InMemoryFs never calls back into this class,
+   * so the queue cannot deadlock.
+   */
+  private serial<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(operation);
+    this.queue = run.catch(() => {});
+    return run;
   }
 
   private isReserved(path: string): boolean {
@@ -179,25 +194,33 @@ export class ScratchFs implements IFileSystem {
     }
   }
 
-  async readFile(path: string, options?: ReadFileOptions): Promise<string> {
-    await this.guard(path);
-    return this.inner.readFile(path, options);
+  readFile(path: string, options?: ReadFileOptions): Promise<string> {
+    return this.serial(async () => {
+      await this.guard(path);
+      return this.inner.readFile(path, options);
+    });
   }
 
-  async readFileBytes(path: string): Promise<ByteString> {
-    await this.guard(path);
-    return this.inner.readFileBytes(path);
+  readFileBytes(path: string): Promise<ByteString> {
+    return this.serial(async () => {
+      await this.guard(path);
+      return this.inner.readFileBytes(path);
+    });
   }
 
-  async readFileBuffer(path: string): Promise<Uint8Array> {
-    await this.guard(path);
-    return this.inner.readFileBuffer(path);
+  readFileBuffer(path: string): Promise<Uint8Array> {
+    return this.serial(async () => {
+      await this.guard(path);
+      return this.inner.readFileBuffer(path);
+    });
   }
 
-  async writeFile(path: string, content: FileContent, options?: WriteFileOptions): Promise<void> {
-    await this.guard(path);
-    await this.reserve(createBytes(path));
-    return this.inner.writeFile(path, content, options);
+  writeFile(path: string, content: FileContent, options?: WriteFileOptions): Promise<void> {
+    return this.serial(async () => {
+      await this.guard(path);
+      await this.reserve(createBytes(path));
+      return this.inner.writeFile(path, content, options);
+    });
   }
 
   /** just-bash writes its default layout (/bin, /dev, /proc) through the sync methods. */
@@ -206,35 +229,45 @@ export class ScratchFs implements IFileSystem {
     this.inner.writeFileSync(path, content);
   }
 
-  async appendFile(path: string, content: FileContent, options?: WriteFileOptions): Promise<void> {
-    await this.guard(path);
-    await this.reserve(createBytes(path));
-    return this.inner.appendFile(path, content, options);
-  }
-
-  async exists(path: string): Promise<boolean> {
-    try {
+  appendFile(path: string, content: FileContent, options?: WriteFileOptions): Promise<void> {
+    return this.serial(async () => {
       await this.guard(path);
-    } catch {
-      return false;
-    }
-    return this.inner.exists(path);
+      await this.reserve(createBytes(path));
+      return this.inner.appendFile(path, content, options);
+    });
   }
 
-  async stat(path: string) {
-    await this.guard(path);
-    return this.inner.stat(path);
+  exists(path: string): Promise<boolean> {
+    return this.serial(async () => {
+      try {
+        await this.guard(path);
+      } catch {
+        return false;
+      }
+      return this.inner.exists(path);
+    });
   }
 
-  async lstat(path: string) {
-    await this.guard(path, false);
-    return this.inner.lstat(path);
+  stat(path: string) {
+    return this.serial(async () => {
+      await this.guard(path);
+      return this.inner.stat(path);
+    });
   }
 
-  async mkdir(path: string, options?: Parameters<IFileSystem["mkdir"]>[1]): Promise<void> {
-    await this.guard(path);
-    await this.reserve(createBytes(path));
-    return this.inner.mkdir(path, options);
+  lstat(path: string) {
+    return this.serial(async () => {
+      await this.guard(path, false);
+      return this.inner.lstat(path);
+    });
+  }
+
+  mkdir(path: string, options?: Parameters<IFileSystem["mkdir"]>[1]): Promise<void> {
+    return this.serial(async () => {
+      await this.guard(path);
+      await this.reserve(createBytes(path));
+      return this.inner.mkdir(path, options);
+    });
   }
 
   mkdirSync(path: string, options?: Parameters<IFileSystem["mkdir"]>[1]): void {
@@ -242,41 +275,51 @@ export class ScratchFs implements IFileSystem {
     this.inner.mkdirSync(path, options);
   }
 
-  async createExclusive(
+  createExclusive(
     path: string,
     options: Parameters<InMemoryFs["createExclusive"]>[1],
   ): Promise<void> {
-    // InMemoryFs follows symlinks in the parent, so the entry lands at the resolved path.
-    await this.reserve(createBytes(await this.guard(path, false)));
-    return this.inner.createExclusive(path, options);
+    return this.serial(async () => {
+      // InMemoryFs follows symlinks in the parent, so the entry lands at the resolved path.
+      await this.reserve(createBytes(await this.guard(path, false)));
+      return this.inner.createExclusive(path, options);
+    });
   }
 
-  async readdir(path: string): Promise<string[]> {
-    await this.guard(path);
-    return this.inner.readdir(path);
+  readdir(path: string): Promise<string[]> {
+    return this.serial(async () => {
+      await this.guard(path);
+      return this.inner.readdir(path);
+    });
   }
 
-  async rm(path: string, options?: Parameters<IFileSystem["rm"]>[1]): Promise<void> {
-    await this.guard(path, false);
-    return this.inner.rm(path, options);
+  rm(path: string, options?: Parameters<IFileSystem["rm"]>[1]): Promise<void> {
+    return this.serial(async () => {
+      await this.guard(path, false);
+      return this.inner.rm(path, options);
+    });
   }
 
-  async cp(src: string, dest: string, options?: Parameters<IFileSystem["cp"]>[2]): Promise<void> {
-    await this.reserve(await this.preflightCopy(src, dest));
-    try {
-      await this.inner.cp(src, dest, options);
-    } finally {
-      this.copyLinks(src, dest);
-    }
+  cp(src: string, dest: string, options?: Parameters<IFileSystem["cp"]>[2]): Promise<void> {
+    return this.serial(async () => {
+      await this.reserve(await this.preflightCopy(src, dest));
+      try {
+        await this.inner.cp(src, dest, options);
+      } finally {
+        this.copyLinks(src, dest);
+      }
+    });
   }
 
-  async mv(src: string, dest: string): Promise<void> {
-    await this.reserve(await this.preflightCopy(src, dest));
-    try {
-      await this.inner.mv(src, dest);
-    } finally {
-      this.copyLinks(src, dest);
-    }
+  mv(src: string, dest: string): Promise<void> {
+    return this.serial(async () => {
+      await this.reserve(await this.preflightCopy(src, dest));
+      try {
+        await this.inner.mv(src, dest);
+      } finally {
+        this.copyLinks(src, dest);
+      }
+    });
   }
 
   resolvePath(base: string, path: string): string {
@@ -287,38 +330,50 @@ export class ScratchFs implements IFileSystem {
     return this.inner.getAllPaths();
   }
 
-  async chmod(path: string, mode: number): Promise<void> {
-    await this.guard(path, false);
-    return this.inner.chmod(path, mode);
+  chmod(path: string, mode: number): Promise<void> {
+    return this.serial(async () => {
+      await this.guard(path, false);
+      return this.inner.chmod(path, mode);
+    });
   }
 
-  async symlink(target: string, linkPath: string): Promise<void> {
-    if (target.length > SCRIPT_FS_MAX_PATH_LENGTH) throw nameTooLong(target);
-    await this.guard(linkPath, false);
-    await this.reserve(createBytes(linkPath) + 2 * target.length);
-    await this.inner.symlink(target, linkPath);
-    this.links.add(linkPath);
+  symlink(target: string, linkPath: string): Promise<void> {
+    return this.serial(async () => {
+      if (target.length > SCRIPT_FS_MAX_PATH_LENGTH) throw nameTooLong(target);
+      await this.guard(linkPath, false);
+      await this.reserve(createBytes(linkPath) + 2 * target.length);
+      await this.inner.symlink(target, linkPath);
+      this.links.add(linkPath);
+    });
   }
 
-  async link(existingPath: string, newPath: string): Promise<void> {
-    await this.guard(existingPath, false);
-    await this.guard(newPath);
-    await this.reserve(createBytes(newPath));
-    return this.inner.link(existingPath, newPath);
+  link(existingPath: string, newPath: string): Promise<void> {
+    return this.serial(async () => {
+      await this.guard(existingPath, false);
+      await this.guard(newPath);
+      await this.reserve(createBytes(newPath));
+      return this.inner.link(existingPath, newPath);
+    });
   }
 
-  async readlink(path: string): Promise<string> {
-    await this.guard(path, false);
-    return this.inner.readlink(path);
+  readlink(path: string): Promise<string> {
+    return this.serial(async () => {
+      await this.guard(path, false);
+      return this.inner.readlink(path);
+    });
   }
 
-  async realpath(path: string): Promise<string> {
-    await this.guard(path);
-    return this.inner.realpath(path);
+  realpath(path: string): Promise<string> {
+    return this.serial(async () => {
+      await this.guard(path);
+      return this.inner.realpath(path);
+    });
   }
 
-  async utimes(path: string, atime: Date, mtime: Date): Promise<void> {
-    await this.guard(path);
-    return this.inner.utimes(path, atime, mtime);
+  utimes(path: string, atime: Date, mtime: Date): Promise<void> {
+    return this.serial(async () => {
+      await this.guard(path);
+      return this.inner.utimes(path, atime, mtime);
+    });
   }
 }
