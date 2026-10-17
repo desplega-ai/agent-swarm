@@ -632,6 +632,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "219_relabel_pi_context_compactions.sql");
       // 220 reads agents and swarm_config, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "220_model_profiles.sql");
+      // 224 rebuilds session_tokens with the 207 columns, which this fixture skipped.
+      markMigrationApplied(database, "224_agent_session_tokens.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
