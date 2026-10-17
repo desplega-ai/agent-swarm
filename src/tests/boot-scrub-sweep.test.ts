@@ -8,11 +8,13 @@ import {
 } from "../be/boot-scrub-sweep";
 import { closeDb, getDb, getDbClient, initDb, isSqliteVecAvailable } from "../be/db";
 import { getMemoryStore } from "../be/memory";
+import { registerStoredSecret } from "../be/secret-registry";
 import { contentSha256 } from "../commands/profile-sync";
 import {
   refreshSecretScrubberCache,
   registerVolatileSecret,
   SCRUBBER_RULES_VERSION,
+  unregisterVolatileSecret,
 } from "../utils/secret-scrubber";
 import { randomToken, type SyntheticSecret, syntheticSecret } from "./synthetic-secret-helpers";
 
@@ -386,5 +388,52 @@ describe("boot retro-sweep", () => {
     expect(events.changed).toBe(0);
     const row = await db.get<{ data: string }>("SELECT data FROM events WHERE id = ?", [id]);
     expect(row?.data).toBe(data);
+  });
+});
+
+describe("boot retro-sweep upgrade from v8", () => {
+  beforeAll(() => initDb(":memory:"));
+  afterAll(() => closeDb());
+
+  test("the default version re-scrubs a padded credential echo once after a completed v8 sweep", async () => {
+    const db = getDbClient();
+    const id = crypto.randomUUID();
+    const token = randomToken(32);
+    const name = "SYNTHETIC_PADDED_UPGRADE_SECRET";
+    const original = `credential echo: ${token}`;
+    await db.run(
+      `INSERT INTO seed_state (kind, key, seededHash, seededAt)
+       VALUES ('maintenance', 'boot-scrub-v8', 'done', datetime('now'))`,
+    );
+    await db.run(
+      `INSERT INTO session_logs (id, sessionId, iteration, content, lineNumber, createdAt)
+       VALUES (?, 'upgrade-v8', 1, ?, 1, datetime('now'))`,
+      [id, original],
+    );
+
+    // Registration now also covers the trimmed echo that the old rules missed.
+    registerStoredSecret(` \t${token}\n`, name);
+    try {
+      expect(await runBootScrubSweep({ version: 8, reembed: false })).toBeNull();
+      expect(
+        (await db.get<{ content: string }>("SELECT content FROM session_logs WHERE id = ?", [id]))
+          ?.content,
+      ).toBe(original);
+
+      const stats = await runBootScrubSweep({ reembed: false });
+      expect(stats?.find((s) => s.table === "session_logs")?.changed).toBe(1);
+      expect(
+        (await db.get<{ content: string }>("SELECT content FROM session_logs WHERE id = ?", [id]))
+          ?.content,
+      ).toBe(`credential echo: [REDACTED:${name}]`);
+      expect(
+        await db.get("SELECT key FROM seed_state WHERE kind = 'maintenance' AND key = ?", [
+          bootScrubDoneKey(9),
+        ]),
+      ).not.toBeNull();
+      expect(await runBootScrubSweep({ reembed: false })).toBeNull();
+    } finally {
+      unregisterVolatileSecret(name);
+    }
   });
 });
