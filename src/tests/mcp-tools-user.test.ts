@@ -441,20 +441,79 @@ describe("manage-user MCP tool (identities array)", () => {
     expect(idents).toHaveLength(0);
   });
 
-  test("update with comms merges into metadata.comms and preserves sibling metadata keys", async () => {
-    const created = await createUser({ name: "Comms Merge", metadata: { customerId: "abc123" } });
+  test("tone-only update preserves language, verbosity and sibling metadata keys", async () => {
+    const created = await createUser({
+      name: "Comms Merge",
+      metadata: {
+        customerId: "abc123",
+        comms: { tone: "formal", language: "English", verbosity: "short" },
+      },
+    });
 
     const result = await callTool(server, "manage-user", {
       action: "update",
       userId: created.id,
-      comms: { tone: "casual", verbosity: "short" },
+      comms: { tone: "casual" },
     });
 
     expect(result.isError).toBe(false);
     const user = structuredOf(result).user as { metadata: Record<string, unknown> | null };
     expect(user.metadata).toEqual({
       customerId: "abc123",
-      comms: { tone: "casual", verbosity: "short" },
+      comms: { tone: "casual", language: "English", verbosity: "short" },
+    });
+  });
+
+  test("update with a null comms field removes only that preference", async () => {
+    const created = await createUser({
+      name: "Comms Remove Field",
+      metadata: {
+        customerId: "abc123",
+        comms: { tone: "formal", language: "English", verbosity: "short" },
+      },
+    });
+
+    const result = await callTool(server, "manage-user", {
+      action: "update",
+      userId: created.id,
+      comms: { tone: null },
+    });
+
+    expect(result.isError).toBe(false);
+    const user = structuredOf(result).user as { metadata: Record<string, unknown> | null };
+    expect(user.metadata).toEqual({
+      customerId: "abc123",
+      comms: { language: "English", verbosity: "short" },
+    });
+  });
+
+  test.each([
+    "create",
+    "update",
+  ])("%s applies explicit metadata before the comms patch", async (action) => {
+    const created =
+      action === "update"
+        ? await createUser({
+            name: "Comms Original",
+            metadata: { replaced: true, comms: { language: "Spanish" } },
+          })
+        : undefined;
+    const result = await callTool(server, "manage-user", {
+      action,
+      userId: created?.id,
+      name: "Comms Metadata First",
+      metadata: {
+        customerId: "abc123",
+        comms: { tone: "formal", language: "English", verbosity: "short" },
+      },
+      comms: { tone: "casual", verbosity: null },
+    });
+
+    expect(result.isError).toBe(false);
+    const user = structuredOf(result).user as { metadata: Record<string, unknown> | null };
+    expect(user.metadata).toEqual({
+      customerId: "abc123",
+      comms: { tone: "casual", language: "English" },
     });
   });
 
