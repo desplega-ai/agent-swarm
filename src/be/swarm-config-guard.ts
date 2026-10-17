@@ -517,6 +517,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // default in thread-buffer.ts; above 10 minutes a
   // reply waits longer than any operator expects.
   ...boundedIntegerValidators(["CHAT_SDK_BUFFER_MS"], 1, 600_000),
+  // Minutes a Chat SDK thread keeps its owner after the owner's task ends.
+  // 0 keeps it only while the task is open; a day is the longest useful window.
+  ...boundedIntegerValidators(["CHAT_SDK_OWNER_WINDOW_MIN"], 0, 1440),
   // Below ~100 tokens the preamble can't fit a useful summary; above 20000
   // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
   // the cap exists to prevent (see context-preamble.ts).

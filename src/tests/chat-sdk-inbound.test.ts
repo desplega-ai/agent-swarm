@@ -2,21 +2,29 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   closeDb,
   createAgent,
+  createTaskExtended,
+  createUser,
   getDbClient,
+  getKv,
   getTaskAttachments,
   getTaskById,
   initDb,
+  startTask,
   upsertKv,
 } from "../be/db";
+import { linkIdentity } from "../be/users";
 import { resetFileStorageProviderForTests } from "../fs/registry";
 import { drainBackground } from "../integrations/chat-sdk/background";
+import { formatChatRelayText } from "../integrations/chat-sdk/relay";
 import { CHAT_CHANNELS_NAMESPACE, routeChatMessage } from "../integrations/chat-sdk/router";
 import { getChatInstance } from "../integrations/chat-sdk/runtime";
 import { isChatThreadBuffered } from "../integrations/chat-sdk/thread-buffer";
 import { chatSdkContextKey } from "../tasks/context-key";
+import { registerDeferTaskTool } from "../tools/defer-task";
 import type { Agent } from "../types";
 import {
   flushChatBuffers,
@@ -30,7 +38,13 @@ import {
 } from "./chat-sdk-harness";
 
 const TEST_DB_PATH = "./test-chat-sdk-inbound.sqlite";
-const ENV_KEYS = ["AGENT_FS_LOCAL_DIR", "AGENT_FS_API_URL", "STEERING_ENABLED"];
+const ENV_KEYS = [
+  "AGENT_FS_LOCAL_DIR",
+  "AGENT_FS_API_URL",
+  "STEERING_ENABLED",
+  "TELEGRAM_MENTION_ON_REPLY",
+  "CHAT_SDK_OWNER_WINDOW_MIN",
+];
 const savedEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 let harness: TelegramHarness;
@@ -68,6 +82,9 @@ beforeAll(async () => {
   process.env.AGENT_FS_LOCAL_DIR = fsDir;
   delete process.env.AGENT_FS_API_URL;
   process.env.STEERING_ENABLED = "true";
+  // The adapter must treat a reply to the bot as a mention without the env fallback.
+  delete process.env.TELEGRAM_MENTION_ON_REPLY;
+  delete process.env.CHAT_SDK_OWNER_WINDOW_MIN;
   resetFileStorageProviderForTests();
   initDb(TEST_DB_PATH);
   lead = await createAgent({
@@ -109,6 +126,16 @@ beforeEach(() => {
   process.env.CHAT_SDK_BUFFER_MS = "60000";
 });
 
+type DeferTaskTool = { handler: (args: unknown, extra: unknown) => Promise<unknown> };
+
+function buildDeferTaskTool(): DeferTaskTool {
+  const server = new McpServer({ name: "chat-sdk-inbound-test", version: "1.0.0" });
+  registerDeferTaskTool(server);
+  const tools = (server as unknown as { _registeredTools: Record<string, DeferTaskTool> })
+    ._registeredTools;
+  return tools["defer-task"]!;
+}
+
 const dm = (id: number): TelegramChat => ({ id, type: "private" });
 const group = (id: number): TelegramChat => ({ id, type: "group" });
 
@@ -134,7 +161,7 @@ describe("Chat SDK inbound pipeline", () => {
     await postTelegramUpdate(telegramUpdate(dm(2002), "!now ship the hotfix"));
     const tasks = await chatTasks(2002);
     expect(tasks).toHaveLength(1);
-    expect(tasks[0]!.task).toBe("ship the hotfix");
+    expect(tasks[0]!.task).toEndWith("\n\nship the hotfix");
   });
 
   test("swarm#<uuid> routes to that agent", async () => {
@@ -143,7 +170,7 @@ describe("Chat SDK inbound pipeline", () => {
     const tasks = await chatTasks(2003);
     expect(tasks).toHaveLength(1);
     expect(tasks[0]!.agentId).toBe(worker.id);
-    expect(tasks[0]!.task).toBe("build the parser");
+    expect(tasks[0]!.task).toEndWith("\n\nbuild the parser");
   });
 
   test("a KV channel mapping routes to the pinned agent", async () => {
@@ -359,5 +386,290 @@ describe("Chat SDK inbound pipeline", () => {
     await postTelegramUpdate(telegramUpdate(group(-2009), "just chatting"));
     await flushChatBuffers();
     expect(await chatTasks(-2009)).toHaveLength(0);
+  });
+});
+
+/**
+ * Who asked and where. The harness posts every update straight to the
+ * webhook, which is what a bot with privacy mode off (or a group admin bot)
+ * receives. With privacy mode on Telegram delivers only a subset (commands,
+ * mentions, replies to the bot), so these filters hold there too.
+ */
+describe("Chat SDK requester and group addressing", () => {
+  const ACTOR = { kind: "system", id: "chat-sdk-inbound-test" } as const;
+  const supergroup = (id: number, title: string, extra: Record<string, unknown> = {}) => ({
+    chat: { id, type: "supergroup", title, ...extra },
+  });
+  const person = (id: number, first: string, username: string) => ({
+    from: { id, is_bot: false, first_name: first, username },
+  });
+  const ALICE = person(777_201, "Alice", "alice");
+  const BOB = person(777_202, "Bob", "bob");
+  const CAROL = person(777_203, "Carol", "carol");
+
+  async function steeringBodies(taskId: string): Promise<string[]> {
+    const rows = await getDbClient().query<{ body: string }>(
+      "SELECT body FROM task_steering_messages WHERE task_id = ? ORDER BY rowid",
+      [taskId],
+    );
+    return rows.map((row) => row.body);
+  }
+
+  function groupUpdate(chatId: number, text: string, sender: Record<string, unknown>) {
+    return telegramUpdate(group(chatId), text, { ...supergroup(chatId, "Life"), ...sender });
+  }
+
+  test("a registered user's chat task has requestedByUserId, and defer-task and the relay print their timezone", async () => {
+    const user = await createUser({ name: "Taras", timezone: "Europe/Madrid" });
+    await linkIdentity(user.id, "telegram", "777101", ACTOR);
+    await postTelegramUpdate(
+      telegramUpdate(dm(3001), "check the deploy", person(777_101, "Taras", "tarasyarema")),
+    );
+    await flushChatBuffers();
+    const [row] = await chatTasks(3001);
+    const task = await getTaskById(row!.id);
+    expect(task?.requestedByUserId).toBe(user.id);
+
+    await startTask(task!.id);
+    const tool = buildDeferTaskTool();
+    const result = (await tool.handler(
+      { taskId: task!.id, delayMs: 60_000, summary: "deploy is rolling", note: "wait" },
+      { sessionId: crypto.randomUUID(), requestInfo: { headers: { "x-agent-id": lead.id } } },
+    )) as { structuredContent: { success: boolean; nextRunAt?: string } };
+    expect(result.structuredContent.success).toBe(true);
+    const madrid = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Madrid",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date(result.structuredContent.nextRunAt!));
+    const deferred = await getTaskById(task!.id);
+    expect(deferred?.output).toMatch(new RegExp(`at ${madrid}$`));
+    expect(deferred?.output).not.toContain("UTC");
+    expect(formatChatRelayText(deferred!)).toBe(deferred!.output!);
+  });
+
+  test("an unknown sender gets no requester and lands in the Unmapped tracker", async () => {
+    await postTelegramUpdate(
+      telegramUpdate(dm(3002), "who am I", person(777_102, "Stranger", "stranger")),
+    );
+    await flushChatBuffers();
+    const [row] = await chatTasks(3002);
+    expect((await getTaskById(row!.id))?.requestedByUserId).toBeUndefined();
+    const meta = await getKv("integration:unmapped:telegram", "777102:meta");
+    expect(meta?.value).toMatchObject({ sampleEventType: "chat.message" });
+  });
+
+  test("the task description starts with the chat header", async () => {
+    await postTelegramUpdate(
+      telegramUpdate(group(-3003), "@swarm_test_bot plan the trip", {
+        ...supergroup(-3003, "Life"),
+        ...person(777_104, "Taras", "tarasyarema"),
+      }),
+    );
+    await flushChatBuffers();
+    const [plain] = await chatTasks(-3003);
+    expect(plain!.task).toStartWith(
+      '[chat] telegram · supergroup "Life" · from: Taras (@tarasyarema) · addressed: mention\n\n',
+    );
+
+    // A forum topic: the topic root is the bot's own message, which is the
+    // topic and not a reply to the bot.
+    await postTelegramUpdate(
+      telegramUpdate(group(-3004), "@swarm_test_bot book the flights", {
+        ...supergroup(-3004, "Life", { is_forum: true }),
+        ...person(777_104, "Taras", "tarasyarema"),
+        is_topic_message: true,
+        message_thread_id: 77,
+        reply_to_message: {
+          message_id: 77,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: -3004, type: "supergroup", title: "Life", is_forum: true },
+          from: { id: 4242, is_bot: true, first_name: "Swarm", username: "swarm_test_bot" },
+          forum_topic_created: { name: "Travel", icon_color: 0 },
+        },
+      }),
+    );
+    await flushChatBuffers();
+    const topicTasks = await getDbClient().query<{ task: string }>(
+      "SELECT task FROM agent_tasks WHERE source = 'chat' AND contextKey LIKE ?",
+      [`${chatSdkContextKey("telegram:-3004")}%`],
+    );
+    expect(topicTasks).toHaveLength(1);
+    expect(topicTasks[0]!.task).toStartWith(
+      '[chat] telegram · supergroup "Life" · forum topic "Travel" · from: Taras (@tarasyarema) · addressed: mention\n\n',
+    );
+  });
+
+  test("side chatter between two other people neither steers the running task nor creates one; the requester and a mention do", async () => {
+    const chatId = -3005;
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot draft the budget", ALICE));
+    await flushChatBuffers();
+    const [first] = await chatTasks(chatId);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+      first!.id,
+    ]);
+
+    // Bob and Carol talk to each other.
+    await postTelegramUpdate(groupUpdate(chatId, "lunch at 2?", BOB));
+    await postTelegramUpdate(groupUpdate(chatId, "sure, the usual place", CAROL));
+    await flushChatBuffers();
+    expect(await chatTasks(chatId)).toHaveLength(1);
+    expect(await steeringBodies(first!.id)).toEqual([]);
+
+    // The requester's plain message, then Bob with a mention.
+    await postTelegramUpdate(groupUpdate(chatId, "include the rent", ALICE));
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot and the car", BOB));
+    await flushChatBuffers();
+    expect(await chatTasks(chatId)).toHaveLength(1);
+    expect(await steeringBodies(first!.id)).toEqual(["include the rent", "and the car"]);
+  });
+
+  test("an unaddressed group message after the owner window creates no task", async () => {
+    const chatId = -3006;
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot book a table", ALICE));
+    await flushChatBuffers();
+    const [first] = await chatTasks(chatId);
+    const endedAt = (minutesAgo: number) =>
+      new Date(Date.now() - minutesAgo * 60_000).toISOString();
+    await getDbClient().run(
+      "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+      [endedAt(60), first!.id],
+    );
+
+    // An hour after the task ended: even the requester's plain message is ignored.
+    await postTelegramUpdate(groupUpdate(chatId, "make it for four", ALICE));
+    await flushChatBuffers();
+    expect(await chatTasks(chatId)).toHaveLength(1);
+
+    // Control: inside the default 15-minute window the same message is a follow-up.
+    await getDbClient().run("UPDATE agent_tasks SET finishedAt = ? WHERE id = ?", [
+      endedAt(5),
+      first!.id,
+    ]);
+    await postTelegramUpdate(groupUpdate(chatId, "make it for four", ALICE));
+    await flushChatBuffers();
+    const tasks = await chatTasks(chatId);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1]!.routingReason).toBe("continuity");
+    expect(tasks[1]!.task).toContain("addressed: requester-follow-up");
+  });
+
+  test("a reply to the bot counts as a mention without TELEGRAM_MENTION_ON_REPLY", async () => {
+    expect(process.env.TELEGRAM_MENTION_ON_REPLY).toBeUndefined();
+    const chatId = -3007;
+    await postTelegramUpdate(
+      groupUpdate(chatId, "yes, go ahead", {
+        ...BOB,
+        reply_to_message: {
+          message_id: 1,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: chatId, type: "supergroup", title: "Life" },
+          from: { id: 4242, is_bot: true, first_name: "Swarm", username: "swarm_test_bot" },
+          text: "Shall I send the invoice?",
+        },
+      }),
+    );
+    await flushChatBuffers();
+    const tasks = await chatTasks(chatId);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.task).toStartWith(
+      '[chat] telegram · supergroup "Life" · from: Bob (@bob) · addressed: reply-to-bot · reply-to: "Shall I send the invoice?"\n\n',
+    );
+  });
+
+  test("an unknown sender in a known requester's thread does not inherit that requester", async () => {
+    const chatId = -3008;
+    const alice = await createUser({ name: "Alice", timezone: "Europe/Madrid" });
+    await linkIdentity(alice.id, "telegram", String(ALICE.from.id), ACTOR);
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot plan the offsite", ALICE));
+    await flushChatBuffers();
+    const [first] = await chatTasks(chatId);
+    expect((await getTaskById(first!.id))?.requestedByUserId).toBe(alice.id);
+
+    // Bob is not linked to any user.
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot and book my train", BOB));
+    await flushChatBuffers();
+    const tasks = await chatTasks(chatId);
+    expect(tasks).toHaveLength(2);
+    const second = await getTaskById(tasks[1]!.id);
+    expect(second?.parentTaskId).toBe(first!.id);
+    expect(second?.requestedByUserId).toBeUndefined();
+  });
+
+  test("a non-requester's malformed swarm# token is chatter: no task, no steering", async () => {
+    const chatId = -3009;
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot draft the agenda", ALICE));
+    await flushChatBuffers();
+    const [first] = await chatTasks(chatId);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+      first!.id,
+    ]);
+
+    await postTelegramUpdate(groupUpdate(chatId, "Carol, what does swarm# mean?", BOB));
+    await postTelegramUpdate(groupUpdate(chatId, "swarm#everyone is it a hashtag?", CAROL));
+    await flushChatBuffers();
+    expect(await chatTasks(chatId)).toHaveLength(1);
+    expect(await steeringBodies(first!.id)).toEqual([]);
+
+    // Control: once the task is done, a real token from a non-requester still routes.
+    await getDbClient().run(
+      "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+      [new Date().toISOString(), first!.id],
+    );
+    await postTelegramUpdate(groupUpdate(chatId, `swarm#${worker.id} check the numbers`, BOB));
+    await flushChatBuffers();
+    const tasks = await chatTasks(chatId);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1]!.agentId).toBe(worker.id);
+  });
+
+  test("only a Telegram group expires the thread owner; DMs and other adapters keep continuity", async () => {
+    const finishedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    async function seedFinishedOwner(threadId: string): Promise<void> {
+      const task = await createTaskExtended("earlier ask", {
+        agentId: worker.id,
+        source: "chat",
+        contextKey: chatSdkContextKey(threadId),
+      });
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+        [finishedAt, task.id],
+      );
+    }
+    const continuity = {
+      kind: "agents",
+      matches: [
+        {
+          agent: expect.objectContaining({ id: worker.id }),
+          reason: "continuity",
+          matchedText: "thread follow-up",
+        },
+      ],
+    };
+    const contexts = [
+      { adapter: "telegram", channelId: "telegram:3101", threadId: "telegram:3101", dm: true },
+      { adapter: "slack", channelId: "slack:C3101", threadId: "slack:C3101:1700000000.000100" },
+      { adapter: "discord", channelId: "discord:g1:c3101", threadId: "discord:g1:c3101:t1" },
+      { adapter: "teams", channelId: "teams:c3101", threadId: "teams:c3101:m1" },
+    ];
+    for (const { dm: isDirectMessage = false, ...ctx } of contexts) {
+      await seedFinishedOwner(ctx.threadId);
+      expect(
+        await routeChatMessage("one more thing", { ...ctx, botMentioned: false, isDirectMessage }),
+      ).toEqual(continuity);
+    }
+
+    // Control: a Telegram group thread with the same history has no owner.
+    await seedFinishedOwner("telegram:-3101");
+    expect(
+      await routeChatMessage("one more thing", {
+        adapter: "telegram",
+        channelId: "telegram:-3101",
+        threadId: "telegram:-3101",
+        botMentioned: false,
+        isDirectMessage: false,
+      }),
+    ).toBeNull();
   });
 });
