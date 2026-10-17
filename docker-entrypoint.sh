@@ -350,7 +350,7 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     DSH_BIN="${DSH_BINARY:-dsh}"
     if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
-        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-rc.1 during image provisioning."
+        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-rc.2 during image provisioning."
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
