@@ -68,8 +68,10 @@ type Transport = "cli" | "sdk";
 interface Harness {
   session: ProviderSession;
   taskId: string;
-  send(command: "empty" | "exit" | "fail"): Promise<void>;
+  send(command: "empty" | "result" | "exit" | "fail"): Promise<void>;
   count(): number;
+  /** True once the fixture saw EOF on stdin: the session closed Claude's input. */
+  inputClosed(): Promise<boolean>;
   completed(): boolean;
   turnEnded(): Promise<void>;
 }
@@ -78,6 +80,7 @@ async function startSession(transport: Transport, withBackgroundTask: boolean): 
   const directory = await mkdtemp(join(tmpdir(), "claude-bg-keepalive-"));
   temporaryDirectories.push(directory);
   const controlFile = join(directory, "control");
+  const stdinClosedFile = join(directory, "stdin-closed");
   const logFile = join(directory, "session.jsonl");
   const taskId = crypto.randomUUID();
   const config: ProviderSessionConfig = {
@@ -99,6 +102,7 @@ async function startSession(transport: Transport, withBackgroundTask: boolean): 
       BG_FIXTURE_TRANSPORT: transport,
       BG_FIXTURE_CONTROL: controlFile,
       BG_FIXTURE_BACKGROUND: withBackgroundTask ? "1" : "0",
+      BG_FIXTURE_STDIN_CLOSED: stdinClosedFile,
     },
   };
   const session = await new ClaudeAdapter(async () => {}).createSession(config);
@@ -112,6 +116,7 @@ async function startSession(transport: Transport, withBackgroundTask: boolean): 
     completed: () => completed,
     send: (command) => appendFile(controlFile, `${command}\n`),
     count: () => heartbeats.get(taskId) ?? 0,
+    inputClosed: () => Bun.file(stdinClosedFile).exists(),
     // Both transports log every protocol line; the result line marks the end of the turn.
     turnEnded: () =>
       waitFor(async () => {
@@ -198,6 +203,49 @@ describe.each(["cli", "sdk"] as const)("Claude %s transport background keepalive
       await harness.session.abort();
       await harness.session.waitForCompletion();
       await expectHeartbeatsStopped(harness);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "a result with a live background task leaves input open until a result after the set empties",
+    async () => {
+      const harness = await liveSessionWithHeartbeats(transport);
+      try {
+        // The turn ended with the background task live: input stays open, so
+        // Claude Code never starts its background-wait ceiling.
+        expect(await harness.inputClosed()).toBe(false);
+        expect(harness.completed()).toBe(false);
+
+        // The task settles; the set empties before the notification turn starts.
+        await harness.send("empty");
+        await Bun.sleep(TICK_MS * 5);
+        expect(await harness.inputClosed()).toBe(false);
+
+        // The notification turn's result closes input.
+        await harness.send("result");
+        await waitFor(() => harness.inputClosed(), "input to close after the notification turn");
+      } finally {
+        await harness.send("exit");
+      }
+      const result = await harness.session.waitForCompletion();
+      expect(result.isError).toBe(false);
+      expect(result.output).toBe("The background job finished.");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "a result with no background work closes input",
+    async () => {
+      const harness = await startSession(transport, false);
+      try {
+        await harness.turnEnded();
+        await waitFor(() => harness.inputClosed(), "input to close after the result");
+      } finally {
+        await harness.send("exit");
+        await harness.session.waitForCompletion();
+      }
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
