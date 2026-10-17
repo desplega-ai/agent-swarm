@@ -16,7 +16,7 @@
         "@chat-adapter/teams": "4.41.1",
         "@chat-adapter/telegram": "4.41.1",
         "@cursor/sdk": "1.0.37",
-        "@desplega.ai/agent-fs-just-bash": "0.16.5",
+        "@desplega.ai/agent-fs-just-bash": "0.17.0",
         "@desplega.ai/business-use": "^0.4.2",
         "@earendil-works/pi-agent-core": "^1.2.0",
         "@earendil-works/pi-ai": "^1.2.0",
@@ -443,7 +443,7 @@
 
     "@cursor/sdk-win32-x64": ["@cursor/sdk-win32-x64@1.0.37", "", { "os": "win32", "cpu": "x64", "bin": { "rg": "bin/rg.exe" } }, "sha512-94EKqfisz9mBWMdF1b9S6qu1NcTd0UYO4DdlhL4sPAU1QoIGLP7K7Fp5VI1MEKniYynu5JMZ7oBZFNq1p50oCg=="],
 
-    "@desplega.ai/agent-fs-just-bash": ["@desplega.ai/agent-fs-just-bash@0.16.5", "", { "peerDependencies": { "just-bash": ">=3.0.1" }, "optionalPeers": ["just-bash"] }, "sha512-eSL7rh1buzrfA6I7i4zWWNG3CZrjv3Daa1jLhr73XohCpVCLvxJCTxP4ZdLZc5k8AzyIvVvSbSzHrNKxY022Ow=="],
+    "@desplega.ai/agent-fs-just-bash": ["@desplega.ai/agent-fs-just-bash@0.17.0", "", { "peerDependencies": { "just-bash": ">=3.0.1" }, "optionalPeers": ["just-bash"] }, "sha512-+U31oiDVQINDWfkPbpzLU6AQnMFBK6sDOsDlHiyXhhAzixzQn95JqPwxHFn0C7+5FDdvq/eViptPJdhBIU5pXw=="],
 
     "@desplega.ai/business-use": ["@desplega.ai/business-use@0.4.2", "", { "dependencies": { "zod": "^3.24.1" } }, "sha512-Rd/H/EzfKjylxaKwJulhoclfK9q0QFg8HjHrLrAVNY3YGlEaDzSFDR2uDjynDy+MLl7jxr/e+xzUNTR87tr0EA=="],
 
