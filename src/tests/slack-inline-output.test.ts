@@ -71,4 +71,18 @@ describe("Slack inline completion output", () => {
     expect(text).toContain("|`abcdef12`>");
     expect(text).toContain(finalMarker);
   });
+
+  test("the inline output header uses SLACK_STATUS_ICON_COMPLETED", () => {
+    process.env.SLACK_STATUS_ICON_COMPLETED = ":bee-lgtm:";
+    try {
+      const [first] = formatInlineCompletionOutputChunks({
+        agentName: "Analyst",
+        taskId: TASK_ID,
+        output: "Done.",
+      });
+      expect(first?.startsWith(":bee-lgtm: *Analyst* completed with output")).toBe(true);
+    } finally {
+      delete process.env.SLACK_STATUS_ICON_COMPLETED;
+    }
+  });
 });

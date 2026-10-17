@@ -8,6 +8,7 @@
 import type { AgentTaskStatus, TaskAttachment } from "../types";
 import { getAppUrl } from "../utils/constants";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+import { completedStatusIcon } from "./reaction-shortcode";
 
 // Slack limits section text to 3000 chars; we use 2900 for safety.
 export const MAX_SECTION_LENGTH = 2900;
@@ -294,7 +295,7 @@ export function buildCompletedBlocks(opts: {
   trailer?: string;
 }): SlackBlock[] {
   const taskLink = getTaskLink(opts.taskId);
-  let line = `✅ *${opts.agentName}* (${taskLink})`;
+  let line = `${completedStatusIcon()} *${opts.agentName}* (${taskLink})`;
   if (opts.duration) line += ` · ${opts.duration}`;
 
   const blocks: SlackBlock[] = [sectionBlock(line)];
@@ -479,7 +480,8 @@ export function isTreeOutputTruncated(text: string): boolean {
  * Render a single node line: icon + bold name + task link + optional duration.
  */
 function renderNodeLine(node: TreeNode): string {
-  const icon = STATUS_ICON[node.status] ?? "•";
+  const icon =
+    node.status === "completed" ? completedStatusIcon() : (STATUS_ICON[node.status] ?? "•");
   const taskLink = getTaskLink(node.taskId);
   let line = `${icon} *${node.agentName}* (${taskLink})`;
   if (node.duration) line += ` · ${node.duration}`;

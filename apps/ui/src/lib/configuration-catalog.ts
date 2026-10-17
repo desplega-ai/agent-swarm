@@ -1128,6 +1128,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_STATUS_ICON_COMPLETED",
+        label: "Completed status icon",
+        description:
+          "Slack emoji shortcode for the done glyph in thread text: task tree, thread header and outcome cards. Bare name or :name:, same rules as the reaction keys. Unset or invalid keeps the stock check mark. Unlike reactions there is no fallback: a name the workspace lacks renders as literal :name:.",
+        kind: "string",
+        defaultValue: "white_check_mark",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "GITHUB_DISABLE",
         label: "Disable GitHub",
         description:

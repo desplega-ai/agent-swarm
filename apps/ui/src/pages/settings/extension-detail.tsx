@@ -1,10 +1,11 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   useActivateExtensionVersion,
+  useCancelExtensionRequests,
   useDeleteExtension,
   useDisableExtension,
   useEnableExtension,
@@ -14,10 +15,15 @@ import {
   useExtensionVersions,
   usePatchExtension,
 } from "@/api/hooks/use-extensions";
-import type { ExtensionManifest, ExtensionRun, ExtensionVersion } from "@/api/types";
+import type {
+  ExtensionManifest,
+  ExtensionRun,
+  ExtensionStatus,
+  ExtensionVersion,
+} from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { DataGrid } from "@/components/shared/data-grid";
-import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -36,11 +42,25 @@ import { InfoRow } from "@/components/ui/info-row";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageHeader } from "@/components/ui/page-header";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime } from "@/lib/utils";
-import { statusBadgeVariant } from "./extensions-page";
+
+/** Status to badge variant. `error` and `auto-disabled` both need attention. */
+export function statusBadgeVariant(
+  status: ExtensionStatus,
+): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "enabled") return "default";
+  if (status === "error" || status === "auto-disabled") return "destructive";
+  return "outline";
+}
 
 /** Bundle paths Monaco should render as TypeScript; anything else shows as plain text. */
 const TS_FILE = /\.(?:[cm]?[jt]sx?)$/;
@@ -386,23 +406,31 @@ function ManifestAssets({ assets }: { assets: ExtensionManifest["assets"] }) {
  * One installed extension: its manifest and the active snapshot's files
  * (read-only — bundles come from the catalog, see `/settings/extensions/new`),
  * enable/disable, priority and config, the version list, and the tail of the
- * run log.
+ * run log. Rendered by {@link ExtensionDetailSheet}.
  */
-export default function ExtensionDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const extensionId = id ?? "";
-
-  const { data: bundle, isLoading, error } = useExtension(id);
-  const { data: versions } = useExtensionVersions(id);
-  const { data: runs } = useExtensionRuns(id);
-  const { data: typeDefsText } = useExtensionTypeDefs();
-
+export function ExtensionDetail({
+  extensionId,
+  active,
+  onDeleted,
+}: {
+  extensionId: string;
+  /** False while the sheet closes: render cached data, fetch nothing. */
+  active: boolean;
+  onDeleted: () => void;
+}) {
   const patch = usePatchExtension(extensionId);
   const enable = useEnableExtension(extensionId);
   const disable = useDisableExtension(extensionId);
   const activate = useActivateExtensionVersion(extensionId);
   const remove = useDeleteExtension(extensionId);
+
+  // Stop fetching once a delete starts: its success drops these caches, and a
+  // still-enabled observer would re-create them and poll the 404.
+  const live = active && !remove.isPending && !remove.isSuccess;
+  const { data: bundle, isLoading, error } = useExtension(extensionId, { enabled: live });
+  const { data: versions } = useExtensionVersions(extensionId, { enabled: live });
+  const { data: runs } = useExtensionRuns(extensionId, { enabled: live });
+  const { data: typeDefsText } = useExtensionTypeDefs();
 
   const [priority, setPriority] = useState("0");
   const [configText, setConfigText] = useState("{}");
@@ -430,30 +458,27 @@ export default function ExtensionDetailPage() {
     [typeDefsText],
   );
 
-  if (isLoading) return <PageSkeleton />;
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner className="size-3.5" /> Loading extension…
+      </div>
+    );
+  }
 
   if (!bundle) {
+    // Deleted: the cache entry is gone and the sheet is sliding out.
+    if (!live) return null;
     return (
-      <div className="flex flex-col flex-1 min-h-0 gap-6">
-        <PageHeader
-          title="Extension not found"
-          action={
-            <Button type="button" size="sm" variant="ghost" asChild>
-              <Link to="/settings/extensions">
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Link>
-            </Button>
-          }
-        />
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>
-              {error instanceof Error ? error.message : String(error)}
-            </AlertDescription>
-          </Alert>
-        )}
-      </div>
+      <Alert variant="destructive">
+        <AlertDescription>
+          {error
+            ? error instanceof Error
+              ? error.message
+              : String(error)
+            : "Extension not found."}
+        </AlertDescription>
+      </Alert>
     );
   }
 
@@ -501,7 +526,7 @@ export default function ExtensionDetailPage() {
         toast.success(`Deleted ${extension.name}`, {
           description: parts.length > 0 ? parts.join(", ") : undefined,
         });
-        void navigate("/settings/extensions");
+        onDeleted();
       },
       onError: (err) => setSaveError(err.message),
     });
@@ -515,66 +540,47 @@ export default function ExtensionDetailPage() {
     remove.isPending;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-6">
-      <PageHeader
-        title={
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="truncate">{extension.name}</span>
-            <Badge variant={statusBadgeVariant(extension.status)} size="tag">
-              {extension.status}
-            </Badge>
-          </div>
-        }
-        description={`Active v${extension.activeVersion} of ${extension.version} · ${extension.consecutiveFailures} consecutive failures`}
-        action={
-          <div className="flex items-center gap-2">
-            <Button type="button" size="sm" variant="ghost" asChild>
-              <Link to="/settings/extensions">
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Link>
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive-outline"
-              disabled={busy}
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
-            {extension.enabled ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  disable.mutate(undefined, {
-                    onError: (err) => setSaveError(err.message),
-                  })
-                }
-              >
-                Disable
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy}
-                onClick={() =>
-                  enable.mutate(undefined, {
-                    onError: (err) => setSaveError(err.message),
-                  })
-                }
-              >
-                Enable
-              </Button>
-            )}
-          </div>
-        }
-      />
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="destructive-outline"
+          disabled={busy}
+          onClick={() => setConfirmDelete(true)}
+        >
+          <Trash2 className="h-4 w-4" />
+          Delete
+        </Button>
+        {extension.enabled ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() =>
+              disable.mutate(undefined, {
+                onError: (err) => setSaveError(err.message),
+              })
+            }
+          >
+            Disable
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              enable.mutate(undefined, {
+                onError: (err) => setSaveError(err.message),
+              })
+            }
+          >
+            Enable
+          </Button>
+        )}
+      </div>
 
       {saveError && (
         <Alert variant="destructive">
@@ -595,7 +601,7 @@ export default function ExtensionDetailPage() {
           <CardTitle>Bundle</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <InfoRow label="Manifest version">
               <span className="font-mono text-xs">{manifest.version}</span>
             </InfoRow>
@@ -746,5 +752,110 @@ export default function ExtensionDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/**
+ * Focus handling for a sheet opened without a SheetTrigger, where Radix would
+ * return focus to <body> on close. Spread `contentProps` on SheetContent. Open focuses the panel itself (not its first
+ * button, Delete or Install) and remembers what had focus; close returns there,
+ * or to `fallback()` when nothing did (deep link) or it left the page.
+ * `forgetOpener()` sends the next close to `fallback()` even while the opener
+ * is still in the DOM, as a deleted card is until the list refetch lands.
+ */
+export function useSheetFocus(fallback: () => HTMLElement | null) {
+  const opener = useRef<HTMLElement | null>(null);
+  const forgetOpener = () => {
+    opener.current = null;
+  };
+  const contentProps = {
+    onOpenAutoFocus(event: Event) {
+      const active = document.activeElement;
+      opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
+      event.preventDefault();
+      if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+    },
+    onCloseAutoFocus(event: Event) {
+      event.preventDefault();
+      const target = opener.current?.isConnected ? opener.current : fallback();
+      opener.current = null;
+      target?.focus();
+    },
+  };
+  return { contentProps, forgetOpener };
+}
+
+/**
+ * Right-side sheet over the installed-extensions grid. Open while
+ * `extensionId` is set; the route `/settings/extensions/:id` drives it, so
+ * deep links land on the grid with this sheet open. Full width on small
+ * screens. `focusFallback` names where focus goes on close when the opener is
+ * gone, or always once the extension was deleted.
+ */
+export function ExtensionDetailSheet({
+  extensionId,
+  onClose,
+  focusFallback,
+}: {
+  extensionId: string | null;
+  onClose: () => void;
+  focusFallback: (extensionId: string, deleted: boolean) => HTMLElement | null;
+}) {
+  const open = !!extensionId;
+  // Keep the last id so the body stays rendered while the sheet animates
+  // closed; its queries stop with `open`, so a closed or deleted extension is
+  // never polled.
+  const [shownId, setShownId] = useState(extensionId);
+  const deleted = useRef(false);
+  if (extensionId && extensionId !== shownId) {
+    setShownId(extensionId);
+    deleted.current = false;
+  }
+  // Cache reader only: the body's query owns fetching and polling.
+  const { data: bundle } = useExtension(shownId ?? undefined, { enabled: false });
+  const extension = bundle?.extension;
+  const focus = useSheetFocus(() => (shownId ? focusFallback(shownId, deleted.current) : null));
+  // The header's disabled observer keeps a failing fetch retrying after the
+  // body stops, so closing (or switching extensions) cancels that id's requests.
+  const cancelRequests = useCancelExtensionRequests();
+  useEffect(() => {
+    if (!open || !shownId) return;
+    return () => cancelRequests(shownId);
+  }, [open, shownId, cancelRequests]);
+
+  return (
+    <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" {...focus.contentProps}>
+        <SheetHeader className="border-b border-border px-6 py-4 pr-12">
+          <SheetTitle className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono">{extension?.name ?? "Extension"}</span>
+            {extension && (
+              <Badge variant={statusBadgeVariant(extension.status)} size="tag">
+                {extension.status}
+              </Badge>
+            )}
+          </SheetTitle>
+          <SheetDescription>
+            {extension
+              ? `Active v${extension.activeVersion} of ${extension.version} · ${extension.consecutiveFailures} consecutive failures`
+              : "Installed extension"}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          {shownId && (
+            <ExtensionDetail
+              key={shownId}
+              extensionId={shownId}
+              active={open}
+              onDeleted={() => {
+                deleted.current = true;
+                focus.forgetOpener();
+                onClose();
+              }}
+            />
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

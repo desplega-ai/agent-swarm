@@ -98,13 +98,12 @@ async function prepareDeferredWakeTask(
  */
 export const DEFERRED_WAIT_WOKE_EVENT = "task_deferred_wait_woke";
 
-/** Undefined means a normal schedule; an empty result means another caller won. */
-export async function dispatchDeferredTaskWait(
+/** Undefined means a normal schedule; an empty preparation means the wait is not ready. */
+export async function prepareDeferredTaskWait(
   scheduleId: string,
   reason: WakeReason,
   extraTags: string[] = [],
-  triggerTaskId?: string,
-): Promise<{ task?: AgentTask } | undefined> {
+): Promise<{ task?: PreparedTaskCreate } | undefined> {
   const client = getDbClient();
   // Keep ordinary schedule dispatch off the write-lock path.
   if (
@@ -117,8 +116,22 @@ export async function dispatchDeferredTaskWait(
   // first; the transaction below re-reads the wait and its member set before claiming.
   // The prepared description carries the cause seen here; for an `any` wait a member
   // that settles between this read and the claim is missing from that text only.
-  const preparedForWait = await prepareDeferredWakeTask(scheduleId, reason, extraTags);
+  return { task: await prepareDeferredWakeTask(scheduleId, reason, extraTags) };
+}
+
+/** Undefined means a normal schedule; an empty result means another caller won. */
+export async function dispatchDeferredTaskWait(
+  scheduleId: string,
+  reason: WakeReason,
+  extraTags: string[] = [],
+  triggerTaskId?: string,
+  prepared?: { task?: PreparedTaskCreate },
+): Promise<{ task?: AgentTask } | undefined> {
+  const preparation = prepared ?? (await prepareDeferredTaskWait(scheduleId, reason, extraTags));
+  if (!preparation) return undefined;
+  const preparedForWait = preparation.task;
   if (!preparedForWait) return {};
+  const client = getDbClient();
   return client.transaction(async () => {
     const resolved = await resolveWaitCause(scheduleId, reason);
     if (!resolved) return {};
