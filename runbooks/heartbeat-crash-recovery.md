@@ -820,9 +820,13 @@ The recurring `HEARTBEAT.md` checklist tick (`checkHeartbeatChecklist`) can ask 
 flowchart TD
   T[checklist tick] --> D{lead, non-empty HEARTBEAT.md,<br/>no active checklist task?}
   D -- no --> X[return]
-  D -- yes --> G{HEARTBEAT_CHECKLIST_GATE_SCRIPT set?}
-  G -- no --> C[create checklist task]
-  G -- yes --> R[run gate under one 60s deadline]
+  D -- yes --> G{HEARTBEAT_CHECKLIST_GATE_SCRIPT?}
+  G -- "empty or off" --> C[create checklist task]
+  G -- unset --> K{global Jev key?<br/>TYPESAFE_API_KEY or OPENROUTER_API_KEY}
+  K -- no --> C
+  K -- yes --> RJ[script = heartbeat-jev-gate]
+  RJ --> R
+  G -- name --> R[run gate under one 60s deadline]
   R --> V{verdict}
   V -- quiet + enforce --> S[skip: no task]
   V -- quiet/wake/error + shadow --> CT[create task, tag heartbeat-gate:verdict,<br/>prompt unchanged]
@@ -834,7 +838,13 @@ Pseudocode (current):
 
 ```
 # checkHeartbeatChecklist, after the lead / HEARTBEAT.md / dedup checks:
-script = HEARTBEAT_CHECKLIST_GATE_SCRIPT (trimmed; empty = gate off, no tag)
+raw = HEARTBEAT_CHECKLIST_GATE_SCRIPT
+if raw is set:      script = raw.trim(); empty or "off" (any case) = gate off, no tag
+else if jevKey():   script = "heartbeat-jev-gate"   # default on, shadow unless MODE says enforce
+else:               script = none
+# jevKey(): a non-empty global swarm_config row for TYPESAFE_API_KEY, or for OPENROUTER_API_KEY
+# while OPENROUTER_BASE_URL is the openrouter.ai default; HEARTBEAT_JEV_GATE_PROVIDER narrows
+# the candidates the same way the script does. A read error = no key.
 mode   = HEARTBEAT_CHECKLIST_GATE_MODE == "enforce" ? enforce : shadow   # anything else = shadow
 if script:
   controller = AbortController()
@@ -930,7 +940,7 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | `getUnassignedTaskIdsForAgent` eligibility-scan hard cap (rows/call) | 500 | `ELIGIBILITY_SCAN_CAP` |
 | `HEARTBEAT.md` checklist tick (restart required; `0` = recurring tick off, boot triage still runs) | 30 min | `HEARTBEAT_CHECKLIST_INTERVAL_MS` |
 | Checklist tick + boot triage kill switch (restart required; `true`/`1` = off, `false`/`0` = on) | off | `HEARTBEAT_CHECKLIST_DISABLE` |
-| Checklist gate script (§5b; global scope, empty = gate off) | unset | `HEARTBEAT_CHECKLIST_GATE_SCRIPT` |
+| Checklist gate script (§5b; global scope; empty or `off` = gate off; unset = `heartbeat-jev-gate` when a global Jev key exists) | unset | `HEARTBEAT_CHECKLIST_GATE_SCRIPT` |
 | Checklist gate mode (§5b; `shadow` tags only, `enforce` skips quiet ticks) | `shadow` | `HEARTBEAT_CHECKLIST_GATE_MODE` |
 
 ---

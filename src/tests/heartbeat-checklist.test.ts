@@ -17,6 +17,7 @@ import {
   initDb,
   startTask,
   updateAgentProfile,
+  upsertSwarmConfig,
 } from "../be/db";
 import { getScript, upsertScriptByName } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -404,6 +405,103 @@ describe("Heartbeat Checklist", () => {
       const tasks = await checklistTasks();
       expect(tasks).toHaveLength(1);
       expect(tasks[0]!.tags.some((tag) => tag.startsWith("heartbeat-gate:"))).toBe(false);
+    });
+
+    describe("default Jev gate", () => {
+      async function setGlobal(key: string, value: string) {
+        await upsertSwarmConfig({ scope: "global", key, value, isSecret: true });
+      }
+
+      beforeEach(() => {
+        delete process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT;
+      });
+
+      afterEach(async () => {
+        await getDbClient().run("DELETE FROM swarm_config");
+        delete process.env.OPENROUTER_BASE_URL;
+        delete process.env.HEARTBEAT_JEV_GATE_PROVIDER;
+      });
+
+      test("unset script with a TypeSafe key runs heartbeat-jev-gate in shadow", async () => {
+        await setGlobal("TYPESAFE_API_KEY", "ts-test-key");
+        useGate({ quiet: true });
+        const lead = await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toEqual([{ scriptName: "heartbeat-jev-gate", leadAgentId: lead.id }]);
+        const tasks = await checklistTasks();
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0]!.tags).toContain("heartbeat-gate:quiet");
+      });
+
+      test("unset script with an OpenRouter key runs heartbeat-jev-gate", async () => {
+        await setGlobal("OPENROUTER_API_KEY", "or-test-key");
+        useGate({ quiet: false });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls.map((call) => call.scriptName)).toEqual(["heartbeat-jev-gate"]);
+      });
+
+      test("unset script and no Jev key: gate stays off", async () => {
+        await setGlobal("ANTHROPIC_API_KEY", "unrelated");
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toHaveLength(0);
+      });
+
+      test("an OpenRouter key behind a gateway base URL does not turn the gate on", async () => {
+        await setGlobal("OPENROUTER_API_KEY", "gateway-token");
+        process.env.OPENROUTER_BASE_URL = "https://gateway.example/v1";
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toHaveLength(0);
+      });
+
+      test("a provider pin with no key for that provider leaves the gate off", async () => {
+        await setGlobal("OPENROUTER_API_KEY", "or-test-key");
+        process.env.HEARTBEAT_JEV_GATE_PROVIDER = "typesafe";
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toHaveLength(0);
+      });
+
+      for (const value of ["", "  ", "off", "OFF"]) {
+        test(`script set to ${JSON.stringify(value)} keeps the gate off with a key present`, async () => {
+          await setGlobal("TYPESAFE_API_KEY", "ts-test-key");
+          process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT = value;
+          useGate({ quiet: true });
+          await seedLead();
+
+          await checkHeartbeatChecklist();
+
+          expect(calls).toHaveLength(0);
+          const tasks = await checklistTasks();
+          expect(tasks).toHaveLength(1);
+          expect(tasks[0]!.tags.some((tag) => tag.startsWith("heartbeat-gate:"))).toBe(false);
+        });
+      }
+
+      test("the default never turns on enforce: a quiet verdict still creates the task", async () => {
+        await setGlobal("TYPESAFE_API_KEY", "ts-test-key");
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(await checklistTasks()).toHaveLength(1);
+      });
     });
 
     test("shadow mode (default): a quiet verdict still creates the task, tagged quiet", async () => {

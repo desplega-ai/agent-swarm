@@ -374,10 +374,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "HEARTBEAT_CHECKLIST_GATE_SCRIPT",
         label: "Checklist gate script",
         description:
-          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Leave empty to turn the gate off.",
+          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Unset runs the built-in heartbeat-jev-gate when a global TYPESAFE_API_KEY or OPENROUTER_API_KEY is set. Set off to turn the gate off.",
         kind: "string",
         defaultValue: "",
-        placeholder: "heartbeat-gate",
+        placeholder: "heartbeat-jev-gate",
         docsUrl: `${DOCS}ui/configuration`,
       },
       {

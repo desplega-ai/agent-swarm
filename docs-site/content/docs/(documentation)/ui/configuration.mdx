@@ -100,7 +100,11 @@ Controller credentials belong on the controller host. They are absent from the c
 
 `HEARTBEAT_CHECKLIST_GATE_SCRIPT` names a global-scope script that runs as the Lead before
 each recurring heartbeat checklist task. It returns `{ quiet: boolean, reason?: string, summary?: string }`.
-Leave it empty to turn the gate off.
+
+- Unset (the default): the built-in `heartbeat-jev-gate` runs when a global Jev key is set (see
+  [Jev gate](#jev-gate)). With no key, the gate stays off.
+- Set to `off` or to an empty value: the gate is off, even when a Jev key is set.
+- Set to a script name: that script runs.
 
 `HEARTBEAT_CHECKLIST_GATE_MODE` decides what the verdict does:
 
@@ -117,8 +121,11 @@ without a restart. Config writes reject modes other than `shadow` and `enforce`.
 
 ### Jev gate
 
-The built-in `heartbeat-jev-gate` script is a ready gate. Set
-`HEARTBEAT_CHECKLIST_GATE_SCRIPT=heartbeat-jev-gate` to use it. Each tick it builds a compact
+The built-in `heartbeat-jev-gate` script is a ready gate. It runs by default, in `shadow` mode,
+once a global `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set and
+`HEARTBEAT_CHECKLIST_GATE_SCRIPT` is unset. An OpenRouter key does not turn it on while
+`OPENROUTER_BASE_URL` points at a gateway, and `HEARTBEAT_JEV_GATE_PROVIDER` limits which key
+counts. `enforce` stays opt-in. Each tick it builds a compact
 state of about 1,500 characters (current time, new failures since the previous checklist,
 tracked HEARTBEAT items due today or past their `DELETE` date, the previous checklist result,
 task counts, agent status) and asks Jev, TypeSafe's decision model, whether the Lead needs to
@@ -137,8 +144,8 @@ environment is not detected. The key never enters the script: it calls the
   the key may then be a gateway token. The tick then reports an `error` verdict and the checklist
   runs.
 
-With neither key, the first tick creates one approval request asking a person to add a key or
-decline, and links it in the heartbeat log's gate `reason`. No Slack message is sent. Until a
+When you name `heartbeat-jev-gate` explicitly and neither key exists, the first tick creates
+one approval request asking a person to add a key or decline, and links it in the heartbeat log's gate `reason`. No Slack message is sent. Until a
 key exists, every tick returns `{ quiet: false, reason: "jev-gate inactive: <state>" }` with no
 `summary`, so the checklist runs as if the gate were off. Ticks never prompt again after that
 first request, whether it is pending, approved, rejected, or expired. Adding a key turns the

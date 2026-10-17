@@ -30,6 +30,7 @@ import {
   getStalledInProgressTasks,
   getSupersededTasksWithoutResume,
   getSupersededTasksWithUnsettledDependents,
+  getSwarmConfigs,
   getTaskById,
   getTaskStats,
   getTasksByStatus,
@@ -77,6 +78,7 @@ import {
 import { type AgentTask, TERMINAL_TASK_STATUSES } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
@@ -245,12 +247,46 @@ function isBootTriageAlways(): boolean {
 const HEARTBEAT_CHECKLIST_GATE_TIMEOUT_MS = 60_000;
 let checklistGateTimeoutMs = HEARTBEAT_CHECKLIST_GATE_TIMEOUT_MS;
 
+/** Seeded gate used when `HEARTBEAT_CHECKLIST_GATE_SCRIPT` is unset and Jev has a key. */
+const DEFAULT_CHECKLIST_GATE_SCRIPT = "heartbeat-jev-gate";
+
 /**
  * Name of a global-scope script that decides whether a checklist tick needs
- * the Lead. Unset or empty turns the gate off.
+ * the Lead. An empty value or `off` turns the gate off. Unset falls back to
+ * the seeded Jev gate, but only when Jev has a usable global key: without
+ * one the script would open a setup approval request on the first tick.
  */
-function heartbeatChecklistGateScript(): string | null {
-  return process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT?.trim() || null;
+async function heartbeatChecklistGateScript(): Promise<string | null> {
+  const raw = process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT;
+  if (raw !== undefined) {
+    const name = raw.trim();
+    return name && name.toLowerCase() !== "off" ? name : null;
+  }
+  return (await hasJevGateKey()) ? DEFAULT_CHECKLIST_GATE_SCRIPT : null;
+}
+
+/**
+ * Mirrors the provider pick in `heartbeat-jev-gate`: a global TypeSafe or
+ * OpenRouter key, honoring `HEARTBEAT_JEV_GATE_PROVIDER`. An OpenRouter key
+ * behind an `OPENROUTER_BASE_URL` gateway does not count, because the
+ * decisions call refuses it and every tick would be an `error` verdict.
+ */
+async function hasJevGateKey(): Promise<boolean> {
+  const pref = process.env.HEARTBEAT_JEV_GATE_PROVIDER?.trim().toLowerCase() || "auto";
+  const keys: string[] = [];
+  if (pref !== "openrouter") keys.push("TYPESAFE_API_KEY");
+  if (pref !== "typesafe" && getOpenRouterBaseUrl() === DEFAULT_OPENROUTER_BASE_URL) {
+    keys.push("OPENROUTER_API_KEY");
+  }
+  try {
+    for (const key of keys) {
+      const rows = await getSwarmConfigs({ scope: "global", key });
+      if (rows.some((row) => row.value.trim() !== "")) return true;
+    }
+  } catch {
+    // An unreadable secret row leaves the gate off; the checklist still runs.
+  }
+  return false;
 }
 
 /**
@@ -1737,7 +1773,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
   );
   if (existing) return;
 
-  const gateScript = heartbeatChecklistGateScript();
+  const gateScript = await heartbeatChecklistGateScript();
   const gateMode = heartbeatChecklistGateMode();
   const gate = gateScript ? await runChecklistGate(gateScript, lead.id) : null;
   if (gate) {
