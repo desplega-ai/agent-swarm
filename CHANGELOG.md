@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Extensions: `comms-adherence-gate` ships as a catalog template; the UI shows extensions as cards with a details sheet (#2195, #2196).
 
 ### Changed
-- agent-fs pins bumped to 0.16.4 then 0.17.0; worker image bumps for claude-code, codex, opencode, amp, grok, qwen, acp, dsh and anthropic-sdk (#2188, #2208, #2179, #2190).
+- agent-fs pins bumped to 0.16.4, 0.17.0 and 0.17.3; worker image bumps for claude-code, codex, opencode, amp, grok, qwen, acp, dsh and anthropic-sdk (#2188, #2208, #2179, #2190).
 - Docs: heartbeat spec synced (#2181).
 
 ### Fixed
