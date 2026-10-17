@@ -95,8 +95,8 @@ const { stdout, exitCode } = await ctx.sh("grep -rn TODO /afs/notes | sort | hea
 - `ctx.fs`: `readFile`, `writeFile`, `appendFile`, `readdir`, `stat`, `exists`, `mkdir`, `rm`, `cp`, `mv`. UTF-8 text only.
 - `ctx.sh(command, { cwd, env, stdin })` returns `{ stdout, stderr, exitCode }` and does not throw on a failed command. Check `exitCode`.
 - `ctx.sh` is just-bash, a bash interpreter in TypeScript: pipes, globs, `grep`, `sed`, `awk`, `jq`, `sort`, `wc`, `find`, `xargs`. No `git`, `curl`, `node`, `python`, or network. Files stay across calls in one run; `cd`, `env`, and variables do not.
-- Limits: 64 MiB of scratch files per run, 64 MiB per command.
-- Without agent-fs for your agent, an `/afs` path fails with `agent-fs is not configured for this agent`. Scratch and `ctx.sh` still work.
+- Limits per run: 64 MiB of scratch files, about 30,000 scratch entries (8 MiB of names and entries), 64 MiB per command, and 64 MiB per `/afs` file read (`EFBIG`). Scratch names have at most 255 characters.
+- Without agent-fs for your agent, an `/afs` path fails with `agent-fs is not configured for this agent`, in `ctx.fs` and in shell redirects. Scratch and `ctx.sh` still work.
 - A change that another agent makes to the drive can take up to 5 seconds to show in `ls` or `stat` during a run. Your own writes show at once.
 
 ### Durable workflow scripts

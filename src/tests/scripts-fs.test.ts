@@ -13,6 +13,10 @@ import {
   type SwarmConfigPayload,
 } from "../scripts-runtime/executors/types";
 import {
+  SCRIPT_FS_MAX_METADATA_BYTES,
+  SCRIPT_FS_MAX_NAME_LENGTH,
+} from "../scripts-runtime/scratch-fs";
+import {
   AGENT_FS_API_KEY_CONFIG,
   createScriptFs,
   SCRIPT_FS_MAX_BYTES,
@@ -91,7 +95,9 @@ beforeAll(() => {
           return Response.json({ version: 1, path });
         }
         const bytes = files.get(path);
-        return bytes ? new Response(bytes) : notFound(path);
+        if (!bytes) return notFound(path);
+        // Files under /streamed/ go out chunked, with no Content-Length.
+        return new Response(path.startsWith("/streamed/") ? new Blob([bytes]).stream() : bytes);
       }
       return new Response("no route", { status: 404 });
     },
@@ -229,7 +235,18 @@ function suite(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean
               const sorted = await ctx.sh("sort /work/a.txt");
               let error = "";
               try { await ctx.fs.readFile("/afs/x.md"); } catch (e) { error = e.message; }
-              return { sorted: sorted.stdout, error, exists: await ctx.fs.exists("/afs/x.md") };
+              let normalized = "";
+              try { await ctx.fs.writeFile("/tmp/../afs/canonical.md", "bypass"); } catch (e) { normalized = e.message; }
+              const shell = await ctx.sh("mkdir -p /afs; echo persisted > /afs/report.md; cat /afs/report.md");
+              return {
+                sorted: sorted.stdout,
+                error,
+                normalized,
+                shell,
+                root: (await ctx.sh("ls /")).stdout,
+                exists: await ctx.fs.exists("/afs/x.md"),
+                normalizedExists: await ctx.fs.exists("/tmp/../afs/canonical.md"),
+              };
             };`,
             false,
           ),
@@ -238,8 +255,48 @@ function suite(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean
         const result = output.result as Record<string, unknown>;
         expect(result.sorted).toBe("a\nb\n");
         expect(result.error).toContain("agent-fs is not configured");
+        expect(result.normalized).toContain("agent-fs is not configured");
+        // A shell write to /afs fails instead of landing in scratch.
+        const shell = result.shell as { stdout: string; stderr: string; exitCode: number };
+        expect(shell.exitCode).not.toBe(0);
+        expect(shell.stdout).not.toContain("persisted");
+        expect(result.root).not.toContain("afs");
         expect(result.exists).toBe(false);
+        expect(result.normalizedExists).toBe(false);
         expect(seenAuth.size).toBe(0);
+      },
+      { timeout: 30_000 },
+    );
+
+    run(
+      "a mounted file over SCRIPT_FS_MAX_BYTES fails before it is buffered",
+      async () => {
+        const big = new Uint8Array(SCRIPT_FS_MAX_BYTES + 1);
+        files.set("/big.bin", big);
+        files.set("/streamed/big.bin", big);
+        const output = await makeExecutor().run(
+          input(`export default async (_args, ctx) => {
+            const reads = [];
+            for (const path of ["/afs/big.bin", "/afs/streamed/big.bin"]) {
+              try { await ctx.fs.readFile(path); reads.push("read"); } catch (e) { reads.push(e.message); }
+            }
+            let append = "";
+            try { await ctx.fs.appendFile("/afs/streamed/big.bin", "x"); } catch (e) { append = e.message; }
+            const wc = await ctx.sh("wc -c /afs/streamed/big.bin");
+            return { reads, append, wc, small: await ctx.fs.readFile("/afs/notes/seed.md") };
+          };`),
+        );
+        expect(output.error).toBeUndefined();
+        const result = output.result as Record<string, unknown>;
+        for (const message of result.reads as string[]) expect(message).toContain("EFBIG");
+        expect(result.append).toContain("EFBIG");
+        const wc = result.wc as { stdout: string; stderr: string; exitCode: number };
+        // just-bash's wc reports any read error as "No such file or directory".
+        expect(wc.exitCode).not.toBe(0);
+        expect(wc.stdout).not.toContain(String(SCRIPT_FS_MAX_BYTES + 1));
+        // Small files still read, and the failed append wrote nothing.
+        expect(result.small).toBe("hello from the drive\nsecond line\n");
+        expect(files.get("/streamed/big.bin")?.length).toBe(SCRIPT_FS_MAX_BYTES + 1);
       },
       { timeout: 30_000 },
     );
@@ -261,6 +318,43 @@ test("scratch files and one ctx.sh command stay under SCRIPT_FS_MAX_BYTES", asyn
   expect(over.stderr).toContain("output size limit exceeded");
   // The session still works after a command hits the cap.
   expect((await sh("echo ok")).stdout).toBe("ok\n");
+});
+
+// InMemoryFs charges only file bodies, so names and empty entries need their own budget.
+test("scratch names and empty entries stay under SCRIPT_FS_MAX_METADATA_BYTES", async () => {
+  const { fs, sh } = createScriptFs(undefined);
+  const longName = "x".repeat(SCRIPT_FS_MAX_NAME_LENGTH + 1);
+  await expect(fs.writeFile(`/tmp/0${"x".repeat(1024 * 1024)}`, "")).rejects.toThrow(
+    "ENAMETOOLONG",
+  );
+  expect((await sh(`touch /tmp/${longName}`)).exitCode).not.toBe(0);
+  // A path within PATH_MAX but deep enough that its parents alone pass the budget.
+  const deep = await sh(`mkdir -p /tmp/${"a/".repeat(2000)}`);
+  expect(deep.exitCode).not.toBe(0);
+  expect(deep.stderr).toContain("ENOSPC");
+
+  const name = "y".repeat(200);
+  let created = 0;
+  let error = "";
+  try {
+    for (;;) {
+      await fs.writeFile(`/tmp/${created}${name}`, "");
+      created++;
+    }
+  } catch (e) {
+    error = (e as Error).message;
+  }
+  expect(error).toContain("ENOSPC");
+  // Each entry costs more than its name, so the budget fills well before 8 MiB of names.
+  expect(created).toBeGreaterThan(1000);
+  expect(created * name.length).toBeLessThan(SCRIPT_FS_MAX_METADATA_BYTES / 2);
+  const touch = await sh("touch /tmp/one-more");
+  expect(touch.exitCode).not.toBe(0);
+  expect(touch.stderr).toContain("ENOSPC");
+  // Deleting entries gives the budget back.
+  await fs.rm("/tmp", { recursive: true });
+  await fs.writeFile("/tmp/after", "ok");
+  expect(await fs.readFile("/tmp/after")).toBe("ok");
 });
 
 describe("agent-fs credential resolution (real resolver)", () => {

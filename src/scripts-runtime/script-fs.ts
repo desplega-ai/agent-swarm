@@ -1,6 +1,7 @@
 import type { Bash, IFileSystem } from "just-bash";
 import { placeholderForConfigKey } from "./credential-broker";
 import type { ScriptAgentFsDescriptor } from "./executors/types";
+import { ScratchFs } from "./scratch-fs";
 
 /**
  * `ctx.fs` and `ctx.sh`: one virtual filesystem per script run, plus a
@@ -23,10 +24,11 @@ export const AGENT_FS_MOUNT = "/afs";
 /** Agent-scoped config key that holds the agent's own agent-fs API key. */
 export const AGENT_FS_API_KEY_CONFIG = "AGENT_FS_API_KEY";
 /**
- * Bytes that one run's scratch files may hold, and that one `ctx.sh` command
- * may read, keep live or print. Under quickjs this code runs in the API
- * process, outside the QuickJS heap limit, so just-bash's own defaults (1 GiB
- * of scratch, 512 MiB per command) are too high.
+ * Bytes that one run's scratch files may hold, that one `ctx.sh` command may
+ * read, keep live or print, and that one agent-fs response may carry. Under
+ * quickjs this code runs in the API process, outside the QuickJS heap limit,
+ * so just-bash's own defaults (1 GiB of scratch, 512 MiB per command) are too
+ * high.
  */
 export const SCRIPT_FS_MAX_BYTES = 64 * 1024 * 1024;
 
@@ -49,13 +51,57 @@ export type ScriptFs = {
 
 type Session = { fs: IFileSystem; bash: Bash };
 
+function notConfigured(path: string): Error {
+  return new Error(
+    `ENOENT: ${path}: agent-fs is not configured for this agent (needs AGENT_FS_API_URL, AGENT_FS_DEFAULT_ORG_ID, AGENT_FS_DEFAULT_DRIVE_ID and an agent AGENT_FS_API_KEY)`,
+  );
+}
+
+/**
+ * Fails an agent-fs response body once it passes SCRIPT_FS_MAX_BYTES. The
+ * adapter buffers whole bodies (`arrayBuffer()`, `text()`) for reads, shell
+ * tools, and `appendFile`, so neither the scratch quota nor the shell limits
+ * bound that buffer. The body errors instead of fetch throwing, because the
+ * adapter reports a fetch error as an unreachable daemon.
+ */
+function limitBody(response: Response): Response {
+  if (!response.body) return response;
+  const tooLarge = () =>
+    new Error(`EFBIG: agent-fs response exceeds the ${SCRIPT_FS_MAX_BYTES}-byte script limit`);
+  const declared = Number(response.headers.get("content-length"));
+  let received = 0;
+  const body = response.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      start(controller) {
+        if (declared > SCRIPT_FS_MAX_BYTES) controller.error(tooLarge());
+      },
+      transform(chunk, controller) {
+        received += chunk.byteLength;
+        if (received > SCRIPT_FS_MAX_BYTES) controller.error(tooLarge());
+        else controller.enqueue(chunk);
+      },
+    }),
+  );
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 async function openSession(agentFs: ScriptAgentFsDescriptor | undefined): Promise<Session> {
   // Loaded on first use, so runs that never touch ctx.fs / ctx.sh skip the import.
   const { Bash, InMemoryFs, MountableFs } = await import("just-bash");
   // just-bash writes its default layout (/bin, /usr, /dev, /proc) into the base
-  // filesystem, so the base must be scratch memory and never the drive.
+  // filesystem, so the base must be scratch memory and never the drive. Without
+  // the drive, the base reserves /afs, so `ctx.sh` cannot put a file there that
+  // looks persistent and dies with the run.
+  const scratch = new InMemoryFs(undefined, { maxTotalBytes: SCRIPT_FS_MAX_BYTES });
   const fs = new MountableFs({
-    base: new InMemoryFs(undefined, { maxTotalBytes: SCRIPT_FS_MAX_BYTES }),
+    base: new ScratchFs(
+      scratch,
+      agentFs ? undefined : { path: AGENT_FS_MOUNT, error: notConfigured },
+    ),
   });
   if (agentFs) {
     const { AgentFsFileSystem } = await import("@desplega.ai/agent-fs-just-bash");
@@ -65,7 +111,7 @@ async function openSession(agentFs: ScriptAgentFsDescriptor | undefined): Promis
       orgId: agentFs.orgId,
       driveId: agentFs.driveId,
       // Late-bound: each executor patches (and quickjs scopes per run) the global fetch.
-      fetch: (input, init) => globalThis.fetch(input, init),
+      fetch: async (input, init) => limitBody(await globalThis.fetch(input, init)),
       writeMessage: (operation, path) => `swarm script: ${operation} ${path}`,
     });
     fs.mount(AGENT_FS_MOUNT, drive);
@@ -97,17 +143,9 @@ export function createScriptFs(
     const text = String(path);
     return text.startsWith("/") ? text : `${home}/${text}`;
   };
-  // Resolves a script path against the session filesystem. Without agent-fs,
-  // /afs paths fail with the reason instead of a bare ENOENT.
-  const at = async (path: string) => {
-    const resolved = resolve(path);
-    if (!agentFs && (resolved === AGENT_FS_MOUNT || resolved.startsWith(`${AGENT_FS_MOUNT}/`))) {
-      throw new Error(
-        `ENOENT: ${resolved}: agent-fs is not configured for this agent (needs AGENT_FS_API_URL, AGENT_FS_DEFAULT_ORG_ID, AGENT_FS_DEFAULT_DRIVE_ID and an agent AGENT_FS_API_KEY)`,
-      );
-    }
-    return { fs: (await session()).fs, path: resolved };
-  };
+  // Resolves a script path against the session filesystem. MountableFs
+  // normalizes it, and without agent-fs ScratchFs rejects /afs with the reason.
+  const at = async (path: string) => ({ fs: (await session()).fs, path: resolve(path) });
 
   const fs: ScriptFs = {
     readFile: async (path) => {
@@ -137,8 +175,8 @@ export function createScriptFs(
       };
     },
     exists: async (path) => {
-      const target = await at(path).catch(() => undefined);
-      return target ? target.fs.exists(target.path) : false;
+      const target = await at(path);
+      return target.fs.exists(target.path);
     },
     mkdir: async (path, options) => {
       const target = await at(path);
@@ -165,13 +203,21 @@ export function createScriptFs(
 
   const sh = async (command: string, options: ScriptShOptions = {}): Promise<ScriptShResult> => {
     const { bash } = await session();
-    const result = await bash.exec(String(command), {
-      ...(options.cwd ? { cwd: resolve(options.cwd) } : {}),
-      ...(options.env ? { env: options.env } : {}),
-      ...(options.stdin !== undefined ? { stdin: String(options.stdin) } : {}),
-      ...(signal ? { signal } : {}),
-    });
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+    try {
+      const result = await bash.exec(String(command), {
+        ...(options.cwd ? { cwd: resolve(options.cwd) } : {}),
+        ...(options.env ? { env: options.env } : {}),
+        ...(options.stdin !== undefined ? { stdin: String(options.stdin) } : {}),
+        ...(signal ? { signal } : {}),
+      });
+      return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+    } catch (error) {
+      // just-bash rethrows a filesystem error from a redirect (an unconfigured
+      // /afs, ENOSPC). Report it as a failed command, as bash does.
+      if (signal?.aborted) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      return { stdout: "", stderr: `bash: ${message}\n`, exitCode: 1 };
+    }
   };
 
   return { fs, sh };

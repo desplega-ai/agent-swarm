@@ -219,21 +219,38 @@ these for the invoking agent:
   A global or repo row and the API's bootstrap key never mount the drive, so a
   run without an invoking agent has no `/afs`.
 
-Without the drive, scratch paths and `ctx.sh` still work, and an `/afs` path
-fails with `agent-fs is not configured for this agent (...)`. The key never
-enters the script: drive requests carry a credential-broker placeholder, and
-the egress layer puts the agent's key on requests to the agent-fs host only.
+Without the drive, scratch paths and `ctx.sh` still work. An `/afs` path fails
+with `agent-fs is not configured for this agent (...)`, from `ctx.fs` and from
+shell commands and redirects alike. A file that looks persistent never lands in
+memory.
+
+`ctx.fs` and `ctx.sh` never hold the key: drive requests carry a
+credential-broker placeholder, and the egress layer puts the agent's key on
+requests to the agent-fs host only. This is not a confinement boundary. Like
+the agent's other config secrets, the key is readable through
+`ctx.swarm.config.get`.
 
 **Caching.** The drive adapter keeps `stat` and directory listings for 5
 seconds. The run's own writes show at once. A change that another agent makes
 during the run can take up to 5 seconds to show in `ls` or `stat`. File
 contents are always read fresh.
 
-**Limits.** Scratch files hold at most 64 MiB per run. One `ctx.sh` command can
-read, hold, or print at most 64 MiB. A write over the limit fails with
-`ENOSPC`, and a command over the limit exits with code 126. The first `ctx.fs`
-or `ctx.sh` call in a run loads the shell (about 200 ms under `native`). Runs
-that do not use them pay nothing.
+**Limits.** These limits apply to each run, under both executors:
+
+- Scratch files hold at most 64 MiB. A write over the limit fails with `ENOSPC`.
+- Scratch paths, directories, and empty files share an 8 MiB metadata budget.
+  Each entry costs 256 bytes plus 2 bytes for each path character, which allows
+  about 30,000 entries. A write over the budget fails with `ENOSPC`. Remove
+  files to free the budget.
+- A scratch name has at most 255 characters, and a scratch path at most 4096. A
+  longer one fails with `ENAMETOOLONG`.
+- One `ctx.sh` command can read, hold, or print at most 64 MiB. A command over
+  the limit exits with code 126.
+- One drive response carries at most 64 MiB. A larger `/afs` file fails with
+  `EFBIG` in `ctx.fs`, and a shell tool reports a read error.
+
+The first `ctx.fs` or `ctx.sh` call in a run loads the shell (about 200 ms
+under `native`). Runs that do not use them pay nothing.
 
 ### Durable workflow context
 
@@ -391,7 +408,7 @@ access except the host calls below. These are the differences from `native`:
 - **Host calls:** at most 16 host calls (`fetch`, `ctx.swarm`, `ctx.api`,
   `ctx.mcp`, `ctx.fs`, `ctx.sh`) run at the same time for one script, and the
   rest wait. `ctx.fs` and `ctx.sh` run on the host side, in the API process,
-  so the 64 MiB limits in [Files and shell](#files-and-shell) apply instead of
+  so the limits in [Files and shell](#files-and-shell) apply instead of
   `memoryMb`. A run
   can have at most 1024 host calls and timers in flight or waiting. When the
   run ends, the executor aborts every host call that is still open, including
