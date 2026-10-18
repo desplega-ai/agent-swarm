@@ -92,6 +92,9 @@ jobs:
           # change can break it (a new `@/` import the root runner cannot resolve).
           TEST=$(match '^(src/|packages/(model-catalog|model-routing)/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/ui/src/|apps/(ui|templates-ui|evals)/package\.json$)')
 
+          # community/ranking/ matches no flag on purpose: an entry PR only adds a
+          # JSON file, and its gate is the Ranking entry workflow (ranking-entry.yml).
+
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
 
