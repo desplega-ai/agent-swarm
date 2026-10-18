@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   closeDb,
   createAgent,
+  createLogEntry,
   createSessionLogs,
   createSteeringMessage,
   createTaskExtended,
@@ -13,6 +14,7 @@ import {
   initDb,
   insertTaskAttachment,
 } from "../be/db";
+import { createEvent } from "../be/events";
 import { setSessionShares } from "../be/session-shares";
 import { mintToken } from "../be/users";
 import { getFileStorageProvider, resetFileStorageProvider } from "../fs/registry";
@@ -215,5 +217,32 @@ describe("task-content routes respect session read access", () => {
     const signed = `${files}/${attachment.id}/signed-url`;
     expect((await get(signed, "viewer")).status).toBe(403);
     expect((await get(signed, "owner")).status).toBe(501);
+  });
+
+  test("B9 events and audit logs, task-filtered and unfiltered", async () => {
+    const { root, child } = await privateSession("events");
+    const eventSecret = "PRIVATE EVENT PAYLOAD";
+    const progressSecret = "PRIVATE PROGRESS TEXT";
+    await createEvent({
+      taskId: child.id,
+      agentId: agent.id,
+      category: "tool",
+      event: "tool.start",
+      source: "worker",
+      data: { message: eventSecret },
+    });
+    await createLogEntry({
+      taskId: root.id,
+      agentId: agent.id,
+      eventType: "task_progress",
+      newValue: progressSecret,
+    });
+
+    await expectPrivate(`/api/events?taskId=${child.id}`, eventSecret, { deniedStatus: 200 });
+    await expectPrivate("/api/events", eventSecret, { deniedStatus: 200 });
+    await expectPrivate("/api/logs", progressSecret, { deniedStatus: 200 });
+    await expectPrivate(`/api/logs?agentId=${agent.id}`, progressSecret, { deniedStatus: 200 });
+    // Task-less rows belong to no session and stay visible.
+    expect((await get("/api/logs", "viewer")).body).toContain("agent_joined");
   });
 });

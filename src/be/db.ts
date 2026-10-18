@@ -2274,10 +2274,16 @@ export async function createLogEntry(entry: {
   return rowToAgentLog(row);
 }
 
-export async function getLogsByAgentId(agentId: string): Promise<AgentLog[]> {
+export async function getLogsByAgentId(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentLog[]> {
+  const readable = readableBy
+    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
+    : undefined;
   const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE agentId = ? ORDER BY createdAt DESC",
-    [agentId],
+    `SELECT * FROM agent_log WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToAgentLog);
 }
@@ -2321,16 +2327,24 @@ export async function getLogsByEventType(eventType: AgentLogEventType): Promise<
   return rows.map(rowToAgentLog);
 }
 
-export async function getAllLogs(limit?: number): Promise<AgentLog[]> {
+export async function getAllLogs(
+  limit?: number,
+  readableBy?: { userId: string | null },
+): Promise<AgentLog[]> {
+  const readable = readableBy
+    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
+    : undefined;
+  const readableParams = readable?.params ?? [];
   if (limit) {
     const rows = await getDbClient().query<AgentLogRow>(
-      "SELECT * FROM agent_log WHERE eventType != 'agent_status_change' ORDER BY createdAt DESC LIMIT ?",
-      [limit],
+      `SELECT * FROM agent_log WHERE eventType != 'agent_status_change'${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC LIMIT ?`,
+      [...readableParams, limit],
     );
     return rows.map(rowToAgentLog);
   }
   const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log ORDER BY createdAt DESC",
+    `SELECT * FROM agent_log${readable ? ` WHERE ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    readableParams,
   );
   return rows.map(rowToAgentLog);
 }

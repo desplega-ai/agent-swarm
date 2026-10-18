@@ -19,6 +19,7 @@ import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
 import { scheduleSummaryWithFavoriteSchema } from "./schedules";
+import { readableByFor, resolveSessionActor } from "./session-access";
 
 // ─── Response schemas ────────────────────────────────────────────────────────
 
@@ -222,11 +223,12 @@ export async function handleStats(
     if (!parsed) return true;
     const limit = parsed.query.limit ?? 100;
     const agentId = parsed.query.agentId;
+    const readableBy = readableByFor(await resolveSessionActor(req, myAgentId));
     let logs: AgentLog[] = [];
     if (agentId) {
-      logs = (await getLogsByAgentId(agentId)).slice(0, limit);
+      logs = (await getLogsByAgentId(agentId, readableBy)).slice(0, limit);
     } else {
-      logs = await getAllLogs(limit);
+      logs = await getAllLogs(limit, readableBy);
     }
     listLogs.respond(res, 200, { logs });
     return true;
