@@ -9,7 +9,7 @@ import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks
 import type { WorkflowRunStatus, WorkflowRunSummary, WorkflowSummary } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
@@ -147,6 +147,7 @@ export default function WorkflowsPage() {
       {
         field: "description",
         headerName: "Description",
+        context: HIDE_WHEN_COMPACT,
         flex: 1,
         minWidth: 200,
         cellRenderer: (params: { value?: string }) => (
@@ -157,6 +158,7 @@ export default function WorkflowsPage() {
         ? [
             {
               headerName: "Setup",
+              context: HIDE_WHEN_COMPACT,
               width: 190,
               minWidth: 190,
               cellRenderer: (params: ICellRendererParams<WorkflowSummary>) => {
@@ -178,6 +180,7 @@ export default function WorkflowsPage() {
         : []),
       {
         headerName: "Nodes",
+        context: HIDE_WHEN_COMPACT,
         width: 100,
         valueGetter: (params) => params.data?.nodeCount ?? 0,
       },
@@ -202,6 +205,7 @@ export default function WorkflowsPage() {
       {
         field: "createdAt",
         headerName: "Created",
+        context: HIDE_WHEN_COMPACT,
         width: 150,
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
@@ -263,6 +267,7 @@ export default function WorkflowsPage() {
       },
       {
         headerName: "Duration",
+        context: HIDE_WHEN_COMPACT,
         width: 120,
         valueGetter: (params) =>
           params.data ? formatDuration(params.data.startedAt, params.data.finishedAt) : "—",
@@ -270,6 +275,7 @@ export default function WorkflowsPage() {
       {
         field: "error",
         headerName: "Error",
+        context: HIDE_WHEN_COMPACT,
         flex: 1,
         cellRenderer: (params: { value?: string }) =>
           params.value ? (

@@ -22,7 +22,7 @@ import {
   ValidationModule,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ListPager } from "@/components/shared/list-pager";
 import { cn } from "@/lib/utils";
@@ -45,6 +45,40 @@ ModuleRegistry.registerModules([
 const DEFAULT_PAGE_SIZE_SELECTOR = [10, 20, 50, 100];
 /** The grid fills the wrapper's height minus the pager below it. */
 const FILL_CONTAINER_STYLE = { flex: "1 1 0%", minHeight: 0, width: "100%" } as const;
+
+/**
+ * Mark a column low-priority with `context: HIDE_WHEN_COMPACT`. When the grid's
+ * own width (not the viewport's, so an open sidebar counts) cannot hold every
+ * column, marked columns are hidden last-to-first until the rest fit. Unmarked
+ * columns always stay, so a grid never loses a column on a wide screen.
+ */
+export const HIDE_WHEN_COMPACT = { hideWhenCompact: true } as const;
+
+const FALLBACK_COLUMN_WIDTH = 80;
+
+function columnWidth(col: ColDef): number {
+  // `flex` columns shrink to `minWidth`; fixed columns keep `width`.
+  const base = col.flex ? (col.minWidth ?? FALLBACK_COLUMN_WIDTH) : (col.width ?? col.minWidth);
+  return Math.max(base ?? FALLBACK_COLUMN_WIDTH, col.minWidth ?? 0);
+}
+
+/** Hides marked columns, last first, until the visible ones fit `containerWidth`. */
+export function resolveCompactColumnDefs<TData>(
+  columnDefs: ColDef<TData>[],
+  containerWidth: number,
+): ColDef<TData>[] {
+  if (containerWidth <= 0) return columnDefs;
+  let total = columnDefs.reduce((sum, col) => sum + (col.hide ? 0 : columnWidth(col)), 0);
+  const hidden = new Set<ColDef<TData>>();
+  for (let i = columnDefs.length - 1; i >= 0 && total > containerWidth; i--) {
+    const col = columnDefs[i];
+    if (col.hide || !col.context?.hideWhenCompact) continue;
+    hidden.add(col);
+    total -= columnWidth(col);
+  }
+  if (hidden.size === 0) return columnDefs;
+  return columnDefs.map((col) => (hidden.has(col) ? { ...col, hide: true } : col));
+}
 
 export interface DataGridProps<TData> {
   rowData: TData[] | undefined;
@@ -159,6 +193,16 @@ export function DataGrid<TData>({
     if (data && typeof data.id === "string") return data.id;
     return JSON.stringify(params.data);
   }, []);
+
+  const [containerWidth, setContainerWidth] = useState(0);
+  const effectiveColumnDefs = useMemo(
+    () => resolveCompactColumnDefs(columnDefs, containerWidth),
+    [columnDefs, containerWidth],
+  );
+  const hiddenCount = useMemo(
+    () => effectiveColumnDefs.filter((col, i) => col.hide && !columnDefs[i].hide).length,
+    [effectiveColumnDefs, columnDefs],
+  );
 
   const defaultColDef = useMemo<ColDef>(
     () => ({
@@ -275,6 +319,25 @@ export function DataGrid<TData>({
     return () => observer.disconnect();
   }, [columnSizing]);
 
+  // A grid mounted in a hidden pane measures 0px; keep the last real answer.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = (width: number) => {
+      if (width > 0) setContainerWidth(Math.round(width));
+    };
+    update(el.clientWidth);
+    const observer = new ResizeObserver((entries) => update(entries[0]?.contentRect.width ?? 0));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Hiding or showing columns changes the total width, so re-fit them.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `hiddenCount` is the trigger
+  useEffect(() => {
+    if (columnSizing === "fit") gridRef.current?.api?.sizeColumnsToFit();
+  }, [hiddenCount, columnSizing]);
+
   return (
     <div
       ref={containerRef}
@@ -289,7 +352,7 @@ export function DataGrid<TData>({
         ref={gridRef}
         containerStyle={domLayout === "normal" ? FILL_CONTAINER_STYLE : undefined}
         rowData={rowData ?? []}
-        columnDefs={columnDefs}
+        columnDefs={effectiveColumnDefs}
         defaultColDef={defaultColDef}
         quickFilterText={quickFilterText}
         onRowClicked={onRowClicked}
