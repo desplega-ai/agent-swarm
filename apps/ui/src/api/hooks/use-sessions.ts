@@ -14,10 +14,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { sessionSharesMutationOptions } from "@/lib/session-shares-mutation";
 import { sharesInput } from "@/lib/session-sharing";
 import { sessionRefetchInterval } from "@/lib/task-activity";
 import { api } from "../client";
-import type { SessionShares } from "../types";
 
 export interface UseSessionsOptions {
   limit?: number;
@@ -90,26 +90,14 @@ export function useSessionShares(rootTaskId: string | undefined, enabled = true)
 /** Apply a full share state. Optimistic: the dialog shows the change at once. */
 export function useUpdateSessionShares(rootTaskId: string) {
   const queryClient = useQueryClient();
-  const key = ["session-shares", rootTaskId];
-  return useMutation({
-    // Each PUT carries the full desired state; run them one at a time so an
-    // older one can never land after a newer one.
-    scope: { id: `session-shares:${rootTaskId}` },
-    mutationFn: (next: SessionShares) => api.putSessionShares(rootTaskId, sharesInput(next)),
-    onMutate: async (next) => {
-      await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<SessionShares | null>(key);
-      queryClient.setQueryData(key, next);
-      return { previous };
-    },
-    onError: (error, _next, context) => {
-      queryClient.setQueryData(key, context?.previous);
-      toast.error(error instanceof Error ? error.message : "Couldn't update sharing");
-    },
-    onSuccess: (saved) => {
-      queryClient.setQueryData(key, saved);
-    },
-  });
+  return useMutation(
+    sessionSharesMutationOptions(
+      queryClient,
+      rootTaskId,
+      (next) => api.putSessionShares(rootTaskId, sharesInput(next)),
+      (error) => toast.error(error instanceof Error ? error.message : "Couldn't update sharing"),
+    ),
+  );
 }
 
 /** Set (non-empty string) or clear (`null`) a session's custom display title. */
