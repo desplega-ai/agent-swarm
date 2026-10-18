@@ -555,12 +555,14 @@ registerTemplate({
   header: "",
   defaultBody: `{{prompt}}
 
-[App action] app={{app_id}} action={{action_name}} input={{input_json}}`,
+[App action] app={{app_id}} action={{action_name}} input={{input_json}}
+Caller (server-verified): {{caller_json}}`,
   variables: [
     { name: "prompt", description: "The task prompt configured on the app action" },
     { name: "app_id", description: "The app identifier" },
     { name: "action_name", description: "The invoked action name" },
     { name: "input_json", description: "The action input serialized as JSON" },
+    { name: "caller_json", description: "The server-verified action caller serialized as JSON" },
   ],
   category: "task_lifecycle",
 });

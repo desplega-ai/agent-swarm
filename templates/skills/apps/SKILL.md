@@ -30,6 +30,23 @@ For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch`
 
 One `app-get` returns everything needed to drive an app you did not write: `definition.queries` are runnable with `app-query` (supply every `$param` the query references), and `definition.actions` are invocable with `POST /api/apps/<id>/actions/<name>` (a `script` action runs its script, a `task` action spawns a task, a `sync` action refreshes sources). Read a query's `$param` placeholders and an action's kind/args from the definition before calling — do not guess parameter names.
 
+### Verified action caller
+
+Script actions receive `caller` as a reserved, server-stamped argument. The server overwrites `caller` from definition defaults and request input.
+
+```typescript
+type AppActionCaller = {
+  kind: "user" | "agent" | "operator" | "guest";
+  id: string | null;
+  name?: string;
+  pageId?: string;
+};
+```
+
+The caller identifies the authenticated user or agent. Operator and guest callers have `id: null`. A signed page session adds `pageId`.
+With the swarm key, a registered `X-Agent-ID` produces an agent caller and `agent:<id>` row provenance. Missing or unknown agent IDs remain operator callers.
+Task actions include the same caller as server-verified JSON in the task prompt. Script execution still uses the saved script owner's bindings.
+
 ## Safe schema evolution and rollback
 
 Prefer **hiding** a column over deleting it. A hidden column's values stay on every existing row, so an unhide or rollback can make it visible again. Hiding is metadata-only: hidden columns cannot be used in queries, page bindings, `app.mutate` values, or new row writes, and `required` is ignored while hidden. Row GETs still expose the historical value for backward compatibility.

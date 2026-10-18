@@ -31,6 +31,21 @@ An App can declare up to 20 named actions:
 
 Pages invoke these through `app.action`. Built-in interface actions also create, update, or delete rows; refresh queries; and navigate between App pages.
 
+Script actions receive `caller` as a reserved, server-stamped argument. The server overwrites `caller` from definition defaults and request input.
+
+```typescript
+type AppActionCaller = {
+  kind: "user" | "agent" | "operator" | "guest";
+  id: string | null;
+  name?: string;
+  pageId?: string;
+};
+```
+
+The caller identifies the authenticated user or agent. Operator and guest callers have `id: null`. A signed page session adds `pageId`.
+With the swarm key, a registered `X-Agent-ID` produces an agent caller and `agent:<id>` row provenance. Missing or unknown agent IDs remain operator callers.
+Task actions include the same caller as server-verified JSON in the task prompt. Script execution still uses the saved script owner's bindings.
+
 ## Pages and reusable elements
 
 Pages are flat, validated element trees rendered by the dashboard. The component catalog includes layout, headings, text, forms, tables, filters, metrics, alerts, badges, drawers, and detail views. Bindings such as `{ "$state": "/queries/allItems/data" }` connect declared queries and actions to those elements.

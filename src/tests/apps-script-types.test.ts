@@ -127,9 +127,16 @@ describe("renderAppTypes", () => {
     expect(rendered).toContain("params: { value: never };");
   });
 
-  test("renders a documentation-grade action union", () => {
+  test("renders action names and arguments with server-stamped caller context", () => {
     const rendered = renderAppTypes([app("PM Inbox", issueDefinition())]);
     expect(rendered).toContain('export type ActionName = "closeIssue" | "notifyOwner";');
+    expect(rendered).toContain("export interface ActionArgs");
+    expect(rendered).toContain('app: { id: "PM Inbox-id" };');
+    expect(rendered).toContain("caller: AppActionCaller;");
+    expect(rendered).toContain('kind: "user" | "agent" | "operator" | "guest";');
+    expect(rendered).toContain("id: string | null;");
+    expect(rendered).toContain("name?: string;");
+    expect(rendered).toContain("pageId?: string;");
   });
 
   test("derives and dedupes namespaces and model interface names", () => {
@@ -262,14 +269,20 @@ describe("renderAppTypes", () => {
     expect(rendered).not.toMatch(/^export const pwned2/m);
   });
 
-  test("a model named actionName does not collide with the ActionName alias", () => {
+  test("model names do not collide with generated action types", () => {
     const rendered = renderAppTypes([
       app("Collision", {
-        models: { actionName: { columns: { title: { kind: "string" } } } },
+        models: {
+          actionName: { columns: { title: { kind: "string" } } },
+          actionArgs: { columns: { title: { kind: "string" } } },
+          appActionCaller: { columns: { title: { kind: "string" } } },
+        },
         actions: { close: { kind: "task", prompt: "close" } },
       }),
     ]);
     expect(rendered).toContain("export interface ActionName_2");
+    expect(rendered).toContain("export interface ActionArgs_2");
+    expect(rendered).toContain("export interface AppActionCaller_2");
     expect(rendered).toContain('export type ActionName = "close";');
   });
 
