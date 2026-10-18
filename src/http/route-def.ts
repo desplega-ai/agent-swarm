@@ -84,7 +84,9 @@ export interface RouteDef<
    * Declarative in slice 1: the handler still calls `can()` itself; the role
    * engine (increment 3) may enforce the declared verb centrally.
    */
-  rbac?: { permission: PermissionVerb } | { ungated: string };
+  rbac?:
+    | { permission: PermissionVerb; alsoAdmits?: readonly PermissionVerb[] }
+    | { ungated: string };
 }
 
 interface ParsedRequest<TParams, TQuery, TBody> {

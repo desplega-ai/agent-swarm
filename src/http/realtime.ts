@@ -17,7 +17,8 @@ const realtimeTicketRoute = route({
   tags: ["Rooms"],
   description:
     "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
-  rbac: { permission: "session.presence" },
+  // Comb presence came first; a role granting only `comb.presence` keeps its ticket.
+  rbac: { permission: "session.presence", alsoAdmits: ["comb.presence"] },
   responses: {
     200: {
       description: "One-shot realtime ticket",
