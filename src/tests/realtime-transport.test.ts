@@ -695,6 +695,57 @@ describe("realtime transport", () => {
     }
   });
 
+  test("session presence: revoking read access evicts the viewer from the room", async () => {
+    const owner = await createUserToken("Revoking Owner");
+    const viewer = await createUserToken("Revoked Viewer");
+    const created = await api("POST", "/api/tasks", {
+      body: { task: "Private incident", requestedByUserId: owner.id, source: "ui" },
+    });
+    expect(created.status).toBe(201);
+    const rootId = ((await created.json()) as { id: string }).id;
+    const namespace = `presence:session:${rootId}`;
+    const share = async (everyone: "read" | "none") => {
+      const response = await api("PUT", `/api/sessions/${rootId}/shares`, {
+        headers: { Authorization: `Bearer ${owner.token}` },
+        body: { everyone, users: [] },
+      });
+      expect(response.status).toBe(200);
+    };
+    const ownerSocket = await openSocket(
+      {},
+      `${socketUrl}?ticket=${(await issueTicket(owner.token)).ticket}`,
+    );
+    const viewerSocket = await openSocket(
+      {},
+      `${socketUrl}?ticket=${(await issueTicket(viewer.token)).ticket}`,
+    );
+    try {
+      await ownerSocket.next((frame) => frame.type === "hello");
+      await viewerSocket.next((frame) => frame.type === "hello");
+      await share("read");
+      expect((await join(ownerSocket, 1, "default", namespace)).type).toBe("result");
+      expect((await join(viewerSocket, 2, "default", namespace)).type).toBe("result");
+      viewerSocket.frames.splice(0);
+
+      await share("none");
+      const evicted = await viewerSocket.next(
+        (frame) => frame.type === "error" && frame.namespace === namespace,
+      );
+      expect(evicted.error).toContain("access");
+
+      ownerSocket.send({ id: 3, op: "presence", namespace, data: { typing: true } });
+      await ownerSocket.next((frame) => frame.type === "result" && frame.id === 3);
+      await Bun.sleep(100);
+      const leaked = viewerSocket.frames.filter(
+        (frame) => frame.type === "presence" && JSON.stringify(frame.peers).includes("typing"),
+      );
+      expect(leaked).toEqual([]);
+    } finally {
+      await closeSocket(ownerSocket);
+      await closeSocket(viewerSocket);
+    }
+  });
+
   test("refuses agent access to Comb presence namespaces", async () => {
     const agentId = await registerAgent();
     const client = await openSocket({

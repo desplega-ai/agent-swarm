@@ -10,7 +10,12 @@ import { extractAndVerifyCookie } from "../utils/page-session";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { registerSessionTokenConnection } from "../utils/session-token-connections";
-import { authorizeRoomNamespace, resolveRoomNamespace } from "./auth";
+import {
+  authorizeRoomNamespace,
+  resolveRoomNamespace,
+  sessionAccessTopic,
+  sessionPresenceRoot,
+} from "./auth";
 import { realtimeBus } from "./bus";
 import {
   addWorkerSubscription,
@@ -230,7 +235,12 @@ function connect(
       )
     : undefined;
   void auth.sessionToken?.check().catch(() => ws.close(1008, "Session token revoked or expired"));
-  const rooms = new Map<string, { room: LiveRoom; version: number; stop: () => void }>();
+  // `suspended`: a session presence room whose access is being re-checked
+  // after a share change; nothing is forwarded until the check passes.
+  const rooms = new Map<
+    string,
+    { room: LiveRoom; version: number; stop: () => void; suspended?: boolean }
+  >();
   const channels = new Map<string, () => void>();
   const pending = new Map<number, number>();
   const clientId = crypto.getRandomValues(new Uint32Array(1))[0]!;
@@ -372,6 +382,7 @@ function connect(
           }
           if (closed) return;
           const stopRoom = realtimeBus.subscribe(key, (event) => {
+            if (rooms.get(key)?.suspended) return;
             const view = event as ReturnType<typeof roomView> & { type: string };
             const type = view.type;
             if (type === "deleted") {
@@ -394,15 +405,47 @@ function connect(
                 .catch(() => ws.close(1011, "Room reset failed"));
             }
           });
-          const stopPresence = realtimeBus.subscribe(`presence:${key}`, (peers) =>
-            send({ type: "presence", name: msg.name, namespace, peers }),
-          );
+          const stopPresence = realtimeBus.subscribe(`presence:${key}`, (peers) => {
+            if (rooms.get(key)?.suspended) return;
+            send({ type: "presence", name: msg.name, namespace, peers });
+          });
+          const sessionRoot = sessionPresenceRoot(namespace);
+          let accessCheck = 0;
+          // A share change can end this viewer's read access: stop forwarding
+          // at once, then evict, or resume if access remains.
+          const stopAccess = sessionRoot
+            ? realtimeBus.subscribe(sessionAccessTopic(sessionRoot), () => {
+                const joined = rooms.get(key);
+                if (!joined) return;
+                joined.suspended = true;
+                const check = ++accessCheck;
+                void authorizeRoomNamespace(namespace, auth.identity, "join")
+                  .catch(() => "Session access check failed")
+                  .then((denied) => {
+                    const current = rooms.get(key);
+                    if (closed || !current || check !== accessCheck) return;
+                    if (denied) {
+                      leave(key);
+                      send({ type: "error", name: msg.name, namespace, error: denied });
+                      return;
+                    }
+                    current.suspended = false;
+                    send({
+                      type: "presence",
+                      name: msg.name,
+                      namespace,
+                      peers: [...current.room.awareness.getStates().values()],
+                    });
+                  });
+              })
+            : undefined;
           rooms.set(key, {
             room,
             version: msg.schemaVersion,
             stop: () => {
               stopRoom();
               stopPresence();
+              stopAccess?.();
             },
           });
           room.awareness.states.set(clientId, { ...auth.me, data: {} });

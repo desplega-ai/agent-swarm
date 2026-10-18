@@ -25,6 +25,8 @@ import {
   revokeSessionToken,
 } from "../be/users";
 import { can } from "../rbac";
+import { sessionAccessTopic } from "../realtime/auth";
+import { realtimeBus } from "../realtime/bus";
 import {
   type AgentTask,
   AgentTaskSchema,
@@ -553,6 +555,8 @@ export async function handleSessions(
       parsed.body,
       actor.kind === "user" ? actor.userId : null,
     );
+    // Committed: presence sockets re-check access, so a revoked viewer leaves.
+    realtimeBus.publish(sessionAccessTopic(root.id), null);
     putSessionShares.respond(res, 200, state);
     return true;
   }

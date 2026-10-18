@@ -213,6 +213,19 @@ export async function authorizeRoomNamespace(
 }
 
 /**
+ * Bus topic published after a session's shares change. Sockets in that
+ * session's presence room re-check access and are evicted when it ended.
+ */
+export function sessionAccessTopic(rootTaskId: string): string {
+  return `session-access:${rootTaskId}`;
+}
+
+/** The root task id of a `presence:session:<rootTaskId>` namespace, else undefined. */
+export function sessionPresenceRoot(namespace: string): string | undefined {
+  return SESSION_PRESENCE_NAMESPACE.exec(namespace)?.[1];
+}
+
+/**
  * `presence:session:<rootTaskId>`: who is viewing (and typing in) a session.
  * Presence-only, dashboard-only, and gated on read access so it never reveals
  * who is inside a private session. An operator-key tab with no picked user
