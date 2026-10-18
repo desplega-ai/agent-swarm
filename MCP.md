@@ -2025,7 +2025,7 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 |-----------|------|----------|---------|-------------|
 | `inboxMessageId` | `uuid` | No | - | Read thread history for an inbox message. |
 | `taskId` | `uuid` | No | - | Read thread history for a task. |
-| `channelId` | `string` | No | - | Slack channel ID to read from (requires lead privileges). |
+| `channelId` | `string` | No | - | Slack channel ID to read from (requires lead privileges). A user ID (U…/W…) reads the bot's DM with that user. |
 | `threadTs` | `string` | No | - | Thread timestamp (required with channelId for thread history). |
 | `limit` | `number` | No | 20 | Maximum number of messages to retrieve (default: 20, max: 100). |
 | `includeFiles` | `boolean` | No | true | Include file attachments in the response (default: true). From a task, they are also stored as attachments of that task. |
@@ -2038,7 +2038,7 @@ Post a message to a Slack channel. By default creates a new top-level message; p
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
+| `channelId` | `string` | Yes | - | The Slack channel ID to post to. A user ID (U…/W…) posts in the bot's DM with that user. |
 | `message` | `string` | Yes | - | The message content to post. |
 | `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 | `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
@@ -2051,7 +2051,7 @@ Post a new top-level message to a Slack channel and return its ts so the caller 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
+| `channelId` | `string` | Yes | - | The Slack channel ID to post to. A user ID (U…/W…) opens the bot's DM with that user; use the returned channelId afterwards. |
 | `message` | `string` | Yes | - | The message content to post. |
 | `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
