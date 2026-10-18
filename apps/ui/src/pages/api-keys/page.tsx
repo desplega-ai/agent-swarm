@@ -457,6 +457,8 @@ export default function ApiKeysPage() {
         context: HIDE_WHEN_COMPACT,
         minWidth: 260,
         flex: 1,
+        // Object-valued: opt out of AG Grid's cell-type inference, which otherwise warns #48 (no value formatter).
+        cellDataType: false,
         cellRenderer: (params: { value: ApiKeyStatus["rateLimitWindows"] | undefined }) => (
           <RateLimitWindowsCell windows={params.value} />
         ),
