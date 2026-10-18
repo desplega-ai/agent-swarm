@@ -254,9 +254,10 @@ describe("ranking routes", () => {
     expect(await configValue("PUBLIC_RANKING_ENABLED")).toBe("true");
   });
 
-  test("a placeholder name or a changed website opts out", async () => {
+  test("a placeholder name, a changed website or a name too long for the listing opts out", async () => {
     for (const [key, value] of [
       ["SWARM_ORG_NAME", "Your Swarm"],
+      ["SWARM_ORG_NAME", "x".repeat(61)],
       ["SWARM_ORG_WEBSITE", "imtec.com"],
     ] as const) {
       await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "Imtec" });
@@ -270,7 +271,7 @@ describe("ranking routes", () => {
         ["ranking.opted_out", "imtec.ba"],
       ]);
     }
-    // A new website needs a new PR: the old listing no longer counts as current.
+    // After the last case (a new website) the old listing needs a new PR.
     const state = await call("GET", "/api/ranking");
     expect(state.json).toMatchObject({ enabled: false, listingMatchesDomain: false, prUrl: null });
   });

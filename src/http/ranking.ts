@@ -233,13 +233,20 @@ export async function syncRankingAfterConfigChange(
   if (!(await rankingEnabled())) return;
 
   const identity = await currentIdentity({ key, value });
-  if (!identity.ok || identity.website !== listing.domain) {
+  let rebuilt: TelemetryRanking | null = null;
+  if (identity.ok && identity.website === listing.domain) {
+    if (identity.name === listing.name) return;
+    try {
+      rebuilt = buildListing(identity, listing, listing.claim);
+    } catch {
+      // A name the listing cannot carry (over 60 characters) leaves the ranking.
+    }
+  }
+  if (!rebuilt) {
     await setEnabled(false);
     emitOptedOut(listing.domain);
     return;
   }
-  if (identity.name === listing.name) return;
-  const rebuilt = buildListing(identity, listing, listing.claim);
   await upsertSwarmConfig({
     scope: "global",
     key: TELEMETRY_RANKING_KEY,
