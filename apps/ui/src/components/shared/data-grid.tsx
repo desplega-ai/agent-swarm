@@ -329,11 +329,16 @@ export function DataGrid<TData>({
     return () => observer.disconnect();
   }, []);
 
-  // Hiding or showing columns changes the total width, so re-fit them.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `hiddenCount` is the trigger
+  // Hiding or showing columns changes the total width, so re-fit them. A container resize
+  // (e.g. the app sidebar collapsing) re-fits too, but AG Grid has not applied the new body
+  // width or column set yet at that point, so refit once more on the next frame.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `hiddenCount` and `containerWidth` are the triggers
   useEffect(() => {
-    if (columnSizing === "fit") gridRef.current?.api?.sizeColumnsToFit();
-  }, [hiddenCount, columnSizing]);
+    if (columnSizing !== "fit") return;
+    gridRef.current?.api?.sizeColumnsToFit();
+    const frame = requestAnimationFrame(() => gridRef.current?.api?.sizeColumnsToFit());
+    return () => cancelAnimationFrame(frame);
+  }, [hiddenCount, containerWidth, columnSizing]);
 
   return (
     <div
