@@ -357,27 +357,54 @@ describe("task routes", () => {
     expect(shared.body.task).toBe("follow-up");
   });
 
-  test("GET /api/tasks?fields=full drops a user's unreadable sessions", async () => {
-    const { root, child, rootRef } = await session(owner.id);
+  test("GET /api/tasks drops a user's unreadable sessions from every shape, and total counts what is shown", async () => {
+    const root = await createTaskExtended("PRIVATE ROOT ALPHA", {
+      requestedByUserId: owner.id,
+      source: "ui",
+    });
+    const child = await createTaskExtended("PRIVATE CHILD BETA", {
+      requestedByUserId: owner.id,
+      parentTaskId: root.id,
+      source: "ui",
+    });
+    const rootRef = { id: root.id, requestedByUserId: owner.id };
     const ownerless = await session();
-    const ids = (body: { tasks: { id: string }[] }) => body.tasks.map((task) => task.id);
-    const url = "/api/tasks?fields=full&limit=1000";
+    const shapes = ["", "&fields=slim", "&fields=timeline", "&fields=full"];
+    const list = async (query: string, opts: Call) => {
+      const { status, body } = await call("tasks", "GET", `/api/tasks?limit=1000${query}`, opts);
+      expect(status).toBe(200);
+      return body as { tasks: { id: string; task?: string }[]; total?: number };
+    };
 
-    const asUser = ids((await call("tasks", "GET", url, { auth: ezeAuth })).body);
-    expect(asUser).not.toContain(root.id);
-    expect(asUser).not.toContain(child.id);
-    expect(asUser).toContain(ownerless.child.id);
+    for (const shape of shapes) {
+      const body = await list(`${shape}&includeTotal=true`, { auth: ezeAuth });
+      const ids = body.tasks.map((task) => task.id);
+      expect(ids).not.toContain(root.id);
+      expect(ids).not.toContain(child.id);
+      expect(ids).toContain(ownerless.child.id);
+      expect(JSON.stringify(body.tasks)).not.toContain("PRIVATE");
+      expect(body.total).toBe(body.tasks.length);
+    }
+    // A search hit on hidden text counts nothing, so `total` is no oracle.
+    for (const shape of shapes) {
+      const hit = await list(`${shape}&search=PRIVATE%20ROOT&includeTotal=true`, { auth: ezeAuth });
+      expect(hit).toEqual({ tasks: [], total: 0 });
+    }
 
     for (const opts of [{}, { dashboardUserId: owner.id }, { agentId: crypto.randomUUID() }]) {
-      const all = ids((await call("tasks", "GET", url, opts)).body);
-      expect(all).toContain(root.id);
-      expect(all).toContain(child.id);
+      for (const shape of shapes) {
+        const body = await list(`${shape}&search=PRIVATE&includeTotal=true`, opts);
+        expect(body.tasks.map((task) => task.id).sort()).toEqual([root.id, child.id].sort());
+        expect(body.total).toBe(2);
+      }
     }
 
     await setSessionShares(rootRef, { everyone: "read", users: [] }, owner.id);
-    const shared = ids((await call("tasks", "GET", url, { auth: ezeAuth })).body);
-    expect(shared).toContain(root.id);
-    expect(shared).toContain(child.id);
+    for (const shape of shapes) {
+      const body = await list(`${shape}&search=PRIVATE&includeTotal=true`, { auth: ezeAuth });
+      expect(body.tasks.map((task) => task.id).sort()).toEqual([root.id, child.id].sort());
+      expect(body.total).toBe(2);
+    }
   });
 });
 

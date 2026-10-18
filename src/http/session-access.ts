@@ -1,10 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import {
-  getSessionRoots,
-  type SessionAccess,
-  sessionAccess,
-  sessionAccessForRoot,
-} from "../be/session-shares";
+import { type SessionAccess, sessionAccess } from "../be/session-shares";
 import { findUserById } from "../be/users";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { dashboardUserIdHeader } from "./favorite-owner";
@@ -47,25 +42,4 @@ export async function sessionAccessFor(
   taskId: string,
 ): Promise<SessionAccess> {
   return actor.kind === "bypass" ? "owner" : sessionAccess(actor.userId, taskId);
-}
-
-/**
- * The tasks whose session the actor may read, in order. A bypass actor keeps
- * every task; a user loses the tasks of sessions not shared with them.
- */
-export async function filterReadableTasks<T extends { id: string }>(
-  actor: SessionActor,
-  tasks: T[],
-): Promise<T[]> {
-  if (actor.kind === "bypass" || tasks.length === 0) return tasks;
-  const roots = await getSessionRoots(tasks.map((task) => task.id));
-  const readable = new Map<string, boolean>();
-  for (const root of roots.values()) {
-    if (readable.has(root.id)) continue;
-    readable.set(root.id, (await sessionAccessForRoot(actor.userId, root)) !== "none");
-  }
-  return tasks.filter((task) => {
-    const root = roots.get(task.id);
-    return root ? readable.get(root.id) === true : false;
-  });
 }

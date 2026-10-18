@@ -82,7 +82,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route } from "./route-def";
-import { filterReadableTasks, resolveSessionActor, sessionAccessFor } from "./session-access";
+import { resolveSessionActor, sessionAccessFor } from "./session-access";
 import { jsonError, parseBody } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ const listTasks = route({
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
   description:
-    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask` (a user caller gets only tasks of sessions they can read), or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
@@ -927,6 +927,9 @@ export async function handleTasks(
       if (validated.length > 0) source = validated;
     }
 
+    // Every shape carries task text, so a user sees only sessions they can
+    // read, and `total` counts the same rows.
+    const actor = await resolveSessionActor(req, myAgentId);
     const filters = {
       status,
       agentId: parsed.query.agentId || undefined,
@@ -946,16 +949,13 @@ export async function handleTasks(
       orderBy: parsed.query.orderBy,
       limit: parsed.query.limit,
       offset: parsed.query.offset,
+      readableBy: actor.kind === "user" ? { userId: actor.userId } : undefined,
     };
     // List responses default to slim (full `task` text → bounded `taskPreview`,
     // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
-    // Full rows carry task text, so a user sees only sessions they can read.
     const tasks =
       parsed.query.fields === "full"
-        ? await filterReadableTasks(
-            await resolveSessionActor(req, myAgentId),
-            await getAllTasks(filters),
-          )
+        ? await getAllTasks(filters)
         : parsed.query.fields === "timeline"
           ? await getAllTasks(filters, { fields: "timeline" })
           : await getAllTasks(filters, { slim: true });
