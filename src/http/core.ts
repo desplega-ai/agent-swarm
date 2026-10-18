@@ -48,6 +48,12 @@ import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
 import {
+  canReadSession,
+  readableByFor,
+  resolveSessionActor,
+  SESSION_READ_DENIED,
+} from "./session-access";
+import {
   agentWithCapacity,
   duplicateGuardedQueryKey,
   getPathSegments,
@@ -662,7 +668,14 @@ export async function handleCore(
     const queryParams = parseQueryParams(req.url || "");
     const taskId = queryParams.get("taskId");
 
+    // A user token naming an agent in X-Agent-ID still reads only its sessions.
+    const sessionActor = await resolveSessionActor(req, myAgentId);
     if (taskId) {
+      if (!(await canReadSession(req, myAgentId, taskId))) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: SESSION_READ_DENIED }));
+        return true;
+      }
       // Check if specific task is cancelled
       const task = await getTaskById(taskId);
       if (task && task.status === "cancelled") {
@@ -687,7 +700,10 @@ export async function handleCore(
     }
 
     // No taskId - return all recently cancelled tasks for this agent
-    const cancelledTasks = await getRecentlyCancelledTasksForAgent(myAgentId);
+    const cancelledTasks = await getRecentlyCancelledTasksForAgent(
+      myAgentId,
+      readableByFor(sessionActor),
+    );
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ cancelled: cancelledTasks }));
     return true;

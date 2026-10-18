@@ -1815,7 +1815,11 @@ export async function handleTasks(
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
-    const pausedTasks = await getPausedTasksForAgent(myAgentId);
+    // A user token naming an agent in X-Agent-ID still reads only its sessions.
+    const pausedTasks = await getPausedTasksForAgent(
+      myAgentId,
+      readableByFor(await resolveSessionActor(req, myAgentId)),
+    );
     const tasks = await Promise.all(
       pausedTasks.map(async (task) => {
         const requestedBy = await buildTaskRequestedBy(task);

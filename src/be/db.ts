@@ -2191,27 +2191,33 @@ export async function hasPendingSteering(taskId: string): Promise<boolean> {
 // Combined Queries (Agent with Tasks)
 // ============================================================================
 
-export async function getAgentWithTasks(id: string): Promise<AgentWithTasks | null> {
+export async function getAgentWithTasks(
+  id: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentWithTasks | null> {
   return await getDbClient().transaction(
     async () => {
       const agent = await getAgentById(id);
       if (!agent) return null;
 
-      const tasks = await getTasksByAgentId(id);
+      const tasks = await getTasksByAgentId(id, readableBy);
       return { ...agent, tasks };
     },
     { readOnly: true },
   );
 }
 
-export async function getAllAgentsWithTasks(opts?: { slim?: boolean }): Promise<AgentWithTasks[]> {
+export async function getAllAgentsWithTasks(opts?: {
+  slim?: boolean;
+  readableBy?: { userId: string | null };
+}): Promise<AgentWithTasks[]> {
   return await getDbClient().transaction(
     async () => {
       const agents = await getAllAgents({ slim: opts?.slim ?? false });
       return await Promise.all(
         agents.map(async (agent) => ({
           ...agent,
-          tasks: await getTasksByAgentId(agent.id),
+          tasks: await getTasksByAgentId(agent.id, opts?.readableBy),
         })),
       );
     },
@@ -5840,8 +5846,13 @@ export interface ConcurrentContext {
  * Returns processing inbox messages, recent task delegations by leads,
  * and currently active (in-progress) tasks across the swarm.
  */
-export async function getConcurrentContext(): Promise<ConcurrentContext> {
+export async function getConcurrentContext(readableBy?: {
+  userId: string | null;
+}): Promise<ConcurrentContext> {
   const client = getDbClient();
+  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
+  const readableSql = readable ? ` AND ${readable.sql}` : "";
+  const readableParams = readable?.params ?? [];
 
   // 1. Inbox messages currently being processed (status = 'processing')
   const processingInboxMessages = await client.query<{
@@ -5870,9 +5881,9 @@ export async function getConcurrentContext(): Promise<ConcurrentContext> {
        FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
        WHERE t.createdAt > ?
-         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)
+         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)${readableSql}
        ORDER BY t.createdAt DESC`,
-    [fiveMinutesAgo],
+    [fiveMinutesAgo, ...readableParams],
   );
 
   // 3. Currently in-progress tasks across the swarm
@@ -5888,8 +5899,9 @@ export async function getConcurrentContext(): Promise<ConcurrentContext> {
     `SELECT t.id, t.task, t.agentId, a.name as agentName, t.status, t.createdAt, t.progress
        FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
-       WHERE t.status = 'in_progress'
+       WHERE t.status = 'in_progress'${readableSql}
        ORDER BY t.createdAt DESC`,
+    readableParams,
   );
 
   return {
@@ -7177,15 +7189,27 @@ export async function deleteActiveSessionById(id: string): Promise<boolean> {
   return result.changes > 0;
 }
 
-export async function getActiveSessions(agentId?: string): Promise<ActiveSession[]> {
+export async function getActiveSessions(
+  agentId?: string,
+  readableBy?: { userId: string | null },
+): Promise<ActiveSession[]> {
+  const conditions: string[] = [];
+  const params: string[] = [];
   if (agentId) {
-    return await getDbClient().query<ActiveSession>(
-      "SELECT * FROM active_sessions WHERE agentId = ? ORDER BY startedAt DESC",
-      [agentId],
-    );
+    conditions.push("agentId = ?");
+    params.push(agentId);
   }
+  if (readableBy) {
+    const readable = readableSessionCondition(readableBy.userId, "active_sessions.taskId", {
+      nullable: true,
+    });
+    conditions.push(readable.sql);
+    params.push(...readable.params);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   return await getDbClient().query<ActiveSession>(
-    "SELECT * FROM active_sessions ORDER BY startedAt DESC",
+    `SELECT * FROM active_sessions ${where} ORDER BY startedAt DESC`,
+    params,
   );
 }
 

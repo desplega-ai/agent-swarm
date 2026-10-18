@@ -11,7 +11,9 @@ import {
   createSteeringMessage,
   createTaskExtended,
   createUser,
+  getDbClient,
   initDb,
+  insertActiveSession,
   insertTaskAttachment,
 } from "../be/db";
 import { createEvent } from "../be/events";
@@ -244,5 +246,38 @@ describe("task-content routes respect session read access", () => {
     await expectPrivate(`/api/logs?agentId=${agent.id}`, progressSecret, { deniedStatus: 200 });
     // Task-less rows belong to no session and stay visible.
     expect((await get("/api/logs", "viewer")).body).toContain("agent_joined");
+  });
+
+  test("B10 task feeds: active sessions, concurrent context, agent tasks, paused and cancelled", async () => {
+    const secret = "PRIVATE B10 TASK";
+    const { child } = await privateSession(secret);
+    const activeSecret = "PRIVATE ACTIVE DESCRIPTION";
+    await insertActiveSession({
+      agentId: agent.id,
+      taskId: child.id,
+      triggerType: "task",
+      taskDescription: activeSecret,
+    });
+    const setStatus = (status: string) =>
+      getDbClient().run(
+        "UPDATE agent_tasks SET status = ?, finishedAt = ?, failureReason = 'stopped' WHERE id = ?",
+        [status, new Date().toISOString(), child.id],
+      );
+
+    await setStatus("in_progress");
+    await expectPrivate("/api/active-sessions", activeSecret, { deniedStatus: 200 });
+    await expectPrivate("/api/concurrent-context", secret, { deniedStatus: 200 });
+    await expectPrivate("/api/agents?include=tasks", secret, { deniedStatus: 200 });
+    await expectPrivate(`/api/agents/${agent.id}?include=tasks`, secret, { deniedStatus: 200 });
+
+    await setStatus("paused");
+    await expectPrivate("/api/paused-tasks", secret, { deniedStatus: 200, withAgentHeader: true });
+
+    await setStatus("cancelled");
+    await expectPrivate(`/cancelled-tasks?taskId=${child.id}`, secret, {
+      deniedStatus: 403,
+      withAgentHeader: true,
+    });
+    await expectPrivate("/cancelled-tasks", secret, { deniedStatus: 200, withAgentHeader: true });
   });
 });

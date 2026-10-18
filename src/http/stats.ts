@@ -308,7 +308,9 @@ export async function handleStats(
   }
 
   if (getConcurrentContextRoute.match(req.method, pathSegments)) {
-    const context = await getConcurrentContext();
+    const context = await getConcurrentContext(
+      readableByFor(await resolveSessionActor(req, myAgentId)),
+    );
     getConcurrentContextRoute.respond(res, 200, context);
     return true;
   }

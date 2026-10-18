@@ -27,6 +27,7 @@ import {
   type AgentTaskRow,
   getTaskById,
   NEVER_STARTED_TASK_STATUSES,
+  readableSessionCondition,
   rowToAgentTask,
 } from "./read";
 
@@ -1019,12 +1020,16 @@ export async function resumeTask(taskId: string): Promise<AgentTask | null> {
  * Used on startup to resume tasks that were interrupted by deployment.
  * Returns tasks ordered by creation time (oldest first for FIFO).
  */
-export async function getPausedTasksForAgent(agentId: string): Promise<AgentTask[]> {
+export async function getPausedTasksForAgent(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentTask[]> {
+  const readable = readableBy ? readableSessionCondition(readableBy.userId) : undefined;
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks
-       WHERE agentId = ? AND status = 'paused'
+       WHERE agentId = ? AND status = 'paused'${readable ? ` AND ${readable.sql}` : ""}
        ORDER BY createdAt ASC, rowid ASC`,
-    [agentId],
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToAgentTask);
 }
@@ -1093,15 +1098,19 @@ export async function resetOrphanedInProgressTasksForAgent(
  * Used by hooks to detect task cancellation and stop the worker loop.
  * Returns tasks cancelled within the last 5 minutes.
  */
-export async function getRecentlyCancelledTasksForAgent(agentId: string): Promise<AgentTask[]> {
+export async function getRecentlyCancelledTasksForAgent(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentTask[]> {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const readable = readableBy ? readableSessionCondition(readableBy.userId) : undefined;
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE agentId = ?
        AND status = 'cancelled'
-       AND finishedAt > ?
+       AND finishedAt > ?${readable ? ` AND ${readable.sql}` : ""}
        ORDER BY finishedAt DESC`,
-    [agentId, fiveMinutesAgo],
+    [agentId, fiveMinutesAgo, ...(readable?.params ?? [])],
   );
   return rows.map(rowToAgentTask);
 }

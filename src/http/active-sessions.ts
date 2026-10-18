@@ -14,6 +14,7 @@ import {
 import { ActiveSessionSchema, AgentTaskSchema } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { route } from "./route-def";
+import { readableByFor, resolveSessionActor } from "./session-access";
 import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -153,7 +154,10 @@ export async function handleActiveSessions(
   if (listActiveSessions.match(req.method, pathSegments)) {
     const parsed = await listActiveSessions.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const sessions = await getActiveSessions(parsed.query.agentId || undefined);
+    const sessions = await getActiveSessions(
+      parsed.query.agentId || undefined,
+      readableByFor(await resolveSessionActor(req, myAgentId)),
+    );
     listActiveSessions.respond(res, 200, { sessions });
     return true;
   }

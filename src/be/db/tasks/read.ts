@@ -556,10 +556,14 @@ export async function hasNonTerminalRerouteDecisionChild(parentId: string): Prom
   return row !== undefined && row !== null;
 }
 
-export async function getTasksByAgentId(agentId: string): Promise<AgentTask[]> {
+export async function getTasksByAgentId(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentTask[]> {
+  const readable = readableBy ? readableSessionCondition(readableBy.userId) : undefined;
   const rows = await getDbClient().query<AgentTaskRow>(
-    "SELECT * FROM agent_tasks WHERE agentId = ? ORDER BY createdAt DESC",
-    [agentId],
+    `SELECT * FROM agent_tasks WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToAgentTask);
 }
