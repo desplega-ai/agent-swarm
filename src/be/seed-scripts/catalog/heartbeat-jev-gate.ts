@@ -138,17 +138,10 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
   // db_query_concurrency_cap on a busy swarm.
   const lead = await q("SELECT heartbeatMd FROM agents WHERE id = ?", [leadId]);
   const prev = await q(
-    `WITH previous AS (
-       SELECT id, substr(output, 1, 400) AS output,
-              instr(char(10) || task, char(10) || '## Current System Status [auto-generated]' || char(10)) AS statusStart,
-              task
-         FROM agent_tasks
-        WHERE agentId = ? AND taskType = 'heartbeat-checklist' AND status = 'completed'
-        ORDER BY createdAt DESC LIMIT 1
-     )
-     SELECT id, output,
-            CASE WHEN statusStart > 0 THEN substr(task, statusStart) ELSE '' END AS status
-       FROM previous`,
+    `SELECT id, substr(output, 1, 400) AS output, createdAt
+       FROM agent_tasks
+      WHERE agentId = ? AND taskType = 'heartbeat-checklist' AND status = 'completed'
+      ORDER BY createdAt DESC LIMIT 1`,
     [leadId],
   );
   const failed = await q(
@@ -169,27 +162,23 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
     "SELECT status, COUNT(*) AS n FROM agents WHERE COALESCE(role, '') != 'extension' GROUP BY status",
   );
 
+  // Reconstruct the ten failures shown at checklist creation. Task bodies contain
+  // arbitrary snapshot text and titles, so their headings cannot delimit history.
+  const previousAt = prev[0]?.createdAt;
+  const previousFailed = previousAt
+    ? await q(
+        `SELECT id FROM agent_tasks
+          WHERE status = 'failed' AND finishedAt > ? AND finishedAt <= ?
+          ORDER BY finishedAt DESC LIMIT 10`,
+        [new Date(Date.parse(previousAt) - 6 * 3600e3).toISOString(), previousAt],
+      )
+    : [];
+  const prevIds = new Set(previousFailed.map((f) => f.id));
   const fails = parseFailures(failed.map(renderFailureLine).join("\n"));
-  // Only generated markers delimit failures: snapshot text may quote the heading,
-  // and raw task titles may contain ordinary level-two headings.
-  const statusLines = String(prev[0]?.status ?? "").split("\n");
-  // Agent Status always follows failures, even when no failures section exists.
-  // In the older layout, the HEARTBEAT snapshot follows the generated status.
-  const agentStatusStart = statusLines.indexOf("## Agent Status [auto-generated]");
-  const failureStart = statusLines.findIndex(
-    (line, i) =>
-      line === "## Recent Failures (last 6h) [auto-generated]" &&
-      (agentStatusStart < 0 || i < agentStatusStart),
+  // Compare full IDs before rendering the replay's eight-character display IDs.
+  const newFails = parseFailures(
+    failed.filter((f) => !prevIds.has(f.id)).map(renderFailureLine).join("\n"),
   );
-  const failureEnd = statusLines.findIndex(
-    (line, i) => i > failureStart && /^## .*\[auto-generated\]$/.test(line),
-  );
-  const previousFailures =
-    failureStart < 0
-      ? ""
-      : statusLines.slice(failureStart + 1, failureEnd < 0 ? undefined : failureEnd).join("\n");
-  const prevIds = new Set(parseFailures(previousFailures).map((f) => f.id));
-  const newFails = fails.filter((f) => !prevIds.has(f.id));
 
   const { stamp, zone } = localStamp(nowMs, timeZone);
   const mmdd = new Date(nowMs).toISOString().slice(5, 10);
