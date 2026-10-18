@@ -1,6 +1,15 @@
 import Editor from "@monaco-editor/react";
 import type { ColDef, GetRowIdParams } from "ag-grid-community";
-import { Bug, ChevronDown, ChevronRight, Play, Search, Table2 } from "lucide-react";
+import {
+  Bug,
+  ChevronDown,
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Play,
+  Search,
+  Table2,
+} from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useDbQuery, useTableColumns, useTableList } from "@/api/hooks";
 import { Spinner } from "@/components/kibo-ui/spinner";
@@ -10,6 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { filterTables } from "./filter-tables";
@@ -151,6 +162,7 @@ export default function DebugPage() {
   const dbQuery = useDbQuery();
   const sql = readStringParam(searchParams, "sql", DEFAULT_SQL);
   const expandedTable = readStringParam(searchParams, "table");
+  const [tablesCollapsed, setTablesCollapsed] = useLocalToggle("debug:tables-collapsed", false);
   const editorRef = useRef<{ getValue: () => string } | null>(null);
 
   const executeQuery = useCallback(() => {
@@ -217,11 +229,13 @@ export default function DebugPage() {
       {/* Main content: sidebar + editor/results */}
       <div className="flex flex-1 min-h-0 border border-border rounded-md overflow-hidden">
         {/* Table browser sidebar */}
-        <TableBrowser
-          expandedTable={expandedTable}
-          onSelectTable={handleSelectTable}
-          onToggleTable={handleToggleTable}
-        />
+        {!tablesCollapsed && (
+          <TableBrowser
+            expandedTable={expandedTable}
+            onSelectTable={handleSelectTable}
+            onToggleTable={handleToggleTable}
+          />
+        )}
 
         {/* Right panel: editor + results */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
@@ -247,6 +261,28 @@ export default function DebugPage() {
 
           {/* Toolbar */}
           <div className="flex shrink-0 items-center gap-3 px-3 py-2 border-b border-border bg-muted/30">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0"
+                  aria-label={tablesCollapsed ? "Show table list" : "Hide table list"}
+                  aria-pressed={tablesCollapsed}
+                  onClick={() => setTablesCollapsed(!tablesCollapsed)}
+                >
+                  {tablesCollapsed ? (
+                    <PanelLeftOpen className="h-4 w-4" />
+                  ) : (
+                    <PanelLeftClose className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {tablesCollapsed ? "Show table list" : "Hide table list"}
+              </TooltipContent>
+            </Tooltip>
+
             <Button
               size="sm"
               className="gap-1.5 bg-primary hover:bg-primary/90"
@@ -264,6 +300,16 @@ export default function DebugPage() {
             <span className="text-xs text-muted-foreground">
               {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+Enter
             </span>
+
+            {expandedTable && (
+              <span
+                className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+                title={expandedTable}
+              >
+                <Table2 className="h-3 w-3 shrink-0" />
+                <span className="truncate font-mono">{expandedTable}</span>
+              </span>
+            )}
 
             {dbQuery.data && (
               <div className="flex items-center gap-2 ml-auto">
