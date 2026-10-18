@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { withHarnessTelemetryEnv } from "../commands/runner";
+import { applyResolvedEnvToProcessEnv, withHarnessTelemetryEnv } from "../commands/runner";
+import { _resetTelemetryStateForTests, initTelemetry, track } from "../telemetry";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 const TELEMETRY_PATH = join(import.meta.dir, "..", "telemetry.ts");
@@ -84,6 +85,60 @@ describe("withHarnessTelemetryEnv", () => {
       else process.env.DESPLEGA_TELEMETRY_ENV = original;
     }
   });
+});
+
+test("worker telemetry receives and clears company profile through resolved config", async () => {
+  const profile = {
+    SWARM_ORG_WEBSITE: "acme.com",
+    SWARM_ORG_TEAM_SIZE: "2-10",
+    SWARM_ORG_USE_CASE: "ops",
+    SWARM_ORG_ACQUISITION_SOURCE: "github",
+  };
+  const saved = Object.fromEntries(
+    [...Object.keys(profile), "ANONYMIZED_TELEMETRY"].map((key) => [key, process.env[key]]),
+  );
+  const originalFetch = globalThis.fetch;
+  const sent: Array<{ context: Record<string, unknown> }> = [];
+  try {
+    process.env.ANONYMIZED_TELEMETRY = "true";
+    _resetTelemetryStateForTests();
+    globalThis.fetch = (async (_url: string, init?: { body?: string }) => {
+      sent.push(JSON.parse(init?.body ?? "{}"));
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+    applyResolvedEnvToProcessEnv(profile);
+    const config: Record<string, string> = {
+      telemetry_installation_id: "install_worker_profile",
+      telemetry_org_id: "org_0123456789abcdef",
+      telemetry_org_domain: "acme.com",
+    };
+    await initTelemetry(
+      "worker",
+      (key) => config[key],
+      () => {},
+    );
+    track({ event: "session.started", properties: { agentId: crypto.randomUUID() } });
+    expect(sent[0]?.context).toMatchObject({
+      org_website: "acme.com",
+      org_domain: "acme.com",
+      team_size: "2-10",
+      use_case: "ops",
+      acquisition_source: "github",
+    });
+    applyResolvedEnvToProcessEnv(Object.fromEntries(Object.keys(profile).map((key) => [key, ""])));
+    track({ event: "session.started", properties: { agentId: crypto.randomUUID() } });
+    expect(sent[1]?.context).not.toHaveProperty("org_website");
+    expect(sent[1]?.context).not.toHaveProperty("team_size");
+    expect(sent[1]?.context).not.toHaveProperty("use_case");
+    expect(sent[1]?.context.acquisition_source).toBeNull();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    globalThis.fetch = originalFetch;
+    _resetTelemetryStateForTests();
+  }
 });
 
 describe("API boot telemetry environment", () => {

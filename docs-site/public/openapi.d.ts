@@ -20814,7 +20814,7 @@ export interface paths {
                          * @default banner
                          * @enum {string}
                          */
-                        via?: "banner" | "settings";
+                        via?: "banner" | "settings" | "benchmark";
                     };
                 };
             };
@@ -21714,7 +21714,7 @@ export interface paths {
         put?: never;
         /**
          * Grant or revoke the 'used by' logo consent
-         * @description Records whether agent-swarm.dev may show this organization's logo as a company that uses Agent Swarm. Sends the organization name and website to the telemetry proxy, where a person approves each logo by hand. An explicit admin action, so it is not gated by the telemetry opt-out.
+         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
          */
         post: {
             parameters: {
@@ -21727,6 +21727,11 @@ export interface paths {
                 content: {
                     "application/json": {
                         granted: boolean;
+                        /** Format: email */
+                        contactEmail?: string;
+                        /** @enum {string} */
+                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other";
+                        quote?: string;
                     };
                 };
             };
@@ -21743,7 +21748,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Organization name or website is not set (a revoke falls back to the identity of the last grant) */
+                /** @description Invalid contact details, or missing organization name or website */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -21796,7 +21801,7 @@ export interface paths {
         };
         /**
          * Compare this swarm with similar swarms
-         * @description Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. `unavailable` also covers an install whose first event the proxy saw cannot be established locally (until 30 days after the first accepted event). The fleet numbers are cached for a day.
+         * @description Compares local task volume and success rate with fleet percentiles over the last 30 days. Comparisons require telemetry, an organization name, and a known proxy ingest date. A website, team size, and use case enable full comparisons with peer filters. The response includes the proxy's peer group when available. With telemetry off, it returns local DB counts without a proxy request. The fleet cache key includes the peer filters.
          */
         get: {
             parameters: {
@@ -21816,6 +21821,13 @@ export interface paths {
                         "application/json": {
                             /** @enum {string} */
                             state: "ready" | "telemetry_off" | "no_org_name" | "not_enough_tasks" | "unavailable";
+                            /** @enum {string} */
+                            level: "basic" | "full";
+                            peerGroup: {
+                                teamSize: string | null;
+                                useCase: string | null;
+                                orgs: number;
+                            } | null;
                             local: {
                                 tasksPerWeek: number;
                                 taskSuccessRate: number | null;
@@ -21994,6 +22006,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         name: string;
+                        /** Format: email */
                         email?: string;
                         role?: string;
                         notes?: string;
@@ -22327,7 +22340,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         name?: string;
-                        email?: string;
+                        /** Format: email */
+                        email?: string | null;
                         role?: string;
                         notes?: string;
                         emailAliases?: string[];

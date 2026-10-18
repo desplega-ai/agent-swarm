@@ -5,10 +5,10 @@ import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import type { OnboardingResponse } from "@/api/types";
 import { IdentityForm } from "@/components/identity/identity-form";
 import { Spinner } from "@/components/kibo-ui/spinner";
-import { FadeIn } from "@/components/onboarding/fade-in";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
-import { SetupCard } from "@/components/onboarding/setup-card";
+import { FadeIn } from "@/components/shared/fade-in";
 import { SecretInput } from "@/components/shared/secret-input";
+import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -139,7 +139,7 @@ function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBl
         ? null
         : loadingUsers
           ? "Loading users…"
-          : "Pick who you are",
+          : "Tell us who you are",
     { busy: checking || loadingUsers },
   );
 
@@ -190,7 +190,7 @@ function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBl
       <SetupCard
         icon={<UserRound className="size-4" />}
         title="Who are you?"
-        description="The swarm attributes your tasks to this user."
+        description="Enter your email. The swarm attributes your tasks to this user."
         actions={
           switching ? (
             <Button
@@ -206,12 +206,7 @@ function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBl
         }
         status={<StatusIcon tone={state === "pending" ? "busy" : "none"} label="Loading users…" />}
       >
-        <IdentityForm
-          autoFocus={false}
-          instant
-          onDone={() => setSwitching(false)}
-          submitLabels={{ create: "Create user" }}
-        />
+        <IdentityForm surface="setup" autoFocus={false} onDone={() => setSwitching(false)} />
       </SetupCard>
     </FadeIn>
   );

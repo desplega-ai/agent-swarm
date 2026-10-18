@@ -4,6 +4,8 @@
  *
  * - `context.org_domain`: the email DOMAIN of the org's admin (never the email)
  * - `context.user_role`: `admin` when the user's grants include everything, else `member`
+ * - `context.user_function`: a canonical job function from `users.metadata.jobFunction`
+ *   (not `users.role`: the dashboard reads an empty or `admin` role as admin-like)
  *
  * This file must not import `./be/db` (`be/db.ts` imports the trigger module
  * that imports this one). It reads through the DB client and lazy-imports RBAC.
@@ -11,26 +13,36 @@
 import { getDbClient } from "./be/db/runtime";
 import { setTelemetryOrgDomain } from "./telemetry";
 import { emailDomain, type TelemetryUserRole } from "./telemetry-context";
+import { USER_FUNCTIONS } from "./utils/company-profile";
 
 const ROLE_TTL_MS = 60 * 60_000;
 const ROLE_CACHE_LIMIT = 1_000;
 const DOMAIN_RECOMPUTE_DEBOUNCE_MS = 2_000;
 
-const roleCache = new Map<string, { role: TelemetryUserRole; at: number }>();
+interface UserRoleEntry {
+  role: TelemetryUserRole;
+  userFunction?: (typeof USER_FUNCTIONS)[number];
+  at: number;
+}
+
+const roleCache = new Map<string, UserRoleEntry>();
 const roleLoads = new Map<string, Promise<TelemetryUserRole | undefined>>();
 
-async function loadUserRole(userId: string): Promise<TelemetryUserRole | undefined> {
+async function loadUserRole(userId: string): Promise<UserRoleEntry | undefined> {
   try {
     // Lazy: be/rbac-roles imports be/db, which (transitively) imports this file.
     const { getUserGrant } = await import("./be/rbac-roles");
     const grant = await getUserGrant(userId);
     const role: TelemetryUserRole = grant.grantsAll ? "admin" : "member";
-    if (roleCache.size >= ROLE_CACHE_LIMIT) {
-      const oldest = roleCache.keys().next().value;
-      if (oldest !== undefined) roleCache.delete(oldest);
-    }
-    roleCache.set(userId, { role, at: Date.now() });
-    return role;
+    const user = await getDbClient().get<{ jobFunction: string | null }>(
+      "SELECT json_extract(metadata, '$.jobFunction') AS jobFunction FROM users WHERE id = ? AND json_valid(metadata)",
+      [userId],
+    );
+    return {
+      role,
+      userFunction: USER_FUNCTIONS.find((value) => value === user?.jobFunction),
+      at: Date.now(),
+    };
   } catch {
     return undefined;
   }
@@ -42,7 +54,20 @@ export function primeUserRole(userId: string): Promise<TelemetryUserRole | undef
   if (hit && Date.now() - hit.at < ROLE_TTL_MS) return Promise.resolve(hit.role);
   let load = roleLoads.get(userId);
   if (!load) {
-    load = loadUserRole(userId).finally(() => roleLoads.delete(userId));
+    load = loadUserRole(userId)
+      .then((entry) => {
+        if (entry && roleLoads.get(userId) === load) {
+          if (roleCache.size >= ROLE_CACHE_LIMIT) {
+            const oldest = roleCache.keys().next().value;
+            if (oldest !== undefined) roleCache.delete(oldest);
+          }
+          roleCache.set(userId, entry);
+        }
+        return entry?.role;
+      })
+      .finally(() => {
+        if (roleLoads.get(userId) === load) roleLoads.delete(userId);
+      });
     roleLoads.set(userId, load);
   }
   return load;
@@ -57,6 +82,19 @@ export function cachedUserRole(userId: string): TelemetryUserRole | undefined {
   const hit = roleCache.get(userId);
   if (!hit || Date.now() - hit.at >= ROLE_TTL_MS) void primeUserRole(userId);
   return hit?.role;
+}
+
+/** Resolve the job function from the same cache and lookup as the RBAC role. */
+export function cachedUserFunction(userId: string): UserRoleEntry["userFunction"] {
+  const hit = roleCache.get(userId);
+  if (!hit || Date.now() - hit.at >= ROLE_TTL_MS) void primeUserRole(userId);
+  return hit?.userFunction;
+}
+
+/** Invalidate after a user mutation commits, including any lookup already in progress. */
+export function invalidateTelemetryUserRole(userId: string): void {
+  roleCache.delete(userId);
+  roleLoads.delete(userId);
 }
 
 /**

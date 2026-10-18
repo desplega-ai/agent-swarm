@@ -4,20 +4,22 @@ import { type ComponentProps, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
+import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { IdentityForm } from "@/components/identity/identity-form";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
-import { SetupCard } from "@/components/onboarding/setup-card";
 import { ComposerDock } from "@/components/sessions/composer-dock";
-import { SUGGESTIONS } from "@/components/sessions/new-session-view";
 import { BorderBeam } from "@/components/shared/border-beam";
+import { SetupCard } from "@/components/shared/setup-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
 import { SuggestionChips } from "@/components/shared/suggestion-chips";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { optionValue, SWARM_ORG_USE_CASE, USE_CASES } from "@/lib/company-profile";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../../step-contract";
+import { firstTaskStarters } from "./starters";
 
 type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
 
@@ -41,6 +43,11 @@ export function FirstTaskComposer({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Step 2 asks for the use case; its starters replace the general ones.
+  const { data: configs } = useConfigs({ scope: "global" });
+  const suggestions = firstTaskStarters(
+    optionValue(USE_CASES, configs?.find((entry) => entry.key === SWARM_ORG_USE_CASE)?.value),
+  );
 
   const taskPath = (id: string) => (usersSupported ? `/sessions/${id}` : `/tasks/${id}`);
   // Step 1 picks the user. This is a fallback for a user that went missing
@@ -66,7 +73,7 @@ export function FirstTaskComposer({
         requestedByUserId: userId ?? undefined,
         source: "ui",
       });
-      const method = SUGGESTIONS.includes(task) ? "suggestion" : "free_form";
+      const method = suggestions.includes(task) ? "suggestion" : "free_form";
       try {
         await act({ action: "first_task", taskId: created.id, method });
         // Collapse to the header pill: a reload on the session page must not
@@ -122,7 +129,7 @@ export function FirstTaskComposer({
           description="The swarm attributes tasks to this user."
           className="w-full"
         >
-          <IdentityForm autoFocus={false} instant submitLabels={{ create: "Create user" }} />
+          <IdentityForm surface="setup" autoFocus={false} />
         </SetupCard>
       ) : null}
 
@@ -153,7 +160,7 @@ export function FirstTaskComposer({
         }
       />
 
-      <SuggestionChips suggestions={SUGGESTIONS} onPick={setDraft} disabled={!live || sending} />
+      <SuggestionChips suggestions={suggestions} onPick={setDraft} disabled={!live || sending} />
     </div>
   );
 }

@@ -154,6 +154,7 @@ import type {
   TaskTemplateKind,
   TaskTemplatesResponse,
   TaskWithLogs,
+  TelemetryEnableVia,
   UnmappedIdentity,
   UnmappedResponse,
   UpdateUserInput,
@@ -163,6 +164,7 @@ import type {
   UpsertPromptTemplateInput,
   UpsertScriptConnectionInput,
   UsageSummaryResponse,
+  UsedByConsentInput,
   User,
   UserIdentity,
   UserResponse,
@@ -3385,7 +3387,7 @@ class ApiClient {
   }
 
   /** Turn telemetry on and apply it to the running server. */
-  async enableTelemetry(via: "banner" | "settings"): Promise<{ enabled: boolean }> {
+  async enableTelemetry(via: TelemetryEnableVia): Promise<{ enabled: boolean }> {
     const url = `${this.getBaseUrl()}/api/telemetry/enable`;
     const res = await fetch(url, {
       method: "POST",
@@ -3396,13 +3398,15 @@ class ApiClient {
     return (await res.json()) as { enabled: boolean };
   }
 
-  /** Grant or revoke the "used by" logo consent. */
-  async setUsedByConsent(granted: boolean): Promise<{ granted: boolean; changedAt: string }> {
+  /** Grant (with a contact email) or revoke the "used by" logo consent. */
+  async setUsedByConsent(
+    input: UsedByConsentInput,
+  ): Promise<{ granted: boolean; changedAt: string }> {
     const url = `${this.getBaseUrl()}/api/used-by`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify({ granted }),
+      body: JSON.stringify(input),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "" }));

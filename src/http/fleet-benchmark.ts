@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getSwarmConfigs } from "../be/db";
 import { getLocalFleetStats } from "../be/fleet-benchmark-stats";
 import {
   compareWithFleet,
@@ -12,6 +11,9 @@ import {
   localTasksPerWeek,
 } from "../fleet-benchmark";
 import { isTelemetryEnabled } from "../telemetry";
+import { COMPANY_TEAM_SIZES, COMPANY_USE_CASES } from "../utils/company-profile";
+import { normalizeOrgWebsite } from "../utils/org-website";
+import { globalConfig } from "./global-config";
 import { rejectGuest } from "./request-principal";
 import { route } from "./route-def";
 import { telemetryProxyEndpoint } from "./used-by";
@@ -34,6 +36,14 @@ const FleetStateSchema = z.enum([
 
 const FleetBenchmarkResponseSchema = z.object({
   state: FleetStateSchema,
+  level: z.enum(["basic", "full"]),
+  peerGroup: z
+    .object({
+      teamSize: z.string().nullable(),
+      useCase: z.string().nullable(),
+      orgs: z.number().int(),
+    })
+    .nullable(),
   local: z
     .object({
       tasksPerWeek: z.number(),
@@ -67,7 +77,7 @@ const fleetBenchmark = route({
   pattern: ["api", "fleet-benchmark"],
   summary: "Compare this swarm with similar swarms",
   description:
-    "Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. `unavailable` also covers an install whose first event the proxy saw cannot be established locally (until 30 days after the first accepted event). The fleet numbers are cached for a day.",
+    "Compares local task volume and success rate with fleet percentiles over the last 30 days. Comparisons require telemetry, an organization name, and a known proxy ingest date. A website, team size, and use case enable full comparisons with peer filters. The response includes the proxy's peer group when available. With telemetry off, it returns local DB counts without a proxy request. The fleet cache key includes the peer filters.",
   tags: ["Telemetry"],
   responses: {
     200: {
@@ -81,8 +91,12 @@ const fleetBenchmark = route({
 
 // ─── Caches ──────────────────────────────────────────────────────────────────
 
-let fleetCache: { value: FleetBenchmarks | null; until: number } | null = null;
-let localCache: { value: LocalFleetStats | null; until: number } | null = null;
+let fleetCache: { key: string; value: ProxyFleetBenchmarks | null; until: number } | null = null;
+let localCache: {
+  requireIngestAnchor: boolean;
+  value: LocalFleetStats | null;
+  until: number;
+} | null = null;
 
 const ProxyMetricSchema = z.object({
   n: z.number(),
@@ -112,19 +126,34 @@ const ProxyFleetBenchmarksSchema = z.object({
     "2-5": ProxyBlockSchema.optional(),
     "6+": ProxyBlockSchema.optional(),
   }),
+  peer_group: z
+    .object({
+      team_size: z.string().nullable(),
+      use_case: z.string().nullable(),
+      orgs: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .optional(),
 }) satisfies z.ZodType<FleetBenchmarks>;
 
+type ProxyFleetBenchmarks = z.infer<typeof ProxyFleetBenchmarksSchema>;
+
 /** The proxy's fleet percentiles. The request carries no install ID. */
-async function fleetBenchmarks(now: number): Promise<FleetBenchmarks | null> {
-  if (fleetCache && fleetCache.until > now) return fleetCache.value;
-  let value: FleetBenchmarks | null = null;
+async function fleetBenchmarks(
+  now: number,
+  peerGroup: { teamSize: string; useCase: string } | null,
+): Promise<ProxyFleetBenchmarks | null> {
+  const endpoint = new URL(await telemetryProxyEndpoint("/v1/fleet/benchmarks"));
+  endpoint.searchParams.set("window", "30d");
+  if (peerGroup) {
+    endpoint.searchParams.set("team_size", peerGroup.teamSize);
+    endpoint.searchParams.set("use_case", peerGroup.useCase);
+  }
+  const key = endpoint.toString();
+  if (fleetCache?.key === key && fleetCache.until > now) return fleetCache.value;
+  let value: ProxyFleetBenchmarks | null = null;
   try {
-    const response = await fetch(
-      `${await telemetryProxyEndpoint("/v1/fleet/benchmarks")}?window=30d`,
-      {
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      },
-    );
+    const response = await fetch(key, { signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (response.ok) {
       const parsed = ProxyFleetBenchmarksSchema.safeParse(await response.json());
       if (parsed.success) value = parsed.data;
@@ -132,38 +161,46 @@ async function fleetBenchmarks(now: number): Promise<FleetBenchmarks | null> {
   } catch {
     // Unreachable proxy: the card says the comparison is unavailable.
   }
-  fleetCache = { value, until: now + (value ? FLEET_TTL_MS : FLEET_FAILURE_TTL_MS) };
+  fleetCache = { key, value, until: now + (value ? FLEET_TTL_MS : FLEET_FAILURE_TTL_MS) };
   return value;
 }
 
-async function localStats(now: Date): Promise<LocalFleetStats | null> {
-  if (localCache && localCache.until > now.getTime()) return localCache.value;
-  const value = await getLocalFleetStats(now);
-  localCache = { value, until: now.getTime() + LOCAL_TTL_MS };
+async function localStats(now: Date, requireIngestAnchor = true): Promise<LocalFleetStats | null> {
+  if (localCache?.requireIngestAnchor === requireIngestAnchor && localCache.until > now.getTime())
+    return localCache.value;
+  const value = await getLocalFleetStats(now, { requireIngestAnchor });
+  localCache = { requireIngestAnchor, value, until: now.getTime() + LOCAL_TTL_MS };
   return value;
-}
-
-async function orgName(): Promise<string | undefined> {
-  const stored = (
-    await getSwarmConfigs({ scope: "global", key: "SWARM_ORG_NAME" })
-  )?.[0]?.value?.trim();
-  return stored || process.env.SWARM_ORG_NAME?.trim() || undefined;
 }
 
 export async function buildFleetBenchmarkResponse(
   now = new Date(),
 ): Promise<FleetBenchmarkResponse> {
+  const [name, website, teamSize, useCase] = await Promise.all([
+    globalConfig("SWARM_ORG_NAME"),
+    globalConfig("SWARM_ORG_WEBSITE"),
+    globalConfig("SWARM_ORG_TEAM_SIZE"),
+    globalConfig("SWARM_ORG_USE_CASE"),
+  ]);
+  const team = z.enum(COMPANY_TEAM_SIZES).safeParse(teamSize);
+  const use = z.enum(COMPANY_USE_CASES).safeParse(useCase);
+  const peerGroup =
+    normalizeOrgWebsite(website) && team.success && use.success
+      ? { teamSize: team.data, useCase: use.data }
+      : null;
   const empty = {
+    level: peerGroup ? ("full" as const) : ("basic" as const),
+    peerGroup: null,
     local: null,
     minFinishedTasks: FLEET_MIN_FINISHED_TASKS,
     generatedAt: null,
     comparisons: [],
   };
   // Telemetry off means no call to our proxy at all, not even an anonymous one.
-  if (!isTelemetryEnabled()) return { state: "telemetry_off", ...empty };
-  if (!(await orgName())) return { state: "no_org_name", ...empty };
+  const telemetryEnabled = isTelemetryEnabled();
+  if (telemetryEnabled && !name) return { state: "no_org_name", ...empty };
 
-  const stats = await localStats(now);
+  const stats = await localStats(now, telemetryEnabled);
   // Where the proxy started counting this install is unknown: no comparison.
   if (!stats) return { state: "unavailable", ...empty };
   const finishedTasks = stats.tasksCompleted + stats.tasksFailed;
@@ -174,14 +211,26 @@ export async function buildFleetBenchmarkResponse(
     agents: stats.agents,
     bucket: fleetBucketFor(stats.agents),
   };
+  if (!telemetryEnabled) return { ...empty, state: "telemetry_off", local };
   if (finishedTasks < FLEET_MIN_FINISHED_TASKS)
     return { ...empty, state: "not_enough_tasks", local };
 
-  const fleet = await fleetBenchmarks(now.getTime());
+  const fleet = await fleetBenchmarks(now.getTime(), peerGroup);
+  const responsePeerGroup =
+    peerGroup && fleet?.peer_group
+      ? {
+          teamSize: fleet.peer_group.team_size,
+          useCase: fleet.peer_group.use_case,
+          orgs: fleet.peer_group.orgs,
+        }
+      : null;
   const comparisons = fleet ? compareWithFleet(stats, fleet, now) : [];
-  if (!fleet || comparisons.length === 0) return { ...empty, state: "unavailable", local };
+  if (!fleet || comparisons.length === 0)
+    return { ...empty, state: "unavailable", local, peerGroup: responsePeerGroup };
   return {
+    ...empty,
     state: "ready",
+    peerGroup: responsePeerGroup,
     local,
     minFinishedTasks: FLEET_MIN_FINISHED_TASKS,
     generatedAt: fleet.generatedAt,

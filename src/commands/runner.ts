@@ -1228,6 +1228,10 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "TEMPLATE_REGISTRY_URL",
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
+  "SWARM_ORG_WEBSITE",
+  "SWARM_ORG_TEAM_SIZE",
+  "SWARM_ORG_USE_CASE",
+  "SWARM_ORG_ACQUISITION_SOURCE",
   // pi reads these from process.env for its traits and its session.
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",

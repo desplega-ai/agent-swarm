@@ -22,7 +22,7 @@ import {
   validOrgDomain,
   validOrgId,
 } from "./telemetry-context";
-import type { PropsFor, TelemetryEventName } from "./telemetry-contract";
+import type { EventContext, PropsFor, TelemetryEventName } from "./telemetry-contract";
 import { isEnvFlagEnabled } from "./utils/env-flag";
 import { getNodeEnv } from "./utils/node-env";
 import { normalizeOrgWebsite } from "./utils/org-website";
@@ -68,6 +68,7 @@ let cachedOrgId: string | undefined;
 /** Email domain of the org's admin, set by the API server (`setTelemetryOrgDomain`). */
 let cachedOrgDomain: string | undefined;
 let roleResolver: ((userId: string) => TelemetryUserRole | undefined) | null = null;
+let functionResolver: ((userId: string) => EventContext["user_function"]) | null = null;
 let identityReloader: (() => Promise<void>) | null = null;
 let lastIdentityLoadAt = 0;
 let source = "unknown";
@@ -510,6 +511,13 @@ export function setTelemetryRoleResolver(
   roleResolver = resolver;
 }
 
+/** API server only: cache-backed lookup of the actor's job function. */
+export function setTelemetryFunctionResolver(
+  resolver: ((userId: string) => EventContext["user_function"]) | null,
+): void {
+  functionResolver = resolver;
+}
+
 /**
  * True when `track()` would send: telemetry is on, an install ID exists and an
  * org ID resolved. Emitters that record "already sent" state check this first.
@@ -661,8 +669,10 @@ function emit(
         swarmVersion: pkg.version,
         installMethod: cachedInstallMethod,
         installPreset: cachedInstallPreset,
-        // Stays null until the dashboard reports where the visitor came from.
-        acquisitionSource: null,
+        acquisitionSource: process.env.SWARM_ORG_ACQUISITION_SOURCE,
+        teamSize: process.env.SWARM_ORG_TEAM_SIZE,
+        useCase: process.env.SWARM_ORG_USE_CASE,
+        userFunction: userId ? functionResolver?.(userId) : undefined,
       }),
       properties: normalizeProperties(event, {
         ...properties,
@@ -742,6 +752,7 @@ export function _resetTelemetryStateForTests(): void {
   cachedOrgId = undefined;
   cachedOrgDomain = undefined;
   roleResolver = null;
+  functionResolver = null;
   identityReloader = null;
   lastIdentityLoadAt = 0;
 }

@@ -13,7 +13,7 @@ import { telemetryIngestRecorder } from "./telemetry-ingest-anchor";
 
 type GetConfig = (key: string) => Promise<string | undefined>;
 type SetConfig = (key: string, value: string) => Promise<void>;
-export type TelemetryEnabledVia = "banner" | "settings" | "env";
+export type TelemetryEnabledVia = "banner" | "settings" | "benchmark" | "env";
 
 let accessors: { getConfig: GetConfig; setConfig: SetConfig } | null = null;
 let lastEnabled = false;

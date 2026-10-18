@@ -27,6 +27,64 @@
         "org_name",
         "used_by"
       ]
+    },
+    "team_size": {
+      "type": "string",
+      "description": "Size of the organization team.",
+      "enum": [
+        "1",
+        "2-10",
+        "11-50",
+        "51+"
+      ]
+    },
+    "use_case": {
+      "type": "string",
+      "description": "Primary use of the swarm.",
+      "enum": [
+        "features",
+        "bugs",
+        "review",
+        "ops",
+        "docs",
+        "data"
+      ]
+    },
+    "acquisition_source": {
+      "type": "string",
+      "description": "How the organization found Agent Swarm.",
+      "enum": [
+        "search",
+        "github",
+        "social",
+        "colleague",
+        "newsletter",
+        "event",
+        "ai_assistant",
+        "hacker_news",
+        "other"
+      ]
+    },
+    "user_function": {
+      "type": "string",
+      "description": "Job function of a user, separate from the RBAC user_role.",
+      "enum": [
+        "engineer",
+        "eng_lead",
+        "founder",
+        "product",
+        "ops",
+        "other"
+      ]
+    },
+    "notification_moment": {
+      "type": "string",
+      "description": "Moment that made the Slack Connect invite relevant.",
+      "enum": [
+        "task_failed",
+        "first_workflow",
+        "default"
+      ]
     }
   },
   "common_properties": {
@@ -1125,6 +1183,9 @@
         "key": {
           "type": "string",
           "required": true
+        },
+        "moment": {
+          "ref": "notification_moment"
         }
       }
     },
@@ -1138,6 +1199,9 @@
         "key": {
           "type": "string",
           "required": true
+        },
+        "moment": {
+          "ref": "notification_moment"
         }
       }
     },
@@ -1155,6 +1219,12 @@
         "email_domain": {
           "type": "string",
           "description": "Domain of the email typed into the item, never the address."
+        },
+        "moment": {
+          "ref": "notification_moment"
+        },
+        "user_function": {
+          "ref": "user_function"
         }
       }
     },
@@ -1167,7 +1237,8 @@
       "properties": {
         "feature": {
           "type": "string",
-          "required": true
+          "required": true,
+          "description": "Feature identifier, including health_popover and kickoff_call_opened. Existing identifiers remain accepted."
         }
       }
     },
@@ -1222,7 +1293,8 @@
       "properties": {
         "channel": {
           "type": "string",
-          "required": true
+          "required": true,
+          "description": "Lead channel, including setup_help and fleet_report. Existing channels remain accepted."
         },
         "submission_id": {
           "type": "string",
@@ -1305,6 +1377,22 @@
           "type": "boolean",
           "required": true,
           "description": "A name or email was left. The values go to /v1/feedback, never here."
+        },
+        "answered": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of profile follow-up questions answered, never their values."
+        },
+        "perks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "used_by",
+              "slack_connect"
+            ]
+          },
+          "description": "Perks the admin explicitly selected."
         }
       }
     },
@@ -1317,8 +1405,18 @@
       "properties": {
         "fields": {
           "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "name",
+              "website",
+              "team_size",
+              "use_case",
+              "acquisition_source"
+            ]
+          },
           "required": true,
-          "description": "Changed field names: name, website."
+          "description": "Changed profile field names, never their values."
         },
         "surface": {
           "type": "string",
@@ -1326,7 +1424,12 @@
           "enum": [
             "prompt",
             "setup",
-            "settings"
+            "settings",
+            "org_name_popup",
+            "feedback",
+            "fleet_benchmark",
+            "telemetry_banner",
+            "identity_modal"
           ],
           "description": "Where the change was made. Not trigger_surface: that key fills the raw_events.trigger_surface column."
         }
@@ -1342,6 +1445,12 @@
         "granted": {
           "type": "boolean",
           "required": true
+        },
+        "has_quote": {
+          "type": "boolean"
+        },
+        "has_function": {
+          "type": "boolean"
         }
       }
     },
@@ -1358,7 +1467,8 @@
           "enum": [
             "banner",
             "settings",
-            "env"
+            "env",
+            "benchmark"
           ]
         }
       }
@@ -1373,6 +1483,82 @@
         "has_org_name": {
           "type": "boolean",
           "required": true
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "basic",
+            "full"
+          ]
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "ranking.opted_in",
+      "description": "An admin opted the install into the public ranking, or the API rebuilt its listing after an org identity change.",
+      "since": "2026-10-18",
+      "source": "api-server",
+      "properties": {
+        "listing": {
+          "type": "string",
+          "required": true,
+          "description": "The stringified telemetry_ranking listing (contracts/telemetry/ranking/listing.v1.schema.json). The ingest also requires its name and domain to equal context.org_name and context.org_website."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "ranking.opted_out",
+      "description": "The install left the public ranking: the admin turned it off, or the org name or website was cleared or changed.",
+      "since": "2026-10-18",
+      "source": "api-server",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "required": true,
+          "description": "The listing domain that leaves the ranking: a lowercase hostname."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "ranking.usage",
+      "description": "Token usage of one session on an install opted into the public ranking. Sent next to session.cost.",
+      "since": "2026-10-18",
+      "source": "worker",
+      "properties": {
+        "totalTokens": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens. The ranking sums this."
+        },
+        "inputTokens": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0
+        },
+        "cacheReadTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheWriteTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model": {
+          "type": "string",
+          "description": "The session's model, the same value as session.cost.model. Usage without it, or with a value the ranking does not accept, is shown as the model unknown."
+        },
+        "provider": {
+          "type": "string",
+          "description": "The session's provider, the same value as session.cost.provider. Missing means unknown."
         }
       }
     },
@@ -1483,6 +1669,109 @@
         "entry_route": {
           "type": "string",
           "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "identity.lookup",
+      "description": "A dashboard identity lookup matched an existing user or found no match.",
+      "since": "2026-10-18",
+      "source": "ui",
+      "properties": {
+        "matched": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "identity.user_created",
+      "description": "A user created a dashboard identity. Email and personal names stay out of telemetry.",
+      "since": "2026-10-18",
+      "source": "ui",
+      "properties": {
+        "surface": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "identity_modal",
+            "setup"
+          ]
+        },
+        "email_kind": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "work",
+            "personal"
+          ]
+        },
+        "has_function": {
+          "type": "boolean",
+          "required": true
+        },
+        "has_company": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "fleet_benchmark.unlocked",
+      "description": "An admin supplied the company profile fields for the full benchmark.",
+      "since": "2026-10-18",
+      "source": "ui",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "website",
+              "team_size",
+              "use_case"
+            ]
+          },
+          "required": true,
+          "description": "Profile fields supplied, never their values."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "setup.worker_command_copied",
+      "description": "An admin copied a worker command from the setup health popover.",
+      "since": "2026-10-18",
+      "source": "ui",
+      "properties": {
+        "target": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "compose",
+            "docker",
+            "kubernetes"
+          ]
+        },
+        "harness": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "claude",
+            "codex",
+            "pi",
+            "devin",
+            "claude-managed",
+            "opencode",
+            "acp",
+            "dsh",
+            "amp",
+            "cursor",
+            "grok"
+          ]
         }
       }
     }

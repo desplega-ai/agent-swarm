@@ -3,6 +3,11 @@ import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-po
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
+import {
+  COMPANY_ACQUISITION_SOURCES,
+  COMPANY_TEAM_SIZES,
+  COMPANY_USE_CASES,
+} from "../utils/company-profile";
 import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
 import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
@@ -141,7 +146,8 @@ function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
 
 /** Build a single `{ KEY: validator }` entry restricted to `options`. */
 function enumValidator(key: string, options: string[]): Record<string, ConfigValidator> {
-  const message = `Invalid ${key} value (must be one of: ${options.join(", ")})`;
+  const listed = options.filter(Boolean).join(", ");
+  const message = `Invalid ${key} value (must be one of: ${listed}${options.includes("") ? ", or empty" : ""})`;
   return {
     [key]: (value: unknown) => {
       if (typeof value !== "string") return message;
@@ -403,6 +409,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       ? null
       : "Invalid SWARM_ORG_WEBSITE (must be a public hostname such as example.com, without scheme, www, path or port)";
   },
+  ...enumValidator("SWARM_ORG_TEAM_SIZE", ["", ...COMPANY_TEAM_SIZES]),
+  ...enumValidator("SWARM_ORG_USE_CASE", ["", ...COMPANY_USE_CASES]),
+  ...enumValidator("SWARM_ORG_ACQUISITION_SOURCE", ["", ...COMPANY_ACQUISITION_SOURCES]),
   ...booleanValidators([
     "SWARM_USED_BY_CONSENT",
     "SWARM_DEV_MODE",

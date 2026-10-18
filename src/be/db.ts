@@ -10,7 +10,7 @@ import {
 import { realtimeBus } from "../realtime/bus";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
-import { scheduleOrgDomainRecompute } from "../telemetry-identity";
+import { invalidateTelemetryUserRole, scheduleOrgDomainRecompute } from "../telemetry-identity";
 import {
   emitTaskTelemetry,
   type TaskTelemetryEvent,
@@ -12310,7 +12310,7 @@ export async function updateUser(
   id: string,
   data: Partial<{
     name: string;
-    email: string;
+    email: string | null;
     role: string;
     notes: string;
     emailAliases: string[];
@@ -12375,7 +12375,12 @@ export async function updateUser(
     `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
     params,
   );
-  if (row) getDbClient().afterCommit(scheduleOrgDomainRecompute);
+  if (row) {
+    getDbClient().afterCommit(() => {
+      invalidateTelemetryUserRole(id);
+      scheduleOrgDomainRecompute();
+    });
+  }
   return row ? rowToUser(row) : null;
 }
 
@@ -12512,7 +12517,12 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     await reclassifyTaskHumanFree(reclassifySeedIds);
 
     const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
-    if (result.changes > 0) getDbClient().afterCommit(scheduleOrgDomainRecompute);
+    if (result.changes > 0) {
+      getDbClient().afterCommit(() => {
+        invalidateTelemetryUserRole(id);
+        scheduleOrgDomainRecompute();
+      });
+    }
     return result.changes > 0;
   });
 }

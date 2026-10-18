@@ -1,5 +1,6 @@
 /**
- * Dashboard telemetry events (`popup.*`, `notification.*`, `fleet_benchmark.viewed`).
+ * Dashboard telemetry events (`popup.*`, `notification.*`, `org.*`, `identity.*`,
+ * `fleet_benchmark.*`, `setup.*`).
  *
  * The browser never talks to the telemetry proxy. It posts each event to
  * `POST /api/telemetry/ui-event`, and the API sends it with the normal v2
@@ -12,8 +13,9 @@
  */
 import { useCallback } from "react";
 import { api } from "@/api/client";
-import type { StatusResponse } from "@/api/types";
+import type { ProviderName, SlackConnectMoment, StatusResponse } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
+import type { UserFunction } from "@/lib/company-profile";
 
 export type PopupName = "feedback" | "org_name" | "used_by";
 export type PopupTrigger =
@@ -23,6 +25,16 @@ export type PopupTrigger =
   | "quarterly"
   | "missing_org_name";
 export type PopupDismissMethod = "later" | "close" | "escape";
+export type OrgProfileField = "name" | "website" | "team_size" | "use_case" | "acquisition_source";
+export type OrgProfileSurface =
+  | "prompt"
+  | "setup"
+  | "settings"
+  | "org_name_popup"
+  | "feedback"
+  | "fleet_benchmark"
+  | "telemetry_banner"
+  | "identity_modal";
 
 /** The catalogued events the dashboard sends, with their properties. */
 export type UiTelemetryEvent =
@@ -30,16 +42,54 @@ export type UiTelemetryEvent =
   | { event: "popup.dismissed"; properties: { popup: PopupName; method: PopupDismissMethod } }
   | {
       event: "popup.submitted";
-      properties: { popup: PopupName; score?: number; has_message: boolean; has_contact: boolean };
+      properties: {
+        popup: PopupName;
+        score?: number;
+        has_message: boolean;
+        has_contact: boolean;
+        /** How many follow-up questions were answered. */
+        answered?: number;
+        perks?: Array<"used_by" | "slack_connect">;
+      };
     }
-  | { event: "notification.viewed"; properties: { key: string } }
-  | { event: "notification.dismissed"; properties: { key: string } }
-  | { event: "notification.submitted"; properties: { key: string; email_domain?: string } }
+  | { event: "notification.viewed"; properties: { key: string; moment?: SlackConnectMoment } }
+  | { event: "notification.dismissed"; properties: { key: string; moment?: SlackConnectMoment } }
+  | {
+      event: "notification.submitted";
+      properties: {
+        key: string;
+        email_domain?: string;
+        moment?: SlackConnectMoment;
+        user_function?: UserFunction;
+      };
+    }
   | {
       event: "org.profile_updated";
-      properties: { fields: Array<"name" | "website">; surface: "prompt" | "setup" | "settings" };
+      properties: { fields: OrgProfileField[]; surface: OrgProfileSurface };
     }
-  | { event: "fleet_benchmark.viewed"; properties: { has_org_name: boolean } };
+  | {
+      event: "fleet_benchmark.viewed";
+      properties: { has_org_name: boolean; level?: "basic" | "full" };
+    }
+  | {
+      event: "fleet_benchmark.unlocked";
+      properties: { fields: Array<"website" | "team_size" | "use_case"> };
+    }
+  | { event: "identity.lookup"; properties: { matched: boolean } }
+  | {
+      event: "identity.user_created";
+      properties: {
+        surface: "identity_modal" | "setup";
+        email_kind: "work" | "personal";
+        has_function: boolean;
+        has_company: boolean;
+      };
+    }
+  | {
+      event: "setup.worker_command_copied";
+      properties: { target: "compose" | "docker" | "kubernetes"; harness: ProviderName };
+    }
+  | { event: "feature.used"; properties: { feature: string } };
 
 /**
  * Whether dashboard events may leave the browser.

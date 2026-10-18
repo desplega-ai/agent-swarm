@@ -6,8 +6,8 @@ import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { AgentWithTasks, ProviderName } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
-import { SetupChip } from "@/components/onboarding/setup-card";
 import { HarnessIcon } from "@/components/shared/harness-icon";
+import { SetupChip } from "@/components/shared/setup-chip";
 import { StatusLine } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import {
