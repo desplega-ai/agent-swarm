@@ -9,6 +9,7 @@ import {
   createTaskExtended,
   createUser,
   createWorkflow,
+  deleteTask,
   deleteTaskAttachment,
   getAssetKeyMappingByProvider,
   getDb,
@@ -391,7 +392,7 @@ describe("cross-entity asset namespace invariants", () => {
     ).toHaveLength(historyBefore.length + 1);
 
     await getDbClient().run(
-      `UPDATE asset_key_mappings SET "key" = 'shared/no-attaching-task/', source_entity_type = NULL, source_entity_id = NULL WHERE id = ?`,
+      `UPDATE asset_key_mappings SET "key" = 'shared/no-attaching-task/' WHERE id = ?`,
       [mapping.id],
     );
     const drift = auditAssetKeys(getDb()).issues.filter(
@@ -429,39 +430,79 @@ describe("cross-entity asset namespace invariants", () => {
     expect((await getTaskById(unchecked.id))?.key).toBe("shared/partial/");
   });
 
-  test("a shared file whose source attachment was deleted follows the next task move", async () => {
-    const [remaining, deleted] = await Promise.all(
-      ["remaining attachment owner", "deleted attachment owner"].map((task) =>
-        createTaskExtended(task, { agentId, key: "shared/detached-source/" }),
+  test("deleting the source attachment of a shared file leaves moves open", async () => {
+    const [kept, deleted, removed] = await Promise.all(
+      ["shared/detach-a/", "shared/detach-b/", "shared/detach-c/"].map((key) =>
+        createTaskExtended(`detach ${key}`, { agentId, key }),
       ),
     );
+    const other = await createTaskExtended("unrelated move", { agentId, key: "shared/other/" });
     const provider = {
       providerId: "agent-fs",
       providerOrgId: "shared-org",
       providerDriveId: "shared-drive",
-      providerKey: "detached-source.md",
+      providerKey: "detach.md",
     };
-    const attachments = [];
-    for (const task of [remaining!, deleted!]) {
-      attachments.push(
-        await insertTaskAttachment({
-          taskId: task.id,
-          name: "detached-source.md",
-          kind: "agent-fs",
-          providerId: provider.providerId,
-          providerKey: provider.providerKey,
-          orgId: provider.providerOrgId,
-          driveId: provider.providerDriveId,
-        }),
-      );
-    }
-    expect(await deleteTaskAttachment(attachments[1]!.id)).toBe(true);
-    expect((await getAssetKeyMappingByProvider(provider))?.sourceEntityType).not.toBe(
-      "task-attachment",
+    const attach = (taskId: string) =>
+      insertTaskAttachment({
+        taskId,
+        name: "detach.md",
+        kind: "agent-fs",
+        providerId: provider.providerId,
+        providerKey: provider.providerKey,
+        orgId: provider.providerOrgId,
+        driveId: provider.providerDriveId,
+      });
+    await attach(kept!.id);
+    const sourceAttachment = await attach(deleted!.id);
+    expect((await getAssetKeyMappingByProvider(provider))?.key).toBe("shared/detach-b/");
+
+    expect(await deleteTaskAttachment(sourceAttachment.id)).toBe(true);
+    expect(await getAssetKeyMappingByProvider(provider)).toMatchObject({
+      key: "shared/detach-b/",
+      sourceEntityType: "external",
+    });
+    expect(auditAssetKeys(getDb()).ok).toBe(true);
+    await moveAssetKey({ entityType: "task", id: other.id, key: "shared/other-moved/" });
+
+    await attach(removed!.id);
+    expect(await deleteTask(removed!.id)).toBe(true);
+    expect(await getAssetKeyMappingByProvider(provider)).toMatchObject({
+      key: "shared/detach-c/",
+      sourceEntityType: "external",
+    });
+    expect(auditAssetKeys(getDb()).ok).toBe(true);
+
+    await moveAssetKey({ entityType: "task", id: kept!.id, key: "shared/detach-moved/" });
+    expect((await getAssetKeyMappingByProvider(provider))?.key).toBe("shared/detach-moved/");
+    expect(auditAssetKeys(getDb()).ok).toBe(true);
+  });
+
+  test("an external mapping that a task still attaches follows that task's move", async () => {
+    const task = await createTaskExtended("external owner", { agentId, key: "shared/external/" });
+    const provider = {
+      providerId: "agent-fs",
+      providerOrgId: "shared-org",
+      providerDriveId: "shared-drive",
+      providerKey: "external.md",
+    };
+    await insertTaskAttachment({
+      taskId: task.id,
+      name: "external.md",
+      kind: "agent-fs",
+      providerId: provider.providerId,
+      providerKey: provider.providerKey,
+      orgId: provider.providerOrgId,
+      driveId: provider.providerDriveId,
+    });
+    const mapping = (await getAssetKeyMappingByProvider(provider))!;
+    await getDbClient().run(
+      "UPDATE asset_key_mappings SET source_entity_type = 'external', source_entity_id = NULL WHERE id = ?",
+      [mapping.id],
     );
 
-    await moveAssetKey({ entityType: "task", id: remaining!.id, key: "shared/detached-moved/" });
-    expect((await getAssetKeyMappingByProvider(provider))?.key).toBe("shared/detached-moved/");
+    await moveAssetKey({ entityType: "task", id: task.id, key: "shared/external-moved/" });
+    expect((await getAssetKeyMappingByProvider(provider))?.key).toBe("shared/external-moved/");
     expect(auditAssetKeys(getDb()).ok).toBe(true);
   });
 
