@@ -1,16 +1,18 @@
 import Editor from "@monaco-editor/react";
 import type { ColDef, GetRowIdParams } from "ag-grid-community";
-import { Bug, ChevronDown, ChevronRight, Play, Table2 } from "lucide-react";
-import { useCallback, useMemo, useRef } from "react";
+import { Bug, ChevronDown, ChevronRight, Play, Search, Table2 } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useDbQuery, useTableColumns, useTableList } from "@/api/hooks";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { filterTables } from "./filter-tables";
 import { formatDebugCell } from "./format-cell";
 
 const DEFAULT_SQL = "SELECT name, type FROM sqlite_master WHERE type='table' ORDER BY name";
@@ -33,12 +35,26 @@ function TableBrowser({
     return tablesResult.rows.map((row) => String(row[0]));
   }, [tablesResult]);
 
+  const [search, setSearch] = useState("");
+  const visibleTables = useMemo(() => filterTables(tables, search), [tables, search]);
+
   return (
     <div className="w-[220px] shrink-0 border-r border-border flex flex-col min-h-0 overflow-hidden">
       <div className="px-3 py-2 border-b border-border shrink-0">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Tables
         </span>
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tables..."
+            aria-label="Search tables"
+            className="h-8 pl-7 text-xs md:text-xs"
+          />
+        </div>
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <div className="py-1">
@@ -47,7 +63,10 @@ function TableBrowser({
               <Spinner className="size-3" /> Loading...
             </div>
           )}
-          {tables.map((name) => (
+          {!isLoading && tables.length > 0 && visibleTables.length === 0 && (
+            <div className="px-3 py-2 text-muted-foreground text-xs">No matching tables</div>
+          )}
+          {visibleTables.map((name) => (
             <TableItem
               key={name}
               name={name}
