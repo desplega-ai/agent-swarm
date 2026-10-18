@@ -204,6 +204,7 @@ import {
   findExistingLinearTrackerContextWork,
   getTaskById,
   getTasksByAgentId,
+  readableSessionCondition,
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
@@ -2082,13 +2083,17 @@ export async function getPendingSteeringForTask(taskId: string): Promise<Steerin
   return await getSteeringMessagesForTask(taskId, { status: "pending" });
 }
 
-export async function getPendingSteeringForAgent(agentId: string): Promise<SteeringMessage[]> {
+export async function getPendingSteeringForAgent(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<SteeringMessage[]> {
+  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
   const rows = await getDbClient().query<TaskSteeringMessageRow>(
     `${STEERING_MESSAGE_SELECT}
        JOIN agent_tasks t ON t.id = m.task_id
-       WHERE t.agentId = ? AND m.status = 'pending'
+       WHERE t.agentId = ? AND m.status = 'pending'${readable ? ` AND ${readable.sql}` : ""}
        ORDER BY m.created_at ASC, m.rowid ASC`,
-    [agentId],
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToSteeringMessage);
 }

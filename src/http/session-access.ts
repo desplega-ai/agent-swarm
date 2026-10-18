@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { type SessionAccess, sessionAccess } from "../be/session-shares";
+import { hasSessionAccess, type SessionAccess, sessionAccess } from "../be/session-shares";
 import { findUserById } from "../be/users";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { dashboardUserIdHeader } from "./favorite-owner";
@@ -42,4 +42,22 @@ export async function sessionAccessFor(
   taskId: string,
 ): Promise<SessionAccess> {
   return actor.kind === "bypass" ? "owner" : sessionAccess(actor.userId, taskId);
+}
+
+export const SESSION_READ_DENIED =
+  "You don't have access to this session. Ask the owner to share it.";
+
+/** True unless the request acts for a user who lacks read access to the task's session. */
+export async function canReadSession(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  taskId: string,
+): Promise<boolean> {
+  const access = await sessionAccessFor(await resolveSessionActor(req, myAgentId), taskId);
+  return hasSessionAccess(access, "read");
+}
+
+/** The SQL list filter (`readableSessionCondition`) for an actor; none for a bypass actor. */
+export function readableByFor(actor: SessionActor): { userId: string | null } | undefined {
+  return actor.kind === "user" ? { userId: actor.userId } : undefined;
 }

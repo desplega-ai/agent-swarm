@@ -654,14 +654,20 @@ export interface TaskFilters {
  * depth, and as a WHERE term it keeps paging and `COUNT(*)` on the same rows.
  * `parentTaskId` is fixed at insert to an existing task, so no parent cycle
  * (which would have no root) can form.
+ *
+ * `taskIdColumn` applies the same filter to any table keyed by task id. A
+ * nullable column keeps its task-less rows: they belong to no session.
  */
-function readableSessionCondition(userId: string | null): { sql: string; params: string[] } {
+export function readableSessionCondition(
+  userId: string | null,
+  taskIdColumn = "agent_tasks.id",
+  opts: { nullable?: boolean } = {},
+): { sql: string; params: string[] } {
   const otherOwner = userId
     ? "r.requestedByUserId IS NOT NULL AND r.requestedByUserId != ?"
     : "r.requestedByUserId IS NOT NULL";
   const shareMatch = userId ? "(s.userId IS NULL OR s.userId = ?)" : "s.userId IS NULL";
-  return {
-    sql: `agent_tasks.id NOT IN (
+  const notHidden = `${taskIdColumn} NOT IN (
       WITH RECURSIVE hidden(id) AS (
         SELECT r.id FROM agent_tasks r
         WHERE (r.parentTaskId IS NULL
@@ -673,7 +679,9 @@ function readableSessionCondition(userId: string | null): { sql: string; params:
         SELECT c.id FROM agent_tasks c JOIN hidden ON c.parentTaskId = hidden.id
       )
       SELECT id FROM hidden
-    )`,
+    )`;
+  return {
+    sql: opts.nullable ? `(${taskIdColumn} IS NULL OR ${notHidden})` : notHidden,
     params: userId ? [userId, userId] : [],
   };
 }

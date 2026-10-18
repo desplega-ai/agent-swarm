@@ -82,7 +82,13 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route } from "./route-def";
-import { resolveSessionActor, sessionAccessFor } from "./session-access";
+import {
+  canReadSession,
+  readableByFor,
+  resolveSessionActor,
+  SESSION_READ_DENIED,
+  sessionAccessFor,
+} from "./session-access";
 import { jsonError, parseBody } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -1374,6 +1380,10 @@ export async function handleTasks(
       jsonError(res, "Task not found", 404);
       return true;
     }
+    if (!(await canReadSession(req, myAgentId, parsed.params.id))) {
+      jsonError(res, SESSION_READ_DENIED, 403);
+      return true;
+    }
     getTaskSteeringMessagesRoute.respond(res, 200, {
       messages: await getSteeringMessagesForTask(parsed.params.id),
     });
@@ -1393,7 +1403,12 @@ export async function handleTasks(
       return true;
     }
 
+    // A user token naming an agent in X-Agent-ID still reads only its sessions.
     if (parsed.query.taskId) {
+      if (!(await canReadSession(req, myAgentId, parsed.query.taskId))) {
+        jsonError(res, SESSION_READ_DENIED, 403);
+        return true;
+      }
       const task = await getTaskById(parsed.query.taskId);
       const messages =
         task?.agentId === myAgentId ? await getPendingSteeringForTask(parsed.query.taskId) : [];
@@ -1401,8 +1416,9 @@ export async function handleTasks(
       return true;
     }
 
+    const actor = await resolveSessionActor(req, myAgentId);
     getPendingSteeringMessagesRoute.respond(res, 200, {
-      messages: await getPendingSteeringForAgent(myAgentId),
+      messages: await getPendingSteeringForAgent(myAgentId, readableByFor(actor)),
     });
     return true;
   }
