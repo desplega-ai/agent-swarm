@@ -64,6 +64,7 @@ type Identity = {
   pageId?: string;
   userId?: string;
   isOperator?: boolean;
+  dashboardUserId?: string;
 };
 type Viewer = { userId: string; name: string; kind: "user" | "guest" | "agent" };
 type AuthenticatedConnection = {
@@ -81,7 +82,7 @@ function header(req: IncomingMessage, name: string): string | undefined {
 
 function identityFromHttpAuth(
   req: IncomingMessage,
-  auth: HttpRequestAuth,
+  auth: HttpRequestAuth & { dashboardUserId?: string },
 ): AuthenticatedConnection {
   if (auth.kind === "controller") throw new Error("Controller tokens cannot use realtime");
   if (auth.kind === "agent") {
@@ -110,6 +111,7 @@ function identityFromHttpAuth(
         auth.kind === "agent" ? (auth.taskId ?? undefined) : header(req, "x-source-task-id"),
       userId: auth.kind === "user" ? auth.userId : undefined,
       isOperator: auth.kind === "operator",
+      dashboardUserId: auth.kind === "operator" ? auth.dashboardUserId : undefined,
     } satisfies Identity,
     me: {
       userId: auth.kind === "user" ? auth.userId : (agentId ?? guestId),
@@ -313,6 +315,9 @@ function connect(
       if (namespace.startsWith("presence:comb:") && msg.name !== "default") {
         throw new Error("Comb presence uses the default room");
       }
+      if (namespace.startsWith("presence:session:") && msg.name !== "default") {
+        throw new Error("Session presence uses the default room");
+      }
       const denied = await authorizeRoomNamespace(namespace, auth.identity, msg.op, msg.name);
       if (denied) throw new Error(typeof denied === "string" ? denied : "Forbidden");
       if (closed) return;
@@ -352,12 +357,14 @@ function connect(
             room = await getRoom(namespace, msg.name, msg.schemaVersion, { create: false });
           } catch (error) {
             if (!(error instanceof Error) || error.message !== "room does not exist") throw error;
-            // Creating a room is a write. Comb presence rooms take only presence
-            // operations, so they check creation as a join.
+            // Creating a room is a write. Comb and session presence rooms take
+            // only presence operations, so they check creation as a join.
             const creationDenied = await authorizeRoomNamespace(
               namespace,
               auth.identity,
-              namespace.startsWith("presence:comb:") ? "join" : true,
+              namespace.startsWith("presence:comb:") || namespace.startsWith("presence:session:")
+                ? "join"
+                : true,
             );
             if (creationDenied) throw new Error(creationDenied);
             if (closed) return;

@@ -158,7 +158,8 @@ function lineNumber(value: unknown): number | undefined {
   return finite(value) && value >= 1 ? Math.min(Math.floor(value), LINE_MAX) : undefined;
 }
 
-function parseWho(value: unknown): PresenceWho | null {
+/** A validated, clamped `who` (shared with session presence). */
+export function parseWho(value: unknown): PresenceWho | null {
   if (!isRecord(value)) return null;
   const id = typeof value.id === "string" ? value.id.trim() : "";
   if (!id || id.length > ID_MAX) return null;

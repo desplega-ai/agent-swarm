@@ -195,6 +195,7 @@ import {
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { getDb, getDbClient } from "./db/runtime";
+import { type SessionViewer, sessionViewerCondition } from "./db/session-visibility";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -12905,6 +12906,8 @@ interface ListRecentSessionsOpts {
   contextKeyPrefix?: string;
   /** When true, return slim `SessionListItemSummary` rows (default: full). */
   slim?: boolean;
+  /** Restrict to sessions this viewer may open (session sharing). */
+  viewer?: SessionViewer;
 }
 
 export async function listRecentSessions(
@@ -12923,7 +12926,7 @@ export async function listRecentSessions(
   const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
 
   const conditions: string[] = ["r.parentTaskId IS NULL"];
-  const params: (string | number)[] = [];
+  const params: (string | number | null)[] = [];
 
   if (sources.length > 0) {
     conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
@@ -12941,6 +12944,11 @@ export async function listRecentSessions(
   if (opts?.contextKeyPrefix) {
     conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
     params.push(literalPrefixPattern(opts.contextKeyPrefix));
+  }
+  if (opts?.viewer) {
+    const viewer = sessionViewerCondition(opts.viewer);
+    conditions.push(viewer.sql);
+    params.push(...viewer.params);
   }
   params.push(limit, offset);
 
@@ -13013,35 +13021,43 @@ export async function listRecentSessions(
  * a plain count, no recursive chain walk needed.
  */
 export async function countSessions(
-  opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId" | "contextKeyPrefix">,
+  opts?: Pick<
+    ListRecentSessionsOpts,
+    "source" | "q" | "requestedByUserId" | "contextKeyPrefix" | "viewer"
+  >,
 ): Promise<number> {
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
   const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
 
-  const conditions: string[] = ["parentTaskId IS NULL"];
-  const params: string[] = [];
+  const conditions: string[] = ["r.parentTaskId IS NULL"];
+  const params: (string | null)[] = [];
 
   if (sources.length > 0) {
-    conditions.push(`source IN (${sources.map(() => "?").join(", ")})`);
+    conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
     params.push(...sources);
   }
   if (q && q.length > 0) {
-    conditions.push("(lower(task) LIKE ? OR lower(COALESCE(title, '')) LIKE ?)");
+    conditions.push("(lower(r.task) LIKE ? OR lower(COALESCE(r.title, '')) LIKE ?)");
     const like = `%${q.toLowerCase()}%`;
     params.push(like, like);
   }
   if (requestedByUserId) {
-    conditions.push("requestedByUserId = ?");
+    conditions.push("r.requestedByUserId = ?");
     params.push(requestedByUserId);
   }
   if (opts?.contextKeyPrefix) {
-    conditions.push(`contextKey LIKE ? ESCAPE '\\'`);
+    conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
     params.push(literalPrefixPattern(opts.contextKeyPrefix));
+  }
+  if (opts?.viewer) {
+    const viewer = sessionViewerCondition(opts.viewer);
+    conditions.push(viewer.sql);
+    params.push(...viewer.params);
   }
 
   const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM agent_tasks WHERE ${conditions.join(" AND ")}`,
+    `SELECT COUNT(*) AS count FROM agent_tasks r WHERE ${conditions.join(" AND ")}`,
     params,
   );
   return row?.count ?? 0;

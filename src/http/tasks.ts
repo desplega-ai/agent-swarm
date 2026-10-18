@@ -37,6 +37,7 @@ import {
 } from "../be/db";
 import { modelProfileRefError, taskProfileError } from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { hasSessionAccess, type SessionAccess } from "../be/session-shares";
 import {
   getTaskSteeringFields,
   markSteeringUndeliverable,
@@ -81,6 +82,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route } from "./route-def";
+import { resolveSessionActor, sessionAccessFor } from "./session-access";
 import { jsonError, parseBody } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -722,22 +724,40 @@ const updateTaskTitleRoute = route({
   },
 });
 
+const SESSION_WRITE_DENIED =
+  "You can't write in this session. Ask the owner to share it with edit access.";
+
+/** True unless the request acts for a user who lacks write access to the task's session. */
+async function hasSessionWrite(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  taskId: string,
+): Promise<boolean> {
+  const access = await sessionAccessFor(await resolveSessionActor(req, myAgentId), taskId);
+  return hasSessionAccess(access, "write");
+}
+
 async function canSteerTask(
   req: IncomingMessage,
   myAgentId: string | undefined,
   task: AgentTask,
+  sessionAccess: SessionAccess = "none",
 ): Promise<boolean> {
+  const auth = getRequestAuth(req);
   const resource: RbacResource = {
     kind: "task",
     taskId: task.id,
-    requestedByUserId: task.requestedByUserId,
+    // A user with a write share steers as if the session were their own; the
+    // verb gate (and any role grant) still applies. Only an actual share
+    // counts: `owner` from an ownerless root must not widen steering.
+    requestedByUserId:
+      auth?.kind === "user" && sessionAccess === "write" ? auth.userId : task.requestedByUserId,
     creatorAgentId: task.creatorAgentId,
     agentId: task.agentId,
   };
   let principal: RbacPrincipal;
   let verb: "task.steer.any" | "task.steer.own";
 
-  const auth = getRequestAuth(req);
   if (auth?.kind === "operator") {
     principal = { kind: "operator" };
     verb = "task.steer.own";
@@ -1013,6 +1033,11 @@ export async function handleTasks(
       jsonError(res, `You don't have context for parent task ${parentTask.id}.`, 403);
       return true;
     }
+    // A follow-up in someone else's session needs a write share.
+    if (parentTask && !(await hasSessionWrite(req, myAgentId, parentTask.id))) {
+      jsonError(res, SESSION_WRITE_DENIED, 403);
+      return true;
+    }
     // A chat-sdk contextKey binds the task to a chat thread that its assignee and creator
     // may then read and post to. An agent may only name a thread other than the parent's
     // with the lead's chat post permission.
@@ -1285,7 +1310,13 @@ export async function handleTasks(
       jsonError(res, "Task not found", 404);
       return true;
     }
-    if (!(await canSteerTask(req, myAgentId, task))) {
+    const sessionActor = await resolveSessionActor(req, myAgentId);
+    const steerAccess = await sessionAccessFor(sessionActor, task.id);
+    if (!hasSessionAccess(steerAccess, "write")) {
+      jsonError(res, SESSION_WRITE_DENIED, 403);
+      return true;
+    }
+    if (!(await canSteerTask(req, myAgentId, task, steerAccess))) {
       jsonError(res, "Forbidden: caller cannot steer this task", 403);
       return true;
     }

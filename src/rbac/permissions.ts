@@ -89,6 +89,15 @@ export const PERMISSIONS = {
       "Write a task's progress, status, or output (its assignee, a lead, a human, or anyone while unassigned).",
     namespace: "task",
   },
+  "session.share": {
+    description:
+      "Change who can view or edit a session the principal owns (the owner check runs in the handler).",
+    namespace: "task",
+  },
+  "session.presence": {
+    description: "Join the presence room of a session the principal can view.",
+    namespace: "task",
+  },
   "favorite.write.own": {
     description: "Set a favorite the caller owns.",
     namespace: "favorite",

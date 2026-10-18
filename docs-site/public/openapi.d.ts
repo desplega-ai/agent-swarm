@@ -15659,7 +15659,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Issue a one-shot dashboard realtime ticket */
+        /**
+         * Issue a one-shot dashboard realtime ticket
+         * @description The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -15681,17 +15684,8 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Comb presence is not allowed */
+                /** @description Presence is not allowed */
                 403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Comb is not enabled */
-                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -18264,6 +18258,7 @@ export interface paths {
                     requestedByUserId?: string;
                     contextKeyPrefix?: string;
                     fields?: "full" | "slim";
+                    scope?: "mine" | "shared";
                 };
                 header?: never;
                 path?: never;
@@ -18374,7 +18369,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Root task + chain (ordered by createdAt) */
+                /** @description Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner` */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -18413,11 +18408,23 @@ export interface paths {
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             })[];
+                            /** @enum {string} */
+                            access: "owner" | "write" | "read";
+                            owner: components["schemas"]["SessionOwner"];
                         };
                     };
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller has no access to this session */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -18437,6 +18444,156 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{rootTaskId}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a session's active shares
+         * @description Active shares only. `everyone` is the access every user has; `users` are per-person shares. A session with no shares is private to its owner.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rootTaskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Active shares */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionShares"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller has no access to this session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Root task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        /**
+         * Set who can view or edit a session
+         * @description Owner only. The body is the full desired state: users left out lose access. Changed targets have their active share revoked and a new one inserted in one transaction; shares are never deleted.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rootTaskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        everyone: "none" | "read" | "write";
+                        users: {
+                            userId: string;
+                            /** @enum {string} */
+                            access: "read" | "write";
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Active shares after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionShares"];
+                    };
+                };
+                /** @description Validation error or unknown user */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only the session owner can share it */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Root task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The session has no owner, so it is already open to everyone */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -25993,6 +26150,20 @@ export interface components {
             webSearchRequests?: number | null;
             costUsd?: number | null;
             harnessCostUsd?: number | null;
+        };
+        SessionOwner: {
+            id: string;
+            name: string;
+        } | null;
+        SessionShares: {
+            /** @enum {string} */
+            everyone: "none" | "read" | "write";
+            users: {
+                userId: string;
+                /** @enum {string} */
+                access: "read" | "write";
+                createdAt: string;
+            }[];
         };
         Skill: {
             id: string;

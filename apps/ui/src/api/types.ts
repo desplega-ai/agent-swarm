@@ -909,6 +909,44 @@ export interface SessionsListResponse {
 export interface SessionDetailResponse {
   root: AgentTask;
   chain: AgentTask[];
+  /**
+   * The caller's access to this session (session sharing). Older servers omit
+   * it: treat a missing value as full access, never as read-only.
+   */
+  access?: SessionAccess;
+  /** The root's requester. Null for Slack/schedule sessions; omitted by older servers. */
+  owner?: SessionOwner | null;
+}
+
+/** What the caller may do in a session: `owner` and `write` can post, `read` can only view. */
+export type SessionAccess = "owner" | "write" | "read";
+
+export interface SessionOwner {
+  id: string;
+  name: string;
+}
+
+/** General access for a session: nobody beyond the people added, or everyone. */
+export type SessionEveryoneAccess = "none" | "read" | "write";
+
+export type SessionShareAccess = "read" | "write";
+
+export interface SessionUserShare {
+  userId: string;
+  access: SessionShareAccess;
+  createdAt?: string;
+}
+
+/** Active shares of a session (`GET`/`PUT /api/sessions/:rootTaskId/shares`). */
+export interface SessionShares {
+  everyone: SessionEveryoneAccess;
+  users: SessionUserShare[];
+}
+
+/** Desired share state for `PUT /api/sessions/:rootTaskId/shares`. Omitted users are revoked. */
+export interface SessionSharesInput {
+  everyone: SessionEveryoneAccess;
+  users: { userId: string; access: SessionShareAccess }[];
 }
 
 export type AgentLogEventType =

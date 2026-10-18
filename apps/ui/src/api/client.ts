@@ -130,6 +130,8 @@ import type {
   SessionListItem,
   SessionLog,
   SessionLogsResponse,
+  SessionShares,
+  SessionSharesInput,
   SessionsListResponse,
   Skill,
   SkillFile,
@@ -3273,6 +3275,12 @@ class ApiClient {
     requestedByUserId?: string;
     /** Root tasks whose `contextKey` starts with this prefix (≥1.157.1). */
     contextKeyPrefix?: string;
+    /**
+     * `mine`: sessions the caller owns. `shared`: someone else's sessions
+     * shared with the caller or everyone. Omit for every session the caller
+     * can open. Session sharing servers only (`SESSION_SHARING_MIN_VERSION`).
+     */
+    scope?: "mine" | "shared";
   }): Promise<SessionListItem[]> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
@@ -3281,6 +3289,7 @@ class ApiClient {
     if (opts?.q && opts.q.length > 0) params.set("q", opts.q);
     if (opts?.requestedByUserId) params.set("requestedByUserId", opts.requestedByUserId);
     if (opts?.contextKeyPrefix) params.set("contextKeyPrefix", opts.contextKeyPrefix);
+    if (opts?.scope) params.set("scope", opts.scope);
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/sessions${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -3289,11 +3298,43 @@ class ApiClient {
     return data.sessions;
   }
 
+  /** The error carries the HTTP `status` (403: the caller has no access to this session). */
   async getSession(rootTaskId: string): Promise<SessionDetailResponse> {
     const url = `${this.getBaseUrl()}/api/sessions/${encodeURIComponent(rootTaskId)}`;
     const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch session: ${res.status}`);
+    if (!res.ok) {
+      throw Object.assign(new Error(`Failed to fetch session: ${res.status}`), {
+        status: res.status,
+      });
+    }
     return res.json();
+  }
+
+  /**
+   * Active shares of a session. `null` on 404: the API predates session
+   * sharing, so the UI hides the Share button.
+   */
+  async getSessionShares(rootTaskId: string): Promise<SessionShares | null> {
+    const url = `${this.getBaseUrl()}/api/sessions/${encodeURIComponent(rootTaskId)}/shares`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Failed to fetch session shares: ${res.status}`);
+    return (await res.json()) as SessionShares;
+  }
+
+  /** Replace a session's shares (owner only). Users left out are revoked. */
+  async putSessionShares(rootTaskId: string, input: SessionSharesInput): Promise<SessionShares> {
+    const url = `${this.getBaseUrl()}/api/sessions/${encodeURIComponent(rootTaskId)}/shares`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? `Failed to update session shares: ${res.status}`);
+    }
+    return (await res.json()) as SessionShares;
   }
 
   /** Set (non-empty string) or clear (`null`) a session's custom display title. */

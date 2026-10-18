@@ -8,6 +8,7 @@ import {
   redeemRealtimeTicket,
   sweepRealtimeTickets,
 } from "../realtime/tickets";
+import { type HttpRequestAuth, setRequestAuth } from "../utils/request-auth-context";
 
 const auth = { kind: "operator", fingerprint: "test-operator" } as const;
 
@@ -46,26 +47,32 @@ describe("realtime tickets", () => {
     expect(redeemRealtimeTicket(newest.ticket, 4_001)).toEqual(auth);
   });
 
-  test("the ticket route answers 404 while Comb is off", async () => {
+  test("the ticket route refuses agents and serves the dashboard with Comb off", async () => {
     const previous = process.env.COMB_ENABLED;
     process.env.COMB_ENABLED = "false";
     try {
-      let status = 0;
-      const res = {
-        writeHead: (code: number) => {
-          status = code;
-        },
-        end: () => {},
-      } as unknown as ServerResponse;
-      const req = { method: "POST", headers: {} } as IncomingMessage;
-      const handled = await handleRealtimeTicket(
-        req,
-        res,
-        ["api", "realtime", "ticket"],
-        new URLSearchParams(),
-      );
-      expect(handled).toBe(true);
-      expect(status).toBe(404);
+      const ticketStatus = async (requestAuth: HttpRequestAuth | null) => {
+        let status = 0;
+        const res = {
+          writeHead: (code: number) => {
+            status = code;
+          },
+          end: () => {},
+        } as unknown as ServerResponse;
+        const req = { method: "POST", headers: {} } as IncomingMessage;
+        if (requestAuth) setRequestAuth(req, requestAuth);
+        const handled = await handleRealtimeTicket(
+          req,
+          res,
+          ["api", "realtime", "ticket"],
+          new URLSearchParams(),
+        );
+        expect(handled).toBe(true);
+        return status;
+      };
+      // Session presence uses the ticket too, so Comb being off no longer hides the route.
+      expect(await ticketStatus(auth)).toBe(200);
+      expect(await ticketStatus(null)).toBe(403);
     } finally {
       if (previous === undefined) delete process.env.COMB_ENABLED;
       else process.env.COMB_ENABLED = previous;
