@@ -15,7 +15,7 @@ import {
   ScheduleTargetFields,
   type ScheduleTargetFormValue,
 } from "@/components/schedules/schedule-target-fields";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
@@ -425,6 +425,7 @@ export default function SchedulesPage() {
       {
         field: "scheduleType",
         headerName: "Type",
+        context: HIDE_WHEN_COMPACT,
         width: 110,
         cellRenderer: (params: { value?: string }) => (
           <Badge
@@ -443,6 +444,7 @@ export default function SchedulesPage() {
       {
         field: "targetType",
         headerName: "Target",
+        context: HIDE_WHEN_COMPACT,
         width: 110,
         cellRenderer: (params: { value?: ScheduledTaskTargetType }) => (
           <Badge variant="outline" size="tag">
@@ -452,6 +454,7 @@ export default function SchedulesPage() {
       },
       {
         headerName: "Setup",
+        context: HIDE_WHEN_COMPACT,
         width: 190,
         minWidth: 190,
         cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
@@ -471,6 +474,7 @@ export default function SchedulesPage() {
       },
       {
         headerName: "Schedule",
+        context: HIDE_WHEN_COMPACT,
         width: 250,
         minWidth: 200,
         cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
@@ -516,6 +520,7 @@ export default function SchedulesPage() {
       },
       {
         headerName: "Model",
+        context: HIDE_WHEN_COMPACT,
         width: 150,
         cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const data = params.data;
@@ -534,6 +539,7 @@ export default function SchedulesPage() {
       {
         field: "targetAgentId",
         headerName: "Target Agent",
+        context: HIDE_WHEN_COMPACT,
         width: 180,
         minWidth: 150,
         valueFormatter: (params) =>
@@ -558,6 +564,7 @@ export default function SchedulesPage() {
       {
         field: "lastRunAt",
         headerName: "Last Run",
+        context: HIDE_WHEN_COMPACT,
         width: 160,
         cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           if (!params.value) return <span className="text-muted-foreground">Never</span>;
@@ -574,6 +581,7 @@ export default function SchedulesPage() {
       {
         field: "lastUpdatedAt",
         headerName: "Updated",
+        context: HIDE_WHEN_COMPACT,
         width: 150,
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
