@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import {
   closeDb,
   createAgent,
+  createSessionLogs,
   createSteeringMessage,
   createTaskExtended,
   createUser,
@@ -155,5 +156,19 @@ describe("task-content routes respect session read access", () => {
       deniedStatus: 200,
       withAgentHeader: true,
     });
+  });
+
+  test("B7 session logs", async () => {
+    const { child } = await privateSession("logs");
+    const secret = "PRIVATE HARNESS LOG LINE";
+    await createSessionLogs({
+      taskId: child.id,
+      sessionId: "logs-session",
+      iteration: 1,
+      cli: "codex",
+      lines: [secret],
+    });
+
+    await expectPrivate(`/api/tasks/${child.id}/session-logs`, secret, { deniedStatus: 403 });
   });
 });
