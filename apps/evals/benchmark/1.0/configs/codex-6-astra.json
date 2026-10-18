@@ -5,21 +5,10 @@
   "harness": "codex",
   "model": "gpt-6-astra",
   "modelAlias": null,
-  "resolvedModels": [
-    "gpt-6-astra"
-  ],
+  "resolvedModels": ["gpt-6-astra"],
   "reasoningEffort": null,
   "envKeys": [],
-  "apiVersions": [
-    "2.1.0",
-    "2.2.0"
-  ],
-  "workerVersions": [
-    "2.1.0",
-    "2.2.0"
-  ],
-  "e2bTemplates": [
-    "rkxvj304b0cbgcc5rzuz",
-    "sd4hhphn0dopxjkrruix"
-  ]
+  "apiVersions": ["2.1.0", "2.2.0"],
+  "workerVersions": ["2.1.0", "2.2.0"],
+  "e2bTemplates": ["rkxvj304b0cbgcc5rzuz", "sd4hhphn0dopxjkrruix"]
 }

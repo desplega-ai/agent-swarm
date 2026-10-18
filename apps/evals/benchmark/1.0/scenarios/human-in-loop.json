@@ -21,16 +21,12 @@
   "budgetUsd": 0.4,
   "budgetMs": 360000,
   "passThreshold": 0.75,
-  "gates": [
-    "export-exists:/workspace/export/customers.json"
-  ],
+  "gates": ["export-exists:/workspace/export/customers.json"],
   "dimensions": [
     {
       "name": "clarification",
       "weight": 3,
-      "checks": [
-        "clarification-paper-trail"
-      ],
+      "checks": ["clarification-paper-trail"],
       "judge": null
     },
     {
@@ -46,9 +42,7 @@
     {
       "name": "correctness",
       "weight": 3,
-      "checks": [
-        "export-answer-key"
-      ],
+      "checks": ["export-answer-key"],
       "judge": null
     },
     {
