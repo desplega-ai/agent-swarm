@@ -14,6 +14,8 @@ import {
   createAgent,
   createTaskExtended,
   getDbClient,
+  getKv,
+  getRecentFailedTasks,
   initDb,
   startTask,
   updateAgentProfile,
@@ -238,6 +240,61 @@ describe("Heartbeat Checklist", () => {
       expect(tasks.length).toBe(1);
       expect(tasks[0]!.agentId).toBe(lead.id);
       expect(tasks[0]!.priority).toBe(60);
+    });
+
+    test("receipt stores exactly the ten rendered full IDs from twelve failures", async () => {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check failures" });
+      for (let i = 0; i < 12; i++) {
+        const task = await createTaskExtended(`receipt failure ${i}`, { agentId: lead.id });
+        await getDbClient().run(
+          "UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ? WHERE id = ?",
+          [`receipt reason ${i}`, new Date(Date.now() - (i + 1) * 60e3).toISOString(), task.id],
+        );
+      }
+      const failures = await getRecentFailedTasks(6);
+      const before = Date.now();
+      await checkHeartbeatChecklist();
+      const checklist = await getDbClient().get<{ id: string; task: string }>(
+        "SELECT id, task FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+      );
+      expect(checklist).toBeDefined();
+      const receipt = await getKv("heartbeat-checklist:reported-failures", checklist!.id);
+      expect(receipt?.value).toEqual(failures.slice(0, 10).map((task) => task.id));
+      expect(receipt?.expiresAt).toBeGreaterThanOrEqual(before + 7 * 24 * 3600e3);
+      expect(receipt?.expiresAt).toBeLessThanOrEqual(Date.now() + 7 * 24 * 3600e3);
+      for (const failure of failures.slice(0, 10)) {
+        expect(checklist!.task).toContain(`[${failure.id.slice(0, 8)}]`);
+      }
+      for (const failure of failures.slice(10)) {
+        expect(checklist!.task).not.toContain(`[${failure.id.slice(0, 8)}]`);
+      }
+    });
+
+    test("receipt write errors log and preserve the created checklist", async () => {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check failures" });
+      await getDbClient().run(`CREATE TRIGGER reject_heartbeat_receipt
+        BEFORE INSERT ON kv_entries
+        WHEN NEW.namespace = 'heartbeat-checklist:reported-failures'
+        BEGIN SELECT RAISE(FAIL, 'receipt unavailable'); END`);
+      const log = spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await checkHeartbeatChecklist();
+        const checklist = await getDbClient().get<{ id: string }>(
+          "SELECT id FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+        );
+        expect(checklist).toBeDefined();
+        expect(log).toHaveBeenCalledWith(
+          expect.stringContaining(
+            `Failed to save reported failures for checklist ${checklist!.id}`,
+          ),
+          expect.any(Error),
+        );
+      } finally {
+        log.mockRestore();
+        await getDbClient().run("DROP TRIGGER reject_heartbeat_receipt");
+      }
     });
 
     test("dedup: skips when active heartbeat-checklist task exists for lead", async () => {
@@ -725,6 +782,7 @@ describe("Heartbeat Checklist", () => {
       expect(tasks.length).toBe(1);
       expect(tasks[0]!.agentId).toBe(lead.id);
       expect(tasks[0]!.priority).toBe(70);
+      expect(await getKv("heartbeat-checklist:reported-failures", tasks[0]!.id)).toBeNull();
     });
 
     test("boot-triage task includes reboot context", async () => {

@@ -48,6 +48,7 @@ import {
   settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatus,
+  upsertKv,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
@@ -1461,7 +1462,10 @@ export function isEffectivelyEmpty(content: string): boolean {
 /**
  * Gather current system status as a markdown string for the lead's checklist task.
  */
-export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): Promise<string> {
+export async function gatherSystemStatus(options?: {
+  isBootTriage?: boolean;
+  reportedFailureIds?: string[];
+}): Promise<string> {
   const stats = await getTaskStats();
   const stalledTasks = await getStalledInProgressTasks(stallThresholdMinutes());
   const agents = await getAllAgents();
@@ -1494,6 +1498,8 @@ export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): 
 
   // Recent failures with reasons and pattern detection (last 6 hours)
   const recentFailures = await getRecentFailedTasks(6);
+  const renderedFailures = recentFailures.slice(0, 10);
+  options?.reportedFailureIds?.push(...renderedFailures.map((task) => task.id));
   if (recentFailures.length > 0) {
     sections.push("");
     sections.push("## Recent Failures (last 6h) [auto-generated]");
@@ -1520,7 +1526,7 @@ export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): 
 
     // List individual failures (max 10)
     sections.push("");
-    for (const task of recentFailures.slice(0, 10)) {
+    for (const task of renderedFailures) {
       const agentSlice = task.agentId?.slice(0, 8) ?? "unassigned";
       const reason = task.failureReason?.slice(0, 100) ?? "no reason";
       sections.push(
@@ -1786,7 +1792,8 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     return;
   }
 
-  let systemStatus = await gatherSystemStatus();
+  const reportedFailureIds: string[] = [];
+  let systemStatus = await gatherSystemStatus({ reportedFailureIds });
   // Shadow mode leaves the prompt untouched so the Lead's own quiet/non-quiet
   // outcome stays an independent check on the gate's verdict.
   if (gateMode === "enforce" && gate?.verdict === "wake" && gate.summary) {
@@ -1803,7 +1810,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
 
   if (result.skipped) return;
 
-  await createTaskExtended(result.text, {
+  const task = await createTaskExtended(result.text, {
     agentId: lead.id,
     routingReason: "skill",
     routingSource: "engine_default",
@@ -1814,6 +1821,18 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     tags: ["checklist", "auto-generated", ...(gate ? [`heartbeat-gate:${gate.verdict}`] : [])],
     priority: 60,
   });
+
+  try {
+    await upsertKv({
+      namespace: "heartbeat-checklist:reported-failures",
+      key: task.id,
+      value: reportedFailureIds,
+      valueType: "json",
+      expiresAt: Date.now() + 7 * 24 * 3600e3,
+    });
+  } catch (err) {
+    console.error(`[Heartbeat] Failed to save reported failures for checklist ${task.id}:`, err);
+  }
 
   console.log(`[Heartbeat] Checklist task created for lead ${lead.name}`);
 }

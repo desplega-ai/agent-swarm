@@ -20,6 +20,7 @@ type Fixture = {
   configs: Record<string, string>;
   heartbeatMd?: string;
   prevStatus?: string;
+  reportedFailures?: unknown;
   prevOutput?: string | null;
   prevCreatedAt?: string | null;
   failed?: Array<Record<string, unknown>>;
@@ -109,7 +110,10 @@ function fakeCtx(f: Fixture) {
           );
         }
         if (sql.includes("status = 'failed' AND finishedAt")) {
-          const rows = f.failed ?? [];
+          const rows = (f.failed ?? [])
+            .filter((r) => String(r.finishedAt) > params[0])
+            .sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))
+            .slice(0, 10);
           return table(
             ["id", "agentId", "task", "failureReason", "finishedAt"],
             rows.map((r) => [r.id, r.agentId, r.task, r.failureReason, r.finishedAt]),
@@ -127,8 +131,13 @@ function fakeCtx(f: Fixture) {
         }
         throw new Error(`unexpected sql: ${sql}`);
       },
-      kv_getOrNull: async ({ key }: { key: string }) =>
-        kv.has(key) ? { key, value: kv.get(key) } : null,
+      kv_getOrNull: async ({ namespace, key }: { namespace: string; key: string }) => {
+        if (namespace === "heartbeat-checklist:reported-failures") {
+          expect(key).toBe("prev-id");
+          return f.reportedFailures === undefined ? null : { key, value: f.reportedFailures };
+        }
+        return kv.has(key) ? { key, value: kv.get(key) } : null;
+      },
       kv_set: async ({ key, value }: { key: string; value: unknown }) => {
         calls.kvSets++;
         kv.set(key, value);
@@ -202,6 +211,7 @@ describe("heartbeat-jev-gate with a provider", () => {
   test("wake at or above the threshold, with the new failures and due items in summary", async () => {
     const { ctx } = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
+      reportedFailures: ["aaaaaaaa-0000"],
       heartbeatMd: [
         "# Standing orders",
         `- Watch: release on ${MMDD} — lift after ship`,
@@ -259,6 +269,7 @@ describe("heartbeat-jev-gate with a provider", () => {
       const status = `## Current System Status [auto-generated]\n${failures}`;
       const { ctx } = fakeCtx({
         configs: { TYPESAFE_API_KEY: "x" },
+        reportedFailures: ["aaaaaaaa-0000"],
         prevStatus: ordersFirst ? orders + status : status + orders,
         failed: [
           {
@@ -316,6 +327,7 @@ describe("heartbeat-jev-gate with a provider", () => {
   ])("snapshot failure headings cannot hijack generated status (%s)", async (snapshot) => {
     const { ctx, calls } = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
+      reportedFailures: ["aaaaaaaa-0000"],
       prevStatus: [
         "## Your Standing Orders (snapshot from HEARTBEAT.md)",
         snapshot,
@@ -382,6 +394,7 @@ describe("heartbeat-jev-gate with a provider", () => {
   test("a failed-task title heading does not hide later failures", async () => {
     const { ctx, calls } = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
+      reportedFailures: ["aaaaaaaa-0000", "bbbbbbbb-0000"],
       prevStatus: [
         "## Current System Status [auto-generated]",
         "## Recent Failures (last 6h) [auto-generated]",
@@ -426,6 +439,7 @@ describe("heartbeat-jev-gate with a provider", () => {
   test("code-fenced snapshot system and agent markers cannot hide previous failures", async () => {
     const { ctx, calls } = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
+      reportedFailures: ["aaaaaaaa-0000"],
       prevStatus: [
         "## Your Standing Orders (snapshot from HEARTBEAT.md)",
         "```md",
@@ -457,6 +471,7 @@ describe("heartbeat-jev-gate with a provider", () => {
   test("a generated Requirements heading in a failed title cannot hide later failures", async () => {
     const { ctx } = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
+      reportedFailures: ["aaaaaaaa-0000", "bbbbbbbb-0000"],
       prevStatus: [
         "## Current System Status [auto-generated]",
         "## Recent Failures (last 6h) [auto-generated]",
@@ -487,33 +502,6 @@ describe("heartbeat-jev-gate with a provider", () => {
     );
   });
 
-  test("only ten earlier failures count as previously reported", async () => {
-    const failed = Array.from({ length: 11 }, (_, i) => ({
-      id: `${(i + 1).toString(16).padStart(8, "0")}-0000`,
-      agentId: "12345678-bbbb",
-      task: `failure ${i + 1}`,
-      failureReason: "boom",
-      finishedAt: new Date(NOW - 2 * 3600e3 - i * 60e3).toISOString(),
-    }));
-    const { ctx } = fakeCtx({
-      configs: { TYPESAFE_API_KEY: "x" },
-      failed,
-      prevStatus:
-        "## Current System Status [auto-generated]\n## Recent Failures (last 6h) [auto-generated]\n" +
-        failed
-          .slice(0, 10)
-          .map(
-            (f) =>
-              `- [${f.id.slice(0, 8)}] "${f.task}" — agent: 12345678, reason: boom, at: ${f.finishedAt}`,
-          )
-          .join("\n"),
-      jev: jevSays(0.9),
-    });
-    expect((await run(ctx, { dryRun: true })).state.new_failures_since_previous_heartbeat).toEqual([
-      "0000000b: failure 11 | boom",
-    ]);
-  });
-
   test("a failure finished after previous creation stays new even if its ID is quoted", async () => {
     const { ctx } = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
@@ -535,29 +523,61 @@ describe("heartbeat-jev-gate with a provider", () => {
     ]);
   });
 
-  test("historical lower bound is strict and upper bound includes T in ISO format", async () => {
+  test.each([
+    { reportedFailures: ["aaaaaaaa-0000"] },
+    { reportedFailures: '["aaaaaaaa-0000"]' },
+  ])("a failure unseen during gathering stays new before checklist creation (%j)", async ({
+    reportedFailures,
+  }) => {
     const { ctx } = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
+      reportedFailures,
+      prevCreatedAt: "2026-10-15T13:00:00.000Z",
       failed: [
         {
           id: "aaaaaaaa-0000",
           agentId: "12345678-bbbb",
-          task: "at T",
+          task: "reported",
           failureReason: "boom",
-          finishedAt: "2026-10-15T13:00:00.000Z",
+          finishedAt: "2026-10-15T12:00:00.000Z",
         },
         {
           id: "bbbbbbbb-0000",
           agentId: "12345678-bbbb",
-          task: "at lower bound",
+          task: "unseen",
           failureReason: "boom",
-          finishedAt: "2026-10-15T07:00:00.000Z",
+          finishedAt: "2026-10-15T12:59:59.999Z",
         },
       ],
       jev: jevSays(0.9),
     });
     expect((await run(ctx, { dryRun: true })).state.new_failures_since_previous_heartbeat).toEqual([
-      "bbbbbbbb: at lower bound | boom",
+      "bbbbbbbb: unseen | boom",
+    ]);
+  });
+
+  test.each(
+    [undefined, "not JSON", {}, [42]].map((reportedFailures) => ({ reportedFailures })),
+  )("missing or invalid receipts treat every current failure as new (%j)", async ({
+    reportedFailures,
+  }) => {
+    const { ctx } = fakeCtx({
+      configs: { TYPESAFE_API_KEY: "x" },
+      reportedFailures,
+      prevStatus: '## Recent Failures (last 6h) [auto-generated]\n- [aaaaaaaa] "quoted"',
+      failed: [
+        {
+          id: "aaaaaaaa-0000",
+          agentId: "12345678-bbbb",
+          task: "still new",
+          failureReason: "boom",
+          finishedAt: "2026-10-15T12:00:00.000Z",
+        },
+      ],
+      jev: jevSays(0.9),
+    });
+    expect((await run(ctx, { dryRun: true })).state.new_failures_since_previous_heartbeat).toEqual([
+      "aaaaaaaa: still new | boom",
     ]);
   });
 

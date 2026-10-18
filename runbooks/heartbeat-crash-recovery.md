@@ -816,7 +816,9 @@ Notes:
 
 The recurring `HEARTBEAT.md` checklist tick (`checkHeartbeatChecklist`) can ask a global script whether the tick needs the Lead before it creates the `heartbeat-checklist` task. Owner code: `runChecklistGate` and `defaultChecklistGateRunner` in `src/heartbeat/heartbeat.ts`, `runSavedScriptAsAgent` in `src/be/scripts/run-saved.ts`, and the `heartbeat.checklist.gate_findings` template in `src/heartbeat/templates.ts`. Boot triage never runs the gate.
 
-The seeded `heartbeat-jev-gate` reconstructs the previous completed checklist's failure IDs from the DB using its `createdAt` as T: failed tasks with `finishedAt > T-6h AND finishedAt <= T`, newest first, limited to 10. It compares full IDs before rendering display IDs and never parses the previous task body. System status is gathered immediately before checklist creation; a failure in that small gap may be reported again once.
+The seeded `heartbeat-jev-gate` reads the previous completed checklist's receipt from KV namespace `heartbeat-checklist:reported-failures`, keyed by checklist task ID. After creating a recurring checklist, `checkHeartbeatChecklist` writes the exact full IDs of up to ten failures rendered from the same `gatherSystemStatus` query, with a seven-day expiry. A write failure is logged without interrupting checklist creation. Boot triage writes no receipt. The namespace family is reserved against generic KV writes.
+
+The gate accepts an array or a JSON-encoded array of full IDs and compares them before rendering display IDs. Missing, expired, or invalid receipts mean no previous IDs, so all current failures count as new. Task body text and task timestamps never establish which failures were reported; a failure that becomes visible after gathering remains new even if its finish timestamp predates checklist creation.
 
 ```mermaid
 flowchart TD
