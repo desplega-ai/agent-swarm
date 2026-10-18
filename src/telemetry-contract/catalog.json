@@ -1434,6 +1434,14 @@
         "cacheWriteTokens": {
           "type": "integer",
           "minimum": 0
+        },
+        "model": {
+          "type": "string",
+          "description": "The session's model, the same value as session.cost.model. Usage without it, or with a value the ranking does not accept, is shown as the model unknown."
+        },
+        "provider": {
+          "type": "string",
+          "description": "The session's provider, the same value as session.cost.provider. Missing means unknown."
         }
       }
     },

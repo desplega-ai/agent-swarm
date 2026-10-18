@@ -1,10 +1,10 @@
 {
   "repo": "desplega-ai/proxy",
-  "commit": "2ad2a6e40dfc13adc45b7ca94306636afab0f018",
+  "commit": "22e6b2ff59d0ba61818ed0d9b55f03b4b9d22913",
   "files": {
-    "types.gen.ts": "763b27bcfe89c776092468b5111a6beebbdff345e8683a6aee2e22ecf89d5455",
-    "catalog.json": "5e8d6f84c6dc2c911fbb9bcaa10d79f1e832a91e290561c56daab9e72340c885",
-    "EVENTS.md": "0a0a51495234b8768f0c3e2c98b303c06d2370e1c8ca3e328664f9b817a4ee76",
+    "types.gen.ts": "192c6769164a65b6e804ea088b38de6827d34fac26a7ecaccce881a46e98b1a7",
+    "catalog.json": "1b2b052f8e43f082e9d6efc2768752d6f194c0cbf0d26ae9c35643cce0e6486c",
+    "EVENTS.md": "9451da995ef04a049888715f960a1641bbc52fecb3dce97610c3c391bead1faf",
     "ranking/fixtures/expected.json": "6d506546f48d99a089666bed2a4c08752ebb63a029392c76ffd057e9520adc70",
     "ranking/fixtures/invalid/bad-category.json": "c2382ca9d2be8d332612c0c732b3397422b99e58f39ec096b3a7d1b4bad8d70b",
     "ranking/fixtures/invalid/bad-claim.json": "e1c007940a87f89e9d5812bfc29f862f21c745f3a80249d3736417c7689f3969",

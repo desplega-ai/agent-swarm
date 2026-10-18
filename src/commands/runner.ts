@@ -4929,8 +4929,6 @@ async function spawnProviderProcess(
             { userId: opts.requestedByUserId ?? null },
           );
           // Public ranking: token counts only, while the install is opted in.
-          // `model` and `provider` are not in the vendored catalog yet; the
-          // proxy PR that adds them deploys before this release (see the PR body).
           const rankingUsage = rankingUsageProps(result.cost, {
             model: result.cost.model,
             provider: result.cost.provider ?? opts.harnessProvider,

@@ -135,7 +135,13 @@ export interface paths {
          * Opted-in agent-swarm installs ranked by tokens
          * @description Copies OpenRouter's app-ranking category response
          *     (`/api/frontend/v1/apps/marketplace/category`) key for key, so an
-         *     OpenRouter-style client reads it unchanged. An install is listed when its
+         *     OpenRouter-style client reads it unchanged, and adds the other OpenRouter
+         *     app pages' fields under their OpenRouter names. Without `domain`:
+         *     `chart` and `titleMap` (the category chart, stacked by app) and
+         *     `trending` (the index page's fastest growing apps). With `domain`: `chart`
+         *     stacked by model, `totalTokens`, `rank`, `modelsUsed` and
+         *     `appModelAnalytics` (the app page). Tokens are the only metric served:
+         *     `total_requests` is always 0. An install is listed when its
          *     `community/ranking/<domain>.json` file is merged into agent-swarm `main`, it
          *     sent a valid `ranking.opted_in` listing with that file's claim first, it has
          *     not opted out since, it is not an internal, test, E2B or non-production
@@ -433,15 +439,49 @@ export interface components {
                 /** @description Subcategories in the group with 1 or 2 listed entries in the period. */
                 lowCountSubcategories: string[];
                 chart?: components["schemas"]["RankingChart"];
+                /** @description Without `domain`. The title of every `app_id` key in `chart`, like OpenRouter's category-chart `titleMap`. */
+                titleMap?: {
+                    [key: string]: string;
+                };
+                /** @description Without `domain`. Listed apps (within `group` and `subcategory`) whose period tokens grew against the previous period of the same length, most tokens gained first. An app with no tokens in the previous period has no baseline and is left out. */
+                trending?: components["schemas"]["RankingTrending"][];
+                /** @description With `domain`. Every counted day's tokens (held days excluded). */
+                totalTokens?: number;
+                /** @description With `domain`. The daily global rank (`period=day`), or null with no tokens today. */
+                rank?: number | null;
+                /** @description With `domain`. Models with tokens in the last 30 days, `unknown` included; may exceed the length of `appModelAnalytics`. */
+                modelsUsed?: number;
+                /** @description With `domain`. Tokens per model over the last 30 days, most first. */
+                appModelAnalytics?: components["schemas"]["RankingModelAnalytics"][];
             };
+        };
+        RankingTrending: {
+            appAnalytics: components["schemas"]["RankingRow"];
+            /** @description Period tokens against the previous period of the same length, as a rounded percent increase. */
+            growthPercent: number;
+        };
+        RankingModelAnalytics: {
+            /**
+             * Format: date
+             * @description Today (UTC), the end of the 30-day window.
+             */
+            date: string;
+            /** @description The `ranking.usage` model, or `unknown`. */
+            model_permaslug: string;
+            /** @description Not an OpenRouter field. The provider that carried most of the model's tokens, or `unknown`. */
+            provider: string;
+            total_tokens: number;
         };
         RankingRow: {
             /** @description Stable entry ID derived from the domain. Never an install or org ID. */
             app_id: number;
             /** @description Sum of `ranking.usage.totalTokens` in the period, as a decimal string like OpenRouter's. */
             total_tokens: string;
-            /** @description Sessions (`ranking.usage` events) in the period. */
-            total_requests: number;
+            /**
+             * @description Always 0. Tokens are the only public metric; the key stays for OpenRouter schema parity.
+             * @constant
+             */
+            total_requests: 0;
             /** @description Position by tokens among every listed entry in the period, without gaps. A filtered list keeps the global rank. */
             rank: number;
             app: components["schemas"]["RankingApp"];
@@ -468,16 +508,15 @@ export interface components {
             categories: string[];
             related_apps: number[];
         };
-        /** @description Present only on a `?domain=` request. 30 daily and 12 Monday-based weekly points, oldest first, zero-filled. */
+        /** @description OpenRouter's `{x, ys}` chart, oldest point first. `daily` is today and the 30 days before, with `x` as `YYYY-MM-DD 00:00:00`. `weekly` is Monday-based with `x` as `YYYY-MM-DD`: 52 weeks without `domain`, and from the entry's first week (first served or first counted day) with `domain`, at most 52. With `domain`, `ys` keys are models (the top 10 of the point); without it, `app_id`s as strings (the top 9). The rest sum into `Others`. A series with no tokens is left out, so `ys` can be empty. An unknown or hidden `domain` gets empty `daily` and `weekly`. */
         RankingChart: {
             daily: components["schemas"]["RankingChartPoint"][];
             weekly: components["schemas"]["RankingChartPoint"][];
         };
         RankingChartPoint: {
-            /** Format: date */
             x: string;
             ys: {
-                tokens: number;
+                [key: string]: number;
             };
         };
         RankingVerification: {
@@ -1409,7 +1448,11 @@ export interface components {
             is_cloud?: boolean;
             /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
             is_e2b?: boolean;
+            /** @description The session's model, the same value as session.cost.model. Usage without it, or with a value the ranking does not accept, is shown as the model unknown. */
+            model?: string;
             outputTokens: number;
+            /** @description The session's provider, the same value as session.cost.provider. Missing means unknown. */
+            provider?: string;
             /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
             swarmVersion?: string;
             /** @description inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens. The ranking sums this. */
@@ -2769,7 +2812,7 @@ export interface operations {
                 group?: string;
                 /** @description A subcategory from the taxonomy, inside `group` when one is given. */
                 subcategory?: string;
-                /** @description Return only this entry, plus `data.chart`. An unknown or hidden domain returns an empty `apps` list. */
+                /** @description Return only this entry and its app page fields. An unknown or hidden domain returns an empty `apps` list, an empty chart, zero totals and a null `rank`. */
                 domain?: string;
                 /** @description Accepted for parity with OpenRouter's collector. Only `tokens` is supported. */
                 sortBy?: "tokens";
