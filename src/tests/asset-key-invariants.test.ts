@@ -9,6 +9,7 @@ import {
   createTaskExtended,
   createUser,
   createWorkflow,
+  deleteTaskAttachment,
   getAssetKeyMappingByProvider,
   getDb,
   getDbClient,
@@ -166,6 +167,11 @@ describe("cross-entity asset namespace invariants", () => {
       ).sourceEntityType,
     ).toBe("task-attachment");
 
+    const lastUpdatedAt = "2026-01-01T00:00:00.000Z";
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      lastUpdatedAt,
+      task.id,
+    ]);
     expect(
       await moveAssetKey({
         entityType: "task",
@@ -173,7 +179,8 @@ describe("cross-entity asset namespace invariants", () => {
         key: "shared/archive/",
         changedBy: userId,
       }),
-    ).toBe(true);
+    ).toEqual({ movedTaskIds: [task.id] });
+    expect((await getTaskById(task.id))?.lastUpdatedAt).toBe(lastUpdatedAt);
     expect((await getTaskById(task.id))?.key).toBe("shared/archive/");
     const after = await getAssetKeyMappingByProvider({
       providerId: "agent-fs",
@@ -251,7 +258,7 @@ describe("cross-entity asset namespace invariants", () => {
         key: "shared/products/",
         changedBy: userId,
       }),
-    ).toBe(true);
+    ).toEqual({});
     expect(
       await moveAssetKey({
         entityType: "script",
@@ -259,7 +266,7 @@ describe("cross-entity asset namespace invariants", () => {
         key: "shared/automation/",
         changedBy: userId,
       }),
-    ).toBe(true);
+    ).toEqual({});
 
     expect(
       await getDbClient().get<{ key: string }>('SELECT "key" AS key FROM apps WHERE id = ?', [
@@ -328,6 +335,134 @@ describe("cross-entity asset namespace invariants", () => {
       updatedBy: userId,
     });
     expect(auditAssetKeys(getDb()).warningCount).toBe(0);
+  });
+
+  test("shared provider files allow moves and follow only their source task", async () => {
+    const first = await createTaskExtended("first attachment owner", {
+      agentId,
+      key: "shared/first/",
+    });
+    const source = await createTaskExtended("source attachment owner", {
+      agentId,
+      key: "shared/source/",
+    });
+    const provider = {
+      providerId: "agent-fs",
+      providerOrgId: "shared-org",
+      providerDriveId: "shared-drive",
+      providerKey: "shared-file.md",
+    };
+    for (const task of [first, source]) {
+      await insertTaskAttachment({
+        taskId: task.id,
+        name: "shared-file.md",
+        kind: "agent-fs",
+        providerId: provider.providerId,
+        providerKey: provider.providerKey,
+        orgId: provider.providerOrgId,
+        driveId: provider.providerDriveId,
+      });
+    }
+    const mapping = (await getAssetKeyMappingByProvider(provider))!;
+    expect(mapping.key).toBe(source.key);
+    const historyBefore = await getDbClient().query(
+      "SELECT id FROM asset_key_history WHERE entity_id = ? ORDER BY id",
+      [mapping.id],
+    );
+    expect(auditAssetKeys(getDb()).ok).toBe(true);
+
+    await moveAssetKey({ entityType: "task", id: first.id, key: "shared/first-moved/" });
+    expect(await getAssetKeyMappingByProvider(provider)).toEqual(mapping);
+    expect(auditAssetKeys(getDb()).ok).toBe(true);
+    expect(
+      await getDbClient().query(
+        "SELECT id FROM asset_key_history WHERE entity_id = ? ORDER BY id",
+        [mapping.id],
+      ),
+    ).toEqual(historyBefore);
+
+    await moveAssetKey({ entityType: "task", id: source.id, key: "shared/source-moved/" });
+    expect((await getAssetKeyMappingByProvider(provider))?.key).toBe("shared/source-moved/");
+    expect(auditAssetKeys(getDb()).ok).toBe(true);
+    expect(
+      await getDbClient().query("SELECT entity_type FROM asset_key_history WHERE entity_id = ?", [
+        mapping.id,
+      ]),
+    ).toHaveLength(historyBefore.length + 1);
+
+    await getDbClient().run(
+      `UPDATE asset_key_mappings SET "key" = 'shared/no-attaching-task/', source_entity_type = NULL, source_entity_id = NULL WHERE id = ?`,
+      [mapping.id],
+    );
+    const drift = auditAssetKeys(getDb()).issues.filter(
+      (issue) => issue.code === "provider-mapping-drift",
+    );
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.entityId).toBe(mapping.id);
+    await expect(
+      moveAssetKey({ entityType: "task", id: first.id, key: "shared/blocked/" }),
+    ).rejects.toThrow("blocked until");
+    await getDbClient().run(
+      `UPDATE asset_key_mappings SET "key" = ?, source_entity_type = 'task-attachment', source_entity_id = ? WHERE id = ?`,
+      ["shared/source-moved/", mapping.sourceEntityId!, mapping.id],
+    );
+    expect(auditAssetKeys(getDb()).ok).toBe(true);
+  });
+
+  test("a task move takes only the descendants the caller passes", async () => {
+    const root = await createTaskExtended("partial root", { agentId, key: "shared/partial/" });
+    const checked = await createTaskExtended("checked child", { agentId, parentTaskId: root.id });
+    const unchecked = await createTaskExtended("unchecked child", {
+      agentId,
+      parentTaskId: root.id,
+    });
+
+    expect(
+      await moveAssetKey({
+        entityType: "task",
+        id: root.id,
+        key: "shared/partial-moved/",
+        descendantTaskIds: [checked.id],
+      }),
+    ).toEqual({ movedTaskIds: [root.id, checked.id] });
+    expect((await getTaskById(checked.id))?.key).toBe("shared/partial-moved/");
+    expect((await getTaskById(unchecked.id))?.key).toBe("shared/partial/");
+  });
+
+  test("a shared file whose source attachment was deleted follows the next task move", async () => {
+    const [remaining, deleted] = await Promise.all(
+      ["remaining attachment owner", "deleted attachment owner"].map((task) =>
+        createTaskExtended(task, { agentId, key: "shared/detached-source/" }),
+      ),
+    );
+    const provider = {
+      providerId: "agent-fs",
+      providerOrgId: "shared-org",
+      providerDriveId: "shared-drive",
+      providerKey: "detached-source.md",
+    };
+    const attachments = [];
+    for (const task of [remaining!, deleted!]) {
+      attachments.push(
+        await insertTaskAttachment({
+          taskId: task.id,
+          name: "detached-source.md",
+          kind: "agent-fs",
+          providerId: provider.providerId,
+          providerKey: provider.providerKey,
+          orgId: provider.providerOrgId,
+          driveId: provider.providerDriveId,
+        }),
+      );
+    }
+    expect(await deleteTaskAttachment(attachments[1]!.id)).toBe(true);
+    expect((await getAssetKeyMappingByProvider(provider))?.sourceEntityType).not.toBe(
+      "task-attachment",
+    );
+
+    await moveAssetKey({ entityType: "task", id: remaining!.id, key: "shared/detached-moved/" });
+    expect((await getAssetKeyMappingByProvider(provider))?.key).toBe("shared/detached-moved/");
+    expect(auditAssetKeys(getDb()).ok).toBe(true);
   });
 
   test("personal namespace users are audited and missing users are repairable warnings", async () => {

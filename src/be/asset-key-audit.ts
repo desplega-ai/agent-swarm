@@ -132,6 +132,7 @@ export function auditAssetKeys(db: Database): AssetKeyAuditResult {
          AND COALESCE(NULLIF(a.provider_key, ''), a.path) IS NOT NULL`,
     )
     .all();
+  const mappingMatches = new Map<string, boolean>();
   for (const row of attachmentMappings) {
     if (!row.mapping_id) {
       issues.push({
@@ -141,13 +142,21 @@ export function auditAssetKeys(db: Database): AssetKeyAuditResult {
         entityId: row.attachment_id,
         message: "Agent-fs attachment has no logical namespace mapping.",
       });
-    } else if (row.mapping_key !== row.task_key) {
+    } else {
+      mappingMatches.set(
+        row.mapping_id,
+        mappingMatches.get(row.mapping_id) === true || row.mapping_key === row.task_key,
+      );
+    }
+  }
+  for (const [mappingId, matches] of mappingMatches) {
+    if (!matches) {
       issues.push({
         severity: "warning",
         code: "provider-mapping-drift",
         entityType: "file",
-        entityId: row.mapping_id,
-        message: "Provider mapping namespace differs from its parent task namespace.",
+        entityId: mappingId,
+        message: "Provider mapping namespace differs from every attaching task namespace.",
       });
     }
   }

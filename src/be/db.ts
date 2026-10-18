@@ -1731,7 +1731,9 @@ export async function moveAssetKey(input: {
   id: string;
   key: string;
   changedBy?: string;
-}): Promise<boolean> {
+  /** Task moves only: descendant task ids the caller already authorized to move with the task. */
+  descendantTaskIds?: readonly string[];
+}): Promise<false | { movedTaskIds?: string[] }> {
   const key = normalizeAssetKey(input.key);
   // auditAssetKeys stays sync (shared with the boot audit); run it inside a
   // client transaction so this request-path read cannot observe another
@@ -1746,7 +1748,7 @@ export async function moveAssetKey(input: {
   }
   const previousKey = await currentAssetKey(input.entityType, input.id);
   if (!previousKey) return false;
-  if (previousKey === key) return true;
+  if (previousKey === key && input.entityType !== "task") return {};
   if (input.entityType === "file") {
     const mapping = await getAssetKeyMapping(input.id);
     if (mapping?.sourceEntityType === "task-attachment") {
@@ -1757,48 +1759,64 @@ export async function moveAssetKey(input: {
   }
   const now = new Date().toISOString();
 
-  await getDbClient().transaction(async (tx) => {
+  return getDbClient().transaction(async (tx) => {
     switch (input.entityType) {
       case "task": {
-        const mappedFiles = await tx.query<{ id: string; key: string }>(
-          `SELECT DISTINCT m.id, m."key" AS key
+        const root = await getTaskById(input.id);
+        if (!root) return false;
+        const tasks = [root];
+        for (const id of input.descendantTaskIds ?? []) {
+          const task = id === root.id ? null : await getTaskById(id);
+          if (task) tasks.push(task);
+        }
+        const movedTaskIds: string[] = [];
+        for (const task of tasks) {
+          if (task.key === key) continue;
+          // A file shared with another task keeps the namespace of the task whose attachment
+          // sources its mapping. Mappings with no attachment source follow any attaching task.
+          const mappedFiles = await tx.query<{ id: string; key: string }>(
+            `SELECT DISTINCT m.id, m."key" AS key
              FROM asset_key_mappings m
              JOIN task_attachments a
                ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
               AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
               AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
               AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-             WHERE a.task_id = ?`,
-          [input.id],
-        );
-        await tx.run(
-          'UPDATE agent_tasks SET "key" = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.id],
-        );
-        await tx.run(
-          `UPDATE asset_key_mappings
-           SET "key" = ?, updated_at = ?, updated_by = ?
-           WHERE EXISTS (
-             SELECT 1 FROM task_attachments a
              WHERE a.task_id = ?
-               AND asset_key_mappings.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
-               AND asset_key_mappings.provider_org_id = COALESCE(a.agent_fs_org_id, '')
-               AND asset_key_mappings.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
-               AND asset_key_mappings.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-           )`,
-          [key, now, input.changedBy ?? null, input.id],
-        );
-        for (const mapping of mappedFiles) {
-          if (mapping.key === key) continue;
+               AND (m.source_entity_type IS NOT 'task-attachment'
+                 OR m.source_entity_id IN (SELECT id FROM task_attachments WHERE task_id = ?))`,
+            [task.id, task.id],
+          );
+          // The namespace is metadata, and lastUpdatedAt tracks task activity, as in updateTaskTitle.
+          await tx.run('UPDATE agent_tasks SET "key" = ?, updated_by = ? WHERE id = ?', [
+            key,
+            input.changedBy ?? null,
+            task.id,
+          ]);
+          for (const mapping of mappedFiles) {
+            if (mapping.key === key) continue;
+            await tx.run(
+              'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
+              [key, now, input.changedBy ?? null, mapping.id],
+            );
+            await insertAssetKeyHistory({
+              entityType: "file",
+              entityId: mapping.id,
+              previousKey: mapping.key,
+              newKey: key,
+              changedBy: input.changedBy,
+            });
+          }
           await insertAssetKeyHistory({
-            entityType: "file",
-            entityId: mapping.id,
-            previousKey: mapping.key,
+            entityType: "task",
+            entityId: task.id,
+            previousKey: task.key,
             newKey: key,
             changedBy: input.changedBy,
           });
+          movedTaskIds.push(task.id);
         }
-        break;
+        return { movedTaskIds };
       }
       case "workflow":
         await tx.run(
@@ -1849,8 +1867,8 @@ export async function moveAssetKey(input: {
       newKey: key,
       changedBy: input.changedBy,
     });
+    return {};
   });
-  return true;
 }
 
 export async function deleteTaskAttachment(id: string): Promise<boolean> {
@@ -12513,6 +12531,7 @@ interface InboxItemStateRow {
   dismissedAt: string | null;
   doneAt: string | null;
   readAt: string | null;
+  lastReadAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -12528,6 +12547,7 @@ function rowToInboxItemState(row: InboxItemStateRow): InboxItemState {
     dismissedAt: row.dismissedAt ?? undefined,
     doneAt: row.doneAt ?? undefined,
     readAt: row.readAt ?? undefined,
+    lastReadAt: row.lastReadAt ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -12568,6 +12588,7 @@ export async function upsertInboxState(opts: {
   doneAt?: string;
   /** First-viewed timestamp. Sticky: once set, later calls never clear or move it. */
   readAt?: string;
+  lastReadAt?: string | null;
 }): Promise<InboxItemState> {
   const now = new Date().toISOString();
   // Auto-derive timestamps from status when not explicitly provided.
@@ -12579,14 +12600,15 @@ export async function upsertInboxState(opts: {
   // SQLite upsert via UNIQUE(userId, itemType, itemId). readAt is sticky: the
   // first non-null value written wins on every subsequent conflict.
   const row = await getDbClient().get<InboxItemStateRow>(
-    `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, lastReadAt, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(userId, itemType, itemId) DO UPDATE SET
          status = excluded.status,
          snoozeUntil = excluded.snoozeUntil,
          dismissedAt = excluded.dismissedAt,
          doneAt = excluded.doneAt,
          readAt = COALESCE(inbox_item_state.readAt, excluded.readAt),
+         lastReadAt = CASE WHEN ? THEN excluded.lastReadAt ELSE inbox_item_state.lastReadAt END,
          lastUpdatedAt = excluded.lastUpdatedAt
        RETURNING *`,
     [
@@ -12598,8 +12620,10 @@ export async function upsertInboxState(opts: {
       dismissedAt,
       doneAt,
       readAt,
+      opts.lastReadAt ?? null,
       now,
       now,
+      opts.lastReadAt !== undefined ? 1 : 0,
     ],
   );
   if (!row) throw new Error("Failed to upsert inbox state");

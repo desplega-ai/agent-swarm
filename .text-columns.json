@@ -1212,6 +1212,9 @@
     },
     "readAt": {
       "exempt": "timestamp"
+    },
+    "lastReadAt": {
+      "exempt": "timestamp"
     }
   },
   "inbox_messages": {

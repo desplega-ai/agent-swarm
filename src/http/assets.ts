@@ -7,6 +7,7 @@ import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
   getDb,
   getDbClient,
+  getRootTaskChain,
   getTaskById,
   listAssetSummaries,
   moveAssetKey,
@@ -120,10 +121,17 @@ function ensureOperator(req: IncomingMessage, res: ServerResponse): boolean {
 }
 
 const moveAssetBodySchema = z.object({ key: AssetKeySchema });
+const moveGenericAssetBodySchema = moveAssetBodySchema.extend({
+  cascade: z
+    .boolean()
+    .optional()
+    .describe("For tasks only, also move every descendant task recursively through parentTaskId."),
+});
 const moveAssetSuccessSchema = z.object({
   entityType: AssetEntityTypeSchema,
   id: z.string(),
   key: AssetKeySchema,
+  movedTaskIds: z.array(z.string()).optional(),
 });
 const moveAssetResponses = {
   200: { description: "Asset namespace updated", schema: moveAssetSuccessSchema },
@@ -168,7 +176,7 @@ const moveAssetRoute = route({
     "Updates namespace metadata only. Provider-backed files keep the same provider key, org, and drive; no remote move occurs. Personal keys are labels, not a privacy guarantee.",
   tags: ["Assets"],
   params: z.object({ entityType: AssetEntityTypeSchema, id: z.string().min(1) }),
-  body: moveAssetBodySchema,
+  body: moveGenericAssetBodySchema,
   responses: moveAssetResponses,
   rbac: {
     ungated:
@@ -302,17 +310,29 @@ export async function handleAssets(
   ) {
     const parsed = await moveAssetRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (parsed.body.cascade && parsed.params.entityType !== "task") {
+      jsonError(res, "Cascade is only supported for task namespace moves", 400);
+      return true;
+    }
     if (parsed.params.entityType === "file" && !ensureOperator(req, res)) return true;
+    let descendantTaskIds: string[] | undefined;
     if (parsed.params.entityType === "task") {
       const task = await getTaskById(parsed.params.id);
       if (!task) {
         jsonError(res, "Asset not found", 404);
         return true;
       }
-      if (!(await canMutateTaskNamespace(task, myAgentId, req))) {
-        jsonError(res, "Not authorized to move this task namespace", 403);
-        return true;
+      // Only the tasks checked here move: a subtask created after this read stays put.
+      const tasks = parsed.body.cascade ? await getRootTaskChain(task.id) : [task];
+      for (const target of tasks) {
+        if (!(await canMutateTaskNamespace(target, myAgentId, req))) {
+          jsonError(res, "Not authorized to move this task namespace", 403);
+          return true;
+        }
       }
+      descendantTaskIds = tasks
+        .filter((target) => target.id !== task.id)
+        .map((target) => target.id);
     }
     if (parsed.params.entityType === "app") {
       if (!(await getApp(parsed.params.id))) {
@@ -344,6 +364,7 @@ export async function handleAssets(
         id: parsed.params.id,
         key,
         changedBy: actor ?? undefined,
+        descendantTaskIds,
       });
       if (!moved) {
         jsonError(res, "Asset not found", 404);
@@ -353,6 +374,7 @@ export async function handleAssets(
         entityType: parsed.params.entityType,
         id: parsed.params.id,
         key,
+        ...moved,
       });
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {

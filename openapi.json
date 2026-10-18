@@ -2295,6 +2295,9 @@
           "readAt": {
             "type": "string"
           },
+          "lastReadAt": {
+            "type": "string"
+          },
           "createdAt": {
             "type": "string"
           },
@@ -14653,6 +14656,12 @@
                       "minLength": 1,
                       "maxLength": 255,
                       "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                    },
+                    "movedTaskIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -14777,6 +14786,12 @@
                       "minLength": 1,
                       "maxLength": 255,
                       "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                    },
+                    "movedTaskIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -14882,6 +14897,10 @@
                     "minLength": 1,
                     "maxLength": 255,
                     "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                  },
+                  "cascade": {
+                    "type": "boolean",
+                    "description": "For tasks only, also move every descendant task recursively through parentTaskId."
                   }
                 },
                 "required": [
@@ -14919,6 +14938,12 @@
                       "minLength": 1,
                       "maxLength": 255,
                       "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                    },
+                    "movedTaskIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -20766,9 +20791,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "userId": {
-                    "type": "string"
-                  },
                   "itemType": {
                     "type": "string",
                     "enum": [
@@ -20800,13 +20822,24 @@
                   "readAt": {
                     "type": "string",
                     "format": "date-time"
+                  },
+                  "lastReadAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "Omit to preserve the read cursor, send null to clear it, or send a timestamp to set it, including an earlier time."
+                  },
+                  "userId": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "userId",
                   "itemType",
                   "itemId",
-                  "status"
+                  "status",
+                  "userId"
                 ]
               }
             }
@@ -20826,6 +20859,135 @@
                   },
                   "required": [
                     "item"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/inbox-state/bulk": {
+      "patch": {
+        "summary": "Upsert inbox-item state in one transaction",
+        "tags": [
+          "Inbox State"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "itemType": {
+                          "type": "string",
+                          "enum": [
+                            "approval",
+                            "credential_missing",
+                            "broken_task",
+                            "to_read",
+                            "to_start_template",
+                            "notification"
+                          ]
+                        },
+                        "itemId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "snoozed",
+                            "dismissed",
+                            "done"
+                          ]
+                        },
+                        "snoozeUntil": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "readAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lastReadAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time",
+                          "description": "Omit to preserve the read cursor, send null to clear it, or send a timestamp to set it, including an earlier time."
+                        }
+                      },
+                      "required": [
+                        "itemType",
+                        "itemId",
+                        "status"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  }
+                },
+                "required": [
+                  "userId",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upserted inbox state rows in request order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/InboxItemState"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
                   ]
                 }
               }
