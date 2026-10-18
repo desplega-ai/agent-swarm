@@ -43,7 +43,7 @@ The Repository Guidelines carry `allowMerge` and `mergeChecks`.
 1. Read `/review/rules.md` on the shared agent-fs drive. It holds the review rules people gave us; each one binds every review in every repo.
 2. Read the repo's `REVIEW.md` when it has one. It holds the repo-specific checks.
 3. Set the effort from the PR body's `Risk:` line. `low`: a quick pass that still covers CI, tests and the security read. `medium` or no line: the full list below. `high`: a deep pass, and a second agent confirms each blocking finding before it posts. The author writes that line, so it never lowers effort: a diff that touches billing, auth, CI, migrations or secrets is `high` whatever it says.
-4. Re-review check. If you reviewed this PR before, compare `gh pr view <number> --json headRefOid --jq .headRefOid` with the `commit_id` of your last review (`gh api repos/<owner>/<repo>/pulls/<number>/reviews`). Same SHA: reuse that verdict, link it and stop. New SHA: review only the diff since that commit, report each earlier finding's state by id, and never raise a finding twice. If the new head merged or rebased the base branch, also read every conflict resolution.
+4. Re-review check. If you reviewed this PR before, compare `gh pr view <number> --json headRefOid --jq .headRefOid` with the `commit_id` of your last review (`gh api repos/<owner>/<repo>/pulls/<number>/reviews`). Same SHA: reuse that verdict, link it and stop. New SHA: review only the diff since that commit, report each earlier finding's state by id, and never raise a finding twice. Re-run each earlier repro on the new head. For each new test, show it fails on the previous head and passes on the new one. Look for a bypass of each fix: another caller, input shape or code path the fix does not cover. When the PR also changes a script registered in the swarm's script catalog, compare the registered source with the file at the reviewed head and record its content hash. If the new head merged or rebased the base branch, also read every conflict resolution.
 5. Round cap. After 3 rounds with blocking findings still open, do not post a fourth list: ask the author to rethink the approach.
 
 ### What to check
@@ -99,7 +99,7 @@ Nothing reaches GitHub without passing `review-post-gate`.
    ```
 
    On a PR the reviewing account authored, the gate returns `event: "COMMENT"`, because GitHub refuses APPROVE and REQUEST_CHANGES there. Post it as is.
-4. Record the evidence (tests run, controls, "checked, fine" notes, the gate's `logKey`) in your task output and with `script-run name="pr-review-ledger-write"` (`action: "round"`). Never on the PR.
+4. Record the evidence (tests run, controls, "checked, fine" notes, the gate's `logKey`) in your task output and with `script-run name="pr-review-ledger-write" scope="global"` (`action: "round"`). Never on the PR. If the ledger write fails, keep the exact payload and the error in your task output, report it to the lead once, and finish the review. Read the PR's existing ledger rounds before any retry so a round is never written twice.
 5. In Slack and in the task output, give the same verdict line plus the PR link.
 
 If the gate cannot run, post nothing to GitHub. Keep the draft in your task output and report the gate failure (the error and the time) to the lead.

@@ -99,6 +99,9 @@ const { stdout, exitCode } = await ctx.sh("grep -rn TODO /afs/notes | sort | hea
 
 `launch-script-run` runs a script as a durable, journaled run with a different `ctx`: `ctx.run` (`id`, `agentId`, `args`) and `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, `ctx.step.swarmScript(label, config)`, plus `ctx.swarm.*`, `ctx.stdlib`, `ctx.logger`. Durable runs have no `ctx.api`, no `ctx.mcp`, no `ctx.fs`, no `ctx.sh`, and no `ctx.swarm.config`. A configured `ctx.step.agentTask` `agentId` records `human_pinned` unless `routingReason` is supplied. Call a connection or the drive from an inner script through `ctx.step.swarmScript`. See the `script-workflows` skill.
 
+- Each `ctx.step.agentTask` step is a normal worker task (`taskType: "script-run-step"`). When it finishes, the lead gets the usual "Worker task completed — review needed" follow-up, even while the run is still awaiting that step. The step config has no `followUpConfig` field, so a value passed there is dropped. Let the script's own judge step be the gate and close those follow-ups with a one-line accept.
+- When a crash supersedes an in-flight step and resumes it as a new task, the run does not follow the new task id: it can stay `failed` (for example `write EPIPE`) while the resumed task completes. Check the resumed task's output before you re-launch the run.
+
 ## Inline script pattern
 
 ```typescript
@@ -168,6 +171,9 @@ function rowsToObjects(res: any): any[] {
 - `script_run` returns an envelope (`result`, `truncated`, `durationMs`, `stdout`, `stderr`, `exitCode`). The callee payload is at `.result`. Take key names from a real response: a guessed key that is absent reads as a false zero.
 - An `argsSchema` validation error fires before the body runs and repeats on every retry. Fix the args instead of retrying.
 - Write a dedup or idempotency marker only after the step succeeds. A marker written after a failure blocks the next real attempt.
+- `kv_set` returns `success: false` instead of throwing when a key has a character outside `[a-zA-Z0-9._:/-]` (for example `#` or `|` from a git ref). Check `success` after every write.
+- `script_run` without `scope` runs an agent-scoped row of the same name before the global one, so a stale private copy silently wins. Pass `scope: "global"` for a shared script.
+- A nested `script_run` does not overlap with the caller's own `ctx.stdlib.fetch` calls: started alongside them it added about 8 s to one measured run. Start it after the caller's own queries.
 
 Common tables: `agent_tasks`, `session_logs`, `agent_memory`, `scheduled_tasks`, `agents`. `session_logs` has no `tool_name` column. Tool names sit inside the `content` JSON column. Extract them with `instr` and `substr` in SQL, or parse the JSON in the script.
 
