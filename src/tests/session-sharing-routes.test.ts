@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   closeDb,
   createAgent,
@@ -8,9 +11,11 @@ import {
   createTaskExtended,
   createUser,
   initDb,
+  insertTaskAttachment,
 } from "../be/db";
 import { setSessionShares } from "../be/session-shares";
 import { mintToken } from "../be/users";
+import { getFileStorageProvider, resetFileStorageProvider } from "../fs/registry";
 import { handleActiveSessions } from "../http/active-sessions";
 import { handleAgentsRest } from "../http/agents";
 import { handleCore } from "../http/core";
@@ -64,8 +69,15 @@ let agent: { id: string };
 let owner: { id: string };
 let sharee: { id: string };
 const tokens = {} as Record<Exclude<Who, "agent">, string>;
+let filesDir: string;
 
 beforeAll(async () => {
+  filesDir = await mkdtemp(join(tmpdir(), "session-routes-"));
+  process.env.AGENT_FS_LOCAL_DIR = filesDir;
+  delete process.env.AGENT_FS_API_URL;
+  delete process.env.API_AGENT_FS_API_KEY;
+  delete process.env.AGENT_FS_API_KEY;
+  resetFileStorageProvider();
   initDb(":memory:");
   agent = await createAgent({ name: "Worker", isLead: false, status: "idle" });
   owner = await createUser({ name: "Owner" });
@@ -82,6 +94,8 @@ afterAll(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
+  resetFileStorageProvider();
+  await rm(filesDir, { recursive: true, force: true });
 });
 
 /** An owned root and descendant on `agent`, shared read-only with `sharee` and nobody else. */
@@ -170,5 +184,36 @@ describe("task-content routes respect session read access", () => {
     });
 
     await expectPrivate(`/api/tasks/${child.id}/session-logs`, secret, { deniedStatus: 403 });
+  });
+
+  test("B8 attachments: list, metadata, raw bytes and signed URL", async () => {
+    const { child } = await privateSession("files");
+    const secret = "PRIVATE FILE BYTES";
+    const provider = getFileStorageProvider();
+    const file = await provider.upload(
+      { taskId: child.id, name: "secret-notes.txt" },
+      Buffer.from(secret),
+      { contentType: "text/plain" },
+    );
+    const attachment = await insertTaskAttachment({
+      taskId: child.id,
+      agentId: agent.id,
+      kind: "shared-fs",
+      name: "secret-notes.txt",
+      path: file.key,
+      providerId: provider.id,
+      providerKey: file.key,
+    });
+    const files = `/api/fs/tasks/${child.id}/files`;
+
+    await expectPrivate(files, "secret-notes.txt", { deniedStatus: 403 });
+    await expectPrivate(`${files}/${attachment.id}`, "secret-notes.txt", { deniedStatus: 403 });
+    await expectPrivate(`${files}/${attachment.id}/raw`, secret, { deniedStatus: 403 });
+
+    // The local provider cannot sign (501), so this only proves the viewer
+    // stops before the provider while the owner reaches it.
+    const signed = `${files}/${attachment.id}/signed-url`;
+    expect((await get(signed, "viewer")).status).toBe(403);
+    expect((await get(signed, "owner")).status).toBe(501);
   });
 });

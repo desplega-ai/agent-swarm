@@ -15,6 +15,7 @@ import { getCurrentRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
+import { canReadSession, SESSION_READ_DENIED } from "./session-access";
 import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 
 // Upload wall-clock past which the provider round-trip is worth a log line.
@@ -263,7 +264,13 @@ export async function handleFs(
   if (downloadTaskFileRoute.match(req.method, pathSegments)) {
     const parsed = await downloadTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const attachment = await findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    const attachment = await findAttachment(
+      req,
+      myAgentId,
+      parsed.params.taskId,
+      parsed.params.attachmentId,
+      res,
+    );
     if (!attachment) return true;
     return sendDownload(res, attachment);
   }
@@ -271,7 +278,13 @@ export async function handleFs(
   if (signedUrlTaskFileRoute.match(req.method, pathSegments)) {
     const parsed = await signedUrlTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const attachment = await findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    const attachment = await findAttachment(
+      req,
+      myAgentId,
+      parsed.params.taskId,
+      parsed.params.attachmentId,
+      res,
+    );
     if (!attachment) return true;
     return sendSignedUrl(res, attachment, parsed.query.expiresIn);
   }
@@ -279,7 +292,13 @@ export async function handleFs(
   if (getTaskFileRoute.match(req.method, pathSegments)) {
     const parsed = await getTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const attachment = await findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    const attachment = await findAttachment(
+      req,
+      myAgentId,
+      parsed.params.taskId,
+      parsed.params.attachmentId,
+      res,
+    );
     if (!attachment) return true;
     getTaskFileRoute.respond(res, 200, attachment);
     return true;
@@ -313,6 +332,10 @@ export async function handleFs(
     const parsed = await listTaskFilesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await getTaskById(parsed.params.taskId))) return notFound(res, "Task not found");
+    if (!(await canReadSession(req, myAgentId, parsed.params.taskId))) {
+      jsonError(res, SESSION_READ_DENIED, 403);
+      return true;
+    }
     listTaskFilesRoute.respond(res, 200, {
       attachments: await getTaskAttachments(parsed.params.taskId),
     });
@@ -493,12 +516,18 @@ function backingProviderId(attachment: TaskAttachment): string | null {
 }
 
 async function findAttachment(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
   taskId: string,
   attachmentId: string,
   res: ServerResponse,
 ): Promise<TaskAttachment | null> {
   if (!(await getTaskById(taskId))) {
     notFound(res, "Task not found");
+    return null;
+  }
+  if (!(await canReadSession(req, myAgentId, taskId))) {
+    jsonError(res, SESSION_READ_DENIED, 403);
     return null;
   }
   const attachment = (await getTaskAttachments(taskId)).find((item) => item.id === attachmentId);
