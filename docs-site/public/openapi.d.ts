@@ -4630,7 +4630,7 @@ export interface paths {
         };
         /**
          * Public ranking state
-         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing.
+         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. The listing carries the private ranking claim, so only a config admin can read it.
          */
         get: {
             parameters: {
@@ -4676,6 +4676,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can read the ranking state */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

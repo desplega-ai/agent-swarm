@@ -23,7 +23,6 @@ import {
 } from "../utils/org-identity";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
-import { rejectGuest } from "./request-principal";
 import { route } from "./route-def";
 import { globalConfig, telemetryProxyEndpoint } from "./used-by";
 
@@ -80,12 +79,14 @@ const getRanking = route({
   pattern: ["api", "ranking"],
   summary: "Public ranking state",
   description:
-    "Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing.",
+    "Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. The listing carries the private ranking claim, so only a config admin can read it.",
   tags: ["Telemetry"],
   responses: {
     200: { description: "Ranking state", schema: RankingStateSchema },
     401: { description: "Unauthorized" },
+    403: { description: "Only a config admin can read the ranking state" },
   },
+  rbac: { permission: "config.write.any" },
 });
 
 const optIn = route({
@@ -269,9 +270,10 @@ export async function handleRanking(
   queryParams: URLSearchParams,
 ): Promise<boolean> {
   if (getRanking.match(req.method, pathSegments)) {
-    if (rejectGuest(req, res)) return true;
     const parsed = await getRanking.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    // The state carries the claim and the PR that proves ownership of the listing.
+    if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
     getRanking.respond(res, 200, await buildRankingState());
     return true;
   }

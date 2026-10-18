@@ -38,6 +38,7 @@ async function call(
   url: string,
   body?: unknown,
   handler: Handler = handleRanking,
+  auth: HttpRequestAuth = OPERATOR,
 ): Promise<{ statusCode: number; json: Record<string, unknown> }> {
   const req = Readable.from(
     body === undefined ? [] : [Buffer.from(JSON.stringify(body))],
@@ -49,7 +50,7 @@ async function call(
   req.method = method;
   req.url = url;
   req.headers = { "content-type": "application/json" };
-  setRequestAuth(req as never, OPERATOR);
+  setRequestAuth(req as never, auth);
   let statusCode = 200;
   const chunks: string[] = [];
   const res = {
@@ -203,6 +204,27 @@ describe("ranking routes", () => {
       missing: [],
       listingMatchesDomain: true,
     });
+  });
+
+  test("only a config admin reads the ranking state and its claim", async () => {
+    const claim = String((await call("POST", "/api/ranking/opt-in", form)).json.claim);
+    const worker: HttpRequestAuth = {
+      kind: "agent",
+      agentId: crypto.randomUUID(),
+      taskId: null,
+      runtimeId: null,
+      tokenId: "tok_test",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    };
+    const guest: HttpRequestAuth = { kind: "guest" };
+    for (const auth of [worker, guest]) {
+      const denied = await call("GET", "/api/ranking", undefined, handleRanking, auth);
+      expect(denied.statusCode).toBe(403);
+      expect(JSON.stringify(denied.json)).not.toContain(claim);
+    }
+    const state = await call("GET", "/api/ranking");
+    expect(state.statusCode).toBe(200);
+    expect((state.json.listing as { claim: string }).claim).toBe(claim);
   });
 
   test("concurrent first opt-ins share one claim, and leave then rejoin keeps it", async () => {
