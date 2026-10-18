@@ -137,6 +137,26 @@ describe("sessionAccess", () => {
     expect(await sessionAccess(eze.id, child.id)).toBe("none");
     expect(await sessionAccess(mar.id, child.id)).toBe("none");
   });
+
+  test("a chain deeper than 1000 tasks still resolves to its actual root", async () => {
+    const { root, child, rootRef } = await session(owner.id);
+    let leaf = child;
+    for (let depth = 2; depth <= 1002; depth++) {
+      leaf = await createTaskExtended(`step ${depth}`, {
+        requestedByUserId: owner.id,
+        parentTaskId: leaf.id,
+        source: "ui",
+      });
+    }
+    await setSessionShares(
+      rootRef,
+      { everyone: "none", users: [{ userId: eze.id, access: "write" }] },
+      owner.id,
+    );
+
+    expect((await getSessionRoot(leaf.id))?.id).toBe(root.id);
+    expect(await sessionAccess(eze.id, leaf.id)).toBe("write");
+  });
 });
 
 describe("setSessionShares", () => {
@@ -298,6 +318,66 @@ describe("session routes", () => {
     expect(operatorIds).toContain(privateOne.root.id);
     const operatorScoped = await call("sessions", "GET", "/api/sessions?scope=shared");
     expect(operatorScoped.body.sessions).toEqual([]);
+  });
+});
+
+describe("task routes", () => {
+  test("GET /api/tasks/:id needs read access for a user, not for agents or the bare operator key", async () => {
+    const { root, child, rootRef } = await session(owner.id);
+    const userToken: HttpRequestAuth = ezeAuth;
+
+    for (const task of [root, child]) {
+      expect(
+        (await call("tasks", "GET", `/api/tasks/${task.id}`, { auth: userToken })).status,
+      ).toBe(403);
+      expect(
+        (await call("tasks", "GET", `/api/tasks/${task.id}`, { dashboardUserId: eze.id })).status,
+      ).toBe(403);
+      expect(
+        (await call("tasks", "GET", `/api/tasks/${task.id}`, { dashboardUserId: owner.id })).status,
+      ).toBe(200);
+      expect((await call("tasks", "GET", `/api/tasks/${task.id}`)).status).toBe(200);
+      expect(
+        (
+          await call("tasks", "GET", `/api/tasks/${task.id}`, {
+            agentId: crypto.randomUUID(),
+            dashboardUserId: eze.id,
+          })
+        ).status,
+      ).toBe(200);
+    }
+
+    await setSessionShares(
+      rootRef,
+      { everyone: "none", users: [{ userId: eze.id, access: "read" }] },
+      owner.id,
+    );
+    const shared = await call("tasks", "GET", `/api/tasks/${child.id}`, { auth: userToken });
+    expect(shared.status).toBe(200);
+    expect(shared.body.task).toBe("follow-up");
+  });
+
+  test("GET /api/tasks?fields=full drops a user's unreadable sessions", async () => {
+    const { root, child, rootRef } = await session(owner.id);
+    const ownerless = await session();
+    const ids = (body: { tasks: { id: string }[] }) => body.tasks.map((task) => task.id);
+    const url = "/api/tasks?fields=full&limit=1000";
+
+    const asUser = ids((await call("tasks", "GET", url, { auth: ezeAuth })).body);
+    expect(asUser).not.toContain(root.id);
+    expect(asUser).not.toContain(child.id);
+    expect(asUser).toContain(ownerless.child.id);
+
+    for (const opts of [{}, { dashboardUserId: owner.id }, { agentId: crypto.randomUUID() }]) {
+      const all = ids((await call("tasks", "GET", url, opts)).body);
+      expect(all).toContain(root.id);
+      expect(all).toContain(child.id);
+    }
+
+    await setSessionShares(rootRef, { everyone: "read", users: [] }, owner.id);
+    const shared = ids((await call("tasks", "GET", url, { auth: ezeAuth })).body);
+    expect(shared).toContain(root.id);
+    expect(shared).toContain(child.id);
   });
 });
 

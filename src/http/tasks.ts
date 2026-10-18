@@ -82,7 +82,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route } from "./route-def";
-import { resolveSessionActor, sessionAccessFor } from "./session-access";
+import { filterReadableTasks, resolveSessionActor, sessionAccessFor } from "./session-access";
 import { jsonError, parseBody } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ const listTasks = route({
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
   description:
-    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask` (a user caller gets only tasks of sessions they can read), or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
@@ -555,6 +555,7 @@ const getTask = route({
   }),
   responses: {
     200: { description: "Task with logs and attachments", schema: GetTaskResponseSchema },
+    403: { description: "A user caller cannot read the task's session" },
     404: { description: "Task not found" },
   },
 });
@@ -948,9 +949,13 @@ export async function handleTasks(
     };
     // List responses default to slim (full `task` text → bounded `taskPreview`,
     // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
+    // Full rows carry task text, so a user sees only sessions they can read.
     const tasks =
       parsed.query.fields === "full"
-        ? await getAllTasks(filters)
+        ? await filterReadableTasks(
+            await resolveSessionActor(req, myAgentId),
+            await getAllTasks(filters),
+          )
         : parsed.query.fields === "timeline"
           ? await getAllTasks(filters, { fields: "timeline" })
           : await getAllTasks(filters, { slim: true });
@@ -1558,6 +1563,11 @@ export async function handleTasks(
 
     if (!task) {
       jsonError(res, "Task not found", 404);
+      return true;
+    }
+    const readAccess = await sessionAccessFor(await resolveSessionActor(req, myAgentId), task.id);
+    if (!hasSessionAccess(readAccess, "read")) {
+      jsonError(res, "You don't have access to this session. Ask the owner to share it.", 403);
       return true;
     }
 
