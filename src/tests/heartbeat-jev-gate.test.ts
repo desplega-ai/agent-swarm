@@ -34,6 +34,7 @@ function fakeCtx(f: Fixture) {
     kvSets: 0,
     decides: [] as Array<Record<string, any>>,
     approvalReads: 0,
+    previousReads: 0,
   };
   const table = (columns: string[], rows: unknown[][]) => ({
     success: true,
@@ -64,6 +65,7 @@ function fakeCtx(f: Fixture) {
         }
         if (sql.includes("heartbeatMd")) return table(["heartbeatMd"], [[f.heartbeatMd ?? ""]]);
         if (sql.includes("'heartbeat-checklist'")) {
+          calls.previousReads++;
           // Execute the real projection so a broken SQL slice cannot hide behind a mock.
           const db = new Database(":memory:");
           try {
@@ -193,7 +195,7 @@ describe("heartbeat-jev-gate with a provider", () => {
       ].join("\n"),
       // The previous checklist already listed aaaaaaaa, so only bbbbbbbb is new.
       prevStatus:
-        '## Recent Failures (last 6h) [auto-generated]\n- [aaaaaaaa] "old failure" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z\n',
+        '## Current System Status [auto-generated]\n## Recent Failures (last 6h) [auto-generated]\n- [aaaaaaaa] "old failure" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z\n',
       prevOutput: "All clear.\n\nNothing to do.",
       failed: [
         {
@@ -275,7 +277,7 @@ describe("heartbeat-jev-gate with a provider", () => {
   ])("failures outside the previous Recent Failures section stay new (%s)", async (section) => {
     const { ctx } = fakeCtx({
       configs: { TYPESAFE_API_KEY: "x" },
-      prevStatus: `${section}## Your Standing Orders\n- [aaaaaaaa] "quoted failure" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z\n`,
+      prevStatus: `## Current System Status [auto-generated]\n${section}## Gate Findings [auto-generated]\n- [aaaaaaaa] "quoted failure" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z\n`,
       failed: [
         {
           id: "aaaaaaaa-0000",
@@ -290,6 +292,120 @@ describe("heartbeat-jev-gate with a provider", () => {
     expect((await run(ctx, { dryRun: true })).state.new_failures_since_previous_heartbeat).toEqual([
       "aaaaaaaa: quoted failure | boom",
     ]);
+  });
+
+  test.each([
+    "- Item 544: fix `## Recent Failures` parsing.\n",
+    "## Recent Failures\nSnapshot notes.\n",
+    '## Recent Failures (last 6h) [auto-generated]\n- [bbbbbbbb] "snapshot quote" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z\n',
+  ])("snapshot failure headings cannot hijack generated status (%s)", async (snapshot) => {
+    const { ctx, calls } = fakeCtx({
+      configs: { TYPESAFE_API_KEY: "x" },
+      prevStatus: [
+        "## Your Standing Orders (snapshot from HEARTBEAT.md)",
+        snapshot,
+        "## Instructions",
+        "Review the generated status.",
+        "## Current System Status [auto-generated]",
+        "## Recent Failures (last 6h) [auto-generated]",
+        '- [aaaaaaaa] "old failure" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z',
+      ].join("\n"),
+      failed: [
+        {
+          id: "aaaaaaaa-0000",
+          agentId: "12345678-bbbb",
+          task: "old failure",
+          failureReason: "boom",
+          finishedAt: "2026-10-15T12:00:00Z",
+        },
+        {
+          id: "bbbbbbbb-0000",
+          agentId: "12345678-bbbb",
+          task: "snapshot quote",
+          failureReason: "boom",
+          finishedAt: "2026-10-15T12:00:00Z",
+        },
+      ],
+      jev: jevSays(0.9),
+    });
+    expect((await run(ctx, { dryRun: true })).state.new_failures_since_previous_heartbeat).toEqual([
+      "bbbbbbbb: snapshot quote | boom",
+    ]);
+    expect(calls.previousReads).toBe(1);
+  });
+
+  test("an absent generated failures section cannot use a trailing snapshot heading", async () => {
+    const { ctx, calls } = fakeCtx({
+      configs: { TYPESAFE_API_KEY: "x" },
+      prevStatus: [
+        "## Current System Status [auto-generated]",
+        "## Task Overview [auto-generated]",
+        "- Failed (24h): 0",
+        "## Agent Status [auto-generated]",
+        "- Online: 6",
+        "## Your Standing Orders (snapshot from HEARTBEAT.md)",
+        "## Recent Failures (last 6h) [auto-generated]",
+        '- [aaaaaaaa] "snapshot quote" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z',
+      ].join("\n"),
+      failed: [
+        {
+          id: "aaaaaaaa-0000",
+          agentId: "12345678-bbbb",
+          task: "snapshot quote",
+          failureReason: "boom",
+          finishedAt: "2026-10-15T12:00:00Z",
+        },
+      ],
+      jev: jevSays(0.9),
+    });
+    expect((await run(ctx, { dryRun: true })).state.new_failures_since_previous_heartbeat).toEqual([
+      "aaaaaaaa: snapshot quote | boom",
+    ]);
+    expect(calls.previousReads).toBe(1);
+  });
+
+  test("a failed-task title heading does not hide later failures", async () => {
+    const { ctx, calls } = fakeCtx({
+      configs: { TYPESAFE_API_KEY: "x" },
+      prevStatus: [
+        "## Current System Status [auto-generated]",
+        "## Recent Failures (last 6h) [auto-generated]",
+        '- [aaaaaaaa] "Fix the task\n## Requirements" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z',
+        '- [bbbbbbbb] "later failure" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z',
+        "## Gate Findings [auto-generated]",
+        '- [cccccccc] "outside failures" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z',
+      ].join("\n"),
+      failed: [
+        {
+          id: "aaaaaaaa-0000",
+          agentId: "12345678-bbbb",
+          task: "Fix the task\n## Requirements",
+          failureReason: "boom",
+          finishedAt: "2026-10-15T12:00:00Z",
+        },
+        {
+          id: "bbbbbbbb-0000",
+          agentId: "12345678-bbbb",
+          task: "later failure",
+          failureReason: "boom",
+          finishedAt: "2026-10-15T12:00:00Z",
+        },
+        {
+          id: "cccccccc-0000",
+          agentId: "12345678-bbbb",
+          task: "outside failures",
+          failureReason: "boom",
+          finishedAt: "2026-10-15T12:00:00Z",
+        },
+      ],
+      jev: jevSays(0.9),
+    });
+    const verdict = await run(ctx, { dryRun: true });
+    expect(verdict.state.new_failures_since_previous_heartbeat).toEqual([
+      "cccccccc: outside failures | boom",
+    ]);
+    expect(verdict.state.failures_last_6h_total).toBe(3);
+    expect(calls.previousReads).toBe(1);
   });
 
   test("threshold and time zone come from swarm config", async () => {

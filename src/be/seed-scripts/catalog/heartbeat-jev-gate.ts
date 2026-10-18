@@ -140,16 +140,14 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
   const prev = await q(
     `WITH previous AS (
        SELECT id, substr(output, 1, 400) AS output,
-              CASE WHEN instr(task, '## Recent Failures') > 0
-                   THEN substr(task, instr(task, '## Recent Failures')) ELSE '' END AS failures
+              instr(char(10) || task, char(10) || '## Current System Status [auto-generated]' || char(10)) AS statusStart,
+              task
          FROM agent_tasks
         WHERE agentId = ? AND taskType = 'heartbeat-checklist' AND status = 'completed'
         ORDER BY createdAt DESC LIMIT 1
      )
      SELECT id, output,
-            CASE WHEN instr(failures, char(10) || '## ') > 0
-                 THEN substr(failures, 1, instr(failures, char(10) || '## '))
-                 ELSE failures END AS status
+            CASE WHEN statusStart > 0 THEN substr(task, statusStart) ELSE '' END AS status
        FROM previous`,
     [leadId],
   );
@@ -172,7 +170,25 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
   );
 
   const fails = parseFailures(failed.map(renderFailureLine).join("\n"));
-  const prevIds = new Set(parseFailures(String(prev[0]?.status ?? "")).map((f) => f.id));
+  // Only generated markers delimit failures: snapshot text may quote the heading,
+  // and raw task titles may contain ordinary level-two headings.
+  const statusLines = String(prev[0]?.status ?? "").split("\n");
+  // Agent Status always follows failures, even when no failures section exists.
+  // In the older layout, the HEARTBEAT snapshot follows the generated status.
+  const agentStatusStart = statusLines.indexOf("## Agent Status [auto-generated]");
+  const failureStart = statusLines.findIndex(
+    (line, i) =>
+      line === "## Recent Failures (last 6h) [auto-generated]" &&
+      (agentStatusStart < 0 || i < agentStatusStart),
+  );
+  const failureEnd = statusLines.findIndex(
+    (line, i) => i > failureStart && /^## .*\[auto-generated\]$/.test(line),
+  );
+  const previousFailures =
+    failureStart < 0
+      ? ""
+      : statusLines.slice(failureStart + 1, failureEnd < 0 ? undefined : failureEnd).join("\n");
+  const prevIds = new Set(parseFailures(previousFailures).map((f) => f.id));
   const newFails = fails.filter((f) => !prevIds.has(f.id));
 
   const { stamp, zone } = localStamp(nowMs, timeZone);

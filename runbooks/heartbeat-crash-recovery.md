@@ -816,7 +816,7 @@ Notes:
 
 The recurring `HEARTBEAT.md` checklist tick (`checkHeartbeatChecklist`) can ask a global script whether the tick needs the Lead before it creates the `heartbeat-checklist` task. Owner code: `runChecklistGate` and `defaultChecklistGateRunner` in `src/heartbeat/heartbeat.ts`, `runSavedScriptAsAgent` in `src/be/scripts/run-saved.ts`, and the `heartbeat.checklist.gate_findings` template in `src/heartbeat/templates.ts`. Boot triage never runs the gate.
 
-The seeded `heartbeat-jev-gate` compares current failures with the previous completed checklist's `## Recent Failures` section, ending at the next level-two heading or the end of the task. This works with standing orders before or after system status; failures mentioned outside that section do not count as previously seen.
+The seeded `heartbeat-jev-gate` compares current failures with the previous completed checklist's exact `## Recent Failures (last 6h) [auto-generated]` heading inside `## Current System Status [auto-generated]`. The section ends at the next generated level-two heading or the end of the task. Both standing-order layouts work; snapshot mentions of the failures heading and ordinary headings inside failed-task titles do not change the boundaries.
 
 ```mermaid
 flowchart TD
