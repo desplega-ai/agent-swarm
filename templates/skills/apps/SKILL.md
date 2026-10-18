@@ -18,6 +18,14 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 | `app-upsert` | Create an app, or replace an existing app's entire definition when you intentionally have the full desired state. |
 | `app-patch` | Make a focused change while preserving everything not mentioned in the patch. Prefer this for iteration. |
 | `app-query` | Run one declared named query and return its rows. Use this when an agent or saved script needs to consume app data rather than render the app UI. |
+| `app-rows-list` | List rows with typed equality filters, sorting, and a limit. Returns `{ rows, total }`. |
+| `app-row-get` | Read a row by `rowId`. Returns `{ row }`. |
+| `app-row-create` | Create a row from `values`. Returns `{ row }`. |
+| `app-rows-create` | Create 1 to 500 rows from a `rows: values[]` array, within 10 MiB. Returns `{ rows }`. |
+| `app-row-patch` | Patch a row by `rowId` with `values`. Returns `{ row }`. |
+| `app-row-delete` | Delete a row by `rowId`. Returns `{ ok: true }`. |
+| `app-rows-delete` | Delete matching rows with a non-empty `equals` filter. Returns `{ deleted }`. |
+| `app-action-run` | Run a declared script, task, or sync action with `{ appId, action, input? }`. Agents can invoke it through MCP only. |
 | `app-history` | List definition snapshots and their compact model/column digests before choosing a restore point. |
 | `app-diff` | Show a unified definition diff; defaults to newest snapshot → CURRENT. |
 | `app-rollback` | Restore a snapshot through the normal schema-migration engine. |
@@ -28,7 +36,7 @@ For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch`
 
 ### Reading an app's callable surface
 
-One `app-get` returns everything needed to drive an app you did not write: `definition.queries` are runnable with `app-query` (supply every `$param` the query references), and `definition.actions` are invocable with `POST /api/apps/<id>/actions/<name>` (a `script` action runs its script, a `task` action spawns a task, a `sync` action refreshes sources). Read a query's `$param` placeholders and an action's kind/args from the definition before calling — do not guess parameter names.
+One `app-get` returns everything needed to drive an app you did not write: `definition.queries` are runnable with `app-query` (supply every `$param` the query references), and `definition.actions` are invocable with `app-action-run` or `POST /api/apps/<id>/actions/<name>` (a `script` action runs its script, a `task` action spawns a task, a `sync` action refreshes sources). Read the query parameters and action arguments from the definition before invocation. Do not guess parameter names.
 
 ### Verified action caller
 
@@ -372,7 +380,7 @@ Use a task action named Tackle when a person should hand one issue row to the sw
 
 For direct MCP calls, `app-query` accepts `{ appId, query, params? }` and returns rows from that declared named query; every supplied param must be referenced by a `$param` filter in that query. Use it when an agent needs to read app state without scraping the UI.
 
-Saved scripts use the generated SDK name `ctx.swarm.app_query({ appId, query, params? })`. Use `app_query` in scripts or workflows that turn current app rows into reports, digests, or follow-up work. Saved scripts also get generated per-app types automatically: each app contributes an `App_<Name>` namespace with one row interface per model (enum columns as literal unions) and a typed `app_query` overload per named query, all visible via `script-query-types`. Actions stay REST-only from scripts — there is no SDK method to invoke them.
+Saved scripts use the generated SDK name `ctx.swarm.app_query({ appId, query, params? })`. Use `app_query` in scripts or workflows that turn current app rows into reports, digests, or follow-up work. Saved scripts also get generated per-app types automatically: each app contributes an `App_<Name>` namespace with one row interface per model (enum columns as literal unions) and a typed `app_query` overload per named query, all visible via `script-query-types`. Scripts can create, list, get, patch, and delete rows with the seven row tools. Actions remain REST/MCP-only and have no script SDK method.
 
 ### Pages, routes, and page trees
 
@@ -764,3 +772,17 @@ The tool returns `{ appId, url: "/apps/<id>" }`. Open that URL to verify the liv
 - Logged-in browser: a fresh dashboard has no connection and redirects to /setup. Seed the localStorage key `agent-swarm-connections` with `{connections:[{id,name,apiUrl,apiKey}],activeId}`. Build the value from an env var and pipe it to `agent-browser eval --stdin`, so the key never reaches a command line. Reload, then pick a user in the "Who are you?" dialog.
 - Apps scroll inside an inner canvas, so a full-page screenshot captures only the viewport. Scroll the canvas or raise the viewport height. For mobile, set a 375px-wide viewport before the screenshot.
 - App definitions: `GET /api/apps` and `GET /api/apps/<id>` with the API key as Bearer.
+
+
+### Rows from agents and scripts
+
+Every row tool requires `appId` and `model`. Scripts use underscore names, such as `ctx.swarm.app_row_create` and `ctx.swarm.app_rows_list`.
+Results use the usual `data` wrapper, so scripts read `res?.data ?? res`. Rows contain system fields and declared columns at the top level.
+Writes record `agent:<agentId>` in `createdBy` and `updatedBy`. Source projections and join keys remain read-only. Each row input must fit within 1 MiB.
+
+`app-rows-list` accepts `equals`, `sort: "<column>:asc|desc"`, and `limit` from 1 to 1000 (default 200).
+Equality filters accept declared columns and system columns. Filter values must match the column kind and use strict equality.
+`app-rows-delete` requires at least one equality filter and accepts a limit from 1 to 1000 (default 1000).
+
+`app-action-run` returns the REST action body under `data`. Script actions run with the script owner's identity and receive the verified invoking agent as `caller`.
+Scripts and extensions cannot invoke `app-action-run`.

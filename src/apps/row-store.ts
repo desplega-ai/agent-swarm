@@ -109,7 +109,7 @@ function indexKeys(model: string, definition: ModelDef, row: AppRow): string[] {
   return keys;
 }
 
-function validValue(column: ColumnDef, value: unknown): boolean {
+export function validValue(column: ColumnDef, value: unknown): boolean {
   if (value === null) return column.required !== true;
   if (column.kind === "string") return typeof value === "string";
   if (column.kind === "number") return typeof value === "number" && Number.isFinite(value);

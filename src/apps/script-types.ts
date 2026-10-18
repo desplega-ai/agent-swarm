@@ -206,7 +206,7 @@ function renderApp(app: AppRecord, namespace: string): string {
 export namespace ${namespace} {
 ${renderedModels.map((model) => model.source).join("\n\n")}
 
-  /** Declared actions. Invocation is REST-only: POST /api/apps/<id>/actions/<name>. */
+  /** Scripts can write rows. Declared actions are callable through REST or MCP only. */
   export type ActionName = ${actionType};
 
   /** Script action arguments include server-stamped app and caller context. */

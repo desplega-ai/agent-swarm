@@ -54,6 +54,8 @@ if [[ "$probe_status" -eq 134 ]]; then
   export SWARM_SKIP_SANDBOX_SPAWN_TESTS=1
   echo "[pre-push-tests] sandbox spawn probe exited 134; skipping spawn-dependent tests in:"
   printf '  %s\n' \
+    src/tests/app-action-run-tool.test.ts \
+    src/tests/app-row-tools.test.ts \
     src/tests/apps-rbac.test.ts \
     src/tests/apps-spike2.test.ts \
     src/tests/apps-sync-engine.test.ts \
