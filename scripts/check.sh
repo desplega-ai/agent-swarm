@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# `bun run check`: one local check loop for agents and humans, run before a push.
+# `bun run check:local`: one local check loop for agents and humans, run before a push.
 #
 #   1. bun install --frozen-lockfile
 #   2. Biome (read-only, like CI's `bun run lint`) on changed files it lints in CI
 #   3. anti-slop Oxlint rules (`bun run lint:slop`, whole scope, about 5 s)
-#   4. tsgo on the root project, plus apps/ui when it changed
+#   4. `bun check` (Bun's built-in type checker) on the root project, plus
+#      apps/ui when it changed
 #   5. test:root on the tests affected by the change (scripts/pre-push-tests.sh
 #      scoping, including its full-suite fallbacks)
 #
@@ -45,12 +46,12 @@ fi
 step "anti-slop rules (oxlint)"
 bun run lint:slop
 
-step "tsgo --noEmit (root)"
+step "bun check (root)"
 bun run tsc:check
 
 if grep -q '^apps/ui/' <<<"$changed"; then
-  step "tsgo -b (apps/ui)"
-  (cd apps/ui && bunx tsgo -b)
+  step "bun check -b (apps/ui)"
+  (cd apps/ui && bun check -b)
 fi
 
 step "test:root (affected tests)"

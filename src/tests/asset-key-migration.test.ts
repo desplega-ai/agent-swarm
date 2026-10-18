@@ -4,6 +4,7 @@ import { closeDb, createTaskExtended, createUser, getDb, getDbClient, initDb } f
 const FRESH_DB = "./test-asset-key-migration-fresh.sqlite";
 const HISTORICAL_DB = "./test-asset-key-migration-historical.sqlite";
 const HISTORY_REBUILD_DB = "./test-asset-key-migration-history-rebuild.sqlite";
+const INBOX_UPGRADE_DB = "./test-asset-key-migration-inbox-upgrade.sqlite";
 const LEGACY_STATUS_DB = "./test-asset-key-migration-legacy-status.sqlite";
 
 const globals = globalThis as typeof globalThis & {
@@ -97,6 +98,7 @@ beforeAll(async () => {
   await removeDb(HISTORICAL_DB);
   await removeDb(HISTORY_REBUILD_DB);
   await removeDb(LEGACY_STATUS_DB);
+  await removeDb(INBOX_UPGRADE_DB);
   initDb(FRESH_DB);
 });
 
@@ -108,6 +110,7 @@ afterAll(async () => {
   await removeDb(HISTORICAL_DB);
   await removeDb(HISTORY_REBUILD_DB);
   await removeDb(LEGACY_STATUS_DB);
+  await removeDb(INBOX_UPGRADE_DB);
 });
 
 describe("asset namespace key migrations", () => {
@@ -171,6 +174,38 @@ describe("asset namespace key migrations", () => {
       .get()!.sql;
     expect(historySchema).toContain("'app'");
     expect(historySchema).toContain("'script'");
+  });
+
+  test("inbox read cursor is nullable on fresh databases and has no backfill on upgrade", async () => {
+    const column = await getDbClient().get<{ notnull: number; dflt_value: string | null }>(
+      "SELECT \"notnull\", dflt_value FROM pragma_table_info('inbox_item_state') WHERE name = 'lastReadAt'",
+    );
+    expect(column).toEqual({ notnull: 0, dflt_value: null });
+    closeDb();
+    initDb(INBOX_UPGRADE_DB);
+    try {
+      const user = await createUser({ name: "Upgrade User", email: "inbox-upgrade@example.com" });
+      const readAt = "2026-01-01T00:00:00.000Z";
+      await getDbClient().run(
+        `INSERT INTO inbox_item_state (userId, itemType, itemId, status, readAt)
+         VALUES (?, 'to_read', 'existing-item', 'done', ?)`,
+        [user.id, readAt],
+      );
+      await getDbClient().run("ALTER TABLE inbox_item_state DROP COLUMN lastReadAt");
+      await getDbClient().run("DELETE FROM _migrations WHERE version = 227");
+      closeDb();
+      initDb(INBOX_UPGRADE_DB);
+      expect(
+        await getDbClient().get(
+          "SELECT status, readAt, lastReadAt FROM inbox_item_state WHERE itemId = 'existing-item'",
+        ),
+      ).toEqual({ status: "done", readAt, lastReadAt: null });
+      closeDb();
+      expect(() => initDb(INBOX_UPGRADE_DB)).not.toThrow();
+    } finally {
+      closeDb();
+      initDb(FRESH_DB);
+    }
   });
 
   test("old insert statements may omit key and repeated shared namespaces are valid", () => {

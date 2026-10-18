@@ -11,6 +11,7 @@ const config: CodexHookConfig = {
   apiUrl: "http://steering.test",
   apiKey: "example-test-key",
   agentId: "11111111-1111-4111-8111-111111111111",
+  taskId: "22222222-2222-4222-8222-222222222222",
 };
 
 const enabledEnv = { STEERING_ENABLED: "true" };
@@ -47,7 +48,7 @@ function fakeFetch(
       options.deliveredCalls?.push(id);
       return new Response("{}", { status: 200 });
     }
-    if (url.endsWith("/api/steering-messages")) {
+    if (new URL(url).pathname === "/api/steering-messages") {
       return Response.json({ messages });
     }
     return new Response("{}", { status: 404 });
@@ -232,6 +233,13 @@ describe("codex steering hook", () => {
         AGENT_SWARM_API_KEY: "k",
       }),
     ).toMatchObject({ agentId: config.agentId, apiKey: "k" });
+    expect(
+      resolveCodexHookConfig({
+        AGENT_ID: config.agentId,
+        AGENT_SWARM_API_KEY: "k",
+        AGENT_SWARM_TASK_ID: config.taskId,
+      }),
+    ).toMatchObject({ taskId: config.taskId });
     expect(resolveCodexHookConfig({ AGENT_SWARM_API_KEY: "k" })).toBeNull();
     expect(resolveCodexHookConfig({ AGENT_ID: config.agentId })).toBeNull();
   });

@@ -26,7 +26,6 @@ const AppearancePage = lazyRoute(() => import("@/pages/settings/appearance-page"
 const SecretsPage = lazyRoute(() => import("@/pages/settings/secrets-page"));
 const ConfigurationPage = lazyRoute(() => import("@/pages/settings/configuration-page"));
 const ExtensionsPage = lazyRoute(() => import("@/pages/settings/extensions-page"));
-const ExtensionDetailPage = lazyRoute(() => import("@/pages/settings/extension-detail-page"));
 const ExtensionCatalogPage = lazyRoute(() => import("@/pages/settings/extension-catalog-page"));
 const RuntimePoolsPage = lazyRoute(() => import("@/pages/settings/runtime-pools-page"));
 const RuntimePoolDetailPage = lazyRoute(() => import("@/pages/settings/runtime-pool-detail-page"));
@@ -189,9 +188,10 @@ export const router = createBrowserRouter([
           { path: "integrations", element: <IntegrationsPage /> },
           { path: "integrations/:id", element: <IntegrationDetailPage /> },
           { path: "configuration", element: <ConfigurationPage /> },
-          { path: "extensions", element: <ExtensionsPage /> },
           { path: "extensions/new", element: <ExtensionCatalogPage /> },
-          { path: "extensions/:id", element: <ExtensionDetailPage /> },
+          // One route for the grid and its detail sheet, so opening and closing
+          // the sheet keeps the page mounted.
+          { path: "extensions/:id?", element: <ExtensionsPage /> },
           { path: "runtime-pools", element: <RuntimePoolsPage /> },
           { path: "runtime-pools/new", element: <RuntimePoolDetailPage /> },
           { path: "runtime-pools/controllers", element: <RuntimeControllersPage /> },

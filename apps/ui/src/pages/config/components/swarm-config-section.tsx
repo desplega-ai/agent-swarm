@@ -3,7 +3,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo } from "react";
 import type { SwarmConfig } from "@/api/types";
 import { Combobox } from "@/components/shared/combobox";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSwarmConfigTable } from "@/hooks/use-swarm-config";
+import { DESCRIPTION_CELL_CLASS, formatDescription } from "../description-cell";
 import { ConfigDetailDialog } from "./config-detail-dialog";
 import { ConfigEntryDialog } from "./config-entry-dialog";
 
@@ -60,6 +61,7 @@ export function SwarmConfigSection() {
       {
         field: "scope",
         headerName: "Scope",
+        context: HIDE_WHEN_COMPACT,
         width: 110,
         minWidth: 90,
         cellRenderer: (params: { value: string }) => (
@@ -70,6 +72,7 @@ export function SwarmConfigSection() {
       },
       {
         headerName: "Agent / Scope ID",
+        context: HIDE_WHEN_COMPACT,
         width: 160,
         minWidth: 120,
         valueGetter: (params) => {
@@ -93,6 +96,7 @@ export function SwarmConfigSection() {
       {
         field: "value",
         headerName: "Value",
+        context: HIDE_WHEN_COMPACT,
         width: 260,
         minWidth: 160,
         maxWidth: 320,
@@ -108,6 +112,7 @@ export function SwarmConfigSection() {
       {
         field: "exportToEnv",
         headerName: "Agent env",
+        context: HIDE_WHEN_COMPACT,
         width: 120,
         minWidth: 100,
         cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
@@ -125,11 +130,15 @@ export function SwarmConfigSection() {
       {
         field: "description",
         headerName: "Description",
+        context: HIDE_WHEN_COMPACT,
         flex: 1,
         minWidth: 160,
-        cellRenderer: (params: { value: string | null }) => (
-          <span className="text-muted-foreground truncate">{params.value ?? "—"}</span>
-        ),
+        tooltipField: "description",
+        // The cell is a flex box (ag-grid.css) and its `.ag-cell-wrapper` child defaults to
+        // `min-width: auto`, so long text widened the wrapper past the column instead of
+        // ellipsizing. `min-w-0` lets it shrink to the column.
+        cellClass: DESCRIPTION_CELL_CLASS,
+        valueFormatter: formatDescription,
       },
       {
         headerName: "",

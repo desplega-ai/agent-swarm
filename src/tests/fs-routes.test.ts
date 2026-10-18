@@ -202,6 +202,59 @@ describe("/api/fs REST", () => {
     expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
+  test("agent-fs upload persists file metadata instead of the PUT response metadata", async () => {
+    const body = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    let receivedBody: Buffer | undefined;
+    const remote = createHttpServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      receivedBody = Buffer.concat(chunks);
+      const response = JSON.stringify({
+        path: `tasks/${taskId}/image.jpg`,
+        version: 7,
+        contentHash: "hash-1",
+      });
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(response),
+      });
+      res.end(response);
+    });
+    const remotePort = await listenOnFreePort(remote);
+    process.env.AGENT_FS_API_URL = `http://localhost:${remotePort}`;
+    process.env.API_AGENT_FS_API_KEY = "af_test";
+    process.env.AGENT_FS_DEFAULT_ORG_ID = "org-1";
+    process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-1";
+    resetFileStorageProviderForTests();
+
+    try {
+      const upload = await authedFetch(`/api/fs/tasks/${taskId}/files?name=image.jpg`, {
+        method: "POST",
+        body,
+        headers: { "Content-Type": "image/jpeg" },
+      });
+      expect(upload.status).toBe(201);
+      const attachment = await upload.json();
+      expect(attachment.providerId).toBe("agent-fs");
+      expect(attachment.mimeType).toBe("image/jpeg");
+      expect(attachment.sizeBytes).toBe(body.byteLength);
+      expect(receivedBody).toEqual(body);
+
+      const rows = await getTaskAttachments(taskId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(attachment.id);
+      expect(rows[0]?.mimeType).toBe("image/jpeg");
+      expect(rows[0]?.sizeBytes).toBe(body.byteLength);
+    } finally {
+      delete process.env.AGENT_FS_API_URL;
+      delete process.env.API_AGENT_FS_API_KEY;
+      delete process.env.AGENT_FS_DEFAULT_ORG_ID;
+      delete process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+      resetFileStorageProviderForTests();
+      await new Promise<void>((resolve) => remote.close(() => resolve()));
+    }
+  });
+
   test("operator API key can upload and delete without X-Agent-ID for dashboard use", async () => {
     const upload = await operatorFetch(`/api/fs/tasks/${taskId}/files?name=dashboard.txt`, {
       method: "POST",

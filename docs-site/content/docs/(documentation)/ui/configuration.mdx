@@ -58,9 +58,9 @@ SDK selection is incompatible with an effective Claude Bridge or legacy bridge b
 | Harness & tools | `CLAUDE_TRUST_PRESEED`, `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `SWARM_ENABLED_TOOLS`, `OPENROUTER_BASE_URL`, `OPENROUTER_APP_ATTRIBUTION`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
 | Model tiers | `MODEL_TIER_<PROVIDER>_<TIER>` for every provider with a tier mapping |
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
-| Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `AGENT_FS_PUBLIC_URL`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED` |
+| Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `AGENT_FS_PUBLIC_URL`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_STATUS_ICON_COMPLETED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults) |
-| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `ANONYMIZED_TELEMETRY` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, and the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`) |
 
@@ -100,7 +100,11 @@ Controller credentials belong on the controller host. They are absent from the c
 
 `HEARTBEAT_CHECKLIST_GATE_SCRIPT` names a global-scope script that runs as the Lead before
 each recurring heartbeat checklist task. It returns `{ quiet: boolean, reason?: string, summary?: string }`.
-Leave it empty to turn the gate off.
+
+- Unset (the default): the built-in `heartbeat-jev-gate` runs when a global Jev key is set (see
+  [Jev gate](#jev-gate)). With no key, the gate stays off.
+- Set to `off` or to an empty value: the gate is off, even when a Jev key is set.
+- Set to a script name: that script runs.
 
 `HEARTBEAT_CHECKLIST_GATE_MODE` decides what the verdict does:
 
@@ -117,8 +121,11 @@ without a restart. Config writes reject modes other than `shadow` and `enforce`.
 
 ### Jev gate
 
-The built-in `heartbeat-jev-gate` script is a ready gate. Set
-`HEARTBEAT_CHECKLIST_GATE_SCRIPT=heartbeat-jev-gate` to use it. Each tick it builds a compact
+The built-in `heartbeat-jev-gate` script is a ready gate. It runs by default, in `shadow` mode,
+once a global `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set and
+`HEARTBEAT_CHECKLIST_GATE_SCRIPT` is unset. An OpenRouter key does not turn it on while
+`OPENROUTER_BASE_URL` points at a gateway, and `HEARTBEAT_JEV_GATE_PROVIDER` limits which key
+counts. `enforce` stays opt-in. Each tick it builds a compact
 state of about 1,500 characters (current time, new failures since the previous checklist,
 tracked HEARTBEAT items due today or past their `DELETE` date, the previous checklist result,
 task counts, agent status) and asks Jev, TypeSafe's decision model, whether the Lead needs to
@@ -137,8 +144,8 @@ environment is not detected. The key never enters the script: it calls the
   the key may then be a gateway token. The tick then reports an `error` verdict and the checklist
   runs.
 
-With neither key, the first tick creates one approval request asking a person to add a key or
-decline, and links it in the heartbeat log's gate `reason`. No Slack message is sent. Until a
+When you name `heartbeat-jev-gate` explicitly and neither key exists, the first tick creates
+one approval request asking a person to add a key or decline, and links it in the heartbeat log's gate `reason`. No Slack message is sent. Until a
 key exists, every tick returns `{ quiet: false, reason: "jev-gate inactive: <state>" }` with no
 `summary`, so the checklist runs as if the gate were off. Ticks never prompt again after that
 first request, whether it is pending, approved, rejected, or expired. Adding a key turns the
@@ -175,6 +182,12 @@ and reported as an executor error before a deployment environment can create a p
 More workers can improve concurrent throughput but retain more WASM memory, up to each
 script's memory limit per busy worker. `SCRIPT_RUN_CONCURRENCY_CAP` still controls admission
 of script runs separately, so raising the pool size alone cannot exceed that cap.
+
+`SCRIPT_EGRESS_ALLOW_PRIVATE` (default off) and `SCRIPT_EGRESS_ALLOWLIST` (default empty) set
+which hosts QuickJS scripts can fetch. Off and empty mean any public host and no private,
+loopback, link-local or metadata address. The allowlist takes comma-separated `host[:port]`
+patterns; config writes reject other shapes. The native executor does not enforce either key
+yet. See [Scripts runtime § Egress policy](/docs/guides/scripts-runtime#egress-policy).
 
 ## Editing
 

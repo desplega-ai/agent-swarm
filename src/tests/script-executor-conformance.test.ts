@@ -69,7 +69,7 @@ class FakeScriptExecutor implements ScriptExecutor {
 
     const stdout = "x".repeat(runInput.resources.maxStdoutBytes + 10);
     return {
-      result: runInput.configPayload.system.apiKey.value,
+      result: runInput.configPayload.system.agentId.value,
       stdout: stdout.slice(0, runInput.resources.maxStdoutBytes),
       stderr: "",
       truncated: { stdout: true, stderr: false },
@@ -123,10 +123,10 @@ function conformance(name: string, makeExecutor: () => ScriptExecutor, spawns: b
       const output = await makeExecutor().run(
         input({
           source:
-            "export default async (_args, ctx) => ctx.stdlib.Redacted.value(ctx.swarm.config.apiKey);",
+            "export default async (_args, ctx) => ctx.stdlib.Redacted.value(ctx.swarm.config.agentId);",
         }),
       );
-      expect(output.result).toBe("conformance-secret");
+      expect(output.result).toBe("agent-1");
     });
   });
 }

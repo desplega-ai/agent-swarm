@@ -14,7 +14,7 @@ import {
 } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelCell } from "@/components/shared/agent-model-cell";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { HarnessCell, harnessLabel } from "@/components/shared/harness-cell";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -92,6 +92,7 @@ export default function AgentsPage() {
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(() => {
     const modelColumn: ColDef<AgentWithTasks> = {
       headerName: "Model",
+      context: HIDE_WHEN_COMPACT,
       width: 320,
       minWidth: 260,
       valueGetter: (params) => (params.data ? modelSearchText(params.data) : ""),
@@ -124,10 +125,11 @@ export default function AgentsPage() {
           </span>
         ),
       },
-      { field: "role", headerName: "Role", width: 150 },
+      { field: "role", headerName: "Role", width: 150, context: HIDE_WHEN_COMPACT },
       {
         field: "harnessProvider",
         headerName: "Harness",
+        context: HIDE_WHEN_COMPACT,
         width: 200,
         cellRenderer: (params: { data: AgentWithTasks | undefined }) => (
           <HarnessCell
@@ -145,6 +147,7 @@ export default function AgentsPage() {
       },
       {
         headerName: "Capacity",
+        context: HIDE_WHEN_COMPACT,
         width: 110,
         valueGetter: (params) => {
           const agent = params.data;

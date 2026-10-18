@@ -134,6 +134,7 @@ The authenticated user MCP exposes only task content and model controls. It assi
 | `modelTier` | string | No | Portable model intent for this task: `smol`, `regular`, `smart`, or `ultra`. Resolved at claim/run time by the assignee's harness/provider. Legacy shortnames map as `haiku→smol`, `sonnet→regular`, `opus→smart`, `fable→ultra`. |
 | `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | string | No | Reasoning effort for this task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when the selected model supports it. |
+| `profile` | string | No | Model profile name (see `list-model-profiles`): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with `model` and `modelTier`; a set `effort` still wins over the profile's. |
 | `slackChannelId` | string | No | Slack channel ID for progress updates (auto-inherited if omitted) |
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
 | `slackUserId` | string | No | Slack user ID of the original requester (auto-inherited if omitted) |
@@ -143,6 +144,14 @@ The authenticated user MCP exposes only task content and model controls. It assi
 | `outputSchema` | object | No | JSON Schema the assignee's final output must satisfy. `store-progress` rejects a completion that doesn't match. Supported keywords: `type`, `required`, `properties`, `enum`, `const`, `items`; every nested schema under `properties`/`items` must itself be a plain object, or `send-task` rejects it at ingress. |
 
 Slack metadata and `requestedByUserId` are auto-inherited from the creator's current task via the `X-Source-Task-Id` header. Slack channel/thread fields inherit as one route: explicit values that conflict with the parent or Slack context key are rejected unless both fields are provided with `overrideSlackContext: true` for an intentional audited handoff.
+
+### list-model-profiles
+
+List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on `send-task` (or `task-action` `create`) to run that task on it, or set it as an agent's default through `PATCH /api/agents/{id}/runtime`. A profile runs only on its own harness. Profile writes are operator-only.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `harness` | string | No | Only profiles for this harness (`claude`, `codex`, `pi`, ...) |
 
 ### get-task-details
 
@@ -288,7 +297,7 @@ Lead-only. Add or update hand-verified facts for one model, for example a launch
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `provider` | string | Yes | models.dev provider id: `anthropic`, `openai`, `openrouter`, `amazon-bedrock`, `opencode` |
+| `provider` | string | Yes | models.dev provider id: `anthropic`, `openai`, `openrouter`, `amazon-bedrock`, `opencode`, `nan`, `helmcode` |
 | `modelId` | string | Yes | Model id as models.dev keys it (e.g. `claude-opus-5-5`) |
 | `reason` | string | Yes | Why this overlay exists (source of the facts) |
 | `name` | string | No | Display name |
@@ -518,6 +527,7 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `modelTier` | string | No | Portable model tier for the created task: `smol`, `regular`, `smart`, or `ultra` (only used with `create` action) |
 | `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list; without it an unknown model id is rejected (only used with `create` action) |
 | `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when supported |
+| `profile` | string | No | Model profile name for the created pool task (see `list-model-profiles`); only workers on its harness claim it. Exclusive with `model` and `modelTier` (only used with `create` action) |
 | `requiredCapabilities` | array | No | Capabilities required for routing the newly created task |
 | `leadOnly` | boolean | No | Structured authorization constraint for a newly created privileged task. Only Lead agents may claim it. |
 
@@ -762,6 +772,7 @@ Create an approval request and return at once with the request ID and URL. The a
 | `title` | string | Yes | Title of the approval request |
 | `questions` | array | Yes | Questions to ask the human |
 | `timeoutSeconds` | integer | No | Seconds until the request expires. After that it becomes `timeout` and the requesting agent gets a `hitl-follow-up` task. |
+| `detached` | boolean | No | Do not attach the request to your current task, so no `hitl-follow-up` task is created. For scripts that read the request's status themselves. |
 
 Approval requests are accessible via the dashboard at `/approval-requests/{id}`. Each question's `label` and `description` render there as markdown; a bare image URL on its own line in `description` shows as an image. The tool sends no Slack message, so share the URL yourself. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses. A request with no `timeoutSeconds` is cancelled after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7) with no answer. An answer after the deadline is refused with 409.
 
@@ -1148,9 +1159,11 @@ A script may also export a Zod schema named `argsSchema` describing its expected
 
 There is no ambient task context: pass values such as `taskId` through `args`.
 Inline and named scripts receive `ctx.swarm`, registered `ctx.api` / `ctx.mcp`
-connection clients, `ctx.stdlib`, and `ctx.logger`. Durable
-`launch-script-run` workflows instead receive `ctx.run` and journaled
-`ctx.step.*` helpers, with no connection clients or `ctx.swarm.config`. See
+connection clients, `ctx.fs` / `ctx.sh` (the agent's agent-fs drive at `/afs`
+plus scratch memory, and a bash interpreter over them), `ctx.stdlib`, and
+`ctx.logger`. Durable `launch-script-run` workflows instead receive `ctx.run`
+and journaled `ctx.step.*` helpers, with no connection clients, no `ctx.fs` /
+`ctx.sh`, and no `ctx.swarm.config`. See
 [Scripts runtime](/docs/guides/scripts-runtime) for the full authoring contract.
 
 ### script-delete

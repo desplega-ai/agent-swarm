@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   QuickJSContext,
   QuickJSDeferredPromise,
@@ -16,6 +17,7 @@ import { SANDBOX_EPILOGUE, SANDBOX_PRELUDE } from "./quickjs-prelude";
 import { SANDBOX_WEB_SHIMS } from "./quickjs-web-shims";
 import type { SourceMapReader } from "./sourcemap";
 import type {
+  ExecutorInput,
   ExecutorOutput,
   ScriptExecutorError,
   ScriptResourcePolicy,
@@ -29,7 +31,21 @@ export type QuickJSJob = {
   args: unknown;
   configPayload: SwarmConfigPayload;
   resources: ScriptResourcePolicy;
+  network: ExecutorInput["network"];
 };
+
+// Set while a ctx.swarm or ctx.mcp host call runs. Those calls go to the swarm
+// API (mcpBaseUrl) with the host bearer; the egress guard trusts that origin
+// only inside this scope; a direct script fetch of it follows the policy.
+const swarmHostCalls = new AsyncLocalStorage<true>();
+
+/** True inside a ctx.swarm / ctx.mcp host call. */
+export function isSwarmHostCall(): boolean {
+  return swarmHostCalls.getStore() === true;
+}
+
+// Values the host uses for swarm calls. Script code gets an opaque handle only.
+const HOST_ONLY_REDACTED = new Set(["system:apiKey", "system:runtimeInstanceId"]);
 
 const BUNDLE_FILE = USER_SCRIPT_FILE.replace(/\.ts$/, ".js");
 // Host calls (fetch, ctx.swarm, ctx.api, ctx.mcp) for one run: at most this
@@ -204,6 +220,7 @@ function callable(target: unknown, name: string): (...args: unknown[]) => Promis
 /** Runs an async host call that the sandbox requested. Only these paths exist. */
 async function dispatchCall(
   hostCtx: RuntimeCtx,
+  sqlApiSlugs: ReadonlySet<string>,
   path: string,
   args: unknown[],
   signal: AbortSignal,
@@ -236,17 +253,32 @@ async function dispatchCall(
   const [kind, first, ...rest] = path.split(".");
   if (kind === "swarm" && first === "room" && rest.length === 1) {
     const name = rest[0] as string;
-    return callable(own(hostCtx.swarm.room, name), `ctx.swarm.room.${name}`)(...args);
+    const method = callable(own(hostCtx.swarm.room, name), `ctx.swarm.room.${name}`);
+    return swarmHostCalls.run(true, () => method(...args));
   }
   if (kind === "swarm" && first && rest.length === 0) {
     // ctx.swarm is a Proxy that maps any tool name to a call (allowlisted inside).
-    const method = first in Object.prototype ? undefined : hostCtx.swarm[first];
-    return callable(method, `ctx.swarm.${first}`)(...args);
+    const method = callable(
+      first in Object.prototype ? undefined : hostCtx.swarm[first],
+      `ctx.swarm.${first}`,
+    );
+    return swarmHostCalls.run(true, () => method(...args));
   }
   if ((kind === "api" || kind === "mcp") && first && rest.length > 0) {
     const name = rest.join(".");
     const client = own(hostCtx[kind], first);
-    return callable(own(client, name), `ctx.${kind}.${first}.${name}`)(...args);
+    const method = callable(own(client, name), `ctx.${kind}.${first}.${name}`);
+    // ctx.mcp goes through the swarm API's MCP proxy, and so does a SQL
+    // connection's ctx.api query. Other ctx.api calls go to the connection's
+    // own host and stay under the egress policy.
+    const viaSwarm = kind === "mcp" || sqlApiSlugs.has(first);
+    return viaSwarm ? swarmHostCalls.run(true, () => method(...args)) : method(...args);
+  }
+  if (kind === "fs" && first && rest.length === 0) {
+    return callable(own(hostCtx.fs, first), `ctx.fs.${first}`)(...args);
+  }
+  if (kind === "sh" && first === undefined) {
+    return hostCtx.sh(...(args as Parameters<RuntimeCtx["sh"]>));
   }
   throw new Error(`unknown quickjs host call: ${path}`);
 }
@@ -268,6 +300,9 @@ function redactedFor(config: SwarmConfig, hostId: unknown): RedactedValue<unknow
 function dispatchSync(config: SwarmConfig, op: string, value: unknown): unknown {
   switch (op) {
     case "redacted.value":
+      if (typeof value === "string" && HOST_ONLY_REDACTED.has(value)) {
+        throw new Error("host-only credential: ctx.swarm uses it, script code cannot read it");
+      }
       return Redacted.value(redactedFor(config, value));
     case "redacted.meta":
       return Redacted.meta(redactedFor(config, value));
@@ -494,11 +529,17 @@ async function evaluateJob(
     swarmConfig: config,
     apiConnections: job.configPayload.apiConnections,
     mcpConnections: job.configPayload.mcpConnections,
+    agentFs: job.configPayload.agentFs,
+    signal: host.signal,
   });
+  const sqlApiSlugs = new Set(
+    (job.configPayload.apiConnections ?? []).filter((c) => c.kind === "sql").map((c) => c.slug),
+  );
   const shape = {
     hasRuntimeInstanceId: config.runtimeInstanceId !== undefined,
     api: Object.fromEntries(Object.entries(hostCtx.api).map(([slug, c]) => [slug, Object.keys(c)])),
     mcp: Object.fromEntries(Object.entries(hostCtx.mcp).map(([slug, c]) => [slug, Object.keys(c)])),
+    fs: Object.keys(hostCtx.fs),
   };
   // Accept both shapes, like eval-harness: callers may pass already-serialized JSON.
   const args = typeof job.args === "string" ? JSON.parse(job.args) : (job.args ?? null);
@@ -566,7 +607,11 @@ async function evaluateJob(
     const callArgs = JSON.parse(ctx.getString(argsHandle)) as unknown[];
     return bridge(async () => {
       const bodyBytes = FETCH_PATHS.has(path) ? binaryBodySize(callArgs?.[0]) : 0;
-      return host.call(() => dispatchCall(hostCtx, path, callArgs, host.signal), true, bodyBytes);
+      return host.call(
+        () => dispatchCall(hostCtx, sqlApiSlugs, path, callArgs, host.signal),
+        true,
+        bodyBytes,
+      );
     });
   });
   define("__host_sync", (opHandle, valueHandle) => {

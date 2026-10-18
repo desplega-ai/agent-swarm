@@ -124,6 +124,62 @@ describe("ClaudeBackgroundKeepalive", () => {
     TIMING,
   );
 
+  test("holds input only while a non-ambient background task is live", () => {
+    const k = keepalive();
+    const release = () => {};
+    expect(k.holdInputForBackgroundWork(release)).toBe(false);
+    k.observe(bgChanged([{ task_id: "watcher", ambient: true }]));
+    expect(k.holdInputForBackgroundWork(release)).toBe(false);
+    k.observe(bgChanged([{ task_id: "agent", task_type: "local_agent" }]));
+    expect(k.holdInputForBackgroundWork(release)).toBe(true);
+    k.observe(bgChanged([]));
+    expect(k.holdInputForBackgroundWork(release)).toBe(false);
+    k.stop();
+  });
+
+  test(
+    "a held input is released once the session is silent for the idle cap",
+    async () => {
+      const k = keepalive(INTERVAL_MS * 4);
+      let released = 0;
+      k.observe(bgChanged([{ task_id: "hung" }]));
+      expect(k.holdInputForBackgroundWork(() => released++)).toBe(true);
+
+      // Output from the session pushes the deadline back.
+      await Bun.sleep(INTERVAL_MS * 2);
+      k.observe({ type: "system", subtype: "task_progress" });
+      await Bun.sleep(INTERVAL_MS * 3);
+      expect(released).toBe(0);
+
+      await Bun.sleep(INTERVAL_MS * 4);
+      expect(released).toBe(1);
+      await Bun.sleep(INTERVAL_MS * 5);
+      k.stop();
+      expect(released).toBe(1);
+    },
+    TIMING,
+  );
+
+  test(
+    "stop() and a result after the set empties cancel a pending release",
+    async () => {
+      const stopped = keepalive(INTERVAL_MS * 2);
+      const settled = keepalive(INTERVAL_MS * 2);
+      let released = 0;
+      for (const k of [stopped, settled]) {
+        k.observe(bgChanged([{ task_id: "a" }]));
+        k.holdInputForBackgroundWork(() => released++);
+      }
+      stopped.stop();
+      settled.observe(bgChanged([]));
+      expect(settled.holdInputForBackgroundWork(() => released++)).toBe(false);
+      await Bun.sleep(INTERVAL_MS * 5);
+      settled.stop();
+      expect(released).toBe(0);
+    },
+    TIMING,
+  );
+
   test(
     "stop() ends the keepalive and ignores later messages",
     async () => {

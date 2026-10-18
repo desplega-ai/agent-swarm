@@ -158,6 +158,10 @@ Setting these properties only on `:root` does not replace the injected body styl
 
 # Reference
 
+## QA a published page
+
+To check a page by screenshot, open it from an origin its data endpoints allow. A page that fetches live data from a CORS-restricted endpoint falls back to its baked values when opened from any other origin (for example an internal service hostname), so a screenshot there proves layout only, never the live numbers. Check every element you changed and its neighbours at the viewport readers use.
+
 ## Auth Modes
 
 | Mode | URL behavior | When to use |

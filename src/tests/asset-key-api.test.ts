@@ -11,8 +11,11 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
+  getAssetKeyMappingByProvider,
   getDbClient,
+  getTaskById,
   initDb,
+  insertTaskAttachment,
 } from "../be/db";
 import { insertScript } from "../be/scripts/db";
 import { handleAssets } from "../http/assets";
@@ -342,5 +345,130 @@ describe("asset namespace REST contract", () => {
     expect(audit.status).toBe(200);
     expect(audit.body.structuralValid).toBe(true);
     expect(audit.body.warningCount).toBe(0);
+  });
+
+  test("cascade moves descendants and sourced mappings without stamping task activity", async () => {
+    const root = await createTaskExtended("cascade root", { agentId, key: "shared/cascade/" });
+    const child = await createTaskExtended("cascade child", { agentId, parentTaskId: root.id });
+    const leaf = await createTaskExtended("cascade leaf", { agentId, parentTaskId: child.id });
+    const unchanged = await createTaskExtended("already moved", {
+      agentId,
+      parentTaskId: root.id,
+      key: "shared/cascade-target/",
+    });
+    const provider = { providerId: "agent-fs", providerKey: "cascade-file.md" };
+    await insertTaskAttachment({
+      taskId: leaf.id,
+      name: "cascade-file.md",
+      kind: "agent-fs",
+      ...provider,
+    });
+    const mapping = (await getAssetKeyMappingByProvider(provider))!;
+    const lastUpdatedAt = "2026-01-01T00:00:00.000Z";
+    for (const task of [root, child, leaf, unchanged]) {
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        lastUpdatedAt,
+        task.id,
+      ]);
+    }
+    const move = await api(
+      "PATCH",
+      `/api/assets/task/${root.id}/key`,
+      {
+        key: "shared/cascade-target/",
+        cascade: true,
+      },
+      { agentId },
+    );
+    expect(move.status).toBe(200);
+    expect(move.body.movedTaskIds).toEqual([root.id, child.id, leaf.id]);
+    for (const task of [root, child, leaf, unchanged]) {
+      const moved = (await getTaskById(task.id))!;
+      expect(moved.key).toBe("shared/cascade-target/");
+      expect(moved.lastUpdatedAt).toBe(lastUpdatedAt);
+    }
+    expect((await getAssetKeyMappingByProvider(provider))?.key).toBe("shared/cascade-target/");
+    const history = await getDbClient().query<{ entity_id: string }>(
+      "SELECT entity_id FROM asset_key_history WHERE entity_id IN (?, ?, ?, ?, ?) AND new_key = ?",
+      [root.id, child.id, leaf.id, unchanged.id, mapping.id, "shared/cascade-target/"],
+    );
+    expect(history.map((row) => row.entity_id).sort()).toEqual(
+      [root.id, child.id, leaf.id, mapping.id].sort(),
+    );
+    expect(
+      (
+        await api(
+          "PATCH",
+          `/api/assets/task/${root.id}/key`,
+          {
+            key: "shared/cascade-target/",
+            cascade: true,
+          },
+          { agentId },
+        )
+      ).body.movedTaskIds,
+    ).toEqual([]);
+
+    // The root can already have the destination key while descendants still need a move.
+    await getDbClient().run('UPDATE agent_tasks SET "key" = ? WHERE id = ?', [
+      "shared/other-child/",
+      child.id,
+    ]);
+    expect(
+      (
+        await api(
+          "PATCH",
+          `/api/assets/task/${root.id}/key`,
+          {
+            key: "shared/cascade-target/",
+            cascade: true,
+          },
+          { agentId },
+        )
+      ).body.movedTaskIds,
+    ).toEqual([child.id]);
+  });
+
+  test("cascade denies the whole move when a descendant is not authorized", async () => {
+    const root = await createTaskExtended("allowed root", { agentId });
+    const child = await createTaskExtended("denied child", {
+      agentId: secondAgentId,
+      creatorAgentId: secondAgentId,
+      parentTaskId: root.id,
+    });
+    const move = await api(
+      "PATCH",
+      `/api/assets/task/${root.id}/key`,
+      {
+        key: "shared/must-not-move/",
+        cascade: true,
+      },
+      { agentId },
+    );
+    expect(move.status).toBe(403);
+    expect((await getTaskById(root.id))?.key).toBe(root.key);
+    expect((await getTaskById(child.id))?.key).toBe(child.key);
+    expect(
+      await getDbClient().query("SELECT id FROM asset_key_history WHERE entity_id IN (?, ?)", [
+        root.id,
+        child.id,
+      ]),
+    ).toEqual([]);
+  });
+
+  test("cascade is rejected for non-task entities", async () => {
+    for (const entityType of ["workflow", "schedule", "page", "file", "app", "script"]) {
+      const move = await api(
+        "PATCH",
+        `/api/assets/${entityType}/${crypto.randomUUID()}/key`,
+        {
+          key: "shared/invalid-cascade/",
+          cascade: true,
+        },
+        { operator: true },
+      );
+      expect(move.status).toBe(400);
+      expect(move.body.error).toContain("only supported for task");
+    }
   });
 });

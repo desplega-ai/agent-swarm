@@ -1,16 +1,30 @@
 import Editor from "@monaco-editor/react";
 import type { ColDef, GetRowIdParams } from "ag-grid-community";
-import { Bug, ChevronDown, ChevronRight, Play, Table2 } from "lucide-react";
-import { useCallback, useMemo, useRef } from "react";
+import {
+  Bug,
+  ChevronDown,
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Play,
+  Search,
+  Table2,
+} from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useDbQuery, useTableColumns, useTableList } from "@/api/hooks";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { filterTables } from "./filter-tables";
+import { formatDebugCell } from "./format-cell";
 
 const DEFAULT_SQL = "SELECT name, type FROM sqlite_master WHERE type='table' ORDER BY name";
 
@@ -32,12 +46,26 @@ function TableBrowser({
     return tablesResult.rows.map((row) => String(row[0]));
   }, [tablesResult]);
 
+  const [search, setSearch] = useState("");
+  const visibleTables = useMemo(() => filterTables(tables, search), [tables, search]);
+
   return (
     <div className="w-[220px] shrink-0 border-r border-border flex flex-col min-h-0 overflow-hidden">
       <div className="px-3 py-2 border-b border-border shrink-0">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Tables
         </span>
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tables..."
+            aria-label="Search tables"
+            className="h-8 pl-7 text-xs md:text-xs"
+          />
+        </div>
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <div className="py-1">
@@ -46,7 +74,10 @@ function TableBrowser({
               <Spinner className="size-3" /> Loading...
             </div>
           )}
-          {tables.map((name) => (
+          {!isLoading && tables.length > 0 && visibleTables.length === 0 && (
+            <div className="px-3 py-2 text-muted-foreground text-xs">No matching tables</div>
+          )}
+          {visibleTables.map((name) => (
             <TableItem
               key={name}
               name={name}
@@ -131,6 +162,7 @@ export default function DebugPage() {
   const dbQuery = useDbQuery();
   const sql = readStringParam(searchParams, "sql", DEFAULT_SQL);
   const expandedTable = readStringParam(searchParams, "table");
+  const [tablesCollapsed, setTablesCollapsed] = useLocalToggle("debug:tables-collapsed", false);
   const editorRef = useRef<{ getValue: () => string } | null>(null);
 
   const executeQuery = useCallback(() => {
@@ -172,6 +204,7 @@ export default function DebugPage() {
       headerName: col,
       flex: 1,
       minWidth: 120,
+      valueFormatter: formatDebugCell,
     }));
   }, [dbQuery.data?.columns]);
 
@@ -196,16 +229,18 @@ export default function DebugPage() {
       {/* Main content: sidebar + editor/results */}
       <div className="flex flex-1 min-h-0 border border-border rounded-md overflow-hidden">
         {/* Table browser sidebar */}
-        <TableBrowser
-          expandedTable={expandedTable}
-          onSelectTable={handleSelectTable}
-          onToggleTable={handleToggleTable}
-        />
+        {!tablesCollapsed && (
+          <TableBrowser
+            expandedTable={expandedTable}
+            onSelectTable={handleSelectTable}
+            onToggleTable={handleToggleTable}
+          />
+        )}
 
         {/* Right panel: editor + results */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
           {/* Monaco editor */}
-          <div className="border-b border-border h-[200px]">
+          <div className="border-b border-border shrink-0 h-[clamp(96px,22vh,200px)]">
             <Editor
               language="sql"
               theme={theme === "dark" ? "vs-dark" : "vs"}
@@ -225,7 +260,29 @@ export default function DebugPage() {
           </div>
 
           {/* Toolbar */}
-          <div className="flex items-center gap-3 px-3 py-2 border-b border-border bg-muted/30">
+          <div className="flex shrink-0 items-center gap-3 px-3 py-2 border-b border-border bg-muted/30">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0"
+                  aria-label={tablesCollapsed ? "Show table list" : "Hide table list"}
+                  aria-pressed={tablesCollapsed}
+                  onClick={() => setTablesCollapsed(!tablesCollapsed)}
+                >
+                  {tablesCollapsed ? (
+                    <PanelLeftOpen className="h-4 w-4" />
+                  ) : (
+                    <PanelLeftClose className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {tablesCollapsed ? "Show table list" : "Hide table list"}
+              </TooltipContent>
+            </Tooltip>
+
             <Button
               size="sm"
               className="gap-1.5 bg-primary hover:bg-primary/90"
@@ -243,6 +300,16 @@ export default function DebugPage() {
             <span className="text-xs text-muted-foreground">
               {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+Enter
             </span>
+
+            {expandedTable && (
+              <span
+                className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+                title={expandedTable}
+              >
+                <Table2 className="h-3 w-3 shrink-0" />
+                <span className="truncate font-mono">{expandedTable}</span>
+              </span>
+            )}
 
             {dbQuery.data && (
               <div className="flex items-center gap-2 ml-auto">
@@ -263,7 +330,7 @@ export default function DebugPage() {
           </div>
 
           {/* Results grid */}
-          <div className="flex-1 min-h-0">
+          <div className="flex flex-1 min-h-0 flex-col">
             <DataGrid
               rowData={rowData}
               columnDefs={columnDefs}
@@ -274,6 +341,7 @@ export default function DebugPage() {
               pagination
               paginationPageSize={50}
               paginationQueryKey="debugResults"
+              pagerClassName="px-3 pb-2"
             />
           </div>
         </div>

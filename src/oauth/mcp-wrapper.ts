@@ -1,4 +1,5 @@
 import * as oauth from "oauth4webapi";
+import { assertUrlSafe, type SsrfGuardOptions } from "../utils/egress-guard";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isDevOrTestNodeEnv } from "../utils/node-env";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
@@ -20,41 +21,9 @@ import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 
 // ─── SSRF guard ──────────────────────────────────────────────────────────────
 
-const PRIVATE_IPV4_BLOCKS = [
-  { prefix: "10.", mask: 8 },
-  { prefix: "127.", mask: 8 },
-  { prefix: "169.254.", mask: 16 },
-  { prefix: "172.16.", mask: 12 }, // 172.16/12 covers 172.16-31 — approximation
-  { prefix: "192.168.", mask: 16 },
-  { prefix: "0.", mask: 8 },
-];
-
-function isPrivateIPv4(host: string): boolean {
-  if (host === "127.0.0.1") return true;
-  if (host.startsWith("169.254.")) return true;
-  if (host.startsWith("10.")) return true;
-  if (host.startsWith("192.168.")) return true;
-  if (host.startsWith("0.")) return true;
-  // 172.16.0.0/12 covers 172.16.0.0 – 172.31.255.255
-  if (host.startsWith("172.")) {
-    const parts = host.split(".");
-    const second = parseInt(parts[1] ?? "", 10);
-    if (Number.isFinite(second) && second >= 16 && second <= 31) return true;
-  }
-  for (const block of PRIVATE_IPV4_BLOCKS) {
-    if (block.prefix !== "172." && host.startsWith(block.prefix)) return true;
-  }
-  return false;
-}
-
-function isPrivateIPv6(host: string): boolean {
-  const lower = host.toLowerCase();
-  if (lower === "::1" || lower === "[::1]") return true;
-  if (lower.startsWith("fe80:") || lower.startsWith("[fe80:")) return true; // link-local
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local
-  if (lower.startsWith("[fc") || lower.startsWith("[fd")) return true;
-  return false;
-}
+// Lives in src/utils/egress-guard.ts (shared with the script executor). Re-exported
+// so the OAuth/MCP callers keep importing it from here.
+export { assertUrlSafe, type SsrfGuardOptions };
 
 // Deliberately does NOT match "invalid_client_metadata" (a distinct DCR-only
 // error) — the `\b` boundary fails on the following underscore. Shared by
@@ -63,49 +32,6 @@ function isPrivateIPv6(host: string): boolean {
 // whether a provider has disowned a stored DCR client.
 export function isInvalidClientError(message: string): boolean {
   return /invalid_client\b/i.test(message);
-}
-
-export interface SsrfGuardOptions {
-  /** Allow loopback and RFC1918 hosts (dev / self-hosting). Opt-in only. */
-  allowPrivateHosts?: boolean;
-  /** Allow http:// URLs (dev). In production only https:// is accepted. */
-  allowInsecure?: boolean;
-}
-
-export function assertUrlSafe(rawUrl: string, opts: SsrfGuardOptions = {}): URL {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new Error(`Invalid URL: ${rawUrl}`);
-  }
-
-  const allowPrivate = opts.allowPrivateHosts === true;
-  const allowInsecure = opts.allowInsecure === true;
-
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error(`Refusing unsupported protocol: ${parsed.protocol}`);
-  }
-  if (parsed.protocol === "http:" && !allowInsecure) {
-    throw new Error(`Refusing insecure (http://) URL in production: ${rawUrl}`);
-  }
-
-  const host = parsed.hostname;
-  if (!host) {
-    throw new Error(`Missing hostname: ${rawUrl}`);
-  }
-
-  if (host === "localhost" && !allowPrivate) {
-    throw new Error(`Refusing loopback hostname: ${host}`);
-  }
-  if (isPrivateIPv4(host) && !allowPrivate) {
-    throw new Error(`Refusing private IPv4 host: ${host}`);
-  }
-  if (isPrivateIPv6(host) && !allowPrivate) {
-    throw new Error(`Refusing private IPv6 host: ${host}`);
-  }
-
-  return parsed;
 }
 
 export function publicEndpointSsrfOptions(): SsrfGuardOptions {

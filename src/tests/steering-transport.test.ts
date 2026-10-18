@@ -179,7 +179,7 @@ describe("steering worker transport", () => {
     expect(pollCount).toBe(2);
     expect(deliveryCounts.get("queue")).toBe(1);
     expect(deliveryCounts.get("steer")).toBe(1);
-    expect(dispatchState.inFlightMessageIds.has(first.id)).toBe(true);
+    expect([...dispatchState.inFlightMessageIds].some((key) => key.endsWith(first.id))).toBe(true);
 
     resolveFirstDelivery({ delivered: true, mode: "queue" });
     await firstReported;
@@ -223,11 +223,11 @@ describe("steering worker transport", () => {
     expect(deliveries[0]?.text).toContain("From Lead (agent): change course");
     expect(deliveries[0]?.text).toContain(pending.id);
     expect(deliveries[0]?.text).toContain("accept-steer");
-    expect(state.dispatchedIds.has(pending.id)).toBe(true);
+    expect(state.dispatchedIds.size).toBe(1);
     expect(reports).toHaveLength(2);
     expect(reports[0]).toEqual({
       path: `/api/steering-messages/${pending.id}/delivered`,
-      body: { mode: "queue" },
+      body: { mode: "queue", taskId: pending.taskId },
     });
   });
 

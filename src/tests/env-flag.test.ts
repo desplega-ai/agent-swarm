@@ -76,6 +76,7 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
       "SLACK_REACTION_STEERED",
       "SLACK_REACTION_COMPLETED",
       "SLACK_REACTION_FAILED",
+      "SLACK_STATUS_ICON_COMPLETED",
     ];
     for (const key of keys) {
       expect(validateConfigValue(key, "thumbsup")).toBeNull();

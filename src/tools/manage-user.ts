@@ -84,16 +84,37 @@ const InputSchema = z.object({
     .describe("Free-form JSON metadata (null clears the field)"),
   comms: z
     .object({
-      tone: z.string().optional(),
-      language: z.string().optional(),
-      verbosity: z.string().optional(),
+      tone: z.string().nullable().optional(),
+      language: z.string().nullable().optional(),
+      verbosity: z.string().nullable().optional(),
     })
     .nullable()
     .optional()
     .describe(
-      "Merge-safe write to metadata.comms without touching sibling metadata keys; null removes only the comms key. When metadata is also provided, it is applied first and replaces the whole blob.",
+      "Merge per key into metadata.comms, preserving omitted preferences and sibling metadata keys. A preference set to null removes only that preference; comms: null removes the whole comms object. When metadata is also provided, it is applied first and replaces the whole blob.",
     ),
 });
+
+function mergeComms(
+  metadata: Record<string, unknown> | null | undefined,
+  comms: z.infer<typeof InputSchema>["comms"],
+): Record<string, unknown> | null | undefined {
+  if (comms === undefined) return metadata;
+  const base = { ...(metadata ?? {}) };
+  if (comms === null) {
+    delete base.comms;
+  } else {
+    const existing = base.comms;
+    const merged: Record<string, unknown> =
+      existing && typeof existing === "object" && !Array.isArray(existing) ? { ...existing } : {};
+    for (const [key, value] of Object.entries(comms)) {
+      if (value === null) delete merged[key];
+      else if (value !== undefined) merged[key] = value;
+    }
+    base.comms = merged;
+  }
+  return Object.keys(base).length > 0 ? base : null;
+}
 
 function diffAliases(prev: string[], next: string[]): { added: string[]; removed: string[] } {
   const prevSet = new Set(prev.map((a) => a.toLowerCase()));
@@ -168,10 +189,7 @@ export const registerManageUserTool = (server: McpServer) => {
             return toolErr("name is required for create action.");
           }
           try {
-            const metadata =
-              input.comms != null
-                ? { ...(input.metadata ?? {}), comms: input.comms }
-                : (input.metadata ?? undefined);
+            const metadata = mergeComms(input.metadata, input.comms) ?? undefined;
             const user = await createUser({
               name: input.name,
               email: input.email,
@@ -207,23 +225,13 @@ export const registerManageUserTool = (server: McpServer) => {
               return toolErr(`User ${input.userId} not found.`);
             }
 
-            // Merge-safe write: metadata (if provided) is applied first and
-            // replaces the whole blob, then comms is merged into it so
-            // sibling metadata keys survive.
-            let metadata = input.metadata;
-            if (input.comms !== undefined) {
-              const base: Record<string, unknown> = {
-                ...(input.metadata !== undefined
-                  ? (input.metadata ?? {})
-                  : (before.metadata ?? {})),
-              };
-              if (input.comms === null) {
-                delete base.comms;
-              } else {
-                base.comms = input.comms;
-              }
-              metadata = Object.keys(base).length > 0 ? base : null;
-            }
+            // Explicit metadata replaces the blob before the per-key comms patch.
+            const metadata = mergeComms(
+              input.comms !== undefined && input.metadata === undefined
+                ? before.metadata
+                : input.metadata,
+              input.comms,
+            );
 
             const user = await updateUser(input.userId, {
               name: input.name,

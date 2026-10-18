@@ -215,13 +215,13 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.2.1-alpha.5` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.1-rc.2` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
 and adapter fail when the executable is absent; startup never downloads npm
 packages. `DSH_BINARY` selects a trusted preinstalled executable, otherwise the
-adapter finds `dsh` on PATH. Use the pinned alpha for its required stdin/JSON
+adapter finds `dsh` on PATH. Use the pinned rc for its required stdin/JSON
 surface.
 
 The adapter launches `--profile headless --patch <temporary-file> --json -`,
@@ -273,14 +273,14 @@ What the patch sets, and why:
 Still missing: live steering (`steerModes: []`) and native resume (follow-ups use
 the context preamble). Developer-preview compatibility can change.
 
-Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.5/packages/bundle/headless/README.md)
+Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/packages/bundle/headless/README.md)
 and the installed CLI's top-level and headless help.
 
 ## Cursor (`cursor`)
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.0.37`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.0.38`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.
@@ -358,6 +358,22 @@ Reject SDK selection when a supported, direct, or legacy bridge is effective.
 Preserve the bridge flag's existing fallback without OAuth credentials.
 Custom executable prefixes must speak the SDK protocol. Never silently remove their arguments.
 Swarm context preambles remain the continuation mechanism. Native SDK resume stays disabled.
+
+### Claude session end with live background work
+
+A Claude session ends when the adapter closes Claude's input after a `result`: the SDK closes its input queue, and the CLI stream-json path calls `closeStdin()`.
+Neither transport closes input on a result while the latest `system/background_tasks_changed` set holds a non-ambient task (`run_in_background` Bash or a backgrounded subagent).
+`ClaudeBackgroundKeepalive.holdInputForBackgroundWork` makes that call for both.
+The session stays open, Claude takes the `task_notification` turn, and the first result after the set empties closes input and finalizes the task.
+
+Keep input open on purpose. Claude Code's background-wait ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, default 600000, `0` waits indefinitely) only counts after its input closes.
+When it expires, Claude Code stops live subagents (`task_updated` status `killed`) and exits on the stale result.
+Background Bash shells are exempt from that stop; subagents are not.
+Verified against Claude Code 2.1.301 with a 5s ceiling: closed input killed a background subagent 5s later, and held input let it finish and take its notification turn.
+
+The hold is bounded by `BACKGROUND_KEEPALIVE_MAX_IDLE_MS` (2h) of session silence, the same cap as the heartbeat keepalive.
+At the cap the adapter closes input, and Claude Code's own ceiling then winds the background work down.
+The `-p` CLI path, used for Claude Code below the queue-steering version, has no stdin to hold.
 
 ## Harness session env: telemetry tag
 

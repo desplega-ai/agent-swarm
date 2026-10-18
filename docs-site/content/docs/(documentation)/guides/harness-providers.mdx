@@ -438,7 +438,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1792152053-g57ff9b`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1792296040-g5ce754`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.
@@ -615,6 +615,10 @@ Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeTh
 - **Adapter behavior**: claude / claude-managed / codex each warn and ignore any stray `resumeSessionId` they receive; the runner no longer sets one. `CodexAdapter.canResume()` returns `false` unconditionally.
 
 **What your adapter owes the task:** emit `session_init` as early as possible (so the runner can persist the provider session id), emit `tool_start`/`tool_end` faithfully (so the UI shows the agent's work), and emit a `result` with populated `CostData` before your `waitForCompletion()` resolves.
+
+OpenCode's native `skill` tool passes `{ id: "<skill-name>" }`. Its adapter emits
+`tool_start` on `session.tool.called`, after input is available, and adds `name`
+to those arguments so `skill.invoke` telemetry records the skill name.
 
 ### Session-summary transcript sourcing
 

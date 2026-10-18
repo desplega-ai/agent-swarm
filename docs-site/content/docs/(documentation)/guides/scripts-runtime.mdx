@@ -136,6 +136,9 @@ The `ScriptContext` passed to your `default` export carries:
   the save-time script type environment. Inspect the effective declarations with
   `script-query-types`; the surface follows the app definition available when
   the script is authored or updated.
+- `ctx.fs` and `ctx.sh` — the run's virtual filesystem (the agent's agent-fs
+  drive at `/afs`, memory everywhere else) and a bash interpreter over it. See
+  [Files and shell](#files-and-shell).
 - `ctx.stdlib` — the runtime helpers (`fetch`, `fetchJson`, `grep`, `glob`,
   `table`, `Redacted`).
 - `ctx.logger` — Console-compatible logger; same destination as the global
@@ -163,6 +166,96 @@ with a bounded preview or omission plus the per-agent KV spill pointer. Process
 large collections inside the script and return only the compact derived value
 the model needs.
 
+### Files and shell
+
+Each run gets one virtual filesystem. `ctx.fs` reads and writes it, and
+`ctx.sh` runs bash commands over the same files.
+
+```ts
+import type { ScriptContext } from "swarm-sdk";
+
+export default async function (_args: unknown, ctx: ScriptContext) {
+  // The agent's agent-fs drive: persistent, versioned.
+  await ctx.fs.writeFile("/afs/reports/today.md", "# Today\n");
+  // The working directory is /afs, so this appends to the same file.
+  await ctx.sh("echo '- shipped the release' >> reports/today.md");
+  // Scratch memory: gone when the run ends.
+  await ctx.fs.writeFile("/tmp/ids.txt", "b\na\nb\n");
+  const { stdout, exitCode } = await ctx.sh("sort -u /tmp/ids.txt | wc -l");
+  return { unique: Number(stdout.trim()), exitCode };
+}
+```
+
+| Path | Backing | Lifetime |
+|---|---|---|
+| `/afs/...` | The invoking agent's default agent-fs drive, with that agent's permissions | Persistent, versioned |
+| Any other path (`/tmp`, `/work`, ...) | Memory | One run |
+
+- `ctx.fs` has `readFile`, `writeFile`, `appendFile`, `readdir`, `stat`,
+  `exists`, `mkdir`, `rm`, `cp`, and `mv`. Content is UTF-8 text. `stat`
+  returns `isFile`, `isDirectory`, `size`, and `mtime` (ISO 8601).
+- `ctx.sh(command, { cwd, env, stdin })` returns `{ stdout, stderr, exitCode }`.
+  A failed command returns a non-zero `exitCode`. It does not throw.
+- Relative paths resolve against `/afs` (against `/` when the drive is not
+  mounted).
+- Files stay across `ctx.sh` calls in one run. The working directory, `env`,
+  and shell variables reset on each call.
+
+`ctx.sh` runs [just-bash](https://github.com/vercel-labs/just-bash), a bash
+interpreter written in TypeScript. It starts no process. Pipes, redirects,
+globs, loops, and text tools work: `grep`, `sed`, `awk`, `jq`, `sort`, `uniq`,
+`wc`, `head`, `tail`, `cut`, `find`, `xargs`, and more. There are no real
+binaries (`git`, `curl`, `node`, `python`) and no network. Some output differs
+from GNU tools: for example, `grep -r pattern .` prints `file:line` without the
+`./` prefix.
+
+**When `/afs` is mounted.** The API mounts the drive only when it finds all of
+these for the invoking agent:
+
+- `AGENT_FS_API_URL`, `AGENT_FS_DEFAULT_ORG_ID`, and `AGENT_FS_DEFAULT_DRIVE_ID`,
+  from swarm config first, then the API environment.
+- The agent's own agent-scoped `AGENT_FS_API_KEY` row. The runner provisions
+  one for each agent (see [agent-fs co-deployment](/docs/guides/agent-fs-co-deployment)).
+  A global or repo row and the API's bootstrap key never mount the drive, so a
+  run without an invoking agent has no `/afs`.
+
+Without the drive, scratch paths and `ctx.sh` still work. An `/afs` path fails
+with `agent-fs is not configured for this agent (...)`, from `ctx.fs` and from
+shell commands and redirects alike. A scratch symlink to `/afs`, or a `cp` or
+`mv` into `/`, fails the same way. A file that looks persistent never lands in
+memory.
+
+With the drive, a scratch symlink cannot reach it: a path that goes through a
+symlink into `/afs` fails with `EXDEV`. Use the `/afs` path itself.
+
+`ctx.fs` and `ctx.sh` never hold the key: drive requests carry a
+credential-broker placeholder, and the egress layer puts the agent's key on
+requests to the agent-fs host only. This is not a confinement boundary. Like
+the agent's other config secrets, the key is readable through
+`ctx.swarm.config.get`.
+
+**Caching.** The drive adapter keeps `stat` and directory listings for 5
+seconds. The run's own writes show at once. A change that another agent makes
+during the run can take up to 5 seconds to show in `ls` or `stat`. File
+contents are always read fresh.
+
+**Limits.** These limits apply to each run, under both executors:
+
+- Scratch files hold at most 64 MiB. A write over the limit fails with `ENOSPC`.
+- Scratch paths, directories, and empty files share an 8 MiB metadata budget.
+  Each entry costs 256 bytes plus 2 bytes for each path character, which allows
+  about 30,000 entries. A write over the budget fails with `ENOSPC`. Remove
+  files to free the budget.
+- A scratch name has at most 255 characters, and a scratch path at most 4096. A
+  longer one fails with `ENAMETOOLONG`.
+- One `ctx.sh` command can read, hold, or print at most 64 MiB. A command over
+  the limit exits with code 126.
+- One drive response carries at most 64 MiB. A larger `/afs` file fails with
+  `EFBIG` in `ctx.fs`, and a shell tool reports a read error.
+
+The first `ctx.fs` or `ctx.sh` call in a run loads the shell (about 200 ms
+under `native`). Runs that do not use them pay nothing.
+
 ### Durable workflow context
 
 Scripts launched through `launch-script-run` receive a different context:
@@ -172,9 +265,9 @@ Scripts launched through `launch-script-run` receive a different context:
   `ctx.step.swarmScript(label, config)` — replay-safe, journaled steps
 - `ctx.swarm`, `ctx.stdlib`, and `ctx.logger`
 
-Durable runs do not receive `ctx.api`, `ctx.mcp`, or `ctx.swarm.config`. When a
-durable workflow needs a registered connection, call a named script through
-`ctx.step.swarmScript`.
+Durable runs do not receive `ctx.api`, `ctx.mcp`, `ctx.fs`, `ctx.sh`, or
+`ctx.swarm.config`. When a durable workflow needs a registered connection or
+the drive, call a named script through `ctx.step.swarmScript`.
 
 ### Allowed bare imports
 
@@ -199,10 +292,12 @@ do NOT exist in the script sandbox:
 - DOM APIs — `window`, `document`, `localStorage`, `sessionStorage`,
   `HTMLElement`, `Event`, etc. The typecheck does NOT include
   `lib.dom.d.ts`. We did this on purpose; the runtime is not a browser.
-- Filesystem — `fs`, `node:fs`, `node:fs/promises`. Use `ctx.stdlib.glob` and
-  `ctx.stdlib.grep` for read-only file inspection in `workspace-rw` mode
+- Filesystem — `fs`, `node:fs`, `node:fs/promises`. Use `ctx.fs` (see
+  [Files and shell](#files-and-shell)). `ctx.stdlib.glob` and
+  `ctx.stdlib.grep` are for read-only file inspection in `workspace-rw` mode
   (v2 only).
 - Subprocess — `node:child_process`, `Bun.spawn`. Scripts cannot shell out.
+  `ctx.sh` interprets bash in TypeScript and starts no process.
 - Net — `node:net`, raw TCP/UDP. Outbound HTTP via `fetch` only.
 - `Bun.*` globals — even though Bun is the runtime, scripts cannot access the
   `Bun` object directly. Use `ctx.stdlib` instead.
@@ -285,7 +380,8 @@ zod code it uses, which can make it slower than `native`.
 The `quickjs` sandbox has no filesystem, no process APIs, and no network
 access except the host calls below. These are the differences from `native`:
 
-- **Available:** `ctx.swarm`, `ctx.api`, `ctx.mcp`, `ctx.stdlib.fetch`,
+- **Available:** `ctx.swarm`, `ctx.api`, `ctx.mcp`, `ctx.fs`, `ctx.sh`,
+  `ctx.stdlib.fetch`,
   `ctx.stdlib.fetchJson`, `ctx.stdlib.table`, `ctx.stdlib.Redacted`,
   `ctx.logger`, `console`, `fetch`, `Headers`, `Response`, `setTimeout`,
   `clearTimeout`, `setInterval`, `clearInterval`, `URL`, `URLSearchParams`,
@@ -314,10 +410,57 @@ access except the host calls below. These are the differences from `native`:
   (`error: "timeout"`). Runtime errors keep the `runtimeError` shape above,
   with lines mapped back to `user-script.ts`.
 - **Host calls:** at most 16 host calls (`fetch`, `ctx.swarm`, `ctx.api`,
-  `ctx.mcp`) run at the same time for one script, and the rest wait. A run
+  `ctx.mcp`, `ctx.fs`, `ctx.sh`) run at the same time for one script, and the
+  rest wait. `ctx.fs` and `ctx.sh` run on the host side, in the API process,
+  so the limits in [Files and shell](#files-and-shell) apply instead of
+  `memoryMb`. A run
   can have at most 1024 host calls and timers in flight or waiting. When the
   run ends, the executor aborts every host call that is still open, including
   a `fetch` that the script did not await.
+
+## Egress policy
+
+**The `quickjs` executor** checks every outbound request it makes for a
+script: `fetch`, `ctx.stdlib.fetch`, `ctx.stdlib.fetchJson`, `ctx.api.*`, and
+requests that carry a [credential broker](/docs/guides/scripts-credential-broker)
+substitution. By default it refuses these destinations:
+
+- loopback (`127.0.0.0/8`, `::1`), `localhost`, and `*.localhost`
+- private ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
+- link-local, including cloud metadata (`169.254/16`, `fe80::/10`)
+- CGNAT (`100.64/10`), `0/8`, multicast, reserved ranges, and IPv4-mapped or
+  NAT64 forms of any of these
+
+The check runs on the resolved addresses, so a public name that points at a
+private address is refused. The request then connects to the address that was
+checked, with the original name kept for the `Host` header and TLS
+certificate check. The check runs again on every redirect hop, with at most 5
+hops for the whole chain. A redirect to another origin drops `Authorization`
+and `Cookie`. The refusal error names the setting to change.
+
+Two settings control the policy. Both apply to new runs after a config reload.
+
+| Key | Default | Effect |
+|---|---|---|
+| `SCRIPT_EGRESS_ALLOW_PRIVATE` | `false` | `true` allows private, loopback and link-local destinations. |
+| `SCRIPT_EGRESS_ALLOWLIST` | empty | Comma-separated `host[:port]` patterns. A leading `*.` matches subdomains. When set, scripts can reach only these hosts, public or private. Empty means any public host. |
+
+`ctx.swarm`, `ctx.mcp` and SQL connection queries (`ctx.api.<slug>.query`)
+still reach the swarm API: only those host calls are exempt from the policy. A direct script request to the swarm API's address
+follows the configured policy like any other host. Script code cannot read the
+credential the host uses for those calls: `Redacted.value(ctx.swarm.config.apiKey)` and
+`Redacted.value(ctx.swarm.config.runtimeInstanceId)` throw
+`host-only credential`. `agentId`, `mcpBaseUrl` and your own config values stay
+readable.
+
+**The `native` executor enforces none of this yet.** Native scripts can reach
+any host, including private ones, and can read the host credential. Run only
+trusted code under `native`.
+
+**The credential broker is not an egress filter.** It substitutes a secret
+only for a binding's allowed hosts, but it does not block requests to other
+hosts. A redirect goes back through the broker, so a substituted credential
+never follows a redirect to another host.
 
 ## Exposing a script externally
 

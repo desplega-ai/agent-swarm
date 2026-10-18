@@ -16,7 +16,7 @@ const PAGE_SIZE = 50;
 const SOURCE_LABEL = { workflow: "Workflow", agent: "Agent", manual: "Manual" } as const;
 /** Desktop columns: request · status · questions · source · resolved by (or approvals so far) · created. */
 const COLUMNS =
-  "md:grid md:grid-cols-[minmax(0,1fr)_120px_96px_90px_140px_110px] md:items-center md:gap-4";
+  "@4xl:grid @4xl:grid-cols-[minmax(0,1fr)_120px_96px_90px_140px_110px] @4xl:items-center @4xl:gap-4";
 
 function questionCount(request: ApprovalRequestSummary) {
   const count = request.questionCount ?? 0;
@@ -48,7 +48,7 @@ function Row({
         onFocus={onFocus}
         aria-current={highlighted ? "true" : undefined}
         className={cn(
-          "group relative flex min-h-11 flex-col gap-1.5 px-4 py-3 outline-none transition-colors md:py-2.5",
+          "group relative flex min-h-11 flex-col gap-1.5 px-4 py-3 outline-none transition-colors @4xl:py-2.5",
           COLUMNS,
           "hover:bg-accent/40 focus-visible:bg-accent/50",
           highlighted && "bg-accent/50",
@@ -66,33 +66,33 @@ function Row({
           <span className={cn("min-w-0 flex-1 text-sm", pending && "font-medium", WRAP)}>
             {request.title}
           </span>
-          <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground md:hidden" />
+          <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground @4xl:hidden" />
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground md:contents">
-          <span className="md:flex">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground @4xl:contents">
+          <span className="@4xl:flex">
             <StatusBadge status={request.status} />
           </span>
           <span>{questionCount(request)}</span>
-          <span aria-hidden className="md:hidden">
+          <span aria-hidden className="@4xl:hidden">
             ·
           </span>
           <span>{SOURCE_LABEL[approvalRequestSource(request)]}</span>
           {quorum ? (
             <>
-              <span aria-hidden className="md:hidden">
+              <span aria-hidden className="@4xl:hidden">
                 ·
               </span>
               <span className="truncate font-medium text-foreground tabular-nums">{quorum}</span>
             </>
           ) : (
-            <span className="hidden truncate md:block" title={request.resolvedBy ?? undefined}>
+            <span className="hidden truncate @4xl:block" title={request.resolvedBy ?? undefined}>
               {resolverName ?? "—"}
             </span>
           )}
-          <span aria-hidden className="md:hidden">
+          <span aria-hidden className="@4xl:hidden">
             ·
           </span>
-          <span className="md:text-right">{formatSmartTime(request.createdAt)}</span>
+          <span className="@4xl:text-right">{formatSmartTime(request.createdAt)}</span>
         </span>
       </Link>
     </li>
@@ -101,8 +101,9 @@ function Row({
 
 /**
  * The approval-request list: pending first (soonest to expire on top, then
- * newest), one responsive row per request (a card on phones, a table row from
- * `md`). j/k or ↑/↓ move the highlight, Enter opens.
+ * newest), one responsive row per request (a card until the list itself is
+ * `@4xl` wide, then a table row; the window width is the wrong signal because
+ * the sidebar takes 256px of it). j/k or ↑/↓ move the highlight, Enter opens.
  */
 export function RequestList({
   rows,
@@ -175,7 +176,7 @@ export function RequestList({
           </span>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-card">
+      <div className="@container min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-card">
         <div
           aria-hidden
           className={cn(

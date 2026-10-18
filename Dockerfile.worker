@@ -25,7 +25,7 @@ ARG SKILLS_CLI_VERSION=1.5.20
 FROM ghcr.io/j178/prek:v${PREK_VERSION} AS prek
 
 # ─── Stage: builder ──────────────────────────────────────────────────────────
-FROM oven/bun:1.4.0 AS builder
+FROM oven/bun:1.4.3 AS builder
 WORKDIR /build
 # Root package.json declares Bun workspaces (apps/{ui,templates-ui,evals}); their manifests +
 # bunfig.toml (pins linker="hoisted"; the workspace default "isolated" would hide the
@@ -94,7 +94,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
 # Install Bun once, system-wide at /usr/local/bin (shared by root and worker —
 # runbook rule 4: never install a toolchain twice). Runtime `bun i -g` for the
 # worker user still lands in ~/.bun via the BUN_INSTALL ENV set below.
-RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v1.4.0"
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v1.4.3"
 
 # Create non-root user for runtime execution.
 # NOTE: Container entrypoint runs as root (setup, chown, privileged mounts).
@@ -129,7 +129,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.301
+ARG CLAUDE_CODE_VERSION=2.1.302
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -143,7 +143,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=1.2.0
+ARG PI_CODING_AGENT_VERSION=1.3.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -194,7 +194,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.0.31
+ARG OPENCODE_VERSION=2.0.32
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -235,7 +235,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.16.4
+ARG AGENT_FS_VERSION=0.18.4
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -565,8 +565,8 @@ RUN case "$TARGETARCH" in \
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.1-alpha.5
-ARG DSH_SHA512=7a1a56be646c91d429f825ceeba05e2b61c1601d0f422b70756635dd5cd455ab293d217193413e719b6f4210cf81cefb65e4446f3f489d74337c32634365b2ee
+ARG DSH_VERSION=0.2.1-rc.2
+ARG DSH_SHA512=b6f63eca17ca4627ed85ba8f7bf38ad00631339664bea7d8abf8cc62025c114c624512f5570adadd38b94c1e805e049641d88f1d887f569e9225af721f030dbb
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -581,9 +581,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1792152053-g57ff9b
-ARG AMP_SHA512_AMD64=7a00b59d60bce2206e05c617f18d11e0d40563f03afbb7f602b115e13b8cd9f9e8c4d8b4e540d3072f01d6ecb712e3b9051fb2406bfdae16b98bf4c13d9eaf17
-ARG AMP_SHA512_ARM64=742d01daaf376351daf4d1a184e8d46aa44c572cf5535a5dd2832a918cd0974b34ab88fb234618f3d1555078a6349f52bf8ee9362b96f69b650eb8203eee382e
+ARG AMP_VERSION=0.0.1792296040-g5ce754
+ARG AMP_SHA512_AMD64=8af5f4dbb3b9212a07ce0cf5a33e68247500d4e8319b02e7c20a1cd88ffc0df6b988145d294dec7766712d34dc0b1bccbbe840a977574f8cc5a18d2411dd8b7b
+ARG AMP_SHA512_ARM64=c8e79d5c559bb13c7900191e9b43f0e08e88b53176e4773393e3141afdbb706ec4e16caf6f6865185cdeff039fb073f8cc03da5334f23ba7232b51f66e325eee
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -599,7 +599,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.0.37
+ARG CURSOR_SDK_VERSION=1.0.38
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -652,9 +652,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.54.0
-ARG GOOSE_SHA256_AMD64=ab396c95aebbd28b4d38c175234be8d4a3ea0c96e7ccb24c307e4618c9be57e1
-ARG GOOSE_SHA256_ARM64=0f174b5118a53888cd4e65b7ca9a4b72dd0b887e89142c8ce41e2409205e40d5
+ARG GOOSE_VERSION=1.55.0
+ARG GOOSE_SHA256_AMD64=fd3932908328fac850ca7ad2a8289c744e0c2ddaf4c5a2338709fb17a00b3a4c
+ARG GOOSE_SHA256_ARM64=ea83f59bb165a3d999dd00edf69a58028747f31e404b96f0153452c6b1651188
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -671,9 +671,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.31.1
-ARG KIRO_CLI_SHA256_AMD64=22eef4c19c42782316b0e24cdd3399024760eec9056b4298751cb99f33795ace
-ARG KIRO_CLI_SHA256_ARM64=cf3fc7681cca9677e18c0d22371fe60d7921ca73ea9d751d78f9cb470c0dce6d
+ARG KIRO_CLI_VERSION=2.32.0
+ARG KIRO_CLI_SHA256_AMD64=05989f9bfe465b304e8d1b2dba50aec2b84fcc1deaa4c0773af3f539d6e0d312
+ARG KIRO_CLI_SHA256_ARM64=98e5b923c7ed8bf589eb9b9d823e6611cba96f26c719cdb053959897738623ec
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -691,9 +691,9 @@ RUN case "$TARGETARCH" in \
 # pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
 # the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
 # and both pins together.
-ARG GROK_VERSION=1.0.60
-ARG GROK_SHA512_AMD64=ecf56f2ecf5db6892b0be7c891643b15048146425f36e02f932ddee467e68eab0495eccdf5e1be31407106e098ad6cdb9a206c45b73c9ea4ec46bf4ac07a0ad3
-ARG GROK_SHA512_ARM64=c76554c411cbdff279bb29befea635caf3cf34516f7717e744a6915994b53531c7d09af528e8e64637a8d0851ac0f1353c22bba67e0c0ed1c16ae5e9330b2523
+ARG GROK_VERSION=1.0.62
+ARG GROK_SHA512_AMD64=32ca8351fd2baf258a721a4eed304563f9e95532a2045ff8cdaace5f304ea9dd185699d2b3d3f4b59999757434a3de6cf5ee054efa72fc28146ee3ac8aa93254
+ARG GROK_SHA512_ARM64=232c498d9ccbf23a0d3cbc3fab1f53378ce8480d2f8172196ce2e9b5a74bacfde53ab515e53ce9613fc4c2133d1a11f14069a8beb9bda0915bb81f9661e4ee8d
 RUN case "$TARGETARCH" in \
       amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
       arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \

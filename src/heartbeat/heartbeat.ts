@@ -30,6 +30,7 @@ import {
   getStalledInProgressTasks,
   getSupersededTasksWithoutResume,
   getSupersededTasksWithUnsettledDependents,
+  getSwarmConfigs,
   getTaskById,
   getTaskStats,
   getTasksByStatus,
@@ -47,6 +48,7 @@ import {
   settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatus,
+  upsertKv,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
@@ -59,7 +61,7 @@ import { remediateStalledRuntime } from "../be/runtime-pools/recovery";
 import { routePoolTasks } from "../be/runtime-pools/routing";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
-import { promotePendingSteeringForTask } from "../be/steering";
+import { carryUnhandledSteering, promotePendingSteeringForTask } from "../be/steering";
 import type { HeartbeatAction, HeartbeatClassification } from "../extensions/contract";
 import { dispatchPre, extensionIdForAgent } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
@@ -77,6 +79,7 @@ import {
 import { type AgentTask, TERMINAL_TASK_STATUSES } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
@@ -245,12 +248,46 @@ function isBootTriageAlways(): boolean {
 const HEARTBEAT_CHECKLIST_GATE_TIMEOUT_MS = 60_000;
 let checklistGateTimeoutMs = HEARTBEAT_CHECKLIST_GATE_TIMEOUT_MS;
 
+/** Seeded gate used when `HEARTBEAT_CHECKLIST_GATE_SCRIPT` is unset and Jev has a key. */
+const DEFAULT_CHECKLIST_GATE_SCRIPT = "heartbeat-jev-gate";
+
 /**
  * Name of a global-scope script that decides whether a checklist tick needs
- * the Lead. Unset or empty turns the gate off.
+ * the Lead. An empty value or `off` turns the gate off. Unset falls back to
+ * the seeded Jev gate, but only when Jev has a usable global key: without
+ * one the script would open a setup approval request on the first tick.
  */
-function heartbeatChecklistGateScript(): string | null {
-  return process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT?.trim() || null;
+async function heartbeatChecklistGateScript(): Promise<string | null> {
+  const raw = process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT;
+  if (raw !== undefined) {
+    const name = raw.trim();
+    return name && name.toLowerCase() !== "off" ? name : null;
+  }
+  return (await hasJevGateKey()) ? DEFAULT_CHECKLIST_GATE_SCRIPT : null;
+}
+
+/**
+ * Mirrors the provider pick in `heartbeat-jev-gate`: a global TypeSafe or
+ * OpenRouter key, honoring `HEARTBEAT_JEV_GATE_PROVIDER`. An OpenRouter key
+ * behind an `OPENROUTER_BASE_URL` gateway does not count, because the
+ * decisions call refuses it and every tick would be an `error` verdict.
+ */
+async function hasJevGateKey(): Promise<boolean> {
+  const pref = process.env.HEARTBEAT_JEV_GATE_PROVIDER?.trim().toLowerCase() || "auto";
+  const keys: string[] = [];
+  if (pref !== "openrouter") keys.push("TYPESAFE_API_KEY");
+  if (pref !== "typesafe" && getOpenRouterBaseUrl() === DEFAULT_OPENROUTER_BASE_URL) {
+    keys.push("OPENROUTER_API_KEY");
+  }
+  try {
+    for (const key of keys) {
+      const rows = await getSwarmConfigs({ scope: "global", key });
+      if (rows.some((row) => row.value.trim() !== "")) return true;
+    }
+  } catch {
+    // An unreadable secret row leaves the gate off; the checklist still runs.
+  }
+  return false;
 }
 
 /**
@@ -1018,6 +1055,8 @@ export async function runRebootSweep(): Promise<void> {
               // Same work: a task-level model pin must survive the retry.
               ...inheritedModelSelection(task),
             });
+            // The retry continues the work, so it takes over unaccepted steering.
+            await carryUnhandledSteering(task.id, retryTask.id);
             if (authorization.decision) {
               await createLogEntry({
                 eventType: "task_recovery_authorization",
@@ -1423,7 +1462,10 @@ export function isEffectivelyEmpty(content: string): boolean {
 /**
  * Gather current system status as a markdown string for the lead's checklist task.
  */
-export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): Promise<string> {
+export async function gatherSystemStatus(options?: {
+  isBootTriage?: boolean;
+  reportedFailures?: Array<{ id: string; line: string }>;
+}): Promise<string> {
   const stats = await getTaskStats();
   const stalledTasks = await getStalledInProgressTasks(stallThresholdMinutes());
   const agents = await getAllAgents();
@@ -1456,6 +1498,7 @@ export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): 
 
   // Recent failures with reasons and pattern detection (last 6 hours)
   const recentFailures = await getRecentFailedTasks(6);
+  const renderedFailures = recentFailures.slice(0, 10);
   if (recentFailures.length > 0) {
     sections.push("");
     sections.push("## Recent Failures (last 6h) [auto-generated]");
@@ -1482,12 +1525,12 @@ export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): 
 
     // List individual failures (max 10)
     sections.push("");
-    for (const task of recentFailures.slice(0, 10)) {
+    for (const task of renderedFailures) {
       const agentSlice = task.agentId?.slice(0, 8) ?? "unassigned";
       const reason = task.failureReason?.slice(0, 100) ?? "no reason";
-      sections.push(
-        `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 50)}" — agent: ${agentSlice}, reason: ${reason}, at: ${task.finishedAt}`,
-      );
+      const line = `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 50)}" — agent: ${agentSlice}, reason: ${reason}, at: ${task.finishedAt}`;
+      sections.push(line);
+      options?.reportedFailures?.push({ id: task.id, line });
     }
     if (recentFailures.length > 10) {
       sections.push(`- ... and ${recentFailures.length - 10} more`);
@@ -1735,7 +1778,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
   );
   if (existing) return;
 
-  const gateScript = heartbeatChecklistGateScript();
+  const gateScript = await heartbeatChecklistGateScript();
   const gateMode = heartbeatChecklistGateMode();
   const gate = gateScript ? await runChecklistGate(gateScript, lead.id) : null;
   if (gate) {
@@ -1748,7 +1791,8 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     return;
   }
 
-  let systemStatus = await gatherSystemStatus();
+  const reportedFailures: Array<{ id: string; line: string }> = [];
+  let systemStatus = await gatherSystemStatus({ reportedFailures });
   // Shadow mode leaves the prompt untouched so the Lead's own quiet/non-quiet
   // outcome stays an independent check on the gate's verdict.
   if (gateMode === "enforce" && gate?.verdict === "wake" && gate.summary) {
@@ -1765,7 +1809,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
 
   if (result.skipped) return;
 
-  await createTaskExtended(result.text, {
+  const task = await createTaskExtended(result.text, {
     agentId: lead.id,
     routingReason: "skill",
     routingSource: "engine_default",
@@ -1776,6 +1820,18 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     tags: ["checklist", "auto-generated", ...(gate ? [`heartbeat-gate:${gate.verdict}`] : [])],
     priority: 60,
   });
+
+  try {
+    await upsertKv({
+      namespace: "heartbeat-checklist:reported-failures",
+      key: task.id,
+      value: reportedFailures.filter(({ line }) => result.text.includes(line)).map(({ id }) => id),
+      valueType: "json",
+      expiresAt: Date.now() + 7 * 24 * 3600e3,
+    });
+  } catch (err) {
+    console.error(`[Heartbeat] Failed to save reported failures for checklist ${task.id}:`, err);
+  }
 
   console.log(`[Heartbeat] Checklist task created for lead ${lead.name}`);
 }

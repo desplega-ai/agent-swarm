@@ -1116,6 +1116,43 @@ describe("Slack renderer v2", () => {
     expect(doneText.startsWith("🧵 ✅ done")).toBe(true);
   });
 
+  test("the completed glyph follows SLACK_STATUS_ICON_COMPLETED in tree, header and cards", async () => {
+    const lead = await createAgent({ name: "Icon Lead", isLead: true, status: "idle" });
+    const ask = await createTaskExtended("icon ask", { agentId: lead.id, source: "slack" });
+    const now = new Date();
+    const done = {
+      ...ask,
+      status: "completed" as const,
+      output: "Shipped.",
+      lastUpdatedAt: now.toISOString(),
+      finishedAt: now.toISOString(),
+    };
+
+    const defaultTree = await renderThreadTree([done], new Map(), now);
+    expect(defaultTree.startsWith("🧵 ✅ done")).toBe(true);
+    expect(defaultTree).toContain("↳ ✅ ");
+    expect(await childOutcomeContent(done, false)).toBe("↳ ✅ Icon Lead — result: Shipped.");
+
+    process.env.SLACK_STATUS_ICON_COMPLETED = ":bee-lgtm:";
+    try {
+      const tree = await renderThreadTree([done], new Map(), now);
+      expect(tree.startsWith("🧵 :bee-lgtm: done")).toBe(true);
+      expect(tree).toContain("↳ :bee-lgtm: ");
+      expect(tree).not.toContain("✅");
+      expect(await childOutcomeContent(done, false)).toBe(
+        "↳ :bee-lgtm: Icon Lead — result: Shipped.",
+      );
+      expect(await childOutcomeContent(done, true)).toBe("↳ :bee-lgtm: Icon Lead completed");
+
+      // Only the completed glyph moves; failure keeps its own icon.
+      expect(
+        await childOutcomeContent({ ...done, status: "failed", failureReason: "boom" }, false),
+      ).toBe("↳ ❌ Icon Lead — failed: boom");
+    } finally {
+      delete process.env.SLACK_STATUS_ICON_COMPLETED;
+    }
+  });
+
   test("a parked deferral reads waiting, and done once its wake-up settles", async () => {
     const lead = await createAgent({ name: "Parked Header Lead", isLead: true, status: "idle" });
     const ask = await createTaskExtended("parked header ask", {

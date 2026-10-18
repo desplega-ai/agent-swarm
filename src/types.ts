@@ -1114,6 +1114,8 @@ export const InboxItemStateSchema = z
     doneAt: z.string().optional(),
     /** First-viewed timestamp, set once on first panel open. Independent of status. */
     readAt: z.string().optional(),
+    /** Read cursor: latest time the user marked the item read. Clients can set, move back, or clear it. Independent of readAt and status. */
+    lastReadAt: z.string().optional(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
   })

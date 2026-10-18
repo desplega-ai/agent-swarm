@@ -298,7 +298,7 @@ flowchart TD
 ```
 
 - Candidate set = `getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN)` → `status='in_progress' AND lastUpdatedAt > 5m`. Tasks in `pending`/`offered` are **not** seen by this sweep. A candidate with a pending steering message newer than `STEERING_STALL_GRACE_MIN` is deferred for that sweep; once the bounded grace expires, normal classification and remediation resume.
-- An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, kept alive by two inputs to `active_sessions.lastHeartbeatAt`: **tool activity** (`PUT /api/active-sessions/heartbeat/{taskId}`, throttled ~5s worker-side) and **provider output** (`POST /api/session-logs` with a `taskId`: `refreshActiveSessionOnActivity` refreshes that task's own session row, at most once per 30s, via a `lastHeartbeatAt < cutoff` guard on the UPDATE). Provider output covers every harness and a long reasoning stream with no tool calls; it is task-scoped, so it never refreshes another task's session. The one wall-clock ping is scoped to background work: a Claude session (CLI or SDK transport) that has at least one non-ambient task in its latest `system/background_tasks_changed` set PUTs the heartbeat every 60s (`ClaudeBackgroundKeepalive`, `src/providers/claude-background-keepalive.ts`), so a turn that ended waiting on a `run_in_background` job stays live; the ping stops when the set empties, the session ends, or the session has emitted nothing for 2h. Any other silent worker (no tool call, no output, no background task) still goes stale. "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
+- An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, kept alive by two inputs to `active_sessions.lastHeartbeatAt`: **tool activity** (`PUT /api/active-sessions/heartbeat/{taskId}`, throttled ~5s worker-side) and **provider output** (`POST /api/session-logs` with a `taskId`: `refreshActiveSessionOnActivity` refreshes that task's own session row, at most once per 30s, via a `lastHeartbeatAt < cutoff` guard on the UPDATE). Provider output covers every harness and a long reasoning stream with no tool calls; it is task-scoped, so it never refreshes another task's session. The one wall-clock ping is scoped to background work: a Claude session (CLI or SDK transport) that has at least one non-ambient task in its latest `system/background_tasks_changed` set PUTs the heartbeat every 60s (`ClaudeBackgroundKeepalive`, `src/providers/claude-background-keepalive.ts`), so a turn that ended waiting on a `run_in_background` job stays live (the session also keeps Claude's input open until a result after the set empties; see [harness-providers.md](./harness-providers.md#claude-session-end-with-live-background-work)); the ping stops when the set empties, the session ends, or the session has emitted nothing for 2h. Any other silent worker (no tool call, no output, no background task) still goes stale. "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - The classifier emits `no-session`, `stale-session`, or `fresh-stalled` only after a task crosses its existing threshold. Extensions cannot change thresholds or classify a healthy task as stalled.
 - `decideRemediation` keeps the default recovery policy. It selects `fail` for workflow steps, excluded task types, existing resume children, and exhausted resume budgets. It otherwise selects `supersede-resume`. A fresh-session stall defaults to `record`.
 - For a selected remediation with a session on a provisionable pool, the classifier uses the same runtime lock as `recoverRuntime`.
@@ -403,6 +403,7 @@ if proposed.action == fail:
 
 promotePendingSteeringForTask(parent)       # pending rows → follow-up tasks, exactly once
 resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
+    # after create: carryUnhandledSteering(parent, resume) (see below)
     preferredAgentId = undefined
     if parent.agentId:
         cand = getAgentById(parent.agentId)
@@ -617,9 +618,11 @@ preferredAgentId = undefined
 cand = getPinCandidateAgent(task.agentId)                   # reachable agent
 if cand and activeCount(cand) < cand.maxTasks:
     preferredAgentId = cand.id
-createTaskExtended(task.task, parentTaskId=task.id, agentId=preferredAgentId,
+retry = createTaskExtended(task.task,
+                    parentTaskId=task.id, agentId=preferredAgentId,
                     tags=[reboot-retry, auto-generated, (reboot-retry-pin if preferredAgentId)],
                     routingAffinity=buildRoutingAffinityFromAgent(task.agentId))
+carryUnhandledSteering(task, retry)                          # see "Unhandled steering hand-off"
 #   agentId set  → status = pending  (PINNED — never enters the pool)
 #   agentId none → status = unassigned (pool — but still routingAffinity-gated)
 
@@ -728,6 +731,25 @@ A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`
 | `send-task` without `taskType: "resume"` | No | New work |
 | Everything else with a `parentTaskId` (Slack/AgentMail/VCS thread replies, steering promotion, reroute/pool-starvation decisions, `POST /tasks`, scripts) | No | New work in the same thread |
 
+### Unhandled steering hand-off
+
+The same three continuations (`createResumeFollowUp`, the `runRebootSweep` retry child, the `defer-task` wake-up in `createStandaloneScheduleTask`) call `carryUnhandledSteering(predecessor, successor)` (`src/be/steering.ts`) right after the successor is created. The wake-up does it inside the schedule-fire transaction, beside the deferred-wait member transfer, so it reads the rows when the schedule fires.
+
+```
+UPDATE task_steering_messages
+   SET task_id = successor, status = 'pending', delivered_mode = NULL, delivered_at = NULL
+ WHERE task_id = predecessor AND status IN ('pending', 'delivered')
+# one task_steering log row per moved message: newValue=pending, metadata.carriedFromTaskId
+```
+
+- **Ownership moves with the row.** `accept-steer` and the `/delivered`, `/handled` and `/undeliverable` callbacks authorize against the assignee of the row's current task. After the hand-off that is the successor's assignee, including a replacement worker that claimed a pooled resume. The authorization rule itself is unchanged.
+- **The predecessor's session may still be running.** A terminal task row does not mean its session stopped: manual supersede creates the successor first, and the API drain awaits supersede before it asks the worker to abort. A moved `delivered` row returns to `pending` for the successor either way.
+- **Delivery is scoped to the session's own task.** The runner polls `GET /api/steering-messages?taskId=<its task>` and keys its process-wide dedup, outcome cache and in-flight set by `taskId:messageId`, so a successor run by the same runner process still receives a moved row once. The codex hook polls only `AGENT_SWARM_TASK_ID`'s rows and delivers nothing without it. Both send `taskId` on the `/delivered` and `/undeliverable` callbacks. A row that moved since the poll answers `409` and stays untouched, so a predecessor's late callback neither marks the successor's row delivered nor promotes it. The runner treats `409` as done; the hook drops the message before injecting it.
+- **One delivery path.** The successor's session receives the row through that live delivery, with its `[steering <id>]` marker. Nothing is copied into task text. A provider without live steering reports it undeliverable, which promotes it to a follow-up task once. One window allows a duplicate, never a loss: a runner delivery already injected into the predecessor's session when the row moves gets `409` on its report, and the successor receives the row again.
+- **Chains.** Each hop moves whatever is still unacknowledged, so P → R1 → R2 (supersede, reboot retry or repeated deferral) keeps a steer until some session accepts it. An accepted row stays `handled` on the task that accepted it and never moves again.
+- **Order with promotion.** Crash recovery and graceful shutdown promote `pending` rows to follow-up tasks before `createResumeFollowUp`, so only `delivered` rows move there. Manual supersede does not promote, so both move. Completion, failure and cancellation promote `pending` rows, so a deferred task's wake-up and a reboot retry receive only `delivered` rows.
+- A failed hand-off logs and leaves the rows on the predecessor. It never blocks creating the successor.
+
 ---
 
 ## 5a. API drain: handoff before the API stops
@@ -794,13 +816,21 @@ Notes:
 
 The recurring `HEARTBEAT.md` checklist tick (`checkHeartbeatChecklist`) can ask a global script whether the tick needs the Lead before it creates the `heartbeat-checklist` task. Owner code: `runChecklistGate` and `defaultChecklistGateRunner` in `src/heartbeat/heartbeat.ts`, `runSavedScriptAsAgent` in `src/be/scripts/run-saved.ts`, and the `heartbeat.checklist.gate_findings` template in `src/heartbeat/templates.ts`. Boot triage never runs the gate.
 
+The seeded `heartbeat-jev-gate` reads the previous completed checklist's receipt from KV namespace `heartbeat-checklist:reported-failures`, keyed by checklist task ID. After creating a recurring checklist, `checkHeartbeatChecklist` writes the exact full IDs of up to ten failures rendered from the same `gatherSystemStatus` query, with a seven-day expiry. A write failure is logged without interrupting checklist creation. Boot triage writes no receipt. The namespace family is reserved against generic KV writes.
+
+The gate accepts an array or a JSON-encoded array of full IDs and compares them before rendering display IDs. Missing, expired, or invalid receipts mean no previous IDs, so all current failures count as new. Task body text and task timestamps never establish which failures were reported; a failure that becomes visible after gathering remains new even if its finish timestamp predates checklist creation.
+
 ```mermaid
 flowchart TD
   T[checklist tick] --> D{lead, non-empty HEARTBEAT.md,<br/>no active checklist task?}
   D -- no --> X[return]
-  D -- yes --> G{HEARTBEAT_CHECKLIST_GATE_SCRIPT set?}
-  G -- no --> C[create checklist task]
-  G -- yes --> R[run gate under one 60s deadline]
+  D -- yes --> G{HEARTBEAT_CHECKLIST_GATE_SCRIPT?}
+  G -- "empty or off" --> C[create checklist task]
+  G -- unset --> K{global Jev key?<br/>TYPESAFE_API_KEY or OPENROUTER_API_KEY}
+  K -- no --> C
+  K -- yes --> RJ[script = heartbeat-jev-gate]
+  RJ --> R
+  G -- name --> R[run gate under one 60s deadline]
   R --> V{verdict}
   V -- quiet + enforce --> S[skip: no task]
   V -- quiet/wake/error + shadow --> CT[create task, tag heartbeat-gate:verdict,<br/>prompt unchanged]
@@ -812,7 +842,13 @@ Pseudocode (current):
 
 ```
 # checkHeartbeatChecklist, after the lead / HEARTBEAT.md / dedup checks:
-script = HEARTBEAT_CHECKLIST_GATE_SCRIPT (trimmed; empty = gate off, no tag)
+raw = HEARTBEAT_CHECKLIST_GATE_SCRIPT
+if raw is set:      script = raw.trim(); empty or "off" (any case) = gate off, no tag
+else if jevKey():   script = "heartbeat-jev-gate"   # default on, shadow unless MODE says enforce
+else:               script = none
+# jevKey(): a non-empty global swarm_config row for TYPESAFE_API_KEY, or for OPENROUTER_API_KEY
+# while OPENROUTER_BASE_URL is the openrouter.ai default; HEARTBEAT_JEV_GATE_PROVIDER narrows
+# the candidates the same way the script does. A read error = no key.
 mode   = HEARTBEAT_CHECKLIST_GATE_MODE == "enforce" ? enforce : shadow   # anything else = shadow
 if script:
   controller = AbortController()
@@ -908,7 +944,7 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | `getUnassignedTaskIdsForAgent` eligibility-scan hard cap (rows/call) | 500 | `ELIGIBILITY_SCAN_CAP` |
 | `HEARTBEAT.md` checklist tick (restart required; `0` = recurring tick off, boot triage still runs) | 30 min | `HEARTBEAT_CHECKLIST_INTERVAL_MS` |
 | Checklist tick + boot triage kill switch (restart required; `true`/`1` = off, `false`/`0` = on) | off | `HEARTBEAT_CHECKLIST_DISABLE` |
-| Checklist gate script (§5b; global scope, empty = gate off) | unset | `HEARTBEAT_CHECKLIST_GATE_SCRIPT` |
+| Checklist gate script (§5b; global scope; empty or `off` = gate off; unset = `heartbeat-jev-gate` when a global Jev key exists) | unset | `HEARTBEAT_CHECKLIST_GATE_SCRIPT` |
 | Checklist gate mode (§5b; `shadow` tags only, `enforce` skips quiet ticks) | `shadow` | `HEARTBEAT_CHECKLIST_GATE_MODE` |
 
 ---

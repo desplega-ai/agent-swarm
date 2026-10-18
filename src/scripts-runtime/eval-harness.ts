@@ -112,6 +112,7 @@ try {
     swarmConfig,
     apiConnections: payload.apiConnections,
     mcpConnections: payload.mcpConnections,
+    agentFs: payload.agentFs,
   });
 
   const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();

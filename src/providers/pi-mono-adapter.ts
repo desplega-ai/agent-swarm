@@ -1508,6 +1508,8 @@ const DEFAULT_CODEMODE_LIMITS: CodemodeLimits = {
  * pi has no option for either: a script runs until it returns unless its own
  * `// @options` line sets `timeout_ms`. Both limits abort the signal pi hands
  * the sandbox, which interrupts the QuickJS worker and fails the codemode call.
+ * A call refused by pi's process-wide worker cap waits for a free worker
+ * within the same deadline instead of failing.
  *
  * "on" keeps declared tools declared; "only" would hide the lifecycle tools
  * behind scripts. `models` stays off unless `PI_CODEMODE_MODELS` asks for it.
@@ -1532,6 +1534,43 @@ export function createBoundedCodemodeExtension(
         },
       }),
     );
+}
+
+const CODEMODE_WORKER_RETRY_MIN_MS = 25;
+const CODEMODE_WORKER_RETRY_MAX_MS = 250;
+
+/**
+ * pi 1.3 admits at most two live codemode workers per process, across all
+ * sessions, and counts a stopped worker until its thread exits. A call over
+ * that cap fails before the script runs. The runner hosts every task's pi
+ * session in one process and pi runs a turn's tool calls in parallel, so a
+ * third concurrent script, or one started right after another, can be
+ * refused. Nothing ran (no nested calls, no store writes), so it is safe to
+ * retry until a worker frees up, within the same deadline.
+ */
+function isCodemodeWorkerLimitRefusal(result: {
+  content: Array<{ type: string; text?: string }>;
+  details?: unknown;
+  isError?: boolean;
+}): boolean {
+  if (!result.isError) return false;
+  const calls = (result.details as { calls?: unknown[] } | undefined)?.calls;
+  if (calls && calls.length > 0) return false;
+  return result.content.some((item) =>
+    item.text?.includes("Script sandbox failed: Codemode worker limit reached"),
+  );
+}
+
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
 }
 
 export function boundCodemodeTool(tool: ToolDefinition, limits: CodemodeLimits): ToolDefinition {
@@ -1599,7 +1638,20 @@ export function boundCodemodeTool(tool: ToolDefinition, limits: CodemodeLimits):
         : ctx;
 
       try {
-        return await tool.execute(toolCallId, params, script.signal, onUpdate, boundedCtx);
+        let delayMs = CODEMODE_WORKER_RETRY_MIN_MS;
+        for (;;) {
+          const result = await tool.execute(
+            toolCallId,
+            params,
+            script.signal,
+            onUpdate,
+            boundedCtx,
+          );
+          if (!isCodemodeWorkerLimitRefusal(result) || script.signal.aborted) return result;
+          await abortableSleep(delayMs, script.signal);
+          if (script.signal.aborted) return result;
+          delayMs = Math.min(delayMs * 2, CODEMODE_WORKER_RETRY_MAX_MS);
+        }
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener("abort", onOuterAbort);

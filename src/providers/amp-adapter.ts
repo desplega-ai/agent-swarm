@@ -44,7 +44,7 @@ import type {
  * default; the image installs exactly this version and the per-task settings
  * set `amp.updates.mode: "disabled"`. Bump it deliberately, with a live run.
  */
-export const AMP_PACKAGE = "@ampcode/cli@0.0.1792152053-g57ff9b";
+export const AMP_PACKAGE = "@ampcode/cli@0.0.1792296040-g5ce754";
 
 /** MCP server name. Amp exposes its tools as `agent_swarm` / `store_progress` (dashes become underscores). */
 const AMP_MCP_SERVER_NAME = "agent-swarm";
