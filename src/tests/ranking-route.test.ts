@@ -115,8 +115,8 @@ describe("ranking routes", () => {
       key: "telemetry_installation_id",
       value: INSTALL_ID,
     });
-    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "Imtec" });
-    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "imtec.ba" });
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "Acme" });
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "acme.dev" });
     await upsertSwarmConfig({ scope: "global", key: "PUBLIC_RANKING_ENABLED", value: "false" });
     await upsertSwarmConfig({ scope: "global", key: "telemetry_ranking", value: "" });
   });
@@ -164,22 +164,22 @@ describe("ranking routes", () => {
     expect(result.statusCode).toBe(200);
     const claim = String(result.json.claim);
     expect(claim).toMatch(/^rk_[0-9a-f]{32}$/);
-    expect(result.json.domain).toBe("imtec.ba");
-    expect(String(result.json.prUrl)).toContain("filename=community%2Franking%2Fimtec.ba.json");
+    expect(result.json.domain).toBe("acme.dev");
+    expect(String(result.json.prUrl)).toContain("filename=community%2Franking%2Facme.dev.json");
     expect(JSON.parse(String(result.json.fileJson))).toEqual({
       $schema: "./schema.json",
-      domain: "imtec.ba",
+      domain: "acme.dev",
       claim,
     });
     expect(String(result.json.verifyUrl)).toBe(
-      `https://proxy.desplega.sh/v1/ranking/verify?domain=imtec.ba&claim=${claim}`,
+      `https://proxy.desplega.sh/v1/ranking/verify?domain=acme.dev&claim=${claim}`,
     );
 
     const stored = parseTelemetryRanking(String(await configValue("telemetry_ranking")));
     expect(stored).toMatchObject({
       claim,
-      name: "Imtec",
-      domain: "imtec.ba",
+      name: "Acme",
+      domain: "acme.dev",
       category: "engineering",
       subcategory: "qa-testing",
       description: "QA",
@@ -190,7 +190,7 @@ describe("ranking routes", () => {
     expect(sent.map((event) => event.event)).toEqual(["ranking.opted_in"]);
     const listing = parseTelemetryRanking(String(sent[0]?.properties.listing));
     expect(listing).toEqual(stored);
-    expect(sent[0]?.context).toMatchObject({ org_name: "Imtec", org_website: "imtec.ba" });
+    expect(sent[0]?.context).toMatchObject({ org_name: "Acme", org_website: "acme.dev" });
 
     // A second opt-in for the same domain keeps the claim.
     const again = await call("POST", "/api/ranking/opt-in", { category: "other" });
@@ -213,11 +213,11 @@ describe("ranking routes", () => {
     expect(result.json).toEqual({
       enabled: false,
       leaveUrl:
-        "https://github.com/desplega-ai/agent-swarm/delete/main/community/ranking/imtec.ba.json",
+        "https://github.com/desplega-ai/agent-swarm/delete/main/community/ranking/acme.dev.json",
     });
     expect(await configValue("PUBLIC_RANKING_ENABLED")).toBe("false");
     expect(sent.map((event) => [event.event, event.properties.domain])).toEqual([
-      ["ranking.opted_out", "imtec.ba"],
+      ["ranking.opted_out", "acme.dev"],
     ]);
   });
 
@@ -238,19 +238,19 @@ describe("ranking routes", () => {
     const put = await call(
       "PUT",
       "/api/config",
-      { scope: "global", key: "SWARM_ORG_NAME", value: "Imtec Labs" },
+      { scope: "global", key: "SWARM_ORG_NAME", value: "Acme Labs" },
       handleConfig,
     );
     expect(put.statusCode).toBe(200);
     expect(sent.map((event) => event.event)).toEqual(["ranking.opted_in"]);
     const listing = parseTelemetryRanking(String(sent[0]?.properties.listing));
     expect(listing).toMatchObject({
-      name: "Imtec Labs",
+      name: "Acme Labs",
       claim: optIn.json.claim,
       subcategory: "qa-testing",
     });
     // The envelope carries the new name before the config reload reaches process.env.
-    expect(sent[0]?.context).toMatchObject({ org_name: "Imtec Labs", org_website: "imtec.ba" });
+    expect(sent[0]?.context).toMatchObject({ org_name: "Acme Labs", org_website: "acme.dev" });
     expect(await configValue("PUBLIC_RANKING_ENABLED")).toBe("true");
   });
 
@@ -258,17 +258,17 @@ describe("ranking routes", () => {
     for (const [key, value] of [
       ["SWARM_ORG_NAME", "Your Swarm"],
       ["SWARM_ORG_NAME", "x".repeat(61)],
-      ["SWARM_ORG_WEBSITE", "imtec.com"],
+      ["SWARM_ORG_WEBSITE", "acme.io"],
     ] as const) {
-      await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "Imtec" });
-      await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "imtec.ba" });
+      await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "Acme" });
+      await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "acme.dev" });
       await call("POST", "/api/ranking/opt-in", form);
       sent = [];
       const put = await call("PUT", "/api/config", { scope: "global", key, value }, handleConfig);
       expect(put.statusCode).toBe(200);
       expect(await configValue("PUBLIC_RANKING_ENABLED")).toBe("false");
       expect(sent.map((event) => [event.event, event.properties.domain])).toEqual([
-        ["ranking.opted_out", "imtec.ba"],
+        ["ranking.opted_out", "acme.dev"],
       ]);
     }
     // After the last case (a new website) the old listing needs a new PR.

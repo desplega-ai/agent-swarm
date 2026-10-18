@@ -40,7 +40,7 @@ describe("telemetry_ranking contract fixtures", () => {
 });
 
 describe("buildListing", () => {
-  const identity = orgIdentityStatus({ SWARM_ORG_NAME: "Imtec", SWARM_ORG_WEBSITE: "imtec.ba" });
+  const identity = orgIdentityStatus({ SWARM_ORG_NAME: "Acme", SWARM_ORG_WEBSITE: "acme.dev" });
   const claim = mintRankingClaim();
 
   test("copies the name and domain from the org identity and blanks to null", () => {
@@ -58,8 +58,8 @@ describe("buildListing", () => {
     expect(listing).toEqual({
       v: 1,
       claim,
-      name: "Imtec",
-      domain: "imtec.ba",
+      name: "Acme",
+      domain: "acme.dev",
       category: "engineering",
       subcategory: "qa-testing",
       description: null,
@@ -68,7 +68,7 @@ describe("buildListing", () => {
     });
     expect(JSON.parse(rankingEntryFile(listing))).toEqual({
       $schema: "./schema.json",
-      domain: "imtec.ba",
+      domain: "acme.dev",
       claim,
     });
   });
@@ -76,17 +76,13 @@ describe("buildListing", () => {
   test("refuses a missing identity and an http source URL", () => {
     expect(() =>
       buildListing(
-        orgIdentityStatus({ SWARM_ORG_NAME: "Swarm", SWARM_ORG_WEBSITE: "imtec.ba" }),
+        orgIdentityStatus({ SWARM_ORG_NAME: "Swarm", SWARM_ORG_WEBSITE: "acme.dev" }),
         { category: "other" },
         claim,
       ),
     ).toThrow("SWARM_ORG_NAME");
     expect(() =>
-      buildListing(
-        identity,
-        { category: "other", sourceCodeUrl: "http://github.com/imtec" },
-        claim,
-      ),
+      buildListing(identity, { category: "other", sourceCodeUrl: "http://github.com/acme" }, claim),
     ).toThrow();
   });
 

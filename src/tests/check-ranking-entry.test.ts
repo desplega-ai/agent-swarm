@@ -18,8 +18,8 @@ const VERIFIED: Verification = {
   telemetryActive7d: true,
   websiteMatchesDomain: true,
   listing: {
-    name: "Imtec",
-    domain: "imtec.ba",
+    name: "Acme",
+    domain: "acme.dev",
     category: "engineering",
     subcategory: "qa-testing",
     description: "QA | release automation",
@@ -29,45 +29,45 @@ const VERIFIED: Verification = {
 
 describe("parseEntry", () => {
   test("accepts the opt-in file", () => {
-    expect(parseEntry("imtec.ba.json", file("imtec.ba"))).toEqual({
-      domain: "imtec.ba",
+    expect(parseEntry("acme.dev.json", file("acme.dev"))).toEqual({
+      domain: "acme.dev",
       claim: CLAIM,
     });
   });
 
   test.each([
-    ["imtec.ba.json", "{", "valid JSON"],
-    ["imtec.ba.json", "[]", "JSON object"],
+    ["acme.dev.json", "{", "valid JSON"],
+    ["acme.dev.json", "[]", "JSON object"],
     [
-      "imtec.ba.json",
-      JSON.stringify({ domain: "imtec.ba", claim: CLAIM, name: "Imtec" }),
+      "acme.dev.json",
+      JSON.stringify({ domain: "acme.dev", claim: CLAIM, name: "Acme" }),
       "unknown keys",
     ],
-    ["www.imtec.ba.json", file("www.imtec.ba"), "bare lowercase hostname"],
-    ["Imtec.ba.json", file("Imtec.ba"), "bare lowercase hostname"],
-    ["other.ba.json", file("imtec.ba"), "must be named imtec.ba.json"],
-    ["imtec.ba.json", file("imtec.ba", "rk_short"), "claim"],
+    ["www.acme.dev.json", file("www.acme.dev"), "bare lowercase hostname"],
+    ["Acme.ba.json", file("Acme.ba"), "bare lowercase hostname"],
+    ["other.ba.json", file("acme.dev"), "must be named acme.dev.json"],
+    ["acme.dev.json", file("acme.dev", "rk_short"), "claim"],
   ])("rejects %s %s", (name, text, message) => {
     expect(() => parseEntry(name, text)).toThrow(message);
   });
 
   test("README and schema are not entries", () => {
-    expect(isEntryPath("community/ranking/imtec.ba.json")).toBe(true);
+    expect(isEntryPath("community/ranking/acme.dev.json")).toBe(true);
     expect(isEntryPath("community/ranking/schema.json")).toBe(false);
     expect(isEntryPath("community/ranking/README.md")).toBe(false);
-    expect(isEntryPath("community/ranking/nested/imtec.ba.json")).toBe(false);
+    expect(isEntryPath("community/ranking/nested/acme.dev.json")).toBe(false);
   });
 });
 
 describe("checkRankingEntries", () => {
   const files: Record<string, string> = {
-    "community/ranking/imtec.ba.json": file("imtec.ba"),
+    "community/ranking/acme.dev.json": file("acme.dev"),
     "community/ranking/acme.com.json": file("acme.com", CLAIM),
   };
   const run = (
     paths: string[],
     verify: (entry: Entry) => Promise<Verification>,
-    all = ["imtec.ba.json"],
+    all = ["acme.dev.json"],
   ) =>
     checkRankingEntries({
       changes: paths.map((path) => ({ status: "A", path })),
@@ -78,21 +78,21 @@ describe("checkRankingEntries", () => {
 
   test("a verified entry passes and the summary shows the listing", async () => {
     const asked: Entry[] = [];
-    const result = await run(["community/ranking/imtec.ba.json"], async (entry) => {
+    const result = await run(["community/ranking/acme.dev.json"], async (entry) => {
       asked.push(entry);
       return VERIFIED;
     });
     expect(result.problems).toEqual([]);
-    expect(asked).toEqual([{ domain: "imtec.ba", claim: CLAIM }]);
+    expect(asked).toEqual([{ domain: "acme.dev", claim: CLAIM }]);
     const summary = result.summary.join("\n");
-    expect(summary).toContain("### imtec.ba: verified");
+    expect(summary).toContain("### acme.dev: verified");
     expect(summary).toContain(
-      "| Imtec | engineering | qa-testing | QA \\| release automation | — |",
+      "| Acme | engineering | qa-testing | QA \\| release automation | — |",
     );
   });
 
   test("an unverified entry fails with the proxy's reasons", async () => {
-    const result = await run(["community/ranking/imtec.ba.json"], async () => ({
+    const result = await run(["community/ranking/acme.dev.json"], async () => ({
       ...VERIFIED,
       verified: false,
       reasons: ["telemetry_inactive_7d"],
@@ -102,7 +102,7 @@ describe("checkRankingEntries", () => {
   });
 
   test("a proxy error fails without throwing", async () => {
-    const result = await run(["community/ranking/imtec.ba.json"], async () => {
+    const result = await run(["community/ranking/acme.dev.json"], async () => {
       throw new Error("the proxy answered 503");
     });
     expect(result.problems[0]).toContain("503");
@@ -113,15 +113,15 @@ describe("checkRankingEntries", () => {
     const result = await run(["community/ranking/acme.com.json"], async () => {
       called = true;
       return VERIFIED;
-    }, ["imtec.ba.json", "acme.com.json"]);
+    }, ["acme.dev.json", "acme.com.json"]);
     expect(called).toBe(false);
-    expect(result.problems[0]).toContain("imtec.ba.json");
+    expect(result.problems[0]).toContain("acme.dev.json");
   });
 
   test("a removal needs no proof, and README edits are ignored", async () => {
     const result = await checkRankingEntries({
       changes: [
-        { status: "D", path: "community/ranking/imtec.ba.json" },
+        { status: "D", path: "community/ranking/acme.dev.json" },
         { status: "M", path: "community/ranking/README.md" },
       ],
       readEntry: () => "",
@@ -131,15 +131,15 @@ describe("checkRankingEntries", () => {
       },
     });
     expect(result.problems).toEqual([]);
-    expect(result.summary).toEqual(["- Removed `imtec.ba.json`."]);
+    expect(result.summary).toEqual(["- Removed `acme.dev.json`."]);
   });
 
   test("the claim differs per entry in a valid two-entry PR", async () => {
     files["community/ranking/acme.com.json"] = file("acme.com", OTHER_CLAIM);
     const result = await run(
-      ["community/ranking/acme.com.json", "community/ranking/imtec.ba.json"],
+      ["community/ranking/acme.com.json", "community/ranking/acme.dev.json"],
       async () => VERIFIED,
-      ["imtec.ba.json", "acme.com.json"],
+      ["acme.dev.json", "acme.com.json"],
     );
     expect(result.problems).toEqual([]);
   });

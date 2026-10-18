@@ -4,8 +4,8 @@ import { rankingUsageProps } from "../ranking/usage";
 const ON = {
   ANONYMIZED_TELEMETRY: "true",
   PUBLIC_RANKING_ENABLED: "true",
-  SWARM_ORG_NAME: "Imtec",
-  SWARM_ORG_WEBSITE: "imtec.ba",
+  SWARM_ORG_NAME: "Acme",
+  SWARM_ORG_WEBSITE: "acme.dev",
 };
 const COST = { inputTokens: 100, outputTokens: 20, cacheReadTokens: 5, cacheWriteTokens: 3 };
 const SESSION = { model: "claude-opus-5-5", provider: "claude" };

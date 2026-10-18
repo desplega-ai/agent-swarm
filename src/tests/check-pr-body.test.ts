@@ -38,22 +38,22 @@ const URGENT = "## Urgency\n- [ ] asap\n- [x] nice to have\n";
 describe("isRankingEntryPr", () => {
   test("exempts only a one-file entry PR with the matching title", () => {
     expect(
-      isRankingEntryPr("chore(ranking): add imtec.ba", ["community/ranking/imtec.ba.json"]),
+      isRankingEntryPr("chore(ranking): add acme.dev", ["community/ranking/acme.dev.json"]),
     ).toBe(true);
     expect(
-      isRankingEntryPr("chore(ranking): remove imtec.ba", ["community/ranking/imtec.ba.json"]),
+      isRankingEntryPr("chore(ranking): remove acme.dev", ["community/ranking/acme.dev.json"]),
     ).toBe(true);
     expect(
-      isRankingEntryPr("chore(ranking): add imtec.ba", ["community/ranking/acme.com.json"]),
+      isRankingEntryPr("chore(ranking): add acme.dev", ["community/ranking/acme.com.json"]),
     ).toBe(false);
     expect(
-      isRankingEntryPr("chore(ranking): add imtec.ba", [
-        "community/ranking/imtec.ba.json",
+      isRankingEntryPr("chore(ranking): add acme.dev", [
+        "community/ranking/acme.dev.json",
         "src/server.ts",
       ]),
     ).toBe(false);
-    expect(isRankingEntryPr("feat: add imtec.ba", ["community/ranking/imtec.ba.json"])).toBe(false);
-    expect(isRankingEntryPr("chore(ranking): add imtec.ba", undefined)).toBe(false);
+    expect(isRankingEntryPr("feat: add acme.dev", ["community/ranking/acme.dev.json"])).toBe(false);
+    expect(isRankingEntryPr("chore(ranking): add acme.dev", undefined)).toBe(false);
   });
 });
 
