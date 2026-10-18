@@ -1464,7 +1464,7 @@ export function isEffectivelyEmpty(content: string): boolean {
  */
 export async function gatherSystemStatus(options?: {
   isBootTriage?: boolean;
-  reportedFailureIds?: string[];
+  reportedFailures?: Array<{ id: string; line: string }>;
 }): Promise<string> {
   const stats = await getTaskStats();
   const stalledTasks = await getStalledInProgressTasks(stallThresholdMinutes());
@@ -1499,7 +1499,6 @@ export async function gatherSystemStatus(options?: {
   // Recent failures with reasons and pattern detection (last 6 hours)
   const recentFailures = await getRecentFailedTasks(6);
   const renderedFailures = recentFailures.slice(0, 10);
-  options?.reportedFailureIds?.push(...renderedFailures.map((task) => task.id));
   if (recentFailures.length > 0) {
     sections.push("");
     sections.push("## Recent Failures (last 6h) [auto-generated]");
@@ -1529,9 +1528,9 @@ export async function gatherSystemStatus(options?: {
     for (const task of renderedFailures) {
       const agentSlice = task.agentId?.slice(0, 8) ?? "unassigned";
       const reason = task.failureReason?.slice(0, 100) ?? "no reason";
-      sections.push(
-        `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 50)}" — agent: ${agentSlice}, reason: ${reason}, at: ${task.finishedAt}`,
-      );
+      const line = `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 50)}" — agent: ${agentSlice}, reason: ${reason}, at: ${task.finishedAt}`;
+      sections.push(line);
+      options?.reportedFailures?.push({ id: task.id, line });
     }
     if (recentFailures.length > 10) {
       sections.push(`- ... and ${recentFailures.length - 10} more`);
@@ -1792,8 +1791,8 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     return;
   }
 
-  const reportedFailureIds: string[] = [];
-  let systemStatus = await gatherSystemStatus({ reportedFailureIds });
+  const reportedFailures: Array<{ id: string; line: string }> = [];
+  let systemStatus = await gatherSystemStatus({ reportedFailures });
   // Shadow mode leaves the prompt untouched so the Lead's own quiet/non-quiet
   // outcome stays an independent check on the gate's verdict.
   if (gateMode === "enforce" && gate?.verdict === "wake" && gate.summary) {
@@ -1826,7 +1825,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     await upsertKv({
       namespace: "heartbeat-checklist:reported-failures",
       key: task.id,
-      value: reportedFailureIds,
+      value: reportedFailures.filter(({ line }) => result.text.includes(line)).map(({ id }) => id),
       valueType: "json",
       expiresAt: Date.now() + 7 * 24 * 3600e3,
     });

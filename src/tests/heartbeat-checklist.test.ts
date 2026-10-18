@@ -13,12 +13,14 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  deletePromptTemplate,
   getDbClient,
   getKv,
   getRecentFailedTasks,
   initDb,
   startTask,
   updateAgentProfile,
+  upsertPromptTemplate,
   upsertSwarmConfig,
 } from "../be/db";
 import { getScript, upsertScriptByName } from "../be/scripts/db";
@@ -268,6 +270,34 @@ describe("Heartbeat Checklist", () => {
       }
       for (const failure of failures.slice(10)) {
         expect(checklist!.task).not.toContain(`[${failure.id.slice(0, 8)}]`);
+      }
+    });
+
+    test("receipt excludes failures when the global checklist template omits system status", async () => {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check standing orders" });
+      const failure = await createTaskExtended("Unrendered failure", { agentId: lead.id });
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ? WHERE id = ?",
+        ["boom", new Date(Date.now() - 1000).toISOString(), failure.id],
+      );
+      const template = upsertPromptTemplate({
+        eventType: "heartbeat.checklist",
+        scope: "global",
+        state: "enabled",
+        body: "Review standing orders:\n{{heartbeat_content}}",
+      });
+      try {
+        await checkHeartbeatChecklist();
+        const checklist = await getDbClient().get<{ id: string; task: string }>(
+          "SELECT id, task FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+        );
+        expect(checklist?.task).toBe("Review standing orders:\n- Check standing orders");
+        expect(
+          (await getKv("heartbeat-checklist:reported-failures", checklist!.id))?.value,
+        ).toEqual([]);
+      } finally {
+        await deletePromptTemplate(template.id);
       }
     });
 
