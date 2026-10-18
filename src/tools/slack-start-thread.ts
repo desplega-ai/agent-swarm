@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById, getTaskById, recordSlackMessage } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
+import { buildMrkdwnSectionBlocks } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
@@ -64,15 +65,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
 
       try {
         const slackMessage = markdownToSlack(message);
-        const messageBlocks = blocks ?? [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: slackMessage,
-            },
-          },
-        ];
+        const messageBlocks = blocks ?? buildMrkdwnSectionBlocks(slackMessage);
 
         const result = await withAutoJoin(app.client, channelId, () =>
           app.client.chat.postMessage({

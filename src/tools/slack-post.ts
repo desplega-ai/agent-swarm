@@ -8,7 +8,7 @@ import {
 } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
-import { getTaskLink } from "@/slack/blocks";
+import { buildMrkdwnSectionBlocks, getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
@@ -82,15 +82,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         const contextKey = sourceTask?.contextKey;
         const tree = threadTs ? await getSlackTreeMessageByThread(channelId, threadTs) : null;
         const messageBlocks: Record<string, unknown>[] = [
-          ...(blocks ?? [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: slackMessage,
-              },
-            },
-          ]),
+          ...(blocks ?? buildMrkdwnSectionBlocks(slackMessage)),
         ];
         if (sourceTask && tree) {
           if (messageBlocks.length >= 50) {

@@ -104,6 +104,14 @@ export function splitSlackSectionText(text: string): string[] {
   return chunks;
 }
 
+/**
+ * Default blocks for a tool message sent without explicit `blocks`: one
+ * mrkdwn section per chunk, so text over the section limit still sends.
+ */
+export function buildMrkdwnSectionBlocks(text: string): SlackBlock[] {
+  return splitSlackSectionText(text).map((chunk) => sectionBlock(chunk));
+}
+
 // --- Block primitives ---
 
 function contextBlock(...elements: string[]): SlackBlock {
