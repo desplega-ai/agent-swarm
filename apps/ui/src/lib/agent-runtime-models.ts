@@ -92,7 +92,7 @@ export type SnapshotProviderId =
   | "amazon-bedrock"
   | OpenAICompatibleProviderId;
 
-type CatalogProviderId = SnapshotProviderId | "opencode" | "deepseek";
+type CatalogProviderId = SnapshotProviderId | "opencode" | "opencode-go" | "deepseek";
 
 interface CachedReasoningOption {
   type: string;
@@ -493,6 +493,32 @@ export interface LiveBedrockStatus {
   error?: string;
 }
 
+/**
+ * OpenCode Go is opencode's first-party subscription provider, a sibling of its
+ * Zen section (`opencode`). It authenticates through the CLI's own login rather
+ * than a swarm env key, so the group is always selectable, and models.dev lists
+ * it, so its models come from the catalog (live over snapshot). Offered to the
+ * opencode harness only — pi cannot reach it.
+ */
+function opencodeGoGroup(liveCatalog?: LiveModelsCatalog | null): ModelGroup {
+  const label =
+    sectionOf(liveCatalog, "opencode-go")?.name ??
+    sectionOf(CACHE, "opencode-go")?.name ??
+    "OpenCode Go";
+  const models: ModelOption[] = Object.values(runtimeSectionModels("opencode-go", liveCatalog))
+    .map((m) => ({
+      id: `opencode-go/${m.id}`,
+      label: modelDisplayName(m.name) ?? m.id,
+      provider: label,
+      providerId: null,
+      requiredKey: "",
+      ...catalogFacts(m),
+      reasoningLevels: reasoningLevelsFor("opencode", m.id, m),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return { provider: label, models, requiredKey: "", enabled: true };
+}
+
 export function modelGroupsForHarness(
   harness: LocalHarnessProvider,
   configs: SwarmConfig[] | undefined,
@@ -545,6 +571,11 @@ export function modelGroupsForHarness(
       enabled: hasRuntimeCredential(meta.requiredKey, configs, envPresence),
     };
   });
+
+  // opencode can also reach its own Go subscription models.
+  if (harness === "opencode") {
+    return [...snapshotGroups, opencodeGoGroup(liveCatalog)];
+  }
 
   // For the pi harness, also expose Amazon Bedrock models.
   if (harness === "pi") {

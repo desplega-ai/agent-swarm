@@ -245,6 +245,21 @@ describe("applyReasoningEffort — opencode-options shape", () => {
       kind: "noop",
     });
   });
+
+  test("opencode-go passes max through on its OpenAI-compatible transport", () => {
+    // `opencode-go/deepseek-v4-flash` declares low|high|max in the snapshot.
+    expect(reasoningCapability("opencode", "opencode-go/deepseek-v4-flash").levels).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
+    expect(applyReasoningEffort("opencode", "opencode-go/deepseek-v4-flash", "max")).toEqual({
+      kind: "opencode-options",
+      providerId: "opencode-go",
+      modelId: "deepseek-v4-flash",
+      options: { reasoningEffort: "max" },
+    });
+  });
 });
 
 // The offered levels, the API's validation and the harness application all read the same
@@ -275,7 +290,8 @@ describe("harness × model → effort matrix", () => {
     {
       harness: "opencode",
       model: "openrouter/deepseek/deepseek-v4.1-flash",
-      levels: ["low", "high"],
+      // The facts declare max, and opencode passes it through (unlike pi).
+      levels: ["low", "high", "max"],
     },
     { harness: "pi", model: "openrouter/qwen/qwen3-coder-flash", levels: [] },
     { harness: "claude", model: "totally-custom-model-xyz", levels: [] },

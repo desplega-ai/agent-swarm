@@ -32,9 +32,9 @@ const VENDOR_PATTERNS: ReadonlyArray<[RegExp, ModelVendor]> = [
   [/^(low|medium|high|ultra)$/, "amp"],
 ];
 
-/** `openrouter/` or a registry provider prefix (`nan/`, `helmcode/`). */
+/** `openrouter/`, `opencode-go/`, or a registry provider prefix (`nan/`, `helmcode/`). */
 const ROUTE_PREFIX = new RegExp(
-  `^(${["openrouter", ...openAICompatibleProviderIds()]
+  `^(${["openrouter", "opencode-go", ...openAICompatibleProviderIds()]
     .map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("|")})/`,
 );

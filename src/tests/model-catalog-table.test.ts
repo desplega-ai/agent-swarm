@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { reasoningLevelsForModel } from "@desplega/model-catalog";
 import { closeDb, getActivePricingRow, getDbClient, initDb } from "../be/db";
 import {
   listModelCatalogOverlay,
@@ -10,6 +11,7 @@ import {
 import { getModelsCatalog, resetModelsCatalogForTests } from "../be/models-catalog";
 import type { ModelsDevCache } from "../be/modelsdev-cache";
 import { MODEL_CATALOG_FRESH_MS, refreshModelCatalog } from "../be/pricing-refresh";
+import { getContextWindowSize } from "../utils/context-window";
 
 const TEST_DB_PATH = "./test-model-catalog-table.sqlite";
 
@@ -210,6 +212,67 @@ describe("persistent model catalog", () => {
     const model = (await loadModelsCatalog()).providers.openai?.models["gpt-base"];
     expect(model?.limit?.context).toBe(200_000);
     expect(model?.name).toBe("GPT Base");
+  });
+
+  test("opencode-go lands in the catalog, context windows and effort gating", async () => {
+    const cache: ModelsDevCache = {
+      "opencode-go": {
+        id: "opencode-go",
+        name: "OpenCode Go",
+        models: {
+          "deepseek-v4.1-flash": {
+            id: "deepseek-v4.1-flash",
+            name: "DeepSeek V4.1 Flash",
+            limit: { context: 1_000_000 },
+            reasoning: true,
+            reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+          },
+        },
+      },
+    };
+    await refreshModelCatalog({ force: true, now: 1_000, fetchImpl: ok(cache, '"og-v1"') });
+
+    const catalog = await loadModelsCatalog();
+    expect(catalog.providers["opencode-go"]?.models["deepseek-v4.1-flash"]?.limit?.context).toBe(
+      1_000_000,
+    );
+    // Before the projection covered opencode-go this fell back to 200k.
+    expect(getContextWindowSize("opencode-go/deepseek-v4.1-flash")).toBe(1_000_000);
+    // opencode keeps the model's own `max`; the catalog now carries the facts.
+    expect(
+      reasoningLevelsForModel("opencode", "opencode-go/deepseek-v4.1-flash", catalog.providers),
+    ).toEqual(["low", "high", "max"]);
+  });
+
+  test("an opencode-go overlay expires once upstream carries the projected facts", async () => {
+    const cache: ModelsDevCache = {
+      "opencode-go": {
+        id: "opencode-go",
+        name: "OpenCode Go",
+        models: {
+          "deepseek-v4.1-flash": {
+            id: "deepseek-v4.1-flash",
+            limit: { context: 1_000_000 },
+            reasoning: true,
+          },
+        },
+      },
+    };
+    await refreshModelCatalog({ force: true, now: 1_000, fetchImpl: ok(cache, '"og-v1"') });
+    await upsertModelCatalogOverlay({
+      provider: "opencode-go",
+      modelId: "deepseek-v4.1-flash",
+      contextWindow: 1_000_000,
+      reason: "hand-verified until models.dev caught up",
+    });
+
+    await refreshModelCatalog({ force: true, now: 2_000, fetchImpl: ok(cache, '"og-v2"') });
+
+    expect((await listModelCatalogOverlay()).map((o) => `${o.provider}/${o.modelId}`)).toEqual([]);
+    const model = (await loadModelsCatalog()).providers["opencode-go"]?.models[
+      "deepseek-v4.1-flash"
+    ];
+    expect(model?.limit?.context).toBe(1_000_000);
   });
 
   test("overlay auto-expires once upstream matches", async () => {
