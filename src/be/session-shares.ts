@@ -45,23 +45,72 @@ export function hasSessionAccess(access: SessionAccess, needed: SessionAccess): 
 
 /**
  * The session root of any task: walk `parentTaskId` up to the topmost task
- * that still exists. Depth-capped so a corrupt parent cycle cannot spin.
+ * that still exists. No depth cap, so a chain of any length resolves to its
+ * actual root; a corrupt parent cycle has no top and resolves to null.
  */
 export async function getSessionRoot(taskId: string): Promise<SessionRoot | null> {
-  return getDbClient().get<SessionRoot>(
-    `WITH RECURSIVE up(id, parentTaskId, depth) AS (
-         SELECT id, parentTaskId, 0 FROM agent_tasks WHERE id = ?
-         UNION ALL
-         SELECT t.id, t.parentTaskId, up.depth + 1
-         FROM agent_tasks t JOIN up ON t.id = up.parentTaskId
-         WHERE up.depth < 1000
-       )
-       SELECT t.id, t.requestedByUserId
-       FROM up CROSS JOIN agent_tasks t ON t.id = up.id
-       ORDER BY up.depth DESC
-       LIMIT 1`,
-    [taskId],
-  );
+  return (await getSessionRoots([taskId])).get(taskId) ?? null;
+}
+
+const ROOT_LOOKUP_CHUNK = 500;
+
+type AncestorRow = { id: string; parentTaskId: string | null; requestedByUserId: string | null };
+
+/** `getSessionRoot` for many tasks; unknown tasks and tasks in a cycle are absent. */
+export async function getSessionRoots(taskIds: string[]): Promise<Map<string, SessionRoot>> {
+  const ids = [...new Set(taskIds)];
+  // Every ancestor once (`UNION` drops revisits, which also ends a cycle),
+  // then resolve each chain in memory: linear in the tasks involved.
+  const tasks = new Map<string, AncestorRow>();
+  for (let start = 0; start < ids.length; start += ROOT_LOOKUP_CHUNK) {
+    const chunk = ids.slice(start, start + ROOT_LOOKUP_CHUNK).filter((id) => !tasks.has(id));
+    if (chunk.length === 0) continue;
+    const rows = await getDbClient().query<AncestorRow>(
+      `WITH RECURSIVE up(id) AS (
+           SELECT id FROM agent_tasks WHERE id IN (${chunk.map(() => "?").join(", ")})
+           UNION
+           SELECT t.parentTaskId FROM agent_tasks t JOIN up ON t.id = up.id
+           WHERE t.parentTaskId IS NOT NULL
+         )
+         SELECT t.id, t.parentTaskId, t.requestedByUserId
+         FROM up CROSS JOIN agent_tasks t ON t.id = up.id`,
+      chunk,
+    );
+    for (const row of rows) tasks.set(row.id, row);
+  }
+
+  const resolved = new Map<string, SessionRoot | null>();
+  const rootOf = (taskId: string): SessionRoot | null => {
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    let current = tasks.get(taskId);
+    let root: SessionRoot | null = null;
+    while (current) {
+      const known = resolved.get(current.id);
+      if (known !== undefined) {
+        root = known;
+        break;
+      }
+      if (onPath.has(current.id)) break;
+      path.push(current.id);
+      onPath.add(current.id);
+      const parent = current.parentTaskId ? tasks.get(current.parentTaskId) : undefined;
+      if (!parent) {
+        root = { id: current.id, requestedByUserId: current.requestedByUserId };
+        break;
+      }
+      current = parent;
+    }
+    for (const id of path) resolved.set(id, root);
+    return root;
+  };
+
+  const roots = new Map<string, SessionRoot>();
+  for (const id of ids) {
+    const root = rootOf(id);
+    if (root) roots.set(id, root);
+  }
+  return roots;
 }
 
 /**
