@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-18
+
+### Added
+- Scripts: quickjs host-side fetches pass an egress guard (resolved addresses and every redirect hop; `SCRIPT_EGRESS_ALLOWLIST`, `SCRIPT_EGRESS_ALLOW_PRIVATE`), and the host bearer for `ctx.swarm` calls stays host-only (#2114).
+- Scripts: `ctx.fs` and `ctx.sh` give each run a virtual filesystem with `/afs` mapped to the agent's default agent-fs drive (#2198).
+- Heartbeat: an unset `HEARTBEAT_CHECKLIST_GATE_SCRIPT` runs the seeded `heartbeat-jev-gate` in shadow mode when a global Jev key exists (`HEARTBEAT_JEV_GATE_PROVIDER` picks the key); the Lead HEARTBEAT.md template and runbook seed ship tracked-item hygiene (#2226).
+- Skills: `code-quality` gains a short review format, a post gate and a rules file (#2224).
+
+### Changed
+- Bun bumped to 1.4.3; type checking uses the built-in `bun check` (#2221).
+- pi bumped to 1.3.0; the codemode tool retries pi's worker-cap refusal with backoff (#2214).
+- agent-fs pins bumped to 0.17.5 and 0.18.2; worker image bumps for claude-code, opencode, dsh, cursor, amp, grok, goose and kiro (#2213, #2228, #2212, #2223).
+- Docs: heartbeat spec synced (#2216).
+
+### Fixed
+- Providers: `CONTEXT_MODE_DISABLED` also disables the installed context-mode plugin on Claude and Codex, not only its MCP server (#2227).
+- Steering: delivered but unaccepted steers carry into successor tasks (#2217).
+- Claude: input stays open while a backgrounded subagent is still running (#2218).
+- Users: MCP comms preferences merge per key (#2222).
+- agent-fs: uploads preserve file metadata and infer UTF-8 sizes for strings (#2220).
+- OpenCode: native skill names are recorded (#2215).
+- Secrets: the stored secret sweep reruns after the padded credential rule change (#2210).
+- Audits: seeded failure audits include heartbeat-tagged tasks (#2225).
+
 ## [2.1.0] - 2026-10-17
 
 ### Added
