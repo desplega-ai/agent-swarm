@@ -156,6 +156,21 @@ describe("slack-update", () => {
     expect(joined.replace(/\s/g, "")).toBe(message.replace(/\s/g, ""));
   });
 
+  test("keeps a 2,931-char message with an emoji at 2,900 in one intact section", async () => {
+    const message = `${"x".repeat(2899)}😀${"y".repeat(30)}`;
+    expect(message.length).toBe(2931);
+    const tool = buildTool();
+    const result = await tool.handler(
+      { channelId: "C1", messageTs: "1783411554.596189", message },
+      meta(leadAgentId),
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(mockChatUpdate.mock.calls[0][0].blocks).toEqual([
+      { type: "section", text: { type: "mrkdwn", text: message } },
+    ]);
+  });
+
   test("keeps a short message in exactly one section", async () => {
     const tool = buildTool();
     await tool.handler(
