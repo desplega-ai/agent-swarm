@@ -50,6 +50,16 @@ Transport changes apply to future sessions and do not require a worker restart.
 The worker resolves this key for each session instead of retaining a scoped value in its deployment environment.
 SDK selection is incompatible with an effective Claude Bridge or legacy bridge binary.
 
+### PR rooms
+
+The **Harness & tools** group includes `PR_ROOM_REPOS`, an empty string by default.
+Set a comma-separated `owner/repo` list to require PR rooms before Claude or Codex workers execute `gh pr create`.
+Repository names ignore case and surrounding spaces. An empty value disables the check.
+Create a room with the `pr-room` skill (app action `createRoom`), then pass its returned `prBody` through `--body-file`.
+The body must contain a line such as `PR room: prr-abcde23457`.
+The guard allows edits and unresolved repositories or bodies. It provides a workflow reminder, not a security control.
+Keep **Export to agent env** enabled. Changes reach the next harness session without a worker restart.
+
 | Group | Examples |
 | --- | --- |
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |

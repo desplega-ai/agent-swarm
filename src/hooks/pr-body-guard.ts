@@ -40,16 +40,21 @@ import { isAbsolute, resolve } from "node:path";
 import { findPrBodyLeaks, type LeakCategory } from "../utils/pr-body-leaks";
 
 export type GhPrInvocation = {
+  action: "create" | "edit";
   /** Working directory of the `gh` call after any `cd`; null when a `cd` target could not be resolved. */
   cwd: string | null;
   /** Explicit target repos: `--repo` / `-R`, a PR URL, or `GH_REPO`. Empty means the checkout at `cwd`. */
   repos: string[];
+  /** Expanded targets for workflow guards. Null means an unknown shell value. */
+  resolvedRepos: Array<string | null>;
   /** Also check the checkout: `GH_REPO` was assigned without `export`, so gh may not see it. */
   alsoCheckout: boolean;
   /** The `gh pr edit` target could not be classified (unset variable, `$(...)`, non-PR URL), so the PR's repo is unknown. */
   unknownTarget: boolean;
   /** Literal public text: `--title` and `--body` values, heredoc or here-string stdin. */
   texts: string[];
+  /** Expanded body values and stdin, excluding the title. Null means an unknown shell value. */
+  bodyTexts: Array<string | null>;
   /** Files that become the body, expanded: `--body-file PATH`, or `--body-file -` with `< PATH`. */
   bodyFiles: string[];
   /** Body file paths whose variables could not be resolved, as written. They count as unreadable. */
@@ -826,11 +831,14 @@ function parseWithState(
       else bodyFiles.push(expanded);
     }
     found.push({
+      action,
       cwd: wrapperFlags || dirUnknown ? null : state.dir,
       repos: [...new Set(repos)],
+      resolvedRepos: repos.map(expand),
       alsoCheckout,
       unknownTarget,
       texts: [...inline, ...(fromStdin ? stdin : [])],
+      bodyTexts: [...values("body"), ...(fromStdin ? stdin : [])].map(expand),
       bodyFiles,
       unresolvedBodyFiles,
       // An unquoted `$(` splits at the paren, leaving a value that ends in `$`.
@@ -861,6 +869,25 @@ function parseWithState(
 const BLOCK_ADVICE =
   "Paraphrase the motivation ('a maintainer asked for X') and link only public sources (Fixes #N, a public PR or issue). Task, session, agent-fs and Slack permalinks go only under '## Swarm provenance'. Bare Slack ids, ts values and private-chat quotes are blocked everywhere.";
 
+/** Read body files relative to the parsed checkout and retain the first unreadable path. */
+export async function readGhPrBodyFiles(
+  call: GhPrInvocation,
+  readFile: PrBodyGuardDeps["readFile"],
+): Promise<{ texts: string[]; unreadable: string | undefined }> {
+  const texts: string[] = [];
+  let unreadable = call.unresolvedBodyFiles[0];
+  for (const bodyFile of call.bodyFiles) {
+    try {
+      const base = isAbsolute(bodyFile) ? "/" : call.cwd;
+      if (base === null) throw new Error("unknown working directory");
+      texts.push(await readFile(resolve(base, bodyFile)));
+    } catch {
+      unreadable ??= bodyFile;
+    }
+  }
+  return { texts, unreadable };
+}
+
 /** Check a shell command. Returns a block reason, or null to allow. */
 export async function checkGhPrCommand(
   command: string,
@@ -873,17 +900,9 @@ export async function checkGhPrCommand(
     for (const text of call.opaqueBody ? [...call.texts, command] : call.texts) {
       for (const leak of findPrBodyLeaks(text)) leaks.add(leak);
     }
-    let unreadable: string | undefined = call.unresolvedBodyFiles[0];
-    for (const bodyFile of call.bodyFiles) {
-      try {
-        const base = isAbsolute(bodyFile) ? "/" : call.cwd;
-        if (base === null) throw new Error("unknown working directory");
-        for (const leak of findPrBodyLeaks(await deps.readFile(resolve(base, bodyFile)))) {
-          leaks.add(leak);
-        }
-      } catch {
-        unreadable ??= bodyFile;
-      }
+    const { texts, unreadable } = await readGhPrBodyFiles(call, deps.readFile);
+    for (const text of texts) {
+      for (const leak of findPrBodyLeaks(text)) leaks.add(leak);
     }
     if (leaks.size === 0 && unreadable === undefined) continue;
 

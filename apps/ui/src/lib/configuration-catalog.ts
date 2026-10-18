@@ -408,6 +408,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "PR_ROOM_REPOS",
+        label: "PR room repositories",
+        description:
+          "Comma-separated owner/repo list requiring a PR room marker before Claude or Codex workers create a pull request.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#pr-rooms`,
+      },
+      {
         key: "RUNTIME_POOLS_ENABLED",
         label: "Runtime pools (beta)",
         description:

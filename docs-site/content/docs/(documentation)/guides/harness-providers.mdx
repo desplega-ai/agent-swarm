@@ -265,6 +265,11 @@ The worker does not use a shared app-server daemon. It does not resume native Co
 
 App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook returns before it polls in that mode. The worker then remains the only steering transport. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for the PR body leak guard, which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2.
 
+Claude and Codex hooks also check `gh pr create` after the leak guard when [`PR_ROOM_REPOS`](/docs/ui/configuration#pr-rooms) lists the target repository.
+The body must contain `PR room: prr-` followed by ten lowercase base32 characters.
+Create the room with the `pr-room` skill (app action `createRoom`) and pass the returned `prBody` through `--body-file`.
+This workflow reminder allows edits and unresolved inputs. An empty `PR_ROOM_REPOS` disables it.
+
 For user-facing modes, degradation, entry points, and message states, see [Steer a running task](/docs/guides/task-steering).
 
 ### pi-mono + Amazon Bedrock auth (alpha)
