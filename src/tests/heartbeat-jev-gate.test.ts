@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -63,10 +64,26 @@ function fakeCtx(f: Fixture) {
         }
         if (sql.includes("heartbeatMd")) return table(["heartbeatMd"], [[f.heartbeatMd ?? ""]]);
         if (sql.includes("'heartbeat-checklist'")) {
-          return table(
-            ["id", "output", "status"],
-            [["prev-id", f.prevOutput ?? null, f.prevStatus ?? ""]],
-          );
+          // Execute the real projection so a broken SQL slice cannot hide behind a mock.
+          const db = new Database(":memory:");
+          try {
+            db.run(`CREATE TABLE agent_tasks (
+              id TEXT, output TEXT, task TEXT, agentId TEXT, taskType TEXT,
+              status TEXT, createdAt TEXT
+            )`);
+            db.run("INSERT INTO agent_tasks VALUES (?, ?, ?, ?, ?, ?, ?)", [
+              "prev-id",
+              f.prevOutput ?? null,
+              f.prevStatus ?? "",
+              LEAD,
+              "heartbeat-checklist",
+              "completed",
+              "2026-10-15T13:00:00Z",
+            ]);
+            return { data: { rows: db.query(sql).all(LEAD) } };
+          } finally {
+            db.close();
+          }
         }
         if (sql.includes("completed24")) {
           return table(
@@ -215,6 +232,64 @@ describe("heartbeat-jev-gate with a provider", () => {
         "- In Progress: 3 - Pending: 1 - Unassigned: 0 - Completed (24h): 40 - Failed (24h): 2",
       agents: "- Online: 6 (4 idle, 2 busy), Offline: 5",
     });
+  });
+
+  for (const ordersFirst of [true, false]) {
+    test(`previous failures are not new with standing orders ${ordersFirst ? "before" : "after"} status`, async () => {
+      const failures =
+        '## Recent Failures (last 6h) [auto-generated]\n- [aaaaaaaa] "old failure" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z\n';
+      const orders = "## Your Standing Orders\n- Already triaged.\n";
+      const status = `## Current System Status [auto-generated]\n${failures}`;
+      const { ctx } = fakeCtx({
+        configs: { TYPESAFE_API_KEY: "x" },
+        prevStatus: ordersFirst ? orders + status : status + orders,
+        failed: [
+          {
+            id: "aaaaaaaa-0000",
+            agentId: "12345678-bbbb",
+            task: "old failure",
+            failureReason: "boom",
+            finishedAt: "2026-10-15T12:00:00Z",
+          },
+          {
+            id: "bbbbbbbb-0000",
+            agentId: "12345678-bbbb",
+            task: "new failure",
+            failureReason: "exit 1",
+            finishedAt: "2026-10-15T13:00:00Z",
+          },
+        ],
+        jev: jevSays(0.9),
+      });
+      const verdict = await run(ctx, { dryRun: true });
+      expect(verdict.state.new_failures_since_previous_heartbeat).toEqual([
+        "bbbbbbbb: new failure | exit 1",
+      ]);
+      expect(verdict.state.failures_last_6h_total).toBe(2);
+    });
+  }
+
+  test.each([
+    "## Recent Failures (last 6h) [auto-generated]\nNone.\n",
+    "",
+  ])("failures outside the previous Recent Failures section stay new (%s)", async (section) => {
+    const { ctx } = fakeCtx({
+      configs: { TYPESAFE_API_KEY: "x" },
+      prevStatus: `${section}## Your Standing Orders\n- [aaaaaaaa] "quoted failure" — agent: 12345678, reason: boom, at: 2026-10-15T12:00:00Z\n`,
+      failed: [
+        {
+          id: "aaaaaaaa-0000",
+          agentId: "12345678-bbbb",
+          task: "quoted failure",
+          failureReason: "boom",
+          finishedAt: "2026-10-15T12:00:00Z",
+        },
+      ],
+      jev: jevSays(0.9),
+    });
+    expect((await run(ctx, { dryRun: true })).state.new_failures_since_previous_heartbeat).toEqual([
+      "aaaaaaaa: quoted failure | boom",
+    ]);
   });
 
   test("threshold and time zone come from swarm config", async () => {

@@ -138,11 +138,19 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
   // db_query_concurrency_cap on a busy swarm.
   const lead = await q("SELECT heartbeatMd FROM agents WHERE id = ?", [leadId]);
   const prev = await q(
-    `SELECT id, substr(output, 1, 400) AS output,
-            substr(task, 1, instr(task, '## Your Standing Orders')) AS status
-       FROM agent_tasks
-      WHERE agentId = ? AND taskType = 'heartbeat-checklist' AND status = 'completed'
-      ORDER BY createdAt DESC LIMIT 1`,
+    `WITH previous AS (
+       SELECT id, substr(output, 1, 400) AS output,
+              CASE WHEN instr(task, '## Recent Failures') > 0
+                   THEN substr(task, instr(task, '## Recent Failures')) ELSE '' END AS failures
+         FROM agent_tasks
+        WHERE agentId = ? AND taskType = 'heartbeat-checklist' AND status = 'completed'
+        ORDER BY createdAt DESC LIMIT 1
+     )
+     SELECT id, output,
+            CASE WHEN instr(failures, char(10) || '## ') > 0
+                 THEN substr(failures, 1, instr(failures, char(10) || '## '))
+                 ELSE failures END AS status
+       FROM previous`,
     [leadId],
   );
   const failed = await q(
