@@ -276,11 +276,19 @@ async function ensureAgentTokenManager(
   }
   // A worker token carries the target agent's privileges and reads that
   // agent's resolved config, global secrets included. A user without a
-  // grant-all role must already hold both, and may not manage a lead's token.
+  // grant-all role must already hold both, and may not manage the token of an
+  // agent that may itself act on any agent (a lead).
   if (auth.kind === "user" && isRbacEnabled()) {
     const grant = await getUserGrant(auth.userId);
     if (!grant.grantsAll) {
-      if ((await getAgentById(agentId))?.isLead) {
+      const target = await getAgentById(agentId);
+      const targetActsOnAny = can({
+        principal: { kind: "agent", agentId, isLead: target?.isLead ?? false },
+        verb: "agent.act.any",
+        resource: { kind: "agent", agentId },
+        source: "http",
+      }).allow;
+      if (targetActsOnAny) {
         jsonError(res, "A lead agent's worker token requires a grant-all role", 403);
         return false;
       }
