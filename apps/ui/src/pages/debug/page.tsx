@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { formatDebugCell } from "./format-cell";
 
 const DEFAULT_SQL = "SELECT name, type FROM sqlite_master WHERE type='table' ORDER BY name";
 
@@ -172,6 +173,7 @@ export default function DebugPage() {
       headerName: col,
       flex: 1,
       minWidth: 120,
+      valueFormatter: formatDebugCell,
     }));
   }, [dbQuery.data?.columns]);
 
@@ -205,7 +207,7 @@ export default function DebugPage() {
         {/* Right panel: editor + results */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
           {/* Monaco editor */}
-          <div className="border-b border-border h-[200px]">
+          <div className="border-b border-border shrink-0 h-[clamp(96px,22vh,200px)]">
             <Editor
               language="sql"
               theme={theme === "dark" ? "vs-dark" : "vs"}
@@ -225,7 +227,7 @@ export default function DebugPage() {
           </div>
 
           {/* Toolbar */}
-          <div className="flex items-center gap-3 px-3 py-2 border-b border-border bg-muted/30">
+          <div className="flex shrink-0 items-center gap-3 px-3 py-2 border-b border-border bg-muted/30">
             <Button
               size="sm"
               className="gap-1.5 bg-primary hover:bg-primary/90"
@@ -263,7 +265,7 @@ export default function DebugPage() {
           </div>
 
           {/* Results grid */}
-          <div className="flex-1 min-h-0">
+          <div className="flex flex-1 min-h-0 flex-col">
             <DataGrid
               rowData={rowData}
               columnDefs={columnDefs}

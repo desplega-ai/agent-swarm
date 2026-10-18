@@ -267,13 +267,10 @@ export function DataGrid<TData>({
 
   const onGridReady = useCallback(
     (event: GridReadyEvent<TData>) => {
-      if (loading) {
-        event.api.showLoadingOverlay();
-      }
       if (columnSizing === "fit") event.api.sizeColumnsToFit();
       syncGridPaginationFromUrl(event);
     },
-    [columnSizing, loading, syncGridPaginationFromUrl],
+    [columnSizing, syncGridPaginationFromUrl],
   );
 
   const onPaginationChanged = useCallback(

@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSwarmConfigTable } from "@/hooks/use-swarm-config";
+import { DESCRIPTION_CELL_CLASS, formatDescription } from "../description-cell";
 import { ConfigDetailDialog } from "./config-detail-dialog";
 import { ConfigEntryDialog } from "./config-entry-dialog";
 
@@ -132,9 +133,12 @@ export function SwarmConfigSection() {
         context: HIDE_WHEN_COMPACT,
         flex: 1,
         minWidth: 160,
-        cellRenderer: (params: { value: string | null }) => (
-          <span className="text-muted-foreground truncate">{params.value ?? "—"}</span>
-        ),
+        tooltipField: "description",
+        // The cell is a flex box (ag-grid.css) and its `.ag-cell-wrapper` child defaults to
+        // `min-width: auto`, so long text widened the wrapper past the column instead of
+        // ellipsizing. `min-w-0` lets it shrink to the column.
+        cellClass: DESCRIPTION_CELL_CLASS,
+        valueFormatter: formatDescription,
       },
       {
         headerName: "",
