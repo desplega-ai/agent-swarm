@@ -447,7 +447,25 @@ function connect(
               stopPresence();
               stopAccess?.();
             },
+            suspended: sessionRoot !== undefined,
           });
+          if (sessionRoot) {
+            // A share change published while the room loaded reached no
+            // subscriber, so check again now that the access subscriber is
+            // live. Anything later is that subscriber's to handle.
+            const check = ++accessCheck;
+            const denied = await authorizeRoomNamespace(namespace, auth.identity, "join").catch(
+              () => "Session access check failed",
+            );
+            if (closed) return;
+            if (denied) {
+              leave(key);
+              throw new Error(denied);
+            }
+            const current = rooms.get(key);
+            if (!current) throw new Error("You don't have access to this session");
+            if (check === accessCheck) current.suspended = false;
+          }
           room.awareness.states.set(clientId, { ...auth.me, data: {} });
           room.awareness.meta.set(clientId, { clock: 1, lastUpdated: Date.now() });
           publishPresence(room);
