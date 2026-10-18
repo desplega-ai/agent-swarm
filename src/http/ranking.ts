@@ -298,13 +298,30 @@ export async function handleRanking(
       return true;
     }
 
-    const stored = await storedListing();
-    const claim = stored?.domain === identity.website ? stored.claim : mintRankingClaim();
-    let listing: TelemetryRanking;
-    try {
-      listing = buildListing(identity, parsed.body, claim);
-    } catch (error) {
-      const issue = error instanceof z.ZodError ? error.issues[0] : undefined;
+    const website = identity.website;
+    const db = getDbClient();
+    // Read the stored claim under the write lock: two concurrent first opt-ins
+    // must return the same claim, or the one merged into community/ranking is lost.
+    const built = await db.transaction(async () => {
+      const stored = await storedListing();
+      const claim = stored?.domain === website ? stored.claim : mintRankingClaim();
+      let listing: TelemetryRanking;
+      try {
+        listing = buildListing(identity, parsed.body, claim);
+      } catch (error) {
+        return { ok: false as const, error };
+      }
+      await upsertSwarmConfig({
+        scope: "global",
+        key: TELEMETRY_RANKING_KEY,
+        value: JSON.stringify(listing),
+      });
+      await setEnabled(true);
+      db.afterCommit(() => emitOptedIn(listing));
+      return { ok: true as const, listing };
+    });
+    if (!built.ok) {
+      const issue = built.error instanceof z.ZodError ? built.error.issues[0] : undefined;
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -315,17 +332,7 @@ export async function handleRanking(
       );
       return true;
     }
-
-    const db = getDbClient();
-    await db.transaction(async () => {
-      await upsertSwarmConfig({
-        scope: "global",
-        key: TELEMETRY_RANKING_KEY,
-        value: JSON.stringify(listing),
-      });
-      await setEnabled(true);
-      db.afterCommit(() => emitOptedIn(listing));
-    });
+    const { listing } = built;
     scheduleIntegrationsReload();
 
     optIn.respond(res, 200, {

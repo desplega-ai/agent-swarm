@@ -205,6 +205,25 @@ describe("ranking routes", () => {
     });
   });
 
+  test("concurrent first opt-ins share one claim, and leave then rejoin keeps it", async () => {
+    const [first, second] = await Promise.all([
+      call("POST", "/api/ranking/opt-in", form),
+      call("POST", "/api/ranking/opt-in", form),
+    ]);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    // Either response may be the one merged into community/ranking.
+    const merged = String(first.json.claim);
+    expect(second.json.claim).toBe(merged);
+    expect(parseTelemetryRanking(String(await configValue("telemetry_ranking")))?.claim).toBe(
+      merged,
+    );
+
+    expect((await call("POST", "/api/ranking/opt-out")).statusCode).toBe(200);
+    const rejoin = await call("POST", "/api/ranking/opt-in", form);
+    expect(rejoin.json.claim).toBe(merged);
+  });
+
   test("opt-out stores false, emits ranking.opted_out and returns the delete page", async () => {
     await call("POST", "/api/ranking/opt-in", form);
     sent = [];
