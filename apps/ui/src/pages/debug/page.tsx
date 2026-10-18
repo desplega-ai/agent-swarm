@@ -295,6 +295,7 @@ export default function DebugPage() {
               pagination
               paginationPageSize={50}
               paginationQueryKey="debugResults"
+              pagerClassName="px-3 pb-2"
             />
           </div>
         </div>

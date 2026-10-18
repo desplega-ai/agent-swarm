@@ -92,6 +92,8 @@ export interface DataGridProps<TData> {
   pagination?: boolean;
   paginationQueryKey?: string;
   className?: string;
+  /** Extra classes for the pager row, e.g. padding when the grid sits flush in a panel. */
+  pagerClassName?: string;
   domLayout?: "normal" | "autoHeight";
   enableCellTextSelection?: boolean;
   getRowId?: (params: GetRowIdParams<TData>) => string;
@@ -145,6 +147,7 @@ export function DataGrid<TData>({
   pagination: paginationEnabled = true,
   paginationQueryKey,
   className,
+  pagerClassName,
   domLayout = "normal",
   enableCellTextSelection = false,
   getRowId,
@@ -382,6 +385,7 @@ export function DataGrid<TData>({
           pageSize={pager.pageSize}
           total={pager.total}
           pageSizeOptions={paginationPageSizeSelector}
+          className={pagerClassName}
           onPageChange={(page) => gridRef.current?.api?.paginationGoToPage(page)}
           onPageSizeChange={(size) =>
             gridRef.current?.api?.setGridOption("paginationPageSize", size)
