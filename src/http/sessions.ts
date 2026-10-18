@@ -9,6 +9,7 @@ import {
   getTaskById,
   listRecentSessions,
 } from "../be/db";
+import { getUserGrant } from "../be/rbac-roles";
 import { getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
 import {
@@ -21,7 +22,7 @@ import {
   revokeSessionToken,
   rotateAgentToken,
 } from "../be/users";
-import { can } from "../rbac";
+import { can, isRbacEnabled } from "../rbac";
 import { type AgentTask, AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
@@ -272,6 +273,25 @@ async function ensureAgentTokenManager(
   if (!decision.allow) {
     jsonError(res, decision.reason, 403);
     return false;
+  }
+  // A worker token carries the target agent's privileges and reads that
+  // agent's resolved config, global secrets included. A user without a
+  // grant-all role must already hold both, and may not manage a lead's token.
+  if (auth.kind === "user" && isRbacEnabled()) {
+    const grant = await getUserGrant(auth.userId);
+    if (!grant.grantsAll) {
+      if ((await getAgentById(agentId))?.isLead) {
+        jsonError(res, "A lead agent's worker token requires a grant-all role", 403);
+        return false;
+      }
+      const missing = (["agent.act.any", "config.read.secrets"] as const).filter(
+        (verb) => !grant.verbs.has(verb),
+      );
+      if (missing.length > 0) {
+        jsonError(res, `Worker tokens also require: ${missing.join(", ")}`, 403);
+        return false;
+      }
+    }
   }
   return true;
 }

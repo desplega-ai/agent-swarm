@@ -5,17 +5,22 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  createUser,
   getAgentById,
+  getDbClient,
   initDb,
   upsertSwarmConfig,
 } from "../be/db";
+import { attachRole } from "../be/rbac-roles";
 import { createRuntimeController } from "../be/runtime-pools/db";
 import { mintControllerToken } from "../be/runtime-pools/tokens";
 import {
   AGENT_TOKEN_NO_EXPIRY,
+  type IdentityActor,
   mintAgentToken,
   mintRuntimeToken,
   mintSessionToken,
+  mintToken,
   resolveBySessionToken,
   resolveSessionToken,
   revokeAgentTokens,
@@ -33,6 +38,7 @@ import { listenOnFreePort } from "./test-net";
 // Synthetic credentials, built at runtime so no literal looks like a real secret.
 const key = `agent-token-test-${randomBytes(8).toString("hex")}`;
 const synthetic = (label: string) => `synthetic-${label}-${randomBytes(12).toString("hex")}`;
+const USER_ACTOR: IdentityActor = { kind: "operator", id: "agent-session-tokens-test" };
 let server: Server;
 let baseUrl: string;
 let workerId: string;
@@ -206,6 +212,61 @@ describe("worker token management routes", () => {
       (await request(`/api/agents/${workerId}/token`, key, { method: "DELETE" })).body,
     ).toEqual({ revoked: 1 });
     expect((await request("/api/poll", again.body.plaintext)).status).toBe(401);
+  });
+
+  test("a user without a grant-all role needs the agent's privileges and never mints a lead's", async () => {
+    const roleId = `token-manager-${crypto.randomUUID()}`;
+    await getDbClient().run(
+      "INSERT INTO roles (id, name, description, isBuiltin, grantsAll) VALUES (?, ?, '', 0, 0)",
+      [roleId, roleId],
+    );
+    const grant = (verb: string) =>
+      getDbClient().run("INSERT INTO role_permissions (roleId, verb) VALUES (?, ?)", [
+        roleId,
+        verb,
+      ]);
+    await grant("agent.token.manage");
+    const limited = await createUser({ name: "Token manager" });
+    // New users start as admin (rbac-roles insert trigger); narrow this one.
+    await getDbClient().run("DELETE FROM principal_roles WHERE principalId = ?", [limited.id]);
+    await getDbClient().run(
+      "INSERT INTO principal_roles (principalType, principalId, roleId) VALUES ('user', ?, ?)",
+      [limited.id, roleId],
+    );
+    const limitedToken = (await mintToken(limited.id, "limited", USER_ACTOR)).plaintext;
+    const admin = await createUser({ name: "Token admin" });
+    await attachRole(admin.id, "admin");
+    const adminToken = (await mintToken(admin.id, "admin", USER_ACTOR)).plaintext;
+
+    // agent.token.manage alone would hand out the agent's privileges and secret reads.
+    for (const agentId of [workerId, leadId]) {
+      const res = await request(`/api/agents/${agentId}/token`, limitedToken, { body: {} });
+      expect(res.status).toBe(403);
+    }
+    await grant("agent.act.any");
+    await grant("config.read.secrets");
+    const minted = await request(`/api/agents/${workerId}/token`, limitedToken, { body: {} });
+    expect(minted.status).toBe(200);
+    expect(minted.body.agentId).toBe(workerId);
+    for (const [method, suffix] of [
+      ["POST", ""],
+      ["POST", "/rotate"],
+      ["DELETE", ""],
+    ] as const) {
+      const res = await request(`/api/agents/${leadId}/token${suffix}`, limitedToken, {
+        method,
+        body: method === "POST" ? {} : undefined,
+      });
+      expect(res.status).toBe(403);
+    }
+
+    const lead = await request(`/api/agents/${leadId}/token`, adminToken, { body: {} });
+    expect(lead.status).toBe(200);
+    for (const agentId of [workerId, leadId]) {
+      expect(
+        (await request(`/api/agents/${agentId}/token`, adminToken, { method: "DELETE" })).body,
+      ).toEqual({ revoked: 1 });
+    }
   });
 });
 
