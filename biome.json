@@ -15,6 +15,8 @@
       "!src/extensions/catalog.generated.json",
       "!src/telemetry-contract/catalog.json",
       "!src/telemetry-contract/types.gen.ts",
+      "!src/telemetry-contract/ranking",
+      "!src/telemetry-contract/ranking-taxonomy.gen.ts",
       "!src/utils/secret-rules.generated.ts",
       "!templates/extensions/manifest.schema.json",
       "!packages/ui-e2e/reporter/ui-e2e-ingest.v1.schema.json",

@@ -67,6 +67,7 @@ import "./task-templates";
 import "./telemetry-ui";
 import "./trackers/jira";
 import "./trackers/linear";
+import "./ranking";
 import "./used-by";
 import "./fleet-benchmark";
 import "./users";

@@ -31,6 +31,7 @@ import { SwarmConfigSchema } from "../types";
 import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
+import { syncRankingAfterConfigChange } from "./ranking";
 import { route } from "./route-def";
 import { duplicateGuardedQueryKey, jsonError } from "./utils";
 
@@ -527,6 +528,7 @@ export async function handleConfig(
       if (scope === "global" && key === "SWARM_ORG_WEBSITE") {
         await fillOrgLogoFromWebsite(String(value));
       }
+      if (scope === "global") await syncRankingAfterConfigChange(key, String(value));
       if (scope === "global") {
         scheduleIntegrationsReload();
       }
@@ -561,6 +563,7 @@ export async function handleConfig(
       return true;
     }
     if (existing.scope === "global") {
+      await syncRankingAfterConfigChange(existing.key, null);
       scheduleIntegrationsReload();
     }
     if (

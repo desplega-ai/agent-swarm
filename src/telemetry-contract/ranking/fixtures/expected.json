@@ -1,0 +1,30 @@
+{
+  "$comment": "Every file in valid/ must parse in the proxy (ParseListing) and in agent-swarm (parseTelemetryRanking). Every file in invalid/ must fail in both; the value is the field the proxy names in its invalid_property message. A file's exact bytes are the listing string.",
+  "invalid": {
+    "bad-claim.json": "listing.claim",
+    "short-claim.json": "listing.claim",
+    "missing-description.json": "listing.description",
+    "unknown-field.json": "listing.logo",
+    "wrong-case-field.json": "listing.Claim",
+    "unsupported-version.json": "listing.v",
+    "missing-version.json": "listing.v",
+    "bad-category.json": "listing.category",
+    "subcategory-other-category.json": "listing.subcategory",
+    "other-with-subcategory.json": "listing.subcategory",
+    "http-source-url.json": "listing.sourceCodeUrl",
+    "domain-with-scheme.json": "listing.domain",
+    "domain-with-www.json": "listing.domain",
+    "domain-uppercase.json": "listing.domain",
+    "name-too-long.json": "listing.name",
+    "blank-name.json": "listing.name",
+    "blank-description.json": "listing.description",
+    "description-too-long.json": "listing.description",
+    "name-not-string.json": "listing.name",
+    "updated-at-offset.json": "listing.updatedAt",
+    "updated-at-not-date.json": "listing.updatedAt",
+    "not-object.json": "listing",
+    "null.json": "listing",
+    "trailing-data.json": "listing",
+    "oversize.json": "listing"
+  }
+}
