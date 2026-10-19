@@ -393,6 +393,11 @@ class ClaudeSdkSession implements ProviderSession {
     }
   }
 
+  private closeInput(): void {
+    this.acceptingInput = false;
+    this.input.close();
+  }
+
   private shutdownAfterSdkGrace(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownPromise = (async () => {
@@ -515,8 +520,11 @@ class ClaudeSdkSession implements ProviderSession {
         if (!isResult) continue;
         terminalResult = message as SDKResultMessage;
         if ((terminalResult.queued_turn_count ?? 0) === 0 && this.input.pendingCount === 0) {
-          this.acceptingInput = false;
-          this.input.close();
+          // Live background work gets its notification turn; the result after
+          // it settles closes input.
+          if (!this.backgroundKeepalive.holdInputForBackgroundWork(() => this.closeInput())) {
+            this.closeInput();
+          }
         }
       }
     } catch (error) {

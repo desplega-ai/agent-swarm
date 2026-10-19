@@ -1,5 +1,7 @@
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
+import { type EgressPolicy, parseEgressAllowlist } from "../utils/egress-guard";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "./api-types";
 import type { FailedCredentialBinding } from "./credential-broker";
@@ -9,6 +11,7 @@ import {
   DEFAULT_SCRIPT_RESOURCES,
   type EgressSecretEntry,
   type ExecutorOutput,
+  type ScriptAgentFsDescriptor,
   type ScriptFsMode,
   type ScriptResourcePolicy,
   type SwarmConfigPayload,
@@ -48,6 +51,7 @@ export type RunScriptInput = {
   failedBindings?: FailedCredentialBinding[];
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
+  agentFs?: ScriptAgentFsDescriptor;
 };
 
 export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr"> & {
@@ -57,6 +61,17 @@ export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr
 };
 
 export type { ScriptRuntimeError, ScriptStackFrame } from "./executors/types";
+
+/**
+ * Egress policy for script runs, read per run like `SCRIPT_EXECUTOR`. Only
+ * the quickjs executor enforces it; native ignores it.
+ */
+export function scriptEgressPolicy(env: NodeJS.ProcessEnv = process.env): EgressPolicy {
+  return {
+    allowPrivate: isEnvFlagEnabled("SCRIPT_EGRESS_ALLOW_PRIVATE", false, env),
+    allowlist: parseEgressAllowlist(env.SCRIPT_EGRESS_ALLOWLIST),
+  };
+}
 
 async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPayload> {
   const apiKey = getApiKey();
@@ -79,6 +94,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
     failedBindings: input.failedBindings ?? [],
     apiConnections: input.apiConnections ?? [],
     mcpConnections: input.mcpConnections ?? [],
+    ...(input.agentFs ? { agentFs: input.agentFs } : {}),
   };
 }
 
@@ -130,7 +146,7 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     configPayload,
     resources,
     fsMode: input.fsMode ?? "none",
-    network: "open" as const,
+    network: scriptEgressPolicy(),
     signal: input.signal,
   };
 

@@ -1,40 +1,14 @@
 import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 /**
- * Shared building blocks for the `/setup` steps, so every step renders the
- * same card anatomy as the round-2 mockup (option B): a bordered card with a
- * header row (icon, title, one-line description, status icon) and a body.
+ * The card anatomy of the `/setup` steps (round-2 mockup, option B), shared
+ * with every surface that wants the same look: a bordered card with a header
+ * row (icon, title, one-line description, status icon) and a body.
  * A card without children is a single header row.
  */
-
-/** `done` is amber like the stepper: progress never uses the green success tone. */
-export type SetupChipTone = "neutral" | "done" | "error" | "info";
-
-const CHIP_TONE: Record<SetupChipTone, string> = {
-  neutral: "border-border text-muted-foreground",
-  done: "border-primary/30 text-primary",
-  error: "border-status-error/30 text-status-error-strong",
-  info: "border-status-info/30 text-status-info-strong",
-};
-
-/** The 9px uppercase status chip ("DONE", "RECOMMENDED", ...). */
-export function SetupChip({
-  tone = "neutral",
-  children,
-}: {
-  tone?: SetupChipTone;
-  children: ReactNode;
-}) {
-  return (
-    <Badge variant="outline" size="tag" className={CHIP_TONE[tone]}>
-      {children}
-    </Badge>
-  );
-}
 
 interface SetupCardProps {
   icon?: ReactNode;

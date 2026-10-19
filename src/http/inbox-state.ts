@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { listInboxState, upsertInboxState } from "../be/db";
+import { getDbClient, listInboxState, upsertInboxState } from "../be/db";
 import { InboxItemStateSchema, InboxItemStatusSchema, InboxItemTypeSchema } from "../types";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -29,20 +29,29 @@ const listState = route({
   auth: { apiKey: true },
 });
 
+const inboxStateItemSchema = z.object({
+  itemType: InboxItemTypeSchema,
+  itemId: z.string().min(1),
+  status: InboxItemStatusSchema,
+  snoozeUntil: z.string().datetime().optional(),
+  readAt: z.string().datetime().optional(),
+  lastReadAt: z
+    .string()
+    .datetime()
+    .nullable()
+    .optional()
+    .describe(
+      "Omit to preserve the read cursor, send null to clear it, or send a timestamp to set it, including an earlier time.",
+    ),
+});
+
 const upsertState = route({
   method: "patch",
   path: "/api/inbox-state",
   pattern: ["api", "inbox-state"],
   summary: "Upsert per-user dismiss/snooze/done state for an inbox item",
   tags: ["Inbox State"],
-  body: z.object({
-    userId: z.string(),
-    itemType: InboxItemTypeSchema,
-    itemId: z.string().min(1),
-    status: InboxItemStatusSchema,
-    snoozeUntil: z.string().datetime().optional(),
-    readAt: z.string().datetime().optional(),
-  }),
+  body: inboxStateItemSchema.extend({ userId: z.string() }),
   responses: {
     200: {
       description: "Upserted inbox state row",
@@ -52,6 +61,28 @@ const upsertState = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+});
+
+const bulkUpsertState = route({
+  method: "patch",
+  path: "/api/inbox-state/bulk",
+  pattern: ["api", "inbox-state", "bulk"],
+  summary: "Upsert inbox-item state in one transaction",
+  tags: ["Inbox State"],
+  body: z.object({
+    userId: z.string(),
+    items: z.array(inboxStateItemSchema).min(1).max(200),
+  }),
+  responses: {
+    200: {
+      description: "Upserted inbox state rows in request order",
+      schema: z.object({ items: z.array(InboxItemStateSchema) }),
+    },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+  rbac: { ungated: "per-user inbox UI state, same posture as PATCH /api/inbox-state" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -74,6 +105,24 @@ export async function handleInboxState(
     return true;
   }
 
+  if (bulkUpsertState.match(req.method, pathSegments)) {
+    const parsed = await bulkUpsertState.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    try {
+      const items = await getDbClient().transaction(async () => {
+        const rows = [];
+        for (const item of parsed.body.items) {
+          rows.push(await upsertInboxState({ ...item, userId: parsed.body.userId }));
+        }
+        return rows;
+      });
+      bulkUpsertState.respond(res, 200, { items });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to upsert inbox state", 500);
+    }
+    return true;
+  }
+
   if (upsertState.match(req.method, pathSegments)) {
     const parsed = await upsertState.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -85,6 +134,7 @@ export async function handleInboxState(
         status: parsed.body.status,
         snoozeUntil: parsed.body.snoozeUntil,
         readAt: parsed.body.readAt,
+        lastReadAt: parsed.body.lastReadAt,
       });
       upsertState.respond(res, 200, { item });
     } catch (err) {

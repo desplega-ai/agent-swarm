@@ -13,7 +13,8 @@ import {
   EventStatusSchema,
   SwarmEventSchema,
 } from "../types";
-import { route } from "./route-def";
+import { bodyListTask, bodyTask, route } from "./route-def";
+import { readableByFor, resolveSessionActor } from "./session-access";
 import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -36,6 +37,7 @@ const createEventRoute = route({
   method: "post",
   path: "/api/events",
   pattern: ["api", "events"],
+  session: bodyTask("taskId"),
   summary: "Store a single event",
   tags: ["Events"],
   body: eventBodySchema,
@@ -53,6 +55,7 @@ const createEventsBatchRoute = route({
   method: "post",
   path: "/api/events/batch",
   pattern: ["api", "events", "batch"],
+  session: bodyListTask("events", "taskId"),
   summary: "Store multiple events in a batch",
   tags: ["Events"],
   body: z.object({
@@ -153,7 +156,7 @@ export async function handleEvents(
   res: ServerResponse,
   pathSegments: string[],
   queryParams: URLSearchParams,
-  _myAgentId: string | undefined,
+  myAgentId: string | undefined,
 ): Promise<boolean> {
   // Match batch BEFORE generic /api/events (POST)
   if (createEventsBatchRoute.match(req.method, pathSegments)) {
@@ -252,6 +255,7 @@ export async function handleEvents(
       limit: parsed.query.limit ?? 100,
       events: eventFilter,
       latestPerDataField: latestPerDataField ? { events: latestEvents, dataFields } : undefined,
+      readableBy: readableByFor(await resolveSessionActor(req, myAgentId)),
     });
     getEventsRoute.respond(
       res,

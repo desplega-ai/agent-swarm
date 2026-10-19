@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 import type { FleetBenchmarkResponse } from "@/api/types";
 import {
   fleetCardMode,
+  fleetPeerGroupNote,
   fleetPlacement,
   formatFleetMedian,
+  formatFleetNumber,
   formatFleetValue,
 } from "./fleet-benchmark";
 
@@ -27,6 +29,19 @@ test("telemetry off, no org name, unavailable or still loading show nothing", ()
     expect(fleetCardMode({ ...base, benchmark: response(state) })).toBeNull();
   }
   expect(fleetCardMode({ ...base, benchmark: undefined })).toBeNull();
+});
+
+test("telemetry off shows the off state only while the telemetry banner is not on screen", () => {
+  const off = response("telemetry_off");
+  expect(fleetCardMode({ ...base, benchmark: off, offStateAllowed: true })).toBe("off");
+  expect(fleetCardMode({ ...base, benchmark: off, offStateAllowed: false })).toBeNull();
+  expect(
+    fleetCardMode({ ...base, benchmark: off, offStateAllowed: true, benchmarkDismissed: true }),
+  ).toBeNull();
+  // The flag means nothing for other states.
+  expect(
+    fleetCardMode({ ...base, benchmark: response("no_org_name"), offStateAllowed: true }),
+  ).toBeNull();
 });
 
 test("the perk shows alone after a completed workflow, until the invite is resolved", () => {
@@ -63,5 +78,19 @@ test("copy", () => {
   );
   expect(fleetPlacement({ band: "below_median", peers: "all" })).toBe(
     "below the median of active swarms",
+  );
+  expect(formatFleetNumber("tasksPerWeek", 42.4)).toBe("42");
+  expect(formatFleetNumber("taskSuccessRate", 0.93)).toBe("93%");
+});
+
+test("peer group note", () => {
+  expect(fleetPeerGroupNote({ teamSize: "2-10", useCase: "features", orgs: 34 })).toBe(
+    "Compared with 34 organizations like yours (2-10 people, Ship features).",
+  );
+  expect(fleetPeerGroupNote({ teamSize: "1", useCase: null, orgs: 1 })).toBe(
+    "Compared with 1 organization like yours (Just me).",
+  );
+  expect(fleetPeerGroupNote(null)).toBe(
+    "Not enough swarms like yours report yet, so these numbers compare with the whole fleet.",
   );
 });

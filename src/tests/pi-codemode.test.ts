@@ -308,6 +308,46 @@ describe("bounded codemode", () => {
     expect(fake.peak()).toBe(2);
   }, 20_000);
 
+  test("scripts past pi's worker cap wait for a free worker instead of failing", async () => {
+    const tool = registerCodemode(limits);
+    const code = "const end = Date.now() + 100; while (Date.now() < end) {}\nreturn 'done';";
+    const results = await Promise.all(
+      ["w1", "w2", "w3", "w4"].map((id) =>
+        tool.execute(id, { code }, undefined, undefined, fakeCtx().ctx),
+      ),
+    );
+    for (const result of results) expect(textOf(result)).toStartWith("Script completed");
+  }, 20_000);
+
+  test("waiting for a codemode worker still honours the deadline", async () => {
+    const holders = new AbortController();
+    const holding = ["h1", "h2"].map((id) =>
+      registerCodemode(limits).execute(
+        id,
+        { code: "while (true) {}" },
+        holders.signal,
+        undefined,
+        fakeCtx().ctx,
+      ),
+    );
+    try {
+      await Bun.sleep(200);
+      const started = Date.now();
+      const result = await registerCodemode({ ...limits, timeoutMs: 300 }).execute(
+        "t6",
+        { code: "return 'done';" },
+        undefined,
+        undefined,
+        fakeCtx().ctx,
+      );
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(textOf(result)).toContain("Codemode worker limit reached");
+    } finally {
+      holders.abort(new Error("test done"));
+      await Promise.all(holding);
+    }
+  }, 20_000);
+
   test("cancelling the task aborts a running script", async () => {
     const tool = registerCodemode(limits);
     const controller = new AbortController();

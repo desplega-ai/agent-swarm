@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -7,7 +7,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
-import { modKeyLabel, OPEN_OVERLAY, type ShortcutKeyEvent } from "@/lib/approval-shortcuts";
+import {
+  modKeyLabel,
+  OPEN_OVERLAY,
+  overlayBlocks,
+  type ShortcutKeyEvent,
+} from "@/lib/approval-shortcuts";
 import { cn } from "@/lib/utils";
 
 export function useMediaQuery(query: string): boolean {
@@ -54,12 +59,14 @@ export const MOD = modKeyLabel();
 /**
  * One window keydown listener mapped through a pure matcher. The matcher
  * owns every guard (text fields, modifiers, open overlays); the handler only
- * runs matched actions.
+ * runs matched actions. With a `root`, an open overlay that contains it (a
+ * flow in a dialog or popover) does not block the keys.
  */
 export function useKeyboardShortcuts<A>(
   match: (event: ShortcutKeyEvent, context: { overlayOpen: boolean }) => A | null,
   onAction: (action: A, event: KeyboardEvent) => boolean | undefined,
   enabled = true,
+  root?: RefObject<HTMLElement | null>,
 ) {
   const latest = useRef({ match, onAction });
   useLayoutEffect(() => {
@@ -70,7 +77,10 @@ export function useKeyboardShortcuts<A>(
     function onKeyDown(event: KeyboardEvent) {
       // Escape closes an open tooltip first.
       if (event.key === "Escape" && document.querySelector('[role="tooltip"]')) return;
-      const overlayOpen = Boolean(document.querySelector(OPEN_OVERLAY));
+      const overlayOpen = overlayBlocks(
+        Array.from(document.querySelectorAll(OPEN_OVERLAY)),
+        root?.current,
+      );
       const action = latest.current.match(event, { overlayOpen });
       if (action === null) return;
       // A handler returns false when the action does not apply right now.
@@ -79,7 +89,7 @@ export function useKeyboardShortcuts<A>(
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [enabled]);
+  }, [enabled, root]);
 }
 
 const SHEET_GROUPS: { title: string; rows: { keys: string[]; label: string }[] }[] = [

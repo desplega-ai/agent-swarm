@@ -184,6 +184,27 @@ describe("onboarding state", () => {
     expect(body.state.version).toBe(1);
   });
 
+  test("a stored org name completes the name step, the old default does not", async () => {
+    const nameStep = async () =>
+      ((await (await request("/api/onboarding")).json()) as { state: OnboardingState }).state.steps
+        .name;
+    const previous = process.env.SWARM_ORG_NAME;
+    try {
+      delete process.env.SWARM_ORG_NAME;
+      expect((await nameStep()).status).toBe("todo");
+      process.env.SWARM_ORG_NAME = " Your Swarm ";
+      expect((await nameStep()).status).toBe("todo");
+      process.env.SWARM_ORG_NAME = "Acme";
+      expect(await nameStep()).toMatchObject({ status: "done", method: "custom_name" });
+      // Clearing the name later never undoes a done step.
+      delete process.env.SWARM_ORG_NAME;
+      expect((await nameStep()).status).toBe("done");
+    } finally {
+      if (previous === undefined) delete process.env.SWARM_ORG_NAME;
+      else process.env.SWARM_ORG_NAME = previous;
+    }
+  });
+
   test("concurrent first GETs create state and started telemetry once", async () => {
     const responses = await Promise.all(
       Array.from({ length: 8 }, () => request("/api/onboarding")),

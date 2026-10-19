@@ -115,6 +115,7 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
     if (provider === "openrouter") return ["OPENROUTER_API_KEY"];
     if (provider === "openai") return ["OPENAI_API_KEY"];
     if (provider === "google") return ["GOOGLE_API_KEY", "GEMINI_API_KEY"];
+    if (provider === "opencode-go") return ["OPENCODE_API_KEY"];
     // models.json custom providers (`writeSessionModelsJson`). The
     // runner normalizes key aliases (HELMCODE_API_NAN → NAN_API_KEY), but a
     // worker without that step (or a boot-time check) may only see the alias.
@@ -141,6 +142,19 @@ function getHarnessDrivableBedrockModels(): Array<{ id: string; name: string }> 
   } catch {
     // getModels may throw if the pi-ai catalog is empty or corrupted.
     // Return an empty list — the intersection will be empty too, which is safe.
+    return [];
+  }
+}
+
+/**
+ * The `opencode-go` model ids this pi-ai build resolves. models.dev can list
+ * ids pi-ai does not know yet, and pi runs its default model for those, so the
+ * worker reports this list and the picker offers only these ids.
+ */
+export function listPiOpencodeGoModelIds(): string[] {
+  try {
+    return getModels("opencode-go").map((m) => m.id);
+  } catch {
     return [];
   }
 }
@@ -480,6 +494,7 @@ const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string]
   ["OPENAI_API_KEY", "openai"],
   ["GEMINI_API_KEY", "google"],
   ["GOOGLE_API_KEY", "google"],
+  ["OPENCODE_API_KEY", "opencode-go"],
   // models.json custom providers (the registry). A runtime key beats the
   // file's `apiKey: "$NAN_API_KEY"`, which pi would otherwise read from the
   // shared process.env, where a credential pool is still the raw comma list.
@@ -1508,6 +1523,8 @@ const DEFAULT_CODEMODE_LIMITS: CodemodeLimits = {
  * pi has no option for either: a script runs until it returns unless its own
  * `// @options` line sets `timeout_ms`. Both limits abort the signal pi hands
  * the sandbox, which interrupts the QuickJS worker and fails the codemode call.
+ * A call refused by pi's process-wide worker cap waits for a free worker
+ * within the same deadline instead of failing.
  *
  * "on" keeps declared tools declared; "only" would hide the lifecycle tools
  * behind scripts. `models` stays off unless `PI_CODEMODE_MODELS` asks for it.
@@ -1532,6 +1549,43 @@ export function createBoundedCodemodeExtension(
         },
       }),
     );
+}
+
+const CODEMODE_WORKER_RETRY_MIN_MS = 25;
+const CODEMODE_WORKER_RETRY_MAX_MS = 250;
+
+/**
+ * pi 1.3 admits at most two live codemode workers per process, across all
+ * sessions, and counts a stopped worker until its thread exits. A call over
+ * that cap fails before the script runs. The runner hosts every task's pi
+ * session in one process and pi runs a turn's tool calls in parallel, so a
+ * third concurrent script, or one started right after another, can be
+ * refused. Nothing ran (no nested calls, no store writes), so it is safe to
+ * retry until a worker frees up, within the same deadline.
+ */
+function isCodemodeWorkerLimitRefusal(result: {
+  content: Array<{ type: string; text?: string }>;
+  details?: unknown;
+  isError?: boolean;
+}): boolean {
+  if (!result.isError) return false;
+  const calls = (result.details as { calls?: unknown[] } | undefined)?.calls;
+  if (calls && calls.length > 0) return false;
+  return result.content.some((item) =>
+    item.text?.includes("Script sandbox failed: Codemode worker limit reached"),
+  );
+}
+
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
 }
 
 export function boundCodemodeTool(tool: ToolDefinition, limits: CodemodeLimits): ToolDefinition {
@@ -1599,7 +1653,20 @@ export function boundCodemodeTool(tool: ToolDefinition, limits: CodemodeLimits):
         : ctx;
 
       try {
-        return await tool.execute(toolCallId, params, script.signal, onUpdate, boundedCtx);
+        let delayMs = CODEMODE_WORKER_RETRY_MIN_MS;
+        for (;;) {
+          const result = await tool.execute(
+            toolCallId,
+            params,
+            script.signal,
+            onUpdate,
+            boundedCtx,
+          );
+          if (!isCodemodeWorkerLimitRefusal(result) || script.signal.aborted) return result;
+          await abortableSleep(delayMs, script.signal);
+          if (script.signal.aborted) return result;
+          delayMs = Math.min(delayMs * 2, CODEMODE_WORKER_RETRY_MAX_MS);
+        }
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener("abort", onOuterAbort);

@@ -228,14 +228,26 @@ describe("profile CRUD", () => {
       (await call("PATCH", "/api/model-profiles/oc-off", { description: "kept" })).status,
     ).toBe(200);
 
+    // opencode passes the model's own declared efforts through, `max` included.
+    expect(
+      (await call("POST", "/api/model-profiles", { ...body, name: "oc-max", effort: "max" }))
+        .status,
+    ).toBe(201);
+
     // Control: a level this model does not list is still refused, on both verbs.
-    const max = await call("POST", "/api/model-profiles", {
-      ...body,
-      name: "oc-max",
-      effort: "max",
-    });
-    expect(max.status).toBe(400);
-    expect((await call("PATCH", "/api/model-profiles/oc-low", { effort: "max" })).status).toBe(400);
+    // `openai/gpt-5.1-codex` declares low|medium|high, so it accepts no `max`.
+    const noMax = { harness: "opencode", model: "openai/gpt-5.1-codex" };
+    expect(
+      (await call("POST", "/api/model-profiles", { ...noMax, name: "oc-nomax", effort: "max" }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await call("POST", "/api/model-profiles", { ...noMax, name: "oc-capped", effort: "low" }))
+        .status,
+    ).toBe(201);
+    expect((await call("PATCH", "/api/model-profiles/oc-capped", { effort: "max" })).status).toBe(
+      400,
+    );
   });
 
   test("a tier seed and a profile in use cannot be deleted", async () => {

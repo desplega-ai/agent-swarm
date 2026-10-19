@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, type ReactNode } from "react";
 
@@ -6,62 +6,97 @@ GlobalRegistrator.register();
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const { createRoot } = await import("react-dom/client");
 
-const apiUrl = "https://bell.example";
-let pathname = "/";
+let inboxRows: Array<{ itemId: string; status: string; readAt?: string }> = [];
+let liveMoment: string | null = "task_failed";
+/** The `enabled` argument of each `useSlackConnectMoment` call. */
+const momentEnabled: boolean[] = [];
+const tracked: Array<{ key: string; action: string; properties?: Record<string, unknown> }> = [];
+/** The `inviteMoment` the panel got on its last render. */
+let panelMoment: string | null | undefined;
+
 const Box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
-mock.module("react-router-dom", () => ({ useLocation: () => ({ pathname }) }));
 mock.module("@/api/hooks/use-agent-fs", () => ({ useAgentFsMentions: () => ({ drive: false }) }));
 mock.module("@/api/hooks/use-inbox-state", () => ({
-  useInboxState: () => ({ data: [] }),
+  useInboxState: () => ({ data: inboxRows }),
   useUpdateInboxItem: () => ({ mutate: () => {} }),
 }));
-mock.module("@/api/hooks/use-integrations-meta", () => ({
-  useEnvPresence: () => ({
-    data: { SWARM_ORG_NAME: false },
-    dataUpdatedAt: Date.now() + 60_000,
-    isError: false,
+mock.module("@/api/hooks/use-notification-events", () => ({
+  useNotificationEvents: () => ({
+    trackEvent: (key: string, action: string, properties?: Record<string, unknown>) =>
+      tracked.push({ key, action, properties }),
   }),
 }));
-mock.module("@/api/hooks/use-notification-events", () => ({
-  useNotificationEvents: () => ({ trackEvent: () => {} }),
-}));
-mock.module("@/api/hooks/use-onboarding", () => ({ useOnboardingOwnsFirstRun: () => false }));
 mock.module("@/components/ui/badge", () => ({ Badge: Box }));
 mock.module("@/components/ui/button", () => ({ Button: Box }));
 mock.module("@/components/ui/popover", () => ({
-  Popover: Box,
+  Popover: ({
+    onOpenChange,
+    children,
+  }: {
+    onOpenChange: (open: boolean) => void;
+    children?: ReactNode;
+  }) => (
+    <div>
+      <button type="button" onClick={() => onOpenChange(true)}>
+        open
+      </button>
+      <button type="button" onClick={() => onOpenChange(false)}>
+        close
+      </button>
+      {children}
+    </div>
+  ),
   PopoverTrigger: Box,
   PopoverContent: Box,
 }));
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ userId: "admin", user: { role: "admin" } }),
 }));
-mock.module("@/hooks/use-config", () => ({ useConfig: () => ({ config: { apiUrl } }) }));
 mock.module("@/lib/notifications/definitions", () =>
   require("../../lib/notifications/definitions"),
 );
 mock.module("@/lib/notifications/unread", () => require("../../lib/notifications/unread"));
-mock.module("@/lib/org-name-prompt", () => require("../../lib/org-name-prompt"));
-mock.module("@/lib/user-role", () => require("../../lib/user-role"));
 mock.module("./notification-panel", () => ({
-  NotificationPanel: ({ definitions }: { definitions: Array<{ key: string }> }) => (
-    <ul>
-      {definitions.map((definition) => (
-        <li key={definition.key}>{definition.key}</li>
-      ))}
-    </ul>
-  ),
+  NotificationPanel: ({
+    definitions,
+    inviteMoment,
+  }: {
+    definitions: Array<{ key: string }>;
+    inviteMoment: string | null;
+  }) => {
+    panelMoment = inviteMoment;
+    return (
+      <ul>
+        {definitions.map((definition) => (
+          <li key={definition.key}>{definition.key}</li>
+        ))}
+      </ul>
+    );
+  },
+}));
+
+mock.module("@/hooks/use-slack-connect-invite", () => ({
+  SLACK_CONNECT_INVITE_KEY: "slack_connect_invite",
+}));
+mock.module("./use-slack-connect-moment", () => ({
+  useSlackConnectMoment: (enabled: boolean) => {
+    momentEnabled.push(enabled);
+    return enabled ? liveMoment : null;
+  },
 }));
 
 const { NotificationBell } = await import("./notification-bell");
-const { deferOrgNamePrompt } = await import("../../lib/org-name-prompt");
 
+let rerender: (() => Promise<void>) | undefined;
 let cleanup: (() => Promise<void>) | undefined;
 async function mount() {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(<NotificationBell />));
+  rerender = async () => {
+    await act(async () => root.render(<NotificationBell />));
+  };
   cleanup = async () => {
     await act(async () => root.unmount());
     container.remove();
@@ -70,25 +105,66 @@ async function mount() {
 }
 const keys = (container: HTMLElement) =>
   [...container.querySelectorAll("li")].map((item) => item.textContent);
+const click = (container: HTMLElement, label: string) =>
+  act(async () => {
+    [...container.querySelectorAll("button")].find((b) => b.textContent === label)?.click();
+  });
 
+beforeEach(() => {
+  inboxRows = [];
+  liveMoment = "task_failed";
+  momentEnabled.length = 0;
+  tracked.length = 0;
+  panelMoment = undefined;
+});
 afterEach(async () => {
   await cleanup?.();
   cleanup = undefined;
+  rerender = undefined;
   sessionStorage.clear();
-  pathname = "/";
 });
 afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-test("Home leaves the org-name ask to the dialog until Later", async () => {
-  const container = await mount();
-  expect(keys(container)).not.toContain("organization_name");
-  await act(async () => deferOrgNamePrompt(apiUrl));
-  expect(keys(container)).toContain("organization_name");
+test("the bell lists only the static notifications", async () => {
+  expect(keys(await mount())).toEqual(["slack_connect_invite"]);
 });
 
-test("off Home the bell carries the org-name ask", async () => {
-  pathname = "/tasks";
-  expect(keys(await mount())).toContain("organization_name");
+test("the moment is pinned when the bell opens and used for the view", async () => {
+  const container = await mount();
+  await click(container, "open");
+  expect(tracked).toEqual([
+    { key: "slack_connect_invite", action: "view", properties: { moment: "task_failed" } },
+  ]);
+  expect(panelMoment).toBe("task_failed");
+  liveMoment = "first_workflow";
+  await rerender?.();
+  expect(panelMoment).toBe("task_failed");
+});
+
+test("a moment still loading at open is pinned, and viewed, once it resolves", async () => {
+  liveMoment = null;
+  const container = await mount();
+  await click(container, "open");
+  expect(tracked).toEqual([]);
+  expect(panelMoment).toBeNull();
+  liveMoment = "first_workflow";
+  await rerender?.();
+  expect(panelMoment).toBe("first_workflow");
+  expect(tracked).toEqual([
+    { key: "slack_connect_invite", action: "view", properties: { moment: "first_workflow" } },
+  ]);
+});
+
+test("a dismissed or done invite does not poll for its moment", async () => {
+  inboxRows = [{ itemId: "slack_connect_invite", status: "dismissed" }];
+  await mount();
+  expect(momentEnabled.length).toBeGreaterThan(0);
+  expect(momentEnabled.every((enabled) => !enabled)).toBe(true);
+  await cleanup?.();
+  momentEnabled.length = 0;
+  inboxRows = [{ itemId: "slack_connect_invite", status: "open" }];
+  await mount();
+  expect(momentEnabled.every((enabled) => enabled)).toBe(true);
 });

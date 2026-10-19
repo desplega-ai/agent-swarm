@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { SetupCard } from "@/components/onboarding/setup-card";
+import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";

@@ -29,8 +29,23 @@ export interface ShortcutKeyEvent {
 }
 
 export interface ShortcutContext {
-  /** A dialog/menu/listbox is open (`document.querySelector(OPEN_OVERLAY)`). */
+  /** A dialog/menu/listbox that owns the keyboard is open (see `overlayBlocks`). */
   overlayOpen?: boolean;
+}
+
+/** The slice of an open overlay (an Element) that `overlayBlocks` reads. */
+export interface OverlayElement {
+  contains(node: unknown): boolean;
+}
+
+/**
+ * Whether the open overlays (`document.querySelectorAll(OPEN_OVERLAY)`) own
+ * the keyboard. An overlay that contains `root` does not: the flow sits
+ * inside that dialog or popover. Without a root (the Approvals pages), any
+ * open overlay blocks.
+ */
+export function overlayBlocks(overlays: readonly OverlayElement[], root?: unknown): boolean {
+  return overlays.some((overlay) => !root || !overlay.contains(root));
 }
 
 function closest(target: unknown, selector: string): boolean {

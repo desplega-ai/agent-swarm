@@ -11,7 +11,7 @@
  * Enter inserts a newline instead, and the send button submits there.
  */
 
-import { ArrowUp, FileText, Paperclip, X } from "lucide-react";
+import { ArrowUp, Eye, FileText, Paperclip, X } from "lucide-react";
 import {
   type ChangeEvent,
   type ClipboardEvent,
@@ -468,5 +468,33 @@ export function ComposerDock({
         <p className="mt-2 text-xs text-status-error-strong px-1">{attachmentErrorMessage}</p>
       ) : null}
     </form>
+  );
+}
+
+/**
+ * The dock's place for a viewer who cannot post (a session shared with them
+ * read-only): the same card, with a notice instead of the input.
+ */
+export function ComposerReadOnlyNotice({
+  message,
+  fullWidth,
+  className,
+}: {
+  message: string;
+  fullWidth?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={cn("shrink-0 px-4 pt-2 pb-4 bg-background w-full", className)}>
+      <div
+        className={cn(
+          !fullWidth && "max-w-3xl mx-auto",
+          "flex items-center gap-2 rounded-2xl border border-border bg-muted/40 px-4 py-3.5",
+        )}
+      >
+        <Eye className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-muted-foreground">{message}</p>
+      </div>
+    </div>
   );
 }

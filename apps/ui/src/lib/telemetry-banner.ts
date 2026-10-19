@@ -2,7 +2,8 @@
  * The dashboard banner shown to admins while telemetry is off.
  *
  * It cannot report its own impressions (telemetry is off while it shows). The
- * only signal is `telemetry.enabled { via: "banner" }` after someone opts in.
+ * only signals come after someone opts in: `telemetry.enabled { via: "banner" }`,
+ * then `org.profile_updated { surface: "telemetry_banner" }`.
  */
 
 /**
@@ -14,6 +15,15 @@ export const TELEMETRY_BANNER_RESHOW_AFTER_MS: number | null = null;
 
 /** Card key for the dismissal timestamp (namespaced per API by the storage helper). */
 export const TELEMETRY_BANNER_CARD_KEY = "dashboard-telemetry-off";
+
+/** The stored dismissal time for `storageKey`, or null. Storage that cannot be read counts as none. */
+export function readTelemetryBannerDismissedAt(storageKey: string): string | null {
+  try {
+    return localStorage.getItem(storageKey);
+  } catch {
+    return null;
+  }
+}
 
 export function showTelemetryBanner(input: {
   /** `/status` `telemetry.enabled`; undefined while loading or on an older server. */

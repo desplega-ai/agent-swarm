@@ -9,9 +9,15 @@
  */
 
 import { getDbClient } from "./be/db/runtime";
-import { isTelemetryReady, setTelemetryRoleResolver, telemetry } from "./telemetry";
+import {
+  isTelemetryReady,
+  setTelemetryFunctionResolver,
+  setTelemetryRoleResolver,
+  telemetry,
+} from "./telemetry";
 import type { PropsFor } from "./telemetry-contract";
 import {
+  cachedUserFunction,
   cachedUserRole,
   configureOrgDomainPersistence,
   recomputeOrgDomain,
@@ -169,6 +175,7 @@ export function startTelemetryTicker(deps: SnapshotDeps): void {
   if (!isTelemetryReady()) return;
   stopTelemetryTicker();
   setTelemetryRoleResolver(cachedUserRole);
+  setTelemetryFunctionResolver(cachedUserFunction);
 
   const tick = async () => {
     try {
@@ -207,5 +214,6 @@ export function stopTelemetryTicker(): void {
   tickTimer = null;
   firstTimer = null;
   setTelemetryRoleResolver(null);
+  setTelemetryFunctionResolver(null);
   configureOrgDomainPersistence(null);
 }

@@ -1,3 +1,11 @@
+import {
+  MAX_REDIRECTS,
+  MAX_REPLAY_BODY_BYTES,
+  nextHopRequest,
+  REDIRECT_STATUSES,
+  RequestBodyTooLargeError,
+  replayableBody,
+} from "../../utils/egress-guard";
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "./types";
 
 function hostnameForFetchInput(input: string | URL | Request): string | null {
@@ -89,9 +97,10 @@ export function patchFetchWithCredentialBroker(
   // guaranteed 401 and optional-auth APIs stop serving public data.
   const originalFetch = globalThis.fetch;
 
-  globalThis.fetch = function patchedFetch(
+  async function patchedFetch(
     input: string | URL | Request,
     init?: RequestInit,
+    hop = 0,
   ): Promise<Response> {
     const url = urlForFetchInput(input);
     const hostname = url?.hostname ?? hostnameForFetchInput(input);
@@ -127,13 +136,58 @@ export function patchFetchWithCredentialBroker(
 
     const urlModified = applyQueryTemplates(url, bindings);
 
-    if (!headersModified && !urlModified) return originalFetch(input, init);
+    // Once the broker follows a redirect it keeps following every later hop,
+    // so the chain has one hop budget even where the fetch below also counts.
+    if (!headersModified && !urlModified && hop === 0) return originalFetch(input, init);
 
+    const callerInit = cloneRequestInit(input, init);
+    const redirectMode = callerInit.redirect ?? "follow";
+    // A 307/308 sends the body again, so a short stream (a Request body) is read
+    // once here; a longer one is sent unbuffered and cannot follow such a hop.
+    let replayable = true;
+    if (redirectMode === "follow") {
+      const prepared = await replayableBody(callerInit.body, callerInit.signal);
+      callerInit.body = prepared.body;
+      replayable = prepared.replayable;
+    }
     const mergedInit: RequestInit = {
-      ...cloneRequestInit(input, init),
+      ...callerInit,
       headers: headersModified || input instanceof Request ? newHeaders : init?.headers,
+      // Never let the fetch follow a redirect with the substituted credential
+      // attached: each hop goes back through the broker, which substitutes
+      // again only for an allowed host.
+      redirect: "manual",
     };
     const nextUrl = urlModified ? url.href : input instanceof Request ? input.url : input;
-    return originalFetch(nextUrl, mergedInit);
-  } as typeof fetch;
+    const response = await originalFetch(nextUrl, mergedInit);
+    const location = response.headers.get("location");
+    if (redirectMode === "manual" || !REDIRECT_STATUSES.has(response.status) || !location) {
+      return response;
+    }
+    if (redirectMode === "error")
+      throw new TypeError(`fetch redirect refused (redirect: "error"): ${url.href}`);
+    if (hop >= MAX_REDIRECTS)
+      throw new TypeError(`fetch exceeded ${MAX_REDIRECTS} redirects: ${url.href}`);
+    await response.body?.cancel().catch(() => {});
+    const next = new URL(location, url);
+    // Re-enter with the caller's placeholder headers, not the substituted ones.
+    const hopRequest = nextHopRequest(response.status, url, next, {
+      method: callerInit.method ?? "GET",
+      headers,
+      body: callerInit.body ?? undefined,
+    });
+    if (!replayable && hopRequest.body !== undefined) {
+      throw new RequestBodyTooLargeError(MAX_REPLAY_BODY_BYTES);
+    }
+    return patchedFetch(
+      next.href,
+      { ...callerInit, ...hopRequest, redirect: redirectMode },
+      hop + 1,
+    );
+  }
+
+  globalThis.fetch = Object.assign(
+    (input: string | URL | Request, init?: RequestInit) => patchedFetch(input, init),
+    { preconnect: originalFetch.preconnect },
+  ) as typeof fetch;
 }

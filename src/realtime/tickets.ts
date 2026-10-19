@@ -3,7 +3,10 @@ import type { HttpRequestAuth } from "../utils/request-auth-context";
 export const REALTIME_TICKET_TTL_MS = 60_000;
 export const REALTIME_TICKET_CAPACITY = 10_000;
 
-export type RealtimeTicketAuth = Extract<HttpRequestAuth, { kind: "operator" | "user" }>;
+export type RealtimeTicketAuth = Extract<HttpRequestAuth, { kind: "operator" | "user" }> & {
+  /** The user an operator-key dashboard tab picked (`X-Swarm-User-Id`), for session presence. */
+  dashboardUserId?: string;
+};
 
 type StoredTicket = {
   auth: RealtimeTicketAuth;

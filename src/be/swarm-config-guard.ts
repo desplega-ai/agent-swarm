@@ -1,9 +1,16 @@
 import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
+import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemetry-ranking";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
+import {
+  COMPANY_ACQUISITION_SOURCES,
+  COMPANY_TEAM_SIZES,
+  COMPANY_USE_CASES,
+} from "../utils/company-profile";
 import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
+import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
@@ -68,15 +75,24 @@ export function isApiOnlyConfigKey(key: string): boolean {
 }
 
 /** Config rows owned by dedicated API surfaces, not the generic config API. */
-export const INTERNAL_CONFIG_KEYS = new Set(["onboarding_state", "runtime_owner_id"]);
+export const INTERNAL_CONFIG_KEYS = new Set([
+  "onboarding_state",
+  "runtime_owner_id",
+  TELEMETRY_RANKING_KEY,
+]);
 
 export function isInternalConfigKey(key: string): boolean {
   return INTERNAL_CONFIG_KEYS.has(key.toLowerCase());
 }
 
 export function internalConfigKeyError(key: string): Error {
+  const lower = key.toLowerCase();
   const owner =
-    key.toLowerCase() === "runtime_owner_id" ? "the runtime supervisor" : "/api/onboarding";
+    lower === "runtime_owner_id"
+      ? "the runtime supervisor"
+      : lower === TELEMETRY_RANKING_KEY
+        ? "/api/ranking"
+        : "/api/onboarding";
   return new Error(`Key '${key}' is managed by ${owner}`);
 }
 
@@ -123,6 +139,16 @@ export const DB_RETENTION_TUNING_BOUNDS = {
   DB_RETENTION_MAX_STATEMENT_MS: { min: 25, max: 5_000 },
 } as const;
 
+/**
+ * Bounds for the Swarm Apps json column size cap (`APPS_JSON_COLUMN_MAX_BYTES`).
+ *
+ * `src/apps/definition.ts` reads the knob against exactly these at call time
+ * and falls back to its 256 KB default outside them; VALIDATED_KEYS below
+ * rejects out-of-range writes with the same numbers, so the config API cannot
+ * accept a cap the row store would silently ignore.
+ */
+export const APPS_JSON_COLUMN_MAX_BYTES_BOUNDS = { min: 1_024, max: 16_777_216 } as const;
+
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
@@ -140,7 +166,8 @@ function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
 
 /** Build a single `{ KEY: validator }` entry restricted to `options`. */
 function enumValidator(key: string, options: string[]): Record<string, ConfigValidator> {
-  const message = `Invalid ${key} value (must be one of: ${options.join(", ")})`;
+  const listed = options.filter(Boolean).join(", ");
+  const message = `Invalid ${key} value (must be one of: ${listed}${options.includes("") ? ", or empty" : ""})`;
   return {
     [key]: (value: unknown) => {
       if (typeof value !== "string") return message;
@@ -300,6 +327,16 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       return "Invalid TASK_TOOL_MANIFESTS (expected JSON with taskTypes and/or schedules maps, each selecting at most 16 known swarm tools)";
     }
   },
+  // Owned by /api/ranking (an internal key); parsed here as defense in depth.
+  [TELEMETRY_RANKING_KEY.toUpperCase()]: (value) => {
+    try {
+      if (typeof value !== "string") throw new Error("Expected JSON string");
+      parseTelemetryRanking(value);
+      return null;
+    } catch {
+      return "Invalid telemetry_ranking (expected the v1 ranking listing JSON)";
+    }
+  },
   // MCP tool allowlist: comma-separated names or a JSON array of strings.
   // Unknown names are accepted here and warned about at session init.
   SWARM_ENABLED_TOOLS: (value) => {
@@ -352,6 +389,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
+  ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
+  SCRIPT_EGRESS_ALLOWLIST: (value) =>
+    typeof value === "string" ? validateEgressAllowlist(value) : "Invalid SCRIPT_EGRESS_ALLOWLIST",
   // fail: worker fails a task fast when every key has exhausted the task
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
@@ -399,8 +439,12 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       ? null
       : "Invalid SWARM_ORG_WEBSITE (must be a public hostname such as example.com, without scheme, www, path or port)";
   },
+  ...enumValidator("SWARM_ORG_TEAM_SIZE", ["", ...COMPANY_TEAM_SIZES]),
+  ...enumValidator("SWARM_ORG_USE_CASE", ["", ...COMPANY_USE_CASES]),
+  ...enumValidator("SWARM_ORG_ACQUISITION_SOURCE", ["", ...COMPANY_ACQUISITION_SOURCES]),
   ...booleanValidators([
     "SWARM_USED_BY_CONSENT",
+    "PUBLIC_RANKING_ENABLED",
     "SWARM_DEV_MODE",
     "MULTI_RUNTIME_ENABLED",
     "STEERING_ENABLED",
@@ -493,6 +537,11 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // an operator could save a 500ms tick budget, see it accepted, and have the
   // sweep keep running for the default 30000ms.
   ...boundedIntegerValidatorsFor(DB_RETENTION_TUNING_BOUNDS),
+  ...boundedIntegerValidators(
+    ["APPS_JSON_COLUMN_MAX_BYTES"],
+    APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.min,
+    APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.max,
+  ),
   ...boundedIntegerValidators(
     [
       "SESSION_LOG_RETENTION_DAYS",

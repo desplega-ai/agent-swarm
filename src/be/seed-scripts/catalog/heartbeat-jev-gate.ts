@@ -138,8 +138,7 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
   // db_query_concurrency_cap on a busy swarm.
   const lead = await q("SELECT heartbeatMd FROM agents WHERE id = ?", [leadId]);
   const prev = await q(
-    `SELECT id, substr(output, 1, 400) AS output,
-            substr(task, 1, instr(task, '## Your Standing Orders')) AS status
+    `SELECT id, substr(output, 1, 400) AS output
        FROM agent_tasks
       WHERE agentId = ? AND taskType = 'heartbeat-checklist' AND status = 'completed'
       ORDER BY createdAt DESC LIMIT 1`,
@@ -163,9 +162,28 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
     "SELECT status, COUNT(*) AS n FROM agents WHERE COALESCE(role, '') != 'extension' GROUP BY status",
   );
 
+  // Only the producer's receipt proves which full IDs the checklist actually showed.
+  // Old checklists and invalid receipts conservatively treat all current failures as new.
+  let reportedIds: unknown = [];
+  if (prev[0]?.id) {
+    try {
+      const receipt = await ctx.swarm.kv_getOrNull({
+        namespace: "heartbeat-checklist:reported-failures",
+        key: prev[0].id,
+      });
+      reportedIds = typeof receipt?.value === "string" ? JSON.parse(receipt.value) : receipt?.value;
+    } catch {
+      reportedIds = [];
+    }
+  }
+  const prevIds = new Set(
+    Array.isArray(reportedIds) && reportedIds.every((id) => typeof id === "string") ? reportedIds : [],
+  );
   const fails = parseFailures(failed.map(renderFailureLine).join("\n"));
-  const prevIds = new Set(parseFailures(String(prev[0]?.status ?? "")).map((f) => f.id));
-  const newFails = fails.filter((f) => !prevIds.has(f.id));
+  // Compare full IDs before rendering the replay's eight-character display IDs.
+  const newFails = parseFailures(
+    failed.filter((f) => !prevIds.has(f.id)).map(renderFailureLine).join("\n"),
+  );
 
   const { stamp, zone } = localStamp(nowMs, timeZone);
   const mmdd = new Date(nowMs).toISOString().slice(5, 10);

@@ -3,6 +3,8 @@ import { motion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ApprovalRequest } from "@/api/types";
+import { WRAP } from "@/components/shared/questions/answer-view";
+import { KeyHint } from "@/components/shared/questions/keyboard";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
 import { UserChip } from "@/components/shared/user-chip";
@@ -17,8 +19,6 @@ import {
   quorumLabel,
 } from "@/lib/approval-format";
 import { cn, formatSmartTime, parseUTCDate } from "@/lib/utils";
-import { WRAP } from "./answer-view";
-import { KeyHint } from "./keyboard";
 import { ResponderChip } from "./responder-chip";
 
 /** Re-renders every `intervalMs` while `active`. */

@@ -17,6 +17,8 @@ const TEST_DB_PATH = "./test-rbac-roles.sqlite";
 const REQUESTER_ROLE_ID = "rbac-role-requester";
 const REQUESTER_VERBS = [
   "favorite.write.own",
+  "session.presence",
+  "session.share",
   "task.action.own",
   "task.cancel.own",
   "task.create.own",

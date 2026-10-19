@@ -205,7 +205,7 @@ const createUserRoute = route({
   tags: ["Users"],
   body: z.object({
     name: z.string().min(1),
-    email: z.string().optional(),
+    email: z.string().email("Email must be a valid email address").optional(),
     role: z.string().optional(),
     notes: z.string().optional(),
     emailAliases: z.array(z.string()).optional(),
@@ -307,7 +307,7 @@ const updateUserRoute = route({
   body: z
     .object({
       name: z.string().min(1).optional(),
-      email: z.string().optional(),
+      email: z.string().email("Email must be a valid email address").nullable().optional(),
       role: z.string().optional(),
       notes: z.string().optional(),
       emailAliases: z.array(z.string()).optional(),

@@ -1,9 +1,16 @@
+import type { EgressPolicy } from "../../utils/egress-guard";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "../api-types";
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "../credential-broker";
 
 export type ScriptFsMode = "none" | "workspace-rw";
 
 export type EgressSecretEntry = ResolvedCredentialBinding;
+
+/**
+ * The invoking agent's default agent-fs drive, mounted by `ctx.fs` / `ctx.sh`.
+ * Carries no secret: the agent's key rides as a credential-broker placeholder.
+ */
+export type ScriptAgentFsDescriptor = { apiUrl: string; orgId: string; driveId: string };
 
 export type SwarmConfigPayload = {
   system: {
@@ -26,6 +33,7 @@ export type SwarmConfigPayload = {
   failedBindings?: FailedCredentialBinding[];
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
+  agentFs?: ScriptAgentFsDescriptor;
 };
 
 export type ScriptResourcePolicy = {
@@ -44,7 +52,11 @@ export type ExecutorInput = {
   configPayload: SwarmConfigPayload;
   resources: ScriptResourcePolicy;
   fsMode: ScriptFsMode;
-  network: "open" | { allowlist: string[] };
+  /**
+   * Egress policy for the run's outbound fetches. Only the quickjs executor
+   * enforces it today; native ignores it (see the scripts-runtime guide).
+   */
+  network: "open" | EgressPolicy;
   signal?: AbortSignal;
 };
 

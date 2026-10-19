@@ -190,7 +190,8 @@ jobs:
         run: bun run lint:slop
 
       # tsc 5 stays the authority here. Local `tsc:check` (and the prek typecheck
-      # hook) run tsgo; the step below keeps the tsconfig tsgo-clean.
+      # hook) run Bun's built-in `bun check`; the step below keeps the tsconfig
+      # clean under it.
       - name: Run TypeScript type check
         id: tsc
         run: |
@@ -203,7 +204,7 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
-      - name: Run TypeScript type check (tsgo)
+      - name: Run TypeScript type check (bun check)
         run: bun run tsc:check
 
       - name: Check extension catalog and manifest schema freshness
@@ -1206,9 +1207,9 @@ jobs:
           exit $code
         working-directory: apps/ui
 
-      # tsc above is the authority; the prek ui-typecheck hook runs tsgo.
-      - name: Run TypeScript type check (tsgo)
-        run: bunx tsgo -b
+      # tsc above is the authority; the prek ui-typecheck hook runs `bun check -b`.
+      - name: Run TypeScript type check (bun check)
+        run: bun check -b
         working-directory: apps/ui
 
       - name: Run UI E2E TypeScript type check

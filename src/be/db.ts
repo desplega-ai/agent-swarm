@@ -10,7 +10,7 @@ import {
 import { realtimeBus } from "../realtime/bus";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
-import { scheduleOrgDomainRecompute } from "../telemetry-identity";
+import { invalidateTelemetryUserRole, scheduleOrgDomainRecompute } from "../telemetry-identity";
 import {
   emitTaskTelemetry,
   type TaskTelemetryEvent,
@@ -195,6 +195,7 @@ import {
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { getDb, getDbClient } from "./db/runtime";
+import { type SessionViewer, sessionViewerCondition } from "./db/session-visibility";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -203,6 +204,7 @@ import {
   findExistingLinearTrackerContextWork,
   getTaskById,
   getTasksByAgentId,
+  readableSessionCondition,
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
@@ -1731,7 +1733,9 @@ export async function moveAssetKey(input: {
   id: string;
   key: string;
   changedBy?: string;
-}): Promise<boolean> {
+  /** Task moves only: descendant task ids the caller already authorized to move with the task. */
+  descendantTaskIds?: readonly string[];
+}): Promise<false | { movedTaskIds?: string[] }> {
   const key = normalizeAssetKey(input.key);
   // auditAssetKeys stays sync (shared with the boot audit); run it inside a
   // client transaction so this request-path read cannot observe another
@@ -1746,7 +1750,7 @@ export async function moveAssetKey(input: {
   }
   const previousKey = await currentAssetKey(input.entityType, input.id);
   if (!previousKey) return false;
-  if (previousKey === key) return true;
+  if (previousKey === key && input.entityType !== "task") return {};
   if (input.entityType === "file") {
     const mapping = await getAssetKeyMapping(input.id);
     if (mapping?.sourceEntityType === "task-attachment") {
@@ -1757,48 +1761,64 @@ export async function moveAssetKey(input: {
   }
   const now = new Date().toISOString();
 
-  await getDbClient().transaction(async (tx) => {
+  return getDbClient().transaction(async (tx) => {
     switch (input.entityType) {
       case "task": {
-        const mappedFiles = await tx.query<{ id: string; key: string }>(
-          `SELECT DISTINCT m.id, m."key" AS key
+        const root = await getTaskById(input.id);
+        if (!root) return false;
+        const tasks = [root];
+        for (const id of input.descendantTaskIds ?? []) {
+          const task = id === root.id ? null : await getTaskById(id);
+          if (task) tasks.push(task);
+        }
+        const movedTaskIds: string[] = [];
+        for (const task of tasks) {
+          if (task.key === key) continue;
+          // A file shared with another task keeps the namespace of the task whose attachment
+          // sources its mapping. Mappings with no attachment source follow any attaching task.
+          const mappedFiles = await tx.query<{ id: string; key: string }>(
+            `SELECT DISTINCT m.id, m."key" AS key
              FROM asset_key_mappings m
              JOIN task_attachments a
                ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
               AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
               AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
               AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-             WHERE a.task_id = ?`,
-          [input.id],
-        );
-        await tx.run(
-          'UPDATE agent_tasks SET "key" = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.id],
-        );
-        await tx.run(
-          `UPDATE asset_key_mappings
-           SET "key" = ?, updated_at = ?, updated_by = ?
-           WHERE EXISTS (
-             SELECT 1 FROM task_attachments a
              WHERE a.task_id = ?
-               AND asset_key_mappings.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
-               AND asset_key_mappings.provider_org_id = COALESCE(a.agent_fs_org_id, '')
-               AND asset_key_mappings.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
-               AND asset_key_mappings.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-           )`,
-          [key, now, input.changedBy ?? null, input.id],
-        );
-        for (const mapping of mappedFiles) {
-          if (mapping.key === key) continue;
+               AND (m.source_entity_type IS NOT 'task-attachment'
+                 OR m.source_entity_id IN (SELECT id FROM task_attachments WHERE task_id = ?))`,
+            [task.id, task.id],
+          );
+          // The namespace is metadata, and lastUpdatedAt tracks task activity, as in updateTaskTitle.
+          await tx.run('UPDATE agent_tasks SET "key" = ?, updated_by = ? WHERE id = ?', [
+            key,
+            input.changedBy ?? null,
+            task.id,
+          ]);
+          for (const mapping of mappedFiles) {
+            if (mapping.key === key) continue;
+            await tx.run(
+              'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
+              [key, now, input.changedBy ?? null, mapping.id],
+            );
+            await insertAssetKeyHistory({
+              entityType: "file",
+              entityId: mapping.id,
+              previousKey: mapping.key,
+              newKey: key,
+              changedBy: input.changedBy,
+            });
+          }
           await insertAssetKeyHistory({
-            entityType: "file",
-            entityId: mapping.id,
-            previousKey: mapping.key,
+            entityType: "task",
+            entityId: task.id,
+            previousKey: task.key,
             newKey: key,
             changedBy: input.changedBy,
           });
+          movedTaskIds.push(task.id);
         }
-        break;
+        return { movedTaskIds };
       }
       case "workflow":
         await tx.run(
@@ -1849,8 +1869,8 @@ export async function moveAssetKey(input: {
       newKey: key,
       changedBy: input.changedBy,
     });
+    return {};
   });
-  return true;
 }
 
 export async function deleteTaskAttachment(id: string): Promise<boolean> {
@@ -2063,29 +2083,38 @@ export async function getPendingSteeringForTask(taskId: string): Promise<Steerin
   return await getSteeringMessagesForTask(taskId, { status: "pending" });
 }
 
-export async function getPendingSteeringForAgent(agentId: string): Promise<SteeringMessage[]> {
+export async function getPendingSteeringForAgent(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<SteeringMessage[]> {
+  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
   const rows = await getDbClient().query<TaskSteeringMessageRow>(
     `${STEERING_MESSAGE_SELECT}
        JOIN agent_tasks t ON t.id = m.task_id
-       WHERE t.agentId = ? AND m.status = 'pending'
+       WHERE t.agentId = ? AND m.status = 'pending'${readable ? ` AND ${readable.sql}` : ""}
        ORDER BY m.created_at ASC, m.rowid ASC`,
-    [agentId],
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToSteeringMessage);
 }
 
+/**
+ * `expectedTaskId` fences a worker callback to the task whose session received
+ * the message: a row handed to a successor in the meantime is left untouched.
+ */
 export async function markSteeringDelivered(
   id: string,
   deliveredMode: SteerMode,
+  expectedTaskId?: string,
 ): Promise<SteeringMessage | null> {
   const row = await getDbClient().get<TaskSteeringMessageRow>(
     `UPDATE task_steering_messages
        SET status = 'delivered',
            delivered_mode = ?,
            delivered_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status = 'pending'
+       WHERE id = ? AND status = 'pending' AND task_id = COALESCE(?, task_id)
        RETURNING *`,
-    [deliveredMode, id],
+    [deliveredMode, id, expectedTaskId ?? null],
   );
 
   if (row) {
@@ -2162,27 +2191,33 @@ export async function hasPendingSteering(taskId: string): Promise<boolean> {
 // Combined Queries (Agent with Tasks)
 // ============================================================================
 
-export async function getAgentWithTasks(id: string): Promise<AgentWithTasks | null> {
+export async function getAgentWithTasks(
+  id: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentWithTasks | null> {
   return await getDbClient().transaction(
     async () => {
       const agent = await getAgentById(id);
       if (!agent) return null;
 
-      const tasks = await getTasksByAgentId(id);
+      const tasks = await getTasksByAgentId(id, readableBy);
       return { ...agent, tasks };
     },
     { readOnly: true },
   );
 }
 
-export async function getAllAgentsWithTasks(opts?: { slim?: boolean }): Promise<AgentWithTasks[]> {
+export async function getAllAgentsWithTasks(opts?: {
+  slim?: boolean;
+  readableBy?: { userId: string | null };
+}): Promise<AgentWithTasks[]> {
   return await getDbClient().transaction(
     async () => {
       const agents = await getAllAgents({ slim: opts?.slim ?? false });
       return await Promise.all(
         agents.map(async (agent) => ({
           ...agent,
-          tasks: await getTasksByAgentId(agent.id),
+          tasks: await getTasksByAgentId(agent.id, opts?.readableBy),
         })),
       );
     },
@@ -2245,10 +2280,16 @@ export async function createLogEntry(entry: {
   return rowToAgentLog(row);
 }
 
-export async function getLogsByAgentId(agentId: string): Promise<AgentLog[]> {
+export async function getLogsByAgentId(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentLog[]> {
+  const readable = readableBy
+    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
+    : undefined;
   const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE agentId = ? ORDER BY createdAt DESC",
-    [agentId],
+    `SELECT * FROM agent_log WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToAgentLog);
 }
@@ -2292,16 +2333,24 @@ export async function getLogsByEventType(eventType: AgentLogEventType): Promise<
   return rows.map(rowToAgentLog);
 }
 
-export async function getAllLogs(limit?: number): Promise<AgentLog[]> {
+export async function getAllLogs(
+  limit?: number,
+  readableBy?: { userId: string | null },
+): Promise<AgentLog[]> {
+  const readable = readableBy
+    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
+    : undefined;
+  const readableParams = readable?.params ?? [];
   if (limit) {
     const rows = await getDbClient().query<AgentLogRow>(
-      "SELECT * FROM agent_log WHERE eventType != 'agent_status_change' ORDER BY createdAt DESC LIMIT ?",
-      [limit],
+      `SELECT * FROM agent_log WHERE eventType != 'agent_status_change'${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC LIMIT ?`,
+      [...readableParams, limit],
     );
     return rows.map(rowToAgentLog);
   }
   const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log ORDER BY createdAt DESC",
+    `SELECT * FROM agent_log${readable ? ` WHERE ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    readableParams,
   );
   return rows.map(rowToAgentLog);
 }
@@ -5801,8 +5850,13 @@ export interface ConcurrentContext {
  * Returns processing inbox messages, recent task delegations by leads,
  * and currently active (in-progress) tasks across the swarm.
  */
-export async function getConcurrentContext(): Promise<ConcurrentContext> {
+export async function getConcurrentContext(readableBy?: {
+  userId: string | null;
+}): Promise<ConcurrentContext> {
   const client = getDbClient();
+  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
+  const readableSql = readable ? ` AND ${readable.sql}` : "";
+  const readableParams = readable?.params ?? [];
 
   // 1. Inbox messages currently being processed (status = 'processing')
   const processingInboxMessages = await client.query<{
@@ -5831,9 +5885,9 @@ export async function getConcurrentContext(): Promise<ConcurrentContext> {
        FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
        WHERE t.createdAt > ?
-         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)
+         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)${readableSql}
        ORDER BY t.createdAt DESC`,
-    [fiveMinutesAgo],
+    [fiveMinutesAgo, ...readableParams],
   );
 
   // 3. Currently in-progress tasks across the swarm
@@ -5849,8 +5903,9 @@ export async function getConcurrentContext(): Promise<ConcurrentContext> {
     `SELECT t.id, t.task, t.agentId, a.name as agentName, t.status, t.createdAt, t.progress
        FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
-       WHERE t.status = 'in_progress'
+       WHERE t.status = 'in_progress'${readableSql}
        ORDER BY t.createdAt DESC`,
+    readableParams,
   );
 
   return {
@@ -7138,15 +7193,27 @@ export async function deleteActiveSessionById(id: string): Promise<boolean> {
   return result.changes > 0;
 }
 
-export async function getActiveSessions(agentId?: string): Promise<ActiveSession[]> {
+export async function getActiveSessions(
+  agentId?: string,
+  readableBy?: { userId: string | null },
+): Promise<ActiveSession[]> {
+  const conditions: string[] = [];
+  const params: string[] = [];
   if (agentId) {
-    return await getDbClient().query<ActiveSession>(
-      "SELECT * FROM active_sessions WHERE agentId = ? ORDER BY startedAt DESC",
-      [agentId],
-    );
+    conditions.push("agentId = ?");
+    params.push(agentId);
   }
+  if (readableBy) {
+    const readable = readableSessionCondition(readableBy.userId, "active_sessions.taskId", {
+      nullable: true,
+    });
+    conditions.push(readable.sql);
+    params.push(...readable.params);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   return await getDbClient().query<ActiveSession>(
-    "SELECT * FROM active_sessions ORDER BY startedAt DESC",
+    `SELECT * FROM active_sessions ${where} ORDER BY startedAt DESC`,
+    params,
   );
 }
 
@@ -12291,7 +12358,7 @@ export async function updateUser(
   id: string,
   data: Partial<{
     name: string;
-    email: string;
+    email: string | null;
     role: string;
     notes: string;
     emailAliases: string[];
@@ -12356,7 +12423,12 @@ export async function updateUser(
     `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
     params,
   );
-  if (row) getDbClient().afterCommit(scheduleOrgDomainRecompute);
+  if (row) {
+    getDbClient().afterCommit(() => {
+      invalidateTelemetryUserRole(id);
+      scheduleOrgDomainRecompute();
+    });
+  }
   return row ? rowToUser(row) : null;
 }
 
@@ -12493,7 +12565,12 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     await reclassifyTaskHumanFree(reclassifySeedIds);
 
     const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
-    if (result.changes > 0) getDbClient().afterCommit(scheduleOrgDomainRecompute);
+    if (result.changes > 0) {
+      getDbClient().afterCommit(() => {
+        invalidateTelemetryUserRole(id);
+        scheduleOrgDomainRecompute();
+      });
+    }
     return result.changes > 0;
   });
 }
@@ -12512,6 +12589,7 @@ interface InboxItemStateRow {
   dismissedAt: string | null;
   doneAt: string | null;
   readAt: string | null;
+  lastReadAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -12527,6 +12605,7 @@ function rowToInboxItemState(row: InboxItemStateRow): InboxItemState {
     dismissedAt: row.dismissedAt ?? undefined,
     doneAt: row.doneAt ?? undefined,
     readAt: row.readAt ?? undefined,
+    lastReadAt: row.lastReadAt ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -12567,6 +12646,7 @@ export async function upsertInboxState(opts: {
   doneAt?: string;
   /** First-viewed timestamp. Sticky: once set, later calls never clear or move it. */
   readAt?: string;
+  lastReadAt?: string | null;
 }): Promise<InboxItemState> {
   const now = new Date().toISOString();
   // Auto-derive timestamps from status when not explicitly provided.
@@ -12578,14 +12658,15 @@ export async function upsertInboxState(opts: {
   // SQLite upsert via UNIQUE(userId, itemType, itemId). readAt is sticky: the
   // first non-null value written wins on every subsequent conflict.
   const row = await getDbClient().get<InboxItemStateRow>(
-    `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, lastReadAt, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(userId, itemType, itemId) DO UPDATE SET
          status = excluded.status,
          snoozeUntil = excluded.snoozeUntil,
          dismissedAt = excluded.dismissedAt,
          doneAt = excluded.doneAt,
          readAt = COALESCE(inbox_item_state.readAt, excluded.readAt),
+         lastReadAt = CASE WHEN ? THEN excluded.lastReadAt ELSE inbox_item_state.lastReadAt END,
          lastUpdatedAt = excluded.lastUpdatedAt
        RETURNING *`,
     [
@@ -12597,8 +12678,10 @@ export async function upsertInboxState(opts: {
       dismissedAt,
       doneAt,
       readAt,
+      opts.lastReadAt ?? null,
       now,
       now,
+      opts.lastReadAt !== undefined ? 1 : 0,
     ],
   );
   if (!row) throw new Error("Failed to upsert inbox state");
@@ -12880,6 +12963,8 @@ interface ListRecentSessionsOpts {
   contextKeyPrefix?: string;
   /** When true, return slim `SessionListItemSummary` rows (default: full). */
   slim?: boolean;
+  /** Restrict to sessions this viewer may open (session sharing). */
+  viewer?: SessionViewer;
 }
 
 export async function listRecentSessions(
@@ -12898,7 +12983,7 @@ export async function listRecentSessions(
   const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
 
   const conditions: string[] = ["r.parentTaskId IS NULL"];
-  const params: (string | number)[] = [];
+  const params: (string | number | null)[] = [];
 
   if (sources.length > 0) {
     conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
@@ -12916,6 +13001,11 @@ export async function listRecentSessions(
   if (opts?.contextKeyPrefix) {
     conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
     params.push(literalPrefixPattern(opts.contextKeyPrefix));
+  }
+  if (opts?.viewer) {
+    const viewer = sessionViewerCondition(opts.viewer);
+    conditions.push(viewer.sql);
+    params.push(...viewer.params);
   }
   params.push(limit, offset);
 
@@ -12988,35 +13078,43 @@ export async function listRecentSessions(
  * a plain count, no recursive chain walk needed.
  */
 export async function countSessions(
-  opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId" | "contextKeyPrefix">,
+  opts?: Pick<
+    ListRecentSessionsOpts,
+    "source" | "q" | "requestedByUserId" | "contextKeyPrefix" | "viewer"
+  >,
 ): Promise<number> {
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
   const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
 
-  const conditions: string[] = ["parentTaskId IS NULL"];
-  const params: string[] = [];
+  const conditions: string[] = ["r.parentTaskId IS NULL"];
+  const params: (string | null)[] = [];
 
   if (sources.length > 0) {
-    conditions.push(`source IN (${sources.map(() => "?").join(", ")})`);
+    conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
     params.push(...sources);
   }
   if (q && q.length > 0) {
-    conditions.push("(lower(task) LIKE ? OR lower(COALESCE(title, '')) LIKE ?)");
+    conditions.push("(lower(r.task) LIKE ? OR lower(COALESCE(r.title, '')) LIKE ?)");
     const like = `%${q.toLowerCase()}%`;
     params.push(like, like);
   }
   if (requestedByUserId) {
-    conditions.push("requestedByUserId = ?");
+    conditions.push("r.requestedByUserId = ?");
     params.push(requestedByUserId);
   }
   if (opts?.contextKeyPrefix) {
-    conditions.push(`contextKey LIKE ? ESCAPE '\\'`);
+    conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
     params.push(literalPrefixPattern(opts.contextKeyPrefix));
+  }
+  if (opts?.viewer) {
+    const viewer = sessionViewerCondition(opts.viewer);
+    conditions.push(viewer.sql);
+    params.push(...viewer.params);
   }
 
   const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM agent_tasks WHERE ${conditions.join(" AND ")}`,
+    `SELECT COUNT(*) AS count FROM agent_tasks r WHERE ${conditions.join(" AND ")}`,
     params,
   );
   return row?.count ?? 0;

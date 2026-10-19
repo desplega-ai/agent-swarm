@@ -168,7 +168,8 @@ function buildOpencodeReasoningOptions(
     // qualitative level — translate internally (see "What We're NOT Doing" in
     // the plan: no numeric budget surface for operators, only this
     // adapter-internal transport detail).
-    if (level === "max") return { reasoningEffort: level };
+    // Its Anthropic transport reads `effort` into `output_config.effort`.
+    if (level === "max") return { effort: level };
     return { thinking: { type: "enabled", budgetTokens: ANTHROPIC_BUDGET_TOKENS_BY_LEVEL[level] } };
   }
   if (providerId === "openrouter") {

@@ -1,64 +1,162 @@
-import { Plus, UserCircle2 } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
-import { useCreateUser, useUsers } from "@/api/hooks/use-users";
+import { AlertCircle, RotateCw, UserCircle2 } from "lucide-react";
+import { type FormEvent, useState } from "react";
+import { toast } from "sonner";
+import { useStatus } from "@/api/hooks/use-status";
+import { sendUiTelemetry } from "@/api/hooks/use-ui-telemetry";
+import { useCreateUser, useUpdateUser, useUsers } from "@/api/hooks/use-users";
+import type { ApprovalQuestion, User } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
+import { FadeIn } from "@/components/shared/fade-in";
+import { QuestionFlow, type QuestionFlowValues } from "@/components/shared/question-flow";
+import { AlertCallout } from "@/components/ui/alert-callout";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SettingsRow } from "@/components/ui/settings-row";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
+import {
+  companyDomain,
+  domainOf,
+  isFreemail,
+  isValidEmail,
+  nameFromEmail,
+  optionValue,
+  USER_FUNCTIONS,
+} from "@/lib/company-profile";
+import { normalizeOrgWebsite } from "../../../../../src/utils/org-website";
+
+type Stage =
+  | { kind: "email" }
+  | { kind: "match"; user: User }
+  | { kind: "details"; askWebsite: boolean }
+  | { kind: "list" }
+  | { kind: "add-email"; user: User };
+
+/** Case-insensitive match on the email and the email aliases (like `?email=` auto-bind). */
+function findByEmail(users: User[], email: string): User | undefined {
+  const value = email.trim().toLowerCase();
+  return users.find(
+    (u) =>
+      u.email?.toLowerCase() === value || u.emailAliases.some((a) => a.toLowerCase() === value),
+  );
+}
+
+function emailHint(email: string): string {
+  const company = companyDomain(email);
+  if (company) return `Work address at ${company}. Stays on this swarm.`;
+  if (domainOf(email)) return "A personal address works. Stays on this swarm.";
+  return "Stays on this swarm. With anonymous telemetry on, at most its domain is shared.";
+}
+
+function detailQuestions(askWebsite: boolean): ApprovalQuestion[] {
+  return [
+    { id: "name", type: "text", label: "Your name", required: true, placeholder: "Ada Lovelace" },
+    {
+      id: "jobFunction",
+      type: "single-select",
+      label: "What do you work on?",
+      description: "Tunes the first tasks the swarm suggests to you.",
+      required: true,
+      options: [...USER_FUNCTIONS],
+    },
+    ...(askWebsite
+      ? [
+          {
+            id: "website",
+            type: "text",
+            label: "Your company website",
+            description:
+              "You used a personal address. Your company site gives your swarm its name and logo.",
+            placeholder: "acme.com",
+          } satisfies ApprovalQuestion,
+        ]
+      : []),
+  ];
+}
+
+function EmailInput({
+  id,
+  value,
+  onChange,
+  error,
+  autoFocus,
+  helper,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  error: string | null;
+  autoFocus?: boolean;
+  helper: string;
+}) {
+  return (
+    <SettingsRow
+      label="Email"
+      htmlFor={id}
+      required
+      helper={error ? <span className="text-status-error-strong">{error}</span> : helper}
+    >
+      <Input
+        id={id}
+        type="email"
+        autoComplete="email"
+        autoFocus={autoFocus}
+        placeholder="ada@acme.com"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-invalid={error ? true : undefined}
+      />
+    </SettingsRow>
+  );
+}
 
 /**
- * Pick the user this session belongs to from `useUsers()`, or create one
- * (`name` + optional `email`). On submit the user's id goes into
- * `CurrentUserContext` via `setUserId`, then `onDone` runs. Shared by the
- * identity modal and the inline picker on `/setup` (step 1, and step 7 as a
- * fallback).
+ * "Who are you?": one email field finds the user on this swarm (email or
+ * alias), or starts a short question flow that creates one (name, a required
+ * job function, and for a personal address an optional company website).
+ * Users with no email on record are picked from a list and must add one. On
+ * finish the user's id goes into `CurrentUserContext` via `setUserId`, then
+ * `onDone` runs. Shared by the identity modal and the inline picker on
+ * `/setup` (step 1, and step 7 as a fallback). It sends telemetry through
+ * `/status` directly, because `/setup` has no `StatusProvider`.
  */
 export function IdentityForm({
+  surface,
   autoFocus = true,
-  instant = false,
   onDone,
-  submitLabels,
+  saveCompanyWebsite,
 }: {
+  /** The `surface` of `identity.user_created`. */
+  surface: "identity_modal" | "setup";
   autoFocus?: boolean;
-  /**
-   * Picking an existing user sets it at once (no submit button). Creating a
-   * user still needs the name, then Enter or the create button.
-   */
-  instant?: boolean;
   /** Called after a user is picked or created (also when the pick did not change). */
   onDone?: () => void;
-  /** Button labels. Defaults: "Continue" and "Create & continue". */
-  submitLabels?: { select?: string; create?: string };
+  /**
+   * Stores the company website a personal-address user gives. Pass it only
+   * while the swarm has no website: the create flow then asks for one.
+   */
+  saveCompanyWebsite?: (website: string) => Promise<void>;
 }) {
-  const { setUserId } = useCurrentUser();
+  const { setUserId, user: currentUser } = useCurrentUser();
   const { pendingIdentity, clearPendingIdentity } = useConfig();
+  const { data: status } = useStatus({ pollIntervalMs: 0 });
   const usersQuery = useUsers();
   const createUser = useCreateUser();
-  const [mode, setMode] = useState<"select" | "create">(pendingIdentity ? "create" : "select");
-  const [selected, setSelected] = useState<string>("");
-  const [newName, setNewName] = useState(pendingIdentity?.name ?? "");
-  const [newEmail, setNewEmail] = useState(pendingIdentity?.email ?? "");
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const updateUser = useUpdateUser();
+  const [chosenStage, setStage] = useState<Stage | null>(null);
+  // A remembered user with no email on record adds one first.
+  const stage: Stage =
+    chosenStage ??
+    (currentUser && !currentUser.email
+      ? { kind: "add-email", user: currentUser }
+      : { kind: "email" });
+  const [email, setEmail] = useState(pendingIdentity?.email ?? "");
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [addedEmail, setAddedEmail] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
 
   const users = usersQuery.data ?? [];
-  const isLoading = usersQuery.isLoading;
-
-  // Default to "create" when there are no users yet, but do it in an effect
-  // so we don't trigger setState during render.
-  useEffect(() => {
-    if (!isLoading && users.length === 0) {
-      setMode((prev) => (prev === "select" ? "create" : prev));
-    }
-  }, [isLoading, users.length]);
 
   function pick(id: string) {
     setUserId(id);
@@ -66,30 +164,94 @@ export function IdentityForm({
     onDone?.();
   }
 
-  function handleSelectSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (selected) pick(selected);
+  function restart() {
+    setStage({ kind: "email" });
+    setEmailError(null);
   }
 
-  async function handleCreateSubmit(e: FormEvent) {
-    e.preventDefault();
-    const name = newName.trim();
-    if (!name) return;
-    setSubmitError(null);
+  function lookUp(event: FormEvent) {
+    event.preventDefault();
+    // Only a loaded list can say "no match".
+    if (!usersQuery.data) return;
+    if (!isValidEmail(email)) {
+      setEmailError("Enter a valid email, such as ada@acme.com.");
+      return;
+    }
+    setEmailError(null);
+    const match = findByEmail(users, email);
+    sendUiTelemetry(status, { event: "identity.lookup", properties: { matched: Boolean(match) } });
+    setStage(
+      match
+        ? { kind: "match", user: match }
+        : {
+            kind: "details",
+            askWebsite: companyDomain(email) === null && saveCompanyWebsite !== undefined,
+          },
+    );
+  }
+
+  async function create(values: QuestionFlowValues) {
+    const name = String(values.name ?? "").trim();
+    const jobFunction = optionValue(USER_FUNCTIONS, values.jobFunction);
+    const websiteInput = String(values.website ?? "").trim();
+    const website = websiteInput ? normalizeOrgWebsite(websiteInput) : null;
+    if (!name || !jobFunction) throw new Error("Answer the required questions.");
+    if (websiteInput && !website) {
+      throw new Error("Enter a public website, such as example.com, or clear it.");
+    }
+    // The job function lives in metadata: `users.role` stays empty, so the
+    // user keeps the admin-level prompts (`isAdminLike`).
+    const user = await createUser.mutateAsync({
+      name,
+      email: email.trim(),
+      metadata: { jobFunction },
+    });
+    let savedWebsite = false;
+    if (website && saveCompanyWebsite) {
+      // The user exists now: a failed website write must not block sign-in.
+      try {
+        await saveCompanyWebsite(website);
+        savedWebsite = true;
+      } catch {
+        toast.error("You are signed in. The website did not save: add it in Settings.");
+      }
+    }
+    sendUiTelemetry(status, {
+      event: "identity.user_created",
+      properties: {
+        surface,
+        email_kind: isFreemail(email) ? "personal" : "work",
+        has_function: true,
+        // We know the company: from a work address, or from the website given here.
+        has_company: companyDomain(email) !== null || savedWebsite,
+      },
+    });
+    pick(user.id);
+  }
+
+  async function addEmail(event: FormEvent, user: User) {
+    event.preventDefault();
+    const value = addedEmail.trim();
+    if (!usersQuery.data) return;
+    if (!isValidEmail(value)) {
+      setAddError("Enter a valid email, such as ada@acme.com.");
+      return;
+    }
+    const owner = findByEmail(users, value);
+    if (owner && owner.id !== user.id) {
+      setAddError(`That email belongs to ${owner.name}.`);
+      return;
+    }
+    setAddError(null);
     try {
-      const user = await createUser.mutateAsync({
-        name,
-        ...(newEmail.trim().length > 0 && { email: newEmail.trim() }),
-      });
-      setUserId(user.id);
-      clearPendingIdentity();
-      onDone?.();
+      await updateUser.mutateAsync({ id: user.id, data: { email: value } });
+      pick(user.id);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create user");
+      setAddError(err instanceof Error ? err.message : "Could not save the email.");
     }
   }
 
-  if (isLoading) {
+  if (usersQuery.isPending) {
     return (
       <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
         <Spinner className="size-4 mr-2" /> Loading users…
@@ -97,107 +259,187 @@ export function IdentityForm({
     );
   }
 
-  if (mode === "select") {
+  // A failed read is not an empty directory: nothing goes on until the list loads.
+  if (!usersQuery.data) {
     return (
-      <form className="flex flex-col gap-4" onSubmit={handleSelectSubmit}>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="identity-user">User</Label>
-          <Select
-            value={selected}
-            onValueChange={(id) => {
-              setSelected(id);
-              if (instant) pick(id);
-            }}
-          >
-            <SelectTrigger id="identity-user">
-              <SelectValue placeholder="Pick a user…" />
-            </SelectTrigger>
-            <SelectContent>
-              {users.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  <span className="flex items-center gap-2">
-                    <UserCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span>{u.name}</span>
-                    {u.email ? (
-                      <span className="text-xs text-muted-foreground">{u.email}</span>
-                    ) : null}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center justify-between gap-2 pt-2">
+      <AlertCallout
+        tone="error"
+        icon={AlertCircle}
+        title="Could not load the users on this swarm"
+        action={
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
-            onClick={() => {
-              setMode("create");
-              setSubmitError(null);
-            }}
+            status={usersQuery.isFetching ? "loading" : "idle"}
+            onClick={() => void usersQuery.refetch()}
           >
-            <Plus className="h-3.5 w-3.5 mr-1" /> Create new
+            <RotateCw />
+            Retry
           </Button>
-          {instant ? null : (
-            <Button type="submit" disabled={!selected}>
-              {submitLabels?.select ?? "Continue"}
-            </Button>
-          )}
+        }
+      >
+        {usersQuery.error?.message || "The request failed."}
+      </AlertCallout>
+    );
+  }
+
+  if (stage.kind === "match") {
+    return (
+      <FadeIn key="match" className="flex flex-col gap-4">
+        <p className="text-sm">
+          Welcome back, <span className="font-medium">{stage.user.name}</span>.
+        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={restart}>
+            Not you? Use another email
+          </Button>
+          <Button type="button" onClick={() => pick(stage.user.id)}>
+            Continue as {stage.user.name}
+          </Button>
         </div>
-      </form>
+      </FadeIn>
+    );
+  }
+
+  if (stage.kind === "details") {
+    const company = companyDomain(email);
+    const teammates = company
+      ? users.filter((u) => u.email && companyDomain(u.email) === company).length
+      : 0;
+    return (
+      <FadeIn key="details" className="flex flex-col gap-3">
+        <p className="text-sm text-muted-foreground">
+          {email.trim()} is new on this swarm. Answer these, then you are in.
+        </p>
+        <QuestionFlow
+          questions={detailQuestions(stage.askWebsite)}
+          initialValues={{ name: pendingIdentity?.name?.trim() || nameFromEmail(email) }}
+          onSubmit={create}
+          footer={
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {teammates > 0 ? (
+                <Badge variant="outline">
+                  {teammates === 1
+                    ? `1 teammate from ${company} is on this swarm`
+                    : `${teammates} teammates from ${company} are on this swarm`}
+                </Badge>
+              ) : (
+                <span />
+              )}
+              <Button type="button" variant="ghost" size="sm" onClick={restart}>
+                Use another email
+              </Button>
+            </div>
+          }
+        />
+      </FadeIn>
+    );
+  }
+
+  if (stage.kind === "list") {
+    return (
+      <FadeIn key="list" className="flex flex-col gap-3">
+        <p className="text-sm text-muted-foreground">
+          Pick your user. A user with no email on record adds one first.
+        </p>
+        <div className="flex max-h-72 flex-col gap-2 overflow-y-auto">
+          {users.map((user) => (
+            <Button
+              key={user.id}
+              type="button"
+              variant="outline"
+              className="justify-start"
+              onClick={() => {
+                if (user.email) {
+                  pick(user.id);
+                  return;
+                }
+                setAddedEmail("");
+                setAddError(null);
+                setStage({ kind: "add-email", user });
+              }}
+            >
+              <UserCircle2 className="text-muted-foreground" />
+              <span className="truncate">{user.name}</span>
+              <span className="truncate text-xs text-muted-foreground">
+                {user.email ?? "no email"}
+              </span>
+            </Button>
+          ))}
+        </div>
+        <Button type="button" variant="ghost" size="sm" className="self-start" onClick={restart}>
+          Back to email
+        </Button>
+      </FadeIn>
+    );
+  }
+
+  if (stage.kind === "add-email") {
+    const user = stage.user;
+    return (
+      <FadeIn key="add-email">
+        <form className="flex flex-col gap-4" onSubmit={(event) => void addEmail(event, user)}>
+          <p className="text-sm text-muted-foreground">
+            {user.name} has no email on record. Every user on this swarm needs one.
+          </p>
+          <EmailInput
+            id="identity-add-email"
+            value={addedEmail}
+            onChange={setAddedEmail}
+            error={addError}
+            autoFocus
+            helper={emailHint(addedEmail)}
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setStage({ kind: "list" })}
+            >
+              Back to the list
+            </Button>
+            <Button type="submit" status={updateUser.isPending ? "loading" : "idle"}>
+              Save and continue as {user.name}
+            </Button>
+          </div>
+        </form>
+      </FadeIn>
     );
   }
 
   return (
-    <form className="flex flex-col gap-4" onSubmit={handleCreateSubmit}>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="identity-new-name">Name</Label>
-        <Input
-          id="identity-new-name"
+    <FadeIn key="email">
+      <form className="flex flex-col gap-4" onSubmit={lookUp} noValidate>
+        <EmailInput
+          id="identity-email"
+          value={email}
+          onChange={(value) => {
+            setEmail(value);
+            setEmailError(null);
+          }}
+          error={emailError}
           autoFocus={autoFocus}
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="Ada Lovelace"
-          required
+          helper={emailHint(email)}
         />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="identity-new-email">Email (optional)</Label>
-        <Input
-          id="identity-new-email"
-          type="email"
-          value={newEmail}
-          onChange={(e) => setNewEmail(e.target.value)}
-          placeholder="ada@example.com"
-        />
-      </div>
-      {submitError ? <p className="text-xs text-status-error-strong">{submitError}</p> : null}
-      <div className="flex items-center justify-between gap-2 pt-2">
-        {users.length > 0 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setMode("select");
-              setSubmitError(null);
-              clearPendingIdentity();
-            }}
-          >
-            Back to list
-          </Button>
-        ) : (
-          <span />
-        )}
-        <Button
-          type="submit"
-          disabled={!newName.trim()}
-          status={createUser.isPending ? "loading" : "idle"}
-        >
-          {submitLabels?.create ?? "Create & continue"}
-        </Button>
-      </div>
-    </form>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+          {users.length > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setStage({ kind: "list" })}
+            >
+              No email? Pick from the list
+            </Button>
+          ) : (
+            <span />
+          )}
+          {/* /setup has its own Continue in the footer. */}
+          <Button type="submit">{surface === "setup" ? "Next" : "Continue"}</Button>
+        </div>
+      </form>
+    </FadeIn>
   );
 }

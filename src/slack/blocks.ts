@@ -97,11 +97,29 @@ export function splitSlackSectionText(text: string): string[] {
     if (splitIdx < MAX_SECTION_LENGTH / 2) {
       // No good break point at all, hard split
       splitIdx = MAX_SECTION_LENGTH;
+      // Keep a surrogate pair (emoji, astral char) together: never end a
+      // chunk on a lone high surrogate.
+      const prev = remaining.charCodeAt(splitIdx - 1);
+      if (prev >= 0xd800 && prev <= 0xdbff) splitIdx -= 1;
     }
     chunks.push(remaining.slice(0, splitIdx));
     remaining = remaining.slice(splitIdx).trimStart();
   }
   return chunks;
+}
+
+// Slack's hard cap on section text.
+const SLACK_SECTION_TEXT_LIMIT = 3000;
+
+/**
+ * Default blocks for a tool message sent without explicit `blocks`: one
+ * mrkdwn section per chunk, so text over the section limit still sends.
+ * Text Slack accepts in one section stays one section, so links and code
+ * fences are never split below the limit.
+ */
+export function buildMrkdwnSectionBlocks(text: string): SlackBlock[] {
+  if (text.length <= SLACK_SECTION_TEXT_LIMIT) return [sectionBlock(text)];
+  return splitSlackSectionText(text).map((chunk) => sectionBlock(chunk));
 }
 
 // --- Block primitives ---

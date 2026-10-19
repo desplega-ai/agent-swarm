@@ -17,6 +17,7 @@
 import { ChevronLeft, Filter, MessageSquare, PanelLeftOpen, Plus, Search } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSessions } from "@/api/hooks/use-sessions";
 import type { SessionListItem } from "@/api/types";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -42,6 +43,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { SESSION_SHARING_MIN_VERSION } from "@/lib/session-sharing";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
 
 const COLLAPSE_STORAGE_KEY = "agent-swarm-sessions-sidebar-collapsed";
@@ -126,6 +128,8 @@ function SessionRow({ session: s, isActive }: SessionRowProps) {
 
 interface SessionsListProps {
   sessions: SessionListItem[] | undefined;
+  /** Someone else's sessions shared with me. Undefined on servers without sharing. */
+  sharedSessions?: SessionListItem[];
   isLoading: boolean;
   activeRootTaskId?: string;
   query: string;
@@ -139,6 +143,7 @@ interface SessionsListProps {
 
 function SessionsList({
   sessions,
+  sharedSessions,
   isLoading,
   activeRootTaskId,
   query,
@@ -150,6 +155,7 @@ function SessionsList({
   identityState,
 }: SessionsListProps) {
   const items = sessions ?? [];
+  const shared = sharedSessions ?? [];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -255,7 +261,7 @@ function SessionsList({
             ))}
           </div>
         ) : items.length === 0 ? (
-          query.trim().length > 0 ? (
+          shared.length > 0 ? null : query.trim().length > 0 ? (
             <div className="px-3 py-6 text-xs text-muted-foreground text-center">
               No sessions match "{query}".
             </div>
@@ -277,6 +283,20 @@ function SessionsList({
             ))}
           </ul>
         )}
+        {identityState === "ready" && shared.length > 0 ? (
+          <section aria-label="Shared with me" className="pb-3">
+            <h2 className="px-3 pt-2 pb-1.5 text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+              Shared with me
+            </h2>
+            <ul className="flex flex-col gap-0.5 px-2">
+              {shared.map((s) => (
+                <li key={s.root.id} className="min-w-0">
+                  <SessionRow session={s} isActive={activeRootTaskId === s.root.id} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </div>
     </div>
   );
@@ -403,6 +423,15 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
     requestedByUserId: userId ?? undefined,
     enabled: identityState === "ready",
   });
+  // "Shared with me": someone else's sessions shared with me or everyone.
+  const sharingGate = useFeatureGate(SESSION_SHARING_MIN_VERSION);
+  const { data: sharedSessions } = useSessions({
+    limit: 50,
+    source: sourceFilter,
+    q: debouncedQuery.trim() || undefined,
+    scope: "shared",
+    enabled: sharingGate.supported && identityState === "ready",
+  });
 
   const openNew = useCallback(() => navigate("/sessions"), [navigate]);
   const api = useMemo<SessionsShellApi>(() => ({ openNew }), [openNew]);
@@ -427,6 +456,7 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
             <aside className="hidden lg:flex border-r border-border min-h-0 bg-card/40 flex-col">
               <SessionsList
                 sessions={sessions}
+                sharedSessions={sharingGate.supported ? sharedSessions : undefined}
                 isLoading={isLoading}
                 activeRootTaskId={activeRootTaskId}
                 query={query}

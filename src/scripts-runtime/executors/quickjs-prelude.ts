@@ -14,7 +14,7 @@
  * `SANDBOX_WEB_SHIMS` (quickjs-web-shims.ts) runs first and adds URL,
  * URLSearchParams, TextEncoder and TextDecoder.
  * `__swarm_shape` (injected before this file) lists the configured api/mcp
- * connections so `ctx.api.<slug>` matches the native executor exactly.
+ * connections and the `ctx.fs` methods, so `ctx` matches the native executor exactly.
  */
 export const SANDBOX_PRELUDE = String.raw`(() => {
 "use strict";
@@ -282,7 +282,10 @@ const registry = (kind) => {
   }
   return out;
 };
-const ctx = Object.freeze({ swarm, api: registry("api"), mcp: registry("mcp"), stdlib, logger: console });
+// ctx.fs / ctx.sh run on the host (script-fs.ts): agent-fs at /afs, scratch memory elsewhere.
+const fs = Object.freeze(Object.fromEntries(shape.fs.map((name) => [name, method("fs." + name)])));
+const sh = (command, options) => hostCall("sh", options === undefined ? [command] : [command, options]);
+const ctx = Object.freeze({ swarm, api: registry("api"), mcp: registry("mcp"), fs, sh, stdlib, logger: console });
 
 const define = (name, value) =>
   Object.defineProperty(globalThis, name, { value, writable: true, configurable: true, enumerable: false });

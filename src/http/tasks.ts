@@ -37,10 +37,12 @@ import {
 } from "../be/db";
 import { modelProfileRefError, taskProfileError } from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { hasSessionAccess, type SessionAccess } from "../be/session-shares";
 import {
   getTaskSteeringFields,
   markSteeringUndeliverable,
   requestSteering,
+  STEERING_MOVED_ERROR,
   SteeringRequestError,
 } from "../be/steering";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
@@ -71,6 +73,7 @@ import {
   SteeringSourceSchema,
   SteerModeSchema,
   SteerResultSchema,
+  SUPERSEDED_WORKFLOW_TASK_REASON,
   splitLegacyModelAlias,
   TaskAttachmentSchema,
 } from "../types";
@@ -79,7 +82,15 @@ import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
+import {
+  canReadSession,
+  readableByFor,
+  resolveSessionActor,
+  SESSION_READ_DENIED,
+  SESSION_WRITE_DENIED,
+  sessionAccessFor,
+} from "./session-access";
 import { jsonError, parseBody } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -151,6 +162,13 @@ const SteeringMessageEnvelopeSchema = z.object({ message: SteeringMessageSchema 
 /** Shared by the steering-message list routes — `{ messages }`. */
 const SteeringMessagesListSchema = z.object({ messages: z.array(SteeringMessageSchema) });
 
+/**
+ * Optional `taskId` on the delivered/undeliverable callbacks: the task whose
+ * session received the message. A row handed to a successor since then
+ * answers 409 and stays untouched.
+ */
+const SteeringCallbackTaskIdSchema = z.string().optional();
+
 /** `POST /api/steering-messages/{id}/undeliverable` — promotion result. */
 const SteeringUndeliverableResponseSchema = z.object({
   message: SteeringMessageSchema,
@@ -199,7 +217,7 @@ const listTasks = route({
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
   description:
-    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
@@ -255,6 +273,7 @@ const createTask = route({
   method: "post",
   path: "/api/tasks",
   pattern: ["api", "tasks"],
+  session: bodyTask("parentTaskId"),
   summary: "Create a new task",
   tags: ["Tasks"],
   body: z
@@ -332,6 +351,7 @@ const promoteDraftTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/promote-draft",
   pattern: ["api", "tasks", null, "promote-draft"],
+  session: { taskParam: "id" },
   summary: "Promote a draft task out of the pre-dispatch draft state",
   description:
     "Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.",
@@ -349,6 +369,7 @@ const updateSession = route({
   method: "put",
   path: "/api/tasks/{id}/session",
   pattern: ["api", "tasks", null, "session"],
+  session: { taskParam: "id" },
   summary: "Update provider session ID and harness metadata for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -384,6 +405,7 @@ const cancelTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/cancel",
   pattern: ["api", "tasks", null, "cancel"],
+  session: { taskParam: "id" },
   summary: "Cancel a pending or in-progress task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -399,6 +421,7 @@ const steerTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/steer",
   pattern: ["api", "tasks", null, "steer"],
+  session: { taskParam: "id" },
   summary: "Deliver a steering message to a running task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -431,6 +454,7 @@ const getTaskSteeringMessagesRoute = route({
   method: "get",
   path: "/api/tasks/{id}/steering-messages",
   pattern: ["api", "tasks", null, "steering-messages"],
+  session: { taskParam: "id" },
   summary: "List steering messages for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -459,10 +483,11 @@ const markSteeringDeliveredRoute = route({
   method: "post",
   path: "/api/steering-messages/{id}/delivered",
   pattern: ["api", "steering-messages", null, "delivered"],
+  session: { steeringParam: "id" },
   summary: "Mark a steering message delivered",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
-  body: z.object({ mode: SteerModeSchema }),
+  body: z.object({ mode: SteerModeSchema, taskId: SteeringCallbackTaskIdSchema }),
   auth: { apiKey: true, agentId: true },
   rbac: {
     ungated:
@@ -476,6 +501,7 @@ const markSteeringDeliveredRoute = route({
     400: { description: "Missing X-Agent-ID header or validation error" },
     403: { description: "Steering message task is assigned to another agent" },
     404: { description: "Agent or steering message not found" },
+    409: { description: "Steering message moved to another task" },
   },
 });
 
@@ -483,6 +509,7 @@ const markSteeringHandledRoute = route({
   method: "post",
   path: "/api/steering-messages/{id}/handled",
   pattern: ["api", "steering-messages", null, "handled"],
+  session: { steeringParam: "id" },
   summary: "Mark a steering message handled",
   description:
     "Optionally accepts a JSON body `{ note?: string }` — a short acceptance note describing how the steering was incorporated, persisted as `handledNote`.",
@@ -508,10 +535,11 @@ const markSteeringUndeliverableRoute = route({
   method: "post",
   path: "/api/steering-messages/{id}/undeliverable",
   pattern: ["api", "steering-messages", null, "undeliverable"],
+  session: { steeringParam: "id" },
   summary: "Promote an undeliverable steering message",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
-  body: z.object({ reason: z.string().min(1) }),
+  body: z.object({ reason: z.string().min(1), taskId: SteeringCallbackTaskIdSchema }),
   auth: { apiKey: true, agentId: true },
   rbac: {
     ungated:
@@ -525,6 +553,7 @@ const markSteeringUndeliverableRoute = route({
     400: { description: "Missing X-Agent-ID header or validation error" },
     403: { description: "Steering message task is assigned to another agent" },
     404: { description: "Agent or steering message not found" },
+    409: { description: "Steering message moved to another task" },
   },
 });
 
@@ -532,6 +561,7 @@ const getTask = route({
   method: "get",
   path: "/api/tasks/{id}",
   pattern: ["api", "tasks", null],
+  session: { taskParam: "id" },
   summary: "Get task details with logs and attachments",
   description:
     "Returns the full `AgentTask` row decorated with `logs` (capped by `logsLimit`) and `attachments` (pointer-based artifacts stored on the task, ordered by `created_at`).",
@@ -543,6 +573,7 @@ const getTask = route({
   }),
   responses: {
     200: { description: "Task with logs and attachments", schema: GetTaskResponseSchema },
+    403: { description: "A user caller cannot read the task's session" },
     404: { description: "Task not found" },
   },
 });
@@ -551,6 +582,7 @@ const updateTaskProgressRoute = route({
   method: "post",
   path: "/api/tasks/{id}/progress",
   pattern: ["api", "tasks", null, "progress"],
+  session: { taskParam: "id" },
   summary: "Update task progress text",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -569,6 +601,7 @@ const finishTask = route({
   method: "post",
   path: "/api/tasks/{id}/finish",
   pattern: ["api", "tasks", null, "finish"],
+  session: { taskParam: "id" },
   summary: "Mark task as completed or failed (runner endpoint)",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -621,6 +654,7 @@ const pauseTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/pause",
   pattern: ["api", "tasks", null, "pause"],
+  session: { taskParam: "id" },
   summary: "Pause an in-progress task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -636,6 +670,7 @@ const resumeTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/resume",
   pattern: ["api", "tasks", null, "resume"],
+  session: { taskParam: "id" },
   summary: "Resume a paused task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -651,6 +686,7 @@ const supersedeTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/supersede",
   pattern: ["api", "tasks", null, "supersede"],
+  session: { taskParam: "id" },
   summary: "Supersede an in-progress task (terminate + spawn resume follow-up)",
   description:
     'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies.',
@@ -673,6 +709,7 @@ const updateTaskVcsRoute = route({
   method: "patch",
   path: "/api/tasks/{id}/vcs",
   pattern: ["api", "tasks", null, "vcs"],
+  session: { taskParam: "id" },
   summary: "Update VCS (PR/MR) info for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -694,6 +731,7 @@ const updateTaskTitleRoute = route({
   method: "patch",
   path: "/api/tasks/{id}/title",
   pattern: ["api", "tasks", null, "title"],
+  session: { taskParam: "id" },
   summary: "Set or clear a task's display title (session rename)",
   description:
     "Sets a human-facing display title override on a task. The sessions UI only reads this from root tasks (session list items), but titles on child tasks are harmless. Pass `title: null` (or an empty string) to clear the override and fall back to the task prompt.",
@@ -712,22 +750,37 @@ const updateTaskTitleRoute = route({
   },
 });
 
+/** True unless the request acts for a user who lacks write access to the task's session. */
+async function hasSessionWrite(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  taskId: string,
+): Promise<boolean> {
+  const access = await sessionAccessFor(await resolveSessionActor(req, myAgentId), taskId);
+  return hasSessionAccess(access, "write");
+}
+
 async function canSteerTask(
   req: IncomingMessage,
   myAgentId: string | undefined,
   task: AgentTask,
+  sessionAccess: SessionAccess = "none",
 ): Promise<boolean> {
+  const auth = getRequestAuth(req);
   const resource: RbacResource = {
     kind: "task",
     taskId: task.id,
-    requestedByUserId: task.requestedByUserId,
+    // A user with a write share steers as if the session were their own; the
+    // verb gate (and any role grant) still applies. Only an actual share
+    // counts: `owner` from an ownerless root must not widen steering.
+    requestedByUserId:
+      auth?.kind === "user" && sessionAccess === "write" ? auth.userId : task.requestedByUserId,
     creatorAgentId: task.creatorAgentId,
     agentId: task.agentId,
   };
   let principal: RbacPrincipal;
   let verb: "task.steer.any" | "task.steer.own";
 
-  const auth = getRequestAuth(req);
   if (auth?.kind === "operator") {
     principal = { kind: "operator" };
     verb = "task.steer.own";
@@ -896,6 +949,9 @@ export async function handleTasks(
       if (validated.length > 0) source = validated;
     }
 
+    // Every shape carries task text, so a user sees only sessions they can
+    // read, and `total` counts the same rows.
+    const actor = await resolveSessionActor(req, myAgentId);
     const filters = {
       status,
       agentId: parsed.query.agentId || undefined,
@@ -915,6 +971,7 @@ export async function handleTasks(
       orderBy: parsed.query.orderBy,
       limit: parsed.query.limit,
       offset: parsed.query.offset,
+      readableBy: actor.kind === "user" ? { userId: actor.userId } : undefined,
     };
     // List responses default to slim (full `task` text → bounded `taskPreview`,
     // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
@@ -1001,6 +1058,11 @@ export async function handleTasks(
       }).allow
     ) {
       jsonError(res, `You don't have context for parent task ${parentTask.id}.`, 403);
+      return true;
+    }
+    // A follow-up in someone else's session needs a write share.
+    if (parentTask && !(await hasSessionWrite(req, myAgentId, parentTask.id))) {
+      jsonError(res, SESSION_WRITE_DENIED, 403);
       return true;
     }
     // A chat-sdk contextKey binds the task to a chat thread that its assignee and creator
@@ -1275,7 +1337,13 @@ export async function handleTasks(
       jsonError(res, "Task not found", 404);
       return true;
     }
-    if (!(await canSteerTask(req, myAgentId, task))) {
+    const sessionActor = await resolveSessionActor(req, myAgentId);
+    const steerAccess = await sessionAccessFor(sessionActor, task.id);
+    if (!hasSessionAccess(steerAccess, "write")) {
+      jsonError(res, SESSION_WRITE_DENIED, 403);
+      return true;
+    }
+    if (!(await canSteerTask(req, myAgentId, task, steerAccess))) {
       jsonError(res, "Forbidden: caller cannot steer this task", 403);
       return true;
     }
@@ -1328,6 +1396,10 @@ export async function handleTasks(
       jsonError(res, "Task not found", 404);
       return true;
     }
+    if (!(await canReadSession(req, myAgentId, parsed.params.id))) {
+      jsonError(res, SESSION_READ_DENIED, 403);
+      return true;
+    }
     getTaskSteeringMessagesRoute.respond(res, 200, {
       messages: await getSteeringMessagesForTask(parsed.params.id),
     });
@@ -1347,7 +1419,12 @@ export async function handleTasks(
       return true;
     }
 
+    // A user token naming an agent in X-Agent-ID still reads only its sessions.
     if (parsed.query.taskId) {
+      if (!(await canReadSession(req, myAgentId, parsed.query.taskId))) {
+        jsonError(res, SESSION_READ_DENIED, 403);
+        return true;
+      }
       const task = await getTaskById(parsed.query.taskId);
       const messages =
         task?.agentId === myAgentId ? await getPendingSteeringForTask(parsed.query.taskId) : [];
@@ -1355,8 +1432,9 @@ export async function handleTasks(
       return true;
     }
 
+    const actor = await resolveSessionActor(req, myAgentId);
     getPendingSteeringMessagesRoute.respond(res, 200, {
-      messages: await getPendingSteeringForAgent(myAgentId),
+      messages: await getPendingSteeringForAgent(myAgentId, readableByFor(actor)),
     });
     return true;
   }
@@ -1384,14 +1462,23 @@ export async function handleTasks(
       jsonError(res, "Steering message task is assigned to another agent", 403);
       return true;
     }
+    const expectedTaskId = parsed.body.taskId;
+    if (expectedTaskId && message.taskId !== expectedTaskId) {
+      jsonError(res, STEERING_MOVED_ERROR, 409);
+      return true;
+    }
     if (message.status !== "pending") {
       markSteeringDeliveredRoute.respond(res, 200, { message });
       return true;
     }
 
     const delivered =
-      (await markSteeringDelivered(message.id, parsed.body.mode)) ??
+      (await markSteeringDelivered(message.id, parsed.body.mode, expectedTaskId)) ??
       (await getSteeringMessageById(message.id));
+    if (expectedTaskId && delivered && delivered.taskId !== expectedTaskId) {
+      jsonError(res, STEERING_MOVED_ERROR, 409);
+      return true;
+    }
     if (!delivered) {
       jsonError(res, "Failed to mark steering message delivered", 500);
       return true;
@@ -1473,6 +1560,10 @@ export async function handleTasks(
       jsonError(res, "Steering message task is assigned to another agent", 403);
       return true;
     }
+    if (parsed.body.taskId && message.taskId !== parsed.body.taskId) {
+      jsonError(res, STEERING_MOVED_ERROR, 409);
+      return true;
+    }
     if (message.status !== "pending") {
       markSteeringUndeliverableRoute.respond(res, 200, {
         message,
@@ -1485,7 +1576,7 @@ export async function handleTasks(
       markSteeringUndeliverableRoute.respond(
         res,
         200,
-        await markSteeringUndeliverable(message.id, parsed.body.reason),
+        await markSteeringUndeliverable(message.id, parsed.body.reason, parsed.body.taskId),
       );
     } catch (error) {
       if (error instanceof SteeringRequestError) {
@@ -1504,6 +1595,11 @@ export async function handleTasks(
 
     if (!task) {
       jsonError(res, "Task not found", 404);
+      return true;
+    }
+    const readAccess = await sessionAccessFor(await resolveSessionActor(req, myAgentId), task.id);
+    if (!hasSessionAccess(readAccess, "read")) {
+      jsonError(res, "You don't have access to this session. Ask the owner to share it.", 403);
       return true;
     }
 
@@ -1735,7 +1831,11 @@ export async function handleTasks(
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
-    const pausedTasks = await getPausedTasksForAgent(myAgentId);
+    // A user token naming an agent in X-Agent-ID still reads only its sessions.
+    const pausedTasks = await getPausedTasksForAgent(
+      myAgentId,
+      readableByFor(await resolveSessionActor(req, myAgentId)),
+    );
     const tasks = await Promise.all(
       pausedTasks.map(async (task) => {
         const requestedBy = await buildTaskRequestedBy(task);
@@ -1915,7 +2015,7 @@ export async function handleTasks(
     // Check this BEFORE the supersede UPDATE so we don't leave a workflow
     // step in `superseded` if the engine expects `failed`.
     if (task.workflowRunStepId != null) {
-      const failed = await failTask(parsed.params.id, "superseded_workflow_task");
+      const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
       ensure({
         id: "task.workflow_step_failed_on_supersede",
         flow: "task",

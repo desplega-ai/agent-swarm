@@ -6,7 +6,8 @@
 //
 //   1. request auth kind "operator" (swarm key)  → allow — BEFORE any agent check,
 //      so an operator bearer with a non-owner X-Agent-ID is still allowed.
-//   2. request auth kind "user" (aswt_ token)    → allow.
+//   2. request auth kind "user" (aswt_ token)    → allow, unless it names an
+//      agent in X-Agent-ID: `handleCore` refuses that pair before any handler.
 //   3. otherwise (auth context unset): lead OR task-assignee OR task-creator
 //      → allow; anything else → 403 {"error":"Caller cannot mutate this task's files"}.
 //
@@ -205,9 +206,9 @@ describe("canMutateTask — real pipeline (handleCore auth → handleFs)", () =>
     expect(res.status).toBe(201);
   });
 
-  test("authenticated user with a non-owner X-Agent-ID is still allowed", async () => {
+  test("authenticated user naming an agent in X-Agent-ID is refused before the handler", async () => {
     const res = await pipelineUpload({ bearer: userToken, agentId: outsiderId });
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
   });
 });
 

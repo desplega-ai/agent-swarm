@@ -10,8 +10,14 @@
  */
 import variant from "@jitl/quickjs-singlefile-mjs-release-sync";
 import { newQuickJSWASMModuleFromVariant } from "quickjs-emscripten-core";
+import { createGuardedFetch } from "../../utils/egress-guard";
 import { patchFetchWithEgressSubstitution } from "../egress-secrets";
-import { type QuickJSJob, type QuickJSJobResult, runQuickJSJob } from "./quickjs-runner";
+import {
+  isSwarmHostCall,
+  type QuickJSJob,
+  type QuickJSJobResult,
+  runQuickJSJob,
+} from "./quickjs-runner";
 
 declare const self: Worker;
 
@@ -33,6 +39,22 @@ const pristineFetch = globalThis.fetch;
 const modulePromise = newQuickJSWASMModuleFromVariant(variant);
 
 /**
+ * The job's base fetch: the pristine fetch behind the egress guard. Calls to
+ * the swarm API origin are trusted only inside a ctx.swarm / ctx.mcp host call.
+ */
+function egressFetch(job: QuickJSJob): typeof fetch {
+  if (job.network === "open") return pristineFetch;
+  let swarmOrigin: string | null = null;
+  try {
+    swarmOrigin = new URL(job.configPayload.system.mcpBaseUrl.value).origin;
+  } catch {}
+  return createGuardedFetch(pristineFetch, {
+    policy: job.network,
+    isTrusted: (url) => url.origin === swarmOrigin && isSwarmHostCall(),
+  });
+}
+
+/**
  * WASM linear memory grows to the peak of any job and never shrinks, even
  * after the QuickJS runtime is disposed. The pool reads this to recycle a
  * worker whose memory grew. `module` is not public API, so this is best effort.
@@ -46,8 +68,10 @@ self.onmessage = async (event: MessageEvent<QuickJSWorkerRequest>) => {
   const { id, job } = event.data;
   try {
     const QuickJS = await modulePromise;
-    // Re-install from the pristine fetch so egress patches never stack across jobs.
-    globalThis.fetch = pristineFetch;
+    // Re-install from the pristine fetch so egress patches never stack across
+    // jobs. The guard goes in first, under the credential broker, so every
+    // substituted request also passes it.
+    globalThis.fetch = egressFetch(job);
     patchFetchWithEgressSubstitution(
       job.configPayload.egressSecrets ?? [],
       job.configPayload.failedBindings ?? [],

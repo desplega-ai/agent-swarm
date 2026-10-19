@@ -8,7 +8,7 @@ const { createRoot } = await import("react-dom/client");
 
 let telemetryEnabled = false;
 let role = "admin";
-const enabled: string[] = [];
+const started: string[] = [];
 
 mock.module("react-router-dom", () => ({
   Link: ({ children }: { children: ReactNode }) => children,
@@ -20,11 +20,33 @@ mock.module("@/api/hooks/use-feature-gate", () => ({
   useFeatureGate: () => ({ currentVersion: null, supported: true }),
 }));
 mock.module("@/api/hooks/use-onboarding", () => ({ useOnboardingOwnsFirstRun: () => false }));
-mock.module("@/api/hooks/use-org-profile", () => ({
-  useEnableTelemetry: () => ({ isPending: false, mutate: (via: string) => enabled.push(via) }),
-}));
 mock.module("@/app/status-context", () => ({
   useStatusContext: () => ({ data: { automations: [], telemetry: { enabled: telemetryEnabled } } }),
+}));
+// The banner has its own flow; here only its show and dismiss rules matter.
+mock.module("./telemetry-benchmark-banner", () => ({
+  TelemetryBenchmarkBanner: ({
+    onStart,
+    onDismiss,
+  }: {
+    onStart: () => void;
+    onClose: () => void;
+    onDismiss: () => void;
+  }) => (
+    <section>
+      See how your swarm compares
+      <button
+        type="button"
+        onClick={() => {
+          started.push("start");
+          onStart();
+        }}
+      >
+        Turn on telemetry
+      </button>
+      <button type="button" aria-label="Dismiss See how your swarm compares" onClick={onDismiss} />
+    </section>
+  ),
 }));
 mock.module("@/components/ui/button", () => ({
   Button: ({
@@ -64,12 +86,17 @@ mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { DashboardNudges } = await import("./dashboard-nudges");
 
+const TITLE = "See how your swarm compares";
+let rerender: (() => Promise<void>) | undefined;
 let cleanup: (() => Promise<void>) | undefined;
 async function mount() {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(<DashboardNudges />));
+  rerender = async () => {
+    await act(async () => root.render(<DashboardNudges />));
+  };
   cleanup = async () => {
     await act(async () => root.unmount());
     container.remove();
@@ -80,7 +107,7 @@ async function mount() {
 beforeEach(() => {
   telemetryEnabled = false;
   role = "admin";
-  enabled.length = 0;
+  started.length = 0;
   localStorage.clear();
 });
 afterEach(async () => {
@@ -91,30 +118,38 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-test("admins with telemetry off see the banner and can turn telemetry on", async () => {
-  const container = await mount();
-  expect(container.textContent).toContain("Telemetry is off");
-  const turnOn = [...container.querySelectorAll("button")].find((b) => b.textContent === "Turn on");
-  await act(async () => turnOn?.click());
-  expect(enabled).toEqual(["banner"]);
+test("admins with telemetry off see the benchmark banner", async () => {
+  expect((await mount()).textContent).toContain(TITLE);
 });
 
 test("members and installs with telemetry on see no banner", async () => {
   role = "member";
-  expect((await mount()).textContent).not.toContain("Telemetry is off");
+  expect((await mount()).textContent).not.toContain(TITLE);
   await cleanup?.();
   role = "admin";
   telemetryEnabled = true;
-  expect((await mount()).textContent).not.toContain("Telemetry is off");
+  expect((await mount()).textContent).not.toContain(TITLE);
+});
+
+test("after Turn on, the banner stays up for its questions once telemetry is on", async () => {
+  const container = await mount();
+  const turnOn = [...container.querySelectorAll("button")].find(
+    (b) => b.textContent === "Turn on telemetry",
+  );
+  await act(async () => turnOn?.click());
+  telemetryEnabled = true;
+  await rerender?.();
+  expect(started).toEqual(["start"]);
+  expect(container.textContent).toContain(TITLE);
 });
 
 test("a dismissal persists across remounts", async () => {
   const container = await mount();
   const dismiss = container.querySelector(
-    'button[aria-label="Dismiss Telemetry is off"]',
+    `button[aria-label="Dismiss ${TITLE}"]`,
   ) as HTMLButtonElement;
   await act(async () => dismiss.click());
-  expect(container.textContent).not.toContain("Telemetry is off");
+  expect(container.textContent).not.toContain(TITLE);
   await cleanup?.();
-  expect((await mount()).textContent).not.toContain("Telemetry is off");
+  expect((await mount()).textContent).not.toContain(TITLE);
 });

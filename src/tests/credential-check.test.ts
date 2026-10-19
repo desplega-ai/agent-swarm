@@ -236,6 +236,26 @@ describe("checkPiMonoCredentials", () => {
     ).toBe(false);
   });
 
+  test("strict: MODEL_OVERRIDE=opencode-go/... requires OPENCODE_API_KEY", async () => {
+    const env = { MODEL_OVERRIDE: "opencode-go/deepseek-v4.1-flash" };
+    expect(
+      (
+        await checkPiMonoCredentials(
+          { ...env, OPENCODE_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(true);
+    expect(
+      (
+        await checkPiMonoCredentials(
+          { ...env, ANTHROPIC_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(false);
+  });
+
   test("strict: MODEL_OVERRIDE=google/... accepts GEMINI_API_KEY", async () => {
     const env = {
       MODEL_OVERRIDE: "google/gemini-3-flash-preview",
@@ -1077,6 +1097,24 @@ describe("isCredCheckDisabled", () => {
 
 describe("buildCredStatusReport", () => {
   const HOME = "/home/worker";
+
+  test("pi reports the opencode-go ids its pi-ai resolves", async () => {
+    const snap = await buildCredStatusReport(
+      "pi",
+      { HOME },
+      { homeDir: HOME, fs: fsWith(new Set([`${HOME}/.pi/agent/auth.json`])) },
+      "boot",
+    );
+    expect(snap.opencodeGo?.models).toContain("deepseek-v4.1-flash");
+    expect(snap.opencodeGo?.models).not.toContain("deepseek-v4-flash");
+    const other = await buildCredStatusReport(
+      "opencode",
+      { HOME },
+      { homeDir: HOME, fs: fsWith(new Set([`${HOME}/.local/share/opencode/auth.json`])) },
+      "boot",
+    );
+    expect(other.opencodeGo).toBeNull();
+  });
 
   for (const [provider, authPath] of [
     ["pi", ".pi/agent/auth.json"],

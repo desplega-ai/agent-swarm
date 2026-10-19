@@ -225,6 +225,20 @@ A `sub-workflow` node runs another workflow as a child run and waits for it.
   (the child runs its live definition), cancelling the child when the parent is cancelled, a
   per-node timeout, a `foreach` body that is a workflow, and showing the link in the dashboard.
 
+## Agent-task steps cut by a deploy
+
+A deploy drain or heartbeat remediation fails an in-flight workflow-step task with
+`superseded_workflow_task` (`SUPERSEDED_WORKFLOW_TASK_REASON`) instead of creating a resume child.
+`scheduleTaskStepRetry` (`src/workflows/task-step-routing.ts`) turns that cut into a retry:
+
+- An `agent-task` node without `retry` gets `SUPERSEDE_RETRY_POLICY`: one retry, `static`, 30s.
+  Only this reason qualifies; any other failure follows `onNodeFailure` as before.
+- An explicit node `retry` always wins. `retry: { maxRetries: 0 }` is the opt-out for a node with
+  external side effects that must not run twice.
+- A second cut exhausts the implicit retry and follows `onNodeFailure`.
+- Foreach children (`<foreachId>#<key>`) are not covered: the retry poller resolves the node by
+  exact id (`src/workflows/retry-poller.ts`) and cannot re-dispatch a child step.
+
 ## Script node types
 
 There are two script-oriented workflow nodes:

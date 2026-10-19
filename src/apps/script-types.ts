@@ -8,6 +8,13 @@ const APP_TYPES_PREAMBLE = `// ── Swarm Apps: generated per-app types (sourc
 // Rows are the app's declared columns plus the 5 system columns. Query
 // overloads narrow only when appId AND query are string literals.
 
+export type AppActionCaller = {
+  kind: "user" | "agent" | "operator" | "guest";
+  id: string | null;
+  name?: string;
+  pageId?: string;
+};
+
 export interface SwarmAppQueryResult<Row> {
   success: boolean;
   status: number;
@@ -62,6 +69,7 @@ function commentSafe(value: string): string {
 }
 
 function tsTypeForColumn(column: Pick<ColumnDef, "kind" | "enum">): string {
+  if (column.kind === "json") return "unknown";
   if (column.kind !== "enum") return column.kind === "date" ? "string" : column.kind;
   return column.enum?.map((value) => JSON.stringify(value)).join(" | ") || "string";
 }
@@ -175,9 +183,8 @@ function renderQuery(
 }
 
 function renderApp(app: AppRecord, namespace: string): string {
-  // Reserve the generated alias so a model named `actionName` dedupes to
-  // `ActionName_2` instead of colliding with `type ActionName`.
-  const modelNames = new Set<string>(["ActionName"]);
+  // Reserve action types so model names cannot collide with them.
+  const modelNames = new Set<string>(["ActionName", "ActionArgs", "AppActionCaller"]);
   const renderedModels = Object.entries(app.definition.models).map(([modelName, model]) =>
     renderModel(modelName, model, modelNames),
   );
@@ -200,8 +207,15 @@ function renderApp(app: AppRecord, namespace: string): string {
 export namespace ${namespace} {
 ${renderedModels.map((model) => model.source).join("\n\n")}
 
-  /** Declared actions. Invocation is REST-only: POST /api/apps/<id>/actions/<name>. */
+  /** Scripts can write rows. Declared actions are callable through REST or MCP only. */
   export type ActionName = ${actionType};
+
+  /** Script action arguments include server-stamped app and caller context. */
+  export interface ActionArgs {
+    app: { id: ${JSON.stringify(app.id)} };
+    caller: AppActionCaller;
+    [key: string]: unknown;
+  }
 }
 
 export interface SwarmSdk {

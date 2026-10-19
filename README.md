@@ -118,6 +118,7 @@ AgentMail archives verified inbound deliveries before acknowledging them and ret
 - [Getting started](https://docs.agent-swarm.dev/docs/getting-started) · [Architecture](https://docs.agent-swarm.dev/docs/architecture/overview) · [Playbooks](https://docs.agent-swarm.dev/docs/playbooks) · [CLI](https://docs.agent-swarm.dev/docs/reference/cli) · [API reference](https://docs.agent-swarm.dev/docs/api-reference)
 - [Orchestration patterns](./docs/orchestration-patterns.md) — Five patterns for delegating, fanning out, gating on humans, retrying, and persisting multi-step agent work
 - [Agent templates](https://templates.agent-swarm.dev)
+- [Public ranking](https://docs.agent-swarm.dev/docs/reference/telemetry#public-ranking): opt in with **Get ranked** (Settings → Configuration → Branding) to rank your install by tokens used on [agent-swarm.dev/ranking](https://agent-swarm.dev/ranking). It shows at the next hourly refresh. Token totals are public and exact; telemetry, the organization name and website must be set.
 - Help: [contact@desplega.sh](mailto:contact@desplega.sh) · [Discord](https://discord.gg/KZgfyyDVZa)
 
 ## Contributing

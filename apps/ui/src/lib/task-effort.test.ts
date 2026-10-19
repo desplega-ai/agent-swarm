@@ -105,8 +105,8 @@ describe("taskEffortOptions", () => {
 
   test("pi and opencode read the tier's provider-qualified model", () => {
     const pi = taskEffortOptions({ ...base, harness: "pi", tier: "smol" });
-    // deepseek-v4.1-flash lists low and high only.
-    expect(pi).toEqual({ kind: "levels", levels: ["low", "high"], guessed: false });
+    // deepseek-v4.1-flash lists low, high and max.
+    expect(pi).toEqual({ kind: "levels", levels: ["low", "high", "max"], guessed: false });
     const opencode = taskEffortOptions({ ...base, harness: "opencode", tier: "ultra" });
     expect(opencode.kind).toBe("levels");
   });

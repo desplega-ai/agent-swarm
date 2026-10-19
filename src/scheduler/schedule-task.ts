@@ -1,4 +1,5 @@
 import { createTaskExtended, getDbClient } from "@/be/db";
+import { carryUnhandledSteering } from "@/be/steering";
 import { scheduleContextKey } from "@/tasks/context-key";
 import {
   type PreparedTaskCreate,
@@ -70,6 +71,9 @@ export async function createStandaloneScheduleTask(
        )`,
       [task.id, new Date().toISOString(), schedule.parentTaskId],
     );
+    // The wake-up continues the deferred task, so it takes over steering the
+    // deferred task received but never accepted.
+    await carryUnhandledSteering(schedule.parentTaskId, task.id);
   }
   return task;
 }
