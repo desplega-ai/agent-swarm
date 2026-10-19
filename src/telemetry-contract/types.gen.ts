@@ -49,6 +49,141 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/used-by": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a "used by" logo consent change
+         * @description Stores one grant or revoke of an install's consent to show its org's logo
+         *     on agent-swarm.dev, then posts it to the feedback Slack channel. Nothing is
+         *     published automatically: a human approves each logo by hand. Called
+         *     server-to-server by the agent-swarm API; there is no read endpoint. The
+         *     JSON body must not exceed 4 KB.
+         */
+        post: operations["submitUsedByConsent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch an org logo by website hostname
+         * @description Returns a 128 px PNG logo for `domain`, fetched from logo.dev with a key held
+         *     only by this service, so dashboards (self-hosted included) can show their
+         *     org's logo without the key reaching their config or UI bundle. Unknown
+         *     domains get logo.dev's generated monogram. Answers are cached in memory for a
+         *     day (a 404 for an hour), and browsers may cache the image for a day. Rate
+         *     limited per IP: a burst of 60, then one per second.
+         */
+        get: operations["getOrgLogo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/fleet/benchmarks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fleet percentiles for tasks per week and task success rate
+         * @description Percentiles over production agent-swarm installs with at least 10 finished
+         *     tasks in the last 30 days, overall and by agent count (`1`, `2-5`, `6+`).
+         *     Internal, QA, test and E2B installs are excluded. Aggregates only: no install
+         *     ID or org name, and any bucket or metric with fewer than 20 installs is
+         *     omitted. Recomputed hourly from `raw_events`; the request carries no install
+         *     ID. Called server to server by agent-swarm API servers, so the response sends
+         *     no CORS headers. Rate limited per IP: a burst of 10, then 10 per minute.
+         */
+        get: operations["getFleetBenchmarks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Opted-in agent-swarm installs ranked by tokens
+         * @description Copies OpenRouter's app-ranking category response
+         *     (`/api/frontend/v1/apps/marketplace/category`) key for key, so an
+         *     OpenRouter-style client reads it unchanged, and adds the other OpenRouter
+         *     app pages' fields under their OpenRouter names. Without `domain`:
+         *     `chart` and `titleMap` (the category chart, stacked by app) and
+         *     `trending` (the index page's fastest growing apps). With `domain`: `chart`
+         *     stacked by model, `totalTokens`, `rank`, `modelsUsed` and
+         *     `appModelAnalytics` (the app page). Tokens are the only metric served:
+         *     `total_requests` is always 0. An install is listed when its
+         *     `community/ranking/<domain>.json` file is merged into agent-swarm `main`, it
+         *     sent a valid `ranking.opted_in` listing with that file's claim first, it has
+         *     not opted out since, it is not an internal, test, E2B or non-production
+         *     install, and its bound `ranking.usage` has tokens in the period. Recomputed
+         *     hourly. Called server to server by the landing, so the response sends no
+         *     CORS headers. Rate limited per IP: a burst of 10, then 10 per minute.
+         */
+        get: operations["getRanking"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ranking/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check a proposed ranking entry for the agent-swarm PR check
+         * @description Reads the telemetry store live (no cache) and reports whether an install
+         *     sent a valid `ranking.opted_in` listing with this claim and domain first,
+         *     has not opted out since, is not excluded, sent telemetry in the last 7
+         *     days, and still declares this domain as its website. `listing` shows the
+         *     reviewer what the ranking would display; it never includes the claim.
+         *     Sends no CORS headers. Rate limited per IP: a burst of 10, then 10 per
+         *     minute.
+         */
+        get: operations["verifyRankingEntry"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -225,6 +360,26 @@ export interface components {
              */
             submitted_at: string;
         };
+        UsedByConsent: {
+            /** @description Agent-swarm installation identifier. Omit it when the install has none (telemetry off). */
+            install_id?: string | null;
+            org_name: string;
+            /** @description Lowercase hostname the admin declared, without scheme, `www.`, path or port. */
+            org_website: string;
+            /** @description The admin's email domain. The Slack post says whether it matches `org_website`. */
+            org_domain?: string | null;
+            /** @description true grants consent, false revokes it. */
+            granted: boolean;
+            /**
+             * Format: date-time
+             * @description When the admin changed the setting (RFC3339).
+             */
+            changed_at: string;
+        };
+        UsedByAcceptedResponse: {
+            /** @constant */
+            status: "accepted";
+        };
         FeedbackAcceptedResponse: {
             /** @constant */
             status: "accepted";
@@ -241,6 +396,144 @@ export interface components {
             code: "invalid_json" | "unknown_field" | "unknown_event" | "unknown_property" | "invalid_property" | "missing_property" | "invalid_envelope" | "v1_sunset" | "invalid_product" | "invalid_event" | "invalid_source" | "invalid_occurred_at" | "invalid_properties" | "invalid_metadata" | "invalid_tier" | "invalid_actor_org_id" | "invalid_actor_mode" | "invalid_actor_anonymous_id" | "invalid_actor_identity" | "invalid_actor_id" | "invalid_actor_email";
             /** @description Human-readable detail, such as the offending property name. */
             message: string;
+        };
+        FleetBenchmarks: {
+            /** @enum {string} */
+            window: "30d";
+            /** Format: date-time */
+            generatedAt: string;
+            /** @description k-anonymity floor. Buckets and metrics below it are omitted. */
+            minInstallsPerBucket: number;
+            /** @description An install needs this many completed or failed tasks in the window to count. */
+            minFinishedTasks: number;
+            overall: components["schemas"]["FleetBenchmarkBlock"];
+            /** @description Keyed by `1`, `2-5` or `6+`. A bucket with fewer than `minInstallsPerBucket` installs is absent. */
+            byAgentCount: {
+                [key: string]: components["schemas"]["FleetBenchmarkBlock"];
+            };
+        };
+        FleetBenchmarkBlock: {
+            installs: number;
+            tasksPerWeek: components["schemas"]["FleetMetric"];
+            taskSuccessRate: components["schemas"]["FleetMetric"];
+        };
+        /** @description Linear-interpolated percentiles. Below the floor, only `n` and `omitted` are present. */
+        FleetMetric: {
+            /** @description Installs contributing to this metric. */
+            n: number;
+            p25?: number;
+            p50?: number;
+            p75?: number;
+            p90?: number;
+            omitted?: string;
+        };
+        RankingResponse: {
+            data: {
+                apps: components["schemas"]["RankingRow"][];
+                /** @description The `group` query value, or `agent-swarm` for every category. */
+                group: string;
+                /** @description The `subcategory` query value, or null. */
+                subcategory: string | null;
+                /** @description Subcategories in the group with 3 or more listed entries in the period, most entries first. */
+                subcategories: string[];
+                /** @description Subcategories in the group with 1 or 2 listed entries in the period. */
+                lowCountSubcategories: string[];
+                chart?: components["schemas"]["RankingChart"];
+                /** @description Without `domain`. The title of every `app_id` key in `chart`, like OpenRouter's category-chart `titleMap`. */
+                titleMap?: {
+                    [key: string]: string;
+                };
+                /** @description Without `domain`. Listed apps (within `group` and `subcategory`) whose period tokens grew against the previous period of the same length, most tokens gained first. An app with no tokens in the previous period has no baseline and is left out. */
+                trending?: components["schemas"]["RankingTrending"][];
+                /** @description With `domain`. Every counted day's tokens (held days excluded). */
+                totalTokens?: number;
+                /** @description With `domain`. The daily global rank (`period=day`), or null with no tokens today. */
+                rank?: number | null;
+                /** @description With `domain`. Models with tokens in the last 30 days, `unknown` included; may exceed the length of `appModelAnalytics`. */
+                modelsUsed?: number;
+                /** @description With `domain`. Tokens per model over the last 30 days, most first. */
+                appModelAnalytics?: components["schemas"]["RankingModelAnalytics"][];
+            };
+        };
+        RankingTrending: {
+            appAnalytics: components["schemas"]["RankingRow"];
+            /** @description Period tokens against the previous period of the same length, as a rounded percent increase. */
+            growthPercent: number;
+        };
+        RankingModelAnalytics: {
+            /**
+             * Format: date
+             * @description Today (UTC), the end of the 30-day window.
+             */
+            date: string;
+            /** @description The `ranking.usage` model, or `unknown`. */
+            model_permaslug: string;
+            /** @description Not an OpenRouter field. The provider that carried most of the model's tokens, or `unknown`. */
+            provider: string;
+            total_tokens: number;
+        };
+        RankingRow: {
+            /** @description Stable entry ID derived from the domain. Never an install or org ID. */
+            app_id: number;
+            /** @description Sum of `ranking.usage.totalTokens` in the period, as a decimal string like OpenRouter's. */
+            total_tokens: string;
+            /**
+             * @description Always 0. Tokens are the only public metric; the key stays for OpenRouter schema parity.
+             * @constant
+             */
+            total_requests: 0;
+            /** @description Position by tokens among every listed entry in the period, without gaps. A filtered list keeps the global rank. */
+            rank: number;
+            app: components["schemas"]["RankingApp"];
+        };
+        RankingApp: {
+            id: number;
+            /**
+             * Format: date-time
+             * @description When the entry was first served.
+             */
+            created_at: string;
+            description: string | null;
+            /** @description The listing name (the install's SWARM_ORG_NAME). */
+            title: string;
+            main_url: string | null;
+            origin_url: string | null;
+            /** @description The entry's domain. */
+            slug: string | null;
+            source_code_url: string | null;
+            icon_class_name: string;
+            /** @description This service's `GET /v1/logo` for the domain. */
+            favicon_url: string;
+            /** @description The listing subcategory, or empty. */
+            categories: string[];
+            related_apps: number[];
+        };
+        /** @description OpenRouter's `{x, ys}` chart, oldest point first. `daily` is today and the 30 days before, with `x` as `YYYY-MM-DD 00:00:00`. `weekly` is Monday-based with `x` as `YYYY-MM-DD`: 52 weeks without `domain`, and from the entry's first week (first served or first counted day) with `domain`, at most 52. With `domain`, `ys` keys are models (the top 10 of the point); without it, `app_id`s as strings (the top 9). The rest sum into `Others`. A series with no tokens is left out, so `ys` can be empty. An unknown or hidden `domain` gets empty `daily` and `weekly`. */
+        RankingChart: {
+            daily: components["schemas"]["RankingChartPoint"][];
+            weekly: components["schemas"]["RankingChartPoint"][];
+        };
+        RankingChartPoint: {
+            x: string;
+            ys: {
+                [key: string]: number;
+            };
+        };
+        RankingVerification: {
+            verified: boolean;
+            reasons: ("no_listing" | "opted_out" | "excluded_install" | "telemetry_inactive_7d" | "website_mismatch")[];
+            telemetryActive7d: boolean;
+            /** @description The install's newest event declares this domain as its org_website. */
+            websiteMatchesDomain: boolean;
+            listing: components["schemas"]["RankingPublicListing"] | null;
+        };
+        RankingPublicListing: {
+            name: string;
+            domain: string;
+            category: string;
+            subcategory: string | null;
+            description: string | null;
+            sourceCodeUrl: string | null;
         };
         ProblemResponse: {
             code: string;
@@ -1074,6 +1367,107 @@ export interface components {
             /** @constant */
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmPopupSubmittedProperties"];
+        };
+        AgentSwarmRankingOptedInProperties: {
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description The stringified telemetry_ranking listing (contracts/telemetry/ranking/listing.v1.schema.json). The ingest also requires its name and domain to equal context.org_name and context.org_website. */
+            listing: string;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description An admin opted the install into the public ranking, or the API rebuilt its listing after an org identity change. (emitter: api-server, since 2026-10-18) */
+        AgentSwarmRankingOptedInEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "ranking.opted_in";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmRankingOptedInProperties"];
+        };
+        AgentSwarmRankingOptedOutProperties: {
+            /** @description The listing domain that leaves the ranking: a lowercase hostname. */
+            domain: string;
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description The install left the public ranking: the admin turned it off, or the org name or website was cleared or changed. (emitter: api-server, since 2026-10-18) */
+        AgentSwarmRankingOptedOutEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "ranking.opted_out";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmRankingOptedOutProperties"];
+        };
+        AgentSwarmRankingUsageProperties: {
+            cacheReadTokens?: number;
+            cacheWriteTokens?: number;
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            inputTokens: number;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description The session's model, the same value as session.cost.model. Usage without it, or with a value the ranking does not accept, is shown as the model unknown. */
+            model?: string;
+            outputTokens: number;
+            /** @description The session's provider, the same value as session.cost.provider. Missing means unknown. */
+            provider?: string;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+            /** @description inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens. The ranking sums this. */
+            totalTokens: number;
+        };
+        /** @description Token usage of one session on an install opted into the public ranking. Sent next to session.cost. (emitter: worker, since 2026-10-18) */
+        AgentSwarmRankingUsageEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "ranking.usage";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmRankingUsageProperties"];
         };
         AgentSwarmScheduleErrorProperties: {
             consecutiveErrors: number;
@@ -2034,7 +2428,7 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmWorkflowStartedProperties"];
         };
-        AgentSwarmCatalogEvent: components["schemas"]["AgentSwarmAgentRegisteredEvent"] | components["schemas"]["AgentSwarmCompactionTriggeredEvent"] | components["schemas"]["AgentSwarmFeatureUsedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkViewedEvent"] | components["schemas"]["AgentSwarmIntegrationConnectedEvent"] | components["schemas"]["AgentSwarmLeadCapturedEvent"] | components["schemas"]["AgentSwarmNotificationDismissedEvent"] | components["schemas"]["AgentSwarmNotificationSubmittedEvent"] | components["schemas"]["AgentSwarmNotificationViewedEvent"] | components["schemas"]["AgentSwarmOnboardingCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingDismissedEvent"] | components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStartedEvent"] | components["schemas"]["AgentSwarmOnboardingStepCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStepFailedEvent"] | components["schemas"]["AgentSwarmOnboardingStepSkippedEvent"] | components["schemas"]["AgentSwarmOnboardingStepViewedEvent"] | components["schemas"]["AgentSwarmOrgProfileUpdatedEvent"] | components["schemas"]["AgentSwarmOrgSnapshotEvent"] | components["schemas"]["AgentSwarmPageViewedEvent"] | components["schemas"]["AgentSwarmPopupDismissedEvent"] | components["schemas"]["AgentSwarmPopupShownEvent"] | components["schemas"]["AgentSwarmPopupSubmittedEvent"] | components["schemas"]["AgentSwarmScheduleErrorEvent"] | components["schemas"]["AgentSwarmScheduleExecutedEvent"] | components["schemas"]["AgentSwarmServerShutdownEvent"] | components["schemas"]["AgentSwarmServerStartedEvent"] | components["schemas"]["AgentSwarmSessionCancelledEvent"] | components["schemas"]["AgentSwarmSessionCostEvent"] | components["schemas"]["AgentSwarmSessionEndedEvent"] | components["schemas"]["AgentSwarmSessionFailureEvent"] | components["schemas"]["AgentSwarmSessionStartedEvent"] | components["schemas"]["AgentSwarmSessionSteeredEvent"] | components["schemas"]["AgentSwarmSkillInvokedEvent"] | components["schemas"]["AgentSwarmTaskCancelledEvent"] | components["schemas"]["AgentSwarmTaskClaimedEvent"] | components["schemas"]["AgentSwarmTaskCompletedEvent"] | components["schemas"]["AgentSwarmTaskCreatedEvent"] | components["schemas"]["AgentSwarmTaskFailedEvent"] | components["schemas"]["AgentSwarmTaskSessionCompletedEvent"] | components["schemas"]["AgentSwarmTaskStartedEvent"] | components["schemas"]["AgentSwarmTaskSupersededEvent"] | components["schemas"]["AgentSwarmTelemetryEnabledEvent"] | components["schemas"]["AgentSwarmUiSessionStartedEvent"] | components["schemas"]["AgentSwarmUsedByConsentChangedEvent"] | components["schemas"]["AgentSwarmWorkflowCompletedEvent"] | components["schemas"]["AgentSwarmWorkflowCreatedEvent"] | components["schemas"]["AgentSwarmWorkflowDeletedEvent"] | components["schemas"]["AgentSwarmWorkflowFailedEvent"] | components["schemas"]["AgentSwarmWorkflowStartedEvent"];
+        AgentSwarmCatalogEvent: components["schemas"]["AgentSwarmAgentRegisteredEvent"] | components["schemas"]["AgentSwarmCompactionTriggeredEvent"] | components["schemas"]["AgentSwarmFeatureUsedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkViewedEvent"] | components["schemas"]["AgentSwarmIntegrationConnectedEvent"] | components["schemas"]["AgentSwarmLeadCapturedEvent"] | components["schemas"]["AgentSwarmNotificationDismissedEvent"] | components["schemas"]["AgentSwarmNotificationSubmittedEvent"] | components["schemas"]["AgentSwarmNotificationViewedEvent"] | components["schemas"]["AgentSwarmOnboardingCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingDismissedEvent"] | components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStartedEvent"] | components["schemas"]["AgentSwarmOnboardingStepCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStepFailedEvent"] | components["schemas"]["AgentSwarmOnboardingStepSkippedEvent"] | components["schemas"]["AgentSwarmOnboardingStepViewedEvent"] | components["schemas"]["AgentSwarmOrgProfileUpdatedEvent"] | components["schemas"]["AgentSwarmOrgSnapshotEvent"] | components["schemas"]["AgentSwarmPageViewedEvent"] | components["schemas"]["AgentSwarmPopupDismissedEvent"] | components["schemas"]["AgentSwarmPopupShownEvent"] | components["schemas"]["AgentSwarmPopupSubmittedEvent"] | components["schemas"]["AgentSwarmRankingOptedInEvent"] | components["schemas"]["AgentSwarmRankingOptedOutEvent"] | components["schemas"]["AgentSwarmRankingUsageEvent"] | components["schemas"]["AgentSwarmScheduleErrorEvent"] | components["schemas"]["AgentSwarmScheduleExecutedEvent"] | components["schemas"]["AgentSwarmServerShutdownEvent"] | components["schemas"]["AgentSwarmServerStartedEvent"] | components["schemas"]["AgentSwarmSessionCancelledEvent"] | components["schemas"]["AgentSwarmSessionCostEvent"] | components["schemas"]["AgentSwarmSessionEndedEvent"] | components["schemas"]["AgentSwarmSessionFailureEvent"] | components["schemas"]["AgentSwarmSessionStartedEvent"] | components["schemas"]["AgentSwarmSessionSteeredEvent"] | components["schemas"]["AgentSwarmSkillInvokedEvent"] | components["schemas"]["AgentSwarmTaskCancelledEvent"] | components["schemas"]["AgentSwarmTaskClaimedEvent"] | components["schemas"]["AgentSwarmTaskCompletedEvent"] | components["schemas"]["AgentSwarmTaskCreatedEvent"] | components["schemas"]["AgentSwarmTaskFailedEvent"] | components["schemas"]["AgentSwarmTaskSessionCompletedEvent"] | components["schemas"]["AgentSwarmTaskStartedEvent"] | components["schemas"]["AgentSwarmTaskSupersededEvent"] | components["schemas"]["AgentSwarmTelemetryEnabledEvent"] | components["schemas"]["AgentSwarmUiSessionStartedEvent"] | components["schemas"]["AgentSwarmUsedByConsentChangedEvent"] | components["schemas"]["AgentSwarmWorkflowCompletedEvent"] | components["schemas"]["AgentSwarmWorkflowCreatedEvent"] | components["schemas"]["AgentSwarmWorkflowDeletedEvent"] | components["schemas"]["AgentSwarmWorkflowFailedEvent"] | components["schemas"]["AgentSwarmWorkflowStartedEvent"];
         /** @description Every catalogued (product, event) pair with its property schema. Generated from contracts/telemetry/catalog/events.json. */
         CatalogEvent: components["schemas"]["AgentFsCatalogEvent"] | components["schemas"]["AgentSwarmCatalogEvent"];
     };
@@ -2210,6 +2604,319 @@ export interface operations {
         requestBody?: never;
         responses: {
             204: components["responses"]["CORSPreflightResponse"];
+        };
+    };
+    submitUsedByConsent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsedByConsent"];
+            };
+        };
+        responses: {
+            /** @description Consent change persisted; the Slack post is best-effort. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsedByAcceptedResponse"];
+                };
+            };
+            /** @description Request body is invalid JSON or failed field validation. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Request body exceeds 4 KB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The source IP exceeded 5 requests per minute. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The consent change could not be persisted. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Used-by storage is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    getOrgLogo: {
+        parameters: {
+            query: {
+                /** @description Lowercase website hostname, without scheme, `www.`, path or port. IP literals are refused. */
+                domain: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo image. */
+            200: {
+                headers: {
+                    /** @description `public, max-age=86400`. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            /** @description `domain` is missing or not a hostname (code `invalid_domain`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description logo.dev has no image for this domain (code `logo_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The source IP exceeded the logo rate limit. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description logo.dev failed or returned something other than a raster image under 256 KB (code `logo_upstream_failed`). Not cached. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description `LOGO_DEV_TOKEN` is not set (code `logo_unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    getFleetBenchmarks: {
+        parameters: {
+            query?: {
+                /** @description Only `30d` is supported. */
+                window?: "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The latest computed benchmark. */
+            200: {
+                headers: {
+                    /** @description `public, max-age=3600`. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetBenchmarks"];
+                };
+            };
+            /** @description `window` is not `30d` (code `invalid_window`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The source IP exceeded the benchmark rate limit. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description No benchmark has been computed yet, for example right after boot (code `benchmarks_unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    getRanking: {
+        parameters: {
+            query?: {
+                /** @description The last 1, 7 or 30 UTC days, today included. */
+                period?: "day" | "week" | "month";
+                /** @description A category from `contracts/telemetry/ranking/taxonomy.json`. `agent-swarm` or absent means every category. */
+                group?: string;
+                /** @description A subcategory from the taxonomy, inside `group` when one is given. */
+                subcategory?: string;
+                /** @description Return only this entry and its app page fields. An unknown or hidden domain returns an empty `apps` list, an empty chart, zero totals and a null `rank`. */
+                domain?: string;
+                /** @description Accepted for parity with OpenRouter's collector. Only `tokens` is supported. */
+                sortBy?: "tokens";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranking for the period and filters. */
+            200: {
+                headers: {
+                    /** @description `public, max-age=3600`. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RankingResponse"];
+                };
+            };
+            /** @description A query value is not allowed (codes `invalid_period`, `invalid_group`, `invalid_subcategory`, `invalid_domain`, `invalid_sort`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The source IP exceeded the ranking rate limit. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The ranking has not been computed yet, for example right after boot (code `ranking_unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    verifyRankingEntry: {
+        parameters: {
+            query: {
+                domain: string;
+                claim: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The verification result. A failed check is still a 200 with `verified` false. */
+            200: {
+                headers: {
+                    /** @description `no-store`. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RankingVerification"];
+                };
+            };
+            /** @description `domain` or `claim` is malformed (codes `invalid_domain`, `invalid_claim`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The source IP exceeded the verify rate limit. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The telemetry store could not be read (code `ranking_unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
         };
     };
 }

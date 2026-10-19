@@ -1577,7 +1577,8 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       {
         key: "SWARM_ORG_NAME",
         label: "Organization name",
-        description: "Name shown in the dashboard header, the status page, and outbound messages.",
+        description:
+          "Name shown in the dashboard header, the status page, and outbound messages. Required for the public ranking, which shows it as your listing's name.",
         kind: "string",
         defaultValue: "Swarm",
         placeholder: "Swarm",
@@ -1587,7 +1588,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SWARM_ORG_WEBSITE",
         label: "Company website",
         description:
-          "Your company's website, stored as a bare hostname such as example.com. When the logo below is empty, the dashboard uses this site's logo. Sent with telemetry as org_website when telemetry is on.",
+          "Your company's website, stored as a bare hostname such as example.com. When the logo below is empty, the dashboard uses this site's logo. Sent with telemetry as org_website when telemetry is on. Required for the public ranking; changing it leaves the ranking until a new ranking PR merges.",
         kind: "string",
         placeholder: "example.com",
         docsUrl: `${DOCS}reference/telemetry`,
