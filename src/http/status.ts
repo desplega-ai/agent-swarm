@@ -237,7 +237,8 @@ export const TestConnectionResponseSchema = z.object({
 /**
  * Read all worker reports for a given harness provider and reduce them to a
  * single milestone-grade rollup. Reports are joined from `agents.cred_status`
- * (migration 055) — no provider-adapter code runs here.
+ * (migration 055) — no provider-adapter code runs here. Offline agents are
+ * excluded: `workers` and `reports` count online agents only.
  *
  * `verified` ⇐ the provider's most recent live test passed, whatever its age.
  * `configured` ⇐ at least one worker has `ready: true` (presence check
@@ -267,7 +268,11 @@ export function _resetTestConnectionCache(): void {
 }
 
 export async function rollupCredStatusForProvider(provider: string): Promise<CredRollup> {
-  const agents = await listAgentsWithCredStatusByProvider(provider);
+  // An offline agent keeps its last cred_status after `/close`, so only online
+  // agents decide the rollup; a stale failure must not override a live pass.
+  const agents = (await listAgentsWithCredStatusByProvider(provider)).filter(
+    (a) => a.status !== "offline",
+  );
   const reports = agents.map((a) => a.credStatus).filter((s): s is AgentCredStatus => s != null);
 
   if (reports.length === 0) {
@@ -381,13 +386,25 @@ async function harnessMilestone(): Promise<SetupMilestone> {
   }
 
   const perProvider: { provider: z.infer<typeof ProviderNameSchema>; roll: CredRollup }[] = [];
+  let recognised = 0;
   for (const { provider } of fleet) {
     const parsed = ProviderNameSchema.safeParse(provider);
     if (!parsed.success) continue;
-    perProvider.push({
-      provider: parsed.data,
-      roll: await rollupCredStatusForProvider(parsed.data),
-    });
+    recognised++;
+    const roll = await rollupCredStatusForProvider(parsed.data);
+    // A provider whose agents are all offline has nothing live to judge.
+    if (roll.workers === 0) continue;
+    perProvider.push({ provider: parsed.data, roll });
+  }
+
+  if (recognised > 0 && perProvider.length === 0) {
+    return {
+      id: "harness",
+      label: "Harness configured",
+      state: "unverified",
+      hint: "No agents online. Start a worker to run a live credential test.",
+      action_url: "/agents",
+    };
   }
 
   if (perProvider.length === 0) {
@@ -837,7 +854,7 @@ export async function handleStatus(
     if (roll.workers === 0) {
       json(res, {
         ok: false,
-        error: `No workers registered with HARNESS_PROVIDER=${provider}. Start a worker — its boot loop will run a live test and report it here.`,
+        error: `No online workers with HARNESS_PROVIDER=${provider}. Start a worker — its boot loop will run a live test and report it here.`,
         latency_ms: 0,
       });
       return true;

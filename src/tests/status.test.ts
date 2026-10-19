@@ -1145,6 +1145,73 @@ describe("computeHealth (Phase 2)", () => {
     expect(payload.health).toBe("degraded");
   });
 
+  test("an offline agent's newer failed live test does not override an online pass", async () => {
+    const online = await createAgent({
+      name: "worker-online",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const offline = await createAgent({
+      name: "worker-offline",
+      isLead: false,
+      status: "offline",
+      capabilities: [],
+    });
+    await updateAgentActivity(online.id);
+    await seedCredStatus(online.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: true, error: null, latency_ms: 12, testedAt: Date.now() - 6 * 3_600_000 },
+    });
+    await seedCredStatus(offline.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: false, error: "HTTP 401", latency_ms: 12, testedAt: Date.now() },
+    });
+
+    expect(await rollupCredStatusForProvider("claude")).toMatchObject({
+      state: "verified",
+      workers: 1,
+      reports: 1,
+    });
+    const harness = getMilestone(await buildStatusPayload(), "harness");
+    expect(harness.state).toBe("verified");
+    expect(harness.hint).toBeUndefined();
+  });
+
+  test("a provider reported only by offline agents does not degrade the harness", async () => {
+    const online = await createAgent({
+      name: "claude-online",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const offline = await createAgent({
+      name: "codex-offline",
+      isLead: false,
+      status: "offline",
+      capabilities: [],
+    });
+    await updateAgentActivity(online.id);
+    await seedCredStatus(online.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: true, error: null, latency_ms: 12, testedAt: Date.now() },
+    });
+    await seedCredStatus(offline.id, "codex", {
+      ready: false,
+      missing: ["OPENAI_API_KEY"],
+      satisfiedBy: null,
+      liveTest: { ok: false, error: "HTTP 401", latency_ms: 12, testedAt: Date.now() },
+    });
+
+    const harness = getMilestone(await buildStatusPayload(), "harness");
+    expect(harness.state).toBe("verified");
+    expect(harness.hint).toBeUndefined();
+    expect((harness.providers ?? []).map((p) => p.provider)).toEqual(["claude"]);
+  });
+
   test("`ok` when workers are `configured` (heartbeat drift is a runtime concern, not setup health)", async () => {
     // Workers in `configured` state means agents exist but haven't posted a
     // heartbeat in the last 5 minutes. This is surfaced on /agents and the

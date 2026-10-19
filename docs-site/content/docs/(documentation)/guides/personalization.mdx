@@ -113,7 +113,7 @@ The `harness` milestone also carries a typed `provider?: ProviderName` field so 
 
 OAuth tokens get a **presence check** rather than a real upstream call. The OAuth-bearer-with-`/v1/models` contract isn't a stable public surface, and OAuth flows have their own refresh logic (handled at adapter boot, not here) — a "real" check that fails on a stale-but-refreshable token would be a worse UX than an optimistic presence check. The runtime adapter remains the source of truth for whether a token actually works.
 
-5-second timeout via `AbortController`. Errors run through `scrubSecrets` before return. Workers run the check at boot and again when their credentials change, and store the result on their agent row. `/status` reports `harness.state === "verified"` while every provider's latest live test passed. An old pass stays verified; only a failed or missing test degrades health.
+5-second timeout via `AbortController`. Errors run through `scrubSecrets` before return. Workers run the check at boot and again when their credentials change, and store the result on their agent row. `/status` reports `harness.state === "verified"` while every provider's latest live test passed. An old pass stays verified; only a failed or missing test degrades health. Offline agents are ignored, so a stopped worker's last report never decides the state.
 
 ```bash
 curl -s http://localhost:3013/status -H "Authorization: Bearer $API_KEY"
