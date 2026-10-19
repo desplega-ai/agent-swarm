@@ -61,6 +61,8 @@ export type GhPrInvocation = {
   unresolvedBodyFiles: string[];
   /** The body text could not be isolated (piped stdin, unquoted `$(...)`); scan the whole command. */
   opaqueBody: boolean;
+  /** gh may build or change the body from a source the parser cannot read: `--fill*`, `--template`, `--editor`, `--web`, `--recover`. */
+  externalBody: boolean;
 };
 
 export type PrBodyGuardDeps = {
@@ -287,6 +289,9 @@ const SHORT_FLAGS: Record<string, string> = {
   p: "project",
   r: "reviewer",
   T: "template",
+  e: "editor",
+  f: "fill",
+  w: "web",
 };
 
 type ParsedArgs = {
@@ -847,6 +852,9 @@ function parseWithState(
         inline.some((value) => value.endsWith("$")) ||
         (action === "edit" && target?.endsWith("$") === true) ||
         (fromStdin && stdin.length === 0 && args.stdinFile === undefined),
+      externalBody:
+        values("fill", "fill-first", "fill-verbose", "template", "editor", "web", "recover")
+          .length > 0,
     });
   };
 

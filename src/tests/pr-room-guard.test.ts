@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { codexPreToolUseBlock } from "../hooks/codex-hook";
-import { guardGhPrRoom, type PrRoomGuardDeps } from "../hooks/pr-room-guard";
+import { gitRemoteOrigin, guardGhPrRoom, type PrRoomGuardDeps } from "../hooks/pr-room-guard";
+import { expectChildOk, runChild } from "./test-proc";
 
 const ROOM_LINE = "PR room: prr-abcde23457";
 const BLOCK_REASON =
@@ -72,6 +76,13 @@ describe("guardGhPrRoom", () => {
     expect(await check(command)).toBe(BLOCK_REASON);
   });
 
+  test("allows an ambiguous target unless every candidate is configured", async () => {
+    const otherCheckout = fakeDeps({ remoteOrigin: async () => "https://github.com/other/repo" });
+    expect(await check("GH_REPO=owner/repo && gh pr create -b plain", otherCheckout)).toBeNull();
+    expect(await check("GH_REPO=owner/repo && gh pr create -b plain")).toBe(BLOCK_REASON);
+    expect(await check("gh pr create -R owner/repo -R other/repo -b plain")).toBeNull();
+  });
+
   test("checks inherited GH_REPO and honors an explicit override", async () => {
     const deps = fakeDeps({ env: { PR_ROOM_REPOS: "owner/repo", GH_REPO: "owner/repo" } });
     expect(await check("gh pr create -b plain", deps)).toBe(BLOCK_REASON);
@@ -122,6 +133,24 @@ describe("guardGhPrRoom", () => {
     ).toBeNull();
   });
 
+  // git exports GIT_DIR to a pre-push hook in a linked worktree. The lookup then reads that repo.
+  test.skipIf(process.env.GIT_DIR !== undefined)(
+    "allows a checkout remote lookup that does not finish",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "pr-room-fifo-"));
+      try {
+        expectChildOk(await runChild(["git", "init", "-q", dir]), "git init");
+        await rm(join(dir, ".git", "config"));
+        expectChildOk(await runChild(["mkfifo", join(dir, ".git", "config")]), "mkfifo");
+        await expect(gitRemoteOrigin(dir, 200)).rejects.toThrow();
+        const deps = fakeDeps({ remoteOrigin: (cwd) => gitRemoteOrigin(cwd, 200) });
+        expect(await guardGhPrRoom({ command: "gh pr create -b plain" }, dir, deps)).toBeNull();
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   test.each([
     'gh pr create -R "$UNKNOWN" -b plain',
     'gh pr create -R owner/repo -b "$UNKNOWN"',
@@ -147,11 +176,23 @@ describe("guardGhPrRoom", () => {
     expect(await check(`BODY='${ROOM_LINE}' && gh pr create -R owner/repo -b "$BODY"`)).toBeNull();
   });
 
-  test("scans the whole command for an opaque body", async () => {
-    expect(
-      await check(`printf 'Summary\n${ROOM_LINE}\n' | gh pr create -R owner/repo -F -`),
-    ).toBeNull();
-    expect(await check("printf plain | gh pr create -R owner/repo -F -")).toBe(BLOCK_REASON);
+  test.each([
+    "cat room.md | gh pr create -R owner/repo -F -",
+    "printf plain | gh pr create -R owner/repo -F -",
+    "gh pr create -R owner/repo -b $(cat room.md)",
+    "gh pr create -R owner/repo --fill",
+    "gh pr create -R owner/repo -f",
+    "gh pr create -R owner/repo --fill-first",
+    "gh pr create -R owner/repo --fill-verbose",
+    "gh pr create -R owner/repo -T template.md -b plain",
+    "gh pr create -R owner/repo --template=template.md",
+    "gh pr create -R owner/repo -dw -b plain",
+    "gh pr create -R owner/repo --web",
+    "gh pr create -R owner/repo -e",
+    "gh pr create -R owner/repo --editor",
+    "gh pr create -R owner/repo --recover input.json",
+  ])("allows a body the guard cannot read: %s", async (command) => {
+    expect(await check(command)).toBeNull();
   });
 
   test.each([

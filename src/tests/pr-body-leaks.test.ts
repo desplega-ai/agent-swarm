@@ -350,6 +350,7 @@ describe("parseGhPrCommands", () => {
         bodyFiles: ["body.md"],
         unresolvedBodyFiles: [],
         opaqueBody: false,
+        externalBody: false,
       },
     ]);
   });
