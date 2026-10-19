@@ -73,6 +73,7 @@ import {
   SteeringSourceSchema,
   SteerModeSchema,
   SteerResultSchema,
+  SUPERSEDED_WORKFLOW_TASK_REASON,
   splitLegacyModelAlias,
   TaskAttachmentSchema,
 } from "../types";
@@ -2014,7 +2015,7 @@ export async function handleTasks(
     // Check this BEFORE the supersede UPDATE so we don't leave a workflow
     // step in `superseded` if the engine expects `failed`.
     if (task.workflowRunStepId != null) {
-      const failed = await failTask(parsed.params.id, "superseded_workflow_task");
+      const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
       ensure({
         id: "task.workflow_step_failed_on_supersede",
         flow: "task",

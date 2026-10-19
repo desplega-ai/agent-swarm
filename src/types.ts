@@ -2210,6 +2210,13 @@ export const RetryPolicySchema = z
   .openapi("RetryPolicy");
 export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
 
+/**
+ * `failureReason` of a workflow-step task cut by a supersede (deploy drain,
+ * heartbeat remediation). The workflow engine re-dispatches it once even
+ * when the node declares no `retry` (see `scheduleTaskStepRetry`).
+ */
+export const SUPERSEDED_WORKFLOW_TASK_REASON = "superseded_workflow_task";
+
 // --- Executor Metadata ---
 
 export const ExecutorMetaSchema = z

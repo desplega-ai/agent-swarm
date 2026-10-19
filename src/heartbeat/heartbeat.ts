@@ -76,7 +76,7 @@ import {
   REBOOT_RETRY_PIN_TAG,
   resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
-import { type AgentTask, TERMINAL_TASK_STATUSES } from "../types";
+import { type AgentTask, SUPERSEDED_WORKFLOW_TASK_REASON, TERMINAL_TASK_STATUSES } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
@@ -679,7 +679,7 @@ function isRemediationAction(value: unknown): value is RemediationAction {
 
 function decideRemediation(task: AgentTask, facts: RemediationFacts): RemediationDecision {
   if (task.workflowRunStepId != null) {
-    return { action: "fail", reason: "superseded_workflow_task" };
+    return { action: "fail", reason: SUPERSEDED_WORKFLOW_TASK_REASON };
   }
   if (facts.skipAutoResume || facts.alreadyResumed) {
     return { action: "fail", reason: facts.legacyFailReason };
