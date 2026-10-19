@@ -712,6 +712,21 @@ describe("initTelemetry", () => {
       else process.env.NODE_ENV = originalNodeEnv;
     });
 
+    test("track detects the real checkout through the default package root with an unprimed cache", async () => {
+      await initTelemetry(
+        "api-server",
+        async (key) => (key === "telemetry_installation_id" ? "install_checkout_env" : undefined),
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "test.event", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.environment).toBe("development");
+    });
+
     test("a .git directory marks a checkout as development", () => {
       mkdirSync(new URL(".git", packageRoot));
       expect(getTelemetryEnvironment(packageRoot)).toBe("development");
