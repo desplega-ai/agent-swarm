@@ -481,6 +481,7 @@ const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string]
   ["OPENAI_API_KEY", "openai"],
   ["GEMINI_API_KEY", "google"],
   ["GOOGLE_API_KEY", "google"],
+  ["OPENCODE_API_KEY", "opencode-go"],
   // models.json custom providers (the registry). A runtime key beats the
   // file's `apiKey: "$NAN_API_KEY"`, which pi would otherwise read from the
   // shared process.env, where a credential pool is still the raw comma list.

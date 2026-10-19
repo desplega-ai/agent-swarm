@@ -546,6 +546,16 @@ describe("createPiRuntimeAuth", () => {
     });
   });
 
+  test("passes OPENCODE_API_KEY to pi opencode-go runtime auth", async () => {
+    const modelRuntime = await createPiRuntimeAuth({
+      OPENCODE_API_KEY: "example-opencode-runtime",
+    });
+
+    await expect(modelRuntime.getAuth("opencode-go")).resolves.toMatchObject({
+      auth: { apiKey: "example-opencode-runtime" },
+    });
+  });
+
   test("passes GEMINI_API_KEY to pi google runtime auth", async () => {
     const modelRuntime = await createPiRuntimeAuth({
       GEMINI_API_KEY: "example-gemini-runtime",

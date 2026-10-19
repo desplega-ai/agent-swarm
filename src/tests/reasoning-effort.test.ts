@@ -267,6 +267,15 @@ describe("applyReasoningEffort — opencode-options shape", () => {
       options: { reasoningEffort: "max" },
     });
   });
+
+  test("anthropic max uses the effort key opencode's Anthropic transport reads", () => {
+    expect(applyReasoningEffort("opencode", "anthropic/claude-opus-5-5", "max")).toEqual({
+      kind: "opencode-options",
+      providerId: "anthropic",
+      modelId: "claude-opus-5-5",
+      options: { effort: "max" },
+    });
+  });
 });
 
 // The offered levels, the API's validation and the harness application all read the same
