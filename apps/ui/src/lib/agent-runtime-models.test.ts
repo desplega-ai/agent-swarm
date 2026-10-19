@@ -73,10 +73,9 @@ describe("effortLevelsFor: what a harness and model accept", () => {
 
   test("Pi and Opencode read <provider>/<id>, the id may hold more slashes", () => {
     const openrouter = "openrouter/deepseek/deepseek-v4.1-flash";
-    // pi drops max; opencode passes the model's own effort values through.
-    expect(effortLevelsFor("pi", openrouter)).toEqual(["low", "high"]);
+    // pi and opencode pass the model's own effort values through.
+    expect(effortLevelsFor("pi", openrouter)).toEqual(["low", "high", "max"]);
     expect(effortLevelsFor("opencode", openrouter)).toEqual(["low", "high", "max"]);
-    expect(effortLevelsFor("pi", "openrouter/anthropic/claude-opus-5.5")).not.toContain("max");
     // A bare id names no provider: unknown.
     expect(effortLevelsFor("pi", "deepseek-v4-flash")).toEqual([]);
   });
@@ -501,8 +500,22 @@ describe("OpenCode Go on the opencode harness", () => {
     expect(go?.models.some((m) => m.id === "opencode-go/deepseek-v4-flash")).toBe(true);
   });
 
-  test("the closed providers (pi, claude, codex) never list opencode-go", () => {
-    for (const harness of ["pi", "claude", "codex"] as const) {
+  test("the pi picker offers the Go group, gated on OPENCODE_API_KEY", () => {
+    const locked = group(modelGroupsForHarness("pi", [], {}, null, catalog), "OpenCode Go");
+    expect(locked).toMatchObject({ requiredKey: "OPENCODE_API_KEY", enabled: false });
+    const go = group(
+      modelGroupsForHarness("pi", [], { OPENCODE_API_KEY: true }, null, catalog),
+      "OpenCode Go",
+    );
+    expect(go?.enabled).toBe(true);
+    expect(go?.models.find((m) => m.id === "opencode-go/deepseek-v4.1-flash")).toMatchObject({
+      requiredKey: "OPENCODE_API_KEY",
+      reasoningLevels: ["low", "high", "max"],
+    });
+  });
+
+  test("the closed providers (claude, codex) never list opencode-go", () => {
+    for (const harness of ["claude", "codex"] as const) {
       const groups = modelGroupsForHarness(harness, [], {}, null, catalog);
       expect(groups.flatMap((g) => g.models).some((m) => m.id.startsWith("opencode-go/"))).toBe(
         false,

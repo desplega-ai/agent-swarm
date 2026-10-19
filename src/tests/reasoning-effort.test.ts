@@ -212,6 +212,13 @@ describe("applyReasoningEffort — pi-session shape", () => {
       sessionOptions: { thinkingLevel: "medium" },
     });
   });
+
+  test("max passes through for an opencode-go model that declares it", () => {
+    expect(applyReasoningEffort("pi", "opencode-go/deepseek-v4-flash", "max")).toEqual({
+      kind: "pi-session",
+      sessionOptions: { thinkingLevel: "max" },
+    });
+  });
 });
 
 describe("applyReasoningEffort — opencode-options shape", () => {
@@ -281,16 +288,20 @@ describe("harness × model → effort matrix", () => {
     },
     { harness: "codex", model: "gpt-6-astra", levels: ["low", "medium", "high", "xhigh", "max"] },
     { harness: "codex", model: "gpt-5.1-codex", levels: ["low", "medium", "high"] },
-    { harness: "pi", model: "openrouter/deepseek/deepseek-v4.1-flash", levels: ["low", "high"] },
+    {
+      harness: "pi",
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      levels: ["low", "high", "max"],
+    },
     {
       harness: "pi",
       model: "openrouter/anthropic/claude-opus-5.5",
-      levels: ["low", "medium", "high", "xhigh"],
+      levels: ["low", "medium", "high", "xhigh", "max"],
     },
     {
       harness: "opencode",
       model: "openrouter/deepseek/deepseek-v4.1-flash",
-      // The facts declare max, and opencode passes it through (unlike pi).
+      // The facts declare max, and opencode passes it through.
       levels: ["low", "high", "max"],
     },
     { harness: "pi", model: "openrouter/qwen/qwen3-coder-flash", levels: [] },

@@ -236,6 +236,26 @@ describe("checkPiMonoCredentials", () => {
     ).toBe(false);
   });
 
+  test("strict: MODEL_OVERRIDE=opencode-go/... requires OPENCODE_API_KEY", async () => {
+    const env = { MODEL_OVERRIDE: "opencode-go/deepseek-v4.1-flash" };
+    expect(
+      (
+        await checkPiMonoCredentials(
+          { ...env, OPENCODE_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(true);
+    expect(
+      (
+        await checkPiMonoCredentials(
+          { ...env, ANTHROPIC_API_KEY: "x" },
+          { homeDir: HOME, fs: noFiles },
+        )
+      ).ready,
+    ).toBe(false);
+  });
+
   test("strict: MODEL_OVERRIDE=google/... accepts GEMINI_API_KEY", async () => {
     const env = {
       MODEL_OVERRIDE: "google/gemini-3-flash-preview",

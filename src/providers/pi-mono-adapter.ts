@@ -115,6 +115,7 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
     if (provider === "openrouter") return ["OPENROUTER_API_KEY"];
     if (provider === "openai") return ["OPENAI_API_KEY"];
     if (provider === "google") return ["GOOGLE_API_KEY", "GEMINI_API_KEY"];
+    if (provider === "opencode-go") return ["OPENCODE_API_KEY"];
     // models.json custom providers (`writeSessionModelsJson`). The
     // runner normalizes key aliases (HELMCODE_API_NAN → NAN_API_KEY), but a
     // worker without that step (or a boot-time check) may only see the alias.

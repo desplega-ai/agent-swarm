@@ -197,18 +197,15 @@ describe("opencode-go section", () => {
     expect(getContextWindowSize("opencode-go/deepseek-v4-flash")).toBe(1_000_000);
   });
 
-  test("opencode keeps the model's own max for an opencode-go id", () => {
+  test("opencode and pi keep the model's own max for an opencode-go id", () => {
     const catalog = getModelsCatalog().providers;
-    // `deepseek-v4-flash` declares low|high|max and opencode passes it through.
-    expect(reasoningLevelsForModel("opencode", "opencode-go/deepseek-v4-flash", catalog)).toEqual([
-      "low",
-      "high",
-      "max",
-    ]);
-    // pi's transport drops max even where the facts declare it.
-    expect(reasoningLevelsForModel("pi", "opencode-go/deepseek-v4-flash", catalog)).toEqual([
-      "low",
-      "high",
-    ]);
+    // `deepseek-v4-flash` declares low|high|max and both harnesses pass it through.
+    for (const harness of ["opencode", "pi"] as const) {
+      expect(reasoningLevelsForModel(harness, "opencode-go/deepseek-v4-flash", catalog)).toEqual([
+        "low",
+        "high",
+        "max",
+      ]);
+    }
   });
 });

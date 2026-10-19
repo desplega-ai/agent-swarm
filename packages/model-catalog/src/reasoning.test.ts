@@ -72,12 +72,12 @@ describe("reasoningLevelsFor", () => {
     expect(reasoningLevelsFor("pi", "x", effort("minimal"))).toEqual(["low", "medium", "high"]);
   });
 
-  test("max is kept where the transport passes it through: codex, cursor, opencode", () => {
+  test("max is kept where the transport passes it through: codex, cursor, opencode, pi", () => {
     const facts = effort("low", "high", "xhigh", "max");
-    for (const harness of ["codex", "cursor", "opencode"]) {
+    for (const harness of ["codex", "cursor", "opencode", "pi"]) {
       expect(reasoningLevelsFor(harness, "m", facts)).toEqual(["low", "high", "xhigh", "max"]);
     }
-    for (const harness of ["claude", "pi", "amp", "grok"]) {
+    for (const harness of ["claude", "amp", "grok"]) {
       expect(reasoningLevelsFor(harness, "m", facts)).toEqual(["low", "high", "xhigh"]);
     }
   });
