@@ -498,20 +498,25 @@ export interface LiveBedrockStatus {
  * Zen section (`opencode`). models.dev lists it, so its models come from the
  * catalog (live over snapshot). opencode can authenticate through the CLI's own
  * login, so the group is always selectable there; pi-ai's native `opencode-go`
- * provider reads `OPENCODE_API_KEY`, so pi gates the group on that key.
+ * provider reads `OPENCODE_API_KEY`, so pi gates the group on that key. pi-ai
+ * resolves only the ids it ships, so pi lists only the ids its worker reported
+ * (`credStatus.opencodeGo`) and stays disabled until the first report.
  */
 function opencodeGoGroup(
   harness: "opencode" | "pi",
   configs: SwarmConfig[] | undefined,
   envPresence: Record<string, boolean> | undefined,
   liveCatalog?: LiveModelsCatalog | null,
+  resolvableIds?: readonly string[] | null,
 ): ModelGroup {
   const label =
     sectionOf(liveCatalog, "opencode-go")?.name ??
     sectionOf(CACHE, "opencode-go")?.name ??
     "OpenCode Go";
   const requiredKey = harness === "pi" ? "OPENCODE_API_KEY" : "";
+  const resolvable = harness === "pi" && resolvableIds ? new Set(resolvableIds) : null;
   const models: ModelOption[] = Object.values(runtimeSectionModels("opencode-go", liveCatalog))
+    .filter((m) => !resolvable || resolvable.has(m.id))
     .map((m) => ({
       id: `opencode-go/${m.id}`,
       label: modelDisplayName(m.name) ?? m.id,
@@ -522,6 +527,15 @@ function opencodeGoGroup(
       reasoningLevels: reasoningLevelsFor(harness, m.id, m),
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
+  if (harness === "pi" && !resolvableIds) {
+    return {
+      provider: label,
+      models,
+      requiredKey,
+      enabled: false,
+      disabledReason: "Awaiting worker probe: showing the catalog snapshot.",
+    };
+  }
   return {
     provider: label,
     models,
@@ -536,6 +550,7 @@ export function modelGroupsForHarness(
   envPresence: Record<string, boolean> | undefined,
   liveBedrockStatus?: LiveBedrockStatus | null,
   liveCatalog?: LiveModelsCatalog | null,
+  liveOpencodeGoModels?: readonly string[] | null,
 ): ModelGroup[] {
   if (harness === "acp") return [];
 
@@ -644,7 +659,7 @@ export function modelGroupsForHarness(
 
     return [
       ...snapshotGroups,
-      opencodeGoGroup("pi", configs, envPresence, liveCatalog),
+      opencodeGoGroup("pi", configs, envPresence, liveCatalog, liveOpencodeGoModels),
       bedrockGroup,
     ];
   }

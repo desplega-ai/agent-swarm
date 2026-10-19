@@ -324,6 +324,8 @@ The prefix before the first `/` selects the provider and the matching credential
 | `helmcode/<id>` | `helmcode/glm5.3-flash` | `HELMCODE_API_KEY` |
 | `opencode-go/<id>` | `opencode-go/deepseek-v4.1-flash` | `OPENCODE_API_KEY` |
 
+models.dev can list `opencode-go` ids that pi-ai does not ship yet, and pi runs its default model for those. The worker reports the ids its pi-ai resolves (`credStatus.opencodeGo`), and the dashboard picker offers only those.
+
 ### Reasoning / Effort
 
 Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh | max`) via `PATCH /api/agents/{id}/runtime` — pi-mono translates it directly into the `thinkingLevel` session option, a top-level sibling of `model` on `CreateAgentSessionOptions`. pi's native vocabulary already includes `off` and `max`, so no special-casing is needed there. `max` is offered only when the model declares it (e.g. `opencode-go/deepseek-v4.1-flash`), and pi-ai clamps any level to the model's own `thinkingLevelMap`.

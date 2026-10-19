@@ -613,6 +613,9 @@
           "bedrock": {
             "$ref": "#/components/schemas/AgentBedrockStatus"
           },
+          "opencodeGo": {
+            "$ref": "#/components/schemas/AgentOpencodeGoStatus"
+          },
           "acp": {
             "$ref": "#/components/schemas/AgentAcpStatus"
           }
@@ -764,6 +767,28 @@
           "region",
           "probedAt",
           "ready"
+        ]
+      },
+      "AgentOpencodeGoStatus": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "probedAt": {
+            "type": "number"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        },
+        "default": null,
+        "required": [
+          "probedAt"
         ]
       },
       "AgentAcpStatus": {

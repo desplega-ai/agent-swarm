@@ -500,18 +500,48 @@ describe("OpenCode Go on the opencode harness", () => {
     expect(go?.models.some((m) => m.id === "opencode-go/deepseek-v4-flash")).toBe(true);
   });
 
-  test("the pi picker offers the Go group, gated on OPENCODE_API_KEY", () => {
-    const locked = group(modelGroupsForHarness("pi", [], {}, null, catalog), "OpenCode Go");
+  test("the pi picker lists only the Go ids its worker resolves, gated on OPENCODE_API_KEY", () => {
+    const withUnresolvable = live({
+      "opencode-go": {
+        "deepseek-v4.1-flash": {
+          name: "DeepSeek V4.1 Flash",
+          reasoning: true,
+          limit: { context: 1_000_000 },
+          reasoning_options: effort(["low", "high", "max"]),
+        },
+        "deepseek-v4-flash": { name: "DeepSeek V4 Flash", limit: { context: 1_000_000 } },
+      },
+    });
+    const resolvable = ["deepseek-v4.1-flash", "glm-5.3"];
+    const goFor = (presence: Record<string, boolean>, ids: string[] | null) =>
+      group(modelGroupsForHarness("pi", [], presence, null, withUnresolvable, ids), "OpenCode Go");
+
+    const locked = goFor({}, resolvable);
     expect(locked).toMatchObject({ requiredKey: "OPENCODE_API_KEY", enabled: false });
-    const go = group(
-      modelGroupsForHarness("pi", [], { OPENCODE_API_KEY: true }, null, catalog),
-      "OpenCode Go",
-    );
+
+    const go = goFor({ OPENCODE_API_KEY: true }, resolvable);
     expect(go?.enabled).toBe(true);
+    const ids = go?.models.map((m) => m.id) ?? [];
+    expect(ids).toContain("opencode-go/deepseek-v4.1-flash");
+    expect(ids).not.toContain("opencode-go/deepseek-v4-flash");
+    expect(ids.every((id) => resolvable.includes(id.replace("opencode-go/", "")))).toBe(true);
     expect(go?.models.find((m) => m.id === "opencode-go/deepseek-v4.1-flash")).toMatchObject({
       requiredKey: "OPENCODE_API_KEY",
       reasoningLevels: ["low", "high", "max"],
     });
+
+    // No worker report yet: the snapshot shows, but nothing is selectable.
+    const awaiting = goFor({ OPENCODE_API_KEY: true }, null);
+    expect(awaiting?.enabled).toBe(false);
+    expect(awaiting?.disabledReason).toContain("Awaiting worker probe");
+  });
+
+  test("the opencode picker ignores the pi probe list", () => {
+    const go = group(
+      modelGroupsForHarness("opencode", [], {}, null, catalog, ["other-model"]),
+      "OpenCode Go",
+    );
+    expect(go?.models.map((m) => m.id)).toContain("opencode-go/deepseek-v4.1-flash");
   });
 
   test("the closed providers (claude, codex) never list opencode-go", () => {

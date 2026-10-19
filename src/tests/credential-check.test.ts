@@ -1098,6 +1098,24 @@ describe("isCredCheckDisabled", () => {
 describe("buildCredStatusReport", () => {
   const HOME = "/home/worker";
 
+  test("pi reports the opencode-go ids its pi-ai resolves", async () => {
+    const snap = await buildCredStatusReport(
+      "pi",
+      { HOME },
+      { homeDir: HOME, fs: fsWith(new Set([`${HOME}/.pi/agent/auth.json`])) },
+      "boot",
+    );
+    expect(snap.opencodeGo?.models).toContain("deepseek-v4.1-flash");
+    expect(snap.opencodeGo?.models).not.toContain("deepseek-v4-flash");
+    const other = await buildCredStatusReport(
+      "opencode",
+      { HOME },
+      { homeDir: HOME, fs: fsWith(new Set([`${HOME}/.local/share/opencode/auth.json`])) },
+      "boot",
+    );
+    expect(other.opencodeGo).toBeNull();
+  });
+
   for (const [provider, authPath] of [
     ["pi", ".pi/agent/auth.json"],
     ["opencode", ".local/share/opencode/auth.json"],

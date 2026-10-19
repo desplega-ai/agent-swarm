@@ -147,6 +147,19 @@ function getHarnessDrivableBedrockModels(): Array<{ id: string; name: string }> 
 }
 
 /**
+ * The `opencode-go` model ids this pi-ai build resolves. models.dev can list
+ * ids pi-ai does not know yet, and pi runs its default model for those, so the
+ * worker reports this list and the picker offers only these ids.
+ */
+export function listPiOpencodeGoModelIds(): string[] {
+  try {
+    return getModels("opencode-go").map((m) => m.id);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Enumerate the Bedrock models that are both invocable by this AWS account and
  * drivable by the pi-ai Converse harness, and verify the credential chain in
  * one pass:

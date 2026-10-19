@@ -25170,6 +25170,7 @@ export interface components {
              */
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
+            opencodeGo?: components["schemas"]["AgentOpencodeGoStatus"];
             acp?: components["schemas"]["AgentAcpStatus"];
         };
         /** @default null */
@@ -25207,6 +25208,12 @@ export interface components {
                 name: string;
             }[];
             error?: string;
+        } | null;
+        /** @default null */
+        AgentOpencodeGoStatus: {
+            probedAt: number;
+            /** @default [] */
+            models: string[];
         } | null;
         /** @default null */
         AgentAcpStatus: {

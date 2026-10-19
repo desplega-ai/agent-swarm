@@ -17,6 +17,7 @@ import {
   checkPiMonoCredentials,
   createPiRuntimeAuth,
   extractPiAssistantText,
+  listPiOpencodeGoModelIds,
   PiMonoAdapter,
   resolveModel,
   type SessionModelsJson,
@@ -454,6 +455,18 @@ describe("Model name mapping", () => {
     const [provider, modelId] = modelStr.split("/", 2);
     expect(provider).toBe("anthropic");
     expect(modelId).toBe("claude-opus-4-8");
+  });
+});
+
+describe("listPiOpencodeGoModelIds", () => {
+  test("every reported opencode-go id resolves, so a picked id never falls back", () => {
+    const ids = listPiOpencodeGoModelIds();
+    expect(ids).toContain("deepseek-v4.1-flash");
+    for (const id of ids) {
+      expect(resolveModel(`opencode-go/${id}`, {})?.id).toBe(id);
+    }
+    expect(ids).not.toContain("deepseek-v4-flash");
+    expect(resolveModel("opencode-go/deepseek-v4-flash", {})).toBeUndefined();
   });
 });
 

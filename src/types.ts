@@ -1327,6 +1327,14 @@ export const AgentBedrockStatusSchema = z
   .openapi("AgentBedrockStatus");
 export type AgentBedrockStatus = z.infer<typeof AgentBedrockStatusSchema>;
 
+export const AgentOpencodeGoStatusSchema = z
+  .object({
+    probedAt: z.number(), // unix ms
+    models: z.array(z.string()).default([]),
+  })
+  .openapi("AgentOpencodeGoStatus");
+export type AgentOpencodeGoStatus = z.infer<typeof AgentOpencodeGoStatusSchema>;
+
 const AcpSessionConfigSelectValueSchema = z.object({
   value: z.string(),
   name: z.string(),
@@ -1386,6 +1394,8 @@ export const AgentCredStatusSchema = z
     reportKind: z.enum(["boot", "post_task"]).default("boot"),
     /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
+    /** Pi-mono only: the `opencode-go` model ids the worker's pi-ai resolves. */
+    opencodeGo: AgentOpencodeGoStatusSchema.nullable().default(null),
     /** ACP options advertised by the most recently created session. */
     acp: AgentAcpStatusSchema.nullable().default(null),
   })

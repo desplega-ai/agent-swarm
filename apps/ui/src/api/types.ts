@@ -328,6 +328,11 @@ export interface AgentBedrockStatus {
   error?: string;
 }
 
+export interface AgentOpencodeGoStatus {
+  probedAt: number;
+  models: string[];
+}
+
 export interface AgentCredStatus {
   ready: boolean;
   missing: string[];
@@ -339,6 +344,8 @@ export interface AgentCredStatus {
   reportKind?: "boot" | "post_task";
   /** Pi-mono Bedrock enumeration block. Null when not in Bedrock mode. */
   bedrock?: AgentBedrockStatus | null;
+  /** Pi-mono only: the `opencode-go` model ids the worker resolves. */
+  opencodeGo?: AgentOpencodeGoStatus | null;
   /** ACP session options most recently advertised by the target. */
   acp?: AgentAcpStatus | null;
 }
