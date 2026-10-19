@@ -526,18 +526,20 @@ export async function rebuildAppColumnIndexUnlocked(
   }
 }
 
+/** `matches` re-checks the row under the lock; a row that no longer matches is kept. */
 export function deleteAppRow(
   appId: string,
   model: string,
   _definition: ModelDef,
   rowId: string,
+  matches?: (row: AppRow) => boolean,
 ): Promise<boolean> {
   return withMutationLock(appId, model, async () => {
     const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) return false;
     const namespace = appsNamespace(appId);
     const row = await getAppRow(appId, model, rowId);
-    if (!row) return false;
+    if (!row || (matches && !matches(row))) return false;
     for (const key of indexKeys(model, currentDefinition, row)) await deleteKv(namespace, key);
     await deleteKv(namespace, rowKey(model, rowId));
     return true;

@@ -976,6 +976,10 @@ function rowValue(row: AppRow, column: string): unknown {
   return Object.hasOwn(row, column) ? row[column] : undefined;
 }
 
+export function rowMatchesFilters(row: AppRow, filters: RowFilter[]): boolean {
+  return filters.every((filter) => rowValue(row, filter.column) === filter.value);
+}
+
 export function applyQuery(
   rows: AppRow[],
   query: AppQueryDef,
@@ -1026,7 +1030,7 @@ export async function selectAppRows(
           : [],
       ),
     )
-  ).filter((row) => filters.every((filter) => rowValue(row, filter.column) === filter.value));
+  ).filter((row) => rowMatchesFilters(row, filters));
 
   if (sortRaw) {
     const [column, dir, extra] = sortRaw.split(":");

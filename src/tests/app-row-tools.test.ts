@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -7,6 +7,7 @@ import {
   normalizeObjectSchema,
   safeParseAsync,
 } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import * as rowStore from "../apps/row-store";
 import { type AppRecord, createApp } from "../apps/store";
 import { closeDb, createAgent, initDb } from "../be/db";
 import { typecheckScript } from "../be/scripts/typecheck";
@@ -159,6 +160,46 @@ test("creates, gets, filters, sorts, limits, patches, and deletes flat rows with
   });
 });
 
+test("null in values clears an optional column on create, bulk create, and patch", async () => {
+  const created = await call("app-row-create", { values: { title: "null-create", rank: null } });
+  expect(created.isError).not.toBe(true);
+  expect(created.structuredContent.row.rank).toBeNull();
+  const bulk = await call("app-rows-create", {
+    rows: [{ title: "null-bulk", rank: null, state: null }],
+  });
+  expect(bulk.isError).not.toBe(true);
+  expect(bulk.structuredContent.rows[0]).toMatchObject({ rank: null, state: null });
+  const row = (await call("app-row-create", { values: { title: "null-patch", rank: 5 } }))
+    .structuredContent.row;
+  const patched = await call("app-row-patch", { rowId: row.id, values: { rank: null } });
+  expect(patched.isError).not.toBe(true);
+  expect(Object.hasOwn(patched.structuredContent.row, "rank")).toBe(false);
+  expect(
+    Object.hasOwn((await call("app-row-get", { rowId: row.id })).structuredContent.row, "rank"),
+  ).toBe(false);
+});
+
+test("app-rows-delete skips a row patched out of the filter after the select", async () => {
+  const row = (await call("app-row-create", { values: { title: "delete" } })).structuredContent.row;
+  const original = rowStore.listAppRows;
+  // The select sees the row as "delete"; the patch lands before the per-row delete lock.
+  const spy = spyOn(rowStore, "listAppRows").mockImplementation(async (...args) => {
+    const rows = await original(...args);
+    await rowStore.patchAppRow(appId, "note", definition.models.note!, row.id, { title: "keep" });
+    return rows;
+  });
+  let result: ToolResult;
+  try {
+    result = await call("app-rows-delete", { equals: { title: "delete" } });
+  } finally {
+    spy.mockRestore();
+  }
+  expect(result.isError).not.toBe(true);
+  expect(result.structuredContent.deleted).toBe(0);
+  expect((await call("app-row-get", { rowId: row.id })).structuredContent.row.title).toBe("keep");
+  await call("app-row-delete", { rowId: row.id });
+});
+
 test("rejects invalid filters, sorts, values, source projections, join keys, and missing agents", async () => {
   for (const values of [
     { projected: "blocked" },
@@ -240,7 +281,7 @@ test("saved scripts can typecheck all seven row methods and cannot invoke action
       await ctx.swarm.app_rows_create({ ...base, rows: [{ title: "test" }] });
       await ctx.swarm.app_rows_list({ ...base, equals: { title: "test" }, sort: "createdAt:desc", limit: 1 });
       await ctx.swarm.app_row_get({ ...base, rowId: "row" });
-      await ctx.swarm.app_row_patch({ ...base, rowId: "row", values: { title: "changed" } });
+      await ctx.swarm.app_row_patch({ ...base, rowId: "row", values: { title: "changed", rank: null } });
       await ctx.swarm.app_row_delete({ ...base, rowId: "row" });
       await ctx.swarm.app_rows_delete({ ...base, equals: { title: "test" } });
     }
@@ -283,9 +324,11 @@ test.skipIf(SKIP_SANDBOX_SPAWN_TESTS)(
           scopeId: agentId,
           agentId,
           source: `export default async function(args, ctx) {
-        const created = await ctx.swarm.app_row_create({ appId: args.appId, model: "note", values: { title: "script-sdk" } });
+        const created = await ctx.swarm.app_row_create({ appId: args.appId, model: "note", values: { title: "script-sdk", rank: 1 } });
         const listed = await ctx.swarm.app_rows_list({ appId: args.appId, model: "note", equals: { title: "script-sdk" } });
-        return { created: created?.data ?? created, listed: listed?.data ?? listed };
+        const rowId = (created?.data ?? created).row.id;
+        const cleared = await ctx.swarm.app_row_patch({ appId: args.appId, model: "note", rowId, values: { rank: null } });
+        return { created: created?.data ?? created, listed: listed?.data ?? listed, cleared: cleared?.data ?? cleared };
       }`,
           description: "SDK row fixture",
           intent: "Verify row tools through the script SDK",
@@ -305,7 +348,10 @@ test.skipIf(SKIP_SANDBOX_SPAWN_TESTS)(
       expect(output.result).toMatchObject({
         created: { row: { createdBy: `agent:${agentId}` } },
         listed: { total: 1, rows: [{ title: "script-sdk" }] },
+        cleared: { row: { title: "script-sdk" } },
       });
+      const cleared = (output.result as { cleared: { row: Record<string, unknown> } }).cleared.row;
+      expect(Object.hasOwn(cleared, "rank")).toBe(false);
     } finally {
       if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
     }

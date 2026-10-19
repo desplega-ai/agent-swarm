@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { AppNameSchema, type ModelDef, SYSTEM_COLUMN_KINDS } from "../apps/definition";
 import {
+  type AppRow,
   AppRowAppNotFoundError,
   AppRowValidationError,
   createAppRow,
@@ -13,7 +14,12 @@ import {
 } from "../apps/row-store";
 import { appDefinitionNeedsRepair, getApp } from "../apps/store";
 import { getAgentById } from "../be/db";
-import { MAX_APP_BULK_ROWS_BODY_BYTES, MAX_APP_ROW_BODY_BYTES, selectAppRows } from "../http/apps";
+import {
+  MAX_APP_BULK_ROWS_BODY_BYTES,
+  MAX_APP_ROW_BODY_BYTES,
+  rowMatchesFilters,
+  selectAppRows,
+} from "../http/apps";
 import { can } from "../rbac";
 import {
   createToolRegistrar,
@@ -207,18 +213,21 @@ export function registerAppRowTools(server: McpServer) {
     },
     { deleted: z.number().optional() },
     async (args, model) => {
+      const filters = rowFilters(model, args.equals);
       const { rows } = await selectAppRows(
         args.appId,
         args.model,
         model,
-        rowFilters(model, args.equals),
+        filters,
         undefined,
         args.limit ?? 1000,
         true,
       );
+      // Re-check under the row lock: a row patched out of the filter since the select is kept.
+      const matches = (row: AppRow) => rowMatchesFilters(row, filters);
       let deleted = 0;
       for (const row of rows)
-        if (await deleteAppRow(args.appId, args.model, model, row.id)) deleted++;
+        if (await deleteAppRow(args.appId, args.model, model, row.id, matches)) deleted++;
       return toolOk(`Deleted ${deleted} row(s).`, { data: { deleted } });
     },
   );
