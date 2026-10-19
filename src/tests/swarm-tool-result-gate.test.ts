@@ -288,7 +288,7 @@ describe("finalizeSwarmToolResult", () => {
     expect((nonEmpty.structuredContent as { nudge?: string }).nudge).toBeUndefined();
   });
 
-  test("NUDGES map: app-get steers to the callable surface only when one exists", async () => {
+  test("NUDGES map: app-get steers to queries and actions only when the app has them", async () => {
     const withSurface = await finalizeSwarmToolResult("app-get", {
       ok: true,
       message: 'App "PM Inbox" (a1).',
@@ -302,9 +302,7 @@ describe("finalizeSwarmToolResult", () => {
         },
       },
     });
-    expect((withSurface.structuredContent as { nudge?: string }).nudge).toContain(
-      "callable surface",
-    );
+    expect((withSurface.structuredContent as { nudge?: string }).nudge).toContain("app-action-run");
 
     const bare = await finalizeSwarmToolResult("app-get", {
       ok: true,

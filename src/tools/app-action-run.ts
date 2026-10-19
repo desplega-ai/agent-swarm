@@ -14,6 +14,8 @@ export function registerAppActionRunTool(server: McpServer) {
       title: "Run an app action",
       description:
         "Run a declared app action as an agent. Scripts and extensions cannot invoke this tool.",
+      // An action runs a script, a sync, or a task: it can write rows and reach external sources.
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
       rbac: { permission: "app.use" },
       inputSchema: z.object({
         appId: z.string().min(1),
