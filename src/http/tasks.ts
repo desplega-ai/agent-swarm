@@ -586,7 +586,7 @@ const getTaskLineageRoute = route({
   pattern: ["api", "tasks", null, "lineage"],
   session: { taskParam: "id" },
   summary: "Get the tree a task belongs to (ancestors and descendants)",
-  description: `Follows \`parentTaskId\` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most ${TASK_LINEAGE_LIMITS.maxAncestors} hops up, \`maxDepth\` levels down and about twice \`maxNodes\` rows; \`truncated\` is true when a cap cut the walk.`,
+  description: `Follows \`parentTaskId\` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most ${TASK_LINEAGE_LIMITS.maxAncestors} hops up, \`maxDepth\` levels down and about twice \`maxNodes\` rows; \`truncated\` is true when any task in the tree is missing from the response.`,
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   query: z.object({

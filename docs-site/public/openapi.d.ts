@@ -13488,7 +13488,7 @@ export interface paths {
         };
         /**
          * Get the tree a task belongs to (ancestors and descendants)
-         * @description Follows `parentTaskId` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most 50 hops up, `maxDepth` levels down and about twice `maxNodes` rows; `truncated` is true when a cap cut the walk.
+         * @description Follows `parentTaskId` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most 50 hops up, `maxDepth` levels down and about twice `maxNodes` rows; `truncated` is true when any task in the tree is missing from the response.
          */
         get: {
             parameters: {

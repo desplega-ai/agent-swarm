@@ -447,7 +447,7 @@ interface TaskLineage {
   rootTaskId: string;
   /** Root first, then descendants; always holds the path root → `taskId`. */
   tasks: TaskLineageNode[];
-  /** True when a cap cut the walk: some ancestors or descendants are missing. */
+  /** True when some ancestor or descendant is missing from `tasks`. */
   truncated: boolean;
 }
 
@@ -513,25 +513,36 @@ export async function getTaskLineage(
 
   const byId = new Map<string, TaskLineageNode>();
   const add = (rows: TaskLineageRow[]) => {
-    if (rows.length > maxNodes) truncated = true;
-    for (const row of rows.slice(0, maxNodes)) {
+    for (const row of rows) {
       if (!byId.has(row.id)) byId.set(row.id, rowToTaskLineageNode(row));
     }
   };
   const ownSubtree = await descendants(taskId);
   const fromRoot = top.id === taskId ? ownSubtree : await descendants(top.id);
-  add(fromRoot);
-  add(ownSubtree);
+  add(fromRoot.slice(0, maxNodes));
+  add(ownSubtree.slice(0, maxNodes));
 
   // The path root → task is always present, even past the depth or node cap.
   const missing = path.map((row) => row.id).filter((id) => !byId.has(id));
   if (missing.length > 0) {
-    truncated = true;
-    const rows = await db.query<TaskLineageRow>(
-      `SELECT ${LINEAGE_COLUMNS} FROM agent_tasks WHERE id IN (${missing.map(() => "?").join(", ")})`,
-      missing,
+    add(
+      await db.query<TaskLineageRow>(
+        `SELECT ${LINEAGE_COLUMNS} FROM agent_tasks WHERE id IN (${missing.map(() => "?").join(", ")})`,
+        missing,
+      ),
     );
-    add(rows);
+  }
+
+  // The caps cut the walk at many points (depth, node count, either walk), so
+  // ask the table directly: is any child of a returned task not returned?
+  if (!truncated) {
+    const ids = [...byId.keys()];
+    const list = ids.map(() => "?").join(", ");
+    const omitted = await db.get(
+      `SELECT 1 FROM agent_tasks WHERE parentTaskId IN (${list}) AND id NOT IN (${list}) LIMIT 1`,
+      [...ids, ...ids],
+    );
+    truncated = omitted !== undefined && omitted !== null;
   }
 
   return { rootTaskId: top.id, tasks: [...byId.values()], truncated };
