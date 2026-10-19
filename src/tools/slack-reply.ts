@@ -11,7 +11,12 @@ import {
 } from "@/be/db";
 import { getTaskCitations } from "@/be/task-citations";
 import { getSlackApp } from "@/slack/app";
-import { buildCaptionBlock, getTaskLink, getTaskUrl } from "@/slack/blocks";
+import {
+  buildCaptionBlock,
+  buildMrkdwnSectionBlocks,
+  getTaskLink,
+  getTaskUrl,
+} from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
@@ -140,15 +145,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
 
         const tree = await getSlackTreeMessageByThread(slackChannelId, slackThreadTs);
         const messageBlocks: Record<string, unknown>[] = [
-          ...(renderedBlocks ?? [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: slackMessage,
-              },
-            },
-          ]),
+          ...(renderedBlocks ?? buildMrkdwnSectionBlocks(slackMessage)),
         ];
         for (const group of taskCitationSourceGroups(
           blocks ? JSON.stringify(blocks) : message,

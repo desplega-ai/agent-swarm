@@ -1,6 +1,7 @@
 import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
 import { type ScrubbedText, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
+import { readableSessionCondition } from "./db/tasks/read";
 import type { DbExecutor } from "./db-client";
 import { breaksJsonValidity } from "./scrub-json";
 import { recordSkillInvocation } from "./skill-invocations";
@@ -262,9 +263,19 @@ export async function getEventsFiltered(filters: {
    * the agent's event history.
    */
   latestPerDataField?: { events: EventName[]; dataFields: string[] };
+  /** Only events outside sessions this user may not read; `userId: null` is a guest. */
+  readableBy?: { userId: string | null };
 }): Promise<SwarmEvent[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
+
+  if (filters.readableBy) {
+    const readable = readableSessionCondition(filters.readableBy.userId, "events.taskId", {
+      nullable: true,
+    });
+    conditions.push(readable.sql);
+    params.push(...readable.params);
+  }
 
   if (filters.category) {
     conditions.push("category = ?");

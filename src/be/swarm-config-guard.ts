@@ -1,4 +1,5 @@
 import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
+import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemetry-ranking";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
@@ -69,15 +70,24 @@ export function isApiOnlyConfigKey(key: string): boolean {
 }
 
 /** Config rows owned by dedicated API surfaces, not the generic config API. */
-export const INTERNAL_CONFIG_KEYS = new Set(["onboarding_state", "runtime_owner_id"]);
+export const INTERNAL_CONFIG_KEYS = new Set([
+  "onboarding_state",
+  "runtime_owner_id",
+  TELEMETRY_RANKING_KEY,
+]);
 
 export function isInternalConfigKey(key: string): boolean {
   return INTERNAL_CONFIG_KEYS.has(key.toLowerCase());
 }
 
 export function internalConfigKeyError(key: string): Error {
+  const lower = key.toLowerCase();
   const owner =
-    key.toLowerCase() === "runtime_owner_id" ? "the runtime supervisor" : "/api/onboarding";
+    lower === "runtime_owner_id"
+      ? "the runtime supervisor"
+      : lower === TELEMETRY_RANKING_KEY
+        ? "/api/ranking"
+        : "/api/onboarding";
   return new Error(`Key '${key}' is managed by ${owner}`);
 }
 
@@ -301,6 +311,16 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       return "Invalid TASK_TOOL_MANIFESTS (expected JSON with taskTypes and/or schedules maps, each selecting at most 16 known swarm tools)";
     }
   },
+  // Owned by /api/ranking (an internal key); parsed here as defense in depth.
+  [TELEMETRY_RANKING_KEY.toUpperCase()]: (value) => {
+    try {
+      if (typeof value !== "string") throw new Error("Expected JSON string");
+      parseTelemetryRanking(value);
+      return null;
+    } catch {
+      return "Invalid telemetry_ranking (expected the v1 ranking listing JSON)";
+    }
+  },
   // MCP tool allowlist: comma-separated names or a JSON array of strings.
   // Unknown names are accepted here and warned about at session init.
   SWARM_ENABLED_TOOLS: (value) => {
@@ -405,6 +425,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   },
   ...booleanValidators([
     "SWARM_USED_BY_CONSENT",
+    "PUBLIC_RANKING_ENABLED",
     "SWARM_DEV_MODE",
     "MULTI_RUNTIME_ENABLED",
     "STEERING_ENABLED",

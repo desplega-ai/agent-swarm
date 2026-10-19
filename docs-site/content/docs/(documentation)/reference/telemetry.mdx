@@ -65,6 +65,9 @@ Common properties, allowed on every event of this product:
 | `popup.dismissed` | ui | 2026-10-12 | A dashboard pop-up was closed without submitting. | `method` (later \| close \| escape, required)<br />`popup` (feedback \| org_name \| used_by, required) |
 | `popup.shown` | ui | 2026-10-12 | A dashboard pop-up was shown. Telemetry-gated: never sent while telemetry is off. | `popup` (feedback \| org_name \| used_by, required)<br />`trigger` (task_failed \| tasks_completed \| workflow_completed \| quarterly \| missing_org_name, required) |
 | `popup.submitted` | ui | 2026-10-12 | A dashboard pop-up was submitted. Content stays out of telemetry: only flags for what was filled. | `has_contact` (boolean, required)<br />`has_message` (boolean, required)<br />`popup` (feedback \| org_name \| used_by, required)<br />`score` (integer ≥0) |
+| `ranking.opted_in` | api-server | 2026-10-18 | An admin opted the install into the public ranking, or the API rebuilt its listing after an org identity change. | `listing` (string, required) |
+| `ranking.opted_out` | api-server | 2026-10-18 | The install left the public ranking: the admin turned it off, or the org name or website was cleared or changed. | `domain` (string, required) |
+| `ranking.usage` | worker | 2026-10-18 | Token usage of one session on an install opted into the public ranking. Sent next to session.cost. | `cacheReadTokens` (integer ≥0)<br />`cacheWriteTokens` (integer ≥0)<br />`inputTokens` (integer ≥0, required)<br />`model` (string)<br />`outputTokens` (integer ≥0, required)<br />`provider` (string)<br />`totalTokens` (integer ≥0, required) |
 | `schedule.error` | api-server | 2026-09-30 | A schedule failed to fire. | `consecutiveErrors` (integer, required)<br />`scheduleType` (string, required)<br />`triggeredWorkflows` (boolean, required)<br />`wasRecovered` (boolean, required) |
 | `schedule.executed` | api-server | 2026-09-30 | A schedule fired. | `scheduleType` (string, required)<br />`triggeredWorkflows` (boolean, required)<br />`wasRecovered` (boolean, required) |
 | `server.shutdown` | api-server | 2026-09-30 | The API server shut down. | `sessionsProcessed` (integer, required)<br />`signal` (string, required)<br />`uptimeMs` (integer, required) |
@@ -178,6 +181,27 @@ While telemetry is off, admins see a dashboard banner that explains what turning
 ### Fleet benchmark
 
 With telemetry on and an organization name set, Home shows how this swarm compares with similar swarms over the last 30 days: tasks per week and task success rate, against swarms with the same number of agents when at least 20 exist, otherwise against all active swarms. The API reads the fleet percentiles from `GET https://proxy.desplega.sh/v1/fleet/benchmarks` at most once a day. That request carries no installation ID or organization name, and the answer holds only aggregates over at least 20 installs with 10 or more finished tasks. With telemetry off, the API never makes the request. The comparison itself is computed locally, so this swarm's own numbers never leave it for the benchmark.
+
+### Public ranking
+
+[agent-swarm.dev/ranking](https://agent-swarm.dev/ranking) ranks installs by tokens used, like OpenRouter's app rankings. It is off by default (`PUBLIC_RANKING_ENABLED=false`). An install is listed only when all of these hold:
+
+- Telemetry is on.
+- The organization name (`SWARM_ORG_NAME`) and company website (`SWARM_ORG_WEBSITE`) are set. The placeholders `Swarm` and `Your Swarm` do not count as a name.
+- An admin clicked **Get ranked** in Settings → Configuration → Branding.
+- A PR adding `community/ranking/<domain>.json` was merged into `desplega-ai/agent-swarm`. A Desplega maintainer reviews each one.
+
+Exactly these fields leave the install for the ranking:
+
+| Event | Sent by | Fields |
+|---|---|---|
+| `ranking.opted_in` | API, on Get ranked and when the organization name changes | `listing`: the organization name and website, the category and subcategory you picked, the optional description and source code URL, a random claim (`rk_` + 32 hex) and the time it was built. The same JSON is stored as the `telemetry_ranking` config key. |
+| `ranking.opted_out` | API, when the setting turns off | `domain` |
+| `ranking.usage` | Each worker, after every session with cost data | `totalTokens`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, and the session's `model` and `provider`. No task, agent or cost. |
+
+**Token totals are public and exact.** The page shows your total tokens per day, week and month, and tokens per model, the same as OpenRouter.
+
+To leave, turn the setting off, turn telemetry off, or clear the organization name or website. Changing the website also opts out, because a new domain needs a new PR. The entry disappears at the proxy's next hourly refresh. Deleting `community/ranking/<domain>.json` removes it for good.
 
 A notification card that asks for your email, and the feedback dialog, are different. Those send what you type to the feedback endpoint (`https://proxy.desplega.sh/v1/feedback`, overridable with the `feedback_endpoint` config key), and only when you submit them. They are not telemetry, so the opt-out does not block them.
 

@@ -4,6 +4,7 @@ import type { ConfigCatalogEntry, ConfigCatalogGroup } from "@/lib/configuration
 import type { EnvPresence } from "@/lib/integrations-status";
 import { normalizeOrgWebsite } from "../../../../../src/utils/org-website";
 import { ConfigurationRow } from "./configuration-row";
+import { PublicRankingRow } from "./public-ranking-row";
 import { UsedByConsentRow } from "./used-by-consent-row";
 
 const PROFILE_FIELDS: Record<string, "name" | "website"> = {
@@ -61,7 +62,10 @@ export function ConfigurationGroupCard({
           );
         })}
         {group.id === "branding" && entries.some((entry) => entry.key === "SWARM_ORG_WEBSITE") ? (
-          <UsedByConsentRow />
+          <>
+            <UsedByConsentRow />
+            <PublicRankingRow />
+          </>
         ) : null}
       </CardContent>
     </Card>

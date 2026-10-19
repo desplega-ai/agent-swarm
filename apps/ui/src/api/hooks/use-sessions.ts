@@ -13,6 +13,9 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { sessionSharesMutationOptions } from "@/lib/session-shares-mutation";
+import { sharesInput } from "@/lib/session-sharing";
 import { sessionRefetchInterval } from "@/lib/task-activity";
 import { api } from "../client";
 
@@ -27,6 +30,8 @@ export interface UseSessionsOptions {
   requestedByUserId?: string;
   /** Root tasks whose `contextKey` starts with this prefix (≥1.157.1). */
   contextKeyPrefix?: string;
+  /** `mine` / `shared` (session sharing servers only, see `SESSION_SHARING_MIN_VERSION`). */
+  scope?: "mine" | "shared";
   /** Disable the query entirely (e.g. when user identity is not yet resolved). */
   enabled?: boolean;
 }
@@ -38,13 +43,23 @@ export function useSessions(options?: UseSessionsOptions) {
   const q = options?.q;
   const requestedByUserId = options?.requestedByUserId;
   const contextKeyPrefix = options?.contextKeyPrefix;
+  const scope = options?.scope;
   const enabled = options?.enabled ?? true;
   return useQuery({
-    queryKey: ["sessions", { limit, offset, source, q, requestedByUserId, contextKeyPrefix }],
+    queryKey: [
+      "sessions",
+      { limit, offset, source, q, requestedByUserId, contextKeyPrefix, scope },
+    ],
     queryFn: () =>
-      api.listSessions({ limit, offset, source, q, requestedByUserId, contextKeyPrefix }),
+      api.listSessions({ limit, offset, source, q, requestedByUserId, contextKeyPrefix, scope }),
     enabled,
   });
+}
+
+/** The HTTP status a failed session fetch carried (403: no access). */
+export function sessionErrorStatus(error: unknown): number | undefined {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : undefined;
 }
 
 export function useSession(rootTaskId: string | undefined) {
@@ -52,10 +67,37 @@ export function useSession(rootTaskId: string | undefined) {
     queryKey: ["session", rootTaskId],
     queryFn: () => api.getSession(rootTaskId!),
     enabled: !!rootTaskId,
+    // A 403 does not get better with retries; it changes when the owner shares.
+    retry: (failureCount, error) => sessionErrorStatus(error) !== 403 && failureCount < 3,
     // Replaces the app-wide 10s default: 4s while any task is active so live
     // progress keeps up, back to 10s once the chain settles (never stops).
     refetchInterval: (query) => sessionRefetchInterval(query.state.data),
   });
+}
+
+/**
+ * Active shares of a session. `data === null` means the API predates session
+ * sharing (404): hide the Share button.
+ */
+export function useSessionShares(rootTaskId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["session-shares", rootTaskId],
+    queryFn: () => api.getSessionShares(rootTaskId!),
+    enabled: !!rootTaskId && enabled,
+  });
+}
+
+/** Apply a full share state. Optimistic: the dialog shows the change at once. */
+export function useUpdateSessionShares(rootTaskId: string) {
+  const queryClient = useQueryClient();
+  return useMutation(
+    sessionSharesMutationOptions(
+      queryClient,
+      rootTaskId,
+      (next) => api.putSessionShares(rootTaskId, sharesInput(next)),
+      (error) => toast.error(error instanceof Error ? error.message : "Couldn't update sharing"),
+    ),
+  );
 }
 
 /** Set (non-empty string) or clear (`null`) a session's custom display title. */

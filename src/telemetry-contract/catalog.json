@@ -1377,6 +1377,75 @@
       }
     },
     {
+      "product": "agent-swarm",
+      "event": "ranking.opted_in",
+      "description": "An admin opted the install into the public ranking, or the API rebuilt its listing after an org identity change.",
+      "since": "2026-10-18",
+      "source": "api-server",
+      "properties": {
+        "listing": {
+          "type": "string",
+          "required": true,
+          "description": "The stringified telemetry_ranking listing (contracts/telemetry/ranking/listing.v1.schema.json). The ingest also requires its name and domain to equal context.org_name and context.org_website."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "ranking.opted_out",
+      "description": "The install left the public ranking: the admin turned it off, or the org name or website was cleared or changed.",
+      "since": "2026-10-18",
+      "source": "api-server",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "required": true,
+          "description": "The listing domain that leaves the ranking: a lowercase hostname."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "ranking.usage",
+      "description": "Token usage of one session on an install opted into the public ranking. Sent next to session.cost.",
+      "since": "2026-10-18",
+      "source": "worker",
+      "properties": {
+        "totalTokens": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens. The ranking sums this."
+        },
+        "inputTokens": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0
+        },
+        "cacheReadTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheWriteTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model": {
+          "type": "string",
+          "description": "The session's model, the same value as session.cost.model. Usage without it, or with a value the ranking does not accept, is shown as the model unknown."
+        },
+        "provider": {
+          "type": "string",
+          "description": "The session's provider, the same value as session.cost.provider. Missing means unknown."
+        }
+      }
+    },
+    {
       "product": "agent-fs",
       "event": "server.started",
       "description": "The agent-fs server started.",

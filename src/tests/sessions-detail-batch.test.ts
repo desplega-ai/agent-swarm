@@ -50,7 +50,13 @@ async function unbatchedSession(id: string) {
     ...(await getTaskSteeringFields(task)),
     citations: await getTaskCitations(task.id),
   });
-  return { root: await decorate(root), chain: await Promise.all(chain.map(decorate)) };
+  return {
+    root: await decorate(root),
+    chain: await Promise.all(chain.map(decorate)),
+    // Session sharing: the bare operator key bypasses access checks, and the fixture root has no owner.
+    access: "owner",
+    owner: null,
+  };
 }
 
 beforeAll(async () => {

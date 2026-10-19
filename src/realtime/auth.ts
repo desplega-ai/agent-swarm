@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { getAgentById, getTaskById } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
+import { getSessionRoot, sessionAccessForRoot } from "../be/session-shares";
 import { getCombConfig } from "../comb/config";
 import { mcpOverflowAuthError } from "../kv-overflow";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
@@ -19,6 +20,8 @@ export type RoomAuthorizationInfo = RoomNamespaceInfo & {
   callOrigin?: "http" | "mcp" | "ws";
   userId?: string;
   isOperator?: boolean;
+  /** The user an operator-key dashboard tab picked (`X-Swarm-User-Id`), captured on its ticket. */
+  dashboardUserId?: string;
 };
 
 export type ResolvedRoomNamespace = {
@@ -39,6 +42,7 @@ export type RoomNamespaceOperation =
 
 const COMB_PRESENCE_NAMESPACE = /^presence:comb:[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/;
 const COMB_PRESENCE_OPERATIONS = new Set<RoomNamespaceOperation>(["join", "leave", "presence"]);
+const SESSION_PRESENCE_NAMESPACE = /^presence:session:([A-Za-z0-9_-]{1,64})$/;
 
 function pageNamespace(pageId: string): string | null {
   try {
@@ -162,6 +166,10 @@ export async function authorizeRoomNamespace(
     return null;
   }
 
+  if (namespace.startsWith("presence:session:")) {
+    return authorizeSessionPresence(namespace, info, access);
+  }
+
   const reservedError = reservedNamespaceError(namespace);
   if (reservedError) return reservedError;
 
@@ -201,5 +209,66 @@ export async function authorizeRoomNamespace(
     if (!allowed) return "writes to another agent's namespace require lead";
   }
 
+  return null;
+}
+
+/**
+ * Bus topic published after a session's shares change. Sockets in that
+ * session's presence room re-check access and are evicted when it ended.
+ */
+export function sessionAccessTopic(rootTaskId: string): string {
+  return `session-access:${rootTaskId}`;
+}
+
+/** The root task id of a `presence:session:<rootTaskId>` namespace, else undefined. */
+export function sessionPresenceRoot(namespace: string): string | undefined {
+  return SESSION_PRESENCE_NAMESPACE.exec(namespace)?.[1];
+}
+
+/**
+ * `presence:session:<rootTaskId>`: who is viewing (and typing in) a session.
+ * Presence-only, dashboard-only, and gated on read access so it never reveals
+ * who is inside a private session. An operator-key tab with no picked user
+ * keeps the access it has everywhere else.
+ */
+async function authorizeSessionPresence(
+  namespace: string,
+  info: RoomAuthorizationInfo,
+  access: boolean | RoomNamespaceOperation,
+): Promise<string | null> {
+  const match = SESSION_PRESENCE_NAMESPACE.exec(namespace);
+  if (!match) return "invalid session presence namespace";
+  if (info.pageId || info.agentId || (!info.isOperator && !info.userId)) {
+    return "Session presence requires dashboard authentication";
+  }
+  if (typeof access !== "string" || !COMB_PRESENCE_OPERATIONS.has(access)) {
+    return "Session presence rooms only allow join, leave, and presence";
+  }
+  const principal = info.isOperator
+    ? ({ kind: "operator" } as const)
+    : ({ kind: "user", userId: info.userId! } as const);
+  if (
+    !can({
+      principal,
+      verb: "session.presence",
+      resource: { kind: "kv-namespace", namespace },
+      source: info.callOrigin === "mcp" ? "mcp" : "http",
+    }).allow
+  ) {
+    return "Session presence requires the session.presence permission";
+  }
+  if (info.userId && isRbacEnabled()) {
+    const grant = await getUserGrant(info.userId);
+    if (!grant.grantsAll && !grant.verbs.has("session.presence")) {
+      return "Session presence requires the session.presence permission";
+    }
+  }
+  const viewerId = info.isOperator ? info.dashboardUserId : info.userId;
+  if (info.isOperator && !viewerId) return null;
+  const root = await getSessionRoot(match[1]!);
+  if (!root || root.id !== match[1]) return "session not found";
+  if ((await sessionAccessForRoot(viewerId ?? null, root)) === "none") {
+    return "You don't have access to this session";
+  }
   return null;
 }

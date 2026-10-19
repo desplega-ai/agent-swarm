@@ -13,7 +13,8 @@ import {
 } from "../be/db";
 import { ActiveSessionSchema, AgentTaskSchema } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
+import { readableByFor, resolveSessionActor } from "./session-access";
 import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ const createActiveSession = route({
   method: "post",
   path: "/api/active-sessions",
   pattern: ["api", "active-sessions"],
+  session: bodyTask("taskId"),
   summary: "Create a new active session",
   tags: ["Active Sessions"],
   body: z.object({
@@ -60,6 +62,7 @@ const deleteSessionByTask = route({
   method: "delete",
   path: "/api/active-sessions/by-task/{taskId}",
   pattern: ["api", "active-sessions", "by-task", null],
+  session: { taskParam: "taskId" },
   summary: "Delete active session by task ID",
   tags: ["Active Sessions"],
   params: z.object({ taskId: z.string() }),
@@ -72,6 +75,7 @@ const deleteSessionById = route({
   method: "delete",
   path: "/api/active-sessions/{id}",
   pattern: ["api", "active-sessions", null],
+  session: { activeSessionParam: "id" },
   summary: "Delete active session by ID",
   tags: ["Active Sessions"],
   params: z.object({ id: z.string() }),
@@ -84,6 +88,7 @@ const heartbeatSession = route({
   method: "put",
   path: "/api/active-sessions/heartbeat/{taskId}",
   pattern: ["api", "active-sessions", "heartbeat", null],
+  session: { taskParam: "taskId" },
   summary: "Update heartbeat for an active session",
   tags: ["Active Sessions"],
   params: z.object({ taskId: z.string() }),
@@ -96,6 +101,7 @@ const updateProviderSession = route({
   method: "put",
   path: "/api/active-sessions/provider-session/{taskId}",
   pattern: ["api", "active-sessions", "provider-session", null],
+  session: { taskParam: "taskId" },
   summary: "Update provider session ID on an active session",
   tags: ["Active Sessions"],
   params: z.object({ taskId: z.string() }),
@@ -109,6 +115,7 @@ const cleanupSessions = route({
   method: "post",
   path: "/api/active-sessions/cleanup",
   pattern: ["api", "active-sessions", "cleanup"],
+  session: { agentWide: "Deletes every session of an agent, or every stale session." },
   summary: "Clean up stale sessions",
   tags: ["Active Sessions"],
   body: z
@@ -126,6 +133,7 @@ const recoverOrphanedTasks = route({
   method: "post",
   path: "/api/active-sessions/recover-orphaned-tasks",
   pattern: ["api", "active-sessions", "recover-orphaned-tasks"],
+  session: { none: "Its handler admits only the calling agent, never a user." },
   summary: "Recover orphaned in-progress tasks for an agent",
   tags: ["Active Sessions"],
   body: z.object({
@@ -153,7 +161,10 @@ export async function handleActiveSessions(
   if (listActiveSessions.match(req.method, pathSegments)) {
     const parsed = await listActiveSessions.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const sessions = await getActiveSessions(parsed.query.agentId || undefined);
+    const sessions = await getActiveSessions(
+      parsed.query.agentId || undefined,
+      readableByFor(await resolveSessionActor(req, myAgentId)),
+    );
     listActiveSessions.respond(res, 200, { sessions });
     return true;
   }

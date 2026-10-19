@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 
-test("migration 229 preserves every token kind and adds agent-only tokens", async () => {
+test("migration 232 preserves every token kind and adds agent-only tokens", async () => {
   const db = new Database(":memory:");
   try {
     db.exec(await Bun.file("src/be/migrations/149_session_tokens.sql").text());
@@ -18,7 +18,7 @@ test("migration 229 preserves every token kind and adds agent-only tokens", asyn
     seed.run("controller", "controller", null, null, null, "ctrl");
     const before = db.query("SELECT * FROM session_tokens ORDER BY id").all();
 
-    db.exec(await Bun.file("src/be/migrations/229_agent_session_tokens.sql").text());
+    db.exec(await Bun.file("src/be/migrations/232_agent_session_tokens.sql").text());
 
     // prepare, not query: query() caches the statement and its pre-migration column list.
     expect(db.prepare("SELECT * FROM session_tokens ORDER BY id").all()).toEqual(

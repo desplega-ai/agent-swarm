@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as z from "zod";
+import type { AppActionCaller } from "../apps/action-caller";
 import {
   type AppDefinition,
   AppNameSchema,
@@ -660,10 +661,54 @@ const syncAppRoute = route({
 });
 
 /**
- * RBAC-gate an app operation and resolve the acting principal's stable actor id
- * (`user:<id>`, `agent:<id>`, or `operator`) for row provenance. Returns null
- * (after writing the 403) when the write is denied.
+ * Check app permissions and resolve server-verified identity for action input
+ * and row provenance. Return null after a 403 response when access is denied.
  */
+async function authorizeAppCaller(
+  req: IncomingMessage,
+  res: ServerResponse,
+  myAgentId: string | undefined,
+  verb: "app.manage" | "app.use",
+  resource: RbacResource,
+): Promise<{ actor: string; caller: AppActionCaller } | null> {
+  const auth = getRequestAuth(req);
+  let principal: RbacPrincipal;
+  let actor: string;
+  let caller: AppActionCaller;
+  if (auth?.kind === "operator") {
+    principal = { kind: "operator" };
+    // Page sessions never act as an agent, even if a header names one.
+    const agent = myAgentId && !auth.page ? await getAgentById(myAgentId) : null;
+    actor = agent ? `agent:${agent.id}` : "operator";
+    caller = agent
+      ? { kind: "agent", id: agent.id, name: agent.name }
+      : { kind: "operator", id: null };
+  } else if (auth?.kind === "user") {
+    principal = { kind: "user", userId: auth.userId };
+    actor = `user:${auth.userId}`;
+    caller = { kind: "user", id: auth.userId, name: auth.user.name };
+  } else if (auth?.kind === "guest" || auth?.kind === "controller") {
+    principal = { kind: "guest" };
+    actor = "guest";
+    caller = { kind: "guest", id: null };
+  } else {
+    const agent = myAgentId ? await getAgentById(myAgentId) : null;
+    principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };
+    actor = myAgentId ? `agent:${myAgentId}` : "agent";
+    caller = { kind: "agent", id: myAgentId ?? null, name: agent?.name };
+  }
+  if (auth?.page) caller.pageId = auth.page.id;
+  const decision = can({
+    principal,
+    verb,
+    resource,
+    source: "http",
+  });
+  if (decision.allow) return { actor, caller };
+  jsonError(res, decision.reason, 403);
+  return null;
+}
+
 async function authorizeApp(
   req: IncomingMessage,
   res: ServerResponse,
@@ -671,32 +716,7 @@ async function authorizeApp(
   verb: "app.manage" | "app.use",
   resource: RbacResource,
 ): Promise<string | null> {
-  const auth = getRequestAuth(req);
-  let principal: RbacPrincipal;
-  let actor: string;
-  if (auth?.kind === "operator") {
-    principal = { kind: "operator" };
-    actor = "operator";
-  } else if (auth?.kind === "user") {
-    principal = { kind: "user", userId: auth.userId };
-    actor = `user:${auth.userId}`;
-  } else if (auth?.kind === "guest") {
-    principal = { kind: "guest" };
-    actor = "guest";
-  } else {
-    const agent = myAgentId ? await getAgentById(myAgentId) : null;
-    principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };
-    actor = myAgentId ? `agent:${myAgentId}` : "agent";
-  }
-  const decision = can({
-    principal,
-    verb,
-    resource,
-    source: "http",
-  });
-  if (decision.allow) return actor;
-  jsonError(res, decision.reason, 403);
-  return null;
+  return (await authorizeAppCaller(req, res, myAgentId, verb, resource))?.actor ?? null;
 }
 
 async function authorizeAppManage(
@@ -1326,8 +1346,12 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await runActionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
-    if (!actor) return true;
+    const identity = await authorizeAppCaller(req, res, myAgentId, "app.use", {
+      kind: "app",
+      appId: parsed.params.id,
+    });
+    if (!identity) return true;
+    const { actor, caller } = identity;
 
     const app = await getApp(parsed.params.id);
     if (!app) {
@@ -1375,7 +1399,7 @@ export async function handleApps(
 
       const output = await runSavedScriptAsAgent({
         script,
-        input: { ...action.args, ...input, app: { id: app.id } },
+        input: { ...action.args, ...input, app: { id: app.id }, caller },
         agentId: runAsAgentId,
       });
       const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
@@ -1434,6 +1458,7 @@ export async function handleApps(
       app_id: app.id,
       action_name: parsed.params.name,
       input_json: JSON.stringify(input),
+      caller_json: JSON.stringify(caller),
     });
     const task = await createTaskWithSiblingAwareness(
       taskPrompt.text,

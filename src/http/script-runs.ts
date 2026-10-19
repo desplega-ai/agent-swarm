@@ -47,7 +47,7 @@ import {
   RawLlmConfigSchema,
   RawLlmOutputSchema,
 } from "../workflows/executors/raw-llm";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
 import { json, jsonError } from "./utils";
 
 const DEFAULT_SCRIPT_RUN_CONCURRENCY_CAP = 10;
@@ -282,6 +282,7 @@ const agentTaskRoute = route({
   method: "post",
   path: "/api/internal/script-runs/{runId}/agent-task",
   pattern: ["api", "internal", "script-runs", null, "agent-task"],
+  session: bodyTask("parentTaskId"),
   operationId: "script_runs_internal_agent_task",
   summary: "Create or wait for a script workflow agent task step",
   tags: ["Script Runs"],

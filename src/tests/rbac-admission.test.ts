@@ -20,6 +20,7 @@ import { type IdentityActor, mintToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleFs } from "../http/fs";
 import { handleMcpOAuth } from "../http/mcp-oauth";
+import { handleRealtimeTicket } from "../http/realtime";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { decideAdmission, decideToolAdmission, isRbacEnabled, type PermissionVerb } from "../rbac";
@@ -61,6 +62,7 @@ function createTestServer(): Server {
     if (await handleTasks(req, res, pathSegments, queryParams, myAgentId)) return;
     if (await handleFs(req, res, pathSegments, queryParams, myAgentId)) return;
     if (await handleMcpOAuth(req, res, pathSegments, queryParams)) return;
+    if (await handleRealtimeTicket(req, res, pathSegments, queryParams)) return;
 
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not Found" }));
@@ -480,6 +482,42 @@ describe("handleCore admission wiring", () => {
       reason: null,
       source: "http",
     });
+  });
+});
+
+describe("realtime ticket admission", () => {
+  async function grantOnly(userId: string, verbs: PermissionVerb[]): Promise<void> {
+    const roleId = `rbac-role-test-${crypto.randomUUID()}`;
+    await detachRole(userId, "admin");
+    await getDbClient().run(
+      `INSERT INTO roles (id, name, description, isBuiltin, grantsAll) VALUES (?, ?, 'test', 0, 0)`,
+      [roleId, roleId],
+    );
+    for (const verb of verbs) {
+      await getDbClient().run("INSERT INTO role_permissions (roleId, verb) VALUES (?, ?)", [
+        roleId,
+        verb,
+      ]);
+    }
+    await getDbClient().run(
+      `INSERT INTO principal_roles (principalType, principalId, roleId) VALUES ('user', ?, ?)`,
+      [userId, roleId],
+    );
+  }
+
+  test("a role with either presence verb gets a ticket; a role with neither does not", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const cases: [PermissionVerb[], number][] = [
+      [["comb.presence"], 200],
+      [["session.presence"], 200],
+      [["task.read.own"], 403],
+    ];
+    for (const [verbs, expected] of cases) {
+      const { userId, plaintext } = await createTokenForUser(`Presence ${verbs.join(",")}`);
+      await grantOnly(userId, verbs);
+      const response = await api(port, "POST", "/api/realtime/ticket", { bearer: plaintext });
+      expect({ verbs, status: response.status }).toEqual({ verbs, status: expected });
+    }
   });
 });
 

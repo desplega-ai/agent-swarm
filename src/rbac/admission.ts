@@ -8,7 +8,20 @@ export type AdmissionGrant = {
   };
 };
 
-export type AdmissionRbac = { permission: PermissionVerb } | { ungated: string };
+/**
+ * `alsoAdmits` names verbs that admit the route as well as `permission`, for a
+ * route that serves two features (each handler check still names its own verb).
+ */
+export type AdmissionRbac =
+  | { permission: PermissionVerb; alsoAdmits?: readonly PermissionVerb[] }
+  | { ungated: string };
+
+function grantedVerb(
+  rbac: { permission: PermissionVerb; alsoAdmits?: readonly PermissionVerb[] },
+  grant: AdmissionGrant,
+): PermissionVerb | undefined {
+  return [rbac.permission, ...(rbac.alsoAdmits ?? [])].find((verb) => grant.verbs.has(verb));
+}
 
 export type AdmissionDecision =
   | { allow: true; verb?: PermissionVerb }
@@ -29,10 +42,11 @@ export function decideAdmission(input: {
   }
 
   if (input.rbac && "permission" in input.rbac) {
-    const verb = input.rbac.permission;
-    if (input.grant.verbs.has(verb)) {
-      return { allow: true, verb };
+    const granted = grantedVerb(input.rbac, input.grant);
+    if (granted) {
+      return { allow: true, verb: granted };
     }
+    const verb = input.rbac.permission;
     return { allow: false, reason: `admission: missing permission '${verb}'`, verb };
   }
 
@@ -54,10 +68,11 @@ export function decideToolAdmission(input: {
   }
 
   if (input.rbac && "permission" in input.rbac) {
-    const verb = input.rbac.permission;
-    if (input.grant.verbs.has(verb)) {
-      return { allow: true, verb };
+    const granted = grantedVerb(input.rbac, input.grant);
+    if (granted) {
+      return { allow: true, verb: granted };
     }
+    const verb = input.rbac.permission;
     return { allow: false, reason: `admission: missing permission '${verb}'`, verb };
   }
 

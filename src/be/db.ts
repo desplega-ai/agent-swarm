@@ -195,6 +195,7 @@ import {
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { getDb, getDbClient } from "./db/runtime";
+import { type SessionViewer, sessionViewerCondition } from "./db/session-visibility";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -203,6 +204,7 @@ import {
   findExistingLinearTrackerContextWork,
   getTaskById,
   getTasksByAgentId,
+  readableSessionCondition,
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
@@ -2081,13 +2083,17 @@ export async function getPendingSteeringForTask(taskId: string): Promise<Steerin
   return await getSteeringMessagesForTask(taskId, { status: "pending" });
 }
 
-export async function getPendingSteeringForAgent(agentId: string): Promise<SteeringMessage[]> {
+export async function getPendingSteeringForAgent(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<SteeringMessage[]> {
+  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
   const rows = await getDbClient().query<TaskSteeringMessageRow>(
     `${STEERING_MESSAGE_SELECT}
        JOIN agent_tasks t ON t.id = m.task_id
-       WHERE t.agentId = ? AND m.status = 'pending'
+       WHERE t.agentId = ? AND m.status = 'pending'${readable ? ` AND ${readable.sql}` : ""}
        ORDER BY m.created_at ASC, m.rowid ASC`,
-    [agentId],
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToSteeringMessage);
 }
@@ -2185,27 +2191,33 @@ export async function hasPendingSteering(taskId: string): Promise<boolean> {
 // Combined Queries (Agent with Tasks)
 // ============================================================================
 
-export async function getAgentWithTasks(id: string): Promise<AgentWithTasks | null> {
+export async function getAgentWithTasks(
+  id: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentWithTasks | null> {
   return await getDbClient().transaction(
     async () => {
       const agent = await getAgentById(id);
       if (!agent) return null;
 
-      const tasks = await getTasksByAgentId(id);
+      const tasks = await getTasksByAgentId(id, readableBy);
       return { ...agent, tasks };
     },
     { readOnly: true },
   );
 }
 
-export async function getAllAgentsWithTasks(opts?: { slim?: boolean }): Promise<AgentWithTasks[]> {
+export async function getAllAgentsWithTasks(opts?: {
+  slim?: boolean;
+  readableBy?: { userId: string | null };
+}): Promise<AgentWithTasks[]> {
   return await getDbClient().transaction(
     async () => {
       const agents = await getAllAgents({ slim: opts?.slim ?? false });
       return await Promise.all(
         agents.map(async (agent) => ({
           ...agent,
-          tasks: await getTasksByAgentId(agent.id),
+          tasks: await getTasksByAgentId(agent.id, opts?.readableBy),
         })),
       );
     },
@@ -2268,10 +2280,16 @@ export async function createLogEntry(entry: {
   return rowToAgentLog(row);
 }
 
-export async function getLogsByAgentId(agentId: string): Promise<AgentLog[]> {
+export async function getLogsByAgentId(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentLog[]> {
+  const readable = readableBy
+    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
+    : undefined;
   const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE agentId = ? ORDER BY createdAt DESC",
-    [agentId],
+    `SELECT * FROM agent_log WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToAgentLog);
 }
@@ -2315,16 +2333,24 @@ export async function getLogsByEventType(eventType: AgentLogEventType): Promise<
   return rows.map(rowToAgentLog);
 }
 
-export async function getAllLogs(limit?: number): Promise<AgentLog[]> {
+export async function getAllLogs(
+  limit?: number,
+  readableBy?: { userId: string | null },
+): Promise<AgentLog[]> {
+  const readable = readableBy
+    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
+    : undefined;
+  const readableParams = readable?.params ?? [];
   if (limit) {
     const rows = await getDbClient().query<AgentLogRow>(
-      "SELECT * FROM agent_log WHERE eventType != 'agent_status_change' ORDER BY createdAt DESC LIMIT ?",
-      [limit],
+      `SELECT * FROM agent_log WHERE eventType != 'agent_status_change'${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC LIMIT ?`,
+      [...readableParams, limit],
     );
     return rows.map(rowToAgentLog);
   }
   const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log ORDER BY createdAt DESC",
+    `SELECT * FROM agent_log${readable ? ` WHERE ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    readableParams,
   );
   return rows.map(rowToAgentLog);
 }
@@ -5820,8 +5846,13 @@ export interface ConcurrentContext {
  * Returns processing inbox messages, recent task delegations by leads,
  * and currently active (in-progress) tasks across the swarm.
  */
-export async function getConcurrentContext(): Promise<ConcurrentContext> {
+export async function getConcurrentContext(readableBy?: {
+  userId: string | null;
+}): Promise<ConcurrentContext> {
   const client = getDbClient();
+  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
+  const readableSql = readable ? ` AND ${readable.sql}` : "";
+  const readableParams = readable?.params ?? [];
 
   // 1. Inbox messages currently being processed (status = 'processing')
   const processingInboxMessages = await client.query<{
@@ -5850,9 +5881,9 @@ export async function getConcurrentContext(): Promise<ConcurrentContext> {
        FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
        WHERE t.createdAt > ?
-         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)
+         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)${readableSql}
        ORDER BY t.createdAt DESC`,
-    [fiveMinutesAgo],
+    [fiveMinutesAgo, ...readableParams],
   );
 
   // 3. Currently in-progress tasks across the swarm
@@ -5868,8 +5899,9 @@ export async function getConcurrentContext(): Promise<ConcurrentContext> {
     `SELECT t.id, t.task, t.agentId, a.name as agentName, t.status, t.createdAt, t.progress
        FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
-       WHERE t.status = 'in_progress'
+       WHERE t.status = 'in_progress'${readableSql}
        ORDER BY t.createdAt DESC`,
+    readableParams,
   );
 
   return {
@@ -7157,15 +7189,27 @@ export async function deleteActiveSessionById(id: string): Promise<boolean> {
   return result.changes > 0;
 }
 
-export async function getActiveSessions(agentId?: string): Promise<ActiveSession[]> {
+export async function getActiveSessions(
+  agentId?: string,
+  readableBy?: { userId: string | null },
+): Promise<ActiveSession[]> {
+  const conditions: string[] = [];
+  const params: string[] = [];
   if (agentId) {
-    return await getDbClient().query<ActiveSession>(
-      "SELECT * FROM active_sessions WHERE agentId = ? ORDER BY startedAt DESC",
-      [agentId],
-    );
+    conditions.push("agentId = ?");
+    params.push(agentId);
   }
+  if (readableBy) {
+    const readable = readableSessionCondition(readableBy.userId, "active_sessions.taskId", {
+      nullable: true,
+    });
+    conditions.push(readable.sql);
+    params.push(...readable.params);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   return await getDbClient().query<ActiveSession>(
-    "SELECT * FROM active_sessions ORDER BY startedAt DESC",
+    `SELECT * FROM active_sessions ${where} ORDER BY startedAt DESC`,
+    params,
   );
 }
 
@@ -12905,6 +12949,8 @@ interface ListRecentSessionsOpts {
   contextKeyPrefix?: string;
   /** When true, return slim `SessionListItemSummary` rows (default: full). */
   slim?: boolean;
+  /** Restrict to sessions this viewer may open (session sharing). */
+  viewer?: SessionViewer;
 }
 
 export async function listRecentSessions(
@@ -12923,7 +12969,7 @@ export async function listRecentSessions(
   const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
 
   const conditions: string[] = ["r.parentTaskId IS NULL"];
-  const params: (string | number)[] = [];
+  const params: (string | number | null)[] = [];
 
   if (sources.length > 0) {
     conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
@@ -12941,6 +12987,11 @@ export async function listRecentSessions(
   if (opts?.contextKeyPrefix) {
     conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
     params.push(literalPrefixPattern(opts.contextKeyPrefix));
+  }
+  if (opts?.viewer) {
+    const viewer = sessionViewerCondition(opts.viewer);
+    conditions.push(viewer.sql);
+    params.push(...viewer.params);
   }
   params.push(limit, offset);
 
@@ -13013,35 +13064,43 @@ export async function listRecentSessions(
  * a plain count, no recursive chain walk needed.
  */
 export async function countSessions(
-  opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId" | "contextKeyPrefix">,
+  opts?: Pick<
+    ListRecentSessionsOpts,
+    "source" | "q" | "requestedByUserId" | "contextKeyPrefix" | "viewer"
+  >,
 ): Promise<number> {
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
   const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
 
-  const conditions: string[] = ["parentTaskId IS NULL"];
-  const params: string[] = [];
+  const conditions: string[] = ["r.parentTaskId IS NULL"];
+  const params: (string | null)[] = [];
 
   if (sources.length > 0) {
-    conditions.push(`source IN (${sources.map(() => "?").join(", ")})`);
+    conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
     params.push(...sources);
   }
   if (q && q.length > 0) {
-    conditions.push("(lower(task) LIKE ? OR lower(COALESCE(title, '')) LIKE ?)");
+    conditions.push("(lower(r.task) LIKE ? OR lower(COALESCE(r.title, '')) LIKE ?)");
     const like = `%${q.toLowerCase()}%`;
     params.push(like, like);
   }
   if (requestedByUserId) {
-    conditions.push("requestedByUserId = ?");
+    conditions.push("r.requestedByUserId = ?");
     params.push(requestedByUserId);
   }
   if (opts?.contextKeyPrefix) {
-    conditions.push(`contextKey LIKE ? ESCAPE '\\'`);
+    conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
     params.push(literalPrefixPattern(opts.contextKeyPrefix));
+  }
+  if (opts?.viewer) {
+    const viewer = sessionViewerCondition(opts.viewer);
+    conditions.push(viewer.sql);
+    params.push(...viewer.params);
   }
 
   const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM agent_tasks WHERE ${conditions.join(" AND ")}`,
+    `SELECT COUNT(*) AS count FROM agent_tasks r WHERE ${conditions.join(" AND ")}`,
     params,
   );
   return row?.count ?? 0;

@@ -130,6 +130,8 @@ import type {
   SessionListItem,
   SessionLog,
   SessionLogsResponse,
+  SessionShares,
+  SessionSharesInput,
   SessionsListResponse,
   Skill,
   SkillFile,
@@ -188,6 +190,50 @@ import type {
  * (e.g. `'pr: missing required property "number"'`). UI surfaces render it
  * as a bulleted list — see `TriggersDetailPanel` payload tester.
  */
+
+/** `GET /api/ranking` (src/http/ranking.ts). */
+export interface RankingListing {
+  v: 1;
+  claim: string;
+  name: string;
+  domain: string;
+  category: string;
+  subcategory: string | null;
+  description: string | null;
+  sourceCodeUrl: string | null;
+  updatedAt: string;
+}
+
+export interface RankingState {
+  eligible: boolean;
+  missing: Array<"SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE">;
+  telemetryOn: boolean;
+  enabled: boolean;
+  name: string | null;
+  domain: string | null;
+  listing: RankingListing | null;
+  listingMatchesDomain: boolean;
+  fileJson: string | null;
+  prUrl: string | null;
+  verifyUrl: string | null;
+}
+
+export interface RankingForm {
+  category: string;
+  subcategory: string | null;
+  description: string | null;
+  sourceCodeUrl: string | null;
+}
+
+export interface RankingOptIn {
+  domain: string;
+  claim: string;
+  listing: RankingListing;
+  fileJson: string;
+  prUrl: string;
+  verifyUrl: string;
+}
+
 export class TriggerSchemaApiError extends Error {
   readonly details: string[];
   readonly validationMessage: string;
@@ -3273,6 +3319,12 @@ class ApiClient {
     requestedByUserId?: string;
     /** Root tasks whose `contextKey` starts with this prefix (≥1.157.1). */
     contextKeyPrefix?: string;
+    /**
+     * `mine`: sessions the caller owns. `shared`: someone else's sessions
+     * shared with the caller or everyone. Omit for every session the caller
+     * can open. Session sharing servers only (`SESSION_SHARING_MIN_VERSION`).
+     */
+    scope?: "mine" | "shared";
   }): Promise<SessionListItem[]> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
@@ -3281,6 +3333,7 @@ class ApiClient {
     if (opts?.q && opts.q.length > 0) params.set("q", opts.q);
     if (opts?.requestedByUserId) params.set("requestedByUserId", opts.requestedByUserId);
     if (opts?.contextKeyPrefix) params.set("contextKeyPrefix", opts.contextKeyPrefix);
+    if (opts?.scope) params.set("scope", opts.scope);
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/sessions${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -3289,11 +3342,43 @@ class ApiClient {
     return data.sessions;
   }
 
+  /** The error carries the HTTP `status` (403: the caller has no access to this session). */
   async getSession(rootTaskId: string): Promise<SessionDetailResponse> {
     const url = `${this.getBaseUrl()}/api/sessions/${encodeURIComponent(rootTaskId)}`;
     const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch session: ${res.status}`);
+    if (!res.ok) {
+      throw Object.assign(new Error(`Failed to fetch session: ${res.status}`), {
+        status: res.status,
+      });
+    }
     return res.json();
+  }
+
+  /**
+   * Active shares of a session. `null` on 404: the API predates session
+   * sharing, so the UI hides the Share button.
+   */
+  async getSessionShares(rootTaskId: string): Promise<SessionShares | null> {
+    const url = `${this.getBaseUrl()}/api/sessions/${encodeURIComponent(rootTaskId)}/shares`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Failed to fetch session shares: ${res.status}`);
+    return (await res.json()) as SessionShares;
+  }
+
+  /** Replace a session's shares (owner only). Users left out are revoked. */
+  async putSessionShares(rootTaskId: string, input: SessionSharesInput): Promise<SessionShares> {
+    const url = `${this.getBaseUrl()}/api/sessions/${encodeURIComponent(rootTaskId)}/shares`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? `Failed to update session shares: ${res.status}`);
+    }
+    return (await res.json()) as SessionShares;
   }
 
   /** Set (non-empty string) or clear (`null`) a session's custom display title. */
@@ -3409,6 +3494,37 @@ class ApiClient {
       throw new Error(err.error || `Failed to update the consent: ${res.status}`);
     }
     return (await res.json()) as { granted: boolean; changedAt: string };
+  }
+
+  /** Whether this install can join, or is in, the public agent-swarm.dev ranking. */
+  async getRanking(): Promise<RankingState> {
+    const url = `${this.getBaseUrl()}/api/ranking`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to load the ranking state: ${res.status}`);
+    return (await res.json()) as RankingState;
+  }
+
+  /** Opt into the public ranking. Returns the entry file and its prefilled PR page. */
+  async rankingOptIn(form: RankingForm): Promise<RankingOptIn> {
+    const url = `${this.getBaseUrl()}/api/ranking/opt-in`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(form),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.message || err.error || `Failed to opt in: ${res.status}`);
+    }
+    return (await res.json()) as RankingOptIn;
+  }
+
+  /** Leave the public ranking. */
+  async rankingOptOut(): Promise<{ enabled: false; leaveUrl: string | null }> {
+    const url = `${this.getBaseUrl()}/api/ranking/opt-out`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to leave the ranking: ${res.status}`);
+    return (await res.json()) as { enabled: false; leaveUrl: string | null };
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
