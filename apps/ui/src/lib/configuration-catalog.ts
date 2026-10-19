@@ -1597,7 +1597,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SWARM_ORG_WEBSITE",
         label: "Company website",
         description:
-          "Your company's website, stored as a bare hostname such as example.com. When the logo below is empty, the dashboard uses this site's logo. Sent with telemetry as org_website when telemetry is on. Required for the public ranking; changing it leaves the ranking until a new ranking PR merges.",
+          "Your company's website, stored as a bare hostname such as example.com. When the logo below is empty, the dashboard uses this site's logo. Sent with telemetry as org_website when telemetry is on. Required for the public ranking; changing it leaves the ranking until you click Get ranked again.",
         kind: "string",
         placeholder: "example.com",
         docsUrl: `${DOCS}reference/telemetry`,

@@ -163,22 +163,15 @@ describe("ranking routes", () => {
   test("opt-in stores the listing, turns the setting on and emits it with a matching envelope", async () => {
     const result = await call("POST", "/api/ranking/opt-in", form);
     expect(result.statusCode).toBe(200);
-    const claim = String(result.json.claim);
-    expect(claim).toMatch(/^rk_[0-9a-f]{32}$/);
+    // Opting in is the whole flow: no claim, no entry file, no PR page.
+    expect(Object.keys(result.json).sort()).toEqual(["domain", "listing", "verifyUrl"]);
     expect(result.json.domain).toBe("acme.dev");
-    expect(String(result.json.prUrl)).toContain("filename=community%2Franking%2Facme.dev.json");
-    expect(JSON.parse(String(result.json.fileJson))).toEqual({
-      $schema: "./schema.json",
-      domain: "acme.dev",
-      claim,
-    });
     expect(String(result.json.verifyUrl)).toBe(
-      `https://proxy.desplega.sh/v1/ranking/verify?domain=acme.dev&claim=${claim}`,
+      "https://proxy.desplega.sh/v1/ranking/verify?domain=acme.dev",
     );
 
     const stored = parseTelemetryRanking(String(await configValue("telemetry_ranking")));
     expect(stored).toMatchObject({
-      claim,
       name: "Acme",
       domain: "acme.dev",
       category: "engineering",
@@ -186,16 +179,13 @@ describe("ranking routes", () => {
       description: "QA",
       sourceCodeUrl: null,
     });
+    expect(stored).not.toHaveProperty("claim");
     expect(await configValue("PUBLIC_RANKING_ENABLED")).toBe("true");
 
     expect(sent.map((event) => event.event)).toEqual(["ranking.opted_in"]);
     const listing = parseTelemetryRanking(String(sent[0]?.properties.listing));
     expect(listing).toEqual(stored);
     expect(sent[0]?.context).toMatchObject({ org_name: "Acme", org_website: "acme.dev" });
-
-    // A second opt-in for the same domain keeps the claim.
-    const again = await call("POST", "/api/ranking/opt-in", { category: "other" });
-    expect(again.json.claim).toBe(claim);
 
     const state = await call("GET", "/api/ranking");
     expect(state.json).toMatchObject({
@@ -204,10 +194,12 @@ describe("ranking routes", () => {
       missing: [],
       listingMatchesDomain: true,
     });
+    expect(state.json).not.toHaveProperty("prUrl");
+    expect(state.json).not.toHaveProperty("fileJson");
   });
 
-  test("only a config admin reads the ranking state and its claim", async () => {
-    const claim = String((await call("POST", "/api/ranking/opt-in", form)).json.claim);
+  test("only a config admin reads the ranking state", async () => {
+    await call("POST", "/api/ranking/opt-in", form);
     const worker: HttpRequestAuth = {
       kind: "agent",
       agentId: crypto.randomUUID(),
@@ -220,42 +212,49 @@ describe("ranking routes", () => {
     for (const auth of [worker, guest]) {
       const denied = await call("GET", "/api/ranking", undefined, handleRanking, auth);
       expect(denied.statusCode).toBe(403);
-      expect(JSON.stringify(denied.json)).not.toContain(claim);
     }
+    expect((await call("GET", "/api/ranking")).statusCode).toBe(200);
+  });
+
+  test("a v2.4.0 listing keeps working and its claim is never served or re-sent", async () => {
+    const claim = `rk_${"0".repeat(32)}`;
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "telemetry_ranking",
+      value: JSON.stringify({
+        v: 1,
+        claim,
+        name: "Acme",
+        domain: "acme.dev",
+        category: "other",
+        subcategory: null,
+        description: null,
+        sourceCodeUrl: null,
+        updatedAt: "2026-10-18T10:00:00.000Z",
+      }),
+    });
+    await upsertSwarmConfig({ scope: "global", key: "PUBLIC_RANKING_ENABLED", value: "true" });
     const state = await call("GET", "/api/ranking");
-    expect(state.statusCode).toBe(200);
-    expect((state.json.listing as { claim: string }).claim).toBe(claim);
-  });
+    expect(state.json).toMatchObject({ enabled: true, listingMatchesDomain: true });
+    expect(JSON.stringify(state.json)).not.toContain(claim);
 
-  test("concurrent first opt-ins share one claim, and leave then rejoin keeps it", async () => {
-    const [first, second] = await Promise.all([
-      call("POST", "/api/ranking/opt-in", form),
-      call("POST", "/api/ranking/opt-in", form),
-    ]);
-    expect(first.statusCode).toBe(200);
-    expect(second.statusCode).toBe(200);
-    // Either response may be the one merged into community/ranking.
-    const merged = String(first.json.claim);
-    expect(second.json.claim).toBe(merged);
-    expect(parseTelemetryRanking(String(await configValue("telemetry_ranking")))?.claim).toBe(
-      merged,
+    const put = await call(
+      "PUT",
+      "/api/config",
+      { scope: "global", key: "SWARM_ORG_NAME", value: "Acme Labs" },
+      handleConfig,
     );
-
-    expect((await call("POST", "/api/ranking/opt-out")).statusCode).toBe(200);
-    const rejoin = await call("POST", "/api/ranking/opt-in", form);
-    expect(rejoin.json.claim).toBe(merged);
+    expect(put.statusCode).toBe(200);
+    expect(sent.map((event) => event.event)).toEqual(["ranking.opted_in"]);
+    expect(String(sent[0]?.properties.listing)).not.toContain("claim");
   });
 
-  test("opt-out stores false, emits ranking.opted_out and returns the delete page", async () => {
+  test("opt-out stores false and emits ranking.opted_out", async () => {
     await call("POST", "/api/ranking/opt-in", form);
     sent = [];
     const result = await call("POST", "/api/ranking/opt-out");
     expect(result.statusCode).toBe(200);
-    expect(result.json).toEqual({
-      enabled: false,
-      leaveUrl:
-        "https://github.com/desplega-ai/agent-swarm/delete/main/community/ranking/acme.dev.json",
-    });
+    expect(result.json).toEqual({ enabled: false });
     expect(await configValue("PUBLIC_RANKING_ENABLED")).toBe("false");
     expect(sent.map((event) => [event.event, event.properties.domain])).toEqual([
       ["ranking.opted_out", "acme.dev"],
@@ -273,8 +272,8 @@ describe("ranking routes", () => {
     expect(String(result.json.error)).toContain("/api/ranking");
   });
 
-  test("renaming the org re-emits the listing with the same claim", async () => {
-    const optIn = await call("POST", "/api/ranking/opt-in", form);
+  test("renaming the org re-emits the listing", async () => {
+    await call("POST", "/api/ranking/opt-in", form);
     sent = [];
     const put = await call(
       "PUT",
@@ -287,7 +286,6 @@ describe("ranking routes", () => {
     const listing = parseTelemetryRanking(String(sent[0]?.properties.listing));
     expect(listing).toMatchObject({
       name: "Acme Labs",
-      claim: optIn.json.claim,
       subcategory: "qa-testing",
     });
     // The envelope carries the new name before the config reload reaches process.env.
@@ -312,8 +310,12 @@ describe("ranking routes", () => {
         ["ranking.opted_out", "acme.dev"],
       ]);
     }
-    // After the last case (a new website) the old listing needs a new PR.
+    // After the last case (a new website) the old listing needs a new opt-in.
     const state = await call("GET", "/api/ranking");
-    expect(state.json).toMatchObject({ enabled: false, listingMatchesDomain: false, prUrl: null });
+    expect(state.json).toMatchObject({
+      enabled: false,
+      listingMatchesDomain: false,
+      verifyUrl: null,
+    });
   });
 });

@@ -23,8 +23,6 @@ export const RANKING_CATEGORIES = Object.keys(RANKING_TAXONOMY) as [
   keyof typeof RANKING_TAXONOMY,
   ...(keyof typeof RANKING_TAXONOMY)[],
 ];
-export const RANKING_CLAIM_PATTERN = /^rk_[0-9a-f]{32}$/;
-
 const hostname = z.string().refine((v) => normalizeOrgWebsite(v) === v, "bare hostname");
 const nullableText = (max: number) => z.string().trim().min(1).max(max).nullable();
 
@@ -37,7 +35,11 @@ function inCategory(category: string, subcategory: string | null): boolean {
 export const telemetryRankingV1 = z
   .strictObject({
     v: z.literal(1),
-    claim: z.string().regex(RANKING_CLAIM_PATTERN),
+    /** Minted by v2.4.0 for the retired ranking PR. Still parsed, never written; the proxy ignores it. */
+    claim: z
+      .string()
+      .regex(/^rk_[0-9a-f]{32}$/)
+      .optional(),
     name: z.string().trim().min(1).max(60),
     domain: hostname,
     category: z.enum(RANKING_CATEGORIES),
@@ -88,12 +90,6 @@ export const rankingFormSchema = z.object({
 });
 export type RankingForm = z.infer<typeof rankingFormSchema>;
 
-/** `rk_` + 32 lowercase hex characters from the platform CSPRNG. */
-export function mintRankingClaim(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return `rk_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
-}
-
 const blankToNull = (value: string | null | undefined) => value?.trim() || null;
 
 /**
@@ -104,7 +100,6 @@ const blankToNull = (value: string | null | undefined) => value?.trim() || null;
 export function buildListing(
   identity: OrgIdentityStatus,
   form: RankingForm,
-  claim: string,
   now: Date = new Date(),
 ): TelemetryRanking {
   if (!identity.ok || !identity.name || !identity.website) {
@@ -112,7 +107,6 @@ export function buildListing(
   }
   const listing = {
     v: 1 as const,
-    claim,
     name: identity.name,
     domain: identity.website,
     category: form.category,
@@ -122,26 +116,4 @@ export function buildListing(
     updatedAt: now.toISOString(),
   };
   return parseTelemetryRanking(JSON.stringify(listing));
-}
-
-/** The `community/ranking/<domain>.json` file that approves this install. */
-export function rankingEntryFile(listing: Pick<TelemetryRanking, "domain" | "claim">): string {
-  return `${JSON.stringify({ $schema: "./schema.json", domain: listing.domain, claim: listing.claim }, null, 2)}\n`;
-}
-
-export const RANKING_REPO = "desplega-ai/agent-swarm";
-
-/** GitHub's "new file" page, prefilled with the entry, as a PR from the admin's fork. */
-export function rankingPrUrl(listing: Pick<TelemetryRanking, "domain" | "claim">): string {
-  const params = new URLSearchParams({
-    filename: `community/ranking/${listing.domain}.json`,
-    value: rankingEntryFile(listing),
-    message: `chore(ranking): add ${listing.domain}`,
-  });
-  return `https://github.com/${RANKING_REPO}/new/main?${params.toString()}`;
-}
-
-/** GitHub's delete page for an entry, to leave the ranking for good. */
-export function rankingLeaveUrl(domain: string): string {
-  return `https://github.com/${RANKING_REPO}/delete/main/community/ranking/${domain}.json`;
 }

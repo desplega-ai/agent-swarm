@@ -96,7 +96,7 @@ export interface ContextInput {
   swarmVersion: string;
   installMethod?: string | null;
   installPreset?: string | null;
-  acquisitionSource?: string | null;
+  acquisitionSource?: EventContext["acquisition_source"];
 }
 
 /** Build the top-level `context` object of a schema_version 2 event. */

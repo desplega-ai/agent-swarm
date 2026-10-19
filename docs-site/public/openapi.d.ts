@@ -4630,7 +4630,7 @@ export interface paths {
         };
         /**
          * Public ranking state
-         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. The listing carries the private ranking claim, so only a config admin can read it.
+         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
          */
         get: {
             parameters: {
@@ -4657,7 +4657,6 @@ export interface paths {
                             listing: {
                                 /** @enum {number} */
                                 v: 1;
-                                claim: string;
                                 name: string;
                                 domain: string;
                                 /** @enum {string} */
@@ -4668,8 +4667,6 @@ export interface paths {
                                 updatedAt: string;
                             } | null;
                             listingMatchesDomain: boolean;
-                            fileJson: string | null;
-                            prUrl: string | null;
                             verifyUrl: string | null;
                         };
                     };
@@ -4713,7 +4710,7 @@ export interface paths {
         put?: never;
         /**
          * Opt this install into the public ranking
-         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. The install is ranked only after a ranking PR with the returned file is merged into desplega-ai/agent-swarm.
+         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
          */
         post: {
             parameters: {
@@ -4742,11 +4739,9 @@ export interface paths {
                     content: {
                         "application/json": {
                             domain: string;
-                            claim: string;
                             listing: {
                                 /** @enum {number} */
                                 v: 1;
-                                claim: string;
                                 name: string;
                                 domain: string;
                                 /** @enum {string} */
@@ -4756,8 +4751,6 @@ export interface paths {
                                 sourceCodeUrl: string | null;
                                 updatedAt: string;
                             };
-                            fileJson: string;
-                            prUrl: string;
                             verifyUrl: string;
                         };
                     };
@@ -4817,7 +4810,7 @@ export interface paths {
         put?: never;
         /**
          * Leave the public ranking
-         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. Returns the GitHub page that deletes the ranking entry.
+         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
          */
         post: {
             parameters: {
@@ -4837,7 +4830,6 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             enabled: false;
-                            leaveUrl: string | null;
                         };
                     };
                 };
