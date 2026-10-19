@@ -55,6 +55,7 @@ import {
   skillFromToolArgs,
 } from "../providers/skill-invoke.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
+import { rankingUsageProps } from "../ranking/usage.ts";
 import { WorkerRealtimeClient } from "../realtime/worker-client";
 import { resumedTaskModelSelection, type TaskModelPinFields } from "../tasks/model-pin.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
@@ -1228,6 +1229,10 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "TEMPLATE_REGISTRY_URL",
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
+  // Gate the public-ranking `ranking.usage` emit, so clearing the website or
+  // turning the setting off stops it on running workers.
+  "SWARM_ORG_WEBSITE",
+  "PUBLIC_RANKING_ENABLED",
   // pi reads these from process.env for its traits and its session.
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",
@@ -4923,6 +4928,12 @@ async function spawnProviderProcess(
             },
             { userId: opts.requestedByUserId ?? null },
           );
+          // Public ranking: token counts only, while the install is opted in.
+          const rankingUsage = rankingUsageProps(result.cost, {
+            model: result.cost.model,
+            provider: result.cost.provider ?? opts.harnessProvider,
+          });
+          if (rankingUsage) telemetry.ranking("usage", rankingUsage);
         }
 
         // Post completion context usage snapshot

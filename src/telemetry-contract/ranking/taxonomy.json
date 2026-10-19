@@ -1,0 +1,8 @@
+{
+  "engineering": ["coding-agents", "qa-testing", "devops", "code-review"],
+  "product": ["research", "design", "analytics"],
+  "marketing": ["content", "seo", "social"],
+  "support": ["customer-support", "docs"],
+  "operations": ["back-office", "sales-ops", "finance"],
+  "other": []
+}

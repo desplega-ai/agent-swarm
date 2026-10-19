@@ -188,6 +188,50 @@ import type {
  * (e.g. `'pr: missing required property "number"'`). UI surfaces render it
  * as a bulleted list — see `TriggersDetailPanel` payload tester.
  */
+
+/** `GET /api/ranking` (src/http/ranking.ts). */
+export interface RankingListing {
+  v: 1;
+  claim: string;
+  name: string;
+  domain: string;
+  category: string;
+  subcategory: string | null;
+  description: string | null;
+  sourceCodeUrl: string | null;
+  updatedAt: string;
+}
+
+export interface RankingState {
+  eligible: boolean;
+  missing: Array<"SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE">;
+  telemetryOn: boolean;
+  enabled: boolean;
+  name: string | null;
+  domain: string | null;
+  listing: RankingListing | null;
+  listingMatchesDomain: boolean;
+  fileJson: string | null;
+  prUrl: string | null;
+  verifyUrl: string | null;
+}
+
+export interface RankingForm {
+  category: string;
+  subcategory: string | null;
+  description: string | null;
+  sourceCodeUrl: string | null;
+}
+
+export interface RankingOptIn {
+  domain: string;
+  claim: string;
+  listing: RankingListing;
+  fileJson: string;
+  prUrl: string;
+  verifyUrl: string;
+}
+
 export class TriggerSchemaApiError extends Error {
   readonly details: string[];
   readonly validationMessage: string;
@@ -3409,6 +3453,37 @@ class ApiClient {
       throw new Error(err.error || `Failed to update the consent: ${res.status}`);
     }
     return (await res.json()) as { granted: boolean; changedAt: string };
+  }
+
+  /** Whether this install can join, or is in, the public agent-swarm.dev ranking. */
+  async getRanking(): Promise<RankingState> {
+    const url = `${this.getBaseUrl()}/api/ranking`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to load the ranking state: ${res.status}`);
+    return (await res.json()) as RankingState;
+  }
+
+  /** Opt into the public ranking. Returns the entry file and its prefilled PR page. */
+  async rankingOptIn(form: RankingForm): Promise<RankingOptIn> {
+    const url = `${this.getBaseUrl()}/api/ranking/opt-in`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(form),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.message || err.error || `Failed to opt in: ${res.status}`);
+    }
+    return (await res.json()) as RankingOptIn;
+  }
+
+  /** Leave the public ranking. */
+  async rankingOptOut(): Promise<{ enabled: false; leaveUrl: string | null }> {
+    const url = `${this.getBaseUrl()}/api/ranking/opt-out`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to leave the ranking: ${res.status}`);
+    return (await res.json()) as { enabled: false; leaveUrl: string | null };
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */

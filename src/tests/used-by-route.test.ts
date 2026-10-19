@@ -184,7 +184,17 @@ describe("POST /api/used-by", () => {
     await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "" });
     const result = await post({ granted: true }, OPERATOR);
     expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body)).toEqual({
+      error: "Set the organization name and website first",
+    });
     expect(proxied).toEqual([]);
+  });
+
+  test("a placeholder name still grants: the ranking's placeholder rule does not apply", async () => {
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "Swarm" });
+    const result = await post({ granted: true }, OPERATOR);
+    expect(result.statusCode).toBe(200);
+    expect(proxied[0]?.body).toMatchObject({ org_name: "Swarm", org_website: "acme.com" });
   });
 });
 

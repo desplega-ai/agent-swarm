@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getSwarmConfigs, upsertSwarmConfig } from "../be/db";
 import { isTelemetryEnabled, trackRelayed } from "../telemetry";
+import { orgIdentityStatus } from "../utils/org-identity";
 import { normalizeOrgWebsite, TELEMETRY_PROXY_ORIGIN } from "../utils/org-website";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
@@ -46,7 +47,8 @@ const usedBy = route({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function globalConfig(key: string): Promise<string | undefined> {
+/** A global config value, falling back to the process env. */
+export async function globalConfig(key: string): Promise<string | undefined> {
   const stored = (await getSwarmConfigs({ scope: "global", key }))?.[0]?.value?.trim();
   return stored || process.env[key]?.trim() || undefined;
 }
@@ -79,8 +81,14 @@ export async function handleUsedBy(
   if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
 
   const { granted } = parsed.body;
-  const currentName = await globalConfig("SWARM_ORG_NAME");
-  const currentWebsite = normalizeOrgWebsite(await globalConfig("SWARM_ORG_WEBSITE"));
+  // The shared identity reader. The grant keeps its own rule (any non-empty
+  // name), so it does not apply the ranking's placeholder-name check.
+  const current = orgIdentityStatus({
+    SWARM_ORG_NAME: await globalConfig("SWARM_ORG_NAME"),
+    SWARM_ORG_WEBSITE: await globalConfig("SWARM_ORG_WEBSITE"),
+  });
+  const currentName = current.name ?? undefined;
+  const currentWebsite = current.website;
   const grantedName = granted ? undefined : await globalConfig(GRANTED_NAME_KEY);
   const grantedWebsite = granted
     ? null
