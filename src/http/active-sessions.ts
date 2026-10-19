@@ -75,6 +75,7 @@ const deleteSessionById = route({
   method: "delete",
   path: "/api/active-sessions/{id}",
   pattern: ["api", "active-sessions", null],
+  session: { activeSessionParam: "id" },
   summary: "Delete active session by ID",
   tags: ["Active Sessions"],
   params: z.object({ id: z.string() }),
@@ -114,6 +115,7 @@ const cleanupSessions = route({
   method: "post",
   path: "/api/active-sessions/cleanup",
   pattern: ["api", "active-sessions", "cleanup"],
+  session: { agentWide: "Deletes every session of an agent, or every stale session." },
   summary: "Clean up stale sessions",
   tags: ["Active Sessions"],
   body: z
@@ -131,6 +133,7 @@ const recoverOrphanedTasks = route({
   method: "post",
   path: "/api/active-sessions/recover-orphaned-tasks",
   pattern: ["api", "active-sessions", "recover-orphaned-tasks"],
+  session: { none: "Its handler admits only the calling agent, never a user." },
   summary: "Recover orphaned in-progress tasks for an agent",
   tags: ["Active Sessions"],
   body: z.object({

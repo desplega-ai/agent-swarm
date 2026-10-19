@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { getSteeringMessageById } from "../be/db";
+import { getActiveSessionById } from "../be/db/active-sessions";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   getSessionRoot,
@@ -91,9 +92,13 @@ async function denialFor(
   return needed === "read" ? SESSION_READ_DENIED : SESSION_WRITE_DENIED;
 }
 
+export const SESSION_AGENT_WIDE_DENIED =
+  "This changes sessions across a whole agent. Only the agent or the operator can call it.";
+
 /**
- * Enforces a route's `taskParam` / `steeringParam` session posture before any
- * handler runs: a GET needs read access, every other method write access.
+ * Enforces a route's path session posture (`taskParam`, `steeringParam`,
+ * `activeSessionParam`, `agentWide`) before any handler runs: a GET needs read
+ * access, every other method write access.
  */
 export async function pathSessionDenial(
   req: IncomingMessage,
@@ -102,19 +107,27 @@ export async function pathSessionDenial(
   pathSegments: string[],
 ): Promise<string | null> {
   const posture = def.session;
-  if (!posture || !("taskParam" in posture || "steeringParam" in posture)) return null;
+  if (!posture || "bodyTaskIds" in posture || "none" in posture) return null;
   const actor = await resolveSessionActor(req, myAgentId);
   if (actor.kind === "bypass") return null;
+  if ("agentWide" in posture) return SESSION_AGENT_WIDE_DENIED;
+  const needed = def.method === "get" ? "read" : "write";
   const params = routePathParams(def, pathSegments);
   let taskId: string | undefined;
   if ("taskParam" in posture) {
     taskId = params[posture.taskParam];
-  } else {
+  } else if ("steeringParam" in posture) {
     const message = await getSteeringMessageById(params[posture.steeringParam] ?? "");
     taskId = message?.taskId;
+  } else {
+    const row = await getActiveSessionById(params[posture.activeSessionParam] ?? "");
+    // An unknown row passes so the handler answers; a row with no task is the agent's own.
+    if (!row) return null;
+    if (!row.taskId) return needed === "read" ? SESSION_READ_DENIED : SESSION_WRITE_DENIED;
+    taskId = row.taskId;
   }
   if (!taskId) return null;
-  return denialFor(actor, taskId, def.method === "get" ? "read" : "write");
+  return denialFor(actor, taskId, needed);
 }
 
 /** Enforces a `bodyTaskIds` posture: every task the body names needs write access. */

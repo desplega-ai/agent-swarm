@@ -10,9 +10,11 @@ import {
   createSteeringMessage,
   createTaskExtended,
   createUser,
+  getActiveSessions,
   getDbClient,
   getTaskById,
   initDb,
+  insertActiveSession,
   insertTaskAttachment,
 } from "../be/db";
 import { attachRole, detachRole, ensureRbacSeedsSynced } from "../be/rbac-roles";
@@ -33,6 +35,7 @@ import { handlePoll } from "../http/poll";
 import { type RouteDef, routeRegistry } from "../http/route-def";
 import { handleScriptRuns } from "../http/script-runs";
 import {
+  SESSION_AGENT_WIDE_DENIED,
   SESSION_READ_DENIED,
   SESSION_WRITE_DENIED,
   USER_AGENT_HEADER_DENIED,
@@ -45,10 +48,11 @@ import { beginRequestAuthScope } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
 
 // Walks the route registry. Every route keyed by a task, steering message or
-// attachment, and every write whose body names a task, declares a session
-// posture, and each posture holds against minted `aswt_` user tokens: an
-// unshared user and a read-only sharee change nothing, the owner and a write
-// sharee pass. A user token never acts as an agent through X-Agent-ID.
+// attachment, every write whose body names a task, and every active-session
+// write (keyed by a row id or a whole agent) declares a session posture, and
+// each posture holds against minted `aswt_` user tokens: an unshared user and
+// a read-only sharee change nothing, the owner and a write sharee pass. A user
+// token never acts as an agent through X-Agent-ID.
 
 const OPERATOR_KEY = "session-posture-operator-key";
 const TASK_PARAMS = new Set(["taskId", "rootTaskId", "parentTaskId", "attachmentId", "steeringId"]);
@@ -106,8 +110,11 @@ let writer: { id: string };
 let reader: { id: string };
 const tokens = {} as Record<Who, string>;
 let filesDir: string;
+const multiRuntime = process.env.MULTI_RUNTIME_ENABLED;
 
 beforeAll(async () => {
+  // Agent-wide cleanup deletes rows only in single-runtime mode.
+  process.env.MULTI_RUNTIME_ENABLED = "false";
   filesDir = await mkdtemp(join(tmpdir(), "session-posture-"));
   process.env.AGENT_FS_LOCAL_DIR = filesDir;
   delete process.env.AGENT_FS_API_URL;
@@ -134,6 +141,8 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
   resetFileStorageProvider();
+  if (multiRuntime === undefined) delete process.env.MULTI_RUNTIME_ENABLED;
+  else process.env.MULTI_RUNTIME_ENABLED = multiRuntime;
   await rm(filesDir, { recursive: true, force: true });
 });
 
@@ -178,6 +187,16 @@ function namesTaskInBody(def: RouteDef): boolean {
     def.method !== "get" &&
     !keyedByTaskPath(def) &&
     bodyKeys(def.body).some((key) => BODY_TASK_KEYS.has(key))
+  );
+}
+
+/** A write keyed by a task only indirectly: an active-session row id, or a whole agent. */
+function activeSessionWrite(def: RouteDef): boolean {
+  return (
+    def.method !== "get" &&
+    def.path.startsWith("/api/active-sessions") &&
+    !keyedByTaskPath(def) &&
+    !namesTaskInBody(def)
   );
 }
 
@@ -279,6 +298,11 @@ async function call(
 
 const pathRoutes = routeRegistry.filter(keyedByTaskPath);
 const bodyRoutes = routeRegistry.filter(namesTaskInBody);
+const indirectRoutes = routeRegistry.filter(activeSessionWrite);
+
+async function activeSessionRows(agentId: string): Promise<string[]> {
+  return (await getActiveSessions(agentId)).map((row) => row.id);
+}
 
 describe("route registry session posture", () => {
   test("every task-keyed route and every task-naming write declares a session posture", () => {
@@ -306,6 +330,18 @@ describe("route registry session posture", () => {
       .filter((def) => !(def.session && ("bodyTaskIds" in def.session || "none" in def.session)))
       .map((def) => `${def.method.toUpperCase()} ${def.path}`);
     expect(wrongBody).toEqual([]);
+    expect(indirectRoutes.length).toBeGreaterThanOrEqual(3);
+    const wrongIndirect = indirectRoutes
+      .filter((def) => {
+        const posture = def.session;
+        if (!posture) return true;
+        if ("activeSessionParam" in posture) {
+          return !pathParams(def.path).includes(posture.activeSessionParam);
+        }
+        return !("agentWide" in posture || "none" in posture);
+      })
+      .map((def) => `${def.method.toUpperCase()} ${def.path}`);
+    expect(wrongIndirect).toEqual([]);
   });
 
   for (const def of pathRoutes) {
@@ -387,6 +423,118 @@ describe("route registry session posture", () => {
       }
     });
   }
+});
+
+describe("active-session writes keyed by a row id or a whole agent", () => {
+  for (const def of indirectRoutes) {
+    const label = `${def.method.toUpperCase()} ${def.path}`;
+    test(`${label}: no user without session write access changes a row`, async () => {
+      const session = await privateSession(label);
+      const taskIds = [session.root.id, session.child.id];
+      const worker = await createAgent({ name: `${label} worker`, isLead: false, status: "idle" });
+      const row = await insertActiveSession({
+        agentId: worker.id,
+        taskId: session.child.id,
+        triggerType: "task_assigned",
+      });
+      const posture = def.session;
+      const method = def.method.toUpperCase();
+      const path = def.path.replace("{id}", row.id);
+      const body = { agentId: worker.id };
+
+      if (posture && "activeSessionParam" in posture) {
+        for (const who of ["viewer", "reader"] as const) {
+          const before = await sessionState(taskIds);
+          const res = await call(method, path, tokens[who]);
+          expect({ label, who, status: res.status }).toEqual({ label, who, status: 403 });
+          expect(res.body).toContain(SESSION_WRITE_DENIED);
+          expect(await sessionState(taskIds)).toBe(before);
+        }
+        const writerRes = await call(method, path, tokens.writer);
+        expect({ label, status: writerRes.status }).toEqual({ label, status: 200 });
+        expect(await activeSessionRows(worker.id)).toEqual([]);
+
+        // A row with no task is the agent's own: no user deletes it, the agent does.
+        const own = await insertActiveSession({ agentId: worker.id, triggerType: "heartbeat" });
+        const ownPath = def.path.replace("{id}", own.id);
+        for (const who of ["viewer", "reader", "writer", "owner"] as const) {
+          const res = await call(method, ownPath, tokens[who]);
+          expect({ label, who, status: res.status }).toEqual({ label, who, status: 403 });
+          expect(await activeSessionRows(worker.id)).toEqual([own.id]);
+        }
+        const agentRes = await call(method, ownPath, OPERATOR_KEY, { agentId: worker.id });
+        expect(agentRes.status).toBe(200);
+        expect(await activeSessionRows(worker.id)).toEqual([]);
+        return;
+      }
+
+      for (const who of ["viewer", "reader", "writer", "owner"] as const) {
+        const before = await sessionState(taskIds);
+        const res = await call(method, path, tokens[who], { body });
+        expect({ label, who, ok: res.status < 300 }).toEqual({ label, who, ok: false });
+        if (posture && "agentWide" in posture)
+          expect(res.body).toContain(SESSION_AGENT_WIDE_DENIED);
+        expect(await sessionState(taskIds)).toBe(before);
+        expect(await activeSessionRows(worker.id)).toEqual([row.id]);
+      }
+    });
+  }
+});
+
+describe("B11 indirect active-session repros", () => {
+  test("a read-only sharee cannot delete by row id what it cannot delete by task id", async () => {
+    const session = await privateSession("delete by id");
+    const row = await insertActiveSession({
+      agentId: agent.id,
+      taskId: session.child.id,
+      triggerType: "task_assigned",
+    });
+    const listed = await call("GET", `/api/active-sessions?agentId=${agent.id}`, tokens.reader);
+    expect(listed.status).toBe(200);
+    expect(listed.body).toContain(row.id);
+
+    const byTask = await call(
+      "DELETE",
+      `/api/active-sessions/by-task/${session.child.id}`,
+      tokens.reader,
+    );
+    expect(byTask.status).toBe(403);
+    const byId = await call("DELETE", `/api/active-sessions/${row.id}`, tokens.reader);
+    expect({ status: byId.status, body: byId.body }).toEqual({
+      status: 403,
+      body: expect.stringContaining(SESSION_WRITE_DENIED),
+    });
+    expect(await activeSessionRows(agent.id)).toContain(row.id);
+  });
+
+  test("an unshared user cannot clean up an agent's private sessions", async () => {
+    const session = await privateSession("cleanup");
+    const worker = await createAgent({ name: "Cleanup worker", isLead: false, status: "idle" });
+    const row = await insertActiveSession({
+      agentId: worker.id,
+      taskId: session.child.id,
+      triggerType: "task_assigned",
+    });
+    const res = await call("POST", "/api/active-sessions/cleanup", tokens.viewer, {
+      body: { agentId: worker.id },
+    });
+    expect({ status: res.status, body: res.body }).toEqual({
+      status: 403,
+      body: expect.stringContaining(SESSION_AGENT_WIDE_DENIED),
+    });
+    expect(await activeSessionRows(worker.id)).toEqual([row.id]);
+
+    // Control: the worker's own boot cleanup still deletes it.
+    const boot = await call("POST", "/api/active-sessions/cleanup", OPERATOR_KEY, {
+      body: { agentId: worker.id },
+      agentId: worker.id,
+    });
+    expect({ status: boot.status, body: JSON.parse(boot.body) }).toEqual({
+      status: 200,
+      body: { cleaned: 1 },
+    });
+    expect(await activeSessionRows(worker.id)).toEqual([]);
+  });
 });
 
 describe("a user token never acts as an agent", () => {

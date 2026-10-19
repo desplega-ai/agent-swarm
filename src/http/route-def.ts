@@ -85,7 +85,8 @@ export interface RouteDef<
   /**
    * Session posture: how a user caller's session access gates this route.
    * Required on every route keyed by a task, steering message or attachment,
-   * and on every write whose body names a task (`session-route-posture.test.ts`).
+   * on every write whose body names a task, and on every active-session write
+   * (`session-route-posture.test.ts`).
    * `handleCore` enforces the path forms; `parse()` enforces `bodyTaskIds`.
    */
   session?: SessionPosture;
@@ -104,12 +105,18 @@ export interface RouteDef<
 /**
  * - `taskParam` / `steeringParam`: the path param naming a task, or a steering
  *   message whose task counts. A GET needs read access, any other method write.
+ * - `activeSessionParam`: the path param naming an active-session row; its task
+ *   counts the same way. A row with no task admits no user.
  * - `bodyTaskIds`: the task ids a write's body names; each needs write access.
+ * - `agentWide`: why the route changes sessions across a whole agent. It
+ *   refuses every user actor; agents and the operator key keep access.
  * - `none`: why the session does not gate this route.
  */
 export type SessionPosture =
   | { taskParam: string }
   | { steeringParam: string }
+  | { activeSessionParam: string }
+  | { agentWide: string }
   | { bodyTaskIds: (body: unknown) => readonly unknown[] }
   | { none: string };
 

@@ -1,3 +1,4 @@
+import type { ActiveSession } from "../../types";
 import { getDbClient } from "./runtime";
 
 /**
@@ -27,4 +28,8 @@ export async function refreshActiveSessionOnActivity(
     [new Date(nowMs).toISOString(), taskId, new Date(nowMs - minIntervalMs).toISOString()],
   );
   return result.changes > 0;
+}
+
+export async function getActiveSessionById(id: string): Promise<ActiveSession | null> {
+  return getDbClient().get<ActiveSession>("SELECT * FROM active_sessions WHERE id = ?", [id]);
 }
