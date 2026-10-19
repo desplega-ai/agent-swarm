@@ -33,9 +33,9 @@ import { beginRequestAuthScope } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
 
 // Every route here returns task content. A minted `aswt_` token for a user with
-// no share must not read a private session through any of them, even when it
-// names the assigned agent in X-Agent-ID. The owner, a shared user and the
-// agent itself (operator key + X-Agent-ID) keep reading it.
+// no share must not read a private session through any of them. A worker-only
+// feed refuses every user token that names the agent in X-Agent-ID. The owner,
+// a shared user and the agent itself (operator key + X-Agent-ID) keep reading.
 
 const OPERATOR_KEY = "session-routes-operator-key";
 const HANDLERS = [
@@ -132,24 +132,32 @@ async function get(path: string, who: Who, withAgentHeader = false) {
   return { status: res.status, body: await res.text() };
 }
 
-/**
- * The unshared viewer gets `deniedStatus` without `secret`; the owner, the
- * sharee and the agent read it. `withAgentHeader` makes every user token also
- * name the agent, as a worker-only feed requires.
- */
+/** The unshared viewer gets `deniedStatus` without `secret`; the owner, the sharee and the agent read it. */
 async function expectPrivate(
   path: string,
   secret: string,
-  { deniedStatus, withAgentHeader = false }: { deniedStatus: 200 | 403; withAgentHeader?: boolean },
+  { deniedStatus }: { deniedStatus: 200 | 403 },
 ) {
-  const denied = await get(path, "viewer", withAgentHeader);
+  const denied = await get(path, "viewer");
   expect({ path, status: denied.status }).toEqual({ path, status: deniedStatus });
   expect(denied.body).not.toContain(secret);
   for (const who of ["owner", "sharee", "agent"] as const) {
-    const allowed = await get(path, who, withAgentHeader);
+    const allowed = await get(path, who);
     expect({ path, who, status: allowed.status }).toEqual({ path, who, status: 200 });
     expect(allowed.body).toContain(secret);
   }
+}
+
+/** A worker-only feed: every user token naming the agent gets 403 without `secret`; the agent reads it. */
+async function expectWorkerOnly(path: string, secret: string) {
+  for (const who of ["viewer", "sharee", "owner"] as const) {
+    const denied = await get(path, who, true);
+    expect({ path, who, status: denied.status }).toEqual({ path, who, status: 403 });
+    expect(denied.body).not.toContain(secret);
+  }
+  const allowed = await get(path, "agent");
+  expect({ path, status: allowed.status }).toEqual({ path, status: 200 });
+  expect(allowed.body).toContain(secret);
 }
 
 describe("task-content routes respect session read access", () => {
@@ -166,14 +174,8 @@ describe("task-content routes respect session read access", () => {
     });
 
     await expectPrivate(`/api/tasks/${child.id}/steering-messages`, secret, { deniedStatus: 403 });
-    await expectPrivate(`/api/steering-messages?taskId=${child.id}`, secret, {
-      deniedStatus: 403,
-      withAgentHeader: true,
-    });
-    await expectPrivate("/api/steering-messages", secret, {
-      deniedStatus: 200,
-      withAgentHeader: true,
-    });
+    await expectWorkerOnly(`/api/steering-messages?taskId=${child.id}`, secret);
+    await expectWorkerOnly("/api/steering-messages", secret);
   });
 
   test("B7 session logs", async () => {
@@ -271,13 +273,10 @@ describe("task-content routes respect session read access", () => {
     await expectPrivate(`/api/agents/${agent.id}?include=tasks`, secret, { deniedStatus: 200 });
 
     await setStatus("paused");
-    await expectPrivate("/api/paused-tasks", secret, { deniedStatus: 200, withAgentHeader: true });
+    await expectWorkerOnly("/api/paused-tasks", secret);
 
     await setStatus("cancelled");
-    await expectPrivate(`/cancelled-tasks?taskId=${child.id}`, secret, {
-      deniedStatus: 403,
-      withAgentHeader: true,
-    });
-    await expectPrivate("/cancelled-tasks", secret, { deniedStatus: 200, withAgentHeader: true });
+    await expectWorkerOnly(`/cancelled-tasks?taskId=${child.id}`, secret);
+    await expectWorkerOnly("/cancelled-tasks", secret);
   });
 });

@@ -49,9 +49,11 @@ import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
 import {
   canReadSession,
+  pathSessionDenial,
   readableByFor,
   resolveSessionActor,
   SESSION_READ_DENIED,
+  userAgentIdentityDenial,
 } from "./session-access";
 import {
   agentWithCapacity,
@@ -509,6 +511,15 @@ export async function handleCore(
     setRequestAuth(req, auth);
   }
 
+  // A user token never gains agent identity from X-Agent-ID, on /mcp, /api/poll
+  // or any worker-header route.
+  const routeDef = findRoute(req.method, pathSegments);
+  const agentIdentityDenial = await userAgentIdentityDenial(req, routeDef, pathSegments);
+  if (agentIdentityDenial) {
+    jsonError(res, agentIdentityDenial, 403);
+    return true;
+  }
+
   if (auth?.kind === "agent") {
     const query = parseQueryParams(req.url || "");
     const duplicate = duplicateGuardedQueryKey(query);
@@ -571,7 +582,7 @@ export async function handleCore(
   if (auth?.kind === "user" && isRbacEnabled()) {
     const grant = await getUserGrant(auth.userId);
     if (!grant.grantsAll) {
-      const def = findRoute(req.method, pathSegments);
+      const def = routeDef;
       const decision = decideAdmission({
         method: req.method ?? "",
         rbac: def?.rbac,
@@ -588,6 +599,16 @@ export async function handleCore(
         jsonError(res, `Forbidden: ${decision.reason}`, 403);
         return true;
       }
+    }
+  }
+
+  // Session access for every route keyed by a task or steering message, before
+  // its handler reads or changes anything (the route's `session` posture).
+  if (routeDef?.session) {
+    const sessionDenial = await pathSessionDenial(req, myAgentId, routeDef, pathSegments);
+    if (sessionDenial) {
+      jsonError(res, sessionDenial, 403);
+      return true;
     }
   }
 

@@ -113,6 +113,9 @@ const mintSessionTokenRoute = route({
   method: "post",
   path: "/api/sessions/tokens",
   pattern: ["api", "sessions", "tokens"],
+  session: {
+    none: "user tokens cannot mint: the handler admits only the operator key or the task's own runtime",
+  },
   summary: "Mint an ephemeral task or runtime token",
   description:
     "Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.",
@@ -225,6 +228,7 @@ const getSession = route({
   method: "get",
   path: "/api/sessions/{rootTaskId}",
   pattern: ["api", "sessions", null],
+  session: { taskParam: "rootTaskId" },
   summary: "Get a session — root task + the entire descendant chain",
   tags: ["Sessions"],
   params: z.object({ rootTaskId: z.string() }),
@@ -250,6 +254,7 @@ const getSessionShares = route({
   method: "get",
   path: "/api/sessions/{rootTaskId}/shares",
   pattern: ["api", "sessions", null, "shares"],
+  session: { taskParam: "rootTaskId" },
   summary: "List a session's active shares",
   description:
     "Active shares only. `everyone` is the access every user has; `users` are per-person shares. A session with no shares is private to its owner.",
@@ -268,6 +273,7 @@ const putSessionShares = route({
   method: "put",
   path: "/api/sessions/{rootTaskId}/shares",
   pattern: ["api", "sessions", null, "shares"],
+  session: { taskParam: "rootTaskId" },
   summary: "Set who can view or edit a session",
   description:
     "Owner only. The body is the full desired state: users left out lose access. Changed targets have their active share revoked and a new one inserted in one transaction; shares are never deleted.",

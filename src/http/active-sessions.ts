@@ -13,7 +13,7 @@ import {
 } from "../be/db";
 import { ActiveSessionSchema, AgentTaskSchema } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
 import { readableByFor, resolveSessionActor } from "./session-access";
 import { jsonError } from "./utils";
 
@@ -40,6 +40,7 @@ const createActiveSession = route({
   method: "post",
   path: "/api/active-sessions",
   pattern: ["api", "active-sessions"],
+  session: bodyTask("taskId"),
   summary: "Create a new active session",
   tags: ["Active Sessions"],
   body: z.object({
@@ -61,6 +62,7 @@ const deleteSessionByTask = route({
   method: "delete",
   path: "/api/active-sessions/by-task/{taskId}",
   pattern: ["api", "active-sessions", "by-task", null],
+  session: { taskParam: "taskId" },
   summary: "Delete active session by task ID",
   tags: ["Active Sessions"],
   params: z.object({ taskId: z.string() }),
@@ -85,6 +87,7 @@ const heartbeatSession = route({
   method: "put",
   path: "/api/active-sessions/heartbeat/{taskId}",
   pattern: ["api", "active-sessions", "heartbeat", null],
+  session: { taskParam: "taskId" },
   summary: "Update heartbeat for an active session",
   tags: ["Active Sessions"],
   params: z.object({ taskId: z.string() }),
@@ -97,6 +100,7 @@ const updateProviderSession = route({
   method: "put",
   path: "/api/active-sessions/provider-session/{taskId}",
   pattern: ["api", "active-sessions", "provider-session", null],
+  session: { taskParam: "taskId" },
   summary: "Update provider session ID on an active session",
   tags: ["Active Sessions"],
   params: z.object({ taskId: z.string() }),

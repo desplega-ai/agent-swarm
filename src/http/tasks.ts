@@ -81,12 +81,13 @@ import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
 import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
 import {
   canReadSession,
   readableByFor,
   resolveSessionActor,
   SESSION_READ_DENIED,
+  SESSION_WRITE_DENIED,
   sessionAccessFor,
 } from "./session-access";
 import { jsonError, parseBody } from "./utils";
@@ -271,6 +272,7 @@ const createTask = route({
   method: "post",
   path: "/api/tasks",
   pattern: ["api", "tasks"],
+  session: bodyTask("parentTaskId"),
   summary: "Create a new task",
   tags: ["Tasks"],
   body: z
@@ -348,6 +350,7 @@ const promoteDraftTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/promote-draft",
   pattern: ["api", "tasks", null, "promote-draft"],
+  session: { taskParam: "id" },
   summary: "Promote a draft task out of the pre-dispatch draft state",
   description:
     "Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.",
@@ -365,6 +368,7 @@ const updateSession = route({
   method: "put",
   path: "/api/tasks/{id}/session",
   pattern: ["api", "tasks", null, "session"],
+  session: { taskParam: "id" },
   summary: "Update provider session ID and harness metadata for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -400,6 +404,7 @@ const cancelTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/cancel",
   pattern: ["api", "tasks", null, "cancel"],
+  session: { taskParam: "id" },
   summary: "Cancel a pending or in-progress task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -415,6 +420,7 @@ const steerTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/steer",
   pattern: ["api", "tasks", null, "steer"],
+  session: { taskParam: "id" },
   summary: "Deliver a steering message to a running task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -447,6 +453,7 @@ const getTaskSteeringMessagesRoute = route({
   method: "get",
   path: "/api/tasks/{id}/steering-messages",
   pattern: ["api", "tasks", null, "steering-messages"],
+  session: { taskParam: "id" },
   summary: "List steering messages for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -475,6 +482,7 @@ const markSteeringDeliveredRoute = route({
   method: "post",
   path: "/api/steering-messages/{id}/delivered",
   pattern: ["api", "steering-messages", null, "delivered"],
+  session: { steeringParam: "id" },
   summary: "Mark a steering message delivered",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -500,6 +508,7 @@ const markSteeringHandledRoute = route({
   method: "post",
   path: "/api/steering-messages/{id}/handled",
   pattern: ["api", "steering-messages", null, "handled"],
+  session: { steeringParam: "id" },
   summary: "Mark a steering message handled",
   description:
     "Optionally accepts a JSON body `{ note?: string }` — a short acceptance note describing how the steering was incorporated, persisted as `handledNote`.",
@@ -525,6 +534,7 @@ const markSteeringUndeliverableRoute = route({
   method: "post",
   path: "/api/steering-messages/{id}/undeliverable",
   pattern: ["api", "steering-messages", null, "undeliverable"],
+  session: { steeringParam: "id" },
   summary: "Promote an undeliverable steering message",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -550,6 +560,7 @@ const getTask = route({
   method: "get",
   path: "/api/tasks/{id}",
   pattern: ["api", "tasks", null],
+  session: { taskParam: "id" },
   summary: "Get task details with logs and attachments",
   description:
     "Returns the full `AgentTask` row decorated with `logs` (capped by `logsLimit`) and `attachments` (pointer-based artifacts stored on the task, ordered by `created_at`).",
@@ -570,6 +581,7 @@ const updateTaskProgressRoute = route({
   method: "post",
   path: "/api/tasks/{id}/progress",
   pattern: ["api", "tasks", null, "progress"],
+  session: { taskParam: "id" },
   summary: "Update task progress text",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -588,6 +600,7 @@ const finishTask = route({
   method: "post",
   path: "/api/tasks/{id}/finish",
   pattern: ["api", "tasks", null, "finish"],
+  session: { taskParam: "id" },
   summary: "Mark task as completed or failed (runner endpoint)",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -640,6 +653,7 @@ const pauseTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/pause",
   pattern: ["api", "tasks", null, "pause"],
+  session: { taskParam: "id" },
   summary: "Pause an in-progress task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -655,6 +669,7 @@ const resumeTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/resume",
   pattern: ["api", "tasks", null, "resume"],
+  session: { taskParam: "id" },
   summary: "Resume a paused task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -670,6 +685,7 @@ const supersedeTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/supersede",
   pattern: ["api", "tasks", null, "supersede"],
+  session: { taskParam: "id" },
   summary: "Supersede an in-progress task (terminate + spawn resume follow-up)",
   description:
     'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies.',
@@ -692,6 +708,7 @@ const updateTaskVcsRoute = route({
   method: "patch",
   path: "/api/tasks/{id}/vcs",
   pattern: ["api", "tasks", null, "vcs"],
+  session: { taskParam: "id" },
   summary: "Update VCS (PR/MR) info for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -713,6 +730,7 @@ const updateTaskTitleRoute = route({
   method: "patch",
   path: "/api/tasks/{id}/title",
   pattern: ["api", "tasks", null, "title"],
+  session: { taskParam: "id" },
   summary: "Set or clear a task's display title (session rename)",
   description:
     "Sets a human-facing display title override on a task. The sessions UI only reads this from root tasks (session list items), but titles on child tasks are harmless. Pass `title: null` (or an empty string) to clear the override and fall back to the task prompt.",
@@ -730,9 +748,6 @@ const updateTaskTitleRoute = route({
     ungated: "mirrors the pre-RBAC PATCH /api/tasks/{id}/vcs sibling route: bearer auth only",
   },
 });
-
-const SESSION_WRITE_DENIED =
-  "You can't write in this session. Ask the owner to share it with edit access.";
 
 /** True unless the request acts for a user who lacks write access to the task's session. */
 async function hasSessionWrite(

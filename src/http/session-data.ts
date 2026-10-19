@@ -24,7 +24,7 @@ import {
   SessionCostSchema,
   SessionLogSchema,
 } from "../types";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
 import { canReadSession, SESSION_READ_DENIED } from "./session-access";
 import { recomputeSessionCost } from "./session-cost-recompute";
 import { cachedUsageReport } from "./usage-cache";
@@ -128,6 +128,7 @@ const createSessionLogsRoute = route({
   method: "post",
   path: "/api/session-logs",
   pattern: ["api", "session-logs"],
+  session: bodyTask("taskId"),
   summary: "Store session logs",
   tags: ["Session Data"],
   body: z.object({
@@ -150,6 +151,7 @@ const getSessionLogsByTask = route({
   method: "get",
   path: "/api/tasks/{taskId}/session-logs",
   pattern: ["api", "tasks", null, "session-logs"],
+  session: { taskParam: "taskId" },
   summary: "Get session logs for a task",
   tags: ["Session Data"],
   params: z.object({ taskId: z.string() }),
@@ -173,6 +175,7 @@ const createSessionCostRoute = route({
   method: "post",
   path: "/api/session-costs",
   pattern: ["api", "session-costs"],
+  session: bodyTask("taskId"),
   summary: "Store session cost record",
   tags: ["Session Data"],
   body: z.object({
