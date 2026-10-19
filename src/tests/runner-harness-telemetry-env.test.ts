@@ -11,6 +11,12 @@ const TELEMETRY_PATH = join(import.meta.dir, "..", "telemetry.ts");
 // leaves the process), and print the environment the event carries.
 const BOOT_SCRIPT = `
 const t = await import(${JSON.stringify(TELEMETRY_PATH)});
+const { mkdtempSync, rmSync } = await import("node:fs");
+const { tmpdir } = await import("node:os");
+const { pathToFileURL } = await import("node:url");
+const root = mkdtempSync(tmpdir() + "/telemetry-package-");
+t.getTelemetryEnvironment(pathToFileURL(root + "/"));
+rmSync(root, { recursive: true, force: true });
 let body;
 globalThis.fetch = async (_url, init) => {
   body = JSON.parse(init.body);

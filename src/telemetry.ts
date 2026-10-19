@@ -3,7 +3,7 @@
  *
  * - Opt-out via ANONYMIZED_TELEMETRY=false
  * - Fire-and-forget: never throws, never blocks
- * - No DB and no external services (global fetch + node:crypto only)
+ * - No DB and no external services (global fetch + built-in APIs only)
  * - Importable from both API server and workers
  * - Every event is schema_version 2: a top-level `context` identity envelope
  *   plus properties typed against the proxy's event catalog
@@ -11,6 +11,7 @@
  *   catalog fails `tsc`, and the proxy rejects it at ingest.
  */
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import pkg from "../package.json";
 import { isSlackConfigured } from "./slack/config";
 import {
@@ -591,14 +592,24 @@ function isCloudDeployment(): boolean {
   return raw === "true" || raw === "1";
 }
 
-function getTelemetryEnvironment(): string {
+let cachedIsGitCheckout: boolean | undefined;
+
+export function getTelemetryEnvironment(packageRoot = new URL("../", import.meta.url)): string {
   const explicit = process.env.DESPLEGA_TELEMETRY_ENV?.trim();
   if (explicit) return explicit;
 
   // Do not default from NODE_ENV: shipped Bun/npm installs can report
   // "development" even when the operator did not choose a telemetry cohort.
   if (getNodeEnv() === "test") return "test";
-  return "production";
+  // Git checkouts (including worktrees) are development; shipped packages omit .git.
+  if (cachedIsGitCheckout === undefined) {
+    try {
+      cachedIsGitCheckout = existsSync(new URL(".git", packageRoot));
+    } catch {
+      cachedIsGitCheckout = false;
+    }
+  }
+  return cachedIsGitCheckout ? "development" : "production";
 }
 
 /**
@@ -741,6 +752,7 @@ function emit(
  * Do not call from production code.
  */
 export function _resetTelemetryStateForTests(): void {
+  cachedIsGitCheckout = undefined;
   installationId = null;
   installedAt = null;
   ingestObserver = null;
