@@ -100,7 +100,8 @@ export function UsedByConsentRow() {
 
   const fn = optionLabel(USER_FUNCTIONS, value("SWARM_USED_BY_CONTACT_FUNCTION"));
   const quote = value("SWARM_USED_BY_QUOTE");
-  const contact = value("SWARM_USED_BY_CONTACT_EMAIL");
+  // A secret row: the API masks the email for every reader.
+  const hasContact = Boolean(value("SWARM_USED_BY_CONTACT_EMAIL"));
 
   return (
     <div id="setting-SWARM_USED_BY_CONSENT" className="scroll-mt-6 space-y-3 py-4">
@@ -114,7 +115,7 @@ export function UsedByConsentRow() {
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
             {granted
-              ? `On. A person at Desplega reviews the logo before it is public${contact ? ` and writes to ${contact}` : ""}. ${canWrite ? "Turn it off" : "An admin can turn it off"} at any time to remove the logo.`
+              ? `On. A person at Desplega reviews the logo before it is public${hasContact ? " and writes to the contact email you gave" : ""}. ${canWrite ? "Turn it off" : "An admin can turn it off"} at any time to remove the logo.`
               : "List your organization as a company that uses Agent Swarm. Nothing is sent until you say yes at the end of the short form."}
           </p>
         </div>

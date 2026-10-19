@@ -286,12 +286,14 @@ test("granted: the preview shows the quote, and the switch revokes without an em
   configs = [
     ...configs,
     { key: "SWARM_USED_BY_CONSENT", value: "true" },
-    { key: "SWARM_USED_BY_CONTACT_EMAIL", value: "dana@acme.com" },
+    // The API masks the secret email row.
+    { key: "SWARM_USED_BY_CONTACT_EMAIL", value: "********" },
     { key: "SWARM_USED_BY_CONTACT_FUNCTION", value: "eng_lead" },
     { key: "SWARM_USED_BY_QUOTE", value: "Reviews every PR." },
   ];
   await mount();
-  expect(container.textContent).toContain("writes to dana@acme.com");
+  expect(container.textContent).toContain("writes to the contact email you gave");
+  expect(container.textContent).not.toContain("********");
   expect(container.textContent).toContain('"Reviews every PR.", Engineering lead at Acme');
   const toggle = container.querySelector('[role="switch"]') as HTMLButtonElement;
   await act(async () => toggle.click());

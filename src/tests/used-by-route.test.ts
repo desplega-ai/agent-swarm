@@ -159,6 +159,17 @@ describe("POST /api/used-by", () => {
     expect(await configValue("SWARM_USED_BY_CONTACT_EMAIL")).toBe("admin@acme.com");
     expect(await configValue("SWARM_USED_BY_CONTACT_FUNCTION")).toBe("founder");
     expect(await configValue("SWARM_USED_BY_QUOTE")).toBe("Our swarm ships features.");
+    // Contact details never reach agent env, and readers see the email masked.
+    const rows = await getSwarmConfigs({ scope: "global" });
+    const row = (key: string) => rows.find((entry) => entry.key === key);
+    for (const key of [
+      "SWARM_USED_BY_CONTACT_EMAIL",
+      "SWARM_USED_BY_CONTACT_FUNCTION",
+      "SWARM_USED_BY_QUOTE",
+    ]) {
+      expect(row(key)?.exportToEnv).toBe(false);
+    }
+    expect(row("SWARM_USED_BY_CONTACT_EMAIL")?.isSecret).toBe(true);
 
     const revoke = await post({ granted: false }, OPERATOR);
     expect(revoke.statusCode).toBe(200);

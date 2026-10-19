@@ -151,12 +151,20 @@ export async function handleUsedBy(
       await upsertSwarmConfig({ scope: "global", key: GRANTED_NAME_KEY, value: orgName });
       await upsertSwarmConfig({ scope: "global", key: GRANTED_WEBSITE_KEY, value: orgWebsite });
     }
-    for (const [key, value] of [
-      [CONTACT_EMAIL_KEY, contactEmail],
-      [CONTACT_FUNCTION_KEY, contactFunction],
-      [QUOTE_KEY, quote],
+    // Contact details stay out of agent env. The email is also a secret row,
+    // so `GET /api/config` masks it for every reader.
+    for (const [key, value, isSecret] of [
+      [CONTACT_EMAIL_KEY, contactEmail, true],
+      [CONTACT_FUNCTION_KEY, contactFunction, false],
+      [QUOTE_KEY, quote, false],
     ] as const) {
-      await upsertSwarmConfig({ scope: "global", key, value: granted ? (value ?? "") : "" });
+      await upsertSwarmConfig({
+        scope: "global",
+        key,
+        value: granted ? (value ?? "") : "",
+        isSecret,
+        exportToEnv: false,
+      });
     }
   });
   scheduleIntegrationsReload();
