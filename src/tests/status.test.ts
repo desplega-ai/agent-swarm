@@ -115,7 +115,6 @@ const ENV_KEYS_TO_RESET = [
   "GOOGLE_APPLICATION_CREDENTIALS",
   "AGENTMAIL_API_KEY",
   "AGENTMAIL_DISABLE",
-  "SWARM_VERIFY_TTL_MS",
   "ANONYMIZED_TELEMETRY",
 ];
 
@@ -314,7 +313,7 @@ describe("setup milestones", () => {
     expect(getMilestone(payload, "harness").state).toBe("verified");
   });
 
-  test("provider rollup counts every agent with a fresh passing report in verifiedWorkers", async () => {
+  test("provider rollup counts every agent with a passing report in verifiedWorkers", async () => {
     const verified = await createAgent({
       name: "w-verified",
       isLead: false,
@@ -376,7 +375,7 @@ describe("setup milestones", () => {
 
   // ─── Multi-provider fleet rollup ─────────────────────────────────────────
   describe("harness — multi-provider fleet aggregate", () => {
-    test("`verified` when every provider in the fleet has a fresh passing live test", async () => {
+    test("`verified` when every provider in the fleet has a passing live test", async () => {
       const a = await createAgent({
         name: "claude-w",
         isLead: false,
@@ -423,8 +422,30 @@ describe("setup milestones", () => {
 
       const m = getMilestone(await buildStatusPayload(), "harness");
       expect(m.state).toBe("configured");
-      expect(m.hint).toContain("claude");
-      expect(m.hint).toContain("codex");
+      // Only the provider that needs attention is listed.
+      expect(m.hint).toBe("codex: not live-tested");
+    });
+
+    test("an all-verified fleet carries no hint, however old the passing tests are", async () => {
+      const a = await createAgent({
+        name: "claude-w",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
+      const b = await createAgent({
+        name: "codex-w",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
+      const old = { ok: true, error: null, latency_ms: 12, testedAt: Date.now() - 6 * 3_600_000 };
+      await seedCredStatus(a.id, "claude", { ready: true, satisfiedBy: "env", liveTest: old });
+      await seedCredStatus(b.id, "codex", { ready: true, satisfiedBy: "file", liveTest: old });
+
+      const m = getMilestone(await buildStatusPayload(), "harness");
+      expect(m.state).toBe("verified");
+      expect(m.hint).toBeUndefined();
     });
 
     test("`unverified` when any provider in the fleet reports blocked credentials", async () => {
@@ -1062,6 +1083,135 @@ describe("computeHealth (Phase 2)", () => {
     expect(payload.health).toBe("degraded");
   });
 
+  test("`ok` when live workers' last passing live test is hours old", async () => {
+    const lead = await createAgent({
+      name: "lead-old",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    const worker = await createAgent({
+      name: "worker-old",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await updateAgentActivity(lead.id);
+    await updateAgentActivity(worker.id);
+    const oldPass = { ok: true, error: null, latency_ms: 12, testedAt: Date.now() - 6 * 3_600_000 };
+    await seedCredStatus(lead.id, "claude", { ready: true, satisfiedBy: "env", liveTest: oldPass });
+    await seedCredStatus(worker.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: oldPass,
+    });
+
+    const payload = await buildStatusPayload();
+    expect(getMilestone(payload, "workers").state).toBe("verified");
+    expect(getMilestone(payload, "harness").state).toBe("verified");
+    expect(payload.health).toBe("ok");
+  });
+
+  test("`degraded` when the provider's latest live test failed, even after an older pass", async () => {
+    const passed = await createAgent({
+      name: "worker-pass",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const failed = await createAgent({
+      name: "worker-fail",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await updateAgentActivity(passed.id);
+    await updateAgentActivity(failed.id);
+    await seedCredStatus(passed.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: true, error: null, latency_ms: 12, testedAt: Date.now() - 60_000 },
+    });
+    await seedCredStatus(failed.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: false, error: "HTTP 401", latency_ms: 12, testedAt: Date.now() },
+    });
+
+    const payload = await buildStatusPayload();
+    const harness = getMilestone(payload, "harness");
+    expect(harness.state).toBe("configured");
+    expect(harness.hint).toBe("claude: live test failed");
+    expect(payload.health).toBe("degraded");
+  });
+
+  test("an offline agent's newer failed live test does not override an online pass", async () => {
+    const online = await createAgent({
+      name: "worker-online",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const offline = await createAgent({
+      name: "worker-offline",
+      isLead: false,
+      status: "offline",
+      capabilities: [],
+    });
+    await updateAgentActivity(online.id);
+    await seedCredStatus(online.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: true, error: null, latency_ms: 12, testedAt: Date.now() - 6 * 3_600_000 },
+    });
+    await seedCredStatus(offline.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: false, error: "HTTP 401", latency_ms: 12, testedAt: Date.now() },
+    });
+
+    expect(await rollupCredStatusForProvider("claude")).toMatchObject({
+      state: "verified",
+      workers: 1,
+      reports: 1,
+    });
+    const harness = getMilestone(await buildStatusPayload(), "harness");
+    expect(harness.state).toBe("verified");
+    expect(harness.hint).toBeUndefined();
+  });
+
+  test("a provider reported only by offline agents does not degrade the harness", async () => {
+    const online = await createAgent({
+      name: "claude-online",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const offline = await createAgent({
+      name: "codex-offline",
+      isLead: false,
+      status: "offline",
+      capabilities: [],
+    });
+    await updateAgentActivity(online.id);
+    await seedCredStatus(online.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: true, error: null, latency_ms: 12, testedAt: Date.now() },
+    });
+    await seedCredStatus(offline.id, "codex", {
+      ready: false,
+      missing: ["OPENAI_API_KEY"],
+      satisfiedBy: null,
+      liveTest: { ok: false, error: "HTTP 401", latency_ms: 12, testedAt: Date.now() },
+    });
+
+    const harness = getMilestone(await buildStatusPayload(), "harness");
+    expect(harness.state).toBe("verified");
+    expect(harness.hint).toBeUndefined();
+    expect((harness.providers ?? []).map((p) => p.provider)).toEqual(["claude"]);
+  });
+
   test("`ok` when workers are `configured` (heartbeat drift is a runtime concern, not setup health)", async () => {
     // Workers in `configured` state means agents exist but haven't posted a
     // heartbeat in the last 5 minutes. This is surfaced on /agents and the
@@ -1166,9 +1316,8 @@ describe("worker-reported live test drives harness.state", () => {
     expect(getMilestone(await buildStatusPayload(), "harness").state).toBe("verified");
   });
 
-  test("a stale live test (older than SWARM_VERIFY_TTL_MS) drops to `configured`", async () => {
+  test("an old passing live test keeps harness `verified`", async () => {
     process.env.HARNESS_PROVIDER = "claude";
-    process.env.SWARM_VERIFY_TTL_MS = "1000"; // 1s — anything older is stale
     const a = await createAgent({ name: "w-stl", isLead: false, status: "idle", capabilities: [] });
     await seedCredStatus(a.id, "claude", {
       ready: true,
@@ -1176,10 +1325,10 @@ describe("worker-reported live test drives harness.state", () => {
         ok: true,
         error: null,
         latency_ms: 80,
-        testedAt: Date.now() - 60_000, // 60s ago, well beyond TTL
+        testedAt: Date.now() - 24 * 3_600_000, // a day ago: workers only re-test on change
       },
     });
-    expect(getMilestone(await buildStatusPayload(), "harness").state).toBe("configured");
+    expect(getMilestone(await buildStatusPayload(), "harness").state).toBe("verified");
   });
 
   test("a failed live test still leaves harness `configured` if presence is ready", async () => {

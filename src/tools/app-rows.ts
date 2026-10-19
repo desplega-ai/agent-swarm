@@ -53,6 +53,11 @@ function rowFilters(model: ModelDef, equals: Record<string, string | number | bo
         { path: `equals.${column}`, message: "Unknown or hidden column." },
       ]);
     }
+    if (declared?.kind === "json") {
+      throw new AppRowValidationError([
+        { path: `equals.${column}`, message: "json columns cannot be filtered" },
+      ]);
+    }
     if (!validValue(declared ?? { kind: SYSTEM_COLUMN_KINDS[column]! }, value)) {
       throw new AppRowValidationError([
         { path: `equals.${column}`, message: "Filter value must match the column kind." },

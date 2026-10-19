@@ -8,10 +8,10 @@ import {
   type AppQueryDef,
   type AppValidationIssue,
   applyAppDefinitionPatch,
-  ColumnKindSchema,
   isIso8601Date,
   type ModelDef,
   parseAppDefinition,
+  ScalarColumnKindSchema,
   SORTABLE_SYSTEM_DATE_COLUMNS,
   SYSTEM_COLUMN_KINDS,
   scriptCompatWarnings,
@@ -216,7 +216,7 @@ const UserConfigValuesSchema = z.record(
  * on the wire anyway — the key can only ever be absent.
  */
 const AppUserConfigFieldSchema = z.object({
-  kind: ColumnKindSchema,
+  kind: ScalarColumnKindSchema,
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),
   enum: z.array(z.string()).optional(),
   label: z.string().optional(),
@@ -785,6 +785,7 @@ async function resolveModel(
 }
 
 function parseFilterValue(raw: string, column: ModelDef["columns"][string]): unknown {
+  if (column.kind === "json") throw new Error("json columns cannot be filtered");
   if (column.kind === "number") {
     if (!DECIMAL_NUMBER_PATTERN.test(raw)) throw new Error("must be a decimal number");
     const value = Number(raw);
@@ -1017,6 +1018,15 @@ export async function selectAppRows(
   limit = 200,
   systemColumns = false,
 ) {
+  // Backstop for every caller: the REST route (`filter.<col>`) and the MCP
+  // tools (`equals.<col>`) reject json filters with their own paths first.
+  const jsonFilterIssues = filters.flatMap((filter) =>
+    Object.hasOwn(model.columns, filter.column) && model.columns[filter.column]!.kind === "json"
+      ? [{ path: `filter.${filter.column}`, message: "json columns cannot be filtered" }]
+      : [],
+  );
+  if (jsonFilterIssues.length > 0) throw new AppRowValidationError(jsonFilterIssues);
+
   // SQL narrows the scan; the `===` re-check keeps the exact filter semantics.
   const rows = (
     await listAppRows(
@@ -1045,6 +1055,9 @@ export async function selectAppRows(
       throw new AppRowValidationError([
         { path: "sort", message: "must be <column>:<asc|desc> for a known column" },
       ]);
+    }
+    if (model.columns[column]?.kind === "json") {
+      throw new AppRowValidationError([{ path: "sort", message: "json columns cannot be sorted" }]);
     }
     rows.sort((a, b) => {
       const result = compareValues(

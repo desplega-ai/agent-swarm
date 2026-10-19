@@ -11,7 +11,7 @@ An App definition is the versioned contract for its data and interface. The serv
 
 ## Models
 
-Models define persistent rows. Each model has typed columns: `string`, `number`, `boolean`, `date`, or `enum`. Columns can be required, defaulted, or indexed where the kind supports it. The server adds identity, timestamps, and authorship fields to every row.
+Models define persistent rows. Each model has typed columns: `string`, `number`, `boolean`, `date`, `enum`, or `json` (any JSON value; serialized size capped at 256 KB by default, `APPS_JSON_COLUMN_MAX_BYTES`). Columns can be required, defaulted, or indexed where the kind supports it; a `json` column cannot be indexed, filtered, or sorted. The server adds identity, timestamps, and authorship fields to every row.
 
 Prefer hiding a column when a field is being retired. Hiding preserves existing values and keeps rollback possible. Purging a column is an explicit, irreversible migration and should be reserved for data that really must be removed.
 

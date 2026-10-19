@@ -8,6 +8,7 @@ import {
   type AppValidationIssue,
   type ColumnDef,
   isIso8601Date,
+  isValidColumnValue,
   type ModelDef,
   parseAppDefinition,
   type SourceDef,
@@ -23,7 +24,18 @@ import {
 } from "./row-store";
 import { invalidateChangedSyncStatus } from "./sync";
 
-const MigrationValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+/**
+ * Literal directive values (`set`, `map` targets, `else`): scalars, plus the
+ * objects and arrays a `json` column holds. The per-column kind check in
+ * `validateDirectiveValues` is what rejects a shape the target column cannot take.
+ */
+const MigrationValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.record(z.string(), z.unknown()),
+  z.array(z.unknown()),
+]);
 
 export const AppMigrationDirectiveSchema = z.union([
   z.object({ set: MigrationValueSchema }).strict(),
@@ -368,11 +380,7 @@ function isPurgeDirective(
 
 function columnAccepts(column: ColumnDef, value: unknown): boolean {
   if (value === null) return column.hidden === true || column.required !== true;
-  if (column.kind === "string") return typeof value === "string";
-  if (column.kind === "number") return typeof value === "number" && Number.isFinite(value);
-  if (column.kind === "boolean") return typeof value === "boolean";
-  if (column.kind === "date") return typeof value === "string" && isIso8601Date(value);
-  return typeof value === "string" && Boolean(column.enum?.includes(value));
+  return isValidColumnValue(column, value);
 }
 
 function coerceValue(

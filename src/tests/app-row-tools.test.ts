@@ -217,6 +217,31 @@ test("rejects invalid filters, sorts, values, source projections, join keys, and
   expect((await call("app-rows-list", {}, "")).isError).toBe(true);
 });
 
+test("app-rows-list rejects equals on a json column, like REST filters and named queries", async () => {
+  const jsonApp = await createApp({
+    name: "Row tools json",
+    definition: {
+      ...definition,
+      models: { note: { columns: { title: { kind: "string" }, payload: { kind: "json" } } } },
+    },
+  });
+  const created = await call("app-row-create", {
+    appId: jsonApp.id,
+    values: { title: "json", payload: { x: 1 } },
+  });
+  expect(created.isError).not.toBe(true);
+
+  const listed = await call("app-rows-list", { appId: jsonApp.id, equals: { payload: "x" } });
+  expect(listed.isError).toBe(true);
+  expect(listed.structuredContent).toMatchObject({
+    issues: [{ path: "equals.payload", message: "json columns cannot be filtered" }],
+  });
+  // A scalar column on the same model still filters.
+  const byTitle = await call("app-rows-list", { appId: jsonApp.id, equals: { title: "json" } });
+  expect(byTitle.isError).not.toBe(true);
+  expect(byTitle.structuredContent.total).toBe(1);
+});
+
 test("enforces row, bulk, filter, and limit caps before writing", async () => {
   await expect(
     call("app-rows-create", { rows: Array.from({ length: 501 }, () => ({ title: "too-many" })) }),

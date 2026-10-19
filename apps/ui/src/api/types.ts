@@ -3585,14 +3585,16 @@ export interface SwarmMetrics {
 // ─── Swarm apps (spike) ─────────────────────────────────────────────────────
 // Mirrors the frozen `AppDefinition` contract served by `/api/apps/*`.
 
-export type AppColumnKind = "string" | "number" | "boolean" | "date" | "enum";
+export type AppColumnKind = "string" | "number" | "boolean" | "date" | "enum" | "json";
+
+export type JsonDef = Record<string, unknown> | unknown[];
 
 export interface AppColumnDef {
   kind: AppColumnKind;
   required?: boolean;
   enum?: string[];
   index?: boolean;
-  default?: string | number | boolean;
+  default?: string | number | boolean | JsonDef;
 }
 
 export interface AppModelDef {
