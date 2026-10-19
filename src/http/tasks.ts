@@ -1121,6 +1121,8 @@ export async function handleTasks(
           offeredTo: parsed.body.offeredTo || undefined,
           dir: parsed.body.dir || undefined,
           parentTaskId: parsed.body.parentTaskId || undefined,
+          // Human chat starts a new output contract; agent children keep inheriting.
+          inheritParentOutputSchema: principal.kind === "agent",
           source: parsed.body.source || "api",
           outputSchema: parsed.body.outputSchema || undefined,
           contextKey: parsed.body.contextKey || undefined,
