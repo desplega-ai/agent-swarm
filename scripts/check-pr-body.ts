@@ -35,9 +35,6 @@
  * line; a local run without it uses `git diff` against origin/main) and
  * `--changed-lines <n>` / PR_CHANGED_LINES (additions + deletions).
  *
- * Exempt: a ranking entry PR (`isRankingEntryPr`), which only adds or removes
- * `community/ranking/<domain>.json`.
- *
  * CI: `.github/workflows/pr-body.yml` passes the env above. On success, each
  * picked choice and the risk level are written to GITHUB_OUTPUT (for example
  * `urgency=asap`, `risk=high`).
@@ -60,23 +57,6 @@ export const SMALL_DIFF_LINES = 50;
 export const PROSE_WORD_WARN = 300;
 
 type Section = { heading: string; flags: string[]; content: string };
-
-const RANKING_ENTRY_TITLE = /^chore\(ranking\): (add|remove) ([a-z0-9.-]+)$/;
-
-/**
- * A public-ranking entry PR (`community/ranking/README.md`): the title is
- * `chore(ranking): add|remove <domain>` and the diff is only
- * `community/ranking/<domain>.json`. Outside admins open these from a prefilled
- * GitHub page, so they skip the template; the Ranking entry check gates them.
- */
-export function isRankingEntryPr(
-  title: string | undefined,
-  changedFiles: string[] | undefined,
-): boolean {
-  const match = title ? RANKING_ENTRY_TITLE.exec(title.trim()) : null;
-  if (!match || !changedFiles || changedFiles.length !== 1) return false;
-  return changedFiles[0] === `community/ranking/${match[2]}.json`;
-}
 
 export type TemplateSection = {
   heading: string;
@@ -310,12 +290,6 @@ if (import.meta.main) {
   }
   if (changedFiles === undefined) {
     console.warn("Changed files unknown. Sections for UI PRs were not checked.");
-  }
-  if (isRankingEntryPr(title, changedFiles)) {
-    console.log(
-      "Ranking entry PR: the template is not required (the Ranking entry check gates it).",
-    );
-    process.exit(0);
   }
   const ctx: PrContext = { title, author, changedFiles, changedLines };
   for (const warning of prBodyWarnings(body)) {

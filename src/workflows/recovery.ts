@@ -25,7 +25,12 @@ import {
 } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { getSecretInputKeys } from "./input";
-import { finalizeOrWait, resumeFromChildRun, resumeWaitState } from "./resume";
+import {
+  finalizeOrWait,
+  recoverResolvedWaitState,
+  resumeFromChildRun,
+  resumeWaitState,
+} from "./resume";
 import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
@@ -392,21 +397,12 @@ async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
 
   for (const stuck of stuckRuns) {
     try {
-      // Decide what status to (re)apply.
-      let resumeStatus: "fired" | "timeout";
-      let payload: unknown;
-
-      if (stuck.waitStatus === "fired") {
-        resumeStatus = "fired";
-        payload = stuck.firedPayload != null ? safeJsonParse(stuck.firedPayload) : undefined;
-      } else if (stuck.waitStatus === "timeout") {
-        resumeStatus = "timeout";
+      if (stuck.waitStatus === "pending") {
+        const status = stuck.waitMode === "time" ? "fired" : "timeout";
+        await resumeWaitState(stuck.waitId, status, undefined, registry);
       } else {
-        // pending + overdue
-        resumeStatus = stuck.waitMode === "time" ? "fired" : "timeout";
+        await recoverResolvedWaitState(stuck.waitId, registry);
       }
-
-      await resumeWaitState(stuck.waitId, resumeStatus, payload, registry);
       recovered++;
     } catch (err) {
       if (await failRunOnUnreadableReplay(stuck.runId, err)) continue;
@@ -415,14 +411,6 @@ async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
   }
 
   return recovered;
-}
-
-function safeJsonParse(s: string): unknown {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return s;
-  }
 }
 
 /**

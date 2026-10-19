@@ -143,12 +143,15 @@ export interface paths {
          *     `trending` (the index page's fastest growing apps). With `domain`: `chart`
          *     stacked by model, `totalTokens`, `rank`, `modelsUsed` and
          *     `appModelAnalytics` (the app page). Tokens are the only metric served:
-         *     `total_requests` is always 0. An install is listed when its
-         *     `community/ranking/<domain>.json` file is merged into agent-swarm `main`, it
-         *     sent a valid `ranking.opted_in` listing with that file's claim first, it has
-         *     not opted out since, it is not an internal, test, E2B or non-production
-         *     install, and its bound `ranking.usage` has tokens in the period. Recomputed
-         *     hourly. Called server to server by the landing, so the response sends no
+         *     `total_requests` is always 0. Telemetry alone lists an install: it sent a
+         *     valid `ranking.opted_in` listing for the domain, has not opted out since,
+         *     is not an internal, test, E2B or non-production install, sent telemetry in
+         *     the last 7 days with the domain as its newest `org_website`, and its
+         *     `ranking.usage` for the domain has tokens in the period. A domain on the
+         *     proxy's denylist is never listed. When several installs list one domain,
+         *     the one whose listing was ingested first holds it (ties go to the lower
+         *     install ID) while it qualifies; the next in that order takes over when it
+         *     stops. Recomputed hourly. Called server to server by the landing, so the response sends no
          *     CORS headers. Rate limited per IP: a burst of 10, then 10 per minute.
          */
         get: operations["getRanking"];
@@ -168,13 +171,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Check a proposed ranking entry for the agent-swarm PR check
-         * @description Reads the telemetry store live (no cache) and reports whether an install
-         *     sent a valid `ranking.opted_in` listing with this claim and domain first,
-         *     has not opted out since, is not excluded, sent telemetry in the last 7
-         *     days, and still declares this domain as its website. `listing` shows the
-         *     reviewer what the ranking would display; it never includes the claim.
-         *     Sends no CORS headers. Rate limited per IP: a burst of 10, then 10 per
+         * Check whether a domain would be ranked
+         * @description Reads the telemetry store live (no cache) and applies the ranking's rules
+         *     to the domain: it is not denylisted (reason `denylisted`), and an install
+         *     that listed it has not opted out since, is not excluded, sent telemetry in
+         *     the last 7 days, and still declares this domain as its website. `listing`
+         *     and the flags describe the install that would hold the domain or, when
+         *     none may, the first install that listed it. `listing` never includes a
+         *     claim. Sends no CORS headers. Rate limited per IP: a burst of 10, then 10 per
          *     minute.
          */
         get: operations["verifyRankingEntry"];
@@ -556,7 +560,7 @@ export interface components {
         };
         RankingVerification: {
             verified: boolean;
-            reasons: ("no_listing" | "opted_out" | "excluded_install" | "telemetry_inactive_7d" | "website_mismatch")[];
+            reasons: ("no_listing" | "denylisted" | "opted_out" | "excluded_install" | "telemetry_inactive_7d" | "website_mismatch")[];
             telemetryActive7d: boolean;
             /** @description The install's newest event declares this domain as its org_website. */
             websiteMatchesDomain: boolean;
@@ -3059,7 +3063,11 @@ export interface operations {
         parameters: {
             query: {
                 domain: string;
-                claim: string;
+                /**
+                 * @deprecated
+                 * @description Sent by agent-swarm v2.4.0's PR check. Ignored.
+                 */
+                claim?: string;
             };
             header?: never;
             path?: never;
@@ -3078,7 +3086,7 @@ export interface operations {
                     "application/json": components["schemas"]["RankingVerification"];
                 };
             };
-            /** @description `domain` or `claim` is malformed (codes `invalid_domain`, `invalid_claim`). */
+            /** @description `domain` is malformed (code `invalid_domain`). */
             400: {
                 headers: {
                     [name: string]: unknown;

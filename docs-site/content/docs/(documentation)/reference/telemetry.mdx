@@ -143,6 +143,8 @@ And these to `metadata`:
 | `org_name` | The name you gave the organization | `SWARM_ORG_NAME`, when set. `null` otherwise. |
 | `org_domain` | The email **domain** of your admin, such as `example.com` | The domain of the earliest-created active user who has an admin grant, falling back to the earliest active user with an email. Lowercased, stored as `telemetry_org_domain`, and recomputed when a user changes and hourly. The address itself is never sent. |
 | `org_website` | The company website an admin declared, such as `example.com` | `SWARM_ORG_WEBSITE`, a bare hostname. Left out when unset. |
+| `team_size` | The organization's team size: `1`, `2-10`, `11-50` or `51+` | Not sent by this version. Reserved in the contract for the company profile. |
+| `use_case` | The organization's main use case: `features`, `bugs`, `review`, `ops`, `docs` or `data` | Not sent by this version. Reserved in the contract for the company profile. |
 | `user_ref` | A pseudonymous reference to the person who caused the event | `u_` plus the first 32 hex characters of `sha256(installation ID + ":" + user ID)`. Stable inside your install, different on every other install, and not reversible to the user. `null` for events nobody caused (server start, schedules, heartbeat). |
 | `user_role` | `admin` or `member` | From the user's role grants. `null` when `user_ref` is `null`. |
 | `plan` | `self-host-free` or `cloud` | `cloud` for a cloud deployment, else `self-host-free`. |
@@ -201,24 +203,26 @@ The request carries no installation ID or organization name. The response contai
 
 ### Public ranking
 
-[agent-swarm.dev/ranking](https://agent-swarm.dev/ranking) ranks installs by tokens used, like OpenRouter's app rankings. It is off by default (`PUBLIC_RANKING_ENABLED=false`). An install is listed only when all of these hold:
+[agent-swarm.dev/ranking](https://agent-swarm.dev/ranking) ranks installs by tokens used, like OpenRouter's app rankings. It is off by default (`PUBLIC_RANKING_ENABLED=false`). Opting in is all it takes: no PR and no approval step. An install is listed when all of these hold:
 
 - Telemetry is on.
 - The organization name (`SWARM_ORG_NAME`) and company website (`SWARM_ORG_WEBSITE`) are set. The placeholders `Swarm` and `Your Swarm` do not count as a name.
 - An admin clicked **Get ranked** in Settings → Configuration → Branding.
-- A PR adding `community/ranking/<domain>.json` was merged into `desplega-ai/agent-swarm`. A Desplega maintainer reviews each one.
+- The install sent telemetry in the last 7 days and used tokens in the period shown.
+
+The install shows at the proxy's next hourly refresh. If two installs list the same website, the one that opted in first holds the entry. Desplega can hide a domain that abuses the ranking.
 
 Exactly these fields leave the install for the ranking:
 
 | Event | Sent by | Fields |
 |---|---|---|
-| `ranking.opted_in` | API, on Get ranked and when the organization name changes | `listing`: the organization name and website, the category and subcategory you picked, the optional description and source code URL, a random claim (`rk_` + 32 hex) and the time it was built. The same JSON is stored as the `telemetry_ranking` config key. |
+| `ranking.opted_in` | API, on Get ranked and when the organization name changes | `listing`: the organization name and website, the category and subcategory you picked, the optional description and source code URL, and the time it was built. The same JSON is stored as the `telemetry_ranking` config key. |
 | `ranking.opted_out` | API, when the setting turns off | `domain` |
 | `ranking.usage` | Each worker, after every session with cost data | `totalTokens`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, and the session's `model` and `provider`. No task, agent or cost. |
 
 **Token totals are public and exact.** The page shows your total tokens per day, week and month, and tokens per model, the same as OpenRouter.
 
-To leave, turn the setting off, turn telemetry off, or clear the organization name or website. Changing the website also opts out, because a new domain needs a new PR. The entry disappears at the proxy's next hourly refresh. Deleting `community/ranking/<domain>.json` removes it for good.
+To leave, turn the setting off, turn telemetry off, or clear the organization name or website. Changing the website also opts out; click **Get ranked** again to list the new domain. The entry disappears at the proxy's next hourly refresh.
 
 A notification card that asks for your email, and the feedback dialog, are different. Those send what you type to the feedback endpoint (`https://proxy.desplega.sh/v1/feedback`, overridable with the `feedback_endpoint` config key), and only when you submit them. They are not telemetry, so the opt-out does not block them.
 
