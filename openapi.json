@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.3.0",
+    "version": "2.4.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -3943,6 +3943,67 @@
           "outputTokens",
           "cacheReadTokens",
           "cacheWriteTokens"
+        ]
+      },
+      "SessionOwner": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "SessionShares": {
+        "type": "object",
+        "properties": {
+          "everyone": {
+            "type": "string",
+            "enum": [
+              "none",
+              "read",
+              "write"
+            ]
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": {
+                  "type": "string"
+                },
+                "access": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "userId",
+                "access",
+                "createdAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "everyone",
+          "users"
         ]
       },
       "Skill": {
@@ -15370,7 +15431,7 @@
     "/api/ranking": {
       "get": {
         "summary": "Public ranking state",
-        "description": "Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. The listing carries the private ranking claim, so only a config admin can read it.",
+        "description": "Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.",
         "tags": [
           "Telemetry"
         ],
@@ -15430,9 +15491,6 @@
                             1
                           ]
                         },
-                        "claim": {
-                          "type": "string"
-                        },
                         "name": {
                           "type": "string"
                         },
@@ -15474,7 +15532,6 @@
                       },
                       "required": [
                         "v",
-                        "claim",
                         "name",
                         "domain",
                         "category",
@@ -15486,18 +15543,6 @@
                     },
                     "listingMatchesDomain": {
                       "type": "boolean"
-                    },
-                    "fileJson": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "prUrl": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
                     },
                     "verifyUrl": {
                       "type": [
@@ -15515,8 +15560,6 @@
                     "domain",
                     "listing",
                     "listingMatchesDomain",
-                    "fileJson",
-                    "prUrl",
                     "verifyUrl"
                   ]
                 }
@@ -15549,7 +15592,7 @@
     "/api/ranking/opt-in": {
       "post": {
         "summary": "Opt this install into the public ranking",
-        "description": "Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. The install is ranked only after a ranking PR with the returned file is merged into desplega-ai/agent-swarm.",
+        "description": "Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.",
         "tags": [
           "Telemetry"
         ],
@@ -15612,9 +15655,6 @@
                     "domain": {
                       "type": "string"
                     },
-                    "claim": {
-                      "type": "string"
-                    },
                     "listing": {
                       "type": "object",
                       "properties": {
@@ -15623,9 +15663,6 @@
                           "enum": [
                             1
                           ]
-                        },
-                        "claim": {
-                          "type": "string"
                         },
                         "name": {
                           "type": "string"
@@ -15668,7 +15705,6 @@
                       },
                       "required": [
                         "v",
-                        "claim",
                         "name",
                         "domain",
                         "category",
@@ -15678,22 +15714,13 @@
                         "updatedAt"
                       ]
                     },
-                    "fileJson": {
-                      "type": "string"
-                    },
-                    "prUrl": {
-                      "type": "string"
-                    },
                     "verifyUrl": {
                       "type": "string"
                     }
                   },
                   "required": [
                     "domain",
-                    "claim",
                     "listing",
-                    "fileJson",
-                    "prUrl",
                     "verifyUrl"
                   ]
                 }
@@ -15746,7 +15773,7 @@
     "/api/ranking/opt-out": {
       "post": {
         "summary": "Leave the public ranking",
-        "description": "Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. Returns the GitHub page that deletes the ranking entry.",
+        "description": "Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.",
         "tags": [
           "Telemetry"
         ],
@@ -15768,17 +15795,10 @@
                       "enum": [
                         false
                       ]
-                    },
-                    "leaveUrl": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
                     }
                   },
                   "required": [
-                    "enabled",
-                    "leaveUrl"
+                    "enabled"
                   ]
                 }
               }
@@ -31148,7 +31168,7 @@
     "/api/tasks": {
       "get": {
         "summary": "List tasks with filters",
-        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
         "tags": [
           "Tasks"
         ],
@@ -32824,6 +32844,16 @@
                       ]
                     }
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A user caller cannot read the task's session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -36924,6 +36954,7 @@
     "/api/realtime/ticket": {
       "post": {
         "summary": "Issue a one-shot dashboard realtime ticket",
+        "description": "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
         "tags": [
           "Rooms"
         ],
@@ -36956,17 +36987,7 @@
             }
           },
           "403": {
-            "description": "Comb presence is not allowed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Comb is not enabled",
+            "description": "Presence is not allowed",
             "content": {
               "application/json": {
                 "schema": {
@@ -47669,6 +47690,18 @@
             "required": false,
             "name": "fields",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "shared"
+              ]
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
           }
         ],
         "responses": {
@@ -47960,7 +47993,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Root task + chain (ordered by createdAt)",
+            "description": "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`",
             "content": {
               "application/json": {
                 "schema": {
@@ -48158,11 +48191,24 @@
                           }
                         ]
                       }
+                    },
+                    "access": {
+                      "type": "string",
+                      "enum": [
+                        "owner",
+                        "write",
+                        "read"
+                      ]
+                    },
+                    "owner": {
+                      "$ref": "#/components/schemas/SessionOwner"
                     }
                   },
                   "required": [
                     "root",
-                    "chain"
+                    "chain",
+                    "access",
+                    "owner"
                   ]
                 }
               }
@@ -48178,8 +48224,215 @@
               }
             }
           },
+          "403": {
+            "description": "The caller has no access to this session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Root task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{rootTaskId}/shares": {
+      "get": {
+        "summary": "List a session's active shares",
+        "description": "Active shares only. `everyone` is the access every user has; `users` are per-person shares. A session with no shares is private to its owner.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "rootTaskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active shares",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionShares"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller has no access to this session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Root task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Set who can view or edit a session",
+        "description": "Owner only. The body is the full desired state: users left out lose access. Changed targets have their active share revoked and a new one inserted in one transaction; shares are never deleted.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "rootTaskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "everyone": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "read",
+                      "write"
+                    ]
+                  },
+                  "users": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "userId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "read",
+                            "write"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "userId",
+                        "access"
+                      ]
+                    },
+                    "maxItems": 500
+                  }
+                },
+                "required": [
+                  "everyone",
+                  "users"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Active shares after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionShares"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or unknown user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the session owner can share it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Root task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The session has no owner, so it is already open to everyone",
             "content": {
               "application/json": {
                 "schema": {

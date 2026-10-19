@@ -15,6 +15,7 @@ test("facade exposes repository bindings without internal exports", () => {
         "rowToAgentTaskSummary",
         "configureTaskReadDependencies",
         "NEVER_STARTED_TASK_STATUSES",
+        "readableSessionCondition",
       ].includes(name)
     ) {
       expect(name in db).toBe(false);

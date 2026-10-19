@@ -408,6 +408,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "PR_ROOM_REPOS",
+        label: "PR room repositories",
+        description:
+          "Comma-separated owner/repo list requiring a PR room marker before Claude or Codex workers create a pull request.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#pr-rooms`,
+      },
+      {
         key: "RUNTIME_POOLS_ENABLED",
         label: "Runtime pools (beta)",
         description:
@@ -1588,7 +1597,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SWARM_ORG_WEBSITE",
         label: "Company website",
         description:
-          "Your company's website, stored as a bare hostname such as example.com. When the logo below is empty, the dashboard uses this site's logo. Sent with telemetry as org_website when telemetry is on. Required for the public ranking; changing it leaves the ranking until a new ranking PR merges.",
+          "Your company's website, stored as a bare hostname such as example.com. When the logo below is empty, the dashboard uses this site's logo. Sent with telemetry as org_website when telemetry is on. Required for the public ranking; changing it leaves the ranking until you click Get ranked again.",
         kind: "string",
         placeholder: "example.com",
         docsUrl: `${DOCS}reference/telemetry`,

@@ -2,12 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInternalConfigKey, validateConfigValue } from "../be/swarm-config-guard";
-import {
-  buildListing,
-  mintRankingClaim,
-  parseTelemetryRanking,
-  rankingEntryFile,
-} from "../ranking/telemetry-ranking";
+import { buildListing, parseTelemetryRanking } from "../ranking/telemetry-ranking";
 import { RANKING_TAXONOMY } from "../telemetry-contract/ranking-taxonomy.gen";
 import { orgIdentityStatus } from "../utils/org-identity";
 
@@ -41,7 +36,6 @@ describe("telemetry_ranking contract fixtures", () => {
 
 describe("buildListing", () => {
   const identity = orgIdentityStatus({ SWARM_ORG_NAME: "Acme", SWARM_ORG_WEBSITE: "acme.dev" });
-  const claim = mintRankingClaim();
 
   test("copies the name and domain from the org identity and blanks to null", () => {
     const listing = buildListing(
@@ -52,12 +46,10 @@ describe("buildListing", () => {
         description: "  ",
         sourceCodeUrl: null,
       },
-      claim,
       new Date("2026-10-18T10:00:00Z"),
     );
     expect(listing).toEqual({
       v: 1,
-      claim,
       name: "Acme",
       domain: "acme.dev",
       category: "engineering",
@@ -66,29 +58,22 @@ describe("buildListing", () => {
       sourceCodeUrl: null,
       updatedAt: "2026-10-18T10:00:00.000Z",
     });
-    expect(JSON.parse(rankingEntryFile(listing))).toEqual({
-      $schema: "./schema.json",
-      domain: "acme.dev",
-      claim,
-    });
   });
 
   test("refuses a missing identity and an http source URL", () => {
     expect(() =>
-      buildListing(
-        orgIdentityStatus({ SWARM_ORG_NAME: "Swarm", SWARM_ORG_WEBSITE: "acme.dev" }),
-        { category: "other" },
-        claim,
-      ),
+      buildListing(orgIdentityStatus({ SWARM_ORG_NAME: "Swarm", SWARM_ORG_WEBSITE: "acme.dev" }), {
+        category: "other",
+      }),
     ).toThrow("SWARM_ORG_NAME");
     expect(() =>
-      buildListing(identity, { category: "other", sourceCodeUrl: "http://github.com/acme" }, claim),
+      buildListing(identity, { category: "other", sourceCodeUrl: "http://github.com/acme" }),
     ).toThrow();
   });
 
-  test("mints rk_ + 32 hex claims", () => {
-    expect(mintRankingClaim()).toMatch(/^rk_[0-9a-f]{32}$/);
-    expect(mintRankingClaim()).not.toBe(mintRankingClaim());
+  test("a v2.4.0 listing with a claim still parses", () => {
+    const legacy = { ...JSON.parse(read("valid", "full.json")), claim: `rk_${"0".repeat(32)}` };
+    expect(parseTelemetryRanking(JSON.stringify(legacy)).claim).toBe(legacy.claim);
   });
 
   test("the taxonomy comes from the vendored contract", () => {

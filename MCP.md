@@ -415,7 +415,7 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 | `dailyBudgetUsd` | `number` | No | - | Daily budget in USD (null clears the cap) |
 | `status` | `invited \| active \| suspended` | No | - | User status — invited / active / suspended |
 | `metadata` | `object` | No | - | Free-form JSON metadata (null clears the field) |
-| `comms` | `object` | No | - | Merge-safe write to metadata.comms without touching sibling metadata keys; null removes only the comms key. When metadata is also provided, it is applied first and replaces the whole blob. |
+| `comms` | `object` | No | - | Merge per key into metadata.comms, preserving omitted preferences and sibling metadata keys. A preference set to null removes only that preference; comms: null removes the whole comms object. When metadata is also provided, it is applied first and replaces the whole blob. |
 
 ### db-query
 

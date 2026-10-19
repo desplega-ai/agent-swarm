@@ -1,10 +1,10 @@
 {
   "repo": "desplega-ai/proxy",
-  "commit": "6260f39827fc57784642b1adc88a43f61d882a6f",
+  "commit": "cc593585467a920dcb8731993d092639372dc7af",
   "files": {
-    "types.gen.ts": "192c6769164a65b6e804ea088b38de6827d34fac26a7ecaccce881a46e98b1a7",
-    "catalog.json": "1b2b052f8e43f082e9d6efc2768752d6f194c0cbf0d26ae9c35643cce0e6486c",
-    "EVENTS.md": "9451da995ef04a049888715f960a1641bbc52fecb3dce97610c3c391bead1faf",
+    "types.gen.ts": "aa8a682f1d875515d63cf5bd3fa667dcb06cd851f8b2b798482a4c71cd775444",
+    "catalog.json": "595654f288ae2a7cbb265b6b2a72392acc33f5acde365d72829101912525a891",
+    "EVENTS.md": "51ee5491c633d684b163d727a369a08b5c1d3f4ba453277d840526449a0bad0c",
     "ranking/fixtures/expected.json": "6d506546f48d99a089666bed2a4c08752ebb63a029392c76ffd057e9520adc70",
     "ranking/fixtures/invalid/bad-category.json": "a4c36da6079c36d15e5e8c8e6322fc97b172de015a80a26cee8cab699f666236",
     "ranking/fixtures/invalid/bad-claim.json": "cee14d465545d057cfb61922301a5119187ba17d70efabb16528a5e305d7b065",
@@ -34,9 +34,10 @@
     "ranking/fixtures/valid/category-without-subcategory.json": "45c5b872aec232bdcba791e6ba1a7aba698c825f389e194a38e96ad141f56e5a",
     "ranking/fixtures/valid/full.json": "d6d93c4a6159e814c3f089c69083df700fb19359f127ccd2b71529a058dfe5e9",
     "ranking/fixtures/valid/minimal.json": "de6629d6ee2c4b67598abfc5ec7f6470a93dd9893b07e6e7c93d018cf5445593",
+    "ranking/fixtures/valid/no-claim.json": "fa5c08ec50c1b602f404cf36ce8b1c03d131111379d914699378dd448431cb84",
     "ranking/fixtures/valid/padded-text.json": "db71248bf83bb1ffb639208ec467a0228e5c37f604299d09838ab25dc61986a3",
     "ranking/fixtures/valid/unicode-name.json": "01a9d2cc8c5fec128af3eef35bf16696286f28636dac21b9dec107b28fddf743",
-    "ranking/listing.v1.schema.json": "1895c57075bbb4b0945e1c5daf813d6c4eaccf1f4480cabd6dc0ce2f0d146776",
+    "ranking/listing.v1.schema.json": "f839b669abadb25e031515a5cc2abd3aa2024e85e6117cae83133fc9dfbb769d",
     "ranking/taxonomy.json": "c6abe7e437635c9a3c1a82a3477a8757ba6c0cb7cbeae86c8c3d175fb37f402c"
   }
 }

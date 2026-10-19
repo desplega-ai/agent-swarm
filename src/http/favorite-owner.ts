@@ -16,7 +16,7 @@ export type FavoriteOwner = {
  */
 export const DASHBOARD_USER_HEADER = "x-swarm-user-id";
 
-function dashboardUserIdHeader(req: IncomingMessage): string | null {
+export function dashboardUserIdHeader(req: IncomingMessage): string | null {
   const raw = req.headers[DASHBOARD_USER_HEADER];
   const value = (Array.isArray(raw) ? raw[0] : raw)?.trim();
   return value ? value : null;

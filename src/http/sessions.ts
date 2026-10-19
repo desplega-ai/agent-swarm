@@ -7,18 +7,40 @@ import {
   getTaskById,
   listRecentSessions,
 } from "../be/db";
+import {
+  getSessionRoot,
+  listActiveSessionShares,
+  type SessionAccess,
+  sessionAccessForRoot,
+  setSessionShares,
+  toSessionSharesState,
+} from "../be/session-shares";
 import { getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
 import {
+  findUserById,
   InvalidRuntimeTokenError,
   mintRuntimeToken,
   mintSessionToken,
   revokeSessionToken,
 } from "../be/users";
-import { type AgentTask, AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
+import { can } from "../rbac";
+import { sessionAccessTopic } from "../realtime/auth";
+import { realtimeBus } from "../realtime/bus";
+import {
+  type AgentTask,
+  AgentTaskSchema,
+  AgentTaskStatusSchema,
+  SessionAccessSchema,
+  SessionOwnerSchema,
+  SessionSharesSchema,
+  SessionSharesUpdateSchema,
+  SteerModeSchema,
+} from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { route } from "./route-def";
+import { resolveSessionActor, type SessionActor } from "./session-access";
 import { jsonError } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -91,6 +113,9 @@ const mintSessionTokenRoute = route({
   method: "post",
   path: "/api/sessions/tokens",
   pattern: ["api", "sessions", "tokens"],
+  session: {
+    none: "user tokens cannot mint: the handler admits only the operator key or the task's own runtime",
+  },
   summary: "Mint an ephemeral task or runtime token",
   description:
     "Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.",
@@ -175,6 +200,14 @@ const listSessions = route({
     contextKeyPrefix: z.string().min(1).optional(),
     /** `full` restores the legacy shape (full root `AgentTask`); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
+    /**
+     * `mine`: sessions the caller owns. `shared`: sessions someone else owns
+     * with an active share to the caller or to everyone. Omit for every
+     * session the caller can open. Callers that act for no user (agents, the
+     * operator key with no picked dashboard user) see every session, and
+     * an empty list for either scope.
+     */
+    scope: z.enum(["mine", "shared"]).optional(),
   }),
   responses: {
     200: {
@@ -195,22 +228,77 @@ const getSession = route({
   method: "get",
   path: "/api/sessions/{rootTaskId}",
   pattern: ["api", "sessions", null],
+  session: { taskParam: "rootTaskId" },
   summary: "Get a session — root task + the entire descendant chain",
   tags: ["Sessions"],
   params: z.object({ rootTaskId: z.string() }),
   responses: {
     200: {
-      description: "Root task + chain (ordered by createdAt)",
+      description:
+        "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`",
       schema: z.object({
         root: TaskWithSteeringSchema,
         chain: z.array(TaskWithSteeringSchema),
+        access: SessionAccessSchema,
+        owner: SessionOwnerSchema.nullable(),
       }),
     },
     401: { description: "Unauthorized" },
+    403: { description: "The caller has no access to this session" },
     404: { description: "Root task not found" },
   },
   auth: { apiKey: true },
 });
+
+const getSessionShares = route({
+  method: "get",
+  path: "/api/sessions/{rootTaskId}/shares",
+  pattern: ["api", "sessions", null, "shares"],
+  session: { taskParam: "rootTaskId" },
+  summary: "List a session's active shares",
+  description:
+    "Active shares only. `everyone` is the access every user has; `users` are per-person shares. A session with no shares is private to its owner.",
+  tags: ["Sessions"],
+  params: z.object({ rootTaskId: z.string() }),
+  responses: {
+    200: { description: "Active shares", schema: SessionSharesSchema },
+    401: { description: "Unauthorized" },
+    403: { description: "The caller has no access to this session" },
+    404: { description: "Root task not found" },
+  },
+  auth: { apiKey: true },
+});
+
+const putSessionShares = route({
+  method: "put",
+  path: "/api/sessions/{rootTaskId}/shares",
+  pattern: ["api", "sessions", null, "shares"],
+  session: { taskParam: "rootTaskId" },
+  summary: "Set who can view or edit a session",
+  description:
+    "Owner only. The body is the full desired state: users left out lose access. Changed targets have their active share revoked and a new one inserted in one transaction; shares are never deleted.",
+  tags: ["Sessions"],
+  params: z.object({ rootTaskId: z.string() }),
+  body: SessionSharesUpdateSchema,
+  responses: {
+    200: { description: "Active shares after the change", schema: SessionSharesSchema },
+    400: { description: "Validation error or unknown user" },
+    401: { description: "Unauthorized" },
+    403: { description: "Only the session owner can share it" },
+    404: { description: "Root task not found" },
+    409: { description: "The session has no owner, so it is already open to everyone" },
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "session.share" },
+});
+
+/** The actor's access to the session rooted at `root`; `owner` when the actor bypasses checks. */
+async function accessForRoot(
+  actor: SessionActor,
+  root: { id: string; requestedByUserId: string | null },
+): Promise<SessionAccess> {
+  return actor.kind === "bypass" ? "owner" : sessionAccessForRoot(actor.userId, root);
+}
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -219,6 +307,7 @@ export async function handleSessions(
   res: ServerResponse,
   pathSegments: string[],
   queryParams: URLSearchParams,
+  myAgentId?: string,
 ): Promise<boolean> {
   if (mintSessionTokenRoute.match(req.method, pathSegments)) {
     const auth = getRequestAuth(req);
@@ -312,13 +401,30 @@ export async function handleSessions(
           .map((s) => s.trim())
           .filter(Boolean)
       : undefined;
-    const baseOpts = {
-      limit: parsed.query.limit,
-      offset: parsed.query.offset,
+    const actor = await resolveSessionActor(req, myAgentId);
+    if (actor.kind === "bypass" && parsed.query.scope) {
+      // No user to own or receive a share.
+      listSessions.respond(res, 200, {
+        sessions: [],
+        total: 0,
+        limit: parsed.query.limit ?? 25,
+        offset: parsed.query.offset ?? 0,
+      });
+      return true;
+    }
+    const filterOpts = {
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
       contextKeyPrefix: parsed.query.contextKeyPrefix,
+      ...(actor.kind === "user"
+        ? { viewer: { userId: actor.userId, scope: parsed.query.scope ?? "all" } as const }
+        : {}),
+    };
+    const baseOpts = {
+      ...filterOpts,
+      limit: parsed.query.limit,
+      offset: parsed.query.offset,
     };
     // List responses default to slim (root is a task summary); `?fields=full` restores it.
     const sessions =
@@ -327,12 +433,7 @@ export async function handleSessions(
         : await listRecentSessions({ ...baseOpts, slim: true });
     // Filter-aware total: same WHERE as the list query, so the UI pager
     // reflects the filtered result set.
-    const total = await countSessions({
-      source: sources,
-      q: parsed.query.q,
-      requestedByUserId: parsed.query.requestedByUserId,
-      contextKeyPrefix: parsed.query.contextKeyPrefix,
-    });
+    const total = await countSessions(filterOpts);
     listSessions.respond(res, 200, {
       sessions,
       total,
@@ -350,6 +451,25 @@ export async function handleSessions(
       jsonError(res, "Root task not found", 404);
       return true;
     }
+    // The route accepts any task id; access follows the topmost root.
+    const sessionRoot = (await getSessionRoot(root.id)) ?? {
+      id: root.id,
+      requestedByUserId: root.requestedByUserId ?? null,
+    };
+    const access = await accessForRoot(await resolveSessionActor(req, myAgentId), sessionRoot);
+    if (access === "none") {
+      jsonError(res, "You don't have access to this session. Ask the owner to share it.", 403);
+      return true;
+    }
+    const ownerUser = sessionRoot.requestedByUserId
+      ? await findUserById(sessionRoot.requestedByUserId)
+      : null;
+    const owner = sessionRoot.requestedByUserId
+      ? {
+          id: sessionRoot.requestedByUserId,
+          name: ownerUser?.name ?? sessionRoot.requestedByUserId,
+        }
+      : null;
     const chain = await getRootTaskChain(parsed.params.rootTaskId);
     // Fixed query count regardless of chain length: one agents lookup and one
     // citations lookup for the whole chain (chunked past 500 ids).
@@ -363,7 +483,87 @@ export async function handleSessions(
       ...steering.get(task.id)!,
       citations: citations.get(task.id)!,
     });
-    getSession.respond(res, 200, { root: decorate(root), chain: chain.map(decorate) });
+    getSession.respond(res, 200, {
+      root: decorate(root),
+      chain: chain.map(decorate),
+      access,
+      owner,
+    });
+    return true;
+  }
+
+  if (getSessionShares.match(req.method, pathSegments)) {
+    const parsed = await getSessionShares.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const root = await getSessionRoot(parsed.params.rootTaskId);
+    if (!root) {
+      jsonError(res, "Root task not found", 404);
+      return true;
+    }
+    const access = await accessForRoot(await resolveSessionActor(req, myAgentId), root);
+    if (access === "none") {
+      jsonError(res, "You don't have access to this session. Ask the owner to share it.", 403);
+      return true;
+    }
+    getSessionShares.respond(
+      res,
+      200,
+      toSessionSharesState(await listActiveSessionShares(root.id)),
+    );
+    return true;
+  }
+
+  if (putSessionShares.match(req.method, pathSegments)) {
+    const parsed = await putSessionShares.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const auth = getRequestAuth(req);
+    const actor = await resolveSessionActor(req, myAgentId);
+    // Sharing is a dashboard action: a person, or the operator key itself.
+    const principal =
+      auth?.kind === "user"
+        ? ({ kind: "user", userId: auth.userId } as const)
+        : auth?.kind === "operator" && !myAgentId
+          ? ({ kind: "operator" } as const)
+          : null;
+    if (
+      !principal ||
+      !can({ principal, verb: "session.share", resource: { kind: "none" }, source: "http" }).allow
+    ) {
+      jsonError(res, "Only the session owner can share it", 403);
+      return true;
+    }
+    const root = await getSessionRoot(parsed.params.rootTaskId);
+    if (!root) {
+      jsonError(res, "Root task not found", 404);
+      return true;
+    }
+    if (!root.requestedByUserId) {
+      jsonError(res, "This session has no owner, so it is already open to everyone", 409);
+      return true;
+    }
+    if (actor.kind === "user" && actor.userId !== root.requestedByUserId) {
+      jsonError(res, "Only the session owner can share it", 403);
+      return true;
+    }
+    const userIds = [...new Set(parsed.body.users.map((user) => user.userId))];
+    if (userIds.length !== parsed.body.users.length) {
+      jsonError(res, "Each user may appear only once", 400);
+      return true;
+    }
+    for (const userId of userIds) {
+      if (!(await findUserById(userId))) {
+        jsonError(res, `Unknown user ${userId}`, 400);
+        return true;
+      }
+    }
+    const state = await setSessionShares(
+      root,
+      parsed.body,
+      actor.kind === "user" ? actor.userId : null,
+    );
+    // Committed: presence sockets re-check access, so a revoked viewer leaves.
+    realtimeBus.publish(sessionAccessTopic(root.id), null);
+    putSessionShares.respond(res, 200, state);
     return true;
   }
 

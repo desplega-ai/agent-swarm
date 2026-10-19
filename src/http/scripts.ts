@@ -225,6 +225,10 @@ const upsertRoute = route({
   method: "post",
   path: "/api/scripts/upsert",
   pattern: ["api", "scripts", "upsert"],
+  auth: {
+    userNamesAgent:
+      "dashboard script playground: a user runs or saves a script in a chosen agent's scope",
+  },
   operationId: "scripts_upsert",
   summary: "Create or update a reusable script",
   description: "Explicit script upserts run a TypeScript typecheck before writing.",
@@ -253,6 +257,10 @@ const runRoute = route({
   method: "post",
   path: "/api/scripts/run",
   pattern: ["api", "scripts", "run"],
+  auth: {
+    userNamesAgent:
+      "dashboard script playground: a user runs or saves a script in a chosen agent's scope",
+  },
   operationId: "scripts_run",
   summary: "Run a reusable or inline script",
   description:

@@ -404,7 +404,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsers(req, res, pathSegments, queryParams),
-        () => handleSessions(req, res, pathSegments, queryParams),
+        () => handleSessions(req, res, pathSegments, queryParams, myAgentId),
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTelemetryUi(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsedBy(req, res, pathSegments, queryParams, myAgentId),

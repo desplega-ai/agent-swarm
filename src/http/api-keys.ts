@@ -20,7 +20,7 @@ import {
   SUBSCRIPTION_PLANS,
   SUBSCRIPTION_PLANS_CHECKED_AT,
 } from "../utils/subscription-plans";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
 import { clearUsageCache } from "./usage-cache";
 import { jsonError } from "./utils";
 
@@ -36,6 +36,7 @@ const reportUsage = route({
   method: "post",
   path: "/api/keys/report-usage",
   pattern: ["api", "keys", "report-usage"],
+  session: bodyTask("taskId"),
   summary: "Record which API key was used for a task",
   tags: ["API Keys"],
   body: z.object({
@@ -82,6 +83,7 @@ const reportAuthFailure = route({
   method: "post",
   path: "/api/keys/report-auth-failure",
   pattern: ["api", "keys", "report-auth-failure"],
+  session: bodyTask("taskId"),
   summary: "Record an auth failure for a pooled key; bench it after 2 in a row",
   tags: ["API Keys"],
   body: z.object({
