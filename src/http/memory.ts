@@ -44,7 +44,7 @@ import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } fr
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -68,6 +68,7 @@ const indexMemory = route({
   method: "post",
   path: "/api/memory/index",
   pattern: ["api", "memory", "index"],
+  session: bodyTask("sourceTaskId"),
   summary: "Ingest content into memory system (async embedding)",
   tags: ["Memory"],
   // The gate only bites when the key that lands on the rows (here, `sourcePath`) sits under a
@@ -687,6 +688,7 @@ const rateMemory = route({
   method: "post",
   path: "/api/memory/rate",
   pattern: ["api", "memory", "rate"],
+  session: { none: "worker-only: it needs X-Agent-ID, which a user token cannot send" },
   summary: "Submit RatingEvents to update memory usefulness posteriors",
   tags: ["Memory"],
   auth: { apiKey: true, agentId: true },

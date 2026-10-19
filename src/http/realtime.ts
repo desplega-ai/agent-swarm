@@ -1,10 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getCombConfig } from "../comb/config";
+import { findUserById } from "../be/users";
 import { can } from "../rbac";
 import bundle from "../realtime/browser.generated.txt" with { type: "text" };
 import { issueRealtimeTicket } from "../realtime/tickets";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { dashboardUserIdHeader } from "./favorite-owner";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -14,14 +15,16 @@ const realtimeTicketRoute = route({
   pattern: ["api", "realtime", "ticket"],
   summary: "Issue a one-shot dashboard realtime ticket",
   tags: ["Rooms"],
-  rbac: { permission: "comb.presence" },
+  description:
+    "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
+  // Comb presence came first; a role granting only `comb.presence` keeps its ticket.
+  rbac: { permission: "session.presence", alsoAdmits: ["comb.presence"] },
   responses: {
     200: {
       description: "One-shot realtime ticket",
       schema: z.object({ ticket: z.string(), expiresAt: z.number().int() }),
     },
-    403: { description: "Comb presence is not allowed" },
-    404: { description: "Comb is not enabled" },
+    403: { description: "Presence is not allowed" },
   },
 });
 
@@ -37,7 +40,7 @@ route({
   },
 });
 
-/** `POST /api/realtime/ticket`: a one-shot ticket for a dashboard realtime socket (Comb presence). */
+/** `POST /api/realtime/ticket`: a one-shot ticket for a dashboard realtime socket (presence rooms). */
 export async function handleRealtimeTicket(
   req: IncomingMessage,
   res: ServerResponse,
@@ -45,34 +48,36 @@ export async function handleRealtimeTicket(
   queryParams: URLSearchParams,
 ): Promise<boolean> {
   if (!realtimeTicketRoute.match(req.method, pathSegments)) return false;
-  // Comb presence is the only ticket consumer, so the route is off with Comb.
-  if (!getCombConfig().enabled) {
-    jsonError(res, "Comb is not enabled", 404);
-    return true;
-  }
+  // Session presence needs the ticket with Comb off too; each room still
+  // checks its own verb and access when the socket joins it.
   const parsed = await realtimeTicketRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
   const auth = getRequestAuth(req);
   if (!auth || auth.kind === "agent" || auth.kind === "guest" || auth.kind === "controller") {
-    jsonError(res, "Comb presence requires dashboard authentication", 403);
+    jsonError(res, "Presence requires dashboard authentication", 403);
     return true;
   }
   const principal =
     auth.kind === "operator"
       ? ({ kind: "operator" } as const)
       : ({ kind: "user", userId: auth.userId } as const);
-  if (
-    !can({
-      principal,
-      verb: "comb.presence",
-      resource: { kind: "none" },
-      source: "http",
-    }).allow
-  ) {
-    jsonError(res, "Comb presence requires the comb.presence permission", 403);
+  const allowed = (verb: "comb.presence" | "session.presence") =>
+    can({ principal, verb, resource: { kind: "none" }, source: "http" }).allow;
+  if (!allowed("comb.presence") && !allowed("session.presence")) {
+    jsonError(res, "Presence requires the comb.presence or session.presence permission", 403);
     return true;
   }
-  realtimeTicketRoute.respond(res, 200, issueRealtimeTicket(auth));
+  let dashboardUserId: string | undefined;
+  if (auth.kind === "operator" && !auth.page) {
+    const picked = dashboardUserIdHeader(req);
+    const user = picked ? await findUserById(picked) : null;
+    if (user?.status === "active") dashboardUserId = user.id;
+  }
+  realtimeTicketRoute.respond(
+    res,
+    200,
+    issueRealtimeTicket(dashboardUserId ? { ...auth, dashboardUserId } : auth),
+  );
   return true;
 }
 

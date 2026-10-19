@@ -35,6 +35,7 @@ import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { guardGhPrBody, type PrBodyGuardDeps } from "./pr-body-guard";
+import { guardGhPrRoom, type PrRoomGuardDeps } from "./pr-room-guard";
 
 const FETCH_TIMEOUT_MS = 5_000;
 
@@ -169,13 +170,16 @@ export async function handleCodexHookEvent(
   };
 }
 
-/** PreToolUse: the PR body leak guard's block reason, or null to allow the call. */
+/** PreToolUse: return the first PR guard block reason, or null to allow the call. */
 export async function codexPreToolUseBlock(
   msg: CodexHookMessage,
   deps?: PrBodyGuardDeps,
+  roomDeps?: PrRoomGuardDeps,
 ): Promise<string | null> {
   if (msg.hook_event_name !== "PreToolUse") return null;
-  return guardGhPrBody(msg.tool_input, msg.cwd ?? process.cwd(), deps);
+  const cwd = msg.cwd ?? process.cwd();
+  const block = await guardGhPrBody(msg.tool_input, cwd, deps);
+  return block ?? (await guardGhPrRoom(msg.tool_input, cwd, roomDeps));
 }
 
 /** stdin/stdout entry point used by the `codex-hook` CLI command. */

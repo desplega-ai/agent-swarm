@@ -183,7 +183,7 @@ The dashboard never sends telemetry to Desplega itself. It posts each event to i
 | `fleet_benchmark.viewed` | The "Your swarm vs. similar swarms" card shows on Home, at most once per page load | `has_org_name` |
 | `popup.submitted` | It is submitted | `popup`, `has_message` and `has_contact`: whether a message or a name or email was filled in, never the text. The feedback card adds the 0-10 `score` |
 
-`telemetry.enabled` (`via`: `banner`, `settings` or `env`) is sent by the API server once per opt-in: on the first boot of an install with telemetry on, or when someone turns telemetry back on from the dashboard banner or the Configuration page. Turning it on that way applies without a restart.
+`telemetry.enabled` (`via`: `banner`, `settings`, `benchmark` or `env`) is sent by the API server once per opt-in: on the first boot of an install with telemetry on, or when someone turns telemetry back on from the dashboard banner, the Home benchmark card, or the Configuration page. Turning it on that way applies without a restart.
 
 While telemetry is off, admins see a dashboard banner that explains what turning it on sends. It cannot report that it was shown, since telemetry is off. After "Dismiss" it never comes back.
 
@@ -198,6 +198,27 @@ The request carries no installation ID or organization name. The response contai
 `GET /api/fleet-benchmark` adds `level` and `peerGroup` to its existing response. Level is `full` when website, team size, and use case are set. Otherwise, level is `basic`. Full requests include `team_size` and `use_case` query parameters. The fleet cache key includes these peer filters.
 
 `peerGroup` contains `{teamSize, useCase, orgs}` when the proxy returns a matching group. It is null when the proxy returns the whole fleet or omits `peer_group`. With telemetry off, `local` contains DB counts for the last 30 days, without a proxy request or ingest requirement. Existing comparisons still require a known proxy ingest date.
+
+### Public ranking
+
+[agent-swarm.dev/ranking](https://agent-swarm.dev/ranking) ranks installs by tokens used, like OpenRouter's app rankings. It is off by default (`PUBLIC_RANKING_ENABLED=false`). An install is listed only when all of these hold:
+
+- Telemetry is on.
+- The organization name (`SWARM_ORG_NAME`) and company website (`SWARM_ORG_WEBSITE`) are set. The placeholders `Swarm` and `Your Swarm` do not count as a name.
+- An admin clicked **Get ranked** in Settings → Configuration → Branding.
+- A PR adding `community/ranking/<domain>.json` was merged into `desplega-ai/agent-swarm`. A Desplega maintainer reviews each one.
+
+Exactly these fields leave the install for the ranking:
+
+| Event | Sent by | Fields |
+|---|---|---|
+| `ranking.opted_in` | API, on Get ranked and when the organization name changes | `listing`: the organization name and website, the category and subcategory you picked, the optional description and source code URL, a random claim (`rk_` + 32 hex) and the time it was built. The same JSON is stored as the `telemetry_ranking` config key. |
+| `ranking.opted_out` | API, when the setting turns off | `domain` |
+| `ranking.usage` | Each worker, after every session with cost data | `totalTokens`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, and the session's `model` and `provider`. No task, agent or cost. |
+
+**Token totals are public and exact.** The page shows your total tokens per day, week and month, and tokens per model, the same as OpenRouter.
+
+To leave, turn the setting off, turn telemetry off, or clear the organization name or website. Changing the website also opts out, because a new domain needs a new PR. The entry disappears at the proxy's next hourly refresh. Deleting `community/ranking/<domain>.json` removes it for good.
 
 A notification card that asks for your email, and the feedback dialog, are different. Those send what you type to the feedback endpoint (`https://proxy.desplega.sh/v1/feedback`, overridable with the `feedback_endpoint` config key), and only when you submit them. They are not telemetry, so the opt-out does not block them.
 

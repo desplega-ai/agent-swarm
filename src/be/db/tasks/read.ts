@@ -556,10 +556,14 @@ export async function hasNonTerminalRerouteDecisionChild(parentId: string): Prom
   return row !== undefined && row !== null;
 }
 
-export async function getTasksByAgentId(agentId: string): Promise<AgentTask[]> {
+export async function getTasksByAgentId(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentTask[]> {
+  const readable = readableBy ? readableSessionCondition(readableBy.userId) : undefined;
   const rows = await getDbClient().query<AgentTaskRow>(
-    "SELECT * FROM agent_tasks WHERE agentId = ? ORDER BY createdAt DESC",
-    [agentId],
+    `SELECT * FROM agent_tasks WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToAgentTask);
 }
@@ -642,6 +646,48 @@ export interface TaskFilters {
   limit?: number;
   offset?: number;
   includeHeartbeat?: boolean;
+  /** Only tasks of sessions this user may read; `userId: null` is a guest. */
+  readableBy?: { userId: string | null };
+}
+
+/**
+ * The SQL twin of `sessionAccessForRoot` (../../session-shares). A session's
+ * root is its topmost existing task; the session is hidden when the root has
+ * an owner other than the user and no active share names the user or
+ * everyone. Descending from hidden roots is linear in their tasks at any chain
+ * depth, and as a WHERE term it keeps paging and `COUNT(*)` on the same rows.
+ * `parentTaskId` is fixed at insert to an existing task, so no parent cycle
+ * (which would have no root) can form.
+ *
+ * `taskIdColumn` applies the same filter to any table keyed by task id. A
+ * nullable column keeps its task-less rows: they belong to no session.
+ */
+export function readableSessionCondition(
+  userId: string | null,
+  taskIdColumn = "agent_tasks.id",
+  opts: { nullable?: boolean } = {},
+): { sql: string; params: string[] } {
+  const otherOwner = userId
+    ? "r.requestedByUserId IS NOT NULL AND r.requestedByUserId != ?"
+    : "r.requestedByUserId IS NOT NULL";
+  const shareMatch = userId ? "(s.userId IS NULL OR s.userId = ?)" : "s.userId IS NULL";
+  const notHidden = `${taskIdColumn} NOT IN (
+      WITH RECURSIVE hidden(id) AS (
+        SELECT r.id FROM agent_tasks r
+        WHERE (r.parentTaskId IS NULL
+            OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = r.parentTaskId))
+          AND ${otherOwner}
+          AND NOT EXISTS (SELECT 1 FROM session_shares s
+            WHERE s.rootTaskId = r.id AND s.revokedAt IS NULL AND ${shareMatch})
+        UNION ALL
+        SELECT c.id FROM agent_tasks c JOIN hidden ON c.parentTaskId = hidden.id
+      )
+      SELECT id FROM hidden
+    )`;
+  return {
+    sql: opts.nullable ? `(${taskIdColumn} IS NULL OR ${notHidden})` : notHidden,
+    params: userId ? [userId, userId] : [],
+  };
 }
 
 export function getAllTasks(filters?: TaskFilters): Promise<AgentTask[]>;
@@ -754,6 +800,12 @@ export async function getAllTasks(
     conditions.push(
       "(IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND tags NOT LIKE '%\"heartbeat\"%')",
     );
+  }
+
+  if (filters?.readableBy) {
+    const readable = readableSessionCondition(filters.readableBy.userId);
+    conditions.push(readable.sql);
+    params.push(...readable.params);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -914,6 +966,12 @@ export async function getTasksCount(
     conditions.push(
       "(IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND tags NOT LIKE '%\"heartbeat\"%')",
     );
+  }
+
+  if (filters?.readableBy) {
+    const readable = readableSessionCondition(filters.readableBy.userId);
+    conditions.push(readable.sql);
+    params.push(...readable.params);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";

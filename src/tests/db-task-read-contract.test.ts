@@ -660,6 +660,7 @@ const internal = [
   "type:AgentTaskRow",
   "value:configureTaskReadDependencies",
   "value:NEVER_STARTED_TASK_STATUSES",
+  "value:readableSessionCondition",
   "value:rowToAgentTask",
   "value:rowToAgentTaskSummary",
 ].sort();

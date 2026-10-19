@@ -24,7 +24,8 @@ import {
   SessionCostSchema,
   SessionLogSchema,
 } from "../types";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
+import { canReadSession, SESSION_READ_DENIED } from "./session-access";
 import { recomputeSessionCost } from "./session-cost-recompute";
 import { cachedUsageReport } from "./usage-cache";
 import { jsonError } from "./utils";
@@ -127,6 +128,7 @@ const createSessionLogsRoute = route({
   method: "post",
   path: "/api/session-logs",
   pattern: ["api", "session-logs"],
+  session: bodyTask("taskId"),
   summary: "Store session logs",
   tags: ["Session Data"],
   body: z.object({
@@ -149,6 +151,7 @@ const getSessionLogsByTask = route({
   method: "get",
   path: "/api/tasks/{taskId}/session-logs",
   pattern: ["api", "tasks", null, "session-logs"],
+  session: { taskParam: "taskId" },
   summary: "Get session logs for a task",
   tags: ["Session Data"],
   params: z.object({ taskId: z.string() }),
@@ -172,6 +175,7 @@ const createSessionCostRoute = route({
   method: "post",
   path: "/api/session-costs",
   pattern: ["api", "session-costs"],
+  session: bodyTask("taskId"),
   summary: "Store session cost record",
   tags: ["Session Data"],
   body: z.object({
@@ -310,7 +314,7 @@ export async function handleSessionData(
   res: ServerResponse,
   pathSegments: string[],
   queryParams: URLSearchParams,
-  _myAgentId: string | undefined,
+  myAgentId: string | undefined,
 ): Promise<boolean> {
   if (createSessionLogsRoute.match(req.method, pathSegments)) {
     const parsed = await createSessionLogsRoute.parse(req, res, pathSegments, queryParams);
@@ -351,6 +355,10 @@ export async function handleSessionData(
     const task = await getTaskById(parsed.params.taskId);
     if (!task) {
       jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (!(await canReadSession(req, myAgentId, task.id))) {
+      jsonError(res, SESSION_READ_DENIED, 403);
       return true;
     }
     const logs = await getSessionLogsByTaskId(parsed.params.taskId, parsed.query?.limit);

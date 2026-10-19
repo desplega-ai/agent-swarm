@@ -50,6 +50,16 @@ Transport changes apply to future sessions and do not require a worker restart.
 The worker resolves this key for each session instead of retaining a scoped value in its deployment environment.
 SDK selection is incompatible with an effective Claude Bridge or legacy bridge binary.
 
+### PR rooms
+
+The **Harness & tools** group includes `PR_ROOM_REPOS`, an empty string by default.
+Set a comma-separated `owner/repo` list to require PR rooms before Claude or Codex workers execute `gh pr create`.
+Repository names ignore case and surrounding spaces. An empty value disables the check.
+Create a room with the `pr-room` skill (app action `createRoom`), then pass its returned `prBody` through `--body-file`.
+The body must contain a line such as `PR room: prr-abcde23457`.
+The guard allows edits and unresolved repositories or bodies. It provides a workflow reminder, not a security control.
+Keep **Export to agent env** enabled. Changes reach the next harness session without a worker restart.
+
 | Group | Examples |
 | --- | --- |
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
@@ -62,9 +72,11 @@ SDK selection is incompatible with an effective Claude Bridge or legacy bridge b
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults) |
 | Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `ANONYMIZED_TELEMETRY` |
-| Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_ORG_TEAM_SIZE`, `SWARM_ORG_USE_CASE`, `SWARM_ORG_ACQUISITION_SOURCE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, and the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`) |
+| Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_ORG_TEAM_SIZE`, `SWARM_ORG_USE_CASE`, `SWARM_ORG_ACQUISITION_SOURCE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`), and the public ranking opt-in (`PUBLIC_RANKING_ENABLED`) |
 
 `SWARM_ORG_WEBSITE` takes a website and stores its bare hostname (`https://www.example.com/about` saves as `example.com`). When `SWARM_ORG_LOGO_URL` is empty, saving a website fills it with that site's logo, served by the telemetry proxy (`https://proxy.desplega.sh/v1/logo?domain=<host>`) so no logo key ever reaches your install. A logo you set yourself is never replaced. The "Show our logo on agent-swarm.dev" switch sends your organization name, website, domain, and contact email to Desplega. It also sends your optional job function and quote. This explicit consent works with telemetry on or off. A person approves each logo before it appears. Turning `ANONYMIZED_TELEMETRY` back on applies without a restart.
+
+The **Public ranking** row opts the install into [agent-swarm.dev/ranking](https://agent-swarm.dev/ranking), which ranks installs by tokens used. It needs telemetry on and both `SWARM_ORG_NAME` (not the placeholder `Swarm`) and `SWARM_ORG_WEBSITE`; until then it lists what is missing. **Get ranked** sends the listing (name, website, category, subcategory, optional description and source code URL) and opens a prefilled PR that adds `community/ranking/<domain>.json`; the install is listed once a maintainer merges it. Renaming the organization updates the listing. Clearing the name or website, or changing the website, leaves the ranking. The listing is stored as the `telemetry_ranking` config key, which only this row can write. What it sends is in the [telemetry reference](/docs/reference/telemetry#public-ranking).
 
 Harness **provider and model selection are deliberately absent** from this page — they are configured per agent. A global value would silently become the default for every agent in the swarm, so those knobs live on each agent's own configuration instead. `OPENROUTER_BASE_URL` is a deployment-wide routing endpoint rather than a model choice, which is why it does belong here.
 

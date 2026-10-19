@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDbClient, upsertSwarmConfig } from "../be/db";
 import { isTelemetryEnabled, trackRelayed } from "../telemetry";
 import { USER_FUNCTIONS } from "../utils/company-profile";
+import { orgIdentityStatus } from "../utils/org-identity";
 import { normalizeOrgWebsite, TELEMETRY_PROXY_ORIGIN } from "../utils/org-website";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
@@ -92,8 +93,14 @@ export async function handleUsedBy(
   if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
 
   const { granted, contactEmail, contactFunction, quote } = parsed.body;
-  const currentName = await globalConfig("SWARM_ORG_NAME");
-  const currentWebsite = normalizeOrgWebsite(await globalConfig("SWARM_ORG_WEBSITE"));
+  // The shared identity reader. The grant keeps its own rule (any non-empty
+  // name), so it does not apply the ranking's placeholder-name check.
+  const current = orgIdentityStatus({
+    SWARM_ORG_NAME: await globalConfig("SWARM_ORG_NAME"),
+    SWARM_ORG_WEBSITE: await globalConfig("SWARM_ORG_WEBSITE"),
+  });
+  const currentName = current.name ?? undefined;
+  const currentWebsite = current.website;
   const grantedName = granted ? undefined : await globalConfig(GRANTED_NAME_KEY);
   const grantedWebsite = granted
     ? null

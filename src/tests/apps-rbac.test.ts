@@ -7,9 +7,20 @@ import {
   type ServerResponse,
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, createUser, getDbClient, getTaskById, initDb } from "../be/db";
+import type { AppActionCaller } from "../apps/action-caller";
+import {
+  closeDb,
+  createAgent,
+  createPage,
+  createUser,
+  getDbClient,
+  getTaskById,
+  initDb,
+} from "../be/db";
+import { createRuntimeController } from "../be/runtime-pools/db";
+import { mintControllerToken } from "../be/runtime-pools/tokens";
 import { upsertScriptByName } from "../be/scripts/db";
-import { type IdentityActor, mintToken } from "../be/users";
+import { type IdentityActor, mintRuntimeToken, mintToken } from "../be/users";
 import { handleApps } from "../http/apps";
 import { resolveHttpRequestAuth } from "../http/auth";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -19,13 +30,18 @@ import { registerAppDiffTool } from "../tools/app-diff";
 import { registerAppGetTool, registerAppQueryTool } from "../tools/app-get";
 import { registerAppHistoryTool } from "../tools/app-history";
 import { registerAppPatchTool } from "../tools/app-patch";
+import { signPageSession } from "../utils/page-session";
 import { setRequestAuth } from "../utils/request-auth-context";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 const TEST_DB_PATH = `/private/tmp/test-apps-rbac-${process.pid}.sqlite`;
 const API_KEY = "example-apps-rbac-test-key";
 const AGENT_ID = crypto.randomUUID();
 const LEAD_ID = crypto.randomUUID();
 const OPERATOR_ACTOR: IdentityActor = { kind: "operator", id: "apps-rbac-test" };
+const previousPageSecret = process.env.PAGE_SESSION_SECRET;
+const previousSwarmKey = process.env.AGENT_SWARM_API_KEY;
 
 const definition = {
   models: { note: { columns: { title: { kind: "string" } } } },
@@ -45,6 +61,7 @@ let server: Server;
 let base = "";
 let userId = "";
 let userToken = "";
+let agentToken = "";
 let appId = "";
 let tools: Record<string, RegisteredTool>;
 
@@ -144,12 +161,15 @@ async function callTool(name: string, args: unknown): Promise<unknown> {
 }
 
 beforeAll(async () => {
+  process.env.PAGE_SESSION_SECRET = "example-apps-rbac-page-session-secret";
+  process.env.AGENT_SWARM_API_KEY = API_KEY;
   for (const suffix of ["", "-wal", "-shm"]) {
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => undefined);
   }
   initDb(TEST_DB_PATH);
   await createAgent({ id: AGENT_ID, name: "apps-rbac-worker", isLead: false, status: "idle" });
   await createAgent({ id: LEAD_ID, name: "apps-rbac-lead", isLead: true, status: "idle" });
+  agentToken = (await mintRuntimeToken(AGENT_ID, crypto.randomUUID())).plaintext;
   const user = await createUser({ name: "Apps RBAC User" });
   userId = user.id;
   userToken = (await mintToken(user.id, "apps-rbac", OPERATOR_ACTOR)).plaintext;
@@ -177,6 +197,10 @@ afterEach(() => {
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
+  if (previousPageSecret === undefined) delete process.env.PAGE_SESSION_SECRET;
+  else process.env.PAGE_SESSION_SECRET = previousPageSecret;
+  if (previousSwarmKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
+  else process.env.AGENT_SWARM_API_KEY = previousSwarmKey;
   for (const suffix of ["", "-wal", "-shm"]) {
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => undefined);
   }
@@ -323,6 +347,9 @@ describe("app viewer identity", () => {
     });
     expect(action.status).toBe(200);
     expect((await getTaskById(action.body.taskId))?.requestedByUserId).toBe(userId);
+    expect((await getTaskById(action.body.taskId))?.task).toContain(
+      `Caller (server-verified): ${JSON.stringify({ kind: "user", id: userId, name: "Apps RBAC User" })}`,
+    );
 
     const operatorAction = await request<{ taskId: string }>(
       `/api/apps/${appId}/actions/triage`,
@@ -339,6 +366,166 @@ describe("app viewer identity", () => {
     );
     expect(agentAction.status).toBe(200);
     expect((await getTaskById(agentAction.body.taskId))?.requestedByUserId).toBeUndefined();
+  });
+});
+
+describe("verified app action caller", () => {
+  beforeEach(async () => {
+    const saved = await upsertScriptByName({
+      name: `apps_caller_${crypto.randomUUID().replaceAll("-", "")}`,
+      scope: "agent",
+      scopeId: AGENT_ID,
+      agentId: AGENT_ID,
+      source: "export default function run(args: Record<string, unknown>) { return args; }",
+      description: "Action caller fixture",
+      intent: "Return the arguments received by a script action",
+      signatureJson: JSON.stringify({ args: { type: "object" }, result: { type: "object" } }),
+      typeChecked: true,
+      embeddingMode: "skip",
+    });
+    const patched = await request(`/api/apps/${appId}`, "operator", {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: {
+          actions: {
+            echo: {
+              kind: "script",
+              scriptId: saved.script.id,
+              args: { caller: { kind: "guest", id: "default-forgery" }, base: 2 },
+            },
+          },
+        },
+      }),
+    });
+    expect(patched.status).toBe(200);
+  });
+
+  const scriptTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
+  scriptTest.each([
+    ["user", undefined],
+    ["operator", AGENT_ID],
+    ["operator", crypto.randomUUID()],
+    ["operator", undefined],
+    ["agent", AGENT_ID],
+  ] as const)(
+    "%s caller with agent header %s preserves identity and overwrites forged input",
+    async (principal, agentId) => {
+      const caller: AppActionCaller =
+        principal === "user"
+          ? { kind: "user", id: userId, name: "Apps RBAC User" }
+          : agentId === AGENT_ID
+            ? { kind: "agent", id: AGENT_ID, name: "apps-rbac-worker" }
+            : { kind: "operator", id: null };
+      const requestHeaders = {
+        ...(agentId ? { "X-Agent-ID": agentId } : {}),
+        ...(principal === "agent" ? { Authorization: `Bearer ${agentToken}` } : {}),
+      };
+      const checks: RbacCheck[] = [];
+      setAuditSink((check) => checks.push(check));
+      const row = await request<{ row: { createdBy: string } }>(
+        `/api/apps/${appId}/models/note/rows`,
+        principal,
+        {
+          method: "POST",
+          headers: requestHeaders,
+          body: JSON.stringify({ values: { title: "caller row" } }),
+        },
+      );
+      expect(row.status).toBe(201);
+      expect(row.body.row.createdBy).toBe(caller.id ? `${caller.kind}:${caller.id}` : "operator");
+
+      const action = await request<{
+        ok: boolean;
+        result: { caller: AppActionCaller; app: { id: string }; base: number; add: number };
+      }>(`/api/apps/${appId}/actions/echo`, principal, {
+        method: "POST",
+        headers: requestHeaders,
+        body: JSON.stringify({
+          input: { caller: { kind: "operator", id: "input-forgery" }, app: { id: "fake" }, add: 3 },
+        }),
+      });
+      expect(action.status).toBe(200);
+      expect(action.body.ok).toBe(true);
+      expect(action.body.result).toEqual({ caller, app: { id: appId }, base: 2, add: 3 });
+
+      const taskAction = await request<{ taskId: string }>(
+        `/api/apps/${appId}/actions/triage`,
+        principal,
+        { method: "POST", headers: requestHeaders, body: JSON.stringify({ input: {} }) },
+      );
+      expect(taskAction.status).toBe(200);
+      expect((await getTaskById(taskAction.body.taskId))?.task).toContain(
+        `Caller (server-verified): ${JSON.stringify(caller)}`,
+      );
+      expect(checks).toHaveLength(3);
+      expect(checks.every((check) => check.principal.kind === principal)).toBe(true);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  scriptTest(
+    "a signed page session includes the verified page id and viewer identity",
+    async () => {
+      const page = await createPage({
+        agentId: AGENT_ID,
+        slug: `caller-${crypto.randomUUID()}`,
+        title: "Caller page",
+        contentType: "text/html",
+        body: "<p>Caller page</p>",
+      });
+      const session = await signPageSession({
+        pageId: page.id,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        uid: userId,
+      });
+      const action = await request<{ ok: boolean; result: { caller: AppActionCaller } }>(
+        `/api/apps/${appId}/actions/echo`,
+        "operator",
+        {
+          method: "POST",
+          headers: {
+            "X-Agent-ID": AGENT_ID,
+            "X-Page-ID": page.id,
+            "X-Page-Session": session,
+          },
+          body: JSON.stringify({ input: { caller: { pageId: "fake" } } }),
+        },
+      );
+      expect(action.status).toBe(200);
+      expect(action.body.ok).toBe(true);
+      expect(action.body.result.caller).toEqual({
+        kind: "user",
+        id: userId,
+        name: "Apps RBAC User",
+        pageId: page.id,
+      });
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test("controller tokens use the guest principal even with a registered agent header", async () => {
+    const controller = await createRuntimeController({
+      name: "apps-caller-controller",
+      kind: "docker",
+      placement: "remote",
+    });
+    const token = await mintControllerToken(controller.id);
+    const checks: RbacCheck[] = [];
+    setAuditSink((check) => checks.push(check));
+    const action = await request(`/api/apps/${appId}/actions/echo`, "operator", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token.plaintext}`, "X-Agent-ID": AGENT_ID },
+      body: JSON.stringify({ input: {} }),
+    });
+    expect(action.status).toBe(403);
+    expect(checks).toEqual([
+      {
+        principal: { kind: "guest" },
+        verb: "app.use",
+        resource: { kind: "app", appId },
+        source: "http",
+      },
+    ]);
   });
 });
 
