@@ -49,7 +49,8 @@ const FILL_CONTAINER_STYLE = { flex: "1 1 0%", minHeight: 0, width: "100%" } as 
 /**
  * Mark a column low-priority with `context: HIDE_WHEN_COMPACT`. When the grid's
  * own width (not the viewport's, so an open sidebar counts) cannot hold every
- * column, marked columns are hidden last-to-first until the rest fit. Unmarked
+ * column, marked columns are hidden until the rest fit. Lower `compactHidePriority`
+ * values hide first (default 0); ties hide last-to-first. Unmarked
  * columns always stay, so a grid never loses a column on a wide screen.
  */
 export const HIDE_WHEN_COMPACT = { hideWhenCompact: true } as const;
@@ -62,7 +63,7 @@ function columnWidth(col: ColDef): number {
   return Math.max(base ?? FALLBACK_COLUMN_WIDTH, col.minWidth ?? 0);
 }
 
-/** Hides marked columns, last first, until the visible ones fit `containerWidth`. */
+/** Hides marked columns by priority until the visible ones fit `containerWidth`. */
 export function resolveCompactColumnDefs<TData>(
   columnDefs: ColDef<TData>[],
   containerWidth: number,
@@ -70,9 +71,12 @@ export function resolveCompactColumnDefs<TData>(
   if (containerWidth <= 0) return columnDefs;
   let total = columnDefs.reduce((sum, col) => sum + (col.hide ? 0 : columnWidth(col)), 0);
   const hidden = new Set<ColDef<TData>>();
-  for (let i = columnDefs.length - 1; i >= 0 && total > containerWidth; i--) {
-    const col = columnDefs[i];
-    if (col.hide || !col.context?.hideWhenCompact) continue;
+  const candidates = columnDefs
+    .filter((col) => !col.hide && col.context?.hideWhenCompact)
+    .reverse()
+    .sort((a, b) => (a.context?.compactHidePriority ?? 0) - (b.context?.compactHidePriority ?? 0));
+  for (const col of candidates) {
+    if (total <= containerWidth) break;
     hidden.add(col);
     total -= columnWidth(col);
   }
