@@ -371,6 +371,53 @@ describe("runStopHookSessionSummary", () => {
     expect(consoleErrors.length).toBe(0);
   });
 
+  test.each(["true", "TRUE"])("SKIP_SESSION_SUMMARY=%s → no runSummarize call", async (value) => {
+    const transcriptPath = await writeTempTranscript(longTranscript());
+
+    let runSummarizeCalled = false;
+    const deps: RunStopHookSessionSummaryDeps = {
+      runSummarize: async () => {
+        runSummarizeCalled = true;
+        throw new Error("should not be called");
+      },
+    };
+
+    await runStopHookSessionSummary(
+      {
+        agentId: "agent-claude-1",
+        transcriptPath,
+        env: makeEnv({ SKIP_SESSION_SUMMARY: value }),
+      },
+      deps,
+    );
+
+    expect(runSummarizeCalled).toBe(false);
+    expect(fetchCalls.length).toBe(0);
+  });
+
+  test.each(["0", "false"])("SKIP_SESSION_SUMMARY=%s → summary still runs", async (value) => {
+    const transcriptPath = await writeTempTranscript(longTranscript());
+
+    let runSummarizeCalled = false;
+    const deps: RunStopHookSessionSummaryDeps = {
+      runSummarize: async () => {
+        runSummarizeCalled = true;
+        return null;
+      },
+    };
+
+    await runStopHookSessionSummary(
+      {
+        agentId: "agent-claude-1",
+        transcriptPath,
+        env: makeEnv({ SKIP_SESSION_SUMMARY: value }),
+      },
+      deps,
+    );
+
+    expect(runSummarizeCalled).toBe(true);
+  });
+
   test("short transcript (≤100 chars) → no runSummarize call, no POST", async () => {
     const transcriptPath = await writeTempTranscript("tiny");
 

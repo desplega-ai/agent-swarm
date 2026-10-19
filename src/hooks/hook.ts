@@ -21,6 +21,7 @@ import {
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
+import { isSessionSummarySkipped } from "../utils/env-flag";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { guardGhPrBody } from "./pr-body-guard";
@@ -315,7 +316,7 @@ export async function runStopHookSessionSummary(
   deps: RunStopHookSessionSummaryDeps = {},
 ): Promise<void> {
   const env = opts.env ?? process.env;
-  if (env.SKIP_SESSION_SUMMARY) {
+  if (isSessionSummarySkipped(env)) {
     console.debug("session_summary skipped (claude): SKIP_SESSION_SUMMARY is set");
     return;
   }
