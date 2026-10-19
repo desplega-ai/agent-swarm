@@ -74,6 +74,8 @@ export function useCompanyProfile() {
     patch: CompanyProfilePatch,
     surface: OrgProfileSurface,
   ): Promise<OrgProfileField[]> {
+    // Unread rows compare as empty, so a save would overwrite stored values.
+    if (configs === undefined) throw new Error("Settings are still loading. Try again.");
     const writes: Array<{ key: string; value: string; field: OrgProfileField }> = [];
     for (const { prop, key, field } of FIELDS) {
       const raw = patch[prop];

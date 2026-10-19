@@ -187,6 +187,83 @@ test.describe("organization name gate", () => {
     await expect(page.getByRole("dialog", { name: "Name your organization" })).not.toBeVisible();
   });
 
+  test("waits for the stored website before it pre-fills or saves", async ({
+    page,
+    api,
+    swarm,
+  }) => {
+    type Rows = { configs: Array<{ id: string; key: string; value: string }> };
+    const before = new Set(
+      (await api.get<Rows>("/api/config?scope=global")).configs.map((row) => row.key),
+    );
+    try {
+      // The server also fills SWARM_ORG_LOGO_URL from the website.
+      await api.put("/api/config", {
+        scope: "global",
+        key: "SWARM_ORG_WEBSITE",
+        value: "product.com",
+        isSecret: false,
+      });
+      // A work email makes the email guess (acme.com) differ from the stored website.
+      await page.route("**/api/users**", async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        await route.fulfill({
+          json: {
+            ...body,
+            users: body.users.map((user: Record<string, unknown>) => ({
+              ...user,
+              email: "admin@acme.com",
+            })),
+          },
+        });
+      });
+      let releaseConfigs: (() => void) | undefined;
+      const released = new Promise<void>((resolve) => {
+        releaseConfigs = resolve;
+      });
+      await page.route(
+        (url) => url.pathname === "/api/config" && url.searchParams.get("scope") === "global",
+        async (route) => {
+          if (route.request().method() === "GET") await released;
+          await route.continue();
+        },
+      );
+      const presence = page.waitForResponse((response) =>
+        response.url().includes("/api/config/env-presence?"),
+      );
+      await page.goto("/");
+      const dialog = page.getByRole("dialog", { name: "Name your organization" });
+      await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+      await presence;
+      // Presence reports the name missing, so only the held profile read keeps
+      // the gate closed. Give the gate time to open if it would.
+      await page.waitForTimeout(500);
+      await expect(dialog).not.toBeVisible();
+      releaseConfigs?.();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole("textbox", { name: "Company website (optional)" })).toHaveValue(
+        "product.com",
+      );
+      await dialog.getByRole("button", { name: "Save organization name" }).click();
+      await expect(dialog).not.toBeVisible();
+      const { configs } = await api.get<Rows>("/api/config?scope=global");
+      expect(configs.find((row) => row.key === "SWARM_ORG_NAME")?.value).toBe("Product");
+      expect(configs.find((row) => row.key === "SWARM_ORG_WEBSITE")?.value).toBe("product.com");
+    } finally {
+      const { configs } = await api.get<Rows>("/api/config?scope=global");
+      for (const row of configs) {
+        if (before.has(row.key)) continue;
+        if (row.key !== "SWARM_ORG_WEBSITE" && row.key !== "SWARM_ORG_LOGO_URL") continue;
+        const deleted = await page.request.delete(`${swarm.apiUrl}/api/config/${row.id}`, {
+          headers: { Authorization: `Bearer ${swarm.apiKey}` },
+        });
+        expect(deleted.ok()).toBe(true);
+      }
+      await api.post("/api/config/reload", {});
+    }
+  });
+
   test("save failure stays retryable and the dialog stays open", async ({ page }) => {
     const failUpsert = (route: Route) =>
       route.request().method() === "PUT"

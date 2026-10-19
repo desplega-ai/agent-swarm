@@ -118,13 +118,15 @@ export function OrganizationNameDialog() {
     !presence.isError &&
     (presence.data?.[ORG_NAME_KEY] === false ||
       (status ? storedOrgName(status.identity.name) === null : false));
+  // Wait for the stored profile: before it loads, the guess from the admin's
+  // email would pre-fill the website and overwrite a stored one on save.
   const open =
     !saved &&
     isAdminLike(user) &&
     !pendingConnection &&
     !onboardingOwnsName &&
     identityState !== "needs-pick" &&
-    (missing || saving || error !== null);
+    ((missing && profile.loaded) || saving || error !== null);
 
   useLayoutEffect(() => {
     if (open) markPromptShownThisLoad(config.apiUrl);
@@ -171,7 +173,7 @@ export function OrganizationNameDialog() {
     currentLogo && !isFilledOrgLogoUrl(currentLogo) ? currentLogo : host ? orgLogoUrl(host) : "";
 
   async function handleSave() {
-    if (blocker || saving) return;
+    if (blocker || saving || !profile.loaded) return;
     setSaving(true);
     setError(null);
     try {
