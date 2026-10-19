@@ -6,11 +6,11 @@ import { useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
 import type { WorkflowNode, WorkflowRunStep } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { AgentLink } from "@/components/shared/agent-link";
+import { JsonTree } from "@/components/shared/json-tree";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { effectiveChildStatus } from "@/components/workflows/graph-utils";
-import { JsonTree } from "@/components/workflows/json-tree";
 import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 

@@ -18,6 +18,7 @@ import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useTaskContext, useTaskSessionLogs } from "@/api/hooks/use-tasks";
 import type { AgentTask } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
+import { JsonTree } from "@/components/shared/json-tree";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
@@ -30,6 +31,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseJsonOutput } from "@/lib/json-output";
 import { taskIsRunning } from "@/lib/task-activity";
 import { normalizeNewlines } from "@/lib/utils";
 
@@ -58,6 +60,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
 
   const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
   const totalSessions = costs?.length ?? 0;
+  const outputJson = task?.status === "completed" ? parseJsonOutput(task.output) : null;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -141,15 +144,19 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
               <h4 className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
                 Output
               </h4>
-              <div className="text-sm leading-relaxed text-foreground/90 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
-                <Streamdown>
-                  {renderTaskCitations(
-                    normalizeNewlines(task.output.trim()),
-                    task.citations ?? [],
-                    "markdown",
-                  )}
-                </Streamdown>
-              </div>
+              {outputJson ? (
+                <JsonTree data={outputJson} defaultExpandDepth={2} maxHeight="60vh" copyable />
+              ) : (
+                <div className="text-sm leading-relaxed text-foreground/90 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
+                  <Streamdown>
+                    {renderTaskCitations(
+                      normalizeNewlines(task.output.trim()),
+                      task.citations ?? [],
+                      "markdown",
+                    )}
+                  </Streamdown>
+                </div>
+              )}
             </section>
           ) : null}
 

@@ -6,13 +6,16 @@
  */
 
 import { Check, Copy } from "lucide-react";
+import type { ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { renderTaskCitations } from "../../../../../src/utils/task-citations";
 import "streamdown/styles.css";
 import type { AgentTask } from "@/api/types";
+import { JsonTree } from "@/components/shared/json-tree";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { parseJsonOutput } from "@/lib/json-output";
 import { cn, normalizeNewlines } from "@/lib/utils";
 
 export function TaskOutcome({
@@ -37,6 +40,8 @@ export function TaskOutcome({
     );
   }
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
+    const json = parseJsonOutput(task.output);
+    if (json) return <OutcomeJson data={json} raw={task.output.trim()} />;
     return (
       <OutcomeProse text={renderTaskCitations(task.output, task.citations ?? [], "markdown")} />
     );
@@ -62,18 +67,39 @@ export function TaskOutcome({
  */
 function OutcomeProse({ text }: { text: string }) {
   const trimmed = text.trim();
-  const { copied, copy } = useCopyToClipboard();
   return (
-    <div className="relative min-w-0 group/outcome">
+    <OutcomeCopyShell copyText={trimmed}>
       <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
         <Streamdown>{normalizeNewlines(trimmed)}</Streamdown>
       </div>
+    </OutcomeCopyShell>
+  );
+}
+
+/**
+ * JSON output (a structured-output completion, or a lone ```json block) —
+ * a collapsible tree with per-key copy. The top-right Copy still copies the
+ * raw output text unchanged.
+ */
+function OutcomeJson({ data, raw }: { data: unknown; raw: string }) {
+  return (
+    <OutcomeCopyShell copyText={raw}>
+      <JsonTree data={data} defaultExpandDepth={2} maxHeight="60vh" copyable className="pr-8" />
+    </OutcomeCopyShell>
+  );
+}
+
+function OutcomeCopyShell({ copyText, children }: { copyText: string; children: ReactNode }) {
+  const { copied, copy } = useCopyToClipboard();
+  return (
+    <div className="relative min-w-0 group/outcome">
+      {children}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             size="icon"
             variant="ghost"
-            onClick={() => copy(trimmed)}
+            onClick={() => copy(copyText)}
             className="absolute top-0 right-0 h-6 w-6 opacity-70 md:opacity-0 md:group-hover/outcome:opacity-70 hover:opacity-100 transition-opacity"
             aria-label={copied ? "Copied" : "Copy output to clipboard"}
           >
