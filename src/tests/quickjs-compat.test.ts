@@ -107,8 +107,9 @@ url.searchParams.set("b", "2");
 const bytes = new TextEncoder().encode(url.href);
 const id = setInterval(() => {}, 10);
 clearInterval(id);
+const clone = structuredClone({ bytes, url: url.href });
 await fetch(url, { method: "POST", body: bytes });
-return [new TextDecoder().decode(bytes), crypto.randomUUID(), crypto.getRandomValues(new Uint8Array(4))];`);
+return [clone.url, new TextDecoder().decode(bytes), crypto.randomUUID(), crypto.getRandomValues(new Uint8Array(4))];`);
     expect(checkQuickJSCompat(source)).toEqual({ compatible: true, findings: [] });
   });
 

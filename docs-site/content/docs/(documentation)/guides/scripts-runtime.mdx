@@ -44,8 +44,10 @@ automatically.
 ## What the runtime provides
 
 Scripts run inside a `bun run` subprocess (`src/scripts-runtime/eval-harness.ts`)
-with the environment stripped to a small allowlist. Everything below is
-available as a plain global in user code AND typechecks cleanly.
+with the environment stripped to a small allowlist under the default `native`
+executor. Everything below is available as a plain global and typechecks
+cleanly there. The `quickjs` executor's supported subset and differences are
+listed in [Executors](#executors).
 
 ### ES2022 standard library
 
@@ -385,9 +387,18 @@ access except the host calls below. These are the differences from `native`:
   `ctx.stdlib.fetchJson`, `ctx.stdlib.table`, `ctx.stdlib.Redacted`,
   `ctx.logger`, `console`, `fetch`, `Headers`, `Response`, `setTimeout`,
   `clearTimeout`, `setInterval`, `clearInterval`, `URL`, `URLSearchParams`,
-  `TextEncoder`, `TextDecoder` (UTF-8 only), `atob`, `btoa`, `crypto.randomUUID`,
-  `crypto.getRandomValues`, and the `zod`, `zod/mini`, `stdlib`, and
-  `swarm-sdk` imports.
+  `TextEncoder`, `TextDecoder` (UTF-8 only), `atob`, `btoa`, `structuredClone`,
+  `crypto.randomUUID`, `crypto.getRandomValues`, and the `zod`, `zod/mini`,
+  `stdlib`, and `swarm-sdk` imports.
+- **`structuredClone`:** clones primitives, arrays and plain objects (including
+  cycles and shared references), `Date`, `RegExp`, `Map`, `Set`, `Error`,
+  `ArrayBuffer`, and typed-array/DataView values. Functions, symbols, weak
+  collections, promises, `URL`, `URLSearchParams`, other non-plain objects, and
+  non-empty transfer lists raise `DataCloneError`; transfer lists are not
+  supported.
+- **Timers:** timeout and interval handles share an ID space, either clear
+  function can cancel either kind, and all outstanding timers are cleared when
+  the script returns or throws.
 - **`fetch` bodies:** a request body can be a string, a `Uint8Array` or other
   typed array, an `ArrayBuffer`, or `URLSearchParams`. A binary body is
   capped at 16 MiB, and the binary bodies one run has in flight or queued at
@@ -396,10 +407,10 @@ access except the host calls below. These are the differences from `native`:
   `FormData`, `arrayBuffer()`, and `AbortSignal` are not supported.
 - **Not available:** `ctx.stdlib.glob`, `ctx.stdlib.grep`, `process`, `Bun`,
   `Buffer`, `crypto.subtle`, `Intl` (so `toLocaleString(locale, options)`
-  ignores its arguments), `AbortController`, `AbortSignal`, and
-  `structuredClone`. The typecheck accepts some of them, so `script-upsert`,
-  script API creation, and app writes return a `warnings` list when the source
-  uses one. The same list flags a literal `fetch`, `ctx.stdlib.fetch`, or
+  ignores its arguments), `AbortController`, and `AbortSignal`. The typecheck
+  accepts some of the unavailable globals, so `script-upsert`, script API
+  creation, and app writes return a `warnings` list when the source uses one.
+  The same list flags a literal `fetch`, `ctx.stdlib.fetch`, or
   `fetchJson` URL whose host is single-label or private: whether quickjs
   reaches it depends on the egress policy, which allows private hosts only
   when the operator opts in. The warnings never block the save.

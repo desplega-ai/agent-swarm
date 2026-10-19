@@ -12,7 +12,7 @@
  *
  * Every value crosses the boundary as JSON. The sandbox has no other way out.
  * `SANDBOX_WEB_SHIMS` (quickjs-web-shims.ts) runs first and adds URL,
- * URLSearchParams, TextEncoder and TextDecoder.
+ * URLSearchParams, TextEncoder, TextDecoder, atob, btoa and structuredClone.
  * `__swarm_shape` (injected before this file) lists the configured api/mcp
  * connections and the `ctx.fs` methods, so `ctx` matches the native executor exactly.
  */
@@ -66,6 +66,9 @@ const setTimeout = (fn, ms, ...args) => {
 };
 const clearTimeout = (id) => {
   timers.delete(id);
+};
+const clearAllTimers = () => {
+  timers.clear();
 };
 // Shares the timer ids with setTimeout, so either clear function stops either.
 const setInterval = (fn, ms, ...args) => {
@@ -294,6 +297,7 @@ define("setTimeout", setTimeout);
 define("clearTimeout", clearTimeout);
 define("setInterval", setInterval);
 define("clearInterval", clearInterval);
+Object.defineProperty(globalThis, "__swarm_cleanup", { value: clearAllTimers });
 define("crypto", crypto);
 define("fetch", fetch);
 define("Headers", Headers);
@@ -308,27 +312,31 @@ define("__swarm_ctx", ctx);
  * zod `argsSchema` check, the same contract as `eval-harness.ts`.
  */
 export const SANDBOX_EPILOGUE = String.raw`(async () => {
-  const mod = globalThis.__swarm_module;
-  if (!mod || typeof mod.default !== "function") {
-    throw new Error(
-      "Swarm script must export a default function. Script must export default async function (args, ctx): args FIRST, ctx second.",
-    );
-  }
-  let args = globalThis.__swarm_args;
-  if (mod.argsSchema && typeof mod.argsSchema === "object" && "parse" in mod.argsSchema) {
-    try {
-      args = mod.argsSchema.parse(args);
-    } catch (error) {
-      if (error && typeof error === "object" && Array.isArray(error.issues)) {
-        const issues = error.issues
-          .map((issue) => "  " + (issue.path.length ? issue.path.join(".") : "(root)") + ": " + issue.message)
-          .join("\n");
-        throw new Error("argsSchema validation failed:\n" + issues);
-      }
-      throw error;
+  try {
+    const mod = globalThis.__swarm_module;
+    if (!mod || typeof mod.default !== "function") {
+      throw new Error(
+        "Swarm script must export a default function. Script must export default async function (args, ctx): args FIRST, ctx second.",
+      );
     }
+    let args = globalThis.__swarm_args;
+    if (mod.argsSchema && typeof mod.argsSchema === "object" && "parse" in mod.argsSchema) {
+      try {
+        args = mod.argsSchema.parse(args);
+      } catch (error) {
+        if (error && typeof error === "object" && Array.isArray(error.issues)) {
+          const issues = error.issues
+            .map((issue) => "  " + (issue.path.length ? issue.path.join(".") : "(root)") + ": " + issue.message)
+            .join("\n");
+          throw new Error("argsSchema validation failed:\n" + issues);
+        }
+        throw error;
+      }
+    }
+    return await mod.default(args, globalThis.__swarm_ctx);
+  } finally {
+    globalThis.__swarm_cleanup();
   }
-  return await mod.default(args, globalThis.__swarm_ctx);
 })().then(
   (value) => {
     let json;
