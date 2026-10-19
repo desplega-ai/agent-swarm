@@ -711,6 +711,22 @@ export async function resumeWaitState(
   );
 }
 
+/** Finish a wait resolution that committed before its step was checkpointed. */
+export async function recoverResolvedWaitState(
+  waitId: string,
+  registry: ExecutorRegistry,
+): Promise<void> {
+  const waitRow = await getWaitStateById(waitId);
+  if (!waitRow) return;
+  const status = waitRow.status;
+  if (status !== "fired" && status !== "timeout") return;
+
+  // Replay the durable result; the step checkpoint arbitrates concurrent resumes.
+  await failClosedOnUnreadableReplay(waitRow.workflowRunId, waitRow.workflowRunStepId, () =>
+    resumeClaimedWait(waitRow, status, waitRow.firedPayload, registry),
+  );
+}
+
 async function resumeClaimedWait(
   waitRow: WaitStateRow,
   status: "fired" | "timeout",

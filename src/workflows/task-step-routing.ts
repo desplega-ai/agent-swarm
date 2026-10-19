@@ -2,6 +2,7 @@ import {
   detachTaskFromWorkflowRunStep,
   getDbClient,
   getTaskById,
+  getWorkflowRun,
   getWorkflowRunStep,
   updateWorkflowRun,
   updateWorkflowRunStep,
@@ -17,7 +18,7 @@ import { getSuccessors } from "./definition";
 import { joinForeach, resolveForeachParent } from "./foreach-join";
 
 export interface PortStepRoutingResult {
-  /** False when another handler already moved the step out of `waiting`. */
+  /** False when the step was already claimed or its run is terminal. */
   claimed: boolean;
   successors: WorkflowNode[];
 }
@@ -85,6 +86,10 @@ export async function checkpointPortStepAndResolveSuccessors(
   return await getDbClient().transaction(async (): Promise<PortStepRoutingResult> => {
     const current = await getWorkflowRunStep(stepId);
     if (!current || current.status !== "waiting") return { claimed: false, successors: [] };
+    const run = await getWorkflowRun(runId);
+    if (!run || (run.status !== "waiting" && run.status !== "running")) {
+      return { claimed: false, successors: [] };
+    }
     await checkpointStep(runId, stepId, nodeId, { output, nextPort }, ctx);
     await updateWorkflowRun(runId, { status: "running" });
     return { claimed: true, successors: getSuccessors(def, nodeId, nextPort) };
