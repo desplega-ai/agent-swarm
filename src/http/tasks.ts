@@ -20,6 +20,7 @@ import {
   getSteeringMessagesForTask,
   getTaskAttachments,
   getTaskById,
+  getTaskLineage,
   getTasksCount,
   markSteeringDelivered,
   markSteeringHandled,
@@ -29,6 +30,7 @@ import {
   resumeTask,
   settleSupersededTaskDependents,
   supersedeTask,
+  TASK_LINEAGE_LIMITS,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
@@ -573,6 +575,33 @@ const getTask = route({
   }),
   responses: {
     200: { description: "Task with logs and attachments", schema: GetTaskResponseSchema },
+    403: { description: "A user caller cannot read the task's session" },
+    404: { description: "Task not found" },
+  },
+});
+
+const getTaskLineageRoute = route({
+  method: "get",
+  path: "/api/tasks/{id}/lineage",
+  pattern: ["api", "tasks", null, "lineage"],
+  session: { taskParam: "id" },
+  summary: "Get the tree a task belongs to (ancestors and descendants)",
+  description: `Follows \`parentTaskId\` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most ${TASK_LINEAGE_LIMITS.maxAncestors} hops up, \`maxDepth\` levels down and about twice \`maxNodes\` rows; \`truncated\` is true when a cap cut the walk.`,
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  query: z.object({
+    maxNodes: z.coerce.number().int().min(1).max(TASK_LINEAGE_LIMITS.maxNodes).optional(),
+    maxDepth: z.coerce.number().int().min(1).max(TASK_LINEAGE_LIMITS.maxDepth).optional(),
+  }),
+  responses: {
+    200: {
+      description: "The lineage tree as a flat list linked by `parentTaskId`",
+      schema: z.object({
+        rootTaskId: z.string(),
+        tasks: z.array(AgentTaskSummarySchema.extend({ workflowRunId: z.string().optional() })),
+        truncated: z.boolean(),
+      }),
+    },
     403: { description: "A user caller cannot read the task's session" },
     404: { description: "Task not found" },
   },
@@ -1612,6 +1641,22 @@ export async function handleTasks(
       attachments,
       citations: await getTaskCitations(task.id),
     });
+    return true;
+  }
+
+  if (getTaskLineageRoute.match(req.method, pathSegments)) {
+    const parsed = await getTaskLineageRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    // Every task in the tree shares the session root, so the path posture covers them all.
+    const lineage = await getTaskLineage(parsed.params.id, {
+      maxNodes: parsed.query.maxNodes,
+      maxDepth: parsed.query.maxDepth,
+    });
+    if (!lineage) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    getTaskLineageRoute.respond(res, 200, lineage);
     return true;
   }
 

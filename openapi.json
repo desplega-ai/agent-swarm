@@ -33012,6 +33012,302 @@
         }
       }
     },
+    "/api/tasks/{id}/lineage": {
+      "get": {
+        "summary": "Get the tree a task belongs to (ancestors and descendants)",
+        "description": "Follows `parentTaskId` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most 50 hops up, `maxDepth` levels down and about twice `maxNodes` rows; `truncated` is true when a cap cut the walk.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "maxNodes",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "required": false,
+            "name": "maxDepth",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The lineage tree as a flat list linked by `parentTaskId`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rootTaskId": {
+                      "type": "string"
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255,
+                            "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                          },
+                          "agentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "creatorAgentId": {
+                            "type": "string"
+                          },
+                          "task": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "backlog",
+                              "unassigned",
+                              "offered",
+                              "reviewing",
+                              "pending",
+                              "in_progress",
+                              "paused",
+                              "completed",
+                              "failed",
+                              "cancelled",
+                              "superseded"
+                            ]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "mcp",
+                              "slack",
+                              "api",
+                              "ui",
+                              "github",
+                              "gitlab",
+                              "azure-devops",
+                              "agentmail",
+                              "system",
+                              "schedule",
+                              "workflow",
+                              "linear",
+                              "jira",
+                              "comb",
+                              "chat"
+                            ],
+                            "default": "mcp"
+                          },
+                          "taskType": {
+                            "type": "string",
+                            "maxLength": 50
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "priority": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "default": 50
+                          },
+                          "dependsOn": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "offeredTo": {
+                            "type": "string"
+                          },
+                          "acceptedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "parentTaskId": {
+                            "type": "string"
+                          },
+                          "scheduleId": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "modelTier": {
+                            "type": "string",
+                            "enum": [
+                              "smol",
+                              "regular",
+                              "smart",
+                              "ultra"
+                            ]
+                          },
+                          "resolvedModel": {
+                            "type": "string"
+                          },
+                          "modelSource": {
+                            "type": "string"
+                          },
+                          "modelAlias": {
+                            "type": "string"
+                          },
+                          "effort": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          "resolvedEffort": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi",
+                              "devin",
+                              "claude-managed",
+                              "opencode",
+                              "acp",
+                              "dsh",
+                              "amp",
+                              "cursor",
+                              "grok"
+                            ]
+                          },
+                          "requestedByUserId": {
+                            "type": "string"
+                          },
+                          "progress": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "finishedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "peakContextPercent": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 100
+                          },
+                          "totalCostUsd": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "key",
+                          "agentId",
+                          "task",
+                          "status",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "rootTaskId",
+                    "tasks",
+                    "truncated"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A user caller cannot read the task's session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks/{id}/progress": {
       "post": {
         "summary": "Update task progress text",

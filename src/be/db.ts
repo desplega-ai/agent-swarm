@@ -327,6 +327,7 @@ export {
   getSupersededTasksWithoutResume,
   getSupersededTasksWithUnsettledDependents,
   getTaskById,
+  getTaskLineage,
   getTaskStats,
   getTasksByAgentId,
   getTasksByStatus,
@@ -346,6 +347,7 @@ export {
   recordChatRelayError,
   resetTasksNotified,
   SUPERSEDED_RESUME_REPAIR_WINDOW_MS,
+  TASK_LINEAGE_LIMITS,
   type TaskFilters,
 } from "./db/tasks/read";
 

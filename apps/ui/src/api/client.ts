@@ -151,6 +151,7 @@ import type {
   SwarmRepo,
   SwarmReposResponse,
   TaskContextResponse,
+  TaskLineageResponse,
   TasksResponse,
   TaskTemplate,
   TaskTemplateKind,
@@ -602,6 +603,18 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/tasks/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch task: ${res.status}`);
+    return res.json();
+  }
+
+  /** The error carries the HTTP `status` (403: the caller cannot read this session). */
+  async fetchTaskLineage(id: string): Promise<TaskLineageResponse> {
+    const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/lineage`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      throw Object.assign(new Error(`Failed to fetch task lineage: ${res.status}`), {
+        status: res.status,
+      });
+    }
     return res.json();
   }
 

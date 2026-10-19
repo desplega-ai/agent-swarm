@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { allTasksTerminal } from "../../lib/task-activity";
 import { buildRetryInput } from "../../lib/task-retry";
 import { api } from "../client";
 import type {
@@ -75,6 +76,24 @@ export function useTask(id: string, opts?: { refetchInterval?: number | false })
     // freezing task status/output until window refocus. Omitting the key lets
     // the default apply, while an explicit `false`/number still overrides.
     ...(opts?.refetchInterval !== undefined ? { refetchInterval: opts.refetchInterval } : {}),
+  });
+}
+
+/**
+ * The tree `id` belongs to (`GET /api/tasks/{id}/lineage`). Polls every 5s
+ * while any task in it is still live, then stops.
+ */
+export function useTaskLineage(id: string | undefined) {
+  return useQuery({
+    queryKey: ["task-lineage", id],
+    queryFn: () => api.fetchTaskLineage(id!),
+    enabled: !!id,
+    retry: (failureCount, error) =>
+      (error as { status?: number } | null)?.status !== 403 &&
+      (error as { status?: number } | null)?.status !== 404 &&
+      failureCount < 3,
+    refetchInterval: (query) =>
+      query.state.data && allTasksTerminal(query.state.data.tasks) ? false : 5000,
   });
 }
 
