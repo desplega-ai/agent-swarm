@@ -1,6 +1,6 @@
 {
   "repo": "desplega-ai/proxy",
-  "commit": "22e6b2ff59d0ba61818ed0d9b55f03b4b9d22913",
+  "commit": "60e7098fb44622058ad8a7d1963ee1658c5112e8",
   "files": {
     "types.gen.ts": "d865c346204bccaac2dd699857660805d1cec0c6cd7a1c8857a64e37f15035b9",
     "catalog.json": "595654f288ae2a7cbb265b6b2a72392acc33f5acde365d72829101912525a891",
