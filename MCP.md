@@ -1519,7 +1519,7 @@ Get details of a workflow run by ID, including all steps and their statuses.
 
 **Retry Workflow Run**
 
-Retry a failed workflow run from the beginning. The run must be in 'failed' status.
+Resume the same failed workflow run from its failed step(s); completed steps are not re-run. Retrying re-creates the failed node's side effects (e.g. an agent task), so check the target state first if that work was already done manually.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
