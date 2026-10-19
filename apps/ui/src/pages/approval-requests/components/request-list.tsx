@@ -2,6 +2,12 @@ import { ChevronRight } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ApprovalRequestSummary } from "@/api/types";
+import { WRAP } from "@/components/shared/questions/answer-view";
+import {
+  KeyHint,
+  useFinePointer,
+  useKeyboardShortcuts,
+} from "@/components/shared/questions/keyboard";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,8 +15,6 @@ import { useUserName } from "@/hooks/use-user-name";
 import { approvalRequestSource, OPERATOR_RESPONDER, quorumLabel } from "@/lib/approval-format";
 import { type ListShortcut, matchListShortcut } from "@/lib/approval-shortcuts";
 import { cn, formatSmartTime } from "@/lib/utils";
-import { WRAP } from "./answer-view";
-import { KeyHint, useFinePointer, useKeyboardShortcuts } from "./keyboard";
 
 const PAGE_SIZE = 50;
 const SOURCE_LABEL = { workflow: "Workflow", agent: "Agent", manual: "Manual" } as const;

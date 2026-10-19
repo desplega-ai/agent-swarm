@@ -144,6 +144,14 @@ export function feedbackPopupTrigger(input: FeedbackEligibility): FeedbackTrigge
   return null;
 }
 
+/** The card's first line: why it asks now. */
+export const FEEDBACK_TRIGGER_LINES: Record<FeedbackTrigger, string> = {
+  task_failed: "A task failed in your swarm recently.",
+  tasks_completed: "Your swarm has finished 10 tasks.",
+  workflow_completed: "Your first workflow run completed.",
+  quarterly: "Our quarterly check-in.",
+};
+
 /** The 0-10 follow-up question for a score. */
 export function followUpQuestion(score: number): string {
   if (score <= 6) return "What almost made you give up?";

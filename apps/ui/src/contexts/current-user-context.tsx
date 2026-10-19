@@ -8,6 +8,8 @@
  *   - "pending"     while `useUsers()` is still loading (don't auto-pop modal)
  *   - "needs-pick"  no userId stored OR stored userId doesn't match any row
  *                   in `useUsers()` (defensive: covers a deleted/renamed user)
+ *                   OR the stored user has no email (then `user` is that
+ *                   user, and "Who are you?" asks for the email)
  *   - "ready"       userId resolved + matches a row from `useUsers()`
  *
  * Multi-tab semantics: the provider attaches a `storage` event listener so
@@ -223,6 +225,8 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     if (!storedUserId) return { state: "needs-pick", user: null };
     const match = users.find((u) => u.id === storedUserId) ?? null;
     if (!match) return { state: "needs-pick", user: null };
+    // Every picked user needs an email: "Who are you?" opens on adding one for `user`.
+    if (!match.email) return { state: "needs-pick", user: match };
     return { state: "ready", user: match };
   }, [
     tokenLocked,

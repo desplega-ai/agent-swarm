@@ -3,13 +3,9 @@ import { z } from "zod";
 import { getDbClient, upsertSwarmConfig } from "../be/db";
 import {
   buildListing,
-  mintRankingClaim,
   PUBLIC_RANKING_ENABLED_KEY,
   RANKING_CATEGORIES,
-  rankingEntryFile,
   rankingFormSchema,
-  rankingLeaveUrl,
-  rankingPrUrl,
   readTelemetryRanking,
   TELEMETRY_RANKING_KEY,
   type TelemetryRanking,
@@ -23,14 +19,14 @@ import {
 } from "../utils/org-identity";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
+import { globalConfig } from "./global-config";
 import { route } from "./route-def";
-import { globalConfig, telemetryProxyEndpoint } from "./used-by";
+import { telemetryProxyEndpoint } from "./used-by";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
 const ListingSchema = z.object({
   v: z.literal(1),
-  claim: z.string(),
   name: z.string(),
   domain: z.string(),
   category: z.enum(RANKING_CATEGORIES),
@@ -49,26 +45,21 @@ const RankingStateSchema = z.object({
   name: z.string().nullable(),
   domain: z.string().nullable(),
   listing: ListingSchema.nullable(),
-  /** False when the stored listing was built for another website: a new PR is needed. */
+  /** False when the stored listing was built for another website: Get ranked again. */
   listingMatchesDomain: z.boolean(),
-  fileJson: z.string().nullable(),
-  prUrl: z.string().nullable(),
+  /** The proxy page that checks whether the domain would be ranked. */
   verifyUrl: z.string().nullable(),
 });
 export type RankingState = z.infer<typeof RankingStateSchema>;
 
 const OptInResponseSchema = z.object({
   domain: z.string(),
-  claim: z.string(),
   listing: ListingSchema,
-  fileJson: z.string(),
-  prUrl: z.string(),
   verifyUrl: z.string(),
 });
 
 const OptOutResponseSchema = z.object({
   enabled: z.literal(false),
-  leaveUrl: z.string().nullable(),
 });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -79,7 +70,7 @@ const getRanking = route({
   pattern: ["api", "ranking"],
   summary: "Public ranking state",
   description:
-    "Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. The listing carries the private ranking claim, so only a config admin can read it.",
+    "Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.",
   tags: ["Telemetry"],
   responses: {
     200: { description: "Ranking state", schema: RankingStateSchema },
@@ -95,7 +86,7 @@ const optIn = route({
   pattern: ["api", "ranking", "opt-in"],
   summary: "Opt this install into the public ranking",
   description:
-    "Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. The install is ranked only after a ranking PR with the returned file is merged into desplega-ai/agent-swarm.",
+    "Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.",
   tags: ["Telemetry"],
   body: rankingFormSchema,
   responses: {
@@ -117,7 +108,7 @@ const optOut = route({
   pattern: ["api", "ranking", "opt-out"],
   summary: "Leave the public ranking",
   description:
-    "Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. Returns the GitHub page that deletes the ranking entry.",
+    "Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.",
   tags: ["Telemetry"],
   responses: {
     200: { description: "Opted out", schema: OptOutResponseSchema },
@@ -163,9 +154,15 @@ async function telemetryReady(): Promise<boolean> {
   return isTelemetryEnabled() && Boolean(await globalConfig("telemetry_installation_id"));
 }
 
-async function verifyUrl(listing: Pick<TelemetryRanking, "domain" | "claim">): Promise<string> {
-  const params = new URLSearchParams({ domain: listing.domain, claim: listing.claim });
+async function verifyUrl(domain: string): Promise<string> {
+  const params = new URLSearchParams({ domain });
   return `${await telemetryProxyEndpoint("/v1/ranking/verify")}?${params.toString()}`;
+}
+
+/** The listing without the claim a v2.4.0 opt-in stored. */
+function withoutClaim(listing: TelemetryRanking): Omit<TelemetryRanking, "claim"> {
+  const { claim: _claim, ...rest } = listing;
+  return rest;
 }
 
 async function setEnabled(enabled: boolean): Promise<void> {
@@ -179,7 +176,7 @@ async function setEnabled(enabled: boolean): Promise<void> {
 function emitOptedIn(listing: TelemetryRanking): void {
   telemetry.ranking(
     "opted_in",
-    { listing: JSON.stringify(listing) },
+    { listing: JSON.stringify(withoutClaim(listing)) },
     { orgName: listing.name, orgWebsite: listing.domain },
   );
 }
@@ -204,17 +201,15 @@ export async function buildRankingState(): Promise<RankingState> {
     enabled: enabled && listingMatchesDomain,
     name: identity.name,
     domain: identity.website,
-    listing,
+    listing: listing ? withoutClaim(listing) : null,
     listingMatchesDomain,
-    fileJson: current ? rankingEntryFile(current) : null,
-    prUrl: current ? rankingPrUrl(current) : null,
-    verifyUrl: current ? await verifyUrl(current) : null,
+    verifyUrl: current ? await verifyUrl(current.domain) : null,
   };
 }
 
 /**
  * Keep the listing in step with the org identity after a global config write.
- * A renamed org rebuilds the listing with the same claim and re-sends it; a
+ * A renamed org rebuilds the listing and re-sends it; a
  * cleared or placeholder name, a changed or cleared website, or the setting
  * turned off by hand opts the install out.
  */
@@ -238,7 +233,7 @@ export async function syncRankingAfterConfigChange(
   if (identity.ok && identity.website === listing.domain) {
     if (identity.name === listing.name) return;
     try {
-      rebuilt = buildListing(identity, listing, listing.claim);
+      rebuilt = buildListing(identity, listing);
     } catch {
       // A name the listing cannot carry (over 60 characters) leaves the ranking.
     }
@@ -272,7 +267,6 @@ export async function handleRanking(
   if (getRanking.match(req.method, pathSegments)) {
     const parsed = await getRanking.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    // The state carries the claim and the PR that proves ownership of the listing.
     if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
     getRanking.respond(res, 200, await buildRankingState());
     return true;
@@ -300,16 +294,12 @@ export async function handleRanking(
       return true;
     }
 
-    const website = identity.website;
     const db = getDbClient();
-    // Read the stored claim under the write lock: two concurrent first opt-ins
-    // must return the same claim, or the one merged into community/ranking is lost.
+    // The listing and the flag land together, and the event fires only after both commit.
     const built = await db.transaction(async () => {
-      const stored = await storedListing();
-      const claim = stored?.domain === website ? stored.claim : mintRankingClaim();
       let listing: TelemetryRanking;
       try {
-        listing = buildListing(identity, parsed.body, claim);
+        listing = buildListing(identity, parsed.body);
       } catch (error) {
         return { ok: false as const, error };
       }
@@ -339,11 +329,8 @@ export async function handleRanking(
 
     optIn.respond(res, 200, {
       domain: listing.domain,
-      claim: listing.claim,
       listing,
-      fileJson: rankingEntryFile(listing),
-      prUrl: rankingPrUrl(listing),
-      verifyUrl: await verifyUrl(listing),
+      verifyUrl: await verifyUrl(listing.domain),
     });
     return true;
   }
@@ -356,10 +343,7 @@ export async function handleRanking(
     await setEnabled(false);
     if (listing) emitOptedOut(listing.domain);
     scheduleIntegrationsReload();
-    optOut.respond(res, 200, {
-      enabled: false,
-      leaveUrl: listing ? rankingLeaveUrl(listing.domain) : null,
-    });
+    optOut.respond(res, 200, { enabled: false });
     return true;
   }
 

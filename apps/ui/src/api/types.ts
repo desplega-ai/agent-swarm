@@ -1,5 +1,6 @@
 import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@desplega/model-catalog";
 import type { TaskCitation } from "../../../../src/utils/task-citations";
+import type { AcquisitionSource, TeamSize, UseCase, UserFunction } from "../lib/company-profile";
 // Backend types (mirrored from agent-swarm backend)
 export type AgentStatus = "idle" | "busy" | "offline" | "waiting_for_credentials";
 export type AgentTaskStatus =
@@ -328,6 +329,11 @@ export interface AgentBedrockStatus {
   error?: string;
 }
 
+export interface AgentOpencodeGoStatus {
+  probedAt: number;
+  models: string[];
+}
+
 export interface AgentCredStatus {
   ready: boolean;
   missing: string[];
@@ -339,6 +345,8 @@ export interface AgentCredStatus {
   reportKind?: "boot" | "post_task";
   /** Pi-mono Bedrock enumeration block. Null when not in Bedrock mode. */
   bedrock?: AgentBedrockStatus | null;
+  /** Pi-mono only: the `opencode-go` model ids the worker resolves. */
+  opencodeGo?: AgentOpencodeGoStatus | null;
   /** ACP session options most recently advertised by the target. */
   acp?: AgentAcpStatus | null;
 }
@@ -899,6 +907,17 @@ export interface CredentialMissingAgentsResponse {
 
 export interface SessionsListResponse {
   sessions: SessionListItem[];
+}
+
+/**
+ * `GET /api/tasks/{id}/lineage`: the tree a task belongs to, as slim task rows
+ * linked by `parentTaskId`. Root first; always holds the path root → task.
+ */
+export interface TaskLineageResponse {
+  rootTaskId: string;
+  tasks: AgentTask[];
+  /** A server cap (depth, nodes or ancestors) cut the walk. */
+  truncated: boolean;
 }
 
 /**
@@ -3165,7 +3184,32 @@ export interface FeedbackInput {
   scale?: "0-10";
   message?: string;
   submitted_at: string;
+  /** Company profile answers (`lib/company-profile.ts` values). Older proxies drop them. */
+  user_function?: UserFunction;
+  team_size?: TeamSize;
+  use_case?: UseCase;
+  acquisition_source?: AcquisitionSource;
+  /** What the person works on. Max 500 characters. */
+  working_on?: string;
+  /** The Slack Connect invite moment that sent this submission. */
+  moment?: SlackConnectMoment;
 }
+
+/** When the Slack Connect invite shows in the notification bell. */
+export type SlackConnectMoment = "task_failed" | "first_workflow" | "default";
+
+/** Body of `POST /api/used-by`. */
+export interface UsedByConsentInput {
+  granted: boolean;
+  /** Required when `granted` is true (the API answers 400 without it). */
+  contactEmail?: string;
+  contactFunction?: UserFunction;
+  /** Max 280 characters. A person reviews it before anything is public. */
+  quote?: string;
+}
+
+/** Where `POST /api/telemetry/enable` was called from (`telemetry.enabled.via`). */
+export type TelemetryEnableVia = "banner" | "settings" | "benchmark";
 
 export interface StatusActivity {
   agents_online: number;
@@ -3552,14 +3596,16 @@ export interface SwarmMetrics {
 // ─── Swarm apps (spike) ─────────────────────────────────────────────────────
 // Mirrors the frozen `AppDefinition` contract served by `/api/apps/*`.
 
-export type AppColumnKind = "string" | "number" | "boolean" | "date" | "enum";
+export type AppColumnKind = "string" | "number" | "boolean" | "date" | "enum" | "json";
+
+export type JsonDef = Record<string, unknown> | unknown[];
 
 export interface AppColumnDef {
   kind: AppColumnKind;
   required?: boolean;
   enum?: string[];
   index?: boolean;
-  default?: string | number | boolean;
+  default?: string | number | boolean | JsonDef;
 }
 
 export interface AppModelDef {
@@ -3875,8 +3921,20 @@ export interface FleetComparison {
   installs: number;
 }
 
+/** The proxy's peer group for a `full` benchmark: swarms with the same team size and use case. */
+export interface FleetPeerGroup {
+  teamSize: string | null;
+  useCase: string | null;
+  orgs: number;
+}
+
 export interface FleetBenchmarkResponse {
   state: FleetBenchmarkState;
+  /** `full` once the org website, team size and use case are all set. Older APIs omit it. */
+  level?: "basic" | "full";
+  /** Set at `full` level; null when the proxy falls back to the whole fleet. Older APIs omit it. */
+  peerGroup?: FleetPeerGroup | null;
+  /** This swarm's own numbers. Also set in the `telemetry_off` state (no proxy call). */
   local: {
     tasksPerWeek: number;
     taskSuccessRate: number | null;

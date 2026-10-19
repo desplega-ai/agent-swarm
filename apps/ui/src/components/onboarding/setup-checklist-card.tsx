@@ -10,6 +10,7 @@ import {
 } from "@/api/hooks/use-onboarding";
 import type { OnboardingResponse, OnboardingStepId, OnboardingStepStatus } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
+import { SetupCard } from "@/components/shared/setup-card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useConfig } from "@/hooks/use-config";
@@ -17,7 +18,6 @@ import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { DIAL_LEVEL_LABEL, type DialLevel } from "@/lib/model-dial";
 import { cn } from "@/lib/utils";
-import { SetupCard } from "./setup-card";
 import { SKIPPED_HATCH, STEP_TONE_CLASS, StepStatusChip, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
 

@@ -1502,6 +1502,7 @@ export async function handleAgentsRest(
         reportedAt: parsed.body.latest_model?.reportedAt ?? parsed.body.acp!.reportedAt,
         reportKind: "post_task" as const,
         bedrock: null,
+        opencodeGo: null,
         acp: null,
       };
       finalAgent =

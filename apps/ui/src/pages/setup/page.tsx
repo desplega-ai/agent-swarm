@@ -116,6 +116,7 @@ function stepStatuses(
 /** Why Continue is disabled for a step that is neither done nor skipped. */
 function unsettledReason(step: OnboardingStepId, status: OnboardingStepStatus): string {
   if (step === "connect") return "Connect to your API first.";
+  if (step === "name") return "Name your swarm to continue.";
   if (status === "failed") return "Last check failed. Retry or skip.";
   return "Finish this step or skip it.";
 }
@@ -244,10 +245,14 @@ function SetupFlow() {
   const data = isConfigured ? query.data : undefined;
   const fresh = query.dataUpdatedAt >= mountedAt;
   const paramStep = parseStepParam(searchParams.get("step"));
+  // Nobody picked a user yet (a fresh install): step 1 asks "Who are you?"
+  // first, so step 2 can pre-fill the name from that email.
+  const resumeStep: OnboardingStepId =
+    data && !identityPick.needed ? onboardingResumeStep(data.state) : "connect";
+  // Wait for the identity checks before a resume picks the step (and writes `?step=`).
+  const choosingStep = isConfigured && !afterConnect && !paramStep && identityPick.resolving;
   const stepId: OnboardingStepId =
-    !isConfigured || afterConnect
-      ? "connect"
-      : (paramStep ?? (data ? onboardingResumeStep(data.state) : "connect"));
+    !isConfigured || afterConnect ? "connect" : (paramStep ?? resumeStep);
   const index = stepNumber(stepId);
   const stepParam = String(index);
   const currentStep = data?.state.currentStep;
@@ -271,7 +276,7 @@ function SetupFlow() {
 
   // Keep `?step=N` in the URL once the payload decides the step.
   useEffect(() => {
-    if (!data || leaving.current || searchParams.get("step") === stepParam) return;
+    if (!data || leaving.current || choosingStep || searchParams.get("step") === stepParam) return;
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -280,7 +285,7 @@ function SetupFlow() {
       },
       { replace: true },
     );
-  }, [data, searchParams, setSearchParams, stepParam]);
+  }, [data, choosingStep, searchParams, setSearchParams, stepParam]);
 
   // Opening setup on purpose resumes it. Decide once, on a payload fetched
   // after mount (a persisted cache can still say "minimized").
@@ -296,10 +301,10 @@ function SetupFlow() {
   // Record the step on screen when it differs from the stored one, once per step.
   const viewed = useRef<OnboardingStepId | null>(null);
   useEffect(() => {
-    if (!currentStep || currentStep === stepId || viewed.current === stepId) return;
+    if (!currentStep || choosingStep || currentStep === stepId || viewed.current === stepId) return;
     viewed.current = stepId;
     act({ action: "view", step: stepId }).catch(() => {});
-  }, [currentStep, stepId, act]);
+  }, [currentStep, choosingStep, stepId, act]);
 
   const goTo = useCallback(
     (step: OnboardingStepId) => {
@@ -322,8 +327,8 @@ function SetupFlow() {
     // A finished setup leaves for the dashboard (`handleConnected`).
     if (isOnboardingFinished(data.state)) return;
     setAfterConnect(false);
-    goTo(identityPick.needed ? "connect" : onboardingResumeStep(data.state));
-  }, [afterConnect, data, identityPick.resolving, identityPick.needed, goTo]);
+    goTo(resumeStep);
+  }, [afterConnect, data, identityPick.resolving, resumeStep, goTo]);
 
   /** `via` names the control that left; a Continue or Skip already in flight keeps its spinner. */
   async function leave(via: SetupBusyAction = "primary") {
@@ -404,7 +409,7 @@ function SetupFlow() {
       return <SetupError message={query.error.message} onRetry={() => void query.refetch()} />;
     }
     // A cached `null` (older API) must not bounce the operator: wait for a fresh answer.
-    if (!afterConnect && (data === undefined || (data === null && !fresh))) {
+    if (!afterConnect && (data === undefined || (data === null && !fresh) || choosingStep)) {
       return <FullPageLoading />;
     }
     if (data === null) return <Navigate to={from} replace />;
@@ -494,8 +499,8 @@ function SetupFlow() {
         busyAction={busyAction}
         onBack={index > 1 && data ? () => goTo(ONBOARDING_STEPS[index - 2].id) : undefined}
         skip={
-          // A done step has nothing to skip.
-          data && stepId !== "connect" && status !== "done"
+          // A done step has nothing to skip. The swarm name is required: no Skip.
+          data && stepId !== "connect" && stepId !== "name" && status !== "done"
             ? {
                 label: status === "skipped" ? "Skipped" : "Skip",
                 // A pending save could fail after Skip and turn `skipped` into `failed`.

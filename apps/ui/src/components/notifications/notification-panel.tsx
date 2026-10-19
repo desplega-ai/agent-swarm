@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { Link } from "react-router-dom";
 import type { AgentFsMentions } from "@/api/hooks/use-agent-fs";
-import type { InboxItemState } from "@/api/types";
+import type { InboxItemState, SlackConnectMoment } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import type { NotificationDefinition } from "@/lib/notifications/definitions";
 import { AgentFsMentionsSection } from "./agent-fs-mentions-section";
@@ -10,7 +10,11 @@ import { SlackConnectInviteCard } from "./slack-connect-invite-card";
 /** Per-key custom card. A definition without an entry falls back to a plain title+body render. */
 const CARD_COMPONENTS: Record<
   string,
-  ComponentType<{ definition: NotificationDefinition; state?: InboxItemState }>
+  ComponentType<{
+    definition: NotificationDefinition;
+    state?: InboxItemState;
+    moment?: SlackConnectMoment | null;
+  }>
 > = {
   slack_connect_invite: SlackConnectInviteCard,
 };
@@ -19,6 +23,8 @@ interface NotificationPanelProps {
   definitions: NotificationDefinition[];
   onDismiss: (key: string) => void;
   stateByKey: Map<string, InboxItemState>;
+  /** The Slack Connect invite's moment, pinned by the bell while it is open. */
+  inviteMoment: SlackConnectMoment | null;
   /** The static definitions need a swarm user (their read state is per user). */
   showStatic: boolean;
   /** The bell's Comb mentions (`drive` is null when Comb has no mentions source). */
@@ -31,6 +37,7 @@ export function NotificationPanel({
   definitions,
   onDismiss,
   stateByKey,
+  inviteMoment,
   showStatic,
   mentions,
   onNavigate,
@@ -55,14 +62,14 @@ export function NotificationPanel({
             No notifications yet.
           </p>
         ) : (
-          <div className="max-h-96 divide-y overflow-y-auto">
+          <div className="max-h-[min(36rem,70dvh)] divide-y overflow-y-auto">
             {definitions.map((definition) => {
               const Card = CARD_COMPONENTS[definition.key];
               const state = stateByKey.get(definition.key);
               return (
-                <div key={definition.key} className="px-4 py-3">
+                <div key={definition.key} className={Card ? "p-3" : "px-4 py-3"}>
                   {Card ? (
-                    <Card definition={definition} state={state} />
+                    <Card definition={definition} state={state} moment={inviteMoment} />
                   ) : (
                     <div className="space-y-1">
                       <p className="text-sm font-medium">{definition.title}</p>

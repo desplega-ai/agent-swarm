@@ -151,11 +151,13 @@ import type {
   SwarmRepo,
   SwarmReposResponse,
   TaskContextResponse,
+  TaskLineageResponse,
   TasksResponse,
   TaskTemplate,
   TaskTemplateKind,
   TaskTemplatesResponse,
   TaskWithLogs,
+  TelemetryEnableVia,
   UnmappedIdentity,
   UnmappedResponse,
   UpdateUserInput,
@@ -165,6 +167,7 @@ import type {
   UpsertPromptTemplateInput,
   UpsertScriptConnectionInput,
   UsageSummaryResponse,
+  UsedByConsentInput,
   User,
   UserIdentity,
   UserResponse,
@@ -194,7 +197,6 @@ import type {
 /** `GET /api/ranking` (src/http/ranking.ts). */
 export interface RankingListing {
   v: 1;
-  claim: string;
   name: string;
   domain: string;
   category: string;
@@ -213,8 +215,6 @@ export interface RankingState {
   domain: string | null;
   listing: RankingListing | null;
   listingMatchesDomain: boolean;
-  fileJson: string | null;
-  prUrl: string | null;
   verifyUrl: string | null;
 }
 
@@ -227,10 +227,7 @@ export interface RankingForm {
 
 export interface RankingOptIn {
   domain: string;
-  claim: string;
   listing: RankingListing;
-  fileJson: string;
-  prUrl: string;
   verifyUrl: string;
 }
 
@@ -606,6 +603,18 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/tasks/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch task: ${res.status}`);
+    return res.json();
+  }
+
+  /** The error carries the HTTP `status` (403: the caller cannot read this session). */
+  async fetchTaskLineage(id: string): Promise<TaskLineageResponse> {
+    const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/lineage`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      throw Object.assign(new Error(`Failed to fetch task lineage: ${res.status}`), {
+        status: res.status,
+      });
+    }
     return res.json();
   }
 
@@ -3470,7 +3479,7 @@ class ApiClient {
   }
 
   /** Turn telemetry on and apply it to the running server. */
-  async enableTelemetry(via: "banner" | "settings"): Promise<{ enabled: boolean }> {
+  async enableTelemetry(via: TelemetryEnableVia): Promise<{ enabled: boolean }> {
     const url = `${this.getBaseUrl()}/api/telemetry/enable`;
     const res = await fetch(url, {
       method: "POST",
@@ -3481,13 +3490,15 @@ class ApiClient {
     return (await res.json()) as { enabled: boolean };
   }
 
-  /** Grant or revoke the "used by" logo consent. */
-  async setUsedByConsent(granted: boolean): Promise<{ granted: boolean; changedAt: string }> {
+  /** Grant (with a contact email) or revoke the "used by" logo consent. */
+  async setUsedByConsent(
+    input: UsedByConsentInput,
+  ): Promise<{ granted: boolean; changedAt: string }> {
     const url = `${this.getBaseUrl()}/api/used-by`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify({ granted }),
+      body: JSON.stringify(input),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "" }));
@@ -3504,7 +3515,7 @@ class ApiClient {
     return (await res.json()) as RankingState;
   }
 
-  /** Opt into the public ranking. Returns the entry file and its prefilled PR page. */
+  /** Opt into the public ranking. Returns the stored listing. */
   async rankingOptIn(form: RankingForm): Promise<RankingOptIn> {
     const url = `${this.getBaseUrl()}/api/ranking/opt-in`;
     const res = await fetch(url, {
@@ -3520,11 +3531,11 @@ class ApiClient {
   }
 
   /** Leave the public ranking. */
-  async rankingOptOut(): Promise<{ enabled: false; leaveUrl: string | null }> {
+  async rankingOptOut(): Promise<{ enabled: false }> {
     const url = `${this.getBaseUrl()}/api/ranking/opt-out`;
     const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to leave the ranking: ${res.status}`);
-    return (await res.json()) as { enabled: false; leaveUrl: string | null };
+    return (await res.json()) as { enabled: false };
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */

@@ -133,7 +133,7 @@ The authenticated user MCP exposes only task content and model controls. It assi
 | `model` | string | No | Concrete model override for this task. Interpreted by the assignee's harness/provider and wins over `modelTier` when both are present. |
 | `modelTier` | string | No | Portable model intent for this task: `smol`, `regular`, `smart`, or `ultra`. Resolved at claim/run time by the assignee's harness/provider. Legacy shortnames map as `haiku→smol`, `sonnet→regular`, `opus→smart`, `fable→ultra`. |
 | `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
-| `effort` | string | No | Reasoning effort for this task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when the selected model supports it. |
+| `effort` | string | No | Reasoning effort for this task: `off`, `low`, `medium`, `high`, `xhigh`, or `max` when the selected model and harness support it (`codex`, `cursor`, `opencode`, `pi`). |
 | `profile` | string | No | Model profile name (see `list-model-profiles`): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with `model` and `modelTier`; a set `effort` still wins over the profile's. |
 | `slackChannelId` | string | No | Slack channel ID for progress updates (auto-inherited if omitted) |
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
@@ -526,7 +526,7 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `model` | string | No | Concrete model override for the created task (only used with `create` action) |
 | `modelTier` | string | No | Portable model tier for the created task: `smol`, `regular`, `smart`, or `ultra` (only used with `create` action) |
 | `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list; without it an unknown model id is rejected (only used with `create` action) |
-| `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when supported |
+| `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or `max` when supported (`codex`, `cursor`, `opencode`, `pi`) |
 | `profile` | string | No | Model profile name for the created pool task (see `list-model-profiles`); only workers on its harness claim it. Exclusive with `model` and `modelTier` (only used with `create` action) |
 | `requiredCapabilities` | array | No | Capabilities required for routing the newly created task |
 | `leadOnly` | boolean | No | Structured authorization constraint for a newly created privileged task. Only Lead agents may claim it. |

@@ -419,6 +419,19 @@ export interface SwarmSdk {
     query: string;
     params?: Record<string, string | number | boolean>;
   }): Promise<unknown>;
+  app_rows_list(args: {
+    appId: string;
+    model: string;
+    equals?: Record<string, string | number | boolean>;
+    sort?: \`\${string}:asc\` | \`\${string}:desc\`;
+    limit?: number;
+  }): Promise<unknown>;
+  app_row_get(args: { appId: string; model: string; rowId: string }): Promise<unknown>;
+  app_row_create(args: { appId: string; model: string; values: Record<string, unknown> }): Promise<unknown>;
+  app_rows_create(args: { appId: string; model: string; rows: Record<string, unknown>[] }): Promise<unknown>;
+  app_row_patch(args: { appId: string; model: string; rowId: string; values: Record<string, unknown> }): Promise<unknown>;
+  app_row_delete(args: { appId: string; model: string; rowId: string }): Promise<unknown>;
+  app_rows_delete(args: { appId: string; model: string; equals: Record<string, string | number | boolean>; limit?: number }): Promise<unknown>;
   app_rollback(args: {
     appId: string;
     version: number;

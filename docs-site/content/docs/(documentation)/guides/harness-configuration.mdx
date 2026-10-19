@@ -255,7 +255,7 @@ The default model is `openrouter/qwen/qwen3-coder-flash`. Set `MODEL_OVERRIDE` t
 
 ### Reasoning / Effort
 
-Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) via `PATCH /api/agents/{id}/runtime`. opencode has no single reasoning knob — the swarm translates the level into provider-keyed options in the per-task opencode config: `anthropic/*` models get `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob), `openrouter/*` models get `reasoning.effort`, and OpenAI-compatible models get `reasoningEffort`. `off` omits reasoning keys entirely — opencode has no explicit off switch.
+Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh | max`) via `PATCH /api/agents/{id}/runtime`. `max` is offered only when the model declares it and the harness passes it through (`codex`, `cursor`, `opencode` and `pi`). opencode has no single reasoning knob — the swarm translates the level into provider-keyed options in the per-task opencode config: `anthropic/*` models get `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob), or `effort` for `max`, `openrouter/*` models get `reasoning.effort`, and OpenAI-compatible models (including `opencode-go/*`) get `reasoningEffort`. `off` omits reasoning keys entirely — opencode has no explicit off switch.
 
 ### opencode Specifics
 
@@ -322,10 +322,13 @@ The prefix before the first `/` selects the provider and the matching credential
 | `google/<id>` | `google/gemini-2.5-pro` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
 | `nan/<id>` | `nan/mimo-v2.6-flash` | `NAN_API_KEY` (or `HELMCODE_API_NAN`) |
 | `helmcode/<id>` | `helmcode/glm5.3-flash` | `HELMCODE_API_KEY` |
+| `opencode-go/<id>` | `opencode-go/deepseek-v4.1-flash` | `OPENCODE_API_KEY` |
+
+models.dev can list `opencode-go` ids that pi-ai does not ship yet, and pi runs its default model for those. The worker reports the ids its pi-ai resolves (`credStatus.opencodeGo`), and the dashboard picker offers only those.
 
 ### Reasoning / Effort
 
-Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) via `PATCH /api/agents/{id}/runtime` — pi-mono translates it directly into the `thinkingLevel` session option, a top-level sibling of `model` on `CreateAgentSessionOptions`. pi's native vocabulary already includes `off`, so no special-casing is needed there.
+Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh | max`) via `PATCH /api/agents/{id}/runtime` — pi-mono translates it directly into the `thinkingLevel` session option, a top-level sibling of `model` on `CreateAgentSessionOptions`. pi's native vocabulary already includes `off` and `max`, so no special-casing is needed there. `max` is offered only when the model declares it (e.g. `opencode-go/deepseek-v4.1-flash`), and pi-ai clamps any level to the model's own `thinkingLevelMap`.
 
 ### pi-mono Specifics
 

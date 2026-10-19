@@ -509,7 +509,6 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 | `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header (any CSS color, e.g. `#a855f7`) |
 | `SWARM_MARKETING_URL` | none | Self-host marketing footer link target. Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true` |
 | `SWARM_HIDE_CLOUD_PROMO` | `false` | Force-hide the marketing footer regardless of `SWARM_CLOUD` |
-| `SWARM_VERIFY_TTL_MS` | `3600000` (1h) | How long a successful "Test connection" click keeps the harness milestone in `verified` state. In-memory; lost on API restart |
 
 ## Agent Filesystem (agent-fs)
 
@@ -586,7 +585,7 @@ NaN and Helmcode cap concurrency per key (NaN: 60 RPM, 7 concurrent requests in 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. Events carry an org ID, the org name and the admin's email domain, and a pseudonymous user reference (never an email address); see [Identity context](/docs/reference/telemetry#identity-context) |
-| `DESPLEGA_TELEMETRY_ENV` | `production` | Explicit telemetry environment tag. Set to `development` or `test` for intentional non-production telemetry. |
+| `DESPLEGA_TELEMETRY_ENV` | Auto-detected | Explicit telemetry environment tag. Overrides `NODE_ENV=test` and automatic `development` detection for git checkouts; shipped installs default to `production`. |
 | `PUBLIC_RANKING_ENABLED` | `false` | Opt-in to the public install ranking. Set by **Get ranked** in Settings → Configuration → Branding rather than by hand. While telemetry is on and `SWARM_ORG_NAME` and `SWARM_ORG_WEBSITE` are set, workers send `ranking.usage` token counts after each session; see [Public ranking](/docs/reference/telemetry#public-ranking) |
 | `INSTALL_METHOD` | unset | Written automatically by the onboard wizard (`onboard_interactive` / `onboard_noninteractive`); not meant to be hand-set. Unset installs are attributed as `manual` (or `e2b` inside an E2B sandbox). |
 | `INSTALL_PRESET` | unset | Written automatically by the onboard wizard with the chosen preset (e.g. `solo`), when applicable. |

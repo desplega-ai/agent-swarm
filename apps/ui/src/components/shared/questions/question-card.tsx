@@ -2,13 +2,13 @@ import { ChevronDown } from "lucide-react";
 import { forwardRef, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import type { ApprovalQuestion } from "@/api/types";
-import { SetupChip } from "@/components/onboarding/setup-card";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { BorderBeam } from "@/components/shared/border-beam";
 import {
   MARKDOWN_IMAGE_COMPONENTS,
   MARKDOWN_IMAGE_REHYPE_PLUGINS,
 } from "@/components/shared/markdown-image";
+import { SetupChip } from "@/components/shared/setup-chip";
 import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
 import { selectionRange } from "@/lib/approval-format";
 import { cn, normalizeNewlines } from "@/lib/utils";
@@ -23,6 +23,14 @@ import { AnswerView, WRAP } from "./answer-view";
  * - `focused`: the keyboard cursor (amber outline + ring).
  * - `beam`: the first question still waiting on you (amber border beam).
  * - `collapsed`: an answered card folds to its header plus the answer.
+ *
+ * Activation re-renders the stack: keycaps move into this card, it unfolds,
+ * and the card that was active folds. So a pointer press activates only when
+ * its click bubbles up here, after the pressed control ran its own handler.
+ * Earlier (pointerdown, the focus a press gives, or the capture phase) moves
+ * the element under the pointer before the click lands, or re-renders the
+ * control's handler under it, and the click is lost. Keyboard focus
+ * (`:focus-visible`) still activates at once.
  */
 export const QuestionCard = forwardRef<
   HTMLElement,
@@ -87,8 +95,10 @@ export const QuestionCard = forwardRef<
       tabIndex={-1}
       aria-labelledby={titleId}
       data-question-index={index}
-      onFocusCapture={onActivate}
-      onPointerDown={onActivate}
+      onFocusCapture={(event) => {
+        if (event.target.matches(":focus-visible")) onActivate();
+      }}
+      onClick={onActivate}
       className={cn(
         "relative scroll-mt-4 scroll-mb-28 rounded-xl border bg-card shadow-sm outline-none",
         "transition-[border-color,box-shadow] duration-200 ease-snappy",

@@ -115,6 +115,7 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
     if (provider === "openrouter") return ["OPENROUTER_API_KEY"];
     if (provider === "openai") return ["OPENAI_API_KEY"];
     if (provider === "google") return ["GOOGLE_API_KEY", "GEMINI_API_KEY"];
+    if (provider === "opencode-go") return ["OPENCODE_API_KEY"];
     // models.json custom providers (`writeSessionModelsJson`). The
     // runner normalizes key aliases (HELMCODE_API_NAN → NAN_API_KEY), but a
     // worker without that step (or a boot-time check) may only see the alias.
@@ -141,6 +142,19 @@ function getHarnessDrivableBedrockModels(): Array<{ id: string; name: string }> 
   } catch {
     // getModels may throw if the pi-ai catalog is empty or corrupted.
     // Return an empty list — the intersection will be empty too, which is safe.
+    return [];
+  }
+}
+
+/**
+ * The `opencode-go` model ids this pi-ai build resolves. models.dev can list
+ * ids pi-ai does not know yet, and pi runs its default model for those, so the
+ * worker reports this list and the picker offers only these ids.
+ */
+export function listPiOpencodeGoModelIds(): string[] {
+  try {
+    return getModels("opencode-go").map((m) => m.id);
+  } catch {
     return [];
   }
 }
@@ -480,6 +494,7 @@ const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string]
   ["OPENAI_API_KEY", "openai"],
   ["GEMINI_API_KEY", "google"],
   ["GOOGLE_API_KEY", "google"],
+  ["OPENCODE_API_KEY", "opencode-go"],
   // models.json custom providers (the registry). A runtime key beats the
   // file's `apiKey: "$NAN_API_KEY"`, which pi would otherwise read from the
   // shared process.env, where a credential pool is still the raw comma list.

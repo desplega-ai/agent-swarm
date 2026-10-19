@@ -476,3 +476,33 @@ it as a swarm bug, not a script bug. Add a probe to `src/tests/scripts-typecheck
 and either expand the runtime-globals shim
 (`SCRIPT_RUNTIME_GLOBALS` in `src/be/scripts/typecheck.ts`) or open an issue
 with the failing snippet.
+
+
+## Read and write app rows
+
+Scripts can use `ctx.swarm.app_rows_list`, `app_row_get`, `app_row_create`, `app_rows_create`, `app_row_patch`, `app_row_delete`, and `app_rows_delete`.
+Each method requires `appId` and `model`. Results use the usual `data` wrapper.
+
+```typescript
+export default async function (args, ctx) {
+  await ctx.swarm.app_row_create({
+    appId: args.appId,
+    model: "note",
+    values: { title: "New note" },
+  });
+  const res = await ctx.swarm.app_rows_list({
+    appId: args.appId,
+    model: "note",
+    equals: { title: "New note" },
+    sort: "createdAt:desc",
+    limit: 20,
+  });
+  return res?.data ?? res;
+}
+```
+
+Writes record `agent:<agentId>` as the writer. Source projections and join keys remain read-only.
+Row inputs must fit within 1 MiB. Bulk creation accepts 1 to 500 value objects and at most 10 MiB total.
+Listing accepts typed equality filters for declared and system columns, sorting, and a limit from 1 to 1000 (default 200).
+Bulk deletion requires a non-empty `equals` filter and defaults to a limit of 1000.
+App actions remain REST/MCP-only. Scripts and extensions cannot invoke `app-action-run`, and the SDK excludes it to prevent recursion.

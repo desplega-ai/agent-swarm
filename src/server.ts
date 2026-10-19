@@ -11,6 +11,7 @@ import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
 import { getSlackConfiguration } from "./slack/config";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
+import { registerAppActionRunTool } from "./tools/app-action-run";
 import { registerAppDiffTool } from "./tools/app-diff";
 import { registerAppGetTool } from "./tools/app-get";
 import { registerAppHistoryTool } from "./tools/app-history";
@@ -18,6 +19,7 @@ import { registerAppListTool } from "./tools/app-list";
 import { registerAppPatchTool } from "./tools/app-patch";
 import { registerAppQueryTool } from "./tools/app-query";
 import { registerAppRollbackTool } from "./tools/app-rollback";
+import { registerAppRowTools } from "./tools/app-rows";
 import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
 import { registerCancelApprovalRequestTool } from "./tools/cancel-approval-request";
@@ -643,6 +645,8 @@ export async function createServer(
   // Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).
   if (hasCapability("pages")) {
     registerAppGetTool(server);
+    registerAppRowTools(server);
+    registerAppActionRunTool(server);
     registerAppHistoryTool(server);
     registerAppDiffTool(server);
     registerAppListTool(server);

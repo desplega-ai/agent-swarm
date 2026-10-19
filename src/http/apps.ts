@@ -1,16 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as z from "zod";
 import type { AppActionCaller } from "../apps/action-caller";
+import { runAppAction } from "../apps/action-runner";
 import {
   type AppDefinition,
   AppNameSchema,
   type AppQueryDef,
   type AppValidationIssue,
   applyAppDefinitionPatch,
-  ColumnKindSchema,
   isIso8601Date,
   type ModelDef,
   parseAppDefinition,
+  ScalarColumnKindSchema,
   SORTABLE_SYSTEM_DATE_COLUMNS,
   SYSTEM_COLUMN_KINDS,
   scriptCompatWarnings,
@@ -61,14 +62,9 @@ import {
   rollbackApp,
   snapshotApp,
 } from "../apps/version";
-import { normalizeAssetKey } from "../assets/key";
-import { getAgentById, getAppVersion, getAppVersions, getLeadAgent } from "../be/db";
-import { getScriptById } from "../be/scripts/db";
-import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
-import { resolveTemplate } from "../prompts/resolver";
+import { getAgentById, getAppVersion, getAppVersions } from "../be/db";
 import type { RbacPrincipal, RbacResource } from "../rbac";
 import { can } from "../rbac";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { AgentTaskStatusSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject } from "../utils/secret-scrubber";
@@ -77,8 +73,8 @@ import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
 const MAX_APP_BODY_BYTES = 5 * 1024 * 1024;
-const MAX_APP_ROW_BODY_BYTES = 1 * 1024 * 1024;
-const MAX_APP_BULK_ROWS_BODY_BYTES = 10 * 1024 * 1024;
+export const MAX_APP_ROW_BODY_BYTES = 1 * 1024 * 1024;
+export const MAX_APP_BULK_ROWS_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_USER_CONFIG_BODY_BYTES = 64 * 1024;
 const MAX_USER_CONFIG_VALUES_BYTES = 16 * 1024;
 const DECIMAL_NUMBER_PATTERN = /^[+-]?\d+(?:\.\d+)?$/;
@@ -220,7 +216,7 @@ const UserConfigValuesSchema = z.record(
  * on the wire anyway — the key can only ever be absent.
  */
 const AppUserConfigFieldSchema = z.object({
-  kind: ColumnKindSchema,
+  kind: ScalarColumnKindSchema,
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),
   enum: z.array(z.string()).optional(),
   label: z.string().optional(),
@@ -756,17 +752,6 @@ function definitionNeedsRepair(
   return true;
 }
 
-/**
- * One `error` string for a sync result, or undefined when every pass succeeded.
- * Each failed pair is named so a multi-pair sync says which one broke; the pass
- * list in `result.passes` carries the rest.
- */
-function syncPassError(sync: Awaited<ReturnType<typeof runAppSync>>): string | undefined {
-  const failed = sync.passes.filter((pass) => pass.error !== undefined);
-  if (failed.length === 0) return undefined;
-  return failed.map((pass) => `${pass.model}.${pass.source}: ${pass.error}`).join("; ");
-}
-
 function snapshotFailure(res: ServerResponse): void {
   jsonError(res, "failed to snapshot app", 500);
 }
@@ -800,6 +785,7 @@ async function resolveModel(
 }
 
 function parseFilterValue(raw: string, column: ModelDef["columns"][string]): unknown {
+  if (column.kind === "json") throw new Error("json columns cannot be filtered");
   if (column.kind === "number") {
     if (!DECIMAL_NUMBER_PATTERN.test(raw)) throw new Error("must be a decimal number");
     const value = Number(raw);
@@ -991,6 +977,10 @@ function rowValue(row: AppRow, column: string): unknown {
   return Object.hasOwn(row, column) ? row[column] : undefined;
 }
 
+export function rowMatchesFilters(row: AppRow, filters: RowFilter[]): boolean {
+  return filters.every((filter) => rowValue(row, filter.column) === filter.value);
+}
+
 export function applyQuery(
   rows: AppRow[],
   query: AppQueryDef,
@@ -1017,6 +1007,71 @@ export function applyQuery(
     });
   }
   return selected.slice(0, query.limit ?? 200);
+}
+
+export async function selectAppRows(
+  appId: string,
+  modelName: string,
+  model: ModelDef,
+  filters: RowFilter[],
+  sortRaw?: string,
+  limit = 200,
+  systemColumns = false,
+) {
+  // Backstop for every caller: the REST route (`filter.<col>`) and the MCP
+  // tools (`equals.<col>`) reject json filters with their own paths first.
+  const jsonFilterIssues = filters.flatMap((filter) =>
+    Object.hasOwn(model.columns, filter.column) && model.columns[filter.column]!.kind === "json"
+      ? [{ path: `filter.${filter.column}`, message: "json columns cannot be filtered" }]
+      : [],
+  );
+  if (jsonFilterIssues.length > 0) throw new AppRowValidationError(jsonFilterIssues);
+
+  // SQL narrows the scan; the `===` re-check keeps the exact filter semantics.
+  const rows = (
+    await listAppRows(
+      appId,
+      modelName,
+      filters.flatMap((filter) =>
+        typeof filter.value === "string" ||
+        typeof filter.value === "number" ||
+        typeof filter.value === "boolean"
+          ? [{ column: filter.column, value: filter.value }]
+          : [],
+      ),
+    )
+  ).filter((row) => rowMatchesFilters(row, filters));
+
+  if (sortRaw) {
+    const [column, dir, extra] = sortRaw.split(":");
+    if (
+      extra !== undefined ||
+      !column ||
+      (dir !== "asc" && dir !== "desc") ||
+      (!SORTABLE_SYSTEM_DATE_COLUMNS.has(column) &&
+        !(systemColumns && Object.hasOwn(SYSTEM_COLUMN_KINDS, column)) &&
+        (!Object.hasOwn(model.columns, column) || model.columns[column]!.hidden === true))
+    ) {
+      throw new AppRowValidationError([
+        { path: "sort", message: "must be <column>:<asc|desc> for a known column" },
+      ]);
+    }
+    if (model.columns[column]?.kind === "json") {
+      throw new AppRowValidationError([{ path: "sort", message: "json columns cannot be sorted" }]);
+    }
+    rows.sort((a, b) => {
+      const result = compareValues(
+        rowValue(a, column),
+        rowValue(b, column),
+        dir,
+        SORTABLE_SYSTEM_DATE_COLUMNS.has(column) ||
+          (Object.hasOwn(model.columns, column) && model.columns[column]!.kind === "date"),
+      );
+      return result;
+    });
+  }
+  const total = rows.length;
+  return { rows: rows.slice(0, limit), total };
 }
 
 export async function handleApps(
@@ -1189,55 +1244,23 @@ export async function handleApps(
       json(res, { error: "invalid row query", issues }, 400);
       return true;
     }
-    // SQL narrows the scan; the `===` re-check keeps the exact filter semantics.
-    const rows = (
-      await listAppRows(
-        parsed.params.id,
-        parsed.params.model,
-        filters.flatMap((filter) =>
-          typeof filter.value === "string" ||
-          typeof filter.value === "number" ||
-          typeof filter.value === "boolean"
-            ? [{ column: filter.column, value: filter.value }]
-            : [],
+    try {
+      listRowsRoute.respond(
+        res,
+        200,
+        await selectAppRows(
+          parsed.params.id,
+          parsed.params.model,
+          resolved.model,
+          filters,
+          parsed.query.sort,
+          parsed.query.limit,
         ),
-      )
-    ).filter((row) => filters.every((filter) => rowValue(row, filter.column) === filter.value));
-    const sortRaw = parsed.query.sort;
-    if (sortRaw) {
-      const [column, dir, extra] = sortRaw.split(":");
-      if (
-        extra !== undefined ||
-        !column ||
-        (dir !== "asc" && dir !== "desc") ||
-        (!SORTABLE_SYSTEM_DATE_COLUMNS.has(column) &&
-          (!Object.hasOwn(resolved.model.columns, column) ||
-            resolved.model.columns[column]!.hidden === true))
-      ) {
-        json(
-          res,
-          {
-            error: "invalid sort",
-            issues: [{ path: "sort", message: "must be <column>:<asc|desc> for a known column" }],
-          },
-          400,
-        );
-        return true;
-      }
-      rows.sort((a, b) => {
-        const result = compareValues(
-          rowValue(a, column),
-          rowValue(b, column),
-          dir,
-          SORTABLE_SYSTEM_DATE_COLUMNS.has(column) ||
-            (Object.hasOwn(resolved.model.columns, column) &&
-              resolved.model.columns[column]!.kind === "date"),
-        );
-        return result;
-      });
+      );
+    } catch (error) {
+      if (!(error instanceof AppRowValidationError)) throw error;
+      json(res, { error: "invalid sort", issues: error.issues }, 400);
     }
-    const total = rows.length;
-    listRowsRoute.respond(res, 200, { rows: rows.slice(0, parsed.query.limit ?? 200), total });
     return true;
   }
 
@@ -1359,122 +1382,15 @@ export async function handleApps(
       return true;
     }
     if (definitionNeedsRepair(res, app)) return true;
-    const actions = app.definition.actions;
-    if (!actions || !Object.hasOwn(actions, parsed.params.name)) {
-      jsonError(res, "app action not found", 404);
-      return true;
-    }
-
-    const action = actions[parsed.params.name]!;
-    const input = parsed.body.input ?? {};
-    if (action.kind === "script") {
-      const script = await getScriptById(action.scriptId);
-      if (!script) {
-        json(
-          res,
-          {
-            error: "invalid app action",
-            issues: [
-              {
-                path: `actions.${parsed.params.name}.scriptId`,
-                message: `script "${action.scriptId}" no longer exists`,
-              },
-            ],
-          },
-          400,
-        );
-        return true;
-      }
-
-      // Script actions run with the OWNER's bindings by design: wiring a script
-      // into an app is the owner's delegation. parseAppDefinition enforces at
-      // write time that an agent may only wire scripts it owns (or global ones),
-      // so a foreign script id cannot be smuggled in here. Invoker-brokered
-      // credentials remain a possible future tightening.
-      const runAsAgentId = getSavedScriptOwnerAgentId(script);
-      if (!runAsAgentId) {
-        jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
-        return true;
-      }
-
-      const output = await runSavedScriptAsAgent({
-        script,
-        input: { ...action.args, ...input, app: { id: app.id }, caller },
-        agentId: runAsAgentId,
-      });
-      const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
-      const error = ok
-        ? undefined
-        : output.runtimeError
-          ? `${output.runtimeError.name}: ${output.runtimeError.message}`
-          : (output.error ?? `Script exited with code ${output.exitCode}`);
-      runActionRoute.respond(
-        res,
-        200,
-        scrubObject({
-          ok,
-          result: output.result,
-          stdout: output.stdout,
-          ...(error === undefined ? {} : { error }),
-          durationMs: output.durationMs,
-        }),
-      );
-      return true;
-    }
-
-    if (action.kind === "sync") {
-      const startedAt = Date.now();
-      const sync = await runAppSync({
-        appId: app.id,
-        ...(action.model === undefined ? {} : { model: action.model }),
-        ...(action.source === undefined ? {} : { source: action.source }),
-        invokedBy: actor,
-      });
-      const durationMs = Date.now() - startedAt;
-      if (sync.issues && sync.issues.length > 0) {
-        json(res, { error: "invalid sync action", issues: sync.issues }, 400);
-        return true;
-      }
-      // Deliberately the SCRIPT-action response shape, minus `taskId`:
-      // app-surface.tsx branches on `taskId` first, so omitting it gives the
-      // dashboard running -> ok/error + refetchAll() with zero UI changes.
-      const error = syncPassError(sync);
-      runActionRoute.respond(
-        res,
-        200,
-        scrubObject({
-          ok: sync.ok,
-          result: { passes: sync.passes },
-          ...(error === undefined ? {} : { error }),
-          durationMs,
-        }),
-      );
-      return true;
-    }
-
-    const lead = action.agentId ? null : await getLeadAgent();
-    const taskPrompt = resolveTemplate("task.app.action", {
-      prompt: action.prompt,
-      app_id: app.id,
-      action_name: parsed.params.name,
-      input_json: JSON.stringify(input),
-      caller_json: JSON.stringify(caller),
+    const output = await runAppAction({
+      app,
+      name: parsed.params.name,
+      input: parsed.body.input,
+      caller,
+      actor,
     });
-    const task = await createTaskWithSiblingAwareness(
-      taskPrompt.text,
-      {
-        source: "api",
-        agentId: action.agentId ?? lead?.id,
-        routingReason: action.agentId ? "human_pinned" : lead ? "skill" : undefined,
-        routingSource: action.agentId || lead ? "engine_default" : undefined,
-        // App-spawned tasks group under the app's asset namespace so a
-        // swarm-tasks source can pull them back via config.assetKey.
-        key: normalizeAssetKey(`shared/app:${app.id}/action:${parsed.params.name}/`),
-        ...(actor.startsWith("user:") ? { requestedByUserId: actor.slice("user:".length) } : {}),
-      },
-      { origin: "app" },
-    );
-    runActionRoute.respond(res, 200, { ok: true, taskId: task.id, status: task.status });
+    if (output.status === 200) runActionRoute.respond(res, 200, output.body);
+    else json(res, output.body, output.status);
     return true;
   }
 

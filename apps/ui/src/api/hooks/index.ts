@@ -180,6 +180,7 @@ export {
   useSteerTask,
   useTask,
   useTaskContext,
+  useTaskLineage,
   useTaskSessionLogs,
   useTaskSteeringMessages,
   useTasks,

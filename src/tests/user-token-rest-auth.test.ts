@@ -110,6 +110,44 @@ describe("normal REST API user-bound token auth", () => {
     expect(body.requestedByUserId).toBeUndefined();
   });
 
+  for (const caller of ["user", "operator", "agent"] as const) {
+    for (const explicit of [false, true]) {
+      test(`REST ${caller} follow-up ${explicit ? "keeps an explicit schema" : caller === "agent" ? "inherits the parent schema" : "does not inherit the parent schema"}`, async () => {
+        const user = await createUser({ name: "Schema follow-up user" });
+        const agent = await createAgent({ name: "Schema worker", status: "idle" });
+        const parentSchema = { type: "object", properties: { options: { type: "array" } } };
+        const explicitSchema = { type: "object", properties: { answer: { type: "string" } } };
+        const parent = await createTaskExtended("schema-carrying worker task", {
+          agentId: agent.id,
+          requestedByUserId: user.id,
+          outputSchema: parentSchema,
+        });
+        const token =
+          caller === "user" ? (await mintToken(user.id, "rest", ACTOR)).plaintext : API_KEY;
+        const res = await fetch(`http://localhost:${port}/api/tasks`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            ...(caller === "agent" ? { "X-Agent-ID": agent.id } : {}),
+          },
+          body: JSON.stringify({
+            task: "Continue the session",
+            parentTaskId: parent.id,
+            source: "ui",
+            ...(explicit ? { outputSchema: explicitSchema } : {}),
+          }),
+        });
+
+        expect(res.status).toBe(201);
+        const body = (await res.json()) as { id: string; outputSchema?: unknown };
+        expect(body.outputSchema).toEqual(
+          explicit ? explicitSchema : caller === "agent" ? parentSchema : undefined,
+        );
+      });
+    }
+  }
+
   test("global API key caller cannot spoof requestedByUserId via body — falls back to owned task context", async () => {
     const legitRequester = await createUser({ name: "Legit Requester" });
     const attacker = await createUser({ name: "Attacker" });

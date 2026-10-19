@@ -69,6 +69,7 @@ function commentSafe(value: string): string {
 }
 
 function tsTypeForColumn(column: Pick<ColumnDef, "kind" | "enum">): string {
+  if (column.kind === "json") return "unknown";
   if (column.kind !== "enum") return column.kind === "date" ? "string" : column.kind;
   return column.enum?.map((value) => JSON.stringify(value)).join(" | ") || "string";
 }
@@ -206,7 +207,7 @@ function renderApp(app: AppRecord, namespace: string): string {
 export namespace ${namespace} {
 ${renderedModels.map((model) => model.source).join("\n\n")}
 
-  /** Declared actions. Invocation is REST-only: POST /api/apps/<id>/actions/<name>. */
+  /** Scripts can write rows. Declared actions are callable through REST or MCP only. */
   export type ActionName = ${actionType};
 
   /** Script action arguments include server-stamped app and caller context. */

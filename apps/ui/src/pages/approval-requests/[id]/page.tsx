@@ -10,7 +10,18 @@ import {
 } from "@/api/hooks/use-approval-requests";
 import { useWhoami } from "@/api/hooks/use-whoami";
 import type { ApprovalQuestion, ApprovalRequest } from "@/api/types";
-import { FadeIn } from "@/components/onboarding/fade-in";
+import { FadeIn } from "@/components/shared/fade-in";
+import { AnswerView } from "@/components/shared/questions/answer-view";
+import {
+  KeyHint,
+  ShortcutSheet,
+  useFinePointer,
+  useKeyboardShortcuts,
+  useMediaQuery,
+} from "@/components/shared/questions/keyboard";
+import { QuestionCard } from "@/components/shared/questions/question-card";
+import { optionValues, QuestionField } from "@/components/shared/questions/question-field";
+import { DISCARD_REASON, DiscardButton, SubmitBar } from "@/components/shared/questions/submit-bar";
 import type { StatusTone } from "@/components/shared/status-icon";
 import {
   DetailPageBody,
@@ -36,20 +47,9 @@ import {
 } from "@/lib/approval-format";
 import { type DetailShortcut, matchDetailShortcut } from "@/lib/approval-shortcuts";
 import { formatSmartTime } from "@/lib/utils";
-import { AnswerView } from "../components/answer-view";
 import { ApprovalVotes } from "../components/approval-votes";
-import {
-  KeyHint,
-  ShortcutSheet,
-  useFinePointer,
-  useKeyboardShortcuts,
-  useMediaQuery,
-} from "../components/keyboard";
-import { QuestionCard } from "../components/question-card";
-import { optionValues, QuestionField } from "../components/question-field";
 import { RequestHeader } from "../components/request-header";
 import { ResponderChip } from "../components/responder-chip";
-import { DISCARD_REASON, DiscardButton, SubmitBar } from "../components/submit-bar";
 
 /** Above this many questions, answered cards fold to one line. */
 const COMPACT_AFTER = 5;

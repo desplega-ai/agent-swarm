@@ -1,0 +1,75 @@
+---
+title: "Release Notes — Week of October 12 to October 19, 2026"
+description: "Agent Swarm 2.0 removes PM2, services and artifacts, the Chat SDK channel reaches four platforms, and scripts gain sandboxed file, shell and SQL access across 146 commits and seven releases."
+---
+
+Seven releases shipped this week — v1.171.1, v1.172.0, v1.173.0, then 2.0.0 through 2.3.0 — across 146 merged commits. The core got smaller while the surface got wider: 2.0 takes out three subsystems, and chat channels, model gateways and a real script runtime go in.
+
+## Breaking Changes
+
+> **Self-hosters: act before the next deploy.** 2.0.0 changes the worker image, the entrypoint and the MCP tool surface.
+
+### Agent Swarm 2.0 removes PM2, the service registry and artifacts
+
+[#2147](https://github.com/desplega-ai/agent-swarm/pull/2147) deletes PM2 process management, the service registry (services page, `use-services` hooks, service MCP tools) and the artifacts feature. The worker image and entrypoint no longer start PM2, and `ecosystem.config.cjs` is gone. Long-running work now lives in pages, apps and scripts.
+
+- Replace PM2-supervised processes with scripts or scheduled tasks.
+- Publish UIs as pages or apps instead of artifacts.
+- Remove service and artifact tool calls from prompts, skills and scripts.
+- Rebuild from the new `Dockerfile.worker`; see the [deployment guide](/docs/guides/deployment).
+
+### Config rows opt in to env export
+
+[#2156](https://github.com/desplega-ai/agent-swarm/pull/2156) adds a per-row `exportToEnv` flag, so a config value reaches agent env only when its row says so. Audit every value your agents read from `process.env` and check it is marked for export.
+
+### Heartbeat hygiene is on by default
+
+[#2226](https://github.com/desplega-ai/agent-swarm/pull/2226) ships heartbeat hygiene and the built-in Jev checklist gate ([#2182](https://github.com/desplega-ai/agent-swarm/pull/2182)) enabled. If you relied on the previous heartbeat cadence, review the gate before deploying a large fleet on it.
+
+## Highlights
+
+### One channel for four chat platforms
+
+[#2125](https://github.com/desplega-ai/agent-swarm/pull/2125) adds the Chat SDK channel: one adapter for Telegram, Slack, Teams and Discord, configured from the Integrations page, with Helm and compose examples. The same agent answers in a Telegram group and a Teams channel without a second integration. Docs: [chat-sdk](/docs/integrations/chat-sdk).
+
+### Scripts get a guarded runtime with real I/O
+
+Two changes turn scripts from pure compute into a safe working surface. [#2114](https://github.com/desplega-ai/agent-swarm/pull/2114) puts scripts behind a QuickJS egress guard, so a script reaches only the hosts you allow and credentials are injected at egress instead of entering script memory. [#2198](https://github.com/desplega-ai/agent-swarm/pull/2198) and [#2139](https://github.com/desplega-ai/agent-swarm/pull/2139) add `ctx.fs`, `ctx.sh` and SQL script connections: read and write agent-fs, run shell over it, and query registered SQL databases. Docs: [scripts runtime](/docs/guides/scripts-runtime).
+
+### More models, routed and profiled
+
+- [#2176](https://github.com/desplega-ai/agent-swarm/pull/2176) adds the Vercel AI Gateway (Token Pass): the full chat model catalog behind one fixed endpoint.
+- [#2172](https://github.com/desplega-ai/agent-swarm/pull/2172) adds NaN and Helmcode as OpenAI-compatible providers on pi and opencode, and [#2189](https://github.com/desplega-ai/agent-swarm/pull/2189) routes registry models such as `nan/*` to their own endpoint from raw-llm workflow nodes.
+- [#2163](https://github.com/desplega-ai/agent-swarm/pull/2163) resolves model profiles at claim time: you name a profile, and the concrete model and effort are chosen when a worker claims the task. [#2158](https://github.com/desplega-ai/agent-swarm/pull/2158) records the effort a task actually ran at, so cost reporting and re-runs stop drifting.
+
+### Azure DevOps Boards
+
+[#2119](https://github.com/desplega-ai/agent-swarm/pull/2119) adds work-item triggers and tracker sync. [#2169](https://github.com/desplega-ai/agent-swarm/pull/2169) adds opt-in state transitions and workflow triggers on work-item events. Docs: [azure-devops](/docs/integrations/azure-devops).
+
+## Improvements
+
+- **Models and harnesses** — OpenCode 2.0 runs in-process ([#2112](https://github.com/desplega-ai/agent-swarm/pull/2112)); the system prompt stays byte-identical across an agent's sessions for prompt caching ([#2171](https://github.com/desplega-ai/agent-swarm/pull/2171)); Sonnet 5.5 cache reads are priced at $0.10 per million and Claude thinking tokens are counted ([#2165](https://github.com/desplega-ai/agent-swarm/pull/2165)); OpenRouter bills its reported `usage.cost` ([#2126](https://github.com/desplega-ai/agent-swarm/pull/2126)); Devin joins the harness picker ([#2157](https://github.com/desplega-ai/agent-swarm/pull/2157)); pi 1.3.0 lands ([#2214](https://github.com/desplega-ai/agent-swarm/pull/2214)).
+- **Scripts** — QuickJS parity shims plus a compat lint ([#2115](https://github.com/desplega-ai/agent-swarm/pull/2115)); `zod/mini` imports ([#2111](https://github.com/desplega-ai/agent-swarm/pull/2111)).
+- **Tasks, inbox and heartbeat** — A movable inbox read cursor, bulk inbox state and safer task key moves ([#2243](https://github.com/desplega-ai/agent-swarm/pull/2243)); unaccepted steers carry over to successor tasks ([#2217](https://github.com/desplega-ai/agent-swarm/pull/2217)); heartbeat failures leave receipts ([#2232](https://github.com/desplega-ai/agent-swarm/pull/2232)).
+- **Dashboard and apps** — Session turns render in a ported shadcn Trace view ([#2162](https://github.com/desplega-ai/agent-swarm/pull/2162)); mermaid diagrams and frontmatter tables render in Comb ([#2160](https://github.com/desplega-ai/agent-swarm/pull/2160)); the app catalog gains a shared Table layer, icons, searchable multi Select and a status, feedback and motion set ([#2130](https://github.com/desplega-ai/agent-swarm/pull/2130), [#2131](https://github.com/desplega-ai/agent-swarm/pull/2131), [#2132](https://github.com/desplega-ai/agent-swarm/pull/2132)); extensions show as cards with a details sheet ([#2196](https://github.com/desplega-ai/agent-swarm/pull/2196)) and comms-adherence-gate ships as a catalog template ([#2195](https://github.com/desplega-ai/agent-swarm/pull/2195)); secrets dialogs are wider ([#2159](https://github.com/desplega-ai/agent-swarm/pull/2159)); install ranking is opt-in publicly ([#2248](https://github.com/desplega-ai/agent-swarm/pull/2248)).
+- **Slack and email** — The swarm stays out of external Slack Connect channels ([#2143](https://github.com/desplega-ai/agent-swarm/pull/2143)); the completed status glyph is configurable ([#2207](https://github.com/desplega-ai/agent-swarm/pull/2207)); AgentMail filters accept full addresses ([#2191](https://github.com/desplega-ai/agent-swarm/pull/2191)).
+- **Skills** — qa-loom records narrated QA passes ([#2127](https://github.com/desplega-ai/agent-swarm/pull/2127)); email-domain-health ships with its playbook ([#2170](https://github.com/desplega-ai/agent-swarm/pull/2170)); code-quality gains a short review format ([#2224](https://github.com/desplega-ai/agent-swarm/pull/2224)).
+
+## Bug Fixes
+
+- Slack tools that receive a user id now open the bot DM ([#2250](https://github.com/desplega-ai/agent-swarm/pull/2250)).
+- Long Slack tool messages split at the section limit instead of failing ([#2245](https://github.com/desplega-ai/agent-swarm/pull/2245)).
+- Defer cards are reused and duplicate watchers rejected ([#2136](https://github.com/desplega-ai/agent-swarm/pull/2136)); worker deferred wake cards are suppressed ([#2140](https://github.com/desplega-ai/agent-swarm/pull/2140)).
+- `ctx.swarm.config.get` returns the invoking agent's config ([#2168](https://github.com/desplega-ai/agent-swarm/pull/2168)); the script SDK respects `PORT` ([#2166](https://github.com/desplega-ai/agent-swarm/pull/2166)).
+- `claudeMd` loads once per Claude session ([#2123](https://github.com/desplega-ai/agent-swarm/pull/2123)); Claude input stays open while a background task is live ([#2218](https://github.com/desplega-ai/agent-swarm/pull/2218)).
+- pi reports per-call context usage as progress, not compaction ([#2183](https://github.com/desplega-ai/agent-swarm/pull/2183)).
+- Boot re-runs when `initDb` fails after opening ([#2175](https://github.com/desplega-ai/agent-swarm/pull/2175)).
+- `NODE_ENV` reads at runtime in compiled binaries ([#2138](https://github.com/desplega-ai/agent-swarm/pull/2138)).
+- agent-fs uploads keep file metadata ([#2220](https://github.com/desplega-ai/agent-swarm/pull/2220)).
+- MCP comms preferences merge per key instead of overwriting ([#2222](https://github.com/desplega-ai/agent-swarm/pull/2222)).
+- The scheduler honours extension hooks for deferred ceilings ([#2194](https://github.com/desplega-ai/agent-swarm/pull/2194)).
+- GitHub review state reads with `GITHUB_TOKEN` when no App installation exists ([#2107](https://github.com/desplega-ai/agent-swarm/pull/2107)).
+- Page loads read `MAX(version)` instead of every snapshot ([#2164](https://github.com/desplega-ai/agent-swarm/pull/2164)); keys typed in the page feedback overlay stay away from page scripts ([#2187](https://github.com/desplega-ai/agent-swarm/pull/2187)).
+- `CONTEXT_MODE_DISABLED` turns the context-mode plugin off ([#2227](https://github.com/desplega-ai/agent-swarm/pull/2227)).
+- The API keys rate-limit column stops triggering the AG Grid warning ([#2241](https://github.com/desplega-ai/agent-swarm/pull/2241)).
+- Responsive fixes: grid columns hide when narrow, approvals use a table by width, the workflow canvas and inspector stay in the viewport, settings rails start at `lg` ([#2236](https://github.com/desplega-ai/agent-swarm/pull/2236), [#2237](https://github.com/desplega-ai/agent-swarm/pull/2237), [#2238](https://github.com/desplega-ai/agent-swarm/pull/2238), [#2239](https://github.com/desplega-ai/agent-swarm/pull/2239), [#2242](https://github.com/desplega-ai/agent-swarm/pull/2242)).

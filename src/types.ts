@@ -1362,6 +1362,14 @@ export const AgentBedrockStatusSchema = z
   .openapi("AgentBedrockStatus");
 export type AgentBedrockStatus = z.infer<typeof AgentBedrockStatusSchema>;
 
+export const AgentOpencodeGoStatusSchema = z
+  .object({
+    probedAt: z.number(), // unix ms
+    models: z.array(z.string()).default([]),
+  })
+  .openapi("AgentOpencodeGoStatus");
+export type AgentOpencodeGoStatus = z.infer<typeof AgentOpencodeGoStatusSchema>;
+
 const AcpSessionConfigSelectValueSchema = z.object({
   value: z.string(),
   name: z.string(),
@@ -1421,6 +1429,8 @@ export const AgentCredStatusSchema = z
     reportKind: z.enum(["boot", "post_task"]).default("boot"),
     /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
+    /** Pi-mono only: the `opencode-go` model ids the worker's pi-ai resolves. */
+    opencodeGo: AgentOpencodeGoStatusSchema.nullable().default(null),
     /** ACP options advertised by the most recently created session. */
     acp: AgentAcpStatusSchema.nullable().default(null),
   })
@@ -2209,6 +2219,13 @@ export const RetryPolicySchema = z
   })
   .openapi("RetryPolicy");
 export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
+
+/**
+ * `failureReason` of a workflow-step task cut by a supersede (deploy drain,
+ * heartbeat remediation). The workflow engine re-dispatches it once even
+ * when the node declares no `retry` (see `scheduleTaskStepRetry`).
+ */
+export const SUPERSEDED_WORKFLOW_TASK_REASON = "superseded_workflow_task";
 
 // --- Executor Metadata ---
 

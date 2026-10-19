@@ -5,11 +5,12 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type RankingForm } from "../client";
+import type { TelemetryEnableVia, UsedByConsentInput } from "../types";
 
 export function useSetUsedByConsent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (granted: boolean) => api.setUsedByConsent(granted),
+    mutationFn: (input: UsedByConsentInput) => api.setUsedByConsent(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["configs"] });
     },
@@ -19,7 +20,7 @@ export function useSetUsedByConsent() {
 export function useEnableTelemetry() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (via: "banner" | "settings") => api.enableTelemetry(via),
+    mutationFn: (via: TelemetryEnableVia) => api.enableTelemetry(via),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["configs"] });
       queryClient.invalidateQueries({ queryKey: ["status"] });

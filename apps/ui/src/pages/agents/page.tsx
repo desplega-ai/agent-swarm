@@ -92,7 +92,7 @@ export default function AgentsPage() {
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(() => {
     const modelColumn: ColDef<AgentWithTasks> = {
       headerName: "Model",
-      context: HIDE_WHEN_COMPACT,
+      context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 4 },
       width: 320,
       minWidth: 260,
       valueGetter: (params) => (params.data ? modelSearchText(params.data) : ""),
@@ -125,11 +125,16 @@ export default function AgentsPage() {
           </span>
         ),
       },
-      { field: "role", headerName: "Role", width: 150, context: HIDE_WHEN_COMPACT },
+      {
+        field: "role",
+        headerName: "Role",
+        width: 150,
+        context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 1 },
+      },
       {
         field: "harnessProvider",
         headerName: "Harness",
-        context: HIDE_WHEN_COMPACT,
+        context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 3 },
         width: 200,
         cellRenderer: (params: { data: AgentWithTasks | undefined }) => (
           <HarnessCell
@@ -147,7 +152,7 @@ export default function AgentsPage() {
       },
       {
         headerName: "Capacity",
-        context: HIDE_WHEN_COMPACT,
+        context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 2 },
         width: 110,
         valueGetter: (params) => {
           const agent = params.data;

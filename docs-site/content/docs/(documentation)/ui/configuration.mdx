@@ -50,6 +50,16 @@ Transport changes apply to future sessions and do not require a worker restart.
 The worker resolves this key for each session instead of retaining a scoped value in its deployment environment.
 SDK selection is incompatible with an effective Claude Bridge or legacy bridge binary.
 
+### PR rooms
+
+The **Harness & tools** group includes `PR_ROOM_REPOS`, an empty string by default.
+Set a comma-separated `owner/repo` list to require PR rooms before Claude or Codex workers execute `gh pr create`.
+Repository names ignore case and surrounding spaces. An empty value disables the check.
+Create a room with the `pr-room` skill (app action `createRoom`), then pass its returned `prBody` through `--body-file`.
+The body must contain a line such as `PR room: prr-abcde23457`.
+The guard allows edits and unresolved repositories or bodies. It provides a workflow reminder, not a security control.
+Keep **Export to agent env** enabled. Changes reach the next harness session without a worker restart.
+
 | Group | Examples |
 | --- | --- |
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
@@ -57,16 +67,16 @@ SDK selection is incompatible with an effective Claude Bridge or legacy bridge b
 | Heartbeat & crash recovery | `API_DRAIN_MAX_MS`, `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `RUNTIME_STALE_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME`, `HEARTBEAT_CHECKLIST_GATE_SCRIPT`, `HEARTBEAT_CHECKLIST_GATE_MODE`, `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` |
 | Harness & tools | `CLAUDE_TRUST_PRESEED`, `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `SWARM_ENABLED_TOOLS`, `OPENROUTER_BASE_URL`, `OPENROUTER_APP_ATTRIBUTION`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
 | Model tiers | `MODEL_TIER_<PROVIDER>_<TIER>` for every provider with a tier mapping |
-| Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
+| Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS`, `APPS_JSON_COLUMN_MAX_BYTES` |
 | Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `AGENT_FS_PUBLIC_URL`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_STATUS_ICON_COMPLETED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults) |
 | Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `ANONYMIZED_TELEMETRY` |
-| Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`), and the public ranking opt-in (`PUBLIC_RANKING_ENABLED`) |
+| Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_ORG_TEAM_SIZE`, `SWARM_ORG_USE_CASE`, `SWARM_ORG_ACQUISITION_SOURCE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`), and the public ranking opt-in (`PUBLIC_RANKING_ENABLED`) |
 
-`SWARM_ORG_WEBSITE` takes a website and stores its bare hostname (`https://www.example.com/about` saves as `example.com`). When `SWARM_ORG_LOGO_URL` is empty, saving a website fills it with that site's logo, served by the telemetry proxy (`https://proxy.desplega.sh/v1/logo?domain=<host>`) so no logo key ever reaches your install. A logo you set yourself is never replaced. The "Show our logo on agent-swarm.dev" switch sends your organization name and website to Desplega when you flip it, telemetry on or off, and a person approves each logo before it appears. Turning `ANONYMIZED_TELEMETRY` back on applies without a restart.
+`SWARM_ORG_WEBSITE` takes a website and stores its bare hostname (`https://www.example.com/about` saves as `example.com`). When `SWARM_ORG_LOGO_URL` is empty, saving a website fills it with that site's logo, served by the telemetry proxy (`https://proxy.desplega.sh/v1/logo?domain=<host>`) so no logo key ever reaches your install. A logo you set yourself is never replaced. The "Show our logo on agent-swarm.dev" switch sends your organization name, website, domain, and contact email to Desplega. It also sends your optional job function and quote. This explicit consent works with telemetry on or off. A person approves each logo before it appears. Turning `ANONYMIZED_TELEMETRY` back on applies without a restart.
 
-The **Public ranking** row opts the install into [agent-swarm.dev/ranking](https://agent-swarm.dev/ranking), which ranks installs by tokens used. It needs telemetry on and both `SWARM_ORG_NAME` (not the placeholder `Swarm`) and `SWARM_ORG_WEBSITE`; until then it lists what is missing. **Get ranked** sends the listing (name, website, category, subcategory, optional description and source code URL) and opens a prefilled PR that adds `community/ranking/<domain>.json`; the install is listed once a maintainer merges it. Renaming the organization updates the listing. Clearing the name or website, or changing the website, leaves the ranking. The listing is stored as the `telemetry_ranking` config key, which only this row can write. What it sends is in the [telemetry reference](/docs/reference/telemetry#public-ranking).
+The **Public ranking** row opts the install into [agent-swarm.dev/ranking](https://agent-swarm.dev/ranking), which ranks installs by tokens used. It needs telemetry on and both `SWARM_ORG_NAME` (not the placeholder `Swarm`) and `SWARM_ORG_WEBSITE`; until then it lists what is missing. **Get ranked** sends the listing (name, website, category, subcategory, optional description and source code URL) and that is the whole opt-in: the install shows at the next hourly refresh. Renaming the organization updates the listing. Clearing the name or website, or changing the website, leaves the ranking. The listing is stored as the `telemetry_ranking` config key, which only this row can write. What it sends is in the [telemetry reference](/docs/reference/telemetry#public-ranking).
 
 Harness **provider and model selection are deliberately absent** from this page — they are configured per agent. A global value would silently become the default for every agent in the swarm, so those knobs live on each agent's own configuration instead. `OPENROUTER_BASE_URL` is a deployment-wide routing endpoint rather than a model choice, which is why it does belong here.
 
@@ -79,6 +89,8 @@ Settings with deeper behavior link out to the relevant guide (for example the [t
 </Callout>
 
 `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` (default 7) sets how many days a pending approval request with no explicit timeout waits before the heartbeat sets it to `cancelled`. A request with an explicit timeout is never auto-cancelled; it becomes `timeout` when its deadline passes. `0` turns auto-cancellation off.
+
+`APPS_JSON_COLUMN_MAX_BYTES` (default `262144`, 256 KB) caps the serialized size, in bytes, of a Swarm Apps `json` column value or default. Accepted values run from `1024` through `16777216` (16 MB); the config API rejects anything else, and the server falls back to the default if the environment carries an out-of-range value. A saved change applies on the next config reload, without a restart. Rows written under a larger cap are not re-checked when the cap is lowered.
 
 ![Editing a configuration group](/ui/configuration-group.png)
 
@@ -493,3 +505,19 @@ The log identifies the registration response or the worker override that selecte
 
 `RUNTIME_DEFAULT_DELIVERY` defaults to `poll`. A pool's explicit mode takes precedence.
 Controller credentials remain encrypted in the controller record. Workers do not receive them through global configuration.
+
+## Company profile
+
+These optional global settings use the existing `PUT /api/config` endpoint. An empty string clears a value. Changes apply without a restart.
+
+| Key | Values |
+| --- | --- |
+| `SWARM_ORG_TEAM_SIZE` | `1` (Just me), `2-10`, `11-50`, `51+` |
+| `SWARM_ORG_USE_CASE` | `features`, `bugs`, `review`, `ops`, `docs`, `data` |
+| `SWARM_ORG_ACQUISITION_SOURCE` | `search`, `github`, `social`, `colleague`, `newsletter`, `event`, `ai_assistant`, `hacker_news`, `other` |
+
+A website, team size, and use case enable the full fleet benchmark. The API sends team size and use case as peer filters only when telemetry is on.
+
+`POST /api/used-by` accepts `{granted, contactEmail?, contactFunction?, quote?}`. A grant requires a valid contact email. The optional quote allows at most 280 characters. Contact function accepts `engineer`, `eng_lead`, `founder`, `product`, `ops`, or `other`.
+
+The explicit consent sends these details to Desplega, even when telemetry is off. The API stores them in `SWARM_USED_BY_CONTACT_EMAIL`, `SWARM_USED_BY_CONTACT_FUNCTION`, and `SWARM_USED_BY_QUOTE`. Revocation clears all three local values after the proxy accepts the request. Desplega keeps the earlier grant record because the proxy has no delete path. To request deletion of that record, contact [contact@desplega.sh](mailto:contact@desplega.sh).

@@ -9,6 +9,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { type EventContext, TRIGGER_SURFACES, type TriggerSurface } from "./telemetry-contract";
 import catalog from "./telemetry-contract/catalog.json";
+import {
+  COMPANY_ACQUISITION_SOURCES,
+  COMPANY_TEAM_SIZES,
+  COMPANY_USE_CASES,
+  USER_FUNCTIONS,
+} from "./utils/company-profile";
 
 /** `org_` + 16 lowercase hex (self-host, minted here) or 27 alphanumerics (cloud). Same pattern the proxy enforces. */
 const ORG_ID_PATTERN = /^org_([0-9a-f]{16}|[A-Za-z0-9]{27})$/;
@@ -97,6 +103,9 @@ export interface ContextInput {
   installMethod?: string | null;
   installPreset?: string | null;
   acquisitionSource?: string | null;
+  teamSize?: string | null;
+  useCase?: string | null;
+  userFunction?: string | null;
 }
 
 /** Build the top-level `context` object of a schema_version 2 event. */
@@ -105,6 +114,11 @@ export function buildContext(input: ContextInput): EventContext {
   const orgName = input.orgName?.trim();
   const orgDomain = validOrgDomain(input.orgDomain);
   const orgWebsite = validOrgDomain(input.orgWebsite);
+  const teamSize = COMPANY_TEAM_SIZES.find((value) => value === input.teamSize);
+  const useCase = COMPANY_USE_CASES.find((value) => value === input.useCase);
+  const userFunction = userId
+    ? USER_FUNCTIONS.find((value) => value === input.userFunction)
+    : undefined;
   return {
     org_id: input.orgId,
     org_name: orgName ? orgName : null,
@@ -116,10 +130,14 @@ export function buildContext(input: ContextInput): EventContext {
     swarm_version: input.swarmVersion,
     install_method: input.installMethod ?? null,
     install_preset: input.installPreset ?? null,
-    acquisition_source: input.acquisitionSource ?? null,
+    acquisition_source:
+      COMPANY_ACQUISITION_SOURCES.find((value) => value === input.acquisitionSource) ?? null,
     // Optional in the catalog: left out, not null, when unset, so an ingest
     // that predates the field keeps accepting events from installs without one.
     ...(orgWebsite ? { org_website: orgWebsite } : {}),
+    ...(teamSize ? { team_size: teamSize } : {}),
+    ...(useCase ? { use_case: useCase } : {}),
+    ...(userFunction ? { user_function: userFunction } : {}),
   };
 }
 

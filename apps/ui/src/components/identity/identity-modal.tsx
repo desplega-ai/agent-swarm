@@ -1,8 +1,9 @@
 /**
  * Phase 3: Identity boot modal.
  *
- * shadcn `Dialog` (NOT `Sheet`) around the shared `IdentityForm`: pick a row
- * from `useUsers()` or create one (`name` + optional `email`). On submit the
+ * shadcn `Dialog` (NOT `Sheet`) around the shared `IdentityForm`: an email
+ * finds the user in `useUsers()`, or creates one (name, job function, and
+ * for a personal address an optional company website). On submit the
  * chosen / newly-created user's id is pushed into `CurrentUserContext` via
  * `setUserId`, then the modal closes.
  *
@@ -17,6 +18,7 @@
  *   AND `useFeatureGate("1.76.0").supported === true`.
  */
 
+import { useCompanyProfile } from "@/api/hooks/use-company-profile";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +31,7 @@ import { IdentityForm } from "./identity-form";
 
 export function IdentityModal() {
   const { state } = useCurrentUser();
+  const profile = useCompanyProfile();
   const open = state === "needs-pick";
 
   return (
@@ -45,6 +48,7 @@ export function IdentityModal() {
       }}
     >
       <DialogContent
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
         showCloseButton={false}
         onEscapeKeyDown={(e) => e.preventDefault()}
         onPointerDownOutside={(e) => e.preventDefault()}
@@ -53,11 +57,21 @@ export function IdentityModal() {
         <DialogHeader>
           <DialogTitle>Who are you?</DialogTitle>
           <DialogDescription>
-            Pick the user this session belongs to. We'll attribute new tasks and chat sessions to
-            them.
+            Enter your email. We find your user on this swarm, or create one. New tasks and chat
+            sessions are attributed to that user.
           </DialogDescription>
         </DialogHeader>
-        <IdentityForm />
+        <IdentityForm
+          surface="identity_modal"
+          // The first person to give a company website names it for the swarm.
+          saveCompanyWebsite={
+            profile.loaded && !profile.website
+              ? async (website) => {
+                  await profile.save({ website }, "identity_modal");
+                }
+              : undefined
+          }
+        />
       </DialogContent>
     </Dialog>
   );

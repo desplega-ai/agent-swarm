@@ -146,6 +146,14 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [app-list](#app-list)
   - [app-patch](#app-patch)
   - [app-query](#app-query)
+  - [app-rows-list](#app-rows-list)
+  - [app-row-get](#app-row-get)
+  - [app-row-create](#app-row-create)
+  - [app-rows-create](#app-rows-create)
+  - [app-row-patch](#app-row-patch)
+  - [app-row-delete](#app-row-delete)
+  - [app-rows-delete](#app-rows-delete)
+  - [app-action-run](#app-action-run)
   - [app-rollback](#app-rollback)
   - [app-sync](#app-sync)
   - [app-upsert](#app-upsert)
@@ -1519,7 +1527,7 @@ Get details of a workflow run by ID, including all steps and their statuses.
 
 **Retry Workflow Run**
 
-Retry a failed workflow run from the beginning. The run must be in 'failed' status.
+Resume the same failed workflow run from its failed step(s); completed steps are not re-run. Retrying re-creates the failed node's side effects (e.g. an agent task), so check the target state first if that work was already done manually.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1791,6 +1799,65 @@ Run one declared named app query with optional $param values and return its rows
 | `appId` | `string` | Yes | - | App ID containing the named query. |
 | `query` | `string` | Yes | - | Declared query name. |
 | `params` | `object` | No | - | Values for any $param filters declared by the named query. |
+
+### App row tools
+
+All row tools require `appId` and `model` and enforce `app.use` for the calling agent.
+Results appear under `data`. Rows contain `{ id, createdAt, updatedAt, createdBy, updatedBy, ...columns }`.
+Writes record `agent:<agentId>` as the writer and use the REST value validation rules.
+Source projections and join keys remain read-only. Row inputs must fit within 1 MiB.
+The seven tools also exist in the script SDK with underscore names.
+
+### app-rows-list
+
+List rows with typed equality filters, sorting, and a limit. Returns `{ rows, total }`.
+
+Parameters: `equals?: Record<string, string | number | boolean>`, `sort?: "<column>:asc" | "<column>:desc"`, `limit?: number` (1 to 1000, default 200). Filters accept declared and system columns with strict equality.
+
+### app-row-get
+
+Read a row by `rowId`. Returns `{ row }`.
+
+Parameters: `rowId: string`.
+
+### app-row-create
+
+Create a row from `values`. Returns `{ row }`.
+
+Parameters: `values: object`.
+
+### app-rows-create
+
+Create 1 to 500 rows from a `rows: values[]` array, within 10 MiB. Returns `{ rows }`.
+
+Parameters: `rows: object[]` (1 to 500 rows, 10 MiB total).
+
+### app-row-patch
+
+Patch a row by `rowId` with `values`. Returns `{ row }`.
+
+Parameters: `rowId: string`, `values: object`.
+
+### app-row-delete
+
+Delete a row by `rowId`. Returns `{ ok: true }`.
+
+Parameters: `rowId: string`.
+
+### app-rows-delete
+
+Delete matching rows with a non-empty `equals` filter. Returns `{ deleted }`.
+
+Parameters: `equals: Record<string, string | number | boolean>` (non-empty), `limit?: number` (1 to 1000, default 1000).
+
+### app-action-run
+
+Run a declared script, task, or sync action with `{ appId, action, input? }`. Agents can invoke it through MCP only.
+
+Parameters: `appId: string`, `action: string`, `input?: object`. Requires `app.use` and an agent identity.
+
+`app-action-run` returns the REST action body under `data`. Script actions run as their owner and receive the verified agent as `caller`.
+Scripts and extensions cannot invoke actions. The action tool has no script SDK method.
 
 ### app-rollback
 

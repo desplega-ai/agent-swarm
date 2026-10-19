@@ -7,6 +7,12 @@ import type { ApprovalRequestSummary } from "../../../api/types";
 // this component's graph maps to its real file.
 // Factories use require, not `() => import()`: Bun hangs when a later test
 // file in the same run re-registers an alias with an async factory.
+mock.module("@/components/shared/questions/answer-view", () =>
+  require("../../../components/shared/questions/answer-view"),
+);
+mock.module("@/components/shared/questions/keyboard", () =>
+  require("../../../components/shared/questions/keyboard"),
+);
 mock.module("@/components/shared/status-badge", () =>
   require("../../../components/shared/status-badge"),
 );

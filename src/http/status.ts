@@ -197,7 +197,7 @@ export type AutomationStatus = z.infer<typeof AutomationStatusSchema>;
  * - `broken`  — harness or workers blocking (creds missing, no live workers ever).
  * - `degraded` — at least one optional integration `unverified`/`configured`
  *                 while another is configured, OR harness creds present but
- *                 never tested (`configured`).
+ *                 the latest live test failed or never ran (`configured`).
  * - `ok`       — harness + workers `verified`; no integration left in
  *                 `configured` state.
  */
@@ -237,12 +237,12 @@ export const TestConnectionResponseSchema = z.object({
 /**
  * Read all worker reports for a given harness provider and reduce them to a
  * single milestone-grade rollup. Reports are joined from `agents.cred_status`
- * (migration 055) — no provider-adapter code runs here.
+ * (migration 055) — no provider-adapter code runs here. Offline agents are
+ * excluded: `workers` and `reports` count online agents only.
  *
- * `verified` ⇐ at least one worker has `liveTest.ok === true` and the test
- *   is fresher than `getCredVerifyTtlMs()`.
+ * `verified` ⇐ the provider's most recent live test passed, whatever its age.
  * `configured` ⇐ at least one worker has `ready: true` (presence check
- *   passed) but no fresh passing live test.
+ *   passed) but the latest live test failed or none ever ran.
  * `unverified` ⇐ no worker reported, or all reporting workers have
  *   `ready: false`.
  */
@@ -258,14 +258,6 @@ export interface CredRollup {
   oldestReportAgeMs: number | null;
 }
 
-function getCredVerifyTtlMs(): number {
-  const raw = process.env.SWARM_VERIFY_TTL_MS;
-  if (!raw) return 3_600_000; // 1h default — matches pre-refactor behavior.
-  const parsed = Number.parseInt(raw, 10);
-  if (Number.isNaN(parsed) || parsed <= 0) return 3_600_000;
-  return parsed;
-}
-
 /**
  * Compatibility stub. The pre-refactor in-memory test-connection cache is
  * gone — credential state now lives on agent rows. Tests still call this
@@ -276,7 +268,11 @@ export function _resetTestConnectionCache(): void {
 }
 
 export async function rollupCredStatusForProvider(provider: string): Promise<CredRollup> {
-  const agents = await listAgentsWithCredStatusByProvider(provider);
+  // An offline agent keeps its last cred_status after `/close`, so only online
+  // agents decide the rollup; a stale failure must not override a live pass.
+  const agents = (await listAgentsWithCredStatusByProvider(provider)).filter(
+    (a) => a.status !== "offline",
+  );
   const reports = agents.map((a) => a.credStatus).filter((s): s is AgentCredStatus => s != null);
 
   if (reports.length === 0) {
@@ -291,23 +287,19 @@ export async function rollupCredStatusForProvider(provider: string): Promise<Cre
     };
   }
 
-  // Pick the most-recent passing live test, if any, then fall back to
-  // most-recent live test of any kind.
-  const ttl = getCredVerifyTtlMs();
+  // The provider's latest live test decides, whatever its age. Workers run the
+  // test at boot and re-run it only when credentials change, so an old pass is
+  // the normal state of a long-running worker, not a missing check.
   const now = Date.now();
-  const isFreshPassingReport = (report: AgentCredStatus): boolean =>
-    report.liveTest?.ok === true && now - (report.liveTest?.testedAt ?? 0) < ttl;
-  const passing = reports
-    .filter(isFreshPassingReport)
-    .sort((a, b) => (b.liveTest?.testedAt ?? 0) - (a.liveTest?.testedAt ?? 0));
+  const passing = reports.filter((r) => r.liveTest?.ok === true);
   const anyLive = reports
     .filter((r) => r.liveTest != null)
     .sort((a, b) => (b.liveTest?.testedAt ?? 0) - (a.liveTest?.testedAt ?? 0));
-  const latestLiveTest = passing[0]?.liveTest ?? anyLive[0]?.liveTest ?? null;
+  const latestLiveTest = anyLive[0]?.liveTest ?? null;
 
   const anyReady = reports.some((r) => r.ready);
   const state: CredRollupState =
-    passing.length > 0 ? "verified" : anyReady ? "configured" : "unverified";
+    latestLiveTest?.ok === true ? "verified" : anyReady ? "configured" : "unverified";
 
   // For UI hints, pick the most-recent missing[] from a not-ready report.
   const latestNotReady = reports
@@ -349,23 +341,19 @@ function buildIdentity(): StatusIdentity {
 // ─── Setup milestones ────────────────────────────────────────────────────────
 
 /**
- * Compose a one-line, per-provider description for the milestone hint.
- * Examples:
- *   "1 worker · live test ok"
- *   "2 workers · presence ok, awaiting live test"
- *   "missing: OPENAI_API_KEY"
+ * One short phrase for a provider that needs attention, e.g. "live test
+ * failed" or "missing: OPENAI_API_KEY". A verified provider gets none.
  */
-function describeRoll(roll: CredRollup): string {
+function describeRoll(roll: CredRollup): string | null {
+  if (roll.state === "verified") return null;
   if (roll.workers === 0) return "no workers";
-  if (roll.reports === 0) {
-    return `${roll.workers} ${roll.workers === 1 ? "worker" : "workers"}, none reported`;
+  if (roll.reports === 0) return "no credential report";
+  if (roll.state === "configured") {
+    return roll.latestLiveTest?.ok === false ? "live test failed" : "not live-tested";
   }
-  const w = `${roll.workers} ${roll.workers === 1 ? "worker" : "workers"}`;
-  if (roll.state === "verified") return `${w} · live test ok`;
-  if (roll.state === "configured") return `${w} · presence ok, awaiting live test`;
   return roll.latestMissing.length > 0
     ? `missing: ${roll.latestMissing.join(", ")}`
-    : "creds blocked";
+    : "credentials blocked";
 }
 
 /**
@@ -375,7 +363,7 @@ function describeRoll(roll: CredRollup): string {
  * workers via migration 054/055), runs the cred-status rollup per provider,
  * and aggregates:
  *
- *   `verified`  — every provider in the fleet has a fresh passing live test.
+ *   `verified`  — every provider's latest live test passed.
  *   `configured` — every provider has at least `configured`, ≥1 not verified.
  *   `unverified` — any provider has `unverified` (no reports OR all-blocked).
  *
@@ -398,13 +386,25 @@ async function harnessMilestone(): Promise<SetupMilestone> {
   }
 
   const perProvider: { provider: z.infer<typeof ProviderNameSchema>; roll: CredRollup }[] = [];
+  let recognised = 0;
   for (const { provider } of fleet) {
     const parsed = ProviderNameSchema.safeParse(provider);
     if (!parsed.success) continue;
-    perProvider.push({
-      provider: parsed.data,
-      roll: await rollupCredStatusForProvider(parsed.data),
-    });
+    recognised++;
+    const roll = await rollupCredStatusForProvider(parsed.data);
+    // A provider whose agents are all offline has nothing live to judge.
+    if (roll.workers === 0) continue;
+    perProvider.push({ provider: parsed.data, roll });
+  }
+
+  if (recognised > 0 && perProvider.length === 0) {
+    return {
+      id: "harness",
+      label: "Harness configured",
+      state: "unverified",
+      hint: "No agents online. Start a worker to run a live credential test.",
+      action_url: "/agents",
+    };
   }
 
   if (perProvider.length === 0) {
@@ -424,7 +424,13 @@ async function harnessMilestone(): Promise<SetupMilestone> {
       ? "configured"
       : "unverified";
 
-  const hint = perProvider.map((p) => `${p.provider}: ${describeRoll(p.roll)}`).join(" · ");
+  const hint =
+    perProvider
+      .flatMap((p) => {
+        const phrase = describeRoll(p.roll);
+        return phrase ? [`${p.provider}: ${phrase}`] : [];
+      })
+      .join(" · ") || undefined;
   const singleProvider = perProvider.length === 1 ? perProvider[0]?.provider : undefined;
 
   return {
@@ -848,7 +854,7 @@ export async function handleStatus(
     if (roll.workers === 0) {
       json(res, {
         ok: false,
-        error: `No workers registered with HARNESS_PROVIDER=${provider}. Start a worker — its boot loop will run a live test and report it here.`,
+        error: `No online workers with HARNESS_PROVIDER=${provider}. Start a worker — its boot loop will run a live test and report it here.`,
         latency_ms: 0,
       });
       return true;

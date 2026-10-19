@@ -26,11 +26,3 @@ export const NOTIFICATION_DEFINITIONS: NotificationDefinition[] = [
     body: "A shared Slack channel with the team that builds Agent Swarm. We reply within a business day.",
   },
 ];
-
-export const ORGANIZATION_NAME_NOTIFICATION: NotificationDefinition = {
-  key: "organization_name",
-  title: "Name your organization",
-  body: "Add a name for your dashboard and messages.",
-  href: "/settings/configuration?search=SWARM_ORG_NAME#setting-SWARM_ORG_NAME",
-  actionLabel: "Add name",
-};

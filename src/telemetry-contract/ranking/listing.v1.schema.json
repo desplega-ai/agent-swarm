@@ -5,7 +5,7 @@
   "description": "The telemetry_ranking listing, version 1. agent-swarm stores it stringified in the global swarm_config key telemetry_ranking and sends the same string as the listing property of ranking.opted_in. The string must not exceed 2048 bytes. The ingest also requires name to equal context.org_name and domain to equal context.org_website. Text fields are trimmed before their length is checked; lengths count UTF-16 code units, as JavaScript does.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["v", "claim", "name", "domain", "category", "subcategory", "description", "sourceCodeUrl", "updatedAt"],
+  "required": ["v", "name", "domain", "category", "subcategory", "description", "sourceCodeUrl", "updatedAt"],
   "properties": {
     "v": {
       "const": 1,
@@ -14,7 +14,7 @@
     "claim": {
       "type": "string",
       "pattern": "^rk_[0-9a-f]{32}$",
-      "description": "Claim minted by the install. The ranking PR carries it, and the proxy binds it to the first install that sent it. Never served publicly."
+      "description": "Optional and ignored. agent-swarm v2.4.0 mints it for a ranking PR flow that no longer exists; the proxy still checks its pattern when present, but ranks from telemetry alone. Never served publicly."
     },
     "name": {
       "type": "string",

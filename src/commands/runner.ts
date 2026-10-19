@@ -1233,6 +1233,9 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   // turning the setting off stops it on running workers.
   "SWARM_ORG_WEBSITE",
   "PUBLIC_RANKING_ENABLED",
+  "SWARM_ORG_TEAM_SIZE",
+  "SWARM_ORG_USE_CASE",
+  "SWARM_ORG_ACQUISITION_SOURCE",
   // pi reads these from process.env for its traits and its session.
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",

@@ -12,10 +12,11 @@ import type {
   ReasoningEffortLevel,
   SwarmConfig,
 } from "@/api/types";
-import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ModelLabel } from "@/components/shared/model-logo";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
+import { SetupCard } from "@/components/shared/setup-card";
+import { SetupChip } from "@/components/shared/setup-chip";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";

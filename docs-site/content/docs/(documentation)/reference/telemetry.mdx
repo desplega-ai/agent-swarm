@@ -45,12 +45,15 @@ Common properties, allowed on every event of this product:
 | `agent.registered` | api-server | 2026-09-30 | An agent registered or reconnected. | `capabilities` (array, required)<br />`isReconnect` (boolean, required)<br />`role` (string) |
 | `compaction.triggered` | worker | 2026-09-30 | The harness compacted a session context. | `compactTrigger` (string, required)<br />`contextTotalTokens` (integer, required)<br />`preCompactTokens` (integer, required) |
 | `feature.used` | ui | 2026-09-30 | A dashboard feature was used. | `feature` (string, required) |
-| `fleet_benchmark.viewed` | ui | 2026-10-12 | The fleet benchmark card was shown. | `has_org_name` (boolean, required) |
+| `fleet_benchmark.unlocked` | ui | 2026-10-18 | An admin supplied the company profile fields for the full benchmark. | `fields` (array of website \| team_size \| use_case, required) |
+| `fleet_benchmark.viewed` | ui | 2026-10-12 | The fleet benchmark card was shown. | `has_org_name` (boolean, required)<br />`level` (basic \| full) |
+| `identity.lookup` | ui | 2026-10-18 | A dashboard identity lookup matched an existing user or found no match. | `matched` (boolean, required) |
+| `identity.user_created` | ui | 2026-10-18 | A user created a dashboard identity. Email and personal names stay out of telemetry. | `email_kind` (work \| personal, required)<br />`has_company` (boolean, required)<br />`has_function` (boolean, required)<br />`surface` (identity_modal \| setup, required) |
 | `integration.connected` | api-server | 2026-09-30 | An integration was connected. | `first_of_type` (boolean, required)<br />`provider` (string)<br />`type` (string, required) |
 | `lead.captured` | api-server | 2026-09-30 | A consented lead (Teams waitlist or private-beta sign-up). The email stays in feedback_submissions. | `channel` (string, required)<br />`consent` (boolean, required)<br />`submission_id` (string, required) |
-| `notification.dismissed` | ui | 2026-09-30 | A notification-centre item was dismissed. | `key` (string, required) |
-| `notification.submitted` | ui | 2026-09-30 | A notification-centre item was submitted. | `email_domain` (string)<br />`key` (string, required) |
-| `notification.viewed` | ui | 2026-09-30 | A notification-centre item was shown. | `key` (string, required) |
+| `notification.dismissed` | ui | 2026-09-30 | A notification-centre item was dismissed. | `key` (string, required)<br />`moment` (task_failed \| first_workflow \| default) |
+| `notification.submitted` | ui | 2026-09-30 | A notification-centre item was submitted. | `email_domain` (string)<br />`key` (string, required)<br />`moment` (task_failed \| first_workflow \| default)<br />`user_function` (engineer \| eng_lead \| founder \| product \| ops \| other) |
+| `notification.viewed` | ui | 2026-09-30 | A notification-centre item was shown. | `key` (string, required)<br />`moment` (task_failed \| first_workflow \| default) |
 | `onboarding.completed` | api-server | 2026-09-30 | Onboarding was completed. | `seconds_since_install` (integer)<br />`seconds_since_start` (integer, required) |
 | `onboarding.dismissed` | api-server | 2026-09-30 | Onboarding was dismissed. | `seconds_since_install` (integer)<br />`seconds_since_start` (integer, required) |
 | `onboarding.first_task_completed` | api-server | 2026-09-30 | The first task after onboarding completed. | `method` (string)<br />`seconds_since_install` (integer)<br />`seconds_since_start` (integer, required) |
@@ -59,12 +62,12 @@ Common properties, allowed on every event of this product:
 | `onboarding.step_failed` | api-server | 2026-09-30 | An onboarding step failed. | `error_class` (string, required)<br />`seconds_since_install` (integer)<br />`seconds_since_start` (integer, required)<br />`step` (string, required) |
 | `onboarding.step_skipped` | api-server | 2026-09-30 | An onboarding step was skipped. | `seconds_since_install` (integer)<br />`seconds_since_start` (integer, required)<br />`step` (string, required) |
 | `onboarding.step_viewed` | api-server | 2026-09-30 | An onboarding step was shown. | `seconds_since_install` (integer)<br />`seconds_since_start` (integer, required)<br />`step` (string, required) |
-| `org.profile_updated` | ui | 2026-10-12 | An admin changed the org profile. Lists which fields changed, never their values. | `fields` (array, required)<br />`surface` (prompt \| setup \| settings, required) |
+| `org.profile_updated` | ui | 2026-10-12 | An admin changed the org profile. Lists which fields changed, never their values. | `fields` (array of name \| website \| team_size \| use_case \| acquisition_source, required)<br />`surface` (enum, required) |
 | `org.snapshot` | api-server | 2026-09-30 | Daily per-install user and agent counts. Counts only: no names, emails or IDs. | `agents_total` (integer ≥0, required)<br />`users_active_7d` (integer ≥0, required)<br />`users_admin` (integer ≥0, required)<br />`users_linked_github` (integer ≥0, required)<br />`users_linked_gitlab` (integer ≥0, required)<br />`users_linked_jira` (integer ≥0, required)<br />`users_linked_linear` (integer ≥0, required)<br />`users_linked_other` (integer ≥0, required)<br />`users_linked_slack` (integer ≥0, required)<br />`users_suspended` (integer ≥0, required)<br />`users_total` (integer ≥0, required)<br />`users_with_login` (integer ≥0, required) |
 | `page.viewed` | ui | 2026-09-30 | A dashboard page was viewed. | `route_template` (string, required) |
 | `popup.dismissed` | ui | 2026-10-12 | A dashboard pop-up was closed without submitting. | `method` (later \| close \| escape, required)<br />`popup` (feedback \| org_name \| used_by, required) |
 | `popup.shown` | ui | 2026-10-12 | A dashboard pop-up was shown. Telemetry-gated: never sent while telemetry is off. | `popup` (feedback \| org_name \| used_by, required)<br />`trigger` (task_failed \| tasks_completed \| workflow_completed \| quarterly \| missing_org_name, required) |
-| `popup.submitted` | ui | 2026-10-12 | A dashboard pop-up was submitted. Content stays out of telemetry: only flags for what was filled. | `has_contact` (boolean, required)<br />`has_message` (boolean, required)<br />`popup` (feedback \| org_name \| used_by, required)<br />`score` (integer ≥0) |
+| `popup.submitted` | ui | 2026-10-12 | A dashboard pop-up was submitted. Content stays out of telemetry: only flags for what was filled. | `answered` (integer ≥0)<br />`has_contact` (boolean, required)<br />`has_message` (boolean, required)<br />`perks` (array of used_by \| slack_connect)<br />`popup` (feedback \| org_name \| used_by, required)<br />`score` (integer ≥0) |
 | `ranking.opted_in` | api-server | 2026-10-18 | An admin opted the install into the public ranking, or the API rebuilt its listing after an org identity change. | `listing` (string, required) |
 | `ranking.opted_out` | api-server | 2026-10-18 | The install left the public ranking: the admin turned it off, or the org name or website was cleared or changed. | `domain` (string, required) |
 | `ranking.usage` | worker | 2026-10-18 | Token usage of one session on an install opted into the public ranking. Sent next to session.cost. | `cacheReadTokens` (integer ≥0)<br />`cacheWriteTokens` (integer ≥0)<br />`inputTokens` (integer ≥0, required)<br />`model` (string)<br />`outputTokens` (integer ≥0, required)<br />`provider` (string)<br />`totalTokens` (integer ≥0, required) |
@@ -78,6 +81,7 @@ Common properties, allowed on every event of this product:
 | `session.failure` | worker | 2026-09-30 | A session failed. | `agentId` (string, required)<br />`durationMs` (integer, required)<br />`errorCategory` (string, required)<br />`model` (string, required)<br />`provider` (string, required)<br />`taskId` (string, nullable, required)<br />`trigger_surface` (enum, nullable, required)<br />`wasRateLimited` (boolean, required) |
 | `session.started` | worker | 2026-09-30 | A worker or lead session started. | `agentId` (string, required)<br />`harnessProvider` (string, required)<br />`model` (string)<br />`role` (string, required)<br />`taskId` (string, nullable, required)<br />`trigger_surface` (enum, nullable, required) |
 | `session.steered` | api-server | 2026-09-30 | A running session received a steering message. | `by_kind` (string, required)<br />`trigger_surface` (enum, nullable, required) |
+| `setup.worker_command_copied` | ui | 2026-10-18 | An admin copied a worker command from the setup health popover. | `harness` (enum, required)<br />`target` (compose \| docker \| kubernetes, required) |
 | `skill.invoked` | worker | 2026-09-30 | A skill was invoked in a session. | `skill_name` (string, required)<br />`skill_source` (string, required)<br />`trigger_surface` (enum, nullable, required) |
 | `task.cancelled` | api-server | 2026-09-30 | A task was cancelled. | `agentId` (string)<br />`durationMs` (integer)<br />`previousStatus` (string, required)<br />`taskId` (string, required)<br />`task_source` (enum, required)<br />`trigger_surface` (enum, required) |
 | `task.claimed` | api-server | 2026-09-30 | An agent claimed a task. | `agentId` (string, required)<br />`taskId` (string, required)<br />`task_source` (enum, required)<br />`trigger_surface` (enum, required) |
@@ -87,9 +91,9 @@ Common properties, allowed on every event of this product:
 | `task.session_completed` | worker | 2026-09-30 | A worker session for a task finished. | `agentId` (string, required)<br />`durationMs` (integer, required)<br />`exitCode` (integer, required)<br />`harnessVariant` (string)<br />`harnessVersion` (string)<br />`isError` (boolean, required)<br />`model` (string, required)<br />`provider` (string, required)<br />`taskId` (string, nullable, required)<br />`trigger_surface` (enum, nullable, required) |
 | `task.started` | api-server | 2026-09-30 | A task started running. | `agentId` (string, required)<br />`taskId` (string, required)<br />`task_source` (enum, required)<br />`trigger_surface` (enum, required) |
 | `task.superseded` | api-server | 2026-09-30 | A task was superseded by another task. | `agentId` (string)<br />`durationMs` (integer)<br />`harnessVariant` (string)<br />`harnessVersion` (string)<br />`provider` (string)<br />`reason` (string, required)<br />`taskId` (string, required)<br />`task_source` (enum, required)<br />`trigger_surface` (enum, required) |
-| `telemetry.enabled` | api-server | 2026-10-12 | Telemetry was turned on. Sent once, on the first boot or re-init after opting in. | `via` (banner \| settings \| env, required) |
+| `telemetry.enabled` | api-server | 2026-10-12 | Telemetry was turned on. Sent once, on the first boot or re-init after opting in. | `via` (banner \| settings \| env \| benchmark, required) |
 | `ui.session_started` | ui | 2026-09-30 | A dashboard session started. | none |
-| `used_by.consent_changed` | ui | 2026-10-12 | An admin granted or revoked the "used by" logo consent. The request itself goes to /v1/used-by. | `granted` (boolean, required) |
+| `used_by.consent_changed` | ui | 2026-10-12 | An admin granted or revoked the "used by" logo consent. The request itself goes to /v1/used-by. | `granted` (boolean, required)<br />`has_function` (boolean)<br />`has_quote` (boolean) |
 | `workflow.completed` | api-server | 2026-09-30 | A workflow run completed. | `durationMs` (integer)<br />`stepsCompleted` (integer, required)<br />`stepsFailed` (integer, required)<br />`workflowId` (string, required) |
 | `workflow.created` | api-server | 2026-09-30 | A workflow was created. | `nodeCount` (integer, required)<br />`via` (api \| mcp)<br />`workflowId` (string, required) |
 | `workflow.deleted` | api-server | 2026-09-30 | A workflow was deleted. | `via` (api \| mcp)<br />`workflowId` (string, required) |
@@ -122,7 +126,7 @@ Every event also adds these to `properties`. They are the same facts `context` c
 
 And these to `metadata`:
 
-- `transport` (always `https`) and `environment` (`production` by default; override with `DESPLEGA_TELEMETRY_ENV`)
+- `transport` (always `https`) and `environment` (`development` for git checkouts, `test` for `NODE_ENV=test`, otherwise `production`; override with `DESPLEGA_TELEMETRY_ENV`)
 - `is_cloud` — boolean, from `SWARM_CLOUD`
 - `organization_id` (optional) — your `SWARM_ORG_ID`, when set
 - `organization_name` (optional) — your `SWARM_ORG_NAME`, when set
@@ -139,6 +143,8 @@ And these to `metadata`:
 | `org_name` | The name you gave the organization | `SWARM_ORG_NAME`, when set. `null` otherwise. |
 | `org_domain` | The email **domain** of your admin, such as `example.com` | The domain of the earliest-created active user who has an admin grant, falling back to the earliest active user with an email. Lowercased, stored as `telemetry_org_domain`, and recomputed when a user changes and hourly. The address itself is never sent. |
 | `org_website` | The company website an admin declared, such as `example.com` | `SWARM_ORG_WEBSITE`, a bare hostname. Left out when unset. |
+| `team_size` | The organization's team size: `1`, `2-10`, `11-50` or `51+` | Not sent by this version. Reserved in the contract for the company profile. |
+| `use_case` | The organization's main use case: `features`, `bugs`, `review`, `ops`, `docs` or `data` | Not sent by this version. Reserved in the contract for the company profile. |
 | `user_ref` | A pseudonymous reference to the person who caused the event | `u_` plus the first 32 hex characters of `sha256(installation ID + ":" + user ID)`. Stable inside your install, different on every other install, and not reversible to the user. `null` for events nobody caused (server start, schedules, heartbeat). |
 | `user_role` | `admin` or `member` | From the user's role grants. `null` when `user_ref` is `null`. |
 | `plan` | `self-host-free` or `cloud` | `cloud` for a cloud deployment, else `self-host-free`. |
@@ -146,7 +152,12 @@ And these to `metadata`:
 | `swarm_version` | The Agent Swarm version | `package.json`. |
 | `install_method` | How the install was produced | Same as the property of the same name. |
 | `install_preset` | The onboard wizard preset | Same as the `metadata` field. `null` when there is none. |
-| `acquisition_source` | Reserved | Always `null` today. |
+| `acquisition_source` | How the organization discovered Agent Swarm | `SWARM_ORG_ACQUISITION_SOURCE`: `search`, `github`, `social`, `colleague`, `newsletter`, `event`, `ai_assistant`, `hacker_news`, or `other`. `null` when unset or invalid. |
+| `team_size` | The organization's team size | `SWARM_ORG_TEAM_SIZE`: `1`, `2-10`, `11-50`, or `51+`. Omitted when unset or invalid. |
+| `use_case` | The organization's main use case | `SWARM_ORG_USE_CASE`: `features`, `bugs`, `review`, `ops`, `docs`, or `data`. Omitted when unset or invalid. |
+| `user_function` | The actor's job function, separate from RBAC role | `users.metadata.jobFunction`: `engineer`, `eng_lead`, `founder`, `product`, `ops`, or `other`. Cached with the RBAC role and invalidated after user updates. Omitted without an actor or a valid function. |
+
+Workers receive company profile settings through the resolved configuration at boot and during reload. They read `telemetry_org_domain` through the API. Workers do not query users for job functions. The API resolves those functions for events with user actors.
 
 What is never sent: email addresses (only the domain of one address), user names, raw user IDs, task content, prompts or outputs.
 
@@ -174,34 +185,44 @@ The dashboard never sends telemetry to Desplega itself. It posts each event to i
 | `fleet_benchmark.viewed` | The "Your swarm vs. similar swarms" card shows on Home, at most once per page load | `has_org_name` |
 | `popup.submitted` | It is submitted | `popup`, `has_message` and `has_contact`: whether a message or a name or email was filled in, never the text. The feedback card adds the 0-10 `score` |
 
-`telemetry.enabled` (`via`: `banner`, `settings` or `env`) is sent by the API server once per opt-in: on the first boot of an install with telemetry on, or when someone turns telemetry back on from the dashboard banner or the Configuration page. Turning it on that way applies without a restart.
+`telemetry.enabled` (`via`: `banner`, `settings`, `benchmark` or `env`) is sent by the API server once per opt-in: on the first boot of an install with telemetry on, or when someone turns telemetry back on from the dashboard banner, the Home benchmark card, or the Configuration page. Turning it on that way applies without a restart.
 
 While telemetry is off, admins see a dashboard banner that explains what turning it on sends. It cannot report that it was shown, since telemetry is off. After "Dismiss" it never comes back.
 
 ### Fleet benchmark
 
-With telemetry on and an organization name set, Home shows how this swarm compares with similar swarms over the last 30 days: tasks per week and task success rate, against swarms with the same number of agents when at least 20 exist, otherwise against all active swarms. The API reads the fleet percentiles from `GET https://proxy.desplega.sh/v1/fleet/benchmarks` at most once a day. That request carries no installation ID or organization name, and the answer holds only aggregates over at least 20 installs with 10 or more finished tasks. With telemetry off, the API never makes the request. The comparison itself is computed locally, so this swarm's own numbers never leave it for the benchmark.
+With telemetry on and an organization name set, Home compares this swarm with other swarms over the last 30 days. It compares tasks per week and task success rate. The API reads fleet percentiles from `GET https://proxy.desplega.sh/v1/fleet/benchmarks` at most once a day.
+
+When the swarm stores a website, team size, and use case, the API sends `team_size` and `use_case` to the proxy. The proxy compares against that peer group only when it meets the same minimum of 20 installs as the whole fleet. Otherwise, it uses the whole fleet. Within the selected fleet, comparisons use the same agent-count bucket when at least 20 installs qualify, otherwise all qualifying installs.
+
+The request carries no installation ID or organization name. The response contains aggregates over at least 20 installs with 10 or more finished tasks. With telemetry off, the API never makes the request. The API computes the comparison locally, so this swarm's own numbers never leave it for the benchmark.
+
+`GET /api/fleet-benchmark` adds `level` and `peerGroup` to its existing response. Level is `full` when website, team size, and use case are set. Otherwise, level is `basic`. Full requests include `team_size` and `use_case` query parameters. The fleet cache key includes these peer filters.
+
+`peerGroup` contains `{teamSize, useCase, orgs}` when the proxy returns a matching group. It is null when the proxy returns the whole fleet or omits `peer_group`. With telemetry off, `local` contains DB counts for the last 30 days, without a proxy request or ingest requirement. Existing comparisons still require a known proxy ingest date.
 
 ### Public ranking
 
-[agent-swarm.dev/ranking](https://agent-swarm.dev/ranking) ranks installs by tokens used, like OpenRouter's app rankings. It is off by default (`PUBLIC_RANKING_ENABLED=false`). An install is listed only when all of these hold:
+[agent-swarm.dev/ranking](https://agent-swarm.dev/ranking) ranks installs by tokens used, like OpenRouter's app rankings. It is off by default (`PUBLIC_RANKING_ENABLED=false`). Opting in is all it takes: no PR and no approval step. An install is listed when all of these hold:
 
 - Telemetry is on.
 - The organization name (`SWARM_ORG_NAME`) and company website (`SWARM_ORG_WEBSITE`) are set. The placeholders `Swarm` and `Your Swarm` do not count as a name.
 - An admin clicked **Get ranked** in Settings → Configuration → Branding.
-- A PR adding `community/ranking/<domain>.json` was merged into `desplega-ai/agent-swarm`. A Desplega maintainer reviews each one.
+- The install sent telemetry in the last 7 days and used tokens in the period shown.
+
+The install shows at the proxy's next hourly refresh. If two installs list the same website, the one that opted in first holds the entry. Desplega can hide a domain that abuses the ranking.
 
 Exactly these fields leave the install for the ranking:
 
 | Event | Sent by | Fields |
 |---|---|---|
-| `ranking.opted_in` | API, on Get ranked and when the organization name changes | `listing`: the organization name and website, the category and subcategory you picked, the optional description and source code URL, a random claim (`rk_` + 32 hex) and the time it was built. The same JSON is stored as the `telemetry_ranking` config key. |
+| `ranking.opted_in` | API, on Get ranked and when the organization name changes | `listing`: the organization name and website, the category and subcategory you picked, the optional description and source code URL, and the time it was built. The same JSON is stored as the `telemetry_ranking` config key. |
 | `ranking.opted_out` | API, when the setting turns off | `domain` |
 | `ranking.usage` | Each worker, after every session with cost data | `totalTokens`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, and the session's `model` and `provider`. No task, agent or cost. |
 
 **Token totals are public and exact.** The page shows your total tokens per day, week and month, and tokens per model, the same as OpenRouter.
 
-To leave, turn the setting off, turn telemetry off, or clear the organization name or website. Changing the website also opts out, because a new domain needs a new PR. The entry disappears at the proxy's next hourly refresh. Deleting `community/ranking/<domain>.json` removes it for good.
+To leave, turn the setting off, turn telemetry off, or clear the organization name or website. Changing the website also opts out; click **Get ranked** again to list the new domain. The entry disappears at the proxy's next hourly refresh.
 
 A notification card that asks for your email, and the feedback dialog, are different. Those send what you type to the feedback endpoint (`https://proxy.desplega.sh/v1/feedback`, overridable with the `feedback_endpoint` config key), and only when you submit them. They are not telemetry, so the opt-out does not block them.
 

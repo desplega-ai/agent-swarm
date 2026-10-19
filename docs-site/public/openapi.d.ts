@@ -965,17 +965,25 @@ export interface paths {
                         version: number;
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;
@@ -1152,17 +1160,25 @@ export interface paths {
                         definition?: unknown;
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;
@@ -1310,17 +1326,25 @@ export interface paths {
                         };
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;
@@ -4548,7 +4572,7 @@ export interface paths {
         put?: never;
         /**
          * Grant or revoke the 'used by' logo consent
-         * @description Records whether agent-swarm.dev may show this organization's logo as a company that uses Agent Swarm. Sends the organization name and website to the telemetry proxy, where a person approves each logo by hand. An explicit admin action, so it is not gated by the telemetry opt-out.
+         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
          */
         post: {
             parameters: {
@@ -4561,6 +4585,11 @@ export interface paths {
                 content: {
                     "application/json": {
                         granted: boolean;
+                        /** Format: email */
+                        contactEmail?: string;
+                        /** @enum {string} */
+                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other";
+                        quote?: string;
                     };
                 };
             };
@@ -4577,7 +4606,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Organization name or website is not set (a revoke falls back to the identity of the last grant) */
+                /** @description Invalid contact details, or missing organization name or website */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -4630,7 +4659,7 @@ export interface paths {
         };
         /**
          * Public ranking state
-         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. The listing carries the private ranking claim, so only a config admin can read it.
+         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
          */
         get: {
             parameters: {
@@ -4657,7 +4686,6 @@ export interface paths {
                             listing: {
                                 /** @enum {number} */
                                 v: 1;
-                                claim: string;
                                 name: string;
                                 domain: string;
                                 /** @enum {string} */
@@ -4668,8 +4696,6 @@ export interface paths {
                                 updatedAt: string;
                             } | null;
                             listingMatchesDomain: boolean;
-                            fileJson: string | null;
-                            prUrl: string | null;
                             verifyUrl: string | null;
                         };
                     };
@@ -4713,7 +4739,7 @@ export interface paths {
         put?: never;
         /**
          * Opt this install into the public ranking
-         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. The install is ranked only after a ranking PR with the returned file is merged into desplega-ai/agent-swarm.
+         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
          */
         post: {
             parameters: {
@@ -4742,11 +4768,9 @@ export interface paths {
                     content: {
                         "application/json": {
                             domain: string;
-                            claim: string;
                             listing: {
                                 /** @enum {number} */
                                 v: 1;
-                                claim: string;
                                 name: string;
                                 domain: string;
                                 /** @enum {string} */
@@ -4756,8 +4780,6 @@ export interface paths {
                                 sourceCodeUrl: string | null;
                                 updatedAt: string;
                             };
-                            fileJson: string;
-                            prUrl: string;
                             verifyUrl: string;
                         };
                     };
@@ -4817,7 +4839,7 @@ export interface paths {
         put?: never;
         /**
          * Leave the public ranking
-         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. Returns the GitHub page that deletes the ranking entry.
+         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
          */
         post: {
             parameters: {
@@ -4837,7 +4859,6 @@ export interface paths {
                         "application/json": {
                             /** @enum {boolean} */
                             enabled: false;
-                            leaveUrl: string | null;
                         };
                     };
                 };
@@ -13458,6 +13479,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/{id}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the tree a task belongs to (ancestors and descendants)
+         * @description Follows `parentTaskId` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most 50 hops up, `maxDepth` levels down and about twice `maxNodes` rows; `truncated` is true when any task in the tree is missing from the response.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    maxNodes?: number;
+                    maxDepth?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The lineage tree as a flat list linked by `parentTaskId` */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            rootTaskId: string;
+                            tasks: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                                key: string;
+                                agentId: string | null;
+                                creatorAgentId?: string;
+                                task: string;
+                                title?: string;
+                                /** @enum {string} */
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                /**
+                                 * @default mcp
+                                 * @enum {string}
+                                 */
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                taskType?: string;
+                                /** @default [] */
+                                tags: string[];
+                                /** @default 50 */
+                                priority: number;
+                                /** @default [] */
+                                dependsOn: string[];
+                                offeredTo?: string;
+                                /** Format: date-time */
+                                acceptedAt?: string;
+                                parentTaskId?: string;
+                                scheduleId?: string;
+                                model?: string;
+                                /** @enum {string} */
+                                modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                resolvedModel?: string;
+                                modelSource?: string;
+                                modelAlias?: string;
+                                /** @enum {string} */
+                                effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
+                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                requestedByUserId?: string;
+                                progress?: string;
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                /** Format: date-time */
+                                finishedAt?: string;
+                                peakContextPercent?: number;
+                                totalCostUsd?: number;
+                                workflowRunId?: string;
+                            }[];
+                            truncated: boolean;
+                        };
+                    };
+                };
+                /** @description A user caller cannot read the task's session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{id}/progress": {
         parameters: {
             query?: never;
@@ -21354,7 +21492,7 @@ export interface paths {
                          * @default banner
                          * @enum {string}
                          */
-                        via?: "banner" | "settings";
+                        via?: "banner" | "settings" | "benchmark";
                     };
                 };
             };
@@ -22252,7 +22390,7 @@ export interface paths {
         };
         /**
          * Compare this swarm with similar swarms
-         * @description Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. `unavailable` also covers an install whose first event the proxy saw cannot be established locally (until 30 days after the first accepted event). The fleet numbers are cached for a day.
+         * @description Compares local task volume and success rate with fleet percentiles over the last 30 days. Comparisons require telemetry, an organization name, and a known proxy ingest date. A website, team size, and use case enable full comparisons with peer filters. The response includes the proxy's peer group when available. With telemetry off, it returns local DB counts without a proxy request. The fleet cache key includes the peer filters.
          */
         get: {
             parameters: {
@@ -22272,6 +22410,13 @@ export interface paths {
                         "application/json": {
                             /** @enum {string} */
                             state: "ready" | "telemetry_off" | "no_org_name" | "not_enough_tasks" | "unavailable";
+                            /** @enum {string} */
+                            level: "basic" | "full";
+                            peerGroup: {
+                                teamSize: string | null;
+                                useCase: string | null;
+                                orgs: number;
+                            } | null;
                             local: {
                                 tasksPerWeek: number;
                                 taskSuccessRate: number | null;
@@ -22450,6 +22595,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         name: string;
+                        /** Format: email */
                         email?: string;
                         role?: string;
                         notes?: string;
@@ -22783,7 +22929,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         name?: string;
-                        email?: string;
+                        /** Format: email */
+                        email?: string | null;
                         role?: string;
                         notes?: string;
                         emailAliases?: string[];
@@ -25626,6 +25773,7 @@ export interface components {
              */
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
+            opencodeGo?: components["schemas"]["AgentOpencodeGoStatus"];
             acp?: components["schemas"]["AgentAcpStatus"];
         };
         /** @default null */
@@ -25663,6 +25811,12 @@ export interface components {
                 name: string;
             }[];
             error?: string;
+        } | null;
+        /** @default null */
+        AgentOpencodeGoStatus: {
+            probedAt: number;
+            /** @default [] */
+            models: string[];
         } | null;
         /** @default null */
         AgentAcpStatus: {

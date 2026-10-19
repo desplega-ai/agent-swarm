@@ -110,8 +110,10 @@ export interface paths {
          * @description Percentiles over production agent-swarm installs with at least 10 finished
          *     tasks in the last 30 days, overall and by agent count (`1`, `2-5`, `6+`).
          *     Internal, QA, test and E2B installs are excluded. Aggregates only: no install
-         *     ID or org name, and any bucket or metric with fewer than 20 installs is
-         *     omitted. Recomputed hourly from `raw_events`; the request carries no install
+         *     ID or org name. Whole-fleet buckets require 20 installs. Optional profile
+         *     filters select orgs by their latest API server or UI context. Both filters
+         *     must be present. A peer group requires 20 contributing orgs. Smaller groups fall back to the whole fleet with
+         *     `peer_group: null`. Peer buckets also require 20 distinct orgs. Recomputed hourly from `raw_events`; the request carries no install
          *     ID. Called server to server by agent-swarm API servers, so the response sends
          *     no CORS headers. Rate limited per IP: a burst of 10, then 10 per minute.
          */
@@ -141,12 +143,15 @@ export interface paths {
          *     `trending` (the index page's fastest growing apps). With `domain`: `chart`
          *     stacked by model, `totalTokens`, `rank`, `modelsUsed` and
          *     `appModelAnalytics` (the app page). Tokens are the only metric served:
-         *     `total_requests` is always 0. An install is listed when its
-         *     `community/ranking/<domain>.json` file is merged into agent-swarm `main`, it
-         *     sent a valid `ranking.opted_in` listing with that file's claim first, it has
-         *     not opted out since, it is not an internal, test, E2B or non-production
-         *     install, and its bound `ranking.usage` has tokens in the period. Recomputed
-         *     hourly. Called server to server by the landing, so the response sends no
+         *     `total_requests` is always 0. Telemetry alone lists an install: it sent a
+         *     valid `ranking.opted_in` listing for the domain, has not opted out since,
+         *     is not an internal, test, E2B or non-production install, sent telemetry in
+         *     the last 7 days with the domain as its newest `org_website`, and its
+         *     `ranking.usage` for the domain has tokens in the period. A domain on the
+         *     proxy's denylist is never listed. When several installs list one domain,
+         *     the one whose listing was ingested first holds it (ties go to the lower
+         *     install ID) while it qualifies; the next in that order takes over when it
+         *     stops. Recomputed hourly. Called server to server by the landing, so the response sends no
          *     CORS headers. Rate limited per IP: a burst of 10, then 10 per minute.
          */
         get: operations["getRanking"];
@@ -166,13 +171,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Check a proposed ranking entry for the agent-swarm PR check
-         * @description Reads the telemetry store live (no cache) and reports whether an install
-         *     sent a valid `ranking.opted_in` listing with this claim and domain first,
-         *     has not opted out since, is not excluded, sent telemetry in the last 7
-         *     days, and still declares this domain as its website. `listing` shows the
-         *     reviewer what the ranking would display; it never includes the claim.
-         *     Sends no CORS headers. Rate limited per IP: a burst of 10, then 10 per
+         * Check whether a domain would be ranked
+         * @description Reads the telemetry store live (no cache) and applies the ranking's rules
+         *     to the domain: it is not denylisted (reason `denylisted`), and an install
+         *     that listed it has not opted out since, is not excluded, sent telemetry in
+         *     the last 7 days, and still declares this domain as its website. `listing`
+         *     and the flags describe the install that would hold the domain or, when
+         *     none may, the first install that listed it. `listing` never includes a
+         *     claim. Sends no CORS headers. Rate limited per IP: a burst of 10, then 10 per
          *     minute.
          */
         get: operations["verifyRankingEntry"];
@@ -236,6 +242,16 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** @enum {string|null} */
+        TeamSize: "1" | "2-10" | "11-50" | "51+" | null;
+        /** @enum {string|null} */
+        UseCase: "features" | "bugs" | "review" | "ops" | "docs" | "data" | null;
+        /** @enum {string|null} */
+        AcquisitionSource: "search" | "github" | "social" | "colleague" | "newsletter" | "event" | "ai_assistant" | "hacker_news" | "other" | null;
+        /** @enum {string|null} */
+        UserFunction: "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other" | null;
+        /** @enum {string|null} */
+        NotificationMoment: "task_failed" | "first_workflow" | "default" | null;
         /**
          * @description Identity envelope for schema version 2. Pseudonymous by design: no email or
          *     user name is accepted, and `is_internal` is set only by the proxy.
@@ -259,7 +275,10 @@ export interface components {
             swarm_version: string;
             install_method?: string | null;
             install_preset?: string | null;
-            acquisition_source?: string | null;
+            acquisition_source?: components["schemas"]["AcquisitionSource"];
+            team_size?: components["schemas"]["TeamSize"];
+            use_case?: components["schemas"]["UseCase"];
+            user_function?: components["schemas"]["UserFunction"];
         };
         EventEnvelope: {
             /** @description Product or service emitting the telemetry event. */
@@ -359,6 +378,13 @@ export interface components {
              * @description Required RFC3339 submission timestamp.
              */
             submitted_at: string;
+            user_function?: components["schemas"]["UserFunction"];
+            team_size?: components["schemas"]["TeamSize"];
+            use_case?: components["schemas"]["UseCase"];
+            acquisition_source?: components["schemas"]["AcquisitionSource"];
+            moment?: components["schemas"]["NotificationMoment"];
+            /** @description Optional description of the submitter's current work. */
+            working_on?: string | null;
         };
         UsedByConsent: {
             /** @description Agent-swarm installation identifier. Omit it when the install has none (telemetry off). */
@@ -375,6 +401,13 @@ export interface components {
              * @description When the admin changed the setting (RFC3339).
              */
             changed_at: string;
+            /**
+             * Format: email
+             * @description Current clients require a valid contact email when consent is granted. Older clients may omit it.
+             */
+            contact_email?: string | null;
+            contact_function?: components["schemas"]["UserFunction"];
+            quote?: string | null;
         };
         UsedByAcceptedResponse: {
             /** @constant */
@@ -402,16 +435,22 @@ export interface components {
             window: "30d";
             /** Format: date-time */
             generatedAt: string;
-            /** @description k-anonymity floor. Buckets and metrics below it are omitted. */
+            /** @description k-anonymity floor in installs for the whole fleet, or distinct orgs for a peer group. */
             minInstallsPerBucket: number;
             /** @description An install needs this many completed or failed tasks in the window to count. */
             minFinishedTasks: number;
             overall: components["schemas"]["FleetBenchmarkBlock"];
-            /** @description Keyed by `1`, `2-5` or `6+`. A bucket with fewer than `minInstallsPerBucket` installs is absent. */
+            /** @description Keyed by `1`, `2-5` or `6+`. A bucket below `minInstallsPerBucket` is absent. The floor counts installs for the whole fleet and distinct orgs for peers. */
             byAgentCount: {
                 [key: string]: components["schemas"]["FleetBenchmarkBlock"];
             };
+            peer_group?: components["schemas"]["FleetPeerGroup"];
         };
+        FleetPeerGroup: {
+            team_size: components["schemas"]["TeamSize"];
+            use_case: components["schemas"]["UseCase"];
+            orgs: number;
+        } | null;
         FleetBenchmarkBlock: {
             installs: number;
             tasksPerWeek: components["schemas"]["FleetMetric"];
@@ -521,7 +560,7 @@ export interface components {
         };
         RankingVerification: {
             verified: boolean;
-            reasons: ("no_listing" | "opted_out" | "excluded_install" | "telemetry_inactive_7d" | "website_mismatch")[];
+            reasons: ("no_listing" | "denylisted" | "opted_out" | "excluded_install" | "telemetry_inactive_7d" | "website_mismatch")[];
             telemetryActive7d: boolean;
             /** @description The install's newest event declares this domain as its org_website. */
             websiteMatchesDomain: boolean;
@@ -669,6 +708,7 @@ export interface components {
             properties: components["schemas"]["AgentSwarmCompactionTriggeredProperties"];
         };
         AgentSwarmFeatureUsedProperties: {
+            /** @description Feature identifier, including health_popover and kickoff_call_opened. Existing identifiers remain accepted. */
             feature: string;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -698,6 +738,37 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmFeatureUsedProperties"];
         };
+        AgentSwarmFleetBenchmarkUnlockedProperties: {
+            /** @description Profile fields supplied, never their values. */
+            fields: ("website" | "team_size" | "use_case")[];
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description An admin supplied the company profile fields for the full benchmark. (emitter: ui, since 2026-10-18) */
+        AgentSwarmFleetBenchmarkUnlockedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "fleet_benchmark.unlocked";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmFleetBenchmarkUnlockedProperties"];
+        };
         AgentSwarmFleetBenchmarkViewedProperties: {
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -714,6 +785,8 @@ export interface components {
             is_cloud?: boolean;
             /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
             is_e2b?: boolean;
+            /** @enum {string} */
+            level?: "basic" | "full";
             /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
             swarmVersion?: string;
         };
@@ -727,6 +800,71 @@ export interface components {
             /** @constant */
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmFleetBenchmarkViewedProperties"];
+        };
+        AgentSwarmIdentityLookupProperties: {
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            matched: boolean;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description A dashboard identity lookup matched an existing user or found no match. (emitter: ui, since 2026-10-18) */
+        AgentSwarmIdentityLookupEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "identity.lookup";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmIdentityLookupProperties"];
+        };
+        AgentSwarmIdentityUserCreatedProperties: {
+            /** @enum {string} */
+            email_kind: "work" | "personal";
+            has_company: boolean;
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            has_function: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @enum {string} */
+            surface: "identity_modal" | "setup";
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description A user created a dashboard identity. Email and personal names stay out of telemetry. (emitter: ui, since 2026-10-18) */
+        AgentSwarmIdentityUserCreatedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "identity.user_created";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmIdentityUserCreatedProperties"];
         };
         AgentSwarmIntegrationConnectedProperties: {
             first_of_type: boolean;
@@ -761,6 +899,7 @@ export interface components {
             properties: components["schemas"]["AgentSwarmIntegrationConnectedProperties"];
         };
         AgentSwarmLeadCapturedProperties: {
+            /** @description Lead channel, including setup_help and fleet_report. Existing channels remain accepted. */
             channel: string;
             consent: boolean;
             /** @description An email channel is configured. */
@@ -792,6 +931,11 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmLeadCapturedProperties"];
         };
+        /**
+         * @description Moment that made the Slack Connect invite relevant.
+         * @enum {string}
+         */
+        "schemas-NotificationMoment": "task_failed" | "first_workflow" | "default";
         AgentSwarmNotificationDismissedProperties: {
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -808,6 +952,7 @@ export interface components {
             /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
             is_e2b?: boolean;
             key: string;
+            moment?: components["schemas"]["schemas-NotificationMoment"];
             /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
             swarmVersion?: string;
         };
@@ -822,6 +967,11 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmNotificationDismissedProperties"];
         };
+        /**
+         * @description Job function of a user, separate from the RBAC user_role.
+         * @enum {string}
+         */
+        "schemas-UserFunction": "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other";
         AgentSwarmNotificationSubmittedProperties: {
             /** @description Domain of the email typed into the item, never the address. */
             email_domain?: string;
@@ -840,8 +990,10 @@ export interface components {
             /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
             is_e2b?: boolean;
             key: string;
+            moment?: components["schemas"]["schemas-NotificationMoment"];
             /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
             swarmVersion?: string;
+            user_function?: components["schemas"]["schemas-UserFunction"];
         };
         /** @description A notification-centre item was submitted. (emitter: ui, since 2026-09-30) */
         AgentSwarmNotificationSubmittedEvent: {
@@ -870,6 +1022,7 @@ export interface components {
             /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
             is_e2b?: boolean;
             key: string;
+            moment?: components["schemas"]["schemas-NotificationMoment"];
             /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
             swarmVersion?: string;
         };
@@ -1142,8 +1295,8 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingStepViewedProperties"];
         };
         AgentSwarmOrgProfileUpdatedProperties: {
-            /** @description Changed field names: name, website. */
-            fields: unknown[];
+            /** @description Changed profile field names, never their values. */
+            fields: ("name" | "website" | "team_size" | "use_case" | "acquisition_source")[];
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1162,7 +1315,7 @@ export interface components {
              * @description Where the change was made. Not trigger_surface: that key fills the raw_events.trigger_surface column.
              * @enum {string}
              */
-            surface: "prompt" | "setup" | "settings";
+            surface: "prompt" | "setup" | "settings" | "org_name_popup" | "feedback" | "fleet_benchmark" | "telemetry_banner" | "identity_modal";
             /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
             swarmVersion?: string;
         };
@@ -1334,6 +1487,8 @@ export interface components {
             properties: components["schemas"]["AgentSwarmPopupShownProperties"];
         };
         AgentSwarmPopupSubmittedProperties: {
+            /** @description Number of profile follow-up questions answered, never their values. */
+            answered?: number;
             /** @description A name or email was left. The values go to /v1/feedback, never here. */
             has_contact: boolean;
             /** @description An email channel is configured. */
@@ -1351,6 +1506,8 @@ export interface components {
             is_cloud?: boolean;
             /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
             is_e2b?: boolean;
+            /** @description Perks the admin explicitly selected. */
+            perks?: ("used_by" | "slack_connect")[];
             popup: components["schemas"]["Popup"];
             /** @description Feedback pop-up only: the 0-10 score. /v1/feedback enforces the upper bound. */
             score?: number;
@@ -1830,6 +1987,39 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmSessionSteeredProperties"];
         };
+        AgentSwarmSetupWorkerCommandCopiedProperties: {
+            /** @enum {string} */
+            harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+            /** @enum {string} */
+            target: "compose" | "docker" | "kubernetes";
+        };
+        /** @description An admin copied a worker command from the setup health popover. (emitter: ui, since 2026-10-18) */
+        AgentSwarmSetupWorkerCommandCopiedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "setup.worker_command_copied";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmSetupWorkerCommandCopiedProperties"];
+        };
         AgentSwarmSkillInvokedProperties: {
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -2187,7 +2377,7 @@ export interface components {
             /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
             swarmVersion?: string;
             /** @enum {string} */
-            via: "banner" | "settings" | "env";
+            via: "banner" | "settings" | "env" | "benchmark";
         };
         /** @description Telemetry was turned on. Sent once, on the first boot or re-init after opting in. (emitter: api-server, since 2026-10-12) */
         AgentSwarmTelemetryEnabledEvent: {
@@ -2235,8 +2425,10 @@ export interface components {
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
             has_embedding_key?: boolean;
+            has_function?: boolean;
             /** @description A notification channel is configured. */
             has_notification_channel?: boolean;
+            has_quote?: boolean;
             /** @description A Slack channel is configured. */
             has_slack_channel?: boolean;
             /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
@@ -2428,7 +2620,7 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmWorkflowStartedProperties"];
         };
-        AgentSwarmCatalogEvent: components["schemas"]["AgentSwarmAgentRegisteredEvent"] | components["schemas"]["AgentSwarmCompactionTriggeredEvent"] | components["schemas"]["AgentSwarmFeatureUsedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkViewedEvent"] | components["schemas"]["AgentSwarmIntegrationConnectedEvent"] | components["schemas"]["AgentSwarmLeadCapturedEvent"] | components["schemas"]["AgentSwarmNotificationDismissedEvent"] | components["schemas"]["AgentSwarmNotificationSubmittedEvent"] | components["schemas"]["AgentSwarmNotificationViewedEvent"] | components["schemas"]["AgentSwarmOnboardingCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingDismissedEvent"] | components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStartedEvent"] | components["schemas"]["AgentSwarmOnboardingStepCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStepFailedEvent"] | components["schemas"]["AgentSwarmOnboardingStepSkippedEvent"] | components["schemas"]["AgentSwarmOnboardingStepViewedEvent"] | components["schemas"]["AgentSwarmOrgProfileUpdatedEvent"] | components["schemas"]["AgentSwarmOrgSnapshotEvent"] | components["schemas"]["AgentSwarmPageViewedEvent"] | components["schemas"]["AgentSwarmPopupDismissedEvent"] | components["schemas"]["AgentSwarmPopupShownEvent"] | components["schemas"]["AgentSwarmPopupSubmittedEvent"] | components["schemas"]["AgentSwarmRankingOptedInEvent"] | components["schemas"]["AgentSwarmRankingOptedOutEvent"] | components["schemas"]["AgentSwarmRankingUsageEvent"] | components["schemas"]["AgentSwarmScheduleErrorEvent"] | components["schemas"]["AgentSwarmScheduleExecutedEvent"] | components["schemas"]["AgentSwarmServerShutdownEvent"] | components["schemas"]["AgentSwarmServerStartedEvent"] | components["schemas"]["AgentSwarmSessionCancelledEvent"] | components["schemas"]["AgentSwarmSessionCostEvent"] | components["schemas"]["AgentSwarmSessionEndedEvent"] | components["schemas"]["AgentSwarmSessionFailureEvent"] | components["schemas"]["AgentSwarmSessionStartedEvent"] | components["schemas"]["AgentSwarmSessionSteeredEvent"] | components["schemas"]["AgentSwarmSkillInvokedEvent"] | components["schemas"]["AgentSwarmTaskCancelledEvent"] | components["schemas"]["AgentSwarmTaskClaimedEvent"] | components["schemas"]["AgentSwarmTaskCompletedEvent"] | components["schemas"]["AgentSwarmTaskCreatedEvent"] | components["schemas"]["AgentSwarmTaskFailedEvent"] | components["schemas"]["AgentSwarmTaskSessionCompletedEvent"] | components["schemas"]["AgentSwarmTaskStartedEvent"] | components["schemas"]["AgentSwarmTaskSupersededEvent"] | components["schemas"]["AgentSwarmTelemetryEnabledEvent"] | components["schemas"]["AgentSwarmUiSessionStartedEvent"] | components["schemas"]["AgentSwarmUsedByConsentChangedEvent"] | components["schemas"]["AgentSwarmWorkflowCompletedEvent"] | components["schemas"]["AgentSwarmWorkflowCreatedEvent"] | components["schemas"]["AgentSwarmWorkflowDeletedEvent"] | components["schemas"]["AgentSwarmWorkflowFailedEvent"] | components["schemas"]["AgentSwarmWorkflowStartedEvent"];
+        AgentSwarmCatalogEvent: components["schemas"]["AgentSwarmAgentRegisteredEvent"] | components["schemas"]["AgentSwarmCompactionTriggeredEvent"] | components["schemas"]["AgentSwarmFeatureUsedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkUnlockedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkViewedEvent"] | components["schemas"]["AgentSwarmIdentityLookupEvent"] | components["schemas"]["AgentSwarmIdentityUserCreatedEvent"] | components["schemas"]["AgentSwarmIntegrationConnectedEvent"] | components["schemas"]["AgentSwarmLeadCapturedEvent"] | components["schemas"]["AgentSwarmNotificationDismissedEvent"] | components["schemas"]["AgentSwarmNotificationSubmittedEvent"] | components["schemas"]["AgentSwarmNotificationViewedEvent"] | components["schemas"]["AgentSwarmOnboardingCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingDismissedEvent"] | components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStartedEvent"] | components["schemas"]["AgentSwarmOnboardingStepCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStepFailedEvent"] | components["schemas"]["AgentSwarmOnboardingStepSkippedEvent"] | components["schemas"]["AgentSwarmOnboardingStepViewedEvent"] | components["schemas"]["AgentSwarmOrgProfileUpdatedEvent"] | components["schemas"]["AgentSwarmOrgSnapshotEvent"] | components["schemas"]["AgentSwarmPageViewedEvent"] | components["schemas"]["AgentSwarmPopupDismissedEvent"] | components["schemas"]["AgentSwarmPopupShownEvent"] | components["schemas"]["AgentSwarmPopupSubmittedEvent"] | components["schemas"]["AgentSwarmRankingOptedInEvent"] | components["schemas"]["AgentSwarmRankingOptedOutEvent"] | components["schemas"]["AgentSwarmRankingUsageEvent"] | components["schemas"]["AgentSwarmScheduleErrorEvent"] | components["schemas"]["AgentSwarmScheduleExecutedEvent"] | components["schemas"]["AgentSwarmServerShutdownEvent"] | components["schemas"]["AgentSwarmServerStartedEvent"] | components["schemas"]["AgentSwarmSessionCancelledEvent"] | components["schemas"]["AgentSwarmSessionCostEvent"] | components["schemas"]["AgentSwarmSessionEndedEvent"] | components["schemas"]["AgentSwarmSessionFailureEvent"] | components["schemas"]["AgentSwarmSessionStartedEvent"] | components["schemas"]["AgentSwarmSessionSteeredEvent"] | components["schemas"]["AgentSwarmSetupWorkerCommandCopiedEvent"] | components["schemas"]["AgentSwarmSkillInvokedEvent"] | components["schemas"]["AgentSwarmTaskCancelledEvent"] | components["schemas"]["AgentSwarmTaskClaimedEvent"] | components["schemas"]["AgentSwarmTaskCompletedEvent"] | components["schemas"]["AgentSwarmTaskCreatedEvent"] | components["schemas"]["AgentSwarmTaskFailedEvent"] | components["schemas"]["AgentSwarmTaskSessionCompletedEvent"] | components["schemas"]["AgentSwarmTaskStartedEvent"] | components["schemas"]["AgentSwarmTaskSupersededEvent"] | components["schemas"]["AgentSwarmTelemetryEnabledEvent"] | components["schemas"]["AgentSwarmUiSessionStartedEvent"] | components["schemas"]["AgentSwarmUsedByConsentChangedEvent"] | components["schemas"]["AgentSwarmWorkflowCompletedEvent"] | components["schemas"]["AgentSwarmWorkflowCreatedEvent"] | components["schemas"]["AgentSwarmWorkflowDeletedEvent"] | components["schemas"]["AgentSwarmWorkflowFailedEvent"] | components["schemas"]["AgentSwarmWorkflowStartedEvent"];
         /** @description Every catalogued (product, event) pair with its property schema. Generated from contracts/telemetry/catalog/events.json. */
         CatalogEvent: components["schemas"]["AgentFsCatalogEvent"] | components["schemas"]["AgentSwarmCatalogEvent"];
     };
@@ -2754,6 +2946,8 @@ export interface operations {
             query?: {
                 /** @description Only `30d` is supported. */
                 window?: "30d";
+                team_size?: "1" | "2-10" | "11-50" | "51+";
+                use_case?: "features" | "bugs" | "review" | "ops" | "docs" | "data";
             };
             header?: never;
             path?: never;
@@ -2772,7 +2966,7 @@ export interface operations {
                     "application/json": components["schemas"]["FleetBenchmarks"];
                 };
             };
-            /** @description `window` is not `30d` (code `invalid_window`). */
+            /** @description Invalid window or profile filter (invalid_window, invalid_team_size, invalid_use_case). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -2869,7 +3063,11 @@ export interface operations {
         parameters: {
             query: {
                 domain: string;
-                claim: string;
+                /**
+                 * @deprecated
+                 * @description Sent by agent-swarm v2.4.0's PR check. Ignored.
+                 */
+                claim?: string;
             };
             header?: never;
             path?: never;
@@ -2888,7 +3086,7 @@ export interface operations {
                     "application/json": components["schemas"]["RankingVerification"];
                 };
             };
-            /** @description `domain` or `claim` is malformed (codes `invalid_domain`, `invalid_claim`). */
+            /** @description `domain` is malformed (code `invalid_domain`). */
             400: {
                 headers: {
                     [name: string]: unknown;

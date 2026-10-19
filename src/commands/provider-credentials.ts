@@ -155,8 +155,13 @@ export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialC
   devin: (env) => checkDevinCredentials(env),
   opencode: (env, opts) => checkOpencodeCredentials(env, opts),
   pi: async (env, opts) => {
-    const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
-    return checkPiMonoCredentials(env, opts);
+    const { checkPiMonoCredentials, listPiOpencodeGoModelIds } = await import(
+      "../providers/pi-mono-adapter"
+    );
+    return {
+      ...(await checkPiMonoCredentials(env, opts)),
+      opencodeGoModels: listPiOpencodeGoModelIds(),
+    };
   },
   acp: (env) => {
     const target = env.ACP_TARGET ?? "custom";
@@ -662,6 +667,10 @@ export async function buildCredStatusReport(
           error: presence.ready ? undefined : (presence.hint ?? undefined),
         }
       : null;
+  const opencodeGo: AgentCredStatus["opencodeGo"] =
+    presence.opencodeGoModels !== undefined
+      ? { probedAt: Date.now(), models: presence.opencodeGoModels }
+      : null;
   return {
     ready: presence.ready,
     missing: presence.missing ?? [],
@@ -672,6 +681,7 @@ export async function buildCredStatusReport(
     reportedAt: Date.now(),
     reportKind: kind,
     bedrock,
+    opencodeGo,
     acp: null,
   };
 }

@@ -1,4 +1,4 @@
-import { useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
+import { type OrgProfileField, useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ConfigCatalogEntry, ConfigCatalogGroup } from "@/lib/configuration-catalog";
 import type { EnvPresence } from "@/lib/integrations-status";
@@ -7,14 +7,18 @@ import { ConfigurationRow } from "./configuration-row";
 import { PublicRankingRow } from "./public-ranking-row";
 import { UsedByConsentRow } from "./used-by-consent-row";
 
-const PROFILE_FIELDS: Record<string, "name" | "website"> = {
+/** Company profile rows: a save here sends `org.profile_updated {surface: settings}`. */
+const PROFILE_FIELDS: Record<string, OrgProfileField> = {
   SWARM_ORG_NAME: "name",
   SWARM_ORG_WEBSITE: "website",
+  SWARM_ORG_TEAM_SIZE: "team_size",
+  SWARM_ORG_USE_CASE: "use_case",
+  SWARM_ORG_ACQUISITION_SOURCE: "acquisition_source",
 };
 
 export interface ConfigurationGroupCardProps {
   group: ConfigCatalogGroup;
-  /** Entries to render — already filtered by the page's search box. */
+  /** Entries to render, already filtered by the page's search box. */
   entries: ConfigCatalogEntry[];
   envPresence: EnvPresence;
 }

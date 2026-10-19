@@ -24,6 +24,7 @@ import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { guardGhPrBody } from "./pr-body-guard";
+import { guardGhPrRoom } from "./pr-room-guard";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
@@ -1186,6 +1187,12 @@ export async function handleHook(): Promise<void> {
         const prBodyBlock = await guardGhPrBody(msg.tool_input, msg.cwd ?? process.cwd());
         if (prBodyBlock) {
           console.error(prBodyBlock);
+          process.exitCode = 2;
+          return;
+        }
+        const prRoomBlock = await guardGhPrRoom(msg.tool_input, msg.cwd ?? process.cwd());
+        if (prRoomBlock) {
+          console.error(prRoomBlock);
           process.exitCode = 2;
           return;
         }

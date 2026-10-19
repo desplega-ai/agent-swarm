@@ -12,7 +12,7 @@ Quick index:
 - [Dashboard UI](#dashboard-ui)
 - [Port-conflict resolution](#port-conflict-resolution)
 
-**Tag every API or worker you boot for a test.** Prefix the command with `DESPLEGA_TELEMETRY_ENV=test`, or pass `-e DESPLEGA_TELEMETRY_ENV=test` to `docker run`. An untagged boot reports to telemetry as a production install. Inside a swarm worker it also inherits that swarm's `SWARM_ORG_NAME`. `bun test`, `bun run e2e` and `bun run e2e:ui` tag themselves.
+**Tag every API or worker you boot for a test.** Prefix the command with `DESPLEGA_TELEMETRY_ENV=test`, or pass `-e DESPLEGA_TELEMETRY_ENV=test` to `docker run`. An untagged boot outside a git checkout reports to telemetry as a production install; git checkouts default to development. Inside a swarm worker it also inherits that swarm's `SWARM_ORG_NAME`. `bun test`, `bun run e2e` and `bun run e2e:ui` tag themselves.
 
 ## Unit tests
 

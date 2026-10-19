@@ -4,6 +4,11 @@ import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-po
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
+import {
+  COMPANY_ACQUISITION_SOURCES,
+  COMPANY_TEAM_SIZES,
+  COMPANY_USE_CASES,
+} from "../utils/company-profile";
 import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
 import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
@@ -134,6 +139,16 @@ export const DB_RETENTION_TUNING_BOUNDS = {
   DB_RETENTION_MAX_STATEMENT_MS: { min: 25, max: 5_000 },
 } as const;
 
+/**
+ * Bounds for the Swarm Apps json column size cap (`APPS_JSON_COLUMN_MAX_BYTES`).
+ *
+ * `src/apps/definition.ts` reads the knob against exactly these at call time
+ * and falls back to its 256 KB default outside them; VALIDATED_KEYS below
+ * rejects out-of-range writes with the same numbers, so the config API cannot
+ * accept a cap the row store would silently ignore.
+ */
+export const APPS_JSON_COLUMN_MAX_BYTES_BOUNDS = { min: 1_024, max: 16_777_216 } as const;
+
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
@@ -151,7 +166,8 @@ function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
 
 /** Build a single `{ KEY: validator }` entry restricted to `options`. */
 function enumValidator(key: string, options: string[]): Record<string, ConfigValidator> {
-  const message = `Invalid ${key} value (must be one of: ${options.join(", ")})`;
+  const listed = options.filter(Boolean).join(", ");
+  const message = `Invalid ${key} value (must be one of: ${listed}${options.includes("") ? ", or empty" : ""})`;
   return {
     [key]: (value: unknown) => {
       if (typeof value !== "string") return message;
@@ -423,6 +439,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       ? null
       : "Invalid SWARM_ORG_WEBSITE (must be a public hostname such as example.com, without scheme, www, path or port)";
   },
+  ...enumValidator("SWARM_ORG_TEAM_SIZE", ["", ...COMPANY_TEAM_SIZES]),
+  ...enumValidator("SWARM_ORG_USE_CASE", ["", ...COMPANY_USE_CASES]),
+  ...enumValidator("SWARM_ORG_ACQUISITION_SOURCE", ["", ...COMPANY_ACQUISITION_SOURCES]),
   ...booleanValidators([
     "SWARM_USED_BY_CONSENT",
     "PUBLIC_RANKING_ENABLED",
@@ -518,6 +537,11 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // an operator could save a 500ms tick budget, see it accepted, and have the
   // sweep keep running for the default 30000ms.
   ...boundedIntegerValidatorsFor(DB_RETENTION_TUNING_BOUNDS),
+  ...boundedIntegerValidators(
+    ["APPS_JSON_COLUMN_MAX_BYTES"],
+    APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.min,
+    APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.max,
+  ),
   ...boundedIntegerValidators(
     [
       "SESSION_LOG_RETENTION_DAYS",

@@ -29,8 +29,8 @@ const CATEGORIES = Object.keys(RANKING_TAXONOMY) as Array<keyof typeof RANKING_T
 /**
  * Settings → Branding: opt into the public ranking on agent-swarm.dev/ranking.
  * Needs telemetry on and a real organization name and website; the name and
- * domain shown on the page are copied from them. Joining still takes a merged
- * `community/ranking/<domain>.json` PR, which the button prefills.
+ * domain shown on the page are copied from them. Get ranked is the whole
+ * opt-in: the install shows at the next hourly refresh.
  */
 export function PublicRankingRow() {
   const { data: configs } = useConfigs({ scope: "global" });
@@ -70,10 +70,8 @@ export function PublicRankingRow() {
         sourceCodeUrl: sourceCodeUrl.trim() || null,
       },
       {
-        onSuccess: (result) => {
-          toast.success("Listing sent. Open the PR to get ranked.");
-          window.open(result.prUrl, "_blank", "noopener,noreferrer");
-        },
+        onSuccess: () =>
+          toast.success("Listing sent. You show on the ranking at the next refresh."),
         onError: (error) => toast.error(error.message),
       },
     );
@@ -101,7 +99,7 @@ export function PublicRankingRow() {
         <p className="text-xs text-muted-foreground leading-relaxed">
           Rank this install by tokens used on agent-swarm.dev/ranking. Your exact token totals, and
           tokens per model, become public. Each worker session sends its token counts, model and
-          provider through telemetry. Listing also takes a merged PR to desplega-ai/agent-swarm.
+          provider through telemetry. The listing shows at the next hourly refresh.
         </p>
       </div>
 
@@ -145,7 +143,7 @@ export function PublicRankingRow() {
             Listed as <span className="font-medium">{state.name}</span> ·{" "}
             <span className="font-mono">{state.domain}</span>
             {state.listing && !state.listingMatchesDomain
-              ? ". Your website changed since the last listing, so this needs a new PR."
+              ? ". Your website changed since the last listing, so Get ranked again."
               : null}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -231,27 +229,7 @@ export function PublicRankingRow() {
                 Leave the ranking
               </Button>
             ) : null}
-            {state.prUrl ? (
-              <a
-                className="text-xs underline"
-                href={state.prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open the ranking PR
-              </a>
-            ) : null}
           </div>
-          {state.fileJson ? (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground">
-                Or add <code>community/ranking/{state.domain}.json</code> by hand
-              </summary>
-              <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 font-mono text-[11px]">
-                {state.fileJson}
-              </pre>
-            </details>
-          ) : null}
         </div>
       )}
     </div>

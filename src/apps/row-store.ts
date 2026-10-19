@@ -4,7 +4,9 @@ import {
   AppDefinitionSchema,
   type AppValidationIssue,
   type ColumnDef,
-  isIso8601Date,
+  isValidColumnValue,
+  jsonColumnSizeLabel,
+  jsonColumnValueIssue,
   type ModelDef,
 } from "./definition";
 import { upgradeAppDefinition } from "./format-upgrades";
@@ -94,6 +96,7 @@ export function appIndexKey(model: string, column: string, value: unknown, rowId
 
 function isIndexed(column: ColumnDef): boolean {
   if (column.hidden === true) return false;
+  if (column.kind === "json") return false;
   if (column.kind === "enum") return true;
   return column.index === true && (column.kind === "string" || column.kind === "boolean");
 }
@@ -109,13 +112,9 @@ function indexKeys(model: string, definition: ModelDef, row: AppRow): string[] {
   return keys;
 }
 
-function validValue(column: ColumnDef, value: unknown): boolean {
+export function validValue(column: ColumnDef, value: unknown): boolean {
   if (value === null) return column.required !== true;
-  if (column.kind === "string") return typeof value === "string";
-  if (column.kind === "number") return typeof value === "number" && Number.isFinite(value);
-  if (column.kind === "boolean") return typeof value === "boolean";
-  if (column.kind === "date") return typeof value === "string" && isIso8601Date(value);
-  return typeof value === "string" && Boolean(column.enum?.includes(value));
+  return isValidColumnValue(column, value);
 }
 
 function joinKeyColumnNames(definition: ModelDef): Set<string> {
@@ -185,7 +184,20 @@ function prepareValues(
   for (const [name, value] of Object.entries(prepared)) {
     if (!Object.hasOwn(definition.columns, name)) continue;
     const column = definition.columns[name]!;
-    if (!validValue(column, value)) {
+    if (column.kind === "json" && value !== null) {
+      // Asked directly so the value is serialized once and the size cap gets its own message.
+      const issue = jsonColumnValueIssue(value);
+      if (issue === "unserializable") {
+        issues.push({ path: `values.${name}`, message: "must be a valid json value" });
+      } else if (issue === "non-finite") {
+        issues.push({ path: `values.${name}`, message: "json value contains a non-finite number" });
+      } else if (issue === "oversized") {
+        issues.push({
+          path: `values.${name}`,
+          message: `json value exceeds the ${jsonColumnSizeLabel()} size limit`,
+        });
+      }
+    } else if (!validValue(column, value)) {
       issues.push({ path: `values.${name}`, message: `must be a valid ${column.kind} value` });
     }
   }
@@ -526,18 +538,20 @@ export async function rebuildAppColumnIndexUnlocked(
   }
 }
 
+/** `matches` re-checks the row under the lock; a row that no longer matches is kept. */
 export function deleteAppRow(
   appId: string,
   model: string,
   _definition: ModelDef,
   rowId: string,
+  matches?: (row: AppRow) => boolean,
 ): Promise<boolean> {
   return withMutationLock(appId, model, async () => {
     const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) return false;
     const namespace = appsNamespace(appId);
     const row = await getAppRow(appId, model, rowId);
-    if (!row) return false;
+    if (!row || (matches && !matches(row))) return false;
     for (const key of indexKeys(model, currentDefinition, row)) await deleteKv(namespace, key);
     await deleteKv(namespace, rowKey(model, rowId));
     return true;
