@@ -37,6 +37,7 @@ const ENV_KEYS = [
   "TRANSCRIPTION_API_KEY",
   "TRANSCRIPTION_BASE_URL",
   "TRANSCRIPTION_MODEL",
+  "TRANSCRIPTION_PROVIDER",
 ];
 const savedEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 

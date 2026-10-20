@@ -273,13 +273,14 @@ Long output is split into several messages at the platform limit.
 
 ## Voice notes
 
-Voice notes and other audio files are transcribed through an OpenAI-compatible `/audio/transcriptions` endpoint. Transcription is off until `TRANSCRIPTION_API_KEY` is set. Store it as a secret.
+Voice notes and other audio files are transcribed through OpenAI-compatible `/audio/transcriptions` (OpenAI, Groq, self-hosted whisper) or ElevenLabs `/speech-to-text`. Transcription is off until `TRANSCRIPTION_API_KEY` is set. Store it as a secret. Deepgram and AssemblyAI are not supported.
 
 | Key | Default | What it does |
 |---|---|---|
 | `TRANSCRIPTION_API_KEY` | unset | Turns transcription on. The API key of the transcription service. |
-| `TRANSCRIPTION_BASE_URL` | `https://api.openai.com/v1` | Base URL of the service. Groq (`https://api.groq.com/openai/v1`) and self-hosted whisper servers work too. |
-| `TRANSCRIPTION_MODEL` | `whisper-1` | Model name sent to the service. |
+| `TRANSCRIPTION_PROVIDER` | `openai` | Request shape. `openai` sends `Authorization: Bearer` and `model`; `elevenlabs` sends `xi-api-key` and `model_id`. |
+| `TRANSCRIPTION_BASE_URL` | `https://api.openai.com/v1` (`https://api.elevenlabs.io/v1` for `elevenlabs`) | Base URL of the service. Groq (`https://api.groq.com/openai/v1`) and self-hosted whisper servers work with `openai`. |
+| `TRANSCRIPTION_MODEL` | `whisper-1` (`scribe_v2` for `elevenlabs`) | Model name sent to the service. |
 
 The task text then carries a `[Transcript of <file>]` block under the file line. Without a key, the task text gets one line saying no transcription provider is configured. A failed call is noted the same way, and the task is still created.
 
