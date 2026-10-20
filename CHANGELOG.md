@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- ACP: the adapter moves to `@agentclientprotocol/sdk` 2.0.0 and its client app API. It imports the `/unstable` entry point, so turn `usage` still reaches cost rows. The wire protocol stays ACP v1.
+
 ## [2.4.3] - 2026-10-20
 
 ### Changed

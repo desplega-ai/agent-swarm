@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type { SessionNotification } from "@agentclientprotocol/sdk/unstable";
 import { acpReportedCostUsd, translateAcpSessionNotification } from "../providers/acp-swarm-events";
 
 function notification(update: SessionNotification["update"]): SessionNotification {

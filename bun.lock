@@ -5,7 +5,7 @@
     "": {
       "name": "cc-orch-mcp",
       "dependencies": {
-        "@agentclientprotocol/sdk": "1.9.0",
+        "@agentclientprotocol/sdk": "2.0.0",
         "@ai-sdk/openai": "^3.0.41",
         "@anthropic-ai/claude-agent-sdk": "0.3.304",
         "@anthropic-ai/sdk": "^0.135.0",
@@ -240,7 +240,7 @@
 
     "@agent-swarm/ui-e2e": ["@agent-swarm/ui-e2e@workspace:packages/ui-e2e"],
 
-    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@1.9.0", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-saCOTPYBK1iqWqJFAYHXbg3+zCoFXyZZFoqQAwdTWkbrZZPpAETr80QOnYr2l+dzPwL0jpNhn3eDY8MoEIDbUA=="],
+    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@2.0.0", "", { "peerDependencies": { "zod": "^3.25.76 || ^4.0.0" } }, "sha512-Za5gWOPQ44aBOdegDJZ+OjCAPn7POc0cw8BlFJQ1mmUY1OoUWxRi3+QZT4gdZnyEWgKXyfeGRb0Oo1ag9YkQ1w=="],
 
     "@ai-sdk/cohere": ["@ai-sdk/cohere@3.0.27", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.21" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-OqcCq2PiFY1dbK/0Ck45KuvE8jfdxRuuAE9Y5w46dAk6U+9vPOeg1CDcmR+ncqmrYrhRl3nmyDttyDahyjCzAw=="],
 
