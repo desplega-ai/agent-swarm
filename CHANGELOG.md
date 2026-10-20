@@ -6,8 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-10-19
+
+### Added
+- Apps: models can declare a `json` column that stores any JSON value natively, up to an operator-set limit (256 KB by default) (#2184).
+- UI: an experimental task lineage view shows a task's whole tree, ancestors and descendants, with who started whom (#2274).
+- UI: JSON task output renders as a collapsible tree with per-key copy in the session view and task sheet (#2277).
+
+### Changed
+- Worker image bumps amp to 0.0.1792411243-gb8cffc and qwen-code to 0.25.3 (#2271); agent-fs pins move to 0.18.5 (#2272).
+- Docs: env reference links point to the published page (#2278).
+
 ### Fixed
-- Telemetry: git checkouts and worktrees default to the development environment, preventing local restarts from appearing as new production installs.
+- Telemetry: git checkouts and worktrees default to the development environment, preventing local restarts from appearing as new production installs (#2276).
+- Tasks: human REST follow-ups no longer inherit a worker's output schema (#2275).
+- Status: the harness badge stays green while each provider's latest live test passed (#2270).
+- UI: the Agents grid keeps Model visible at compact widths (#2273).
 
 ## [2.4.1] - 2026-10-19
 

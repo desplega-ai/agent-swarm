@@ -570,7 +570,7 @@ H3 ==
   /\ UNCHANGED <<run, steps, execLive, okCount, hbLeft, crashes>>
 
 \* H4 recovery.ts:88-94 — run -> completed (blind write, no transaction).
-\* F4 recovery.ts:136-156 completeIfSettled: one transaction, only while the
+\* F4 recovery.ts:159-179 completeIfSettled: one transaction, only while the
 \* run is still running, no row is pending retry, and no node's latest row is
 \* live.
 H4 ==
@@ -584,7 +584,7 @@ H4 ==
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h5"])
   /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H5 recovery.ts:165 getStuckWorkflowRuns — waiting steps whose task is terminal.
+\* H5 recovery.ts:186 getStuckWorkflowRuns — waiting steps whose task is terminal.
 \* Snapshot rows <<step, task generation, task status>>.
 H5 ==
   /\ thr[THb].pc = "h5"
@@ -596,7 +596,7 @@ H5 ==
                        ELSE {}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H6 recovery.ts:169-174 — next stuck row; getWorkflowRun must be waiting.
+\* H6 recovery.ts:189-193 — next stuck row; getWorkflowRun must be waiting.
 H6 ==
   /\ thr[THb].pc = "h6"
   /\ IF thr[THb].R = {}
@@ -608,7 +608,7 @@ H6 ==
                                ELSE "h8"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H7R F7 recovery.ts:175-192 -> task-step-routing.ts scheduleTaskStepRetry:
+\* H7R F7 recovery.ts:196-213 -> task-step-routing.ts:146-174 scheduleTaskStepRetry:
 \* one transaction; claim the step while waiting AND bound to the snapshot's
 \* task; retries left -> queue for the poller; exhausted -> fall through to H7.
 H7R ==
@@ -622,7 +622,7 @@ H7R ==
      ELSE SetT(THb, [thr[THb] EXCEPT !.pc = "h6"]) /\ UNCHANGED steps
   /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
 
-\* H7 recovery.ts:200 -> task-step-routing.ts:46-70 failStepAndRunIfWaiting.
+\* H7 recovery.ts:221-227 -> task-step-routing.ts:47-70 failStepAndRunIfWaiting.
 \* F7: fenced on the snapshot's task still being bound (ownerTaskId).
 H7 ==
   /\ thr[THb].pc = "h7"
@@ -633,7 +633,7 @@ H7 ==
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h6"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-\* H8 recovery.ts:222-239 — claim (completeTaskStepAndResolveSuccessors),
+\* H8 recovery.ts:243-251 — claim (completeTaskStepAndResolveSuccessors),
 \* then always walkGraph(successors), even when empty. F7: ownerTaskId fence.
 H8 ==
   /\ thr[THb].pc = "h8"
@@ -648,8 +648,8 @@ H8 ==
           /\ UNCHANGED <<steps, okCount, run, active>>
   /\ UNCHANGED <<execLive, hbLeft, crashes>>
 
-\* H8U recovery.ts:217 `run.context` throws before the claim; the catch
-\* (:257) fails the run (no step id).
+\* H8U recovery.ts:232 `run.context` throws before the claim; the catch
+\* (:272) fails the run (no step id).
 H8Unreadable ==
   /\ ReplayUnreadable
   /\ thr[THb].pc = "h8"
@@ -657,7 +657,7 @@ H8Unreadable ==
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* --- Case 5 (#2030): waiting sub-workflow steps whose child run is terminal ---
-\* H9 recovery.ts:60-67 -> workflow-runs.ts getSettledChildRunParentSteps:
+\* H9 recovery.ts:65-72 -> workflow-runs.ts getSettledChildRunParentSteps:
 \* waiting sub-workflow rows whose child is terminal. No run-status filter.
 H9 ==
   /\ thr[THb].pc = "h9"
@@ -666,7 +666,7 @@ H9 ==
                           i \in {j \in StepIds : steps[j].st = "waiting" /\ steps[j].task \in {"ok", "fail"}}}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H10 resume.ts:792-805 resumeFromChildRun pre-checks, outside any
+\* H10 resume.ts:808-821 resumeFromChildRun pre-checks, outside any
 \* transaction: step still waiting, child outcome (null while it runs), run
 \* waiting or running. No task-generation fence and no retry policy.
 H10 ==
@@ -681,14 +681,15 @@ H10 ==
                                ELSE IF steps[i].task = "ok" THEN "h11" ELSE "h12"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H11 resume.ts:814-838 checkpointPortStepAndResolveSuccessors
-\* (task-step-routing.ts:76-92: CAS on step waiting, run -> running), then
-\* walkGraph(successors) or finalizeOrWait.
+\* H11 resume.ts:830-854 checkpointPortStepAndResolveSuccessors
+\* (task-step-routing.ts:79-99: CAS on step waiting AND, since #2257, run
+\* waiting or running; then run -> running), then walkGraph(successors) or
+\* finalizeOrWait.
 H11 ==
   /\ thr[THb].pc = "h11"
   /\ LET i == thr[THb].sid
          n == thr[THb].cur IN
-     IF steps[i].st = "waiting"
+     IF steps[i].st = "waiting" /\ run \in {"waiting", "running"}
      THEN /\ steps' = [steps EXCEPT ![i].st = "completed"]
           /\ okCount' = [okCount EXCEPT ![n] = @ + 1]
           /\ run' = "running"
@@ -699,7 +700,7 @@ H11 ==
           /\ UNCHANGED <<steps, okCount, run, active>>
   /\ UNCHANGED <<execLive, hbLeft, crashes>>
 
-\* H11U resume.ts:814 `run.context` throws before the claim;
+\* H11U resume.ts:830 `run.context` throws before the claim;
 \* failClosedOnUnreadableReplay fails the step, then the run.
 H11Unreadable ==
   /\ ReplayUnreadable
@@ -707,7 +708,7 @@ H11Unreadable ==
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "hRF", !.rf = "h10"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H12 resume.ts:809-811 failStepAndRunIfWaiting (no ownerTaskId).
+\* H12 resume.ts:825-827 failStepAndRunIfWaiting (no ownerTaskId).
 H12 ==
   /\ thr[THb].pc = "h12"
   /\ LET i == thr[THb].sid IN
@@ -717,7 +718,7 @@ H12 ==
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h10"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-\* H13 resume.ts:839-841 finalizeOrWait (as EFin): no run-status guard.
+\* H13 resume.ts:855-857 finalizeOrWait (as EFin): no run-status guard.
 H13 ==
   /\ thr[THb].pc = "h13"
   /\ run' = FinalizeOrWait
@@ -742,7 +743,7 @@ TaskFinish(i) ==
 \* E1 resume.ts:140-144 / 249-257 — pre-checks outside any transaction,
 \* including isStaleTaskEvent (resume.ts:325): another task is bound now.
 \* CR (#2030): a `workflow.child.finished` event runs resumeFromChildRun
-\* (resume.ts:792-805): no generation fence, the child outcome must be
+\* (resume.ts:808-821): no generation fence, the child outcome must be
 \* terminal, and a failed child fails the step (no retry policy, EF).
 E1(t) ==
   /\ thr[t].pc = "e1"
@@ -756,13 +757,15 @@ E1(t) ==
                 ELSE IF FixTaskRetry THEN "eR" ELSE "eF"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* E2 resume.ts:164-191 -> task-step-routing.ts:96-143 — claim transaction
+\* E2 resume.ts:194-240 -> task-step-routing.ts:206-256 — claim transaction
 \* (re-reads the STEP only), then walkGraph(successors) or finalizeOrWait.
+\* CR: checkpointPortStepAndResolveSuccessors (task-step-routing.ts:79-99)
+\* also re-reads the run inside the claim (#2257): only waiting or running.
 E2(t) ==
   /\ thr[t].pc = "e2"
   /\ LET i == thr[t].sid
          n == thr[t].cur IN
-     IF steps[i].st = "waiting"
+     IF steps[i].st = "waiting" /\ (ChildRunResume => run \in {"waiting", "running"})
      THEN /\ steps' = [steps EXCEPT ![i].st = "completed"]
           /\ okCount' = [okCount EXCEPT ![n] = @ + 1]
           /\ run' = "running"
