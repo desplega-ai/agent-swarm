@@ -49,7 +49,8 @@ const CLEF_THRESHOLD = 0.2;
 // The model is called through `ctx.swarm.systemOne_decide`: the API server reads
 // the key and sends the request, so no key ever enters this script's realm. The
 // server also refuses OpenRouter when the effective OPENROUTER_BASE_URL (stored
-// config or deployment env) points at a gateway.
+// config or deployment env) points at a gateway; `auto` then tries the next
+// usable provider, since this script cannot read the deployment env.
 //
 // `credentials` lists what must be set: every group needs one of its keys.
 // `threshold` is the default the provider's own replay measured (see `CLEF_THRESHOLD`).
@@ -322,9 +323,9 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
     PROVIDERS[id].credentials.every((group) => group.some((key) => cfg(key) !== ""));
   const candidates: ProviderId[] =
     Object.hasOwn(PROVIDERS, providerPref) ? [providerPref as ProviderId] : AUTO_ORDER;
-  const provider = candidates.find(usable);
+  const usableCandidates = candidates.filter(usable);
 
-  if (!provider) {
+  if (usableCandidates.length === 0) {
     const keys = candidates.map((id) =>
       PROVIDERS[id].credentials
         .map((group) => (group.length > 1 ? `(${group.join(" or ")})` : group[0]))
@@ -384,25 +385,37 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
     return inactive(why, { setup });
   }
 
+  const state = await buildState(ctx, leadId, Date.now(), timeZone);
+
+  // The server enforces the time budget. No retries, as in the replay. A provider
+  // this deployment refuses (OpenRouter behind a gateway) sends nothing, so the
+  // next usable one is tried; only an explicit choice or the last one throws.
+  let provider = usableCandidates[0] as ProviderId;
+  let body: any;
+  const skipped: string[] = [];
+  for (const [i, id] of usableCandidates.entries()) {
+    provider = id;
+    const res: any = await ctx.swarm.systemOne_decide({
+      provider: id,
+      model: PROVIDERS[id].model,
+      state,
+      questions: QUESTIONS,
+      timeoutMs: a.jevTimeoutMs ?? 25_000,
+      maxRetries: 0,
+    });
+    body = res?.data ?? res;
+    if (res?.success !== false && body?.success !== false) break;
+    const why = String(body?.message ?? body?.error ?? `HTTP ${res?.status}`).slice(0, 250);
+    if (body?.providerUnavailable === true && i < usableCandidates.length - 1) {
+      skipped.push(`${id}: ${why}`);
+      continue;
+    }
+    throw new Error(`${PROVIDERS[id].family} ${id}: ${why}`);
+  }
   const target = PROVIDERS[provider];
   // A configured threshold applies to every provider; unset, each uses its measured one.
   const threshold =
     a.threshold ?? (cfgThreshold >= 0 && cfgThreshold <= 1 ? cfgThreshold : target.threshold);
-  const state = await buildState(ctx, leadId, Date.now(), timeZone);
-
-  // The server enforces the time budget. No retries, as in the replay.
-  const res: any = await ctx.swarm.systemOne_decide({
-    provider,
-    model: target.model,
-    state,
-    questions: QUESTIONS,
-    timeoutMs: a.jevTimeoutMs ?? 25_000,
-    maxRetries: 0,
-  });
-  const body: any = res?.data ?? res;
-  if (res?.success === false || body?.success === false) {
-    throw new Error(`${target.family} ${provider}: ${String(body?.message ?? body?.error ?? `HTTP ${res?.status}`).slice(0, 250)}`);
-  }
   const p = body?.answers?.act?.noul;
   if (typeof p !== "number" || !Number.isFinite(p)) {
     throw new Error(`${target.family} ${provider}: response has no numeric answers.act.noul`);
@@ -430,5 +443,5 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
     }
     verdict.summary = lines.join("\n").slice(0, 4000);
   }
-  return dryRun ? { ...verdict, dryRun: true, provider, p, threshold, state } : verdict;
+  return dryRun ? { ...verdict, dryRun: true, provider, skipped, p, threshold, state } : verdict;
 }

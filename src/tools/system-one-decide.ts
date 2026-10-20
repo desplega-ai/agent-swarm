@@ -57,6 +57,12 @@ export const registerSystemOneDecideTool = (server: McpServer) => {
         answers: z.record(z.string(), z.unknown()).optional(),
         usage: z.record(z.string(), z.unknown()).optional(),
         requestId: z.string().optional(),
+        providerUnavailable: z
+          .boolean()
+          .optional()
+          .describe(
+            "On an error: true when this deployment refuses the provider (e.g. OpenRouter behind a gateway) and no request was sent, so a caller choosing automatically can try its next provider",
+          ),
       }),
     },
     async ({ provider, model, state, questions, timeoutMs, maxRetries }, requestInfo) => {
@@ -90,7 +96,12 @@ export const registerSystemOneDecideTool = (server: McpServer) => {
         return toolErr("The system-one-decision executor is not available");
       }
       const decided = await executor.decide(parsed.data);
-      if (!decided.ok) return toolErr(decided.error);
+      if (!decided.ok) {
+        return toolErr(
+          decided.error,
+          decided.deploymentRefused ? { data: { providerUnavailable: true } } : {},
+        );
+      }
 
       const { output } = decided;
       return toolOk(`Decision from ${output.model}`, {

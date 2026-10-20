@@ -519,7 +519,12 @@ export type SystemOneTarget =
       /** The secret name the key was read under, for a rejection message. */
       keyName: string;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /** This deployment refuses the host whatever its credential (`deploymentProblem`). */
+      deploymentRefused?: true;
+    };
 
 export interface SystemOneTargetOverrides {
   /** Replaces the credential lookup. */
@@ -547,7 +552,7 @@ export async function resolveSystemOneTarget(
   const capability = overrides.capability ?? "decide";
   const service = serviceOf(id, capability);
   const deploymentProblem = host.deploymentProblem?.(ctx.env);
-  if (deploymentProblem) return { ok: false, error: deploymentProblem };
+  if (deploymentProblem) return { ok: false, error: deploymentProblem, deploymentRefused: true };
 
   const errors: string[] = [];
 

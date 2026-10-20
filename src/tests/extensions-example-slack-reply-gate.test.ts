@@ -876,6 +876,40 @@ describe("on the real system-one-decide tool", () => {
     expect(JSON.stringify(kv)).not.toContain(CF_TOKEN);
   });
 
+  test("auto skips OpenRouter behind a gateway, which the server refuses, and reaches Clef", async () => {
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLOUDFLARE_API_TOKEN",
+      value: CF_TOKEN,
+      isSecret: true,
+    });
+    const prevBase = process.env.OPENROUTER_BASE_URL;
+    process.env.OPENROUTER_BASE_URL = "https://llm-gateway.example.com/v1";
+    try {
+      mockWorkersAi("reaction_only", 0.9);
+      const { ctx, kv } = makeCtx(
+        { mode: "enforce" },
+        {
+          key: "",
+          openrouterKey: "or-gateway-token",
+          cloudflareToken: "present",
+          cloudflareAccount: CF_ACCOUNT,
+        },
+      );
+      viaTool(ctx);
+
+      const result = await handler(slackEvent(["lol nice"]), ctx);
+      expect(result).toEqual({ action: "block", reason: expect.stringContaining("reaction_only") });
+      expect(jevCalls.map((c) => c.provider)).toEqual(["openrouter", "cloudflare"]);
+      expect(workersAi).toHaveLength(1);
+      expect(workersAi[0]!.url).toBe(CLEF_URL);
+      expect(kv.last).toMatchObject({ provider: "cloudflare", action: "skipped" });
+    } finally {
+      if (prevBase === undefined) delete process.env.OPENROUTER_BASE_URL;
+      else process.env.OPENROUTER_BASE_URL = prevBase;
+    }
+  });
+
   test("a token missing on the server fails open, as before", async () => {
     await getDbClient().run("DELETE FROM swarm_config WHERE key = 'CLOUDFLARE_API_TOKEN'");
     mockWorkersAi("reaction_only", 0.9);

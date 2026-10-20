@@ -224,23 +224,28 @@ const modelFor = (provider: ProviderId, cfg: Cfg): string | undefined =>
         : undefined;
 
 /**
- * Pick the decision provider. An explicit one is used as is: the server checks
- * its credential. `auto` takes the first provider in `AUTO_CREDENTIALS` whose
- * credential is set and throws when none is; the handler then fails open.
+ * The decision providers to try, in order. An explicit one is used as is: the
+ * server checks its credential. `auto` lists every provider in `AUTO_CREDENTIALS`
+ * whose credential is set and throws when none is; the handler then fails open.
  */
-export const resolveProvider = (cfg: Cfg): DecisionTarget => {
+export const resolveProviders = (cfg: Cfg): DecisionTarget[] => {
   if (cfg.provider !== "auto") {
-    return { provider: cfg.provider, model: modelFor(cfg.provider, cfg) };
+    return [{ provider: cfg.provider, model: modelFor(cfg.provider, cfg) }];
   }
-  for (const [provider, groups] of AUTO_CREDENTIALS) {
-    if (groups.every((keys) => keys.some((key) => usable(secret(key))))) {
-      return { provider, model: modelFor(provider, cfg) };
-    }
-  }
+  const targets = AUTO_CREDENTIALS.filter(([, groups]) =>
+    groups.every((keys) => keys.some((key) => usable(secret(key)))),
+  ).map(([provider]) => ({ provider, model: modelFor(provider, cfg) }));
+  if (targets.length > 0) return targets;
   throw new Error(
     "no TYPESAFE_API_KEY, OPENROUTER_API_KEY, or CLOUDFLARE_API_TOKEN with CLOUDFLARE_ACCOUNT_ID",
   );
 };
+
+/** The first provider `resolveProviders` would try. */
+export const resolveProvider = (cfg: Cfg): DecisionTarget => resolveProviders(cfg)[0]!;
+
+/** The server refused the provider for a deployment setting and sent nothing. */
+export class ProviderUnavailableError extends Error {}
 
 const SLACK_API = "https://slack.com/api";
 // The engine's acceptance reactions (src/slack/reaction-shortcode.ts), by config key.
@@ -395,11 +400,14 @@ export const askModel = async (
       success?: boolean;
       message?: unknown;
       error?: unknown;
+      providerUnavailable?: unknown;
       answers?: { reason?: { choice?: unknown; confidence?: unknown; probabilities?: unknown } };
     } | null;
     if (res?.success === false || body?.success === false) {
-      const why = body?.message ?? body?.error ?? `HTTP ${res?.status}`;
-      throw new Error(`${target.provider}: ${String(why).slice(0, 200)}`);
+      const why = `${target.provider}: ${String(body?.message ?? body?.error ?? `HTTP ${res?.status}`).slice(0, 200)}`;
+      throw body?.providerUnavailable === true
+        ? new ProviderUnavailableError(why)
+        : new Error(why);
     }
     const answer = body?.answers?.reason;
     const reason = typeof answer?.choice === "string" ? answer.choice : "";
@@ -414,6 +422,28 @@ export const askModel = async (
     clearTimeout(timer);
     if (onOuterAbort) outer?.removeEventListener("abort", onOuterAbort);
   }
+};
+
+/**
+ * `askModel` on each target in turn, moving on only when the server refused the
+ * provider for a deployment setting (no request was sent). Any other failure, or
+ * a refusal of the last target, throws.
+ */
+export const askFirstAvailable = async (
+  swarm: Swarm,
+  input: Parameters<typeof askModel>[1],
+  targets: readonly DecisionTarget[],
+  cfg: Cfg,
+  outer?: AbortSignal,
+): Promise<{ verdict: Verdict; target: DecisionTarget }> => {
+  for (const [i, target] of targets.entries()) {
+    try {
+      return { verdict: await askModel(swarm, input, target, cfg, outer), target };
+    } catch (err) {
+      if (!(err instanceof ProviderUnavailableError) || i === targets.length - 1) throw err;
+    }
+  }
+  throw new Error("no decision provider");
 };
 
 /** Probability that the message needs no reply: the summed mass of the skip labels. */
@@ -527,7 +557,7 @@ const extension: SwarmExtension = (api) => {
         return;
       }
 
-      const target = resolveProvider(cfg);
+      const targets = resolveProviders(cfg);
 
       const sender =
         opts.slackUserId && cfg.botSlackUserIds.includes(opts.slackUserId)
@@ -536,7 +566,7 @@ const extension: SwarmExtension = (api) => {
             ? "human (known teammate)"
             : "unknown (not a known teammate; may be a bot or an external person)";
 
-      const verdict = await askModel(
+      const { verdict, target } = await askFirstAvailable(
         ctx.swarm,
         {
           messages,
@@ -544,7 +574,7 @@ const extension: SwarmExtension = (api) => {
           sender,
           leadNames: cfg.leadAliases,
         },
-        target,
+        targets,
         cfg,
         ctx.signal,
       );

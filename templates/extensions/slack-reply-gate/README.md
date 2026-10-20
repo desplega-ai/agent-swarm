@@ -43,7 +43,7 @@ The decision is made on the API server by the `system-one-decide` tool (`ctx.swa
 | `openrouter` | Jev, `openrouterModel` (default `typesafe/jev-1.13`) | `OPENROUTER_API_KEY` |
 | `cloudflare` | Clef, `cloudflareModel` (default `clef`, or `clef-flash`) | `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` |
 | `laya`, `openai` | The host's default model | See the workflows guide |
-| `auto` (default) | The first of typesafe, openrouter, cloudflare whose credential is set | |
+| `auto` (default) | The first of typesafe, openrouter, cloudflare whose credential is set. A provider the server refuses for a deployment setting (openrouter when `OPENROUTER_BASE_URL` points at a gateway) is skipped for the next one | |
 
 With no credential for `auto`, every message fails open and the KV row names the secrets. Each decision row records the `provider` that answered. `minConfidence` was tuned on Jev; check Clef's verdicts in `shadow` before you enforce on it.
 

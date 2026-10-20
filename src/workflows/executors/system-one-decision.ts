@@ -915,7 +915,10 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
    */
   async decide(
     config: SystemOneDecisionConfig,
-  ): Promise<{ ok: true; output: SystemOneDecisionOutput } | { ok: false; error: string }> {
+  ): Promise<
+    | { ok: true; output: SystemOneDecisionOutput }
+    | { ok: false; error: string; deploymentRefused?: true }
+  > {
     const providerId = config.provider ?? (await this.defaultProvider());
     const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[providerId];
 
@@ -930,7 +933,7 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     );
     if (limitProblem) return { ok: false, error: limitProblem };
     const target = await this.resolveTarget(providerId, model);
-    if (!target.ok) return { ok: false, error: target.error };
+    if (!target.ok) return target;
     const { apiKey, endpoint, keyName } = target;
 
     const wire = provider.wire ?? SYSTEM_ONE_WIRE;

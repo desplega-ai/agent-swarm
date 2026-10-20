@@ -9,9 +9,11 @@ import {
   getApprovalRequestById,
   initDb,
   startTask,
+  upsertSwarmConfig,
 } from "../be/db";
 import gate from "../be/seed-scripts/catalog/heartbeat-jev-gate";
 import { registerRequestHumanInputTool } from "../tools/request-human-input";
+import { registerSystemOneDecideTool } from "../tools/system-one-decide";
 import type { ExecutorDependencies } from "../workflows/executors/base";
 import {
   SystemOneDecisionConfigSchema,
@@ -907,6 +909,97 @@ describe("heartbeat-jev-gate without a provider", () => {
     expect(verdict.state.agents).toBe("- Online: 6 (4 idle, 2 busy), Offline: 5");
     expect(calls.prompts).toHaveLength(0);
     expect(calls.kvSets).toBe(0);
+  });
+});
+
+describe("heartbeat-jev-gate on the real system-one-decide tool", () => {
+  let agentId: string;
+  let prevBase: string | undefined;
+  const realFetch = globalThis.fetch;
+  beforeAll(async () => {
+    initDb(":memory:");
+    agentId = (await createAgent({ name: "jev-gate-decide", isLead: true, status: "idle" })).id;
+    await upsertSwarmConfig({ scope: "global", key: "CLOUDFLARE_ACCOUNT_ID", value: CF_ACCOUNT });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLOUDFLARE_API_TOKEN",
+      value: "cf-example-token",
+      isSecret: true,
+    });
+    prevBase = process.env.OPENROUTER_BASE_URL;
+  });
+  afterAll(() => {
+    globalThis.fetch = realFetch;
+    if (prevBase === undefined) delete process.env.OPENROUTER_BASE_URL;
+    else process.env.OPENROUTER_BASE_URL = prevBase;
+    closeDb();
+  });
+
+  /** `ctx.swarm.systemOne_decide` as the MCP bridge serves it, backed by the registered tool. */
+  const viaTool = () => {
+    const server = new McpServer({ name: "jev-gate-decide", version: "1" });
+    registerSystemOneDecideTool(server);
+    const tool = (server as any)._registeredTools["system-one-decide"];
+    return async (args: Record<string, any>) => {
+      const result = await tool.handler(args, {
+        sessionId: "script",
+        requestInfo: { headers: { "x-agent-id": agentId } },
+      });
+      return { success: true, status: 200, data: result.structuredContent };
+    };
+  };
+
+  test("auto skips OpenRouter behind a gateway, which the server refuses, and runs on Clef", async () => {
+    process.env.OPENROUTER_BASE_URL = "https://llm-gateway.example.com/v1";
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return Response.json({
+        result: {
+          model: "clef",
+          answers: { act: { type: "noul", noul: 0.1 } },
+          usage: { input_tokens: 739, output_tokens: 0 },
+        },
+        success: true,
+        errors: [],
+        messages: [],
+      });
+    }) as typeof fetch;
+    const { ctx, calls } = fakeCtx({
+      configs: {
+        OPENROUTER_API_KEY: "x",
+        CLOUDFLARE_API_TOKEN: "x",
+        CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT,
+      },
+      jev: viaTool(),
+    });
+
+    const verdict = await run(ctx, { dryRun: true });
+    expect(verdict).toMatchObject({ quiet: true, provider: "cloudflare", threshold: 0.2 });
+    expect(verdict.skipped).toEqual([
+      expect.stringContaining("openrouter: OPENROUTER_BASE_URL points at a gateway"),
+    ]);
+    expect(calls.decides.map((d) => d.provider)).toEqual(["openrouter", "cloudflare"]);
+    expect(urls).toEqual([
+      `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/ai/run/@cf/cloudflare/clef`,
+    ]);
+  });
+
+  test("an explicit openrouter choice behind a gateway still throws", async () => {
+    process.env.OPENROUTER_BASE_URL = "https://llm-gateway.example.com/v1";
+    const { ctx, calls } = fakeCtx({
+      configs: {
+        OPENROUTER_API_KEY: "x",
+        CLOUDFLARE_API_TOKEN: "x",
+        CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT,
+        HEARTBEAT_JEV_GATE_PROVIDER: "openrouter",
+      },
+      jev: viaTool(),
+    });
+    await expect(run(ctx)).rejects.toThrow(
+      "jev openrouter: OPENROUTER_BASE_URL points at a gateway",
+    );
+    expect(calls.decides).toHaveLength(1);
   });
 });
 

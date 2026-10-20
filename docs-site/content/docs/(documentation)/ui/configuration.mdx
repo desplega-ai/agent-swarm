@@ -164,8 +164,9 @@ it.
 | `openrouter` | Jev | `OPENROUTER_API_KEY` | `0.5` |
 | `cloudflare` | Clef | `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) plus the `CLOUDFLARE_ACCOUNT_ID` config value | `0.2` |
 
-`auto` tries them in that order, so Clef runs when it is the only provider configured or when
-`HEARTBEAT_JEV_GATE_PROVIDER` is `cloudflare`. Each threshold comes from a replay of the same
+`auto` tries them in that order, so Clef runs when it is the only provider configured, when
+`HEARTBEAT_JEV_GATE_PROVIDER` is `cloudflare`, or when the server refuses OpenRouter because
+`OPENROUTER_BASE_URL` points at a gateway. Each threshold comes from a replay of the same
 229 recorded checklist ticks: the highest value that kept every tick where the Lead acted.
 Jev at `0.5` would have skipped 100 ticks. Clef at `0.2` would have skipped 57, and above
 about `0.21` it starts to miss ticks the Lead acted on. One Jev decision costs about
