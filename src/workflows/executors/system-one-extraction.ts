@@ -377,6 +377,41 @@ export type SystemOneExtractionOutput = z.infer<typeof SystemOneExtractionOutput
 
 // ─── Engine-facing rules (authoring + runtime) ──────────────
 
+function hasToken(value: unknown): boolean {
+  if (typeof value === "string") return value.includes("{{") && value.includes("}}");
+  if (Array.isArray(value)) return value.some(hasToken);
+  if (isRecord(value)) return Object.values(value).some(hasToken);
+  return false;
+}
+
+/**
+ * Save-time checks for a field spec that carries a {{token}}. The generic config
+ * check skips any issue whose value holds a token, which would let a whole spec
+ * through because its `instructions` is templated. Only `instructions` may be a
+ * token, so every other option must be a literal and the rest is checked as is.
+ */
+function templatedFieldViolations(nodeId: string, fields: Record<string, unknown>): string[] {
+  const violations: string[] = [];
+  for (const [id, spec] of Object.entries(fields)) {
+    if (!isRecord(spec) || !hasToken(spec)) continue;
+    const at = `Node "${nodeId}" (system-one-extraction) config.fields.${id}`;
+    const tokened = Object.keys(spec).filter(
+      (key) => key !== "instructions" && hasToken(spec[key]),
+    );
+    for (const key of tokened) {
+      violations.push(`${at}.${key} must be a literal: only instructions may use {{tokens}}`);
+    }
+    if (tokened.length > 0) continue;
+    const parsed = SystemOneExtractionFieldSchema.safeParse({ ...spec, instructions: "x" });
+    if (parsed.success) continue;
+    for (const issue of parsed.error.issues) {
+      const path = issue.path.length > 0 ? `${at}.${issue.path.map(String).join(".")}` : at;
+      violations.push(`${path}: ${issue.message}`);
+    }
+  }
+  return violations;
+}
+
 /** Static-shape rules a per-field schema cannot express: field ids and types, and the provider, are static. */
 export function systemOneExtractionStaticShapeViolations(node: {
   id: string;
@@ -393,6 +428,8 @@ export function systemOneExtractionStaticShapeViolations(node: {
     violations.push(
       `Node "${node.id}" (system-one-extraction) config.fields must be an object: field ids and types are static, only state, images, and instructions may use {{tokens}}`,
     );
+  } else if (fields !== undefined) {
+    violations.push(...templatedFieldViolations(node.id, fields as Record<string, unknown>));
   }
   const provider = node.config.provider;
   if (typeof provider === "string" && provider.includes("{{")) {

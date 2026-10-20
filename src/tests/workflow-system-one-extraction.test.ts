@@ -687,6 +687,31 @@ describe("system-one-extraction in a workflow definition", () => {
     expect(tokenFields.errors.join(";")).toContain("config.fields must be an object");
   });
 
+  test("a templated instructions does not hide an invalid field spec or a token type", () => {
+    const save = (spec: Record<string, unknown>) =>
+      validateDefinition(
+        { nodes: [node({ config: config({ fields: { note: spec } }) })] },
+        registry(),
+      );
+
+    expect(save({ type: "text", instructions: "{{hint}}" }).valid).toBe(true);
+
+    // Regression: before the fix, the generic check skipped the whole spec because it held a token.
+    const badOption = save({ type: "text", instructions: "{{hint}}", decimals: 2 });
+    expect(badOption.valid).toBe(false);
+    expect(badOption.errors.join(";")).toContain("config.fields.note");
+
+    const tokenType = save({ type: "{{t}}", instructions: "{{hint}}" });
+    expect(tokenType.errors.join(";")).toContain(
+      "config.fields.note.type must be a literal: only instructions may use {{tokens}}",
+    );
+    const tokenTypeAlone = save({ type: "{{t}}" });
+    expect(tokenTypeAlone.errors.join(";")).toContain("config.fields.note.type must be a literal");
+
+    const tokenBound = save({ type: "estimate", min: "{{lo}}", max: 10 });
+    expect(tokenBound.errors.join(";")).toContain("config.fields.note.min must be a literal");
+  });
+
   test("a whole-token state keeps its JSON type and an unresolved token is strict", () => {
     const resolved = interpolateNodeConfig(node({ config: config({ state: "{{email}}" }) }), {
       email: { subject: "Broken", body: EMAIL },
