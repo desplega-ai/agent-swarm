@@ -712,6 +712,47 @@ describe("system-one-extraction in a workflow definition", () => {
     expect(tokenBound.errors.join(";")).toContain("config.fields.note.min must be a literal");
   });
 
+  test("a saved templated field spec cannot resolve to a different shape or an invalid id", () => {
+    const saveFields = (fields: Record<string, unknown>) =>
+      validateDefinition({ nodes: [node({ config: config({ fields }) })] }, registry());
+    const hinted = { type: "text", instructions: "{{hint}}" };
+
+    // Regression: each of these saved valid and only failed the executor's input check at run time.
+    const refused: Array<[string, Record<string, unknown>, string]> = [
+      ["whole-token spec", { note: "{{spec}}" }, "config.fields.note must be an object"],
+      ["dotted id", { "bad.id": hinted }, "config.fields.bad.id: field ids must start"],
+      ["token id", { "{{field}}": hinted }, "config.fields.{{field}}: field ids must start"],
+      ["reserved id", { constructor: hinted }, '"constructor" is reserved'],
+      [
+        "list instructions",
+        { note: { type: "text", instructions: ["{{hint}}"] } },
+        "config.fields.note.instructions must be a string",
+      ],
+      [
+        "object instructions",
+        { note: { type: "text", instructions: { text: "{{hint}}" } } },
+        "config.fields.note.instructions must be a string",
+      ],
+    ];
+    for (const [label, fields, message] of refused) {
+      const result = saveFields(fields);
+      expect({ label, valid: result.valid }).toEqual({ label, valid: false });
+      expect(result.errors.join(";")).toContain(message);
+    }
+
+    // Literal specs with the same bad ids are still refused by the generic check.
+    expect(saveFields({ "{{field}}": { type: "text" } }).valid).toBe(false);
+    expect(saveFields({ constructor: { type: "text" } }).valid).toBe(false);
+
+    // What does save resolves to a config the executor accepts, with the static type intact.
+    const saved = node({ config: config({ fields: { note: hinted } }) });
+    expect(validateDefinition({ nodes: [saved] }, registry()).valid).toBe(true);
+    const resolved = interpolateNodeConfig(saved, { email: EMAIL, hint: "the order id" });
+    expect(resolved.strictUnresolved ?? []).toEqual([]);
+    const parsed = SystemOneExtractionConfigSchema.parse(resolved.value);
+    expect(parsed.fields.note).toEqual({ type: "text", instructions: "the order id" });
+  });
+
   test("a whole-token state keeps its JSON type and an unresolved token is strict", () => {
     const resolved = interpolateNodeConfig(node({ config: config({ state: "{{email}}" }) }), {
       email: { subject: "Broken", body: EMAIL },

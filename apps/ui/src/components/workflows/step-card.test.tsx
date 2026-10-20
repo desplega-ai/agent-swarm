@@ -248,7 +248,7 @@ describe("SystemOneExtractionOutput", () => {
     expect(html).toContain("cracked screen, dented corner");
     expect(html).toContain("not in the input");
     expect(html).toContain("best guess $52.10");
-    expect(html).toContain("213 (p10 122 – p90 370)");
+    expect(html).toContain("236 · median 213 (p10 122 – p90 370)");
     expect(html).toContain("655 in");
   });
 });

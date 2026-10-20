@@ -70,6 +70,8 @@ const FORECAST_INTERVALS = [
 
 /** Field ids double as output paths (`answers.<id>.value`), so no dots. Clairic allows 64 characters. */
 const FIELD_ID_RE = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
+const FIELD_ID_MESSAGE =
+  "field ids must start with a letter or underscore, use only letters, digits, _ or -, and be at most 64 characters";
 const RESERVED_FIELD_IDS = new Set([...Object.getOwnPropertyNames(Object.prototype), "prototype"]);
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -246,12 +248,7 @@ export const SystemOneExtractionConfigSchema = z
       .max(SYSTEM_ONE_MAX_RETRIES_LIMIT)
       .default(SYSTEM_ONE_DEFAULT_MAX_RETRIES),
     fields: z.record(
-      z
-        .string()
-        .regex(
-          FIELD_ID_RE,
-          "field ids must start with a letter or underscore, use only letters, digits, _ or -, and be at most 64 characters",
-        ),
+      z.string().regex(FIELD_ID_RE, FIELD_ID_MESSAGE),
       SystemOneExtractionFieldSchema,
     ),
   })
@@ -387,14 +384,26 @@ function hasToken(value: unknown): boolean {
 /**
  * Save-time checks for a field spec that carries a {{token}}. The generic config
  * check skips any issue whose value holds a token, which would let a whole spec
- * through because its `instructions` is templated. Only `instructions` may be a
- * token, so every other option must be a literal and the rest is checked as is.
+ * (and its field id) through because its `instructions` is templated. Only a
+ * string `instructions` may hold a token, so the field id, the spec object and
+ * every other option must be literals, and the rest is checked as is.
  */
 function templatedFieldViolations(nodeId: string, fields: Record<string, unknown>): string[] {
   const violations: string[] = [];
   for (const [id, spec] of Object.entries(fields)) {
-    if (!isRecord(spec) || !hasToken(spec)) continue;
+    if (!hasToken(spec)) continue;
     const at = `Node "${nodeId}" (system-one-extraction) config.fields.${id}`;
+    if (!FIELD_ID_RE.test(id)) {
+      violations.push(`${at}: ${FIELD_ID_MESSAGE}`);
+    } else if (RESERVED_FIELD_IDS.has(id)) {
+      violations.push(`${at}: "${id}" is reserved and cannot be a field id`);
+    }
+    if (!isRecord(spec)) {
+      violations.push(
+        `${at} must be an object: field types and options are static, only instructions may use {{tokens}}`,
+      );
+      continue;
+    }
     const tokened = Object.keys(spec).filter(
       (key) => key !== "instructions" && hasToken(spec[key]),
     );
@@ -402,6 +411,10 @@ function templatedFieldViolations(nodeId: string, fields: Record<string, unknown
       violations.push(`${at}.${key} must be a literal: only instructions may use {{tokens}}`);
     }
     if (tokened.length > 0) continue;
+    if (typeof spec.instructions !== "string") {
+      violations.push(`${at}.instructions must be a string to use {{tokens}}`);
+      continue;
+    }
     const parsed = SystemOneExtractionFieldSchema.safeParse({ ...spec, instructions: "x" });
     if (parsed.success) continue;
     for (const issue of parsed.error.issues) {

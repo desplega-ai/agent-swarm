@@ -712,10 +712,20 @@ function showPoints(value: ExtractionPoint | ExtractionPoint[] | undefined): str
   return Array.isArray(value) ? value.join(", ") : String(value);
 }
 
-/** An extracted value as one line: a list joined, a range for estimates and forecasts. */
+/**
+ * An extracted value as one line: a list joined, a range for estimates and forecasts.
+ * An estimate's `value` (Clairic's rounded mean) can differ from its median, so both show.
+ */
 function formatExtracted(answer: SystemOneExtractionAnswer): string {
   if (answer.type === "estimate" || answer.type === "forecast") {
-    return `${showPoints(answer.median)} (p10 ${showPoints(answer.p10)} – p90 ${showPoints(answer.p90)})`;
+    const range = `p10 ${showPoints(answer.p10)} – p90 ${showPoints(answer.p90)}`;
+    if (
+      answer.type === "estimate" &&
+      (typeof answer.value === "number" || typeof answer.value === "string")
+    ) {
+      return `${answer.value} · median ${showPoints(answer.median)} (${range})`;
+    }
+    return `${showPoints(answer.median)} (${range})`;
   }
   if (Array.isArray(answer.value)) {
     return answer.value.length > 0 ? answer.value.map(String).join(", ") : "(none)";
