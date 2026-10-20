@@ -422,7 +422,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         description:
           "The Codex keep-warm sweep refreshes a ChatGPT pool slot once its token is older than this. Accepts 1 to 216.",
         kind: "number",
-        unit: "hours",
+        unit: "h",
         defaultValue: "120",
         placeholder: "120",
         docsUrl: `${DOCS}ui/configuration#codex-oauth-keep-warm`,
