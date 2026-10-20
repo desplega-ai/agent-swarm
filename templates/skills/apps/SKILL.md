@@ -790,6 +790,7 @@ The tool returns `{ appId, url: "/apps/<id>" }`. Open that URL to verify the liv
 - Logged-in browser: a fresh dashboard has no connection and redirects to /setup. Seed the localStorage key `agent-swarm-connections` with `{connections:[{id,name,apiUrl,apiKey}],activeId}`. Build the value from an env var and pipe it to `agent-browser eval --stdin`, so the key never reaches a command line. Reload, then pick a user in the "Who are you?" dialog.
 - Apps scroll inside an inner canvas, so a full-page screenshot captures only the viewport. Scroll the canvas or raise the viewport height. For mobile, set a 375px-wide viewport before the screenshot.
 - App definitions: `GET /api/apps` and `GET /api/apps/<id>` with the API key as Bearer.
+- Follow-up edit to a live app: list in the brief the control numbers the edit must not move, and assert them from the backing script before publishing. Take a signed-in screenshot of each changed selector at 1440px wide, save the shots to agent-fs, critique, and repeat at least 3 times. If the backing script caches results, bump its version or force a fresh run so the shots show new data.
 
 
 ### Rows from agents and scripts
