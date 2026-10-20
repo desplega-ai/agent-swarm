@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { validateConfigValue } from "../be/swarm-config-guard";
-import { isEnvFlagEnabled, parseEnvFlag } from "../utils/env-flag";
+import { isEnvFlagEnabled, isSessionSummarySkipped, parseEnvFlag } from "../utils/env-flag";
 
 describe("parseEnvFlag", () => {
   test("accepts both truthy serializations", () => {
@@ -197,5 +197,19 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
 
   test("unknown keys stay unvalidated", () => {
     expect(validateConfigValue("SOME_RANDOM_KEY", "whatever")).toBeNull();
+  });
+});
+
+describe("isSessionSummarySkipped", () => {
+  test.each(["1", "true", "TRUE", " True "])("SKIP_SESSION_SUMMARY=%p skips", (value) => {
+    expect(isSessionSummarySkipped({ SKIP_SESSION_SUMMARY: value })).toBe(true);
+  });
+
+  test.each(["0", "false", "FALSE", ""])("SKIP_SESSION_SUMMARY=%p keeps the summary", (value) => {
+    expect(isSessionSummarySkipped({ SKIP_SESSION_SUMMARY: value })).toBe(false);
+  });
+
+  test("unset keeps the summary", () => {
+    expect(isSessionSummarySkipped({})).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { parseEnvFlag } from "../utils/env-flag";
 import { getInstallationToken } from "./app";
 import {
   detectMention,
@@ -50,12 +51,12 @@ function buildGithubContextKey(
 
 /**
  * Runtime-config guards for cancel-on-unassign and cancel-on-review-request-removed.
- * Absent key / any value other than "false" → true (cancel, current behavior).
- * Value "false" → false (skip cancel, leave task untouched).
+ * Values "false" / "0" (case-insensitive, trimmed) leave the task untouched.
+ * Absent, empty, or unrecognized values default to true (cancel).
  */
 async function cancelFlagEnabled(key: string): Promise<boolean> {
   const row = (await getSwarmConfigs({ scope: "global", key }))[0];
-  return row?.value !== "false";
+  return parseEnvFlag(row?.value, true);
 }
 const cancelOnUnassignEnabled = () => cancelFlagEnabled("github.cancelOnUnassign");
 const cancelOnReviewRequestRemovedEnabled = () =>
@@ -1186,9 +1187,9 @@ const PR_REVIEW_ACTION_ITEMS_QUERY = `query($owner: String!, $name: String!, $nu
   }
 }`;
 
-/** Approved reviews with nothing to act on skip the lead task unless this is "false". */
+/** Approved reviews with nothing to act on skip the lead task by default. */
 function skipNoopApprovalsEnabled(): boolean {
-  return process.env.GITHUB_SKIP_NOOP_APPROVALS?.trim().toLowerCase() !== "false";
+  return parseEnvFlag(process.env.GITHUB_SKIP_NOOP_APPROVALS, true);
 }
 
 /**
