@@ -19,7 +19,7 @@ A workflow consists of:
 
 ### Executor Types
 
-The engine includes 14 built-in executor types:
+The engine includes 15 built-in executor types:
 
 | Executor | Description |
 |----------|-------------|
@@ -29,6 +29,7 @@ The engine includes 14 built-in executor types:
 | `foreach` | Fan out one agent task per array item, wait for every child, and emit one aggregate result |
 | `raw-llm` | Call an LLM directly with a prompt template |
 | `system-one-decision` | Make typed decisions (probability, choice, score) over supplied state, with Jev by default. Can send uncertain answers to a person |
+| `system-one-extraction` | Read typed values (text, numbers, dates, durations, lists, estimates, forecasts) out of a text and up to 4 images, with Cloudflare Clairic |
 | `vcs` | Version control operations (create PR, merge, etc.) |
 | `property-match` | Route based on matching properties in step input |
 | `code-match` | Route based on a custom JavaScript expression in a sandbox |
@@ -58,7 +59,7 @@ Jev is weak at counting. For a hybrid, count in a `script` and pass the number t
 
 ### SystemOne Decision
 
-A `system-one-decision` node (display name "SystemOne Decision") sends one `state` and a map of questions to a typed-decisions model and returns one validated answer per question. The model is Jev today (`model` defaults to it); the node name is not model-specific. It reaches the model through a `provider`: `typesafe` (the default), `openrouter`, `laya`, `openai` (the OpenAI Decisions API, `gpt-6-luna`), or `cloudflare` (Clef or Clef-flash on Workers AI). Each provider needs its own global secret, `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `LAYA_API_KEY`, `OPENAI_DECISIONS_API_KEY`, or `CLOUDFLARE_API_TOKEN`; `laya` also needs `LAYA_URL`, its server's base URL, and `cloudflare` needs `CLOUDFLARE_ACCOUNT_ID`, as global config values. The key is read on the server and never appears in a definition, a step output, or an error.
+A `system-one-decision` node (display name "SystemOne Decision") sends one `state` and a map of questions to a typed-decisions model and returns one validated answer per question. The model is Jev today (`model` defaults to it); the node name is not model-specific. It reaches the model through a `provider`: `typesafe` (the default), `openrouter`, `laya`, `openai` (the OpenAI Decisions API, `gpt-6-luna`), or `cloudflare` (Clef or Clef-flash on Workers AI). Each provider needs its own global secret, `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `LAYA_API_KEY`, `OPENAI_DECISIONS_API_KEY`, or `CLOUDFLARE_API_TOKEN` (`CLOUDFLARE_API_KEY` is read when it is unset); `laya` also needs `LAYA_URL`, its server's base URL, and `cloudflare` needs `CLOUDFLARE_ACCOUNT_ID`, as global config values. The key is read on the server and never appears in a definition, a step output, or an error.
 
 ```json
 {
@@ -194,6 +195,48 @@ The live runs of this definition:
 Each laya call took under 0.7 s.
 
 Prefer `choice` questions on laya for now. On laya-server 0.1.0, a `noul` question asking whether the review was positive returned close to 0 for every input, including clearly positive ones, while the same judgment as a `choice` answered correctly. Check a `noul` question against a few known inputs before you rely on it.
+
+### SystemOne Extraction
+
+A `system-one-extraction` node (display name "SystemOne Extraction") sends one `state` text, and optionally up to 4 images, to a typed-extraction model and returns one typed answer per declared field. The model is Cloudflare's Clairic on Workers AI (`provider: cloudflare`, the default and only provider today). It shares the decision node's provider registry, credential, preflight, transport, and error messages: it needs the global secret `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and the global config value `CLOUDFLARE_ACCOUNT_ID`.
+
+```json
+{
+  "id": "claim",
+  "type": "system-one-extraction",
+  "inputs": { "email": "trigger.email" },
+  "config": {
+    "state": "{{email}}",
+    "fields": {
+      "order_id": { "type": "text", "instructions": "Order number" },
+      "delivered_on": { "type": "date", "instructions": "Delivery date" },
+      "amount_paid": { "type": "number", "decimals": 2, "unit": "USD", "instructions": "Total paid including tax" },
+      "days_since_delivery": { "type": "duration", "unit": "days", "integer": true },
+      "damage": { "type": "list", "items": "text" },
+      "repair_cost": { "type": "estimate", "unit": "USD", "min": 10, "max": 5000, "scale": "log", "step": 1 }
+    }
+  },
+  "next": "decide"
+}
+```
+
+Field types and their options, checked when the workflow is saved:
+
+| Type | Options |
+|---|---|
+| `text`, `date`, `time`, `datetime` | `instructions`, `null_threshold` |
+| `number` | `instructions`, `unit`, `integer`, `decimals` (0-6), `null_threshold` |
+| `duration` | `instructions`, `unit` (`seconds` to `years`), `integer`, `decimals`, `null_threshold` |
+| `list` | `instructions`, `items` (`text`, `number`, or `date`; required), `decimals` (number lists) |
+| `estimate` | `instructions`, `min` and `max` (required; numbers, or ISO dates for a date estimate), `step`, `scale` (`linear` or `log`), `unit` |
+| `forecast` | `instructions`, `min` and `max` (required), `horizon` (1-64), `interval`, `scale`, `unit` |
+
+Each answer is at `<node>.answers.<field>`. `value` is the extracted value, or `null` when the input does not say. `guess` is what the model would have said anyway, `p_null` how likely "not in the input" is, `confidence` how sure it is of the value, and `span` (or `spans` for a list) the character offsets in `state`. An `estimate` adds `median`, `p10`, and `p90`; a `forecast` carries one entry per step in `value`, `median`, `p10`, and `p90`. Branch on `claim.answers.amount_paid.value`, or on `confidence`, with a `property-match` or a `system-one-decision` node.
+
+- `state` is a string; a structured value is sent as JSON text. It may be empty only when `images` are sent. `images` are base64 `data:` URLs or `{ content_type, base64 }` (PNG, JPEG, WebP; 4 MiB each, 8 MiB total). `referenceDate` (`YYYY-MM-DD`) anchors dates written without a year.
+- Field ids double as output paths, so they use letters, digits, `_`, and `-` (no dots), up to 64 characters.
+- The node has no `humanReview`. A wrong value is a typed value a person would have to type back in, so route a low `confidence` to a `human-in-the-loop` node instead.
+- Retries, time budget, and the ban on `retry` and `validation.retry` are the same as for `system-one-decision`.
 
 ### Foreach fan-out
 
