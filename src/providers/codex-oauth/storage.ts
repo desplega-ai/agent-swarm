@@ -364,7 +364,7 @@ export async function persistCodexOAuth(
  * once it was issued more than that long ago (see {@link isStaleByAge}) — on
  * top of the near-expiry skew above, not instead of it. This is how the
  * locked keep-warm sweep (`POST /api/oauth/keep-warm/codex`) reuses this same
- * function to refresh slots proactively (~weekly, `maxAgeMs` ≈ 7 days) rather
+ * function to refresh slots proactively (`maxAgeMs` default 5 days) rather
  * than waiting for a task to draw a slot within `REFRESH_SKEW_MS` of expiry.
  * Default behavior (opts omitted) is unchanged.
  *

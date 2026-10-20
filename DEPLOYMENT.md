@@ -605,7 +605,7 @@ bun run src/cli.tsx codex-login --api-url https://your-swarm.example.com --api-k
 
 That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. The default behavior picks the next free pool slot (`codex_oauth_0`, `codex_oauth_1`, ...), and you can pin a specific slot with `--slot <n>` for any integer from `0` through `100`. Then restart codex workers. On boot, `docker-entrypoint.sh` enumerates the stored `codex_oauth_<slot>` entries from the API and writes the selected credential to `/home/worker/.codex/auth.json` automatically.
 
-Pool health is coordinated centrally. Task-time revalidation and the locked `POST /api/oauth/keep-warm/codex` sweep use the same refresh-lock path, so rarely-used slots can still refresh on a roughly weekly cadence without racing the runner. If OpenAI rejects a refresh, the worker now fails fast with the upstream auth error instead of silently starting Codex on a stale pool auth file.
+Pool health is coordinated centrally. Task-time revalidation and the locked `POST /api/oauth/keep-warm/codex` sweep use the same refresh-lock path, so rarely-used slots still refresh every 5 days (`CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`) without racing the runner. If OpenAI rejects a refresh, the worker now fails fast with the upstream auth error instead of silently starting Codex on a stale pool auth file.
 
 Worker requirements for this path:
 

@@ -10,7 +10,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { closeDb, initDb, upsertKv } from "../be/db";
-import { handleCodexOAuthKeepWarm } from "../http/codex-oauth-keep-warm";
+import { validateConfigValue } from "../be/swarm-config-guard";
+import { handleCodexOAuthKeepWarm, keepWarmMaxAgeMs } from "../http/codex-oauth-keep-warm";
 import { handleOAuthLocks } from "../http/oauth-locks";
 import { resetFetchForTesting, setFetchForTesting } from "../providers/codex-oauth/flow.js";
 import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
@@ -176,6 +177,70 @@ describe("POST /api/oauth/keep-warm/codex", () => {
     expect(slots.get(1)?.access).toBe("example-at_keepwarm");
   });
 
+  it("refreshes a 6-day-old slot by default, before the ~6d20h point where OpenAI ended a session", async () => {
+    const slots = new Map<number, CodexOAuthCredentials>([
+      [
+        0,
+        {
+          access: "at_six_days",
+          refresh: "rt_six_days",
+          expires: Date.now() + 4 * 24 * 60 * 60 * 1000, // issued ~6 days ago (10d TTL)
+          accountId: "acc-six",
+        },
+      ],
+    ]);
+    installMockTransport(slots);
+    setFetchForTesting(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "example-at_six_days_new",
+            refresh_token: "example-rt_six_days_new",
+            expires_in: 864000,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    const { req, res, captured } = fakeReqRes();
+    await handleCodexOAuthKeepWarm(req, res, ["api", "oauth", "keep-warm", "codex"]);
+
+    const body = JSON.parse(captured.body) as { results: Array<Record<string, unknown>> };
+    expect(body.results[0]).toMatchObject({ slot: 0, outcome: "refreshed" });
+    expect(slots.get(0)?.refresh).toBe("example-rt_six_days_new");
+  });
+
+  it("honors CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS read at sweep time", async () => {
+    const saved = process.env.CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS;
+    process.env.CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS = "168";
+    try {
+      const slots = new Map<number, CodexOAuthCredentials>([
+        [
+          0,
+          {
+            access: "at_six_days",
+            refresh: "rt_six_days",
+            expires: Date.now() + 4 * 24 * 60 * 60 * 1000, // issued ~6 days ago, under 168h
+            accountId: "acc-six",
+          },
+        ],
+      ]);
+      installMockTransport(slots);
+      setFetchForTesting(async () => {
+        throw new Error("no /oauth/token exchange should happen under a 168h threshold");
+      });
+
+      const { req, res, captured } = fakeReqRes();
+      await handleCodexOAuthKeepWarm(req, res, ["api", "oauth", "keep-warm", "codex"]);
+
+      const body = JSON.parse(captured.body) as { results: Array<Record<string, unknown>> };
+      expect(body.results[0]).toMatchObject({ slot: 0, outcome: "warm" });
+    } finally {
+      if (saved === undefined) delete process.env.CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS;
+      else process.env.CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS = saved;
+    }
+  });
+
   it("skips a slot with an active codex-auth-watch bench marker", async () => {
     const keySuffix = "c-old"; // last 5 of accountId (no chatgpt_user_id in this fixture's access token)
     await upsertKv({
@@ -282,6 +347,25 @@ describe("POST /api/oauth/keep-warm/codex", () => {
       if (savedPublic === undefined) delete process.env.PUBLIC_MCP_BASE_URL;
       else process.env.PUBLIC_MCP_BASE_URL = savedPublic;
     }
+  });
+
+  it("keepWarmMaxAgeMs defaults to 120h and ignores invalid or out-of-range values", () => {
+    const hour = 60 * 60 * 1000;
+    expect(keepWarmMaxAgeMs({})).toBe(120 * hour);
+    expect(keepWarmMaxAgeMs({ CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS: " 72 " })).toBe(72 * hour);
+    expect(keepWarmMaxAgeMs({ CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS: "216" })).toBe(216 * hour);
+    for (const bad of ["0", "217", "1.5", "-3", "abc", ""]) {
+      expect(keepWarmMaxAgeMs({ CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS: bad })).toBe(120 * hour);
+    }
+  });
+
+  it("the config API rejects the values keepWarmMaxAgeMs would fall back from", () => {
+    const key = "CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS";
+    expect(validateConfigValue(key, "1")).toBeNull();
+    expect(validateConfigValue(key, "216")).toBeNull();
+    expect(validateConfigValue(key, "0")).toContain("between 1 and 216");
+    expect(validateConfigValue(key, "217")).toContain("between 1 and 216");
+    expect(validateConfigValue(key, "1.5")).toContain("integer");
   });
 
   it("does not match unrelated paths", async () => {
