@@ -86,7 +86,9 @@ async function requestSecretReadScope(
       }).allow
     )
       return "all";
-    if (!auth.runtimeId || resolvedScope?.agentId !== auth.agentId) return "none";
+    // Runtime and agent tokens stand in for a worker and read their own agent's
+    // scope. Task tokens are ACP harness credentials and read no secrets.
+    if (auth.tokenKind === "task" || resolvedScope?.agentId !== auth.agentId) return "none";
     return "self";
   }
   if (auth?.kind === "guest") return "none";
@@ -107,7 +109,7 @@ async function resolveSecretsRead(
   const auth = getRequestAuth(req);
   return {
     effectiveIncludeSecrets: includeSecrets && scope !== "none",
-    includeRepoSecrets: !(auth?.kind === "agent" && auth.runtimeId && scope !== "all"),
+    includeRepoSecrets: !(auth?.kind === "agent" && auth.tokenKind !== "task" && scope !== "all"),
     secretsNote: includeSecrets && scope === "none" ? SECRETS_FORCE_MASK_NOTE : "",
   };
 }
@@ -363,7 +365,7 @@ export async function handleConfig(
     const resolvedScope = {
       agentId:
         parsed.query.agentId ||
-        (auth?.kind === "agent" && auth.runtimeId ? auth.agentId : undefined),
+        (auth?.kind === "agent" && auth.tokenKind !== "task" ? auth.agentId : undefined),
       repoId: parsed.query.repoId || undefined,
     };
     const { effectiveIncludeSecrets, includeRepoSecrets, secretsNote } = await resolveSecretsRead(

@@ -48,6 +48,7 @@ import { CollapsibleDescription } from "@/components/shared/collapsible-descript
 import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
 import { DataGrid } from "@/components/shared/data-grid";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { JsonTree } from "@/components/shared/json-tree";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -69,7 +70,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { JsonTree } from "@/components/workflows/json-tree";
 import { subWorkflowTargetId } from "@/components/workflows/node-summary";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useTheme } from "@/hooks/use-theme";

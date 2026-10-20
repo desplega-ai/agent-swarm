@@ -417,6 +417,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#pr-rooms`,
       },
       {
+        key: "CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS",
+        label: "Codex OAuth keep-warm age",
+        description:
+          "The Codex keep-warm sweep refreshes a ChatGPT pool slot once its token is older than this. Accepts 1 to 216.",
+        kind: "number",
+        unit: "h",
+        defaultValue: "120",
+        placeholder: "120",
+        docsUrl: `${DOCS}ui/configuration#codex-oauth-keep-warm`,
+      },
+      {
         key: "RUNTIME_POOLS_ENABLED",
         label: "Runtime pools (beta)",
         description:

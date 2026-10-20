@@ -126,7 +126,7 @@ Every event also adds these to `properties`. They are the same facts `context` c
 
 And these to `metadata`:
 
-- `transport` (always `https`) and `environment` (`production` by default; override with `DESPLEGA_TELEMETRY_ENV`)
+- `transport` (always `https`) and `environment` (`development` for git checkouts, `test` for `NODE_ENV=test`, otherwise `production`; override with `DESPLEGA_TELEMETRY_ENV`)
 - `is_cloud` — boolean, from `SWARM_CLOUD`
 - `organization_id` (optional) — your `SWARM_ORG_ID`, when set
 - `organization_name` (optional) — your `SWARM_ORG_NAME`, when set

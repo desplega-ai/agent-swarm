@@ -547,6 +547,8 @@ export async function handleCore(
         return true;
       }
       req.headers["x-runtime-instance-id"] = auth.runtimeId;
+    }
+    if (auth.tokenKind !== "task") {
       const sourceHeader = req.headers["x-source-task-id"];
       const taskId = Array.isArray(sourceHeader) ? sourceHeader[0] : sourceHeader;
       if (taskId !== undefined && (await getTaskById(taskId))?.agentId !== auth.agentId) {

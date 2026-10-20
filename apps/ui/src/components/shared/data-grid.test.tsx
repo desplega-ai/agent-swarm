@@ -30,6 +30,52 @@ describe("resolveCompactColumnDefs", () => {
     expect(hiddenFields(resolveCompactColumnDefs(cols, 300))).toEqual(["type", "model", "updated"]);
   });
 
+  test("hides lower priorities first while preserving visual order", () => {
+    const agents: ColDef[] = [
+      { field: "name", width: 250, minWidth: 180 },
+      { field: "role", width: 150, context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 1 } },
+      { field: "harness", width: 200, context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 3 } },
+      { field: "status", width: 120 },
+      { field: "capacity", width: 110, context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 2 } },
+      {
+        field: "model",
+        width: 320,
+        minWidth: 260,
+        context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 4 },
+      },
+      { field: "updated", flex: 1, minWidth: 150 },
+    ];
+    expect(resolveCompactColumnDefs(agents, 1300)).toBe(agents);
+    expect(hiddenFields(resolveCompactColumnDefs(agents, 1206))).toEqual(["role"]);
+    expect(hiddenFields(resolveCompactColumnDefs(agents, 1149))).toEqual(["role", "capacity"]);
+    expect(hiddenFields(resolveCompactColumnDefs(agents, 1039))).toEqual([
+      "role",
+      "harness",
+      "capacity",
+    ]);
+    expect(hiddenFields(resolveCompactColumnDefs(agents, 839))).toEqual([
+      "role",
+      "harness",
+      "capacity",
+      "model",
+    ]);
+    const narrow = resolveCompactColumnDefs(agents, 480);
+    expect(narrow.map((col) => col.field)).toEqual(agents.map((col) => col.field));
+    expect(
+      narrow.reduce((sum, col) => sum + (col.hide ? 0 : (col.minWidth ?? 80)), 0),
+    ).toBeLessThanOrEqual(480);
+    expect(agents.every((col) => !col.hide)).toBe(true);
+  });
+
+  test("equal priorities retain last-first hiding", () => {
+    const defs = cols.map((col) => ({
+      ...col,
+      context: { ...col.context, compactHidePriority: 1 },
+    }));
+    expect(hiddenFields(resolveCompactColumnDefs(defs, 464))).toEqual(["updated"]);
+    expect(hiddenFields(resolveCompactColumnDefs(defs, 400))).toEqual(["model", "updated"]);
+  });
+
   test("never hides unmarked columns, however narrow", () => {
     const defs = resolveCompactColumnDefs(cols, 50);
     expect(defs.find((c) => c.field === "name")?.hide).toBeUndefined();

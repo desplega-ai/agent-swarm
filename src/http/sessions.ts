@@ -2,11 +2,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   countSessions,
+  createAgent,
+  getAgentById,
   getDbClient,
   getRootTaskChain,
   getTaskById,
   listRecentSessions,
 } from "../be/db";
+import { getUserGrant } from "../be/rbac-roles";
 import {
   getSessionRoot,
   listActiveSessionShares,
@@ -18,13 +21,17 @@ import {
 import { getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
 import {
+  AgentTokenExistsError,
   findUserById,
   InvalidRuntimeTokenError,
+  mintAgentToken,
   mintRuntimeToken,
   mintSessionToken,
+  revokeAgentTokens,
   revokeSessionToken,
+  rotateAgentToken,
 } from "../be/users";
-import { can } from "../rbac";
+import { can, isRbacEnabled } from "../rbac";
 import { sessionAccessTopic } from "../realtime/auth";
 import { realtimeBus } from "../realtime/bus";
 import {
@@ -39,6 +46,7 @@ import {
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { resolveSessionActor, type SessionActor } from "./session-access";
 import { jsonError } from "./utils";
@@ -118,7 +126,7 @@ const mintSessionTokenRoute = route({
   },
   summary: "Mint an ephemeral task or runtime token",
   description:
-    "Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.",
+    "Operators can mint task or runtime tokens. Runtime and agent tokens can mint task tokens for their own assigned tasks. A child token never outlives its parent and is revoked with it.",
   tags: ["Sessions"],
   body: z
     .object({
@@ -147,7 +155,8 @@ const mintSessionTokenRoute = route({
   },
   auth: { apiKey: true },
   rbac: {
-    ungated: "operator or runtime token minting for its own assigned task, enforced in the handler",
+    ungated:
+      "operator, or a runtime or agent token minting for its own assigned task, enforced in the handler",
   },
 });
 
@@ -157,7 +166,7 @@ const revokeSessionTokenRoute = route({
   pattern: ["api", "sessions", "tokens", null],
   summary: "Revoke an ephemeral session token",
   description:
-    "Operators can revoke any ephemeral token. With runtime pools enabled, runtime tokens can revoke their own child task tokens. Repeated revocation has no effect.",
+    "Operators can revoke any ephemeral token. Agent tokens, and runtime tokens when runtime pools are enabled, can revoke their own child task tokens. Repeated revocation has no effect.",
   tags: ["Sessions"],
   params: z.object({ tokenId: z.string() }),
   responses: {
@@ -167,9 +176,233 @@ const revokeSessionTokenRoute = route({
   },
   auth: { apiKey: true },
   rbac: {
-    ungated: "operator or runtime token revoking its own child, enforced in the handler",
+    ungated:
+      "operator, or a runtime or agent token revoking its own child, enforced in the handler",
   },
 });
+
+/** Default rotation grace: the old worker token keeps working this long. */
+const AGENT_TOKEN_ROTATE_GRACE_SEC = 300;
+
+const AgentTokenSchema = z.object({
+  agentId: z.string(),
+  tokenId: z.string(),
+  plaintext: z.string(),
+  expiresAt: z.string().nullable().describe("null when the token does not expire"),
+});
+
+const agentTokenTtl = z
+  .number()
+  .int()
+  .positive()
+  .optional()
+  .describe("Token lifetime in ms. Omit for the default (no expiry).");
+
+const mintAgentTokenRoute = route({
+  method: "post",
+  path: "/api/agents/{id}/token",
+  pattern: ["api", "agents", null, "token"],
+  operationId: "agents_mintWorkerToken",
+  summary: "Mint an agent-bound worker token",
+  description:
+    "Returns the token once. A worker runs on it in place of the swarm API key and acts only as this agent. Creates the agent when it does not exist and `name` is given. Fails with 409 when the agent already holds an active token.",
+  tags: ["Sessions"],
+  params: z.object({ id: z.string().min(1) }),
+  body: z
+    .object({ name: z.string().min(1).optional(), ttlMs: agentTokenTtl })
+    .strict()
+    .optional(),
+  responses: {
+    200: {
+      description: "Minted worker token",
+      schema: AgentTokenSchema.extend({ agentCreated: z.boolean() }),
+    },
+    403: { description: "Operator or user credentials required" },
+    404: { description: "Agent not found and no name given" },
+    409: { description: "Agent already holds an active token" },
+  },
+  rbac: { permission: "agent.token.manage" },
+});
+
+const rotateAgentTokenRoute = route({
+  method: "post",
+  path: "/api/agents/{id}/token/rotate",
+  pattern: ["api", "agents", null, "token", "rotate"],
+  operationId: "agents_rotateWorkerToken",
+  summary: "Rotate an agent-bound worker token",
+  description:
+    "Returns a new token once. The previous token keeps working for `graceSec` (default 300), then expires. Use revoke for a token that must stop now.",
+  tags: ["Sessions"],
+  params: z.object({ id: z.string().min(1) }),
+  body: z
+    .object({ graceSec: z.number().int().min(0).max(86_400).optional(), ttlMs: agentTokenTtl })
+    .strict()
+    .optional(),
+  responses: {
+    200: {
+      description: "New worker token",
+      schema: AgentTokenSchema.extend({ previousExpiresAt: z.string() }),
+    },
+    403: { description: "Operator or user credentials required" },
+    404: { description: "Agent holds no active token" },
+  },
+  rbac: { permission: "agent.token.manage" },
+});
+
+const revokeAgentTokenRoute = route({
+  method: "delete",
+  path: "/api/agents/{id}/token",
+  pattern: ["api", "agents", null, "token"],
+  operationId: "agents_revokeWorkerToken",
+  summary: "Revoke an agent-bound worker token",
+  description:
+    "Revokes every active worker token of the agent and the task tokens they minted. Open realtime connections on them close.",
+  tags: ["Sessions"],
+  params: z.object({ id: z.string().min(1) }),
+  responses: {
+    200: {
+      description: "Number of worker tokens revoked (0 when none was active)",
+      schema: z.object({ revoked: z.number().int() }),
+    },
+    403: { description: "Operator or user credentials required" },
+  },
+  rbac: { permission: "agent.token.manage" },
+});
+
+const AGENT_TOKEN_ROUTES = [mintAgentTokenRoute, rotateAgentTokenRoute, revokeAgentTokenRoute];
+
+/**
+ * Gate the worker-token routes. Only an operator key or a user may manage
+ * them, never a session token. The principal is agent-first: an operator key
+ * sent with X-Agent-ID acts as that agent and is refused, as on the
+ * controller-token route.
+ */
+async function ensureAgentTokenManager(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: string,
+): Promise<boolean> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "operator" && auth?.kind !== "user") {
+    jsonError(res, "Worker tokens require operator or user credentials", 403);
+    return false;
+  }
+  const header = req.headers["x-agent-id"];
+  const decision = can({
+    principal: await agentFirstPrincipal(req, Array.isArray(header) ? header[0] : header),
+    verb: "agent.token.manage",
+    resource: { kind: "agent", agentId },
+    source: "http",
+  });
+  if (!decision.allow) {
+    jsonError(res, decision.reason, 403);
+    return false;
+  }
+  // A worker token carries the target agent's privileges and reads that
+  // agent's resolved config, global secrets included. A user without a
+  // grant-all role must already hold both, and may not manage the token of an
+  // agent that may itself act on any agent (a lead).
+  if (auth.kind === "user" && isRbacEnabled()) {
+    const grant = await getUserGrant(auth.userId);
+    if (!grant.grantsAll) {
+      const target = await getAgentById(agentId);
+      const targetActsOnAny = can({
+        principal: { kind: "agent", agentId, isLead: target?.isLead ?? false },
+        verb: "agent.act.any",
+        resource: { kind: "agent", agentId },
+        source: "http",
+      }).allow;
+      if (targetActsOnAny) {
+        jsonError(res, "A lead agent's worker token requires a grant-all role", 403);
+        return false;
+      }
+      const missing = (["agent.act.any", "config.read.secrets"] as const).filter(
+        (verb) => !grant.verbs.has(verb),
+      );
+      if (missing.length > 0) {
+        jsonError(res, `Worker tokens also require: ${missing.join(", ")}`, 403);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+async function handleAgentTokens(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathSegments: string[],
+  queryParams: URLSearchParams,
+): Promise<boolean> {
+  const matched = AGENT_TOKEN_ROUTES.find((def) => def.match(req.method, pathSegments));
+  if (!matched) return false;
+  if (!(await ensureAgentTokenManager(req, res, pathSegments[2]!))) return true;
+  res.setHeader("Cache-Control", "no-store");
+
+  if (matched === mintAgentTokenRoute) {
+    const parsed = await mintAgentTokenRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const agentId = parsed.params.id;
+    const result = await getDbClient()
+      .transaction(async () => {
+        let agentCreated = false;
+        if (!(await getAgentById(agentId))) {
+          if (!parsed.body?.name) return { status: 404 as const };
+          // Same defaults as a worker's first registration; it is offline until it connects.
+          await createAgent({
+            id: agentId,
+            name: parsed.body.name,
+            isLead: false,
+            status: "offline",
+            capabilities: [],
+            maxTasks: 1,
+          });
+          agentCreated = true;
+        }
+        return {
+          status: 200 as const,
+          agentCreated,
+          token: await mintAgentToken(agentId, parsed.body?.ttlMs),
+        };
+      })
+      .catch((error) => {
+        if (error instanceof AgentTokenExistsError) return { status: 409 as const };
+        throw error;
+      });
+    if (result.status === 404) {
+      jsonError(res, "Agent not found; pass name to create it", 404);
+      return true;
+    }
+    if (result.status === 409) {
+      jsonError(res, "Agent already holds an active worker token; rotate or revoke it", 409);
+      return true;
+    }
+    mintAgentTokenRoute.respond(res, 200, {
+      agentId,
+      ...result.token,
+      agentCreated: result.agentCreated,
+    });
+    return true;
+  }
+
+  if (matched === rotateAgentTokenRoute) {
+    const parsed = await rotateAgentTokenRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const graceSec = parsed.body?.graceSec ?? AGENT_TOKEN_ROTATE_GRACE_SEC;
+    const token = await rotateAgentToken(parsed.params.id, graceSec * 1000, parsed.body?.ttlMs);
+    if (!token) {
+      jsonError(res, "Agent holds no active worker token", 404);
+      return true;
+    }
+    rotateAgentTokenRoute.respond(res, 200, { agentId: parsed.params.id, ...token });
+    return true;
+  }
+
+  const parsed = await revokeAgentTokenRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true;
+  revokeAgentTokenRoute.respond(res, 200, { revoked: await revokeAgentTokens(parsed.params.id) });
+  return true;
+}
 
 const listSessions = route({
   method: "get",
@@ -309,9 +542,11 @@ export async function handleSessions(
   queryParams: URLSearchParams,
   myAgentId?: string,
 ): Promise<boolean> {
+  if (await handleAgentTokens(req, res, pathSegments, queryParams)) return true;
+
   if (mintSessionTokenRoute.match(req.method, pathSegments)) {
     const auth = getRequestAuth(req);
-    if (auth?.kind !== "operator" && !(auth?.kind === "agent" && auth.runtimeId)) {
+    if (auth?.kind !== "operator" && !(auth?.kind === "agent" && auth.tokenKind !== "task")) {
       jsonError(res, "Unauthorized", 401);
       return true;
     }
@@ -334,7 +569,7 @@ export async function handleSessions(
           return {
             token: await mintSessionToken(agentId, taskId!, ttlMs!, {
               tokenId: auth.tokenId,
-              runtimeId: auth.runtimeId!,
+              runtimeId: auth.runtimeId,
             }),
           };
         }
@@ -365,7 +600,10 @@ export async function handleSessions(
     const auth = getRequestAuth(req);
     if (
       auth?.kind !== "operator" &&
-      !(isRuntimePoolsEnabled() && auth?.kind === "agent" && auth.runtimeId)
+      !(
+        auth?.kind === "agent" &&
+        (auth.tokenKind === "agent" || (auth.tokenKind === "runtime" && isRuntimePoolsEnabled()))
+      )
     ) {
       jsonError(res, "Unauthorized", 401);
       return true;
@@ -375,8 +613,9 @@ export async function handleSessions(
     const revoked = await getDbClient().transaction(async (client) => {
       if (auth.kind === "agent") {
         const child = await client.get(
-          "SELECT id FROM session_tokens WHERE id = ? AND agentId = ? AND parentRuntimeId = ? AND taskId IS NOT NULL",
-          [parsed.params.tokenId, auth.agentId, auth.runtimeId!],
+          `SELECT id FROM session_tokens WHERE id = ? AND agentId = ? AND taskId IS NOT NULL
+           AND ${auth.runtimeId ? "parentRuntimeId" : "parentTokenId"} = ?`,
+          [parsed.params.tokenId, auth.agentId, auth.runtimeId ?? auth.tokenId],
         );
         if (!child) return false;
       }

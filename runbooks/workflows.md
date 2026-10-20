@@ -528,7 +528,7 @@ A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes 
       urgent: { type: noul }
 ```
 
-- Needs `CLOUDFLARE_ACCOUNT_ID` (global config, the 32-character hex account id) and `CLOUDFLARE_API_TOKEN` (global secret, a token with the Workers AI permission on that account). A malformed account id is refused and never echoed.
+- Needs `CLOUDFLARE_ACCOUNT_ID` (global config, the 32-character hex account id) and `CLOUDFLARE_API_TOKEN` (global secret, a token with the Workers AI permission on that account). When `CLOUDFLARE_API_TOKEN` is unset, the same bearer token is read from `CLOUDFLARE_API_KEY`, and a rejection names the key that was sent. A malformed account id is refused and never echoed.
 - `model` is part of the URL, so only `clef` and `clef-flash` are accepted.
 - At most 64 questions per node, checked at save. Choice and score limits match the node's own (255 options, 10 levels). The context window is 65,536 tokens; Cloudflare truncates longer state.
 - `success: false` fails the step with Cloudflare's error code. HTTP errors read the code from `errors[0].code`. The `cf-ray` header is the `requestId`.
@@ -541,6 +541,82 @@ A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes 
 - A `system-one-decision` node must not set `retry` or `validation.retry`. Engine retries are not status-aware and would re-send rejected requests. Workflow create and update reject it, and a stored definition that has it fails the step before any request.
 - The node reads its provider's key on the server (see Keys and preflight). Errors carry the HTTP status, a short error code, and the request id, not the provider's message or your state.
 - Any unresolved `{{token}}` in a `system-one-decision` config fails the step before the request, because the call is paid and not idempotent.
+
+## SystemOne Extraction nodes
+
+A `system-one-extraction` node (display name "SystemOne Extraction") reads typed values out of a text, and up to 4 images, with a System One extraction model: Cloudflare's Clairic on Workers AI today. It answers at once. One call sends `state` and a map of typed fields, and the node returns one validated answer per field.
+
+```yaml
+- id: claim
+  type: system-one-extraction
+  inputs: { email: trigger.email }
+  config:
+    state: "{{email}}"
+    fields:
+      order_id: { type: text, instructions: Order number }
+      amount_paid: { type: number, decimals: 2, unit: USD, instructions: Total paid including tax }
+      days_since_delivery: { type: duration, unit: days, integer: true }
+      damage: { type: list, items: text }
+      repair_cost: { type: estimate, unit: USD, min: 10, max: 5000, scale: log, step: 1 }
+  next: decide
+```
+
+### `system-one-extraction` config
+
+| Field | Notes |
+|---|---|
+| `provider` | Extraction host id, a literal. `cloudflare` (default). |
+| `model` | `clairic` (default, the only id Cloudflare serves). |
+| `state` | The text to read. A structured whole-token value is sent as JSON text, and spans index into that text. May be empty only when `images` are sent. |
+| `images` | Up to 4: a base64 `data:image/png|jpeg|webp` URL or `{ content_type, base64 }`. 4 MiB each and 8 MiB total, decoded. Remote URLs are refused. |
+| `referenceDate` | `YYYY-MM-DD`; anchors dates written without a year. |
+| `fields` | Map of field id to a typed spec (below). Ids are letters, digits, `_`, `-`, at most 64 characters, no dots, so `answers.<id>` is a valid path. Static: field ids and types cannot be `{{tokens}}`. |
+| `timeoutMs`, `maxRetries` | As on `system-one-decision`. |
+
+Field specs use Clairic's option names and are sent unchanged. Each type takes only its own options; an unknown option, a missing `items`, a missing `min`/`max`, `min >= max`, a `log` scale with `min <= 0`, `integer` with `decimals > 0`, or `horizon` outside 1-64 is refused at save.
+
+| Type | Options |
+|---|---|
+| `text`, `date`, `time`, `datetime` | `instructions`, `null_threshold` (0-1, the `p_null` above which `value` is null; default 0.5) |
+| `number` | + `unit`, `integer`, `decimals` (0-6) |
+| `duration` | + `unit` (`seconds`, `minutes`, `hours`, `days`, `weeks`, `months`, `years`), `integer`, `decimals` |
+| `list` | `instructions`, `items` (`text`, `number`, `date`; required), `decimals` (number lists only) |
+| `estimate` | `instructions`, `unit`, `min`, `max` (numbers, or ISO dates for a date estimate), `step` (a positive number, or `month` / `year` for dates), `scale` (`linear`, `log`) |
+| `forecast` | `instructions`, `unit`, `min`, `max` (numbers), `horizon` (1-64), `interval` (`step`, `minute`, `hour`, `day`, `week`, `month`, `quarter`, `year`), `scale` |
+
+### `system-one-extraction` output
+
+```json
+{
+  "model": "clairic",
+  "answers": {
+    "order_id": { "type": "text", "value": "A-88412", "guess": "A-88412", "p_null": 0.0019, "confidence": 0.9999996, "span": [10, 17] },
+    "amount_paid": { "type": "number", "value": 701.1, "guess": 701.1, "p_null": 0.00000003, "confidence": 0.99997 },
+    "days_since_delivery": { "type": "duration", "value": 11, "guess": 11, "unit": "days", "p_null": 0.00000003, "confidence": 0.9956 },
+    "tracking_number": { "type": "text", "value": null, "guess": "A-88412", "p_null": 0.9999992, "confidence": 0.959, "span": [10, 17] },
+    "damage": { "type": "list", "value": ["cracked screen", "dented corner"], "spans": [[50, 64], [71, 84]], "confidence": 0.63 },
+    "repair_cost": { "type": "estimate", "value": 236, "mean": 236.26, "median": 213, "p10": 122, "p90": 370, "p_below": 0.0000044, "p_above": 0.0000025 }
+  },
+  "usage": { "input_tokens": 739, "output_tokens": 0 },
+  "truncated": false,
+  "requestId": "<cf-ray>"
+}
+```
+
+The answers above are a live `@cf/cloudflare/clairic` response to the damaged-order email (`delivered_on` omitted), trimmed to fewer digits.
+
+- `value` is `null` when the input does not determine the field. `guess` and `confidence` still describe what the model saw, so `tracking_number` above guessed the order number and returned null because `p_null` is above `null_threshold`.
+- An estimate's `value` is the rounded `mean`, not the `median`. Branch on `median`, `p10`, or `p90` when the spread matters.
+- Every declared field must come back once, with its declared type and a value of that type (strings for `text`/dates/times, numbers for `number`/`duration`, integers when `integer` is set, typed list items, estimate `median`/`p10`/`p90`, forecast arrays of `horizon` steps). Anything else fails the step with `SystemOne response failed validation: ...`. Unknown answer keys are dropped.
+- There is no `humanReview`. A reviewer of an extracted value has to type a replacement of the right type (a date, a duration, a quantile), which the approval card has no inputs for. Route a low `confidence` or a high `p_null` to `human-in-the-loop` with `property-match`.
+
+### Providers and credentials
+
+The provider registry (`SYSTEM_ONE_HOSTS` in `src/workflows/executors/system-one-providers.ts`) serves both node types. A host declares a `decide` and/or `extract` service, each with its endpoint, models, limits, and wire; the credential, the deployment check, readiness, the transport (`system-one-transport.ts`), and every message are the host's. Cloudflare serves Clef (`decide`) and Clairic (`extract`) from one entry and one credential. Adding an extraction host (for example an open-weights Clairic server) is one `extract` block with an endpoint and a wire.
+
+- Cloudflare needs `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`), the same as Clef. Saving warns and a run fails before any node executes when either is missing.
+- Retries, the time budget, `Retry-After`, the ban on `retry` and `validation.retry`, and strict `{{token}}` resolution are the same as for `system-one-decision`.
+- Pricing: Clairic is $0.10 per 1M input tokens, with no output charge. Fields that do not fit beside the state in one 8,192-token pass are split across parallel passes.
 
 ## Trigger requester attribution
 

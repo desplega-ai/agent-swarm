@@ -523,18 +523,18 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=1.0` disabling rating-based demotion. On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.4. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.5. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
-> For the complete reference of all environment variables, see [docs/ENVS.md](./docs/ENVS.md).
+> For the complete reference of all environment variables, see [environment variables reference](https://docs.agent-swarm.dev/docs/reference/environment-variables).
 
 ### Docker Worker Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `HARNESS_PROVIDER` | No | Fleet harness: `claude`, `codex` for OpenAI, or `pi` for OpenRouter and AWS Bedrock (alpha). Defaults to `pi` when `OPENROUTER_API_KEY` is set and neither `ANTHROPIC_API_KEY` nor `CLAUDE_CODE_OAUTH_TOKEN` is set; otherwise `claude`. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | One of four | Claude Code OAuth token (run `claude setup-token`). Supports comma-separated values for [multi-credential load balancing](./docs/ENVS.md#multi-credential-support). `ANTHROPIC_API_KEY` is also accepted for Claude. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | One of four | Claude Code OAuth token (run `claude setup-token`). Supports comma-separated values for [multi-credential load balancing](https://docs.agent-swarm.dev/docs/reference/environment-variables#multi-credential-support). `ANTHROPIC_API_KEY` is also accepted for Claude. |
 | `OPENAI_API_KEY` | One of four | OpenAI credential for the `codex` harness. Also enables workflow LLM nodes and optional memory embeddings. |
 | `OPENROUTER_API_KEY` | One of four | OpenRouter credential for the `pi` harness and workflow LLM nodes. Use `OPENROUTER_BASE_URL` for a compatible gateway. |
 | `AWS_REGION` | One of four | Region for AWS Bedrock (alpha). Also set `MODEL_OVERRIDE=amazon-bedrock/<model-id>` and provide the standard AWS credential chain. Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. |
@@ -605,7 +605,7 @@ bun run src/cli.tsx codex-login --api-url https://your-swarm.example.com --api-k
 
 That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. The default behavior picks the next free pool slot (`codex_oauth_0`, `codex_oauth_1`, ...), and you can pin a specific slot with `--slot <n>` for any integer from `0` through `100`. Then restart codex workers. On boot, `docker-entrypoint.sh` enumerates the stored `codex_oauth_<slot>` entries from the API and writes the selected credential to `/home/worker/.codex/auth.json` automatically.
 
-Pool health is coordinated centrally. Task-time revalidation and the locked `POST /api/oauth/keep-warm/codex` sweep use the same refresh-lock path, so rarely-used slots can still refresh on a roughly weekly cadence without racing the runner. If OpenAI rejects a refresh, the worker now fails fast with the upstream auth error instead of silently starting Codex on a stale pool auth file.
+Pool health is coordinated centrally. Task-time revalidation and the locked `POST /api/oauth/keep-warm/codex` sweep use the same refresh-lock path, so rarely-used slots still refresh every 5 days (`CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`) without racing the runner. If OpenAI rejects a refresh, the worker now fails fast with the upstream auth error instead of silently starting Codex on a stale pool auth file.
 
 Worker requirements for this path:
 

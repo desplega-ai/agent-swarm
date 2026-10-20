@@ -62,14 +62,16 @@ import {
   rollbackApp,
   snapshotApp,
 } from "../apps/version";
-import { getAgentById, getAppVersion, getAppVersions } from "../be/db";
+import { getAgentById, getAppVersion, getAppVersions, getTaskById } from "../be/db";
 import type { RbacPrincipal, RbacResource } from "../rbac";
 import { can } from "../rbac";
 import { AgentTaskStatusSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject } from "../utils/secret-scrubber";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
-import { route } from "./route-def";
+import { agentFirstPrincipal } from "./request-principal";
+import { bodyTask, route } from "./route-def";
+import { denyParentAttach } from "./session-access";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
 const MAX_APP_BODY_BYTES = 5 * 1024 * 1024;
@@ -618,17 +620,27 @@ const runActionRoute = route({
   method: "post",
   path: "/api/apps/{id}/actions/{name}",
   pattern: ["api", "apps", null, "actions", null],
+  // A task-kind action may chain under `body.parentTaskId`: a user caller needs
+  // write access to that session, as for POST /api/tasks.
+  session: bodyTask("parentTaskId"),
   summary: "Run a custom app action",
   description: "Runs the saved script, or creates the agent task, named by the app definition.",
   tags: ["Apps"],
   params: z.object({ id: z.string().min(1), name: AppNameSchema }),
-  body: z.object({ input: z.record(z.string(), z.unknown()).optional() }),
+  body: z.object({
+    input: z.record(z.string(), z.unknown()).optional(),
+    /** Chains the new task off an existing one. Task-kind actions only: a script or sync action rejects it (400). */
+    parentTaskId: z.string().min(1).optional(),
+  }),
   responses: {
     200: { description: "Action invoked", schema: runActionResultSchema },
-    400: { description: "Invalid action input or stale script reference" },
+    400: {
+      description:
+        "Invalid action input, stale script reference, or parentTaskId on a non-task action",
+    },
     403: { description: "Permission denied" },
     409: { description: "App definition needs repair" },
-    404: { description: "App or action not found" },
+    404: { description: "App, action, or parent task not found" },
   },
   rbac: { permission: "app.use" },
 });
@@ -1382,10 +1394,36 @@ export async function handleApps(
       return true;
     }
     if (definitionNeedsRepair(res, app)) return true;
+    if (parsed.body.parentTaskId) {
+      // `parentTaskId` only means something to a task-kind action: a script or
+      // sync action rejects it rather than silently dropping it. An unknown
+      // action keeps `runAppAction`'s 404.
+      const actions = app.definition.actions;
+      const action =
+        actions && Object.hasOwn(actions, parsed.params.name)
+          ? actions[parsed.params.name]
+          : undefined;
+      if (action && action.kind !== "task") {
+        jsonError(res, "parentTaskId is only supported for task-kind actions", 400);
+        return true;
+      }
+      if (action) {
+        const parentTask = await getTaskById(parsed.body.parentTaskId);
+        if (!parentTask) {
+          jsonError(res, "parent task not found", 404);
+          return true;
+        }
+        // The same gate as POST /api/tasks: without it an app action would
+        // chain under any task past `task.parent.attach`.
+        const principal = await agentFirstPrincipal(req, myAgentId);
+        if (await denyParentAttach(req, res, myAgentId, parentTask, principal)) return true;
+      }
+    }
     const output = await runAppAction({
       app,
       name: parsed.params.name,
       input: parsed.body.input,
+      parentTaskId: parsed.body.parentTaskId,
       caller,
       actor,
     });

@@ -30,7 +30,7 @@ import { findEntryNodes, getNextTargets, getSuccessors, resolveValidationPort } 
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import {
-  SYSTEM_ONE_DECISION_NODE_TYPE,
+  isSystemOneNodeType,
   systemOneRetryViolations,
   systemOneUnresolvedError,
 } from "./executors/system-one-decision";
@@ -854,7 +854,7 @@ async function runClaimedStep(
     await checkpointStepFailure(
       runId,
       stepId,
-      systemOneUnresolvedError(node.id, strictUnresolved),
+      systemOneUnresolvedError(node.id, strictUnresolved, node.type),
       0,
     );
     return { outcome: "failed", successors: [] };
@@ -1150,6 +1150,9 @@ function buildScriptBodyCtx(
   return safe;
 }
 
+/** System One config fields whose whole-token references keep their JSON type. */
+const SYSTEM_ONE_DATA_FIELDS = new Set(["state", "questions", "fields", "images"]);
+
 export function interpolateNodeConfig(
   node: Pick<WorkflowNode, "type" | "config" | "inputs">,
   interpolationCtx: Record<string, unknown>,
@@ -1160,17 +1163,20 @@ export function interpolateNodeConfig(
   /** Tokens that must resolve before dispatch; the caller fails the step when non-empty. */
   strictUnresolved?: string[];
 } {
-  if (node.type === SYSTEM_ONE_DECISION_NODE_TYPE) {
-    // `state` and `questions` keep a whole-token reference's JSON type (an object
-    // stays an object; string interpolation would flatten it to JSON text). The
-    // resolved value is data, never re-interpolated, so a literal `{{` inside a
-    // lead's text is not read as another template. Every other field, and every
-    // unresolved token anywhere in the config, is strict: no blank reaches the API.
-    const { state, questions, ...rest } = node.config;
-    const restResult = deepInterpolate(rest, interpolationCtx);
+  if (isSystemOneNodeType(node.type)) {
+    // `state` and the question / field specs (and extraction `images`) keep a
+    // whole-token reference's JSON type (an object stays an object; string
+    // interpolation would flatten it to JSON text). The resolved value is data,
+    // never re-interpolated, so a literal `{{` inside a lead's text is not read as
+    // another template. Every other field, and every unresolved token anywhere in
+    // the config, is strict: no blank reaches the API.
+    const rest: Record<string, unknown> = {};
     const dynamic: Record<string, unknown> = {};
-    if (Object.hasOwn(node.config, "state")) dynamic.state = state;
-    if (Object.hasOwn(node.config, "questions")) dynamic.questions = questions;
+    for (const [key, value] of Object.entries(node.config)) {
+      if (SYSTEM_ONE_DATA_FIELDS.has(key)) dynamic[key] = value;
+      else rest[key] = value;
+    }
+    const restResult = deepInterpolate(rest, interpolationCtx);
     const dynamicResult = deepInterpolate(dynamic, interpolationCtx, { preserveRawTokens: true });
     const unresolved = [...restResult.unresolved, ...dynamicResult.unresolved];
     return {

@@ -360,6 +360,25 @@ const COMMAND_HELP: Record<
       `  ${binName} claude-managed-setup --api-url https://swarm.example.com`,
     ].join("\n"),
   },
+  "worker-token": {
+    usage: `${binName} worker-token <create|rotate|revoke> (--agent-id <id> | --name <name>) [options]`,
+    description:
+      "Manage the agent-bound token a worker runs on in place of the swarm API key. The token acts only as its agent. create and rotate print the new token to stdout once; messages go to stderr. Uses your operator swarm API key.",
+    options: [
+      "  --agent-id <id>    Agent the token is bound to",
+      "  --name <name>      Agent name; create makes the agent when no agent has this name",
+      "  --ttl-days <n>     Token lifetime (create, rotate). Default: no expiry",
+      "  --grace-sec <n>    How long the old token keeps working after rotate (default 300)",
+      "  --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)",
+      "  --api-key <key>    Operator swarm API key (default: AGENT_SWARM_API_KEY or API_KEY, falling back to 123123)",
+      "  -h, --help         Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} worker-token create --name worker-1`,
+      `  ${binName} worker-token rotate --agent-id <agent-id> --grace-sec 600`,
+      `  ${binName} worker-token revoke --agent-id <agent-id>`,
+    ].join("\n"),
+  },
   e2b: {
     usage: `${binName} e2b <subcommand> [options]`,
     description:
@@ -445,6 +464,7 @@ function printHelp(command?: string) {
     ["docs", "Open documentation (--open to launch in browser)"],
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
     ["claude-managed-setup", "Bootstrap Anthropic Managed Agents (agent + env + skills)"],
+    ["worker-token", "Mint, rotate, or revoke an agent-bound worker token"],
     ["e2b", "Build templates and start E2B API/worker sandboxes"],
     ["version", "Show version number"],
     ["help", "Show this help message"],
@@ -803,6 +823,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runClaudeManagedSetup } = await import("./commands/claude-managed-setup");
   const setupArgs = process.argv.slice(process.argv.indexOf("claude-managed-setup") + 1);
   await runClaudeManagedSetup(setupArgs);
+} else if (args.command === "worker-token") {
+  const { runWorkerToken } = await import("./commands/worker-token");
+  const tokenArgs = process.argv.slice(process.argv.indexOf("worker-token") + 1);
+  process.exit(await runWorkerToken(tokenArgs));
 } else if (args.command === "e2b") {
   const { runE2BCommand } = await import("./commands/e2b");
   const e2bArgs = process.argv.slice(process.argv.indexOf("e2b") + 1);

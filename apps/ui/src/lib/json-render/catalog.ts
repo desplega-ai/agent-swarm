@@ -80,6 +80,8 @@ export const appRefreshActionSchema = z.object({
 export const appActionActionSchema = z.object({
   name: z.string(),
   input: z.record(z.string(), z.unknown()).optional(),
+  /** Task-kind actions only — chains the new task off an existing one. Usually bound from chain scope (`{ "$chain": "leafTaskId" }`) by a component that runs a task chain; a literal or `$state` task id works too. Forwarded to the server unchanged; the server rejects it (400) for script and sync actions. */
+  parentTaskId: z.string().optional(),
 });
 
 /**

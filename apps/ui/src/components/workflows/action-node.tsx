@@ -8,6 +8,7 @@ import {
   type LucideIcon,
   MessageCircle,
   Repeat,
+  ScanText,
   Share2,
   Terminal,
   UserCheck,
@@ -21,7 +22,7 @@ import { WorkflowNodeShell } from "@/components/shared/workflow-node-shell";
 import { Badge } from "@/components/ui/badge";
 import type { FlowNodeData } from "./graph-utils";
 import { statusBorderColor } from "./node-styles";
-import { subWorkflowTargetId, systemOneSummary } from "./node-summary";
+import { subWorkflowTargetId, systemOneExtractionSummary, systemOneSummary } from "./node-summary";
 
 type NodeStyle = {
   border: string;
@@ -109,6 +110,13 @@ const nodeStyleMap: Record<string, NodeStyle> = {
     handle: "!bg-action-system-one-decision",
     icon: BrainCircuit,
   },
+  "system-one-extraction": {
+    border: "border-action-system-one-extraction/50",
+    bg: "bg-action-system-one-extraction/10",
+    text: "text-action-system-one-extraction",
+    handle: "!bg-action-system-one-extraction",
+    icon: ScanText,
+  },
 };
 
 const defaultStyle: NodeStyle = {
@@ -151,6 +159,7 @@ function nodeSubtitle(d: FlowNodeData) {
     return workflowId ? <SubWorkflowTarget workflowId={workflowId} /> : undefined;
   }
   if (d.nodeType === "system-one-decision") return systemOneSummary(d.config);
+  if (d.nodeType === "system-one-extraction") return systemOneExtractionSummary(d.config);
   return undefined;
 }
 

@@ -82,27 +82,22 @@ The review body is the verdict line: at most about 60 tokens. Each inline commen
 - Swarm PR, nit fixed: ``**Approve** at `3d4f34a` · 0 blocking · set `Risk: high` (billing) in the body``
 - Re-review: ``**Approve** at `661327f` · B1 fixed · N1 won't fix (author)``, new findings inline.
 
-Never on GitHub: test counts, CI lists (unless a red check changes the verdict), what you read, how the code works, or why GitHub refused a formal verdict. Those go to your task output and the ledger.
+Never on GitHub: test counts, CI lists (unless a red check changes the verdict), what you read, how the code works, or why GitHub refused a formal verdict. Those go to your task output.
 
-### Post through the gate
+### Post the review
 
-Nothing reaches GitHub without passing `review-post-gate`.
-
-1. Draft the review as JSON: `{ pr: "<owner>/<repo>#<n>", head, swarmAuthored, risk, round, priorFindings: [{ id, state, text }], findings: [{ id?, tag, path?, line?, text, fix? }], body? }`. Write `fix` so it reads as done in the verdict line, for example "set `Risk: high` (billing) in the body". When you ran `code-reviewing`, its Standards/Spec report stays in your task output; only its findings go into the draft.
-2. Run `script-run name="review-post-gate" scope="global" args=<draft>`. It checks token limits, the nit cap, tallies and CI lists, turns swarm-PR nits into `fixes`, and asks Jev to keep, drop or relabel each finding against the live `rules.md`. Every decision is logged with its reason. With `jev: "unavailable"` the deterministic result still stands.
-3. Apply every entry in `fixes`, then post exactly `postable`, never your draft:
+1. Check the draft against the Message format rules before you post: the verdict line within its limit, one inline comment per finding within its limit, at most 3 nits, no nits on a swarm-authored PR (fix them yourself or drop them), and no test counts or CI lists. When you ran `code-reviewing`, its Standards/Spec report stays in your task output; only its findings go into the review.
+2. Post the verdict line and every inline comment as one review:
 
    ```bash
-   jq -n --argjson p "$POSTABLE" --arg sha "$HEAD" \
-     '{commit_id: $sha, event: $p.event, body: $p.body, comments: [$p.comments[] | {path, line, side: "RIGHT", body}]}' \
+   jq -n --arg sha "$HEAD" --arg event "$EVENT" --arg body "$VERDICT" --argjson comments "$COMMENTS" \
+     '{commit_id: $sha, event: $event, body: $body, comments: [$comments[] | {path, line, side: "RIGHT", body}]}' \
      | gh api repos/<owner>/<repo>/pulls/<n>/reviews --input -
    ```
 
-   On a PR the reviewing account authored, the gate returns `event: "COMMENT"`, because GitHub refuses APPROVE and REQUEST_CHANGES there. Post it as is.
-4. Record the evidence (tests run, controls, "checked, fine" notes, the gate's `logKey`) in your task output and with `script-run name="pr-review-ledger-write" scope="global"` (`action: "round"`). Never on the PR. If the ledger write fails, keep the exact payload and the error in your task output, report it to the lead once, and finish the review. Read the PR's existing ledger rounds before any retry so a round is never written twice.
-5. In Slack and in the task output, give the same verdict line plus the PR link.
-
-If the gate cannot run, post nothing to GitHub. Keep the draft in your task output and report the gate failure (the error and the time) to the lead.
+   `EVENT` is `APPROVE` or `REQUEST_CHANGES`. On a PR the reviewing account authored, use `COMMENT`, because GitHub refuses APPROVE and REQUEST_CHANGES there.
+3. Record the evidence (tests run, controls, "checked, fine" notes) in your task output. Never on the PR.
+4. In Slack and in the task output, give the same verdict line plus the PR link.
 
 ### Capture pushback as a rule
 

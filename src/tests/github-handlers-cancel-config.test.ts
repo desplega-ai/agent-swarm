@@ -6,8 +6,8 @@
  *   github.cancelOnUnassign              — PR unassigned + issue unassigned
  *   github.cancelOnReviewRequestRemoved  — PR review_request_removed
  *
- * Absent / any value ≠ "false" → cancel (current behavior, default).
- * Value "false" → leave task untouched, return { created: false }.
+ * Absent / empty / unrecognized values → cancel (default).
+ * Values "false" / "0" (case-insensitive, trimmed) → leave task untouched.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
@@ -122,8 +122,15 @@ describe("PR unassigned — github.cancelOnUnassign", () => {
     expect(await getTaskStatus(taskId)).toBe("failed");
   });
 
-  test("config = 'false': unassign leaves task untouched", async () => {
-    await setConfigFlag("github.cancelOnUnassign", "false");
+  test.each([
+    "false",
+    "FALSE",
+    "False",
+    "0",
+    " false ",
+    " 0 ",
+  ])("config = %j: unassign leaves task untouched", async (value) => {
+    await setConfigFlag("github.cancelOnUnassign", value);
     const taskId = await seedTask(BASE_PR.number, "pr");
     expect(await getTaskStatus(taskId)).toBe("pending");
 
@@ -162,8 +169,15 @@ describe("issue unassigned — github.cancelOnUnassign", () => {
     expect(await getTaskStatus(taskId)).toBe("failed");
   });
 
-  test("config = 'false': unassign leaves task untouched", async () => {
-    await setConfigFlag("github.cancelOnUnassign", "false");
+  test.each([
+    "false",
+    "FALSE",
+    "False",
+    "0",
+    " false ",
+    " 0 ",
+  ])("config = %j: unassign leaves task untouched", async (value) => {
+    await setConfigFlag("github.cancelOnUnassign", value);
     const taskId = await seedTask(BASE_ISSUE.number, "issue");
     expect(await getTaskStatus(taskId)).toBe("pending");
 
@@ -201,8 +215,15 @@ describe("PR review_request_removed — github.cancelOnReviewRequestRemoved", ()
     expect(await getTaskStatus(taskId)).toBe("failed");
   });
 
-  test("config = 'false': review removal leaves task untouched", async () => {
-    await setConfigFlag("github.cancelOnReviewRequestRemoved", "false");
+  test.each([
+    "false",
+    "FALSE",
+    "False",
+    "0",
+    " false ",
+    " 0 ",
+  ])("config = %j: review removal leaves task untouched", async (value) => {
+    await setConfigFlag("github.cancelOnReviewRequestRemoved", value);
     const taskId = await seedTask(BASE_PR.number, "pr");
     expect(await getTaskStatus(taskId)).toBe("pending");
 

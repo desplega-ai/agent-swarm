@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- ACP: the adapter moves to `@agentclientprotocol/sdk` 2.0.0 and its client app API. It imports the `/unstable` entry point, so turn `usage` still reaches cost rows. The wire protocol stays ACP v1.
+
+### Fixed
+- Codex OAuth: the keep-warm sweep refreshes pool slots at 5 days instead of 7, and `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS` sets the age, so a ChatGPT session that ends before day 7 gets a refresh first (#2296).
+
+## [2.4.3] - 2026-10-20
+
+### Changed
+- Worker image bumps claude-code to 2.1.304, amp to 0.0.1792470027-g8c393d and Copilot CLI to 1.0.100 (#2284).
+- Docs: live-app follow-up edits get safeguards that preserve control numbers and verify fresh screenshots (#2282); the TLA+ heartbeat and workflows specs match main again (#2285).
+
+### Fixed
+- Skills: `code-quality` no longer tells reviewers to run the `review-post-gate` and `pr-review-ledger-write` scripts, which no release seeds, so PR reviews finish on every deployment. A new test fails when a shipped skill names a script the release does not seed (#2287).
+- GitHub: boolean configuration flags honor `FALSE`, `False`, `0` and surrounding whitespace, so disabling cancellation or no-op approval skipping takes effect (#2281).
+- Harness: every harness reads `SKIP_SESSION_SUMMARY` the same way; `0` or `false` no longer skips the summary and codex honors `true` (#2283).
+
+## [2.4.2] - 2026-10-19
+
+### Added
+- Apps: models can declare a `json` column that stores any JSON value natively, up to an operator-set limit (256 KB by default) (#2184).
+- UI: an experimental task lineage view shows a task's whole tree, ancestors and descendants, with who started whom (#2274).
+- UI: JSON task output renders as a collapsible tree with per-key copy in the session view and task sheet (#2277).
+
+### Changed
+- Worker image bumps amp to 0.0.1792411243-gb8cffc and qwen-code to 0.25.3 (#2271); agent-fs pins move to 0.18.5 (#2272).
+- Docs: env reference links point to the published page (#2278).
+
+### Fixed
+- Telemetry: git checkouts and worktrees default to the development environment, preventing local restarts from appearing as new production installs (#2276).
+- Tasks: human REST follow-ups no longer inherit a worker's output schema (#2275).
+- Status: the harness badge stays green while each provider's latest live test passed (#2270).
+- UI: the Agents grid keeps Model visible at compact widths (#2273).
+
 ## [2.4.1] - 2026-10-19
 
 ### Added

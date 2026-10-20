@@ -40,6 +40,7 @@ import "streamdown/styles.css";
 
 import type { AgentTaskStatus, ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { JsonTree } from "@/components/shared/json-tree";
 import {
   type EndSummary,
   formatDur,
@@ -81,7 +82,6 @@ import {
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace";
-import { JsonTree } from "@/components/workflows/json-tree";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";

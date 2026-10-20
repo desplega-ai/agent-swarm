@@ -58,6 +58,7 @@ const routeLabels: Record<string, string> = {
   debug: "Debug",
   integrations: "Integrations",
   keys: "API Keys",
+  lineage: "Lineage",
   "api-keys": "API Keys",
   pages: "Pages",
   file: "Comb",

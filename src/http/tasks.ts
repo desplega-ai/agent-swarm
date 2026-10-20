@@ -20,6 +20,7 @@ import {
   getSteeringMessagesForTask,
   getTaskAttachments,
   getTaskById,
+  getTaskLineage,
   getTasksCount,
   markSteeringDelivered,
   markSteeringHandled,
@@ -29,6 +30,7 @@ import {
   resumeTask,
   settleSupersededTaskDependents,
   supersedeTask,
+  TASK_LINEAGE_LIMITS,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
@@ -85,6 +87,7 @@ import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { bodyTask, route } from "./route-def";
 import {
   canReadSession,
+  denyParentAttach,
   readableByFor,
   resolveSessionActor,
   SESSION_READ_DENIED,
@@ -578,6 +581,33 @@ const getTask = route({
   },
 });
 
+const getTaskLineageRoute = route({
+  method: "get",
+  path: "/api/tasks/{id}/lineage",
+  pattern: ["api", "tasks", null, "lineage"],
+  session: { taskParam: "id" },
+  summary: "Get the tree a task belongs to (ancestors and descendants)",
+  description: `Follows \`parentTaskId\` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most ${TASK_LINEAGE_LIMITS.maxAncestors} hops up, \`maxDepth\` levels down and about twice \`maxNodes\` rows; \`truncated\` is true when any task in the tree is missing from the response.`,
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  query: z.object({
+    maxNodes: z.coerce.number().int().min(1).max(TASK_LINEAGE_LIMITS.maxNodes).optional(),
+    maxDepth: z.coerce.number().int().min(1).max(TASK_LINEAGE_LIMITS.maxDepth).optional(),
+  }),
+  responses: {
+    200: {
+      description: "The lineage tree as a flat list linked by `parentTaskId`",
+      schema: z.object({
+        rootTaskId: z.string(),
+        tasks: z.array(AgentTaskSummarySchema.extend({ workflowRunId: z.string().optional() })),
+        truncated: z.boolean(),
+      }),
+    },
+    403: { description: "A user caller cannot read the task's session" },
+    404: { description: "Task not found" },
+  },
+});
+
 const updateTaskProgressRoute = route({
   method: "post",
   path: "/api/tasks/{id}/progress",
@@ -749,16 +779,6 @@ const updateTaskTitleRoute = route({
     ungated: "mirrors the pre-RBAC PATCH /api/tasks/{id}/vcs sibling route: bearer auth only",
   },
 });
-
-/** True unless the request acts for a user who lacks write access to the task's session. */
-async function hasSessionWrite(
-  req: IncomingMessage,
-  myAgentId: string | undefined,
-  taskId: string,
-): Promise<boolean> {
-  const access = await sessionAccessFor(await resolveSessionActor(req, myAgentId), taskId);
-  return hasSessionAccess(access, "write");
-}
 
 async function canSteerTask(
   req: IncomingMessage,
@@ -1040,29 +1060,10 @@ export async function handleTasks(
       ? await getTaskById(parsed.body.parentTaskId)
       : null;
     // The child inherits the parent's thread context, so an agent caller must own or
-    // have created the parent. Operator and user callers keep their access.
+    // have created the parent, and a follow-up in someone else's session needs a
+    // write share. The same gate guards app actions that chain under a task.
     const principal = await resolveTaskWritePrincipal(req, myAgentId);
-    if (
-      parentTask &&
-      !can({
-        principal,
-        verb: "task.parent.attach",
-        resource: {
-          kind: "task",
-          taskId: parentTask.id,
-          requestedByUserId: parentTask.requestedByUserId,
-          creatorAgentId: parentTask.creatorAgentId,
-          agentId: parentTask.agentId,
-        },
-        source: "http",
-      }).allow
-    ) {
-      jsonError(res, `You don't have context for parent task ${parentTask.id}.`, 403);
-      return true;
-    }
-    // A follow-up in someone else's session needs a write share.
-    if (parentTask && !(await hasSessionWrite(req, myAgentId, parentTask.id))) {
-      jsonError(res, SESSION_WRITE_DENIED, 403);
+    if (parentTask && (await denyParentAttach(req, res, myAgentId, parentTask, principal))) {
       return true;
     }
     // A chat-sdk contextKey binds the task to a chat thread that its assignee and creator
@@ -1121,6 +1122,8 @@ export async function handleTasks(
           offeredTo: parsed.body.offeredTo || undefined,
           dir: parsed.body.dir || undefined,
           parentTaskId: parsed.body.parentTaskId || undefined,
+          // Human chat starts a new output contract; agent children keep inheriting.
+          inheritParentOutputSchema: principal.kind === "agent",
           source: parsed.body.source || "api",
           outputSchema: parsed.body.outputSchema || undefined,
           contextKey: parsed.body.contextKey || undefined,
@@ -1612,6 +1615,22 @@ export async function handleTasks(
       attachments,
       citations: await getTaskCitations(task.id),
     });
+    return true;
+  }
+
+  if (getTaskLineageRoute.match(req.method, pathSegments)) {
+    const parsed = await getTaskLineageRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    // Every task in the tree shares the session root, so the path posture covers them all.
+    const lineage = await getTaskLineage(parsed.params.id, {
+      maxNodes: parsed.query.maxNodes,
+      maxDepth: parsed.query.maxDepth,
+    });
+    if (!lineage) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    getTaskLineageRoute.respond(res, 200, lineage);
     return true;
   }
 

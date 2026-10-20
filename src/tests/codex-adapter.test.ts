@@ -2294,6 +2294,48 @@ describe("CodexSession session-end summarization", () => {
     expect(indexCalls.length).toBe(0);
   });
 
+  test.each(["true", "TRUE"])("SKIP_SESSION_SUMMARY=%s → no runSummarize call", async (value) => {
+    process.env.SKIP_SESSION_SUMMARY = value;
+    const events = buildSummaryEvents();
+
+    let runSummarizeCalls = 0;
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => {
+        runSummarizeCalls += 1;
+        return null;
+      },
+    };
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, `skip-${value}.log`),
+      cwd: "",
+    });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    expect(runSummarizeCalls).toBe(0);
+  });
+
+  test.each(["0", "false"])("SKIP_SESSION_SUMMARY=%s → summary still runs", async (value) => {
+    process.env.SKIP_SESSION_SUMMARY = value;
+    const events = buildSummaryEvents();
+
+    let runSummarizeCalls = 0;
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => {
+        runSummarizeCalls += 1;
+        return null;
+      },
+    };
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, `no-skip-${value}.log`),
+      cwd: "",
+    });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    expect(runSummarizeCalls).toBe(1);
+  });
+
   test("missing taskId → no runSummarize call, no POST", async () => {
     const events = buildSummaryEvents();
 

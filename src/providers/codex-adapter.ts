@@ -37,7 +37,7 @@ import {
   clampContextPercent,
   computeContextUsedUnified,
 } from "../utils/context-window";
-import { isEnvFlagEnabled } from "../utils/env-flag";
+import { isEnvFlagEnabled, isSessionSummarySkipped } from "../utils/env-flag";
 import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
@@ -1739,8 +1739,8 @@ export class CodexSession implements ProviderSession {
     } finally {
       // Session-end summarization. Pure addition for codex — no behavior to
       // preserve. Wrapped in its own try/catch so summary failure must NOT
-      // block the existing log/AGENTS.md cleanup below. Gate `SKIP_SESSION_SUMMARY=1`
-      // matches the parity convention used by the claude Stop hook + pi/opencode.
+      // block the existing log/AGENTS.md cleanup below. `SKIP_SESSION_SUMMARY` is
+      // read with `isSessionSummarySkipped`, the same as the claude Stop hook + pi/opencode.
       //
       // Skip the summary entirely when the session was aborted. The transcript
       // is incomplete, the LLM call would retry 3× through openrouter and
@@ -1751,7 +1751,7 @@ export class CodexSession implements ProviderSession {
         this.aborted ||
         this.abortController?.signal.aborted === true ||
         this.pendingResult?.exitCode === 130;
-      if (process.env.SKIP_SESSION_SUMMARY !== "1" && !sessionWasAborted) {
+      if (!isSessionSummarySkipped() && !sessionWasAborted) {
         try {
           await this.summarizeAtEnd();
         } catch (err) {
