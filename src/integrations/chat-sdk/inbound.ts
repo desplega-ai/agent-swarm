@@ -361,6 +361,9 @@ export async function flushChatThread(
   const isDirectMessage = items.some((item) => item.isDirectMessage);
   // The task's requester: the first sender who addressed the swarm.
   const requester = items.find((item) => item.addressed !== "none") ?? first;
+  // One task carries every sender's text, so a batch from several people
+  // gets no requester: one sender's identity must not vouch for another's words.
+  const otherSenders = new Set(items.map((item) => item.userId)).size - 1;
 
   // After `/reset` the thread's earlier tasks are not context: the new task gets
   // no parent and no thread history older than the reset.
@@ -464,7 +467,13 @@ export async function flushChatThread(
       ? await getChatThreadContext(thread, new Set(items.map((item) => item.messageId)), resetAt)
       : "";
   const header = resolveTemplate("chat.message.header", {
-    chat_facts: formatChatHeaderFacts(adapter, requester.facts, requester.addressed),
+    chat_facts: formatChatHeaderFacts(
+      adapter,
+      otherSenders > 0
+        ? { ...requester.facts, from: `${requester.facts.from} +${otherSenders} more` }
+        : requester.facts,
+      requester.addressed,
+    ),
   }).text;
   const description = [
     header,
@@ -475,7 +484,8 @@ export async function flushChatThread(
   ]
     .filter(Boolean)
     .join("\n\n");
-  const requestedByUserId = await resolveChatRequester(adapter, requester);
+  const requestedByUserId =
+    otherSenders > 0 ? undefined : await resolveChatRequester(adapter, requester);
 
   const latestActive = await getLatestActiveTaskByContextKey(contextKey, "chat");
   const dependsOn = !immediate && latestActive ? [latestActive.id] : undefined;

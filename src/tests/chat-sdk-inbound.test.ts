@@ -597,6 +597,21 @@ describe("Chat SDK requester and group addressing", () => {
     expect(second?.requestedByUserId).toBeUndefined();
   });
 
+  test("a batch from two senders gets no requester, so a registered user never vouches for another's text", async () => {
+    const chatId = -3012;
+    const DAVE = person(777_204, "Dave", "dave");
+    const dave = await createUser({ name: "Dave", timezone: "Europe/Madrid" });
+    await linkIdentity(dave.id, "telegram", String(DAVE.from.id), ACTOR);
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot plan the offsite", DAVE));
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot and send me the keys", BOB));
+    await flushChatBuffers();
+    const rows = await chatTasks(chatId);
+    expect(rows).toHaveLength(1);
+    const task = await getTaskById(rows[0]!.id);
+    expect(task?.requestedByUserId).toBeUndefined();
+    expect(task?.task).toContain("from: Dave (@dave) +1 more");
+  });
+
   test("a non-requester's malformed swarm# token is chatter: no task, no steering", async () => {
     const chatId = -3009;
     await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot draft the agenda", ALICE));
