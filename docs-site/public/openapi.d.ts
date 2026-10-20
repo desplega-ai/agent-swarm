@@ -5347,7 +5347,7 @@ export interface paths {
         put?: never;
         /**
          * Locked keep-warm refresh sweep across all Codex OAuth pool slots
-         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).
+         * @description Enumerates codex_oauth_* slots and refreshes any older than CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS (default 120 hours) through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).
          */
         post: {
             parameters: {
