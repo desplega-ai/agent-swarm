@@ -210,13 +210,13 @@ function clairicResult(answers: Record<string, unknown> = {}) {
       },
       repair_cost: {
         type: "estimate",
-        value: 180,
-        mean: 214.2,
-        median: 180,
-        p10: 90,
-        p90: 420,
-        p_below: 0,
-        p_above: 0,
+        value: 236,
+        mean: 236.26,
+        median: 213,
+        p10: 122,
+        p90: 370,
+        p_below: 4.4e-6,
+        p_above: 2.5e-6,
       },
       ...answers,
     },
@@ -224,6 +224,84 @@ function clairicResult(answers: Record<string, unknown> = {}) {
     usage: { state_tokens: 61, input_tokens: 655, output_tokens: 0, passes: 3 },
   };
 }
+
+/** `@cf/cloudflare/clairic` on 2026-10-20 for EMAIL and `fields`, verbatim. */
+const LIVE_CLOUDFLARE_RESPONSE = {
+  result: {
+    model: "clairic",
+    answers: {
+      order_id: {
+        type: "text",
+        p_null: 0.0019279655534774065,
+        span: [10, 17],
+        guess: "A-88412",
+        confidence: 0.9999996423721313,
+        value: "A-88412",
+      },
+      delivered_on: {
+        type: "date",
+        p_null: 0.0000010288927114743274,
+        guess: "2026-09-28",
+        confidence: 0.9999949932298761,
+        value: "2026-09-28",
+      },
+      amount_paid: {
+        type: "number",
+        p_null: 3.2816508621635876e-8,
+        guess: 701.1,
+        confidence: 0.9999686488145774,
+        value: 701.1,
+      },
+      days_since_delivery: {
+        type: "duration",
+        p_null: 3.2392144078130514e-8,
+        unit: "days",
+        guess: 11,
+        confidence: 0.9955674593910555,
+        value: 11,
+      },
+      damage: {
+        type: "list",
+        value: ["cracked screen", "dented corner"],
+        spans: [
+          [50, 64],
+          [71, 84],
+        ],
+        confidence: 0.6304950857959576,
+      },
+      tracking_number: {
+        type: "text",
+        p_null: 0.9999991655349731,
+        span: [10, 17],
+        guess: "A-88412",
+        confidence: 0.9594870209693909,
+        value: null,
+      },
+      repair_cost: {
+        type: "estimate",
+        value: 236,
+        mean: 236.25989418083398,
+        median: 213,
+        p10: 122,
+        p90: 370,
+        p_below: 0.0000044131897993793245,
+        p_above: 0.0000025400161121069686,
+      },
+    },
+    truncated: false,
+    usage: {
+      state_tokens: 74,
+      image_tokens: 0,
+      schema_tokens: 517,
+      input_tokens: 739,
+      output_tokens: 0,
+      passes: 3,
+    },
+  },
+  success: true,
+  errors: [],
+  messages: [],
+};
 
 function envelope(result: unknown = clairicResult()) {
   return { result, success: true, errors: [], messages: [] };
@@ -265,7 +343,25 @@ describe("system-one-extraction on Cloudflare Clairic", () => {
       p_null: 1,
       guess: "$52.10",
     });
-    expect(output.answers.repair_cost).toMatchObject({ median: 180, p10: 90, p90: 420 });
+    expect(output.answers.repair_cost).toMatchObject({
+      value: 236,
+      median: 213,
+      p10: 122,
+      p90: 370,
+    });
+  });
+
+  test("accepts a recorded live Workers AI response unchanged", async () => {
+    const { executor } = makeExecutor([jsonResponse(LIVE_CLOUDFLARE_RESPONSE)]);
+    const result = await run(executor, config());
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") throw new Error("unreachable");
+    const output = SystemOneExtractionOutputSchema.parse(result.output);
+    expect(output.usage).toEqual({ input_tokens: 739, output_tokens: 0 });
+    expect(output.answers.tracking_number).toMatchObject({ value: null, guess: "A-88412" });
+    expect(output.answers.damage).toMatchObject({ confidence: 0.6304950857959576 });
+    expect(output.answers.repair_cost).toMatchObject({ value: 236, median: 213 });
   });
 
   test("structured state is sent as JSON text and images ride along", async () => {

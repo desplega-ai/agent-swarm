@@ -237,7 +237,7 @@ describe("SystemOneExtractionOutput", () => {
             order_id: { type: "text", value: "A-88412", confidence: 0.99 },
             damage: { type: "list", value: ["cracked screen", "dented corner"] },
             tracking_number: { type: "text", value: null, guess: "$52.10", p_null: 1 },
-            repair_cost: { type: "estimate", value: 180, median: 180, p10: 90, p90: 420 },
+            repair_cost: { type: "estimate", value: 236, median: 213, p10: 122, p90: 370 },
           },
           usage: { input_tokens: 655, output_tokens: 0 },
         })}
@@ -248,7 +248,7 @@ describe("SystemOneExtractionOutput", () => {
     expect(html).toContain("cracked screen, dented corner");
     expect(html).toContain("not in the input");
     expect(html).toContain("best guess $52.10");
-    expect(html).toContain("180 (p10 90 – p90 420)");
+    expect(html).toContain("213 (p10 122 – p90 370)");
     expect(html).toContain("655 in");
   });
 });

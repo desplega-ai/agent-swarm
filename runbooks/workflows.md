@@ -590,18 +590,23 @@ Field specs use Clairic's option names and are sent unchanged. Each type takes o
 {
   "model": "clairic",
   "answers": {
-    "order_id": { "type": "text", "value": "A-88412", "guess": "A-88412", "p_null": 0.0000034, "confidence": 0.99996, "span": [10, 17] },
-    "tracking_number": { "type": "text", "value": null, "guess": "$52.10", "p_null": 1, "confidence": 0.416, "span": [106, 112] },
-    "damage": { "type": "list", "value": ["cracked screen", "dented corner"], "spans": [[50, 64], [71, 84]] },
-    "repair_cost": { "type": "estimate", "value": 180, "median": 180, "p10": 90, "p90": 420, "p_below": 0, "p_above": 0 }
+    "order_id": { "type": "text", "value": "A-88412", "guess": "A-88412", "p_null": 0.0019, "confidence": 0.9999996, "span": [10, 17] },
+    "amount_paid": { "type": "number", "value": 701.1, "guess": 701.1, "p_null": 0.00000003, "confidence": 0.99997 },
+    "days_since_delivery": { "type": "duration", "value": 11, "guess": 11, "unit": "days", "p_null": 0.00000003, "confidence": 0.9956 },
+    "tracking_number": { "type": "text", "value": null, "guess": "A-88412", "p_null": 0.9999992, "confidence": 0.959, "span": [10, 17] },
+    "damage": { "type": "list", "value": ["cracked screen", "dented corner"], "spans": [[50, 64], [71, 84]], "confidence": 0.63 },
+    "repair_cost": { "type": "estimate", "value": 236, "mean": 236.26, "median": 213, "p10": 122, "p90": 370, "p_below": 0.0000044, "p_above": 0.0000025 }
   },
-  "usage": { "input_tokens": 655, "output_tokens": 0 },
+  "usage": { "input_tokens": 739, "output_tokens": 0 },
   "truncated": false,
   "requestId": "<cf-ray>"
 }
 ```
 
-- `value` is `null` when the input does not determine the field. `guess` and `confidence` still describe what the model saw, so `tracking_number` above guessed `$52.10` at 0.42 and returned null.
+The answers above are a live `@cf/cloudflare/clairic` response to the damaged-order email (`delivered_on` omitted), trimmed to fewer digits.
+
+- `value` is `null` when the input does not determine the field. `guess` and `confidence` still describe what the model saw, so `tracking_number` above guessed the order number and returned null because `p_null` is above `null_threshold`.
+- An estimate's `value` is the rounded `mean`, not the `median`. Branch on `median`, `p10`, or `p90` when the spread matters.
 - Every declared field must come back once, with its declared type and a value of that type (strings for `text`/dates/times, numbers for `number`/`duration`, integers when `integer` is set, typed list items, estimate `median`/`p10`/`p90`, forecast arrays of `horizon` steps). Anything else fails the step with `SystemOne response failed validation: ...`. Unknown answer keys are dropped.
 - There is no `humanReview`. A reviewer of an extracted value has to type a replacement of the right type (a date, a duration, a quantile), which the approval card has no inputs for. Route a low `confidence` or a high `p_null` to `human-in-the-loop` with `property-match`.
 
