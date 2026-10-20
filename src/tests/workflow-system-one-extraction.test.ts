@@ -753,6 +753,43 @@ describe("system-one-extraction in a workflow definition", () => {
     expect(parsed.fields.note).toEqual({ type: "text", instructions: "the order id" });
   });
 
+  test("a {{token}} does not hide a whole-config limit at save", () => {
+    const save = (overrides: Record<string, unknown>) =>
+      validateDefinition({ nodes: [node({ config: config(overrides) })] }, registry());
+    const manyFields = (count: number) =>
+      Object.fromEntries(
+        Array.from({ length: count }, (_, i) => [
+          `f${i}`,
+          i === 0 ? { type: "text", instructions: "{{hint}}" } : { type: "text" },
+        ]),
+      );
+    const image = "data:image/png;base64,AAAA";
+
+    // Regression: each of these saved valid and only failed the executor's input check at run time.
+    const refused: Array<[string, Record<string, unknown>, string]> = [
+      ["65 fields, one templated", { fields: manyFields(65) }, "at most 64 fields"],
+      ["5 images, one templated", { images: [image, image, image, image, "{{img}}"] }, "images"],
+      ["unknown templated key", { extra: "{{hint}}" }, "extra"],
+    ];
+    for (const [label, overrides, message] of refused) {
+      const result = save(overrides);
+      expect({ label, valid: result.valid }).toEqual({ label, valid: false });
+      expect(result.errors.join(";")).toContain(message);
+    }
+
+    // Templated values that can still resolve to a valid config keep saving.
+    const accepted: Array<[string, Record<string, unknown>]> = [
+      ["64 fields, one templated", { fields: manyFields(64) }],
+      ["templated images", { state: "", images: [image, "{{img}}"] }],
+      ["whole-token images", { images: "{{imgs}}" }],
+      ["templated options", { model: "{{m}}", timeoutMs: "{{t}}", referenceDate: "{{d}}" }],
+    ];
+    for (const [label, overrides] of accepted) {
+      const result = save(overrides);
+      expect({ label, errors: result.errors }).toEqual({ label, errors: [] });
+    }
+  });
+
   test("a whole-token state keeps its JSON type and an unresolved token is strict", () => {
     const resolved = interpolateNodeConfig(node({ config: config({ state: "{{email}}" }) }), {
       email: { subject: "Broken", body: EMAIL },

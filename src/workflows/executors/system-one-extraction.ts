@@ -425,6 +425,63 @@ function templatedFieldViolations(nodeId: string, fields: Record<string, unknown
   return violations;
 }
 
+/** A 3-byte PNG data URL that stands in for a templated image. */
+const STAND_IN_IMAGE = "data:image/png;base64,AAAA";
+
+/**
+ * The config with every {{token}} replaced by a value the schema accepts:
+ * templated known options are dropped (each is optional or has a default),
+ * templated `state` and `instructions` become text, and templated images become
+ * one small image. Unknown keys stay, so the strict schema still refuses them.
+ */
+function standInConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const known = new Set(Object.keys(SystemOneExtractionConfigSchema.shape));
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (!hasToken(value) || key === "fields" || !known.has(key)) {
+      out[key] = value;
+    } else if (key === "state") {
+      out.state = typeof value === "string" ? "x" : value;
+    } else if (key === "images" && Array.isArray(value)) {
+      out.images = value.map((image) => (hasToken(image) ? STAND_IN_IMAGE : image));
+    }
+  }
+  if (isRecord(config.fields)) {
+    out.fields = Object.fromEntries(
+      Object.entries(config.fields).map(([id, spec]) => [
+        id,
+        isRecord(spec) && hasToken(spec) ? { ...spec, instructions: "x" } : spec,
+      ]),
+    );
+  }
+  return out;
+}
+
+/**
+ * Whole-config rules hidden by a {{token}}. The generic config check skips an
+ * issue whose value holds a token, so a limit on `fields`, `images` or the
+ * config itself (field count, image count, unknown keys) disappears once any
+ * part of it is templated. Parse the config with type-valid stand-ins and
+ * report exactly those issues.
+ */
+function templatedConfigViolations(nodeId: string, config: Record<string, unknown>): string[] {
+  if (!hasToken(config)) return [];
+  const parsed = SystemOneExtractionConfigSchema.safeParse(standInConfig(config));
+  if (parsed.success) return [];
+  const violations: string[] = [];
+  for (const issue of parsed.error.issues) {
+    let value: unknown = config;
+    for (const segment of issue.path) {
+      value = isRecord(value) || Array.isArray(value) ? (value as never)[segment] : undefined;
+    }
+    // A token-free value is reported by the generic check; a token itself resolves at run time.
+    if (!hasToken(value) || typeof value === "string") continue;
+    const path = ["config", ...issue.path.map(String)].join(".");
+    violations.push(`Node "${nodeId}" (system-one-extraction) ${path}: ${issue.message}`);
+  }
+  return violations;
+}
+
 /** Static-shape rules a per-field schema cannot express: field ids and types, and the provider, are static. */
 export function systemOneExtractionStaticShapeViolations(node: {
   id: string;
@@ -449,6 +506,9 @@ export function systemOneExtractionStaticShapeViolations(node: {
     violations.push(
       `Node "${node.id}" (system-one-extraction) config.provider must be a literal (${SYSTEM_ONE_EXTRACT_PROVIDER_IDS.join(", ")}), not a {{token}}: the provider decides which credential is checked before the run starts`,
     );
+  }
+  if (violations.length === 0) {
+    violations.push(...templatedConfigViolations(node.id, node.config));
   }
   return violations;
 }
