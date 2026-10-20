@@ -9,6 +9,7 @@ import { handleSessions } from "../http/sessions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { ACPAdapter } from "../providers/acp-adapter";
 import { setRequestAuth } from "../utils/request-auth-context";
+import { ACP_SDK_PATH, serveFakeAcpAgent } from "./acp-fake-agent";
 import { listenOnFreePort } from "./test-net";
 import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
@@ -69,12 +70,11 @@ for (const setupFails of [false, true]) {
       const api = await startApi(resolveRevoke);
       const script = join(tmpdir(), `runtime-child-${crypto.randomUUID()}.ts`);
       const capture = `${script}.auth`;
-      const sdk = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
       await Bun.write(
         script,
         `
 import { Readable, Writable } from "node:stream";
-import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from ${JSON.stringify(sdk)};
+import { PROTOCOL_VERSION, agent, methods, ndJsonStream } from ${JSON.stringify(ACP_SDK_PATH)};
 class Agent {
   async initialize() {
     return { protocolVersion: PROTOCOL_VERSION, agentCapabilities: { loadSession: false } };
@@ -89,7 +89,7 @@ class Agent {
   async prompt() { return { stopReason: "end_turn" }; }
   async cancel() {}
 }
-new AgentSideConnection(() => new Agent(), ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
+${serveFakeAcpAgent("Agent")}
 `,
       );
       try {

@@ -30,6 +30,7 @@ import {
 } from "../providers/grok-adapter";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { getModelAwareCredentialVars } from "../utils/credentials";
+import { ACP_SDK_PATH, serveFakeAcpAgent } from "./acp-fake-agent";
 
 /**
  * Recorded from a live `grok agent stdio` session (Grok CLI 1.0.46,
@@ -39,7 +40,6 @@ import { getModelAwareCredentialVars } from "../utils/credentials";
  */
 const FIXTURE = join(import.meta.dir, "fixtures", "grok", "acp-updates-recorded.jsonl");
 const PROMPT_META = join(import.meta.dir, "fixtures", "grok", "prompt-response-meta.json");
-const SDK_PATH = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
 
 const tmpDirs: string[] = [];
 
@@ -129,7 +129,7 @@ function writeFakeGrok(
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
-import { AgentSideConnection, PROTOCOL_VERSION, RequestError, ndJsonStream } from "${SDK_PATH}";
+import { PROTOCOL_VERSION, RequestError, agent, methods, ndJsonStream } from "${ACP_SDK_PATH}";
 const home = process.env.GROK_HOME ?? "";
 const read = (name) => (existsSync(join(home, name)) ? readFileSync(join(home, name), "utf8") : null);
 const capture = {
@@ -160,7 +160,7 @@ class FakeGrok {
   }
   async cancel() { this.cancelled?.(); }
 }
-new AgentSideConnection((c) => new FakeGrok(c), ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
+${serveFakeAcpAgent("FakeGrok")}
 `,
   );
   const binPath = join(dir, "grok");
