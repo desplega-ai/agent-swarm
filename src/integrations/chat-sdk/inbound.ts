@@ -141,10 +141,12 @@ export async function handleChatInbound(
   }
 
   // A thread with messages already waiting keeps its order: append, do not steer past them.
+  // Another sender's message takes the buffer, so it gets its own header and requester.
   if (!immediate && attachments.length === 0 && text && !isChatThreadBuffered(thread.id)) {
     const steering = await requestChatThreadSteering({
       contextKey: chatSdkContextKey(thread.id),
       message: text,
+      resolveSender: () => resolveChatSender(adapter, message.author.userId),
     });
     if (steering) {
       console.log(
@@ -238,15 +240,24 @@ async function resolveChatRequester(
   adapter: string,
   item: ChatBufferedMessage,
 ): Promise<string | undefined> {
+  return resolveChatSender(adapter, item.userId, {
+    sampleEventType: "chat.message",
+    sampleContext: `${item.facts.from}: ${item.text}`,
+  });
+}
+
+/** {@link resolveChatRequester} for a bare sender id; records it as unmapped only when `sample` is set. */
+async function resolveChatSender(
+  adapter: string,
+  userId: string,
+  sample?: { sampleEventType: string; sampleContext: string },
+): Promise<string | undefined> {
   // Telegram `sender_chat` posts (anonymous admins, linked channels) are no person.
-  if (!item.userId || item.userId.startsWith("chat:")) return undefined;
+  if (!userId || userId.startsWith("chat:")) return undefined;
   try {
-    const resolution = await resolveIdentity(adapter, item.userId);
+    const resolution = await resolveIdentity(adapter, userId);
     if (resolution.status === "resolved") return resolution.userId;
-    await recordUnmappedIdentity(adapter, item.userId, {
-      sampleEventType: "chat.message",
-      sampleContext: `${item.facts.from}: ${item.text}`,
-    });
+    if (sample) await recordUnmappedIdentity(adapter, userId, sample);
   } catch (error) {
     console.warn(`[chat-sdk] Could not resolve the requester: ${errorMessage(error)}`);
   }

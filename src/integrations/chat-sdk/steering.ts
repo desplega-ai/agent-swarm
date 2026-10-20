@@ -14,15 +14,23 @@ export interface ChatThreadSteeringResult {
  * rule as the Slack default (`SLACK_THREAD_STEERING=lead`, queue mode) as
  * constants: `isSteeringEnabled()` is the only switch. Returns null when the
  * caller should buffer the message into a follow-up task instead.
+ *
+ * Only the task's own requester steers it: a steering row carries the task's
+ * attribution, and an undeliverable one is promoted to a follow-up of this
+ * task. `resolveSender` returns the sender's canonical user, undefined when
+ * unknown; it runs only when there is a task to steer.
  */
 export async function requestChatThreadSteering(args: {
   contextKey: string;
   message: string;
+  resolveSender: () => Promise<string | undefined>;
 }): Promise<ChatThreadSteeringResult | null> {
   if (!isSteeringEnabled()) return null;
 
   const task = await getLatestLeadTaskByContextKey(args.contextKey, "chat");
   if (!task || task.status !== "in_progress") return null;
+  const senderUserId = await args.resolveSender();
+  if (senderUserId !== task.requestedByUserId) return null;
 
   try {
     const result = await requestSteering({
@@ -32,6 +40,7 @@ export async function requestChatThreadSteering(args: {
       onUnsupported: "degrade",
       source: "chat",
       createdByKind: "user",
+      createdByUserId: senderUserId,
     });
     return { task, result };
   } catch (error) {

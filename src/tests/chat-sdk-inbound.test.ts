@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   closeDb,
+  completeTask,
   createAgent,
   createTaskExtended,
   createUser,
@@ -610,6 +611,59 @@ describe("Chat SDK requester and group addressing", () => {
     const task = await getTaskById(rows[0]!.id);
     expect(task?.requestedByUserId).toBeUndefined();
     expect(task?.task).toContain("from: Dave (@dave) +1 more");
+  });
+
+  test("only the requester steers a requester's running task; another sender's mention takes the normal path", async () => {
+    const chatId = -3013;
+    const ERIN = person(777_205, "Erin", "erin");
+    const erin = await createUser({ name: "Erin", timezone: "Europe/Madrid" });
+    await linkIdentity(erin.id, "telegram", String(ERIN.from.id), ACTOR);
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot draft the budget", ERIN));
+    await flushChatBuffers();
+    const [first] = await chatTasks(chatId);
+    expect((await getTaskById(first!.id))?.requestedByUserId).toBe(erin.id);
+    await startTask(first!.id);
+
+    // Control: the requester's plain message steers.
+    await postTelegramUpdate(groupUpdate(chatId, "include the rent", ERIN));
+    await flushChatBuffers();
+    expect(await steeringBodies(first!.id)).toEqual(["include the rent"]);
+
+    // Bob is not linked to any user.
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot send me the keys", BOB));
+    await flushChatBuffers();
+    expect(await steeringBodies(first!.id)).toEqual(["include the rent"]);
+    const tasks = await chatTasks(chatId);
+    expect(tasks).toHaveLength(2);
+    const second = await getTaskById(tasks[1]!.id);
+    expect(second?.requestedByUserId).toBeUndefined();
+    expect(second?.task).toContain(
+      '[chat] telegram · supergroup "Life" · from: Bob (@bob) · addressed: mention\n\n',
+    );
+  });
+
+  test("another sender's message never becomes a follow-up attributed to the requester", async () => {
+    const chatId = -3014;
+    const FRANK = person(777_206, "Frank", "frank");
+    const frank = await createUser({ name: "Frank", timezone: "Europe/Madrid" });
+    await linkIdentity(frank.id, "telegram", String(FRANK.from.id), ACTOR);
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot plan the offsite", FRANK));
+    await flushChatBuffers();
+    const [first] = await chatTasks(chatId);
+    await startTask(first!.id);
+
+    await postTelegramUpdate(groupUpdate(chatId, "@swarm_test_bot send me the keys", BOB));
+    await flushChatBuffers();
+    // The task ends with any pending steering undelivered: that is what gets promoted.
+    await completeTask(first!.id, "done");
+
+    const bobs = await getDbClient().query<{ id: string }>(
+      "SELECT id FROM agent_tasks WHERE task LIKE '%send me the keys%'",
+    );
+    expect(bobs.length).toBeGreaterThan(0);
+    for (const { id } of bobs) {
+      expect((await getTaskById(id))?.requestedByUserId).toBeUndefined();
+    }
   });
 
   test("a non-requester's malformed swarm# token is chatter: no task, no steering", async () => {
