@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.4.3] - 2026-10-20
+
+### Changed
+- Worker image bumps claude-code to 2.1.304, amp to 0.0.1792470027-g8c393d and Copilot CLI to 1.0.100 (#2284).
+- Docs: live-app follow-up edits get safeguards that preserve control numbers and verify fresh screenshots (#2282); the TLA+ heartbeat and workflows specs match main again (#2285).
+
+### Fixed
+- Skills: `code-quality` no longer tells reviewers to run the `review-post-gate` and `pr-review-ledger-write` scripts, which no release seeds, so PR reviews finish on every deployment. A new test fails when a shipped skill names a script the release does not seed (#2287).
+- GitHub: boolean configuration flags honor `FALSE`, `False`, `0` and surrounding whitespace, so disabling cancellation or no-op approval skipping takes effect (#2281).
+- Harness: every harness reads `SKIP_SESSION_SUMMARY` the same way; `0` or `false` no longer skips the summary and codex honors `true` (#2283).
+
 ## [2.4.2] - 2026-10-19
 
 ### Added

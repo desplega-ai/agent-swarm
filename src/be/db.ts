@@ -813,6 +813,9 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
  * subsequent re-defers to the latest wake, keeping the original card open.
  * `deferredAt` (not the `deferred` tag) identifies the deferring task,
  * because the wake-up task inherits the tag.
+ *
+ * CROSS JOIN and `+wake.taskType` pin the join order to the small chain. Without
+ * them the planner drives the outer join from every terminal task (~1s at 150k tasks).
  */
 export async function getResolvableDeferralOutcomes(
   limit = 50,
@@ -826,13 +829,13 @@ export async function getResolvableDeferralOutcomes(
            AND card.ts NOT LIKE 'pending:%'
          UNION
          SELECT chain.card_id, wake.id FROM chain
-         JOIN agent_tasks parent ON parent.id = chain.task_id AND parent.deferredAt IS NOT NULL
-         JOIN agent_tasks wake ON wake.parentTaskId = parent.id AND wake.taskType = 'deferred'
+         CROSS JOIN agent_tasks parent ON parent.id = chain.task_id AND parent.deferredAt IS NOT NULL
+         CROSS JOIN agent_tasks wake ON wake.parentTaskId = parent.id AND +wake.taskType = 'deferred'
        )
        SELECT card.*, wake.id AS wake_task_id
        FROM chain
-       JOIN slack_messages card ON card.id = chain.card_id
-       JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
+       CROSS JOIN slack_messages card ON card.id = chain.card_id
+       CROSS JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
        WHERE card.kind = 'outcome'
          AND card.finalized_at IS NOT NULL
          AND card.deferral_resolved_at IS NULL
