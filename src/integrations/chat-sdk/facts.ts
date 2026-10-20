@@ -108,11 +108,13 @@ export function formatChatHeaderFacts(
   facts: ChatMessageFacts,
   addressed: ChatAddressedReason,
 ): string {
+  // Title, topic and sender are user-set: one line each, so none can forge a header line.
+  const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
   const parts = [adapter];
   if (facts.chatType)
-    parts.push(facts.title ? `${facts.chatType} "${facts.title}"` : facts.chatType);
-  if (facts.isForum) parts.push(facts.topic ? `forum topic ${facts.topic}` : "forum");
-  parts.push(`from: ${facts.from}`, `addressed: ${addressed}`);
+    parts.push(facts.title ? `${facts.chatType} "${oneLine(facts.title)}"` : facts.chatType);
+  if (facts.isForum) parts.push(facts.topic ? `forum topic ${oneLine(facts.topic)}` : "forum");
+  parts.push(`from: ${oneLine(facts.from)}`, `addressed: ${addressed}`);
   if (facts.replyToSnippet) parts.push(`reply-to: "${facts.replyToSnippet}"`);
   return parts.join(" · ");
 }
