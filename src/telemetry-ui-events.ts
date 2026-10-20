@@ -15,6 +15,7 @@ interface PropertySpec {
   minimum?: number;
   required?: boolean;
   nullable?: boolean;
+  items?: PropertySpec;
 }
 
 interface CatalogEntry {
@@ -62,8 +63,8 @@ export function uiEventEmitter(event: string): string | undefined {
 }
 
 function resolveSpec(spec: PropertySpec): PropertySpec {
-  if (!spec.ref) return spec;
-  return { ...file.definitions[spec.ref], ...spec };
+  const resolved = spec.ref ? { ...file.definitions[spec.ref], ...spec } : spec;
+  return resolved.items ? { ...resolved, items: resolveSpec(resolved.items) } : resolved;
 }
 
 function typeMatches(type: string | undefined, value: unknown): boolean {
@@ -116,6 +117,12 @@ export function validateUiEvent(event: string, properties: Record<string, unknow
     }
     if (spec.enum && !spec.enum.includes(value as string)) {
       problems.push(`"${key}" must be one of ${spec.enum.join(", ")}`);
+    }
+    if (Array.isArray(value) && spec.items?.enum) {
+      const allowed = spec.items.enum;
+      if (value.some((item) => !allowed.includes(item))) {
+        problems.push(`"${key}" items must be one of ${allowed.join(", ")}`);
+      }
     }
     if (typeof spec.minimum === "number" && typeof value === "number" && value < spec.minimum) {
       problems.push(`"${key}" must be at least ${spec.minimum}`);

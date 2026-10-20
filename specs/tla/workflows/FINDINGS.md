@@ -428,3 +428,35 @@ holds has the same distinct-state count. `src/tests/workflow-tla-races.test.ts` 
 | `Probe-input-await.cfg` | CX6 found | 416 | 12 |
 | `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,178 / 13,005 | 19 / - |
 | `Probe-child-run.cfg` / control | holds / CX12 found | 14,004 / 145,327 | - / 34 |
+
+## Sync with #2257 and #2262 (`main` @ `746b6bb81`)
+
+#2257 adds a run-status check to `checkpointPortStepAndResolveSuccessors`: the claim now
+re-reads the run inside its transaction and claims only while the run is `waiting` or
+`running`. With `ChildRunResume`, `E2` and `H11` carry that guard, so a child resume no longer
+completes its step and sets a `failed` run back to `running` after its pre-check passed. Its
+other change, `recoverResolvedWaitState`, replays a wait resolved before a crash; wait nodes
+are not modelled. #2262 gives an agent-task node without `retry` one retry when its task was
+cut by a supersede. Every model branch already has a retry policy (`MaxRetries >= 1`), so
+`ER` and `H7R` already over-approximate it, and the claim transaction is unchanged.
+
+Only `Probe-child-run.cfg` sets `ChildRunResume`, so it is the only config whose state space
+changes (14,004 to 13,564 distinct states, still holds). Its converging variant also holds,
+107,448 distinct states. Every other config gives the same verdict as on `ba5bb0d79`, and every
+other config that holds has the same distinct-state count. `src/tests/workflow-tla-races.test.ts`
++ `src/tests/workflow-sub-workflow.test.ts`: 21 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 23,675 | 23 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 16,905 | 19 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 364 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,708 / 3,170 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 2,227 / 2,143 / 33,024 / 7,392 / 333 / 1,235 | 22 / 20 / 29 / 32 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,262 | - / 20 |
+| `Probe-task-retry.cfg` | CX12 found | 581,380 | 34 |
+| `Probe-cancel-finalize.cfg` | CX13 found | 591 | 17 |
+| `Probe-input-await.cfg` | CX6 found | 480 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,204 / 13,005 | 20 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 13,564 / 207,856 | - / 34 |

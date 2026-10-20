@@ -1212,6 +1212,9 @@
     },
     "readAt": {
       "exempt": "timestamp"
+    },
+    "lastReadAt": {
+      "exempt": "timestamp"
     }
   },
   "inbox_messages": {
@@ -2614,6 +2617,35 @@
       "exempt": "timestamp"
     }
   },
+  "session_shares": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "rootTaskId": {
+      "exempt": "identifier"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "access": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "revokedAt": {
+      "exempt": "timestamp"
+    },
+    "revokedBy": {
+      "exempt": "identifier"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
   "session_tokens": {
     "runtimeId": {
       "exempt": "identifier"
@@ -2622,6 +2654,9 @@
       "exempt": "identifier"
     },
     "controllerId": {
+      "exempt": "identifier"
+    },
+    "parentTokenId": {
       "exempt": "identifier"
     },
     "id": {

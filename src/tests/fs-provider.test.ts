@@ -198,6 +198,37 @@ describe("AgentFsProvider", () => {
     expect(calls[0]?.init.body).toBeInstanceOf(Uint8Array);
   });
 
+  test.each([
+    ["ASCII string", "hello", undefined, 5],
+    ["UTF-8 string", "é🐝", undefined, 6],
+    ["empty string", "", undefined, 0],
+    ["typed-array view", new Uint8Array([0, 1, 2, 3]).subarray(1, 3), undefined, 2],
+    ["ArrayBuffer", new ArrayBuffer(4), undefined, 4],
+    ["Blob", new Blob(["hello"]), undefined, 5],
+    ["empty body", new Uint8Array(), undefined, 0],
+    ["explicit zero", new Uint8Array([1]), 0, 0],
+    ["sized stream", new ReadableStream(), 123, 123],
+    ["unknown stream", new ReadableStream(), undefined, undefined],
+  ] as const)("upload size uses the %s rather than the JSON response", async (_, body, sizeBytes, expected) => {
+    const provider = new AgentFsProvider({
+      apiUrl: "http://agent-fs.test",
+      apiKey: "af_test",
+      orgId: "org-1",
+      driveId: "drive-1",
+      fetchImpl: (async () =>
+        new Response('{"version":7}', {
+          headers: { "content-type": "application/json", "content-length": "13" },
+        })) as typeof fetch,
+    });
+
+    const result = await provider.upload({ taskId: "task-1", name: "file.bin" }, body, {
+      sizeBytes,
+    });
+
+    expect(result.sizeBytes).toBe(expected);
+    expect(result.contentType).toBeUndefined();
+  });
+
   test("dispatches capability methods through the ops endpoint", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     const provider = new AgentFsProvider({

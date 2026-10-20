@@ -78,6 +78,7 @@ afterAll(async () => {
 });
 
 describe("migration 196 skill invocations", () => {
+  // The full migration chain on a fresh DB can be slow under CI shard load.
   test("fresh DB has the counter columns and the invocations table", () => {
     const db = new Database(MIGRATION_DB_PATH, { create: true });
     try {
@@ -109,8 +110,9 @@ describe("migration 196 skill invocations", () => {
     } finally {
       db.close();
     }
-  });
+  }, 30_000);
 
+  // The full migration chain on a fresh DB can be slow under CI shard load.
   test("existing DB keeps its skills and starts them at zero", async () => {
     await removeDb(MIGRATION_DB_PATH);
     const db = new Database(MIGRATION_DB_PATH, { create: true });
@@ -143,7 +145,7 @@ describe("migration 196 skill invocations", () => {
     } finally {
       db.close();
     }
-  });
+  }, 30_000);
 });
 
 describe("skill.invoke ingestion", () => {

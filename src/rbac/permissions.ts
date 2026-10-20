@@ -33,6 +33,10 @@ export const PERMISSIONS = {
     description: "View or diff another agent's context history.",
     namespace: "agent",
   },
+  "agent.token.manage": {
+    description: "Mint, rotate, or revoke an agent-bound worker token.",
+    namespace: "agent",
+  },
   "task.cancel.any": {
     description: "Cancel any task (beyond tasks the caller created).",
     namespace: "task",
@@ -87,6 +91,15 @@ export const PERMISSIONS = {
   "task.progress.write": {
     description:
       "Write a task's progress, status, or output (its assignee, a lead, a human, or anyone while unassigned).",
+    namespace: "task",
+  },
+  "session.share": {
+    description:
+      "Change who can view or edit a session the principal owns (the owner check runs in the handler).",
+    namespace: "task",
+  },
+  "session.presence": {
+    description: "Join the presence room of a session the principal can view.",
     namespace: "task",
   },
   "favorite.write.own": {

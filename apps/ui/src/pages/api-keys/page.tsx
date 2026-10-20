@@ -24,7 +24,7 @@ import {
   useSetApiKeyName,
 } from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { isSubscriptionKeyType, PlanPicker } from "@/components/shared/plan-picker";
 import { ProviderIcon } from "@/components/shared/provider-icon";
@@ -353,6 +353,7 @@ export default function ApiKeysPage() {
       {
         field: "provider",
         headerName: "Provider",
+        context: HIDE_WHEN_COMPACT,
         width: 140,
         cellRenderer: (params: { value: string }) => (
           <span className="inline-flex items-center gap-1.5 text-foreground">
@@ -364,6 +365,7 @@ export default function ApiKeysPage() {
       {
         field: "keyType",
         headerName: "Type",
+        context: HIDE_WHEN_COMPACT,
         width: 180,
         cellRenderer: (params: { value: string }) => {
           const meta = getKeyTypeMeta(params.value);
@@ -378,6 +380,7 @@ export default function ApiKeysPage() {
       {
         field: "plan",
         headerName: "Plan",
+        context: HIDE_WHEN_COMPACT,
         width: 300,
         sortable: false,
         cellRenderer: (params: { data: ApiKeyStatus | undefined }) => {
@@ -405,6 +408,7 @@ export default function ApiKeysPage() {
       {
         field: "keySuffix",
         headerName: "Key Suffix",
+        context: HIDE_WHEN_COMPACT,
         width: 120,
         cellRenderer: (params: { value: string }) => (
           <span className="font-mono text-muted-foreground">...{params.value}</span>
@@ -413,6 +417,7 @@ export default function ApiKeysPage() {
       {
         field: "keyIndex",
         headerName: "Index",
+        context: HIDE_WHEN_COMPACT,
         width: 80,
         cellRenderer: (params: { value: number }) => (
           <span className="font-mono text-xs">{params.value}</span>
@@ -434,6 +439,7 @@ export default function ApiKeysPage() {
       {
         field: "rateLimitedUntil",
         headerName: "Rate Limit Expiry",
+        context: HIDE_WHEN_COMPACT,
         width: 150,
         cellRenderer: (params: { value: string | null; data: ApiKeyStatus | undefined }) => {
           if (params.data?.status !== "rate_limited")
@@ -448,8 +454,11 @@ export default function ApiKeysPage() {
       {
         field: "rateLimitWindows",
         headerName: "Provider Windows",
+        context: HIDE_WHEN_COMPACT,
         minWidth: 260,
         flex: 1,
+        // Object-valued: opt out of AG Grid's cell-type inference, which otherwise warns #48 (no value formatter).
+        cellDataType: false,
         cellRenderer: (params: { value: ApiKeyStatus["rateLimitWindows"] | undefined }) => (
           <RateLimitWindowsCell windows={params.value} />
         ),
@@ -457,6 +466,7 @@ export default function ApiKeysPage() {
       {
         field: "totalUsageCount",
         headerName: "Usage",
+        context: HIDE_WHEN_COMPACT,
         width: 90,
         cellRenderer: (params: { value: number }) => (
           <span className="font-mono text-xs">{params.value.toLocaleString()}</span>
@@ -465,6 +475,7 @@ export default function ApiKeysPage() {
       {
         field: "rateLimitCount",
         headerName: "Rate Limits",
+        context: HIDE_WHEN_COMPACT,
         width: 110,
         cellRenderer: (params: { value: number }) => (
           <span className={cn("font-mono text-xs", params.value > 0 && "text-status-error-strong")}>
@@ -474,6 +485,7 @@ export default function ApiKeysPage() {
       },
       {
         headerName: "Cost",
+        context: HIDE_WHEN_COMPACT,
         width: 100,
         valueGetter: (params) => {
           if (!params.data) return 0;
@@ -488,6 +500,7 @@ export default function ApiKeysPage() {
       {
         field: "lastUsedAt",
         headerName: "Last Used",
+        context: HIDE_WHEN_COMPACT,
         flex: 1,
         minWidth: 140,
         cellRenderer: (params: { value: string | null }) =>

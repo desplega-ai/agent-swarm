@@ -209,11 +209,37 @@ describe("GET /api/fleet-benchmark", () => {
     }
   }
 
-  test("telemetry off: no proxy call and no local scan", async () => {
+  test("telemetry off: local 30-day counts without an ingest anchor or proxy call", async () => {
     process.env.ANONYMIZED_TELEMETRY = "false";
+    await db.getDbClient().run("DELETE FROM swarm_config WHERE key = 'telemetry_first_ingest'");
+    await addTasks(9, "completed", 3);
+    await addTasks(1, "failed", 3);
+    await addTasks(5, "pending", 3);
+    await addTasks(40, "completed", 45);
+    await setProfile();
     const response = await buildFleetBenchmarkResponse(NOW);
     expect(response.state).toBe("telemetry_off");
-    expect(response.local).toBeNull();
+    expect(response.local).toEqual({
+      tasksPerWeek: 3.5,
+      taskSuccessRate: 0.9,
+      finishedTasks: 10,
+      agents: 3,
+      bucket: "2-5",
+    });
+    expect(response.level).toBe("full");
+    expect(response.peerGroup).toBeNull();
+    expect(response.comparisons).toEqual([]);
+    expect(fetched).toEqual([]);
+  });
+
+  test("telemetry off on a fresh swarm returns zero counts", async () => {
+    process.env.ANONYMIZED_TELEMETRY = "false";
+    await db.getDbClient().run("DELETE FROM swarm_config WHERE key = 'telemetry_first_ingest'");
+    expect(await buildFleetBenchmarkResponse(NOW)).toMatchObject({
+      state: "telemetry_off",
+      level: "basic",
+      local: { tasksPerWeek: 0, taskSuccessRate: null, finishedTasks: 0 },
+    });
     expect(fetched).toEqual([]);
   });
 
@@ -225,6 +251,19 @@ describe("GET /api/fleet-benchmark", () => {
     if (saved !== undefined) process.env.SWARM_ORG_NAME = saved;
     expect(response.state).toBe("no_org_name");
     expect(fetched).toEqual([]);
+  });
+
+  test("an empty stored name overrides the deployment name", async () => {
+    const saved = process.env.SWARM_ORG_NAME;
+    process.env.SWARM_ORG_NAME = "Deployment name";
+    try {
+      await db.upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "" });
+      expect((await buildFleetBenchmarkResponse(NOW)).state).toBe("no_org_name");
+      expect(fetched).toEqual([]);
+    } finally {
+      if (saved === undefined) delete process.env.SWARM_ORG_NAME;
+      else process.env.SWARM_ORG_NAME = saved;
+    }
   });
 
   test("fewer than 10 finished tasks: local numbers only", async () => {
@@ -242,6 +281,8 @@ describe("GET /api/fleet-benchmark", () => {
     await addTasks(40, "completed", 45); // Outside the window.
     const response = await buildFleetBenchmarkResponse(NOW);
     expect(response.state).toBe("ready");
+    expect(response.level).toBe("basic");
+    expect(response.peerGroup).toBeNull();
     expect(response.local).toEqual({
       tasksPerWeek: 14,
       taskSuccessRate: 0.95,
@@ -257,6 +298,85 @@ describe("GET /api/fleet-benchmark", () => {
 
     await buildFleetBenchmarkResponse(new Date(NOW.getTime() + 23 * 3_600_000));
     expect(fetched).toHaveLength(1);
+  });
+
+  async function setProfile(teamSize = "2-10", useCase = "features"): Promise<void> {
+    await db.upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "acme.com" });
+    await db.upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_TEAM_SIZE", value: teamSize });
+    await db.upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_USE_CASE", value: useCase });
+  }
+
+  test("full profile requests peers and returns the proxy group", async () => {
+    await addTasks(10, "completed", 1);
+    await setProfile();
+    proxyBody = {
+      ...FLEET,
+      peer_group: { team_size: "2-10", use_case: "features", orgs: 6 },
+    };
+    const response = await buildFleetBenchmarkResponse(NOW);
+    expect(response).toMatchObject({
+      state: "ready",
+      level: "full",
+      peerGroup: { teamSize: "2-10", useCase: "features", orgs: 6 },
+    });
+    expect(fetched).toEqual([
+      "http://proxy.test/v1/fleet/benchmarks?window=30d&team_size=2-10&use_case=features",
+    ]);
+    await buildFleetBenchmarkResponse(NOW);
+    expect(fetched).toHaveLength(1);
+  });
+
+  test("full profile tolerates absent or null peer_group from the proxy", async () => {
+    await addTasks(10, "completed", 1);
+    await setProfile();
+    for (const peer_group of [undefined, null]) {
+      proxyBody = { ...FLEET, peer_group };
+      const route = await freshRoute();
+      const response = await route.buildFleetBenchmarkResponse(NOW);
+      expect(response).toMatchObject({ state: "ready", level: "full", peerGroup: null });
+    }
+  });
+
+  test("cache follows profile changes and cleared fields return to basic", async () => {
+    await addTasks(10, "completed", 1);
+    await buildFleetBenchmarkResponse(NOW);
+    await setProfile();
+    await buildFleetBenchmarkResponse(NOW);
+    await setProfile("11-50", "bugs");
+    await buildFleetBenchmarkResponse(NOW);
+    await setProfile("11-50", "review");
+    await buildFleetBenchmarkResponse(NOW);
+    expect(fetched).toHaveLength(4);
+    expect(fetched[2]).toContain("team_size=11-50&use_case=bugs");
+    expect(fetched[3]).toContain("team_size=11-50&use_case=review");
+    await db.upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "" });
+    const response = await buildFleetBenchmarkResponse(NOW);
+    expect(response.level).toBe("basic");
+    expect(fetched.at(-1)).toBe("http://proxy.test/v1/fleet/benchmarks?window=30d");
+  });
+
+  test("partial profile stays basic and sends no peer filters", async () => {
+    await addTasks(10, "completed", 1);
+    for (const key of ["SWARM_ORG_WEBSITE", "SWARM_ORG_TEAM_SIZE", "SWARM_ORG_USE_CASE"]) {
+      await setProfile();
+      await db.upsertSwarmConfig({ scope: "global", key, value: "" });
+      const route = await freshRoute();
+      expect((await route.buildFleetBenchmarkResponse(NOW)).level).toBe("basic");
+      expect(fetched.at(-1)).toBe("http://proxy.test/v1/fleet/benchmarks?window=30d");
+    }
+  });
+
+  test("enabling telemetry never reuses local-only counts for comparison", async () => {
+    await addTasks(10, "completed", 1);
+    await db.getDbClient().run("DELETE FROM swarm_config WHERE key = 'telemetry_first_ingest'");
+    process.env.ANONYMIZED_TELEMETRY = "false";
+    expect((await buildFleetBenchmarkResponse(NOW)).local?.finishedTasks).toBe(10);
+    process.env.ANONYMIZED_TELEMETRY = "true";
+    expect(await buildFleetBenchmarkResponse(NOW)).toMatchObject({
+      state: "unavailable",
+      local: null,
+    });
+    expect(fetched).toEqual([]);
   });
 
   async function mintInstallId(daysAgo: number): Promise<void> {

@@ -53,3 +53,12 @@ export function isEnvFlagEnabled(
 ): boolean {
   return parseEnvFlag(env[key], defaultValue);
 }
+
+/**
+ * Whether the session-end summary is turned off via `SKIP_SESSION_SUMMARY`.
+ * Every harness (claude Stop hook, pi, opencode, codex) gates on this, so
+ * `1`/`true` skip and unset/empty/`0`/`false` keep the summary everywhere.
+ */
+export function isSessionSummarySkipped(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isEnvFlagEnabled("SKIP_SESSION_SUMMARY", false, env);
+}

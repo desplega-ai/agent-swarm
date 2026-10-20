@@ -13,6 +13,14 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 | `app-upsert` | Create an app, or replace an existing app's entire definition when you intentionally have the full desired state. |
 | `app-patch` | Make a focused change while preserving everything not mentioned in the patch. Prefer this for iteration. |
 | `app-query` | Run one declared named query and return its rows. Use this when an agent or saved script needs to consume app data rather than render the app UI. |
+| `app-rows-list` | List rows with typed equality filters, sorting, and a limit. Returns `{ rows, total }`. |
+| `app-row-get` | Read a row by `rowId`. Returns `{ row }`. |
+| `app-row-create` | Create a row from `values`. Returns `{ row }`. |
+| `app-rows-create` | Create 1 to 500 rows from a `rows: values[]` array, within 10 MiB. Returns `{ rows }`. |
+| `app-row-patch` | Patch a row by `rowId` with `values`. Returns `{ row }`. |
+| `app-row-delete` | Delete a row by `rowId`. Returns `{ ok: true }`. |
+| `app-rows-delete` | Delete matching rows with a non-empty `equals` filter. Returns `{ deleted }`. |
+| `app-action-run` | Run a declared script, task, or sync action with `{ appId, action, input? }`. Agents can invoke it through MCP only. |
 | `app-history` | List definition snapshots and their compact model/column digests before choosing a restore point. |
 | `app-diff` | Show a unified definition diff; defaults to newest snapshot → CURRENT. |
 | `app-rollback` | Restore a snapshot through the normal schema-migration engine. |
@@ -23,7 +31,41 @@ For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch`
 
 ### Reading an app's callable surface
 
-One `app-get` returns everything needed to drive an app you did not write: `definition.queries` are runnable with `app-query` (supply every `$param` the query references), and `definition.actions` are invocable with `POST /api/apps/<id>/actions/<name>` (a `script` action runs its script, a `task` action spawns a task, a `sync` action refreshes sources). Read a query's `$param` placeholders and an action's kind/args from the definition before calling — do not guess parameter names.
+One `app-get` returns everything needed to drive an app you did not write: `definition.queries` are runnable with `app-query` (supply every `$param` the query references), and `definition.actions` are invocable with `app-action-run` or `POST /api/apps/<id>/actions/<name>` (a `script` action runs its script, a `task` action spawns a task, a `sync` action refreshes sources). Read the query parameters and action arguments from the definition before invocation. Do not guess parameter names.
+
+### Verified action caller
+
+Script actions receive `caller` as a reserved, server-stamped argument. The server overwrites `caller` from definition defaults and request input.
+
+```typescript
+type AppActionCaller = {
+  kind: "user" | "agent" | "operator" | "guest";
+  id: string | null;
+  name?: string;
+  pageId?: string;
+};
+```
+
+The caller identifies the authenticated user or agent. Operator and guest callers have `id: null`. A signed page session adds `pageId`.
+With the swarm key, a registered `X-Agent-ID` produces an agent caller and `agent:<id>` row provenance. Missing or unknown agent IDs remain operator callers.
+Task actions include the same caller as server-verified JSON in the task prompt. Script execution still uses the saved script owner's bindings.
+
+### Verified action caller
+
+Script actions receive `caller` as a reserved, server-stamped argument. The server overwrites `caller` from definition defaults and request input.
+
+```typescript
+type AppActionCaller = {
+  kind: "user" | "agent" | "operator" | "guest";
+  id: string | null;
+  name?: string;
+  pageId?: string;
+};
+```
+
+The caller identifies the authenticated user or agent. Operator and guest callers have `id: null`. A signed page session adds `pageId`.
+With the swarm key, a registered `X-Agent-ID` produces an agent caller and `agent:<id>` row provenance. Missing or unknown agent IDs remain operator callers.
+Task actions include the same caller as server-verified JSON in the task prompt. Script execution still uses the saved script owner's bindings.
 
 ## Safe schema evolution and rollback
 
@@ -178,6 +220,7 @@ Each column is `{ "kind": ..., "required"?: boolean, "default"?: ..., "index"?: 
 | `boolean` | Boolean; set `index: true` only when equality lookups need it. |
 | `date` | ISO-8601 string; never indexed. |
 | `enum` | String from the non-empty unique `enum` list; always indexed, without `index: true`. |
+| `json` | Any JSON value (object, array, nested) up to 256 KB serialized by default (`APPS_JSON_COLUMN_MAX_BYTES`); never indexed, and a named query cannot `filter` or `sort` on it. Not allowed for `userConfig` fields or element props. |
 
 `default` must match the column kind (and be one of the enum values). `required: true` rejects missing/null values unless a default supplies the value. `id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy` — and the sync envelope `source`, `syncedAt`, `stale` — are system columns and reserved names. An app created before the sync envelope that declared ordinary columns with these names surfaces `definitionError` after upgrade until they are renamed: patch in a fresh column with a `{from}` migration directive, then purge the old one. Rows always expose `id`/`createdAt`/`updatedAt`; `createdBy`/`updatedBy` record the acting principal (`user:<id>`, `agent:<id>`, `operator`, or `sync:<source>` for engine writes) and are system-managed on every row write.
 
@@ -274,7 +317,7 @@ A named query is:
 }
 ```
 
-`filter` is a strict AND of equality checks. A filter may target a declared model column or a system column (`id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, and on synced models `source`, `syncedAt`, `stale`) — filtering on `id` is the universal way to select one row for a detail view, and `{ "stale": true }` selects rows a complete pull stopped confirming. A literal value must match the column's kind; date filters compare the stored raw ISO string, not parsed instants. Omit `limit` for the default 200 rows, or set an integer from 1 through 1000. `sort.column` is a model column, `createdAt`, `updatedAt`, or `syncedAt`; `dir` is `asc` or `desc`. Query runtime state is `{ data, loading, error }` under `/queries/<queryName>`.
+`filter` is a strict AND of equality checks. A filter may target a declared model column or a system column (`id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, and on synced models `source`, `syncedAt`, `stale`) — filtering on `id` is the universal way to select one row for a detail view, and `{ "stale": true }` selects rows a complete pull stopped confirming. A literal value must match the column's kind; date filters compare the stored raw ISO string, not parsed instants. Omit `limit` for the default 200 rows, or set an integer from 1 through 1000. `sort.column` is a non-`json` model column, `createdAt`, `updatedAt`, or `syncedAt`; `dir` is `asc` or `desc`. Query runtime state is `{ data, loading, error }` under `/queries/<queryName>`.
 
 A filter value may instead be exactly `{ "$param": "<name>" }`. At execution, the caller supplies that name and the server coerces its value to the filtered column's kind before equality matching:
 
@@ -350,7 +393,7 @@ Use a task action named Tackle when a person should hand one issue row to the sw
 
 For direct MCP calls, `app-query` accepts `{ appId, query, params? }` and returns rows from that declared named query; every supplied param must be referenced by a `$param` filter in that query. Use it when an agent needs to read app state without scraping the UI.
 
-Saved scripts use the generated SDK name `ctx.swarm.app_query({ appId, query, params? })`. Use `app_query` in scripts or workflows that turn current app rows into reports, digests, or follow-up work. Saved scripts also get generated per-app types automatically: each app contributes an `App_<Name>` namespace with one row interface per model (enum columns as literal unions) and a typed `app_query` overload per named query, all visible via `script-query-types`. Actions stay REST-only from scripts — there is no SDK method to invoke them.
+Saved scripts use the generated SDK name `ctx.swarm.app_query({ appId, query, params? })`. Use `app_query` in scripts or workflows that turn current app rows into reports, digests, or follow-up work. Saved scripts also get generated per-app types automatically: each app contributes an `App_<Name>` namespace with one row interface per model (enum columns as literal unions) and a typed `app_query` overload per named query, all visible via `script-query-types`. Scripts can create, list, get, patch, and delete rows with the seven row tools. Actions remain REST/MCP-only and have no script SDK method.
 
 ### Pages, routes, and page trees
 
@@ -473,7 +516,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 
 Table details:
 
-- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", max?: number, onChange?: chain }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, or `link`; `string` and `enum` render as text. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
+- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", max?: number, onChange?: chain }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, `link`, or `json`; `string` and `enum` render as text, and `json` renders a truncated single-line `JSON.stringify` preview. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
   - `status`: lifecycle values (`pending`, `in_progress`, `running`, `completed`, `failed`, `cancelled`, `paused`, `reviewing`, ...) render the dashboard status chip with its icon; other values use `tones` like `badge`.
   - `user` / `agent`: avatar plus name. `relative` (and `date`): smart time, exact time on hover. `duration`: milliseconds as `1m 23s`. `progress`: a bar against `max` (default 100). `copy`: the value plus a copy button. `link`: an http(s) URL opening in a new tab (other values render as text).
   - `switch`: a toggle. `onChange` runs with `$row` = the row with this column already set to the new value, e.g. `[{ "action": "app.mutate", "params": { "model": "m", "op": "update", "rowId": { "$row": "id" }, "values": { "enabled": { "$row": "enabled" } } } }]`. Without `onChange` the switch is read-only.
@@ -597,6 +640,8 @@ Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, o
 | `{ "$form": "title" }` | One current Form value. |
 | `{ "$form": "" }` | All current Form values. |
 | `{ "$state": "/queries/allIdeas/data" }` | Current value at a valid app state path, including action state such as `/actions/refreshIssues/status`. |
+| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by a component that runs a task chain; it carries `leafTaskId` and `newTaskId`. Where no chain scope is published, the sentinel is left in place and the action fails instead of silently dropping the parent. |
+| `{ "$chain": "" }` | The whole chain scope. |
 
 Each sentinel object must contain exactly the single key shown.
 
@@ -604,7 +649,7 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 
 - `app.mutate`: `{ model, op, rowId?, values?, formId? }`, where `op` is `"create"`, `"update"`, or `"delete"`. `update`/`delete` require `rowId` (usually `{ "$row": "id" }`, or `{ "$state": "/route/params/<param>" }` in a Drawer footer); literal `values` keys must be model columns. Successful mutation refetches all queries on that model.
 - `app.refresh`: `{ query? }`; omit `query` to refetch all, or name a declared query.
-- `app.action`: `{ name, input? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`.
+- `app.action`: `{ name, input?, parentTaskId? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`. `parentTaskId` chains the created task under an existing one for task-kind actions (typically `{ "$chain": "leafTaskId" }`; a literal or `$state` task id also works); a script or sync action rejects it with 400.
 - `app.navigate`: `{ page, params? }`; `page` must be declared, supplied keys must be params of the target page, and every required target param must be supplied. `params` replace the current route params wholesale and may contain action sentinels. Navigation pushes history, so browser Back returns to the previous page/params; only `mode` is preserved automatically.
 - `ui.toast`: `{ message, description?, tone?, undo? }`, where `tone` is `"success"`, `"error"`, `"info"` (default), or `"warning"`. `undo: { label?, actions }` adds an Undo button (default label `Undo`) that runs `actions` as a chain; its steps are validated like any chain. Put it after the step it confirms, e.g. a row delete followed by `{ "action": "ui.toast", "params": { "message": "Order deleted", "undo": { "actions": [{ "action": "app.mutate", "params": { "model": "order", "op": "create", "values": { "title": { "$row": "title" } } } }] } } }`. Undo params resolve `$state` when Undo is pressed; `$row` / `$form` resolve when the toast is shown.
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.
@@ -742,3 +787,18 @@ The tool returns `{ appId, url: "/apps/<id>" }`. Open that URL to verify the liv
 - Logged-in browser: a fresh dashboard has no connection and redirects to /setup. Seed the localStorage key `agent-swarm-connections` with `{connections:[{id,name,apiUrl,apiKey}],activeId}`. Build the value from an env var and pipe it to `agent-browser eval --stdin`, so the key never reaches a command line. Reload, then pick a user in the "Who are you?" dialog.
 - Apps scroll inside an inner canvas, so a full-page screenshot captures only the viewport. Scroll the canvas or raise the viewport height. For mobile, set a 375px-wide viewport before the screenshot.
 - App definitions: `GET /api/apps` and `GET /api/apps/<id>` with the API key as Bearer.
+- Follow-up edit to a live app: list in the brief the control numbers the edit must not move, and assert them from the backing script before publishing. Take a signed-in screenshot of each changed selector at 1440px wide, save the shots to agent-fs, critique, and repeat at least 3 times. If the backing script caches results, bump its version or force a fresh run so the shots show new data.
+
+
+### Rows from agents and scripts
+
+Every row tool requires `appId` and `model`. Scripts use underscore names, such as `ctx.swarm.app_row_create` and `ctx.swarm.app_rows_list`.
+Results use the usual `data` wrapper, so scripts read `res?.data ?? res`. Rows contain system fields and declared columns at the top level.
+Writes record `agent:<agentId>` in `createdBy` and `updatedBy`. Source projections and join keys remain read-only. Each row input must fit within 1 MiB.
+
+`app-rows-list` accepts `equals`, `sort: "<column>:asc|desc"`, and `limit` from 1 to 1000 (default 200).
+Equality filters accept declared columns and system columns. Filter values must match the column kind and use strict equality.
+`app-rows-delete` requires at least one equality filter and accepts a limit from 1 to 1000 (default 1000).
+
+`app-action-run` returns the REST action body under `data`. Script actions run with the script owner's identity and receive the verified invoking agent as `caller`.
+Scripts and extensions cannot invoke `app-action-run`.

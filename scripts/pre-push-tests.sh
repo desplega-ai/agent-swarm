@@ -25,7 +25,7 @@ unset $(git rev-parse --local-env-vars)
 
 FULL_RUN_PATHS='^(src/be/migrations/|templates/|bunfig\.toml$|bun\.lock)'
 
-# The push compares commits only. `bun run check` (scripts/check.sh) sets
+# The push compares commits only. `bun run check:local` (scripts/check.sh) sets
 # PRE_PUSH_TESTS_INCLUDE_WORKTREE=1 so uncommitted edits count as changes too.
 diff_to=HEAD
 if [[ "${PRE_PUSH_TESTS_INCLUDE_WORKTREE:-}" == 1 ]]; then
@@ -54,6 +54,9 @@ if [[ "$probe_status" -eq 134 ]]; then
   export SWARM_SKIP_SANDBOX_SPAWN_TESTS=1
   echo "[pre-push-tests] sandbox spawn probe exited 134; skipping spawn-dependent tests in:"
   printf '  %s\n' \
+    src/tests/app-action-run-tool.test.ts \
+    src/tests/app-row-tools.test.ts \
+    src/tests/apps-rbac.test.ts \
     src/tests/apps-spike2.test.ts \
     src/tests/apps-sync-engine.test.ts \
     src/tests/connection-embedded-auth.test.ts \
@@ -66,6 +69,7 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/script-workflows-runtime-e2e.test.ts \
     src/tests/secret-canary-sweep.test.ts \
     src/tests/scripts-external-api.test.ts \
+    src/tests/scripts-fs.test.ts \
     src/tests/scripts-http.test.ts \
     src/tests/scripts-mcp-e2e.test.ts \
     src/tests/scripts-retention.test.ts \

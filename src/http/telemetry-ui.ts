@@ -43,7 +43,7 @@ const enableTelemetry = route({
   description:
     "Stores `ANONYMIZED_TELEMETRY=true` and applies it to the running server: the install ID is minted if needed and `telemetry.enabled` is sent once, so no restart is needed.",
   tags: ["Telemetry"],
-  body: z.object({ via: z.enum(["banner", "settings"]).default("banner") }),
+  body: z.object({ via: z.enum(["banner", "settings", "benchmark"]).default("banner") }),
   responses: {
     200: {
       description: "Telemetry is on",

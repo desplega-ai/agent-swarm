@@ -436,6 +436,118 @@ export async function getChildTasks(parentTaskId: string): Promise<AgentTask[]> 
   return rows.map(rowToAgentTask);
 }
 
+/** Caps for {@link getTaskLineage}: a fan-out of thousands still answers in one bounded read. */
+export const TASK_LINEAGE_LIMITS = { maxNodes: 500, maxDepth: 30, maxAncestors: 50 } as const;
+
+/** One task in a lineage tree: the slim list row plus the workflow run it belongs to. */
+type TaskLineageNode = AgentTaskSummary & { workflowRunId?: string };
+
+interface TaskLineage {
+  /** The topmost ancestor reached (the session root unless `truncated`). */
+  rootTaskId: string;
+  /** Root first, then descendants; always holds the path root → `taskId`. */
+  tasks: TaskLineageNode[];
+  /** True when some ancestor or descendant is missing from `tasks`. */
+  truncated: boolean;
+}
+
+const LINEAGE_COLUMNS = `${LIST_COLUMNS.slim}, agent_tasks.workflowRunId,
+  (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = agent_tasks.id) AS totalCostUsd`;
+
+type TaskLineageRow = AgentTaskSummaryRow & { workflowRunId: string | null };
+
+function rowToTaskLineageNode(row: TaskLineageRow): TaskLineageNode {
+  return { ...rowToAgentTaskSummary(row), workflowRunId: row.workflowRunId ?? undefined };
+}
+
+/**
+ * The whole tree `taskId` belongs to, following `parentTaskId`: up to the
+ * topmost ancestor, then every descendant of that root breadth-first. The
+ * descendants of `taskId` itself are walked first, so a wide tree cut at
+ * `maxNodes` still shows the task's own subtree. Read-only and bounded: at
+ * most `maxAncestors` hops up, `maxDepth` levels down and about `2 * maxNodes`
+ * rows. Null when the task does not exist.
+ */
+export async function getTaskLineage(
+  taskId: string,
+  limits: { maxNodes?: number; maxDepth?: number; maxAncestors?: number } = {},
+): Promise<TaskLineage | null> {
+  const maxNodes = limits.maxNodes ?? TASK_LINEAGE_LIMITS.maxNodes;
+  const maxDepth = limits.maxDepth ?? TASK_LINEAGE_LIMITS.maxDepth;
+  const maxAncestors = limits.maxAncestors ?? TASK_LINEAGE_LIMITS.maxAncestors;
+  const db = getDbClient();
+  // Hops are counted, so a parentTaskId cycle stops at the cap instead of looping.
+  const path = await db.query<{ id: string; parentTaskId: string | null; hops: number }>(
+    `WITH RECURSIVE up(id, parentTaskId, hops) AS (
+         SELECT id, parentTaskId, 0 FROM agent_tasks WHERE id = ?
+         UNION ALL
+         SELECT t.id, t.parentTaskId, up.hops + 1 FROM agent_tasks t
+         JOIN up ON t.id = up.parentTaskId
+         WHERE up.hops < ?
+       )
+       SELECT id, parentTaskId, hops FROM up ORDER BY hops`,
+    [taskId, maxAncestors],
+  );
+  if (path.length === 0) return null;
+  const top = path[path.length - 1]!;
+  // A parent that no longer exists ends the walk like a root; a cap does not.
+  let truncated = top.hops === maxAncestors && top.parentTaskId !== null;
+
+  // LIMIT inside the recursive CTE stops the walk itself, not just the output.
+  const descendants = (startId: string) =>
+    db.query<TaskLineageRow>(
+      `WITH RECURSIVE down(id, depth) AS (
+           SELECT ?, 0
+           UNION ALL
+           SELECT t.id, down.depth + 1 FROM down
+           JOIN agent_tasks t ON t.parentTaskId = down.id
+           WHERE down.depth < ?
+           ORDER BY 2
+           LIMIT ?
+         )
+         SELECT ${LINEAGE_COLUMNS} FROM down
+         CROSS JOIN agent_tasks ON agent_tasks.id = down.id
+         ORDER BY down.depth, agent_tasks.createdAt, agent_tasks.rowid`,
+      [startId, maxDepth, maxNodes + 1],
+    );
+
+  const byId = new Map<string, TaskLineageNode>();
+  const add = (rows: TaskLineageRow[]) => {
+    for (const row of rows) {
+      if (!byId.has(row.id)) byId.set(row.id, rowToTaskLineageNode(row));
+    }
+  };
+  const ownSubtree = await descendants(taskId);
+  const fromRoot = top.id === taskId ? ownSubtree : await descendants(top.id);
+  add(fromRoot.slice(0, maxNodes));
+  add(ownSubtree.slice(0, maxNodes));
+
+  // The path root → task is always present, even past the depth or node cap.
+  const missing = path.map((row) => row.id).filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    add(
+      await db.query<TaskLineageRow>(
+        `SELECT ${LINEAGE_COLUMNS} FROM agent_tasks WHERE id IN (${missing.map(() => "?").join(", ")})`,
+        missing,
+      ),
+    );
+  }
+
+  // The caps cut the walk at many points (depth, node count, either walk), so
+  // ask the table directly: is any child of a returned task not returned?
+  if (!truncated) {
+    const ids = [...byId.keys()];
+    const list = ids.map(() => "?").join(", ");
+    const omitted = await db.get(
+      `SELECT 1 FROM agent_tasks WHERE parentTaskId IN (${list}) AND id NOT IN (${list}) LIMIT 1`,
+      [...ids, ...ids],
+    );
+    truncated = omitted !== undefined && omitted !== null;
+  }
+
+  return { rootTaskId: top.id, tasks: [...byId.values()], truncated };
+}
+
 /**
  * Returns true if `parentId` has at least one non-terminal child task with
  * `taskType = 'resume'`. Used by the heartbeat sweep as an idempotency guard:
@@ -556,10 +668,14 @@ export async function hasNonTerminalRerouteDecisionChild(parentId: string): Prom
   return row !== undefined && row !== null;
 }
 
-export async function getTasksByAgentId(agentId: string): Promise<AgentTask[]> {
+export async function getTasksByAgentId(
+  agentId: string,
+  readableBy?: { userId: string | null },
+): Promise<AgentTask[]> {
+  const readable = readableBy ? readableSessionCondition(readableBy.userId) : undefined;
   const rows = await getDbClient().query<AgentTaskRow>(
-    "SELECT * FROM agent_tasks WHERE agentId = ? ORDER BY createdAt DESC",
-    [agentId],
+    `SELECT * FROM agent_tasks WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
+    [agentId, ...(readable?.params ?? [])],
   );
   return rows.map(rowToAgentTask);
 }
@@ -642,6 +758,48 @@ export interface TaskFilters {
   limit?: number;
   offset?: number;
   includeHeartbeat?: boolean;
+  /** Only tasks of sessions this user may read; `userId: null` is a guest. */
+  readableBy?: { userId: string | null };
+}
+
+/**
+ * The SQL twin of `sessionAccessForRoot` (../../session-shares). A session's
+ * root is its topmost existing task; the session is hidden when the root has
+ * an owner other than the user and no active share names the user or
+ * everyone. Descending from hidden roots is linear in their tasks at any chain
+ * depth, and as a WHERE term it keeps paging and `COUNT(*)` on the same rows.
+ * `parentTaskId` is fixed at insert to an existing task, so no parent cycle
+ * (which would have no root) can form.
+ *
+ * `taskIdColumn` applies the same filter to any table keyed by task id. A
+ * nullable column keeps its task-less rows: they belong to no session.
+ */
+export function readableSessionCondition(
+  userId: string | null,
+  taskIdColumn = "agent_tasks.id",
+  opts: { nullable?: boolean } = {},
+): { sql: string; params: string[] } {
+  const otherOwner = userId
+    ? "r.requestedByUserId IS NOT NULL AND r.requestedByUserId != ?"
+    : "r.requestedByUserId IS NOT NULL";
+  const shareMatch = userId ? "(s.userId IS NULL OR s.userId = ?)" : "s.userId IS NULL";
+  const notHidden = `${taskIdColumn} NOT IN (
+      WITH RECURSIVE hidden(id) AS (
+        SELECT r.id FROM agent_tasks r
+        WHERE (r.parentTaskId IS NULL
+            OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = r.parentTaskId))
+          AND ${otherOwner}
+          AND NOT EXISTS (SELECT 1 FROM session_shares s
+            WHERE s.rootTaskId = r.id AND s.revokedAt IS NULL AND ${shareMatch})
+        UNION ALL
+        SELECT c.id FROM agent_tasks c JOIN hidden ON c.parentTaskId = hidden.id
+      )
+      SELECT id FROM hidden
+    )`;
+  return {
+    sql: opts.nullable ? `(${taskIdColumn} IS NULL OR ${notHidden})` : notHidden,
+    params: userId ? [userId, userId] : [],
+  };
 }
 
 export function getAllTasks(filters?: TaskFilters): Promise<AgentTask[]>;
@@ -754,6 +912,12 @@ export async function getAllTasks(
     conditions.push(
       "(IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND tags NOT LIKE '%\"heartbeat\"%')",
     );
+  }
+
+  if (filters?.readableBy) {
+    const readable = readableSessionCondition(filters.readableBy.userId);
+    conditions.push(readable.sql);
+    params.push(...readable.params);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -914,6 +1078,12 @@ export async function getTasksCount(
     conditions.push(
       "(IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND tags NOT LIKE '%\"heartbeat\"%')",
     );
+  }
+
+  if (filters?.readableBy) {
+    const readable = readableSessionCondition(filters.readableBy.userId);
+    conditions.push(readable.sql);
+    params.push(...readable.params);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";

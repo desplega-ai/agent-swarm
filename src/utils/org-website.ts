@@ -71,34 +71,71 @@ export function isFilledOrgLogoUrl(
   }
 }
 
-const FREE_MAIL_DOMAINS = new Set([
-  "gmail.com",
-  "googlemail.com",
-  "outlook.com",
-  "hotmail.com",
-  "live.com",
-  "msn.com",
-  "yahoo.com",
-  "icloud.com",
-  "me.com",
-  "mac.com",
-  "aol.com",
-  "proton.me",
-  "protonmail.com",
-  "gmx.com",
-  "gmx.de",
-  "yandex.com",
-  "yandex.ru",
-  "mail.com",
-  "zoho.com",
-  "qq.com",
-  "163.com",
-  "hey.com",
-  "fastmail.com",
+/**
+ * Free-mail providers with regional domains, matched on the label before the
+ * public suffix: hotmail.es, yahoo.co.uk, gmx.net and yandex.com.tr all count.
+ */
+const FREE_MAIL_FAMILIES = new Set([
+  "aol",
+  "fastmail",
+  "gmail",
+  "gmx",
+  "googlemail",
+  "hotmail",
+  "icloud",
+  "live",
+  "msn",
+  "outlook",
+  "protonmail",
+  "rocketmail",
+  "yahoo",
+  "yandex",
+  "ymail",
+  "zoho",
 ]);
+
+/** Free-mail providers on one domain only, where the label alone is too generic. */
+const FREE_MAIL_DOMAINS = new Set([
+  "126.com",
+  "163.com",
+  "comcast.net",
+  "daum.net",
+  "free.fr",
+  "hanmail.net",
+  "hey.com",
+  "libero.it",
+  "mac.com",
+  "mail.com",
+  "mail.ru",
+  "me.com",
+  "naver.com",
+  "orange.fr",
+  "pm.me",
+  "proton.me",
+  "qq.com",
+  "rediffmail.com",
+  "sina.com",
+  "t-online.de",
+  "tutanota.com",
+  "web.de",
+]);
+
+/** Second-level labels of a country code suffix (acme.co.uk, acme.com.br). */
+const SECOND_LEVEL_LABELS = new Set(["ac", "co", "com", "edu", "gov", "ne", "net", "or", "org"]);
+
+/** Whether `host` (a normalized hostname) belongs to a public free-mail provider. */
+function isFreeMailHost(host: string): boolean {
+  const labels = host.split(".");
+  const suffixLength = labels.length > 2 && SECOND_LEVEL_LABELS.has(labels.at(-2) ?? "") ? 2 : 1;
+  // mail.yahoo.co.uk becomes yahoo.co.uk.
+  const registrable = labels.slice(-(suffixLength + 1));
+  return (
+    FREE_MAIL_FAMILIES.has(registrable[0] ?? "") || FREE_MAIL_DOMAINS.has(registrable.join("."))
+  );
+}
 
 /** The admin's email domain as a website suggestion, or null for free-mail domains. */
 export function websiteSuggestion(orgDomain: string | null | undefined): string | null {
   const host = normalizeOrgWebsite(orgDomain);
-  return host && !FREE_MAIL_DOMAINS.has(host) ? host : null;
+  return host && !isFreeMailHost(host) ? host : null;
 }

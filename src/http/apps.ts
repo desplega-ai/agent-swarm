@@ -1,15 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as z from "zod";
+import type { AppActionCaller } from "../apps/action-caller";
+import { runAppAction } from "../apps/action-runner";
 import {
   type AppDefinition,
   AppNameSchema,
   type AppQueryDef,
   type AppValidationIssue,
   applyAppDefinitionPatch,
-  ColumnKindSchema,
   isIso8601Date,
   type ModelDef,
   parseAppDefinition,
+  ScalarColumnKindSchema,
   SORTABLE_SYSTEM_DATE_COLUMNS,
   SYSTEM_COLUMN_KINDS,
   scriptCompatWarnings,
@@ -60,24 +62,21 @@ import {
   rollbackApp,
   snapshotApp,
 } from "../apps/version";
-import { normalizeAssetKey } from "../assets/key";
-import { getAgentById, getAppVersion, getAppVersions, getLeadAgent } from "../be/db";
-import { getScriptById } from "../be/scripts/db";
-import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
-import { resolveTemplate } from "../prompts/resolver";
+import { getAgentById, getAppVersion, getAppVersions, getTaskById } from "../be/db";
 import type { RbacPrincipal, RbacResource } from "../rbac";
 import { can } from "../rbac";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { AgentTaskStatusSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject } from "../utils/secret-scrubber";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
-import { route } from "./route-def";
+import { agentFirstPrincipal } from "./request-principal";
+import { bodyTask, route } from "./route-def";
+import { denyParentAttach } from "./session-access";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
 const MAX_APP_BODY_BYTES = 5 * 1024 * 1024;
-const MAX_APP_ROW_BODY_BYTES = 1 * 1024 * 1024;
-const MAX_APP_BULK_ROWS_BODY_BYTES = 10 * 1024 * 1024;
+export const MAX_APP_ROW_BODY_BYTES = 1 * 1024 * 1024;
+export const MAX_APP_BULK_ROWS_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_USER_CONFIG_BODY_BYTES = 64 * 1024;
 const MAX_USER_CONFIG_VALUES_BYTES = 16 * 1024;
 const DECIMAL_NUMBER_PATTERN = /^[+-]?\d+(?:\.\d+)?$/;
@@ -219,7 +218,7 @@ const UserConfigValuesSchema = z.record(
  * on the wire anyway — the key can only ever be absent.
  */
 const AppUserConfigFieldSchema = z.object({
-  kind: ColumnKindSchema,
+  kind: ScalarColumnKindSchema,
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),
   enum: z.array(z.string()).optional(),
   label: z.string().optional(),
@@ -621,17 +620,27 @@ const runActionRoute = route({
   method: "post",
   path: "/api/apps/{id}/actions/{name}",
   pattern: ["api", "apps", null, "actions", null],
+  // A task-kind action may chain under `body.parentTaskId`: a user caller needs
+  // write access to that session, as for POST /api/tasks.
+  session: bodyTask("parentTaskId"),
   summary: "Run a custom app action",
   description: "Runs the saved script, or creates the agent task, named by the app definition.",
   tags: ["Apps"],
   params: z.object({ id: z.string().min(1), name: AppNameSchema }),
-  body: z.object({ input: z.record(z.string(), z.unknown()).optional() }),
+  body: z.object({
+    input: z.record(z.string(), z.unknown()).optional(),
+    /** Chains the new task off an existing one. Task-kind actions only: a script or sync action rejects it (400). */
+    parentTaskId: z.string().min(1).optional(),
+  }),
   responses: {
     200: { description: "Action invoked", schema: runActionResultSchema },
-    400: { description: "Invalid action input or stale script reference" },
+    400: {
+      description:
+        "Invalid action input, stale script reference, or parentTaskId on a non-task action",
+    },
     403: { description: "Permission denied" },
     409: { description: "App definition needs repair" },
-    404: { description: "App or action not found" },
+    404: { description: "App, action, or parent task not found" },
   },
   rbac: { permission: "app.use" },
 });
@@ -660,10 +669,54 @@ const syncAppRoute = route({
 });
 
 /**
- * RBAC-gate an app operation and resolve the acting principal's stable actor id
- * (`user:<id>`, `agent:<id>`, or `operator`) for row provenance. Returns null
- * (after writing the 403) when the write is denied.
+ * Check app permissions and resolve server-verified identity for action input
+ * and row provenance. Return null after a 403 response when access is denied.
  */
+async function authorizeAppCaller(
+  req: IncomingMessage,
+  res: ServerResponse,
+  myAgentId: string | undefined,
+  verb: "app.manage" | "app.use",
+  resource: RbacResource,
+): Promise<{ actor: string; caller: AppActionCaller } | null> {
+  const auth = getRequestAuth(req);
+  let principal: RbacPrincipal;
+  let actor: string;
+  let caller: AppActionCaller;
+  if (auth?.kind === "operator") {
+    principal = { kind: "operator" };
+    // Page sessions never act as an agent, even if a header names one.
+    const agent = myAgentId && !auth.page ? await getAgentById(myAgentId) : null;
+    actor = agent ? `agent:${agent.id}` : "operator";
+    caller = agent
+      ? { kind: "agent", id: agent.id, name: agent.name }
+      : { kind: "operator", id: null };
+  } else if (auth?.kind === "user") {
+    principal = { kind: "user", userId: auth.userId };
+    actor = `user:${auth.userId}`;
+    caller = { kind: "user", id: auth.userId, name: auth.user.name };
+  } else if (auth?.kind === "guest" || auth?.kind === "controller") {
+    principal = { kind: "guest" };
+    actor = "guest";
+    caller = { kind: "guest", id: null };
+  } else {
+    const agent = myAgentId ? await getAgentById(myAgentId) : null;
+    principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };
+    actor = myAgentId ? `agent:${myAgentId}` : "agent";
+    caller = { kind: "agent", id: myAgentId ?? null, name: agent?.name };
+  }
+  if (auth?.page) caller.pageId = auth.page.id;
+  const decision = can({
+    principal,
+    verb,
+    resource,
+    source: "http",
+  });
+  if (decision.allow) return { actor, caller };
+  jsonError(res, decision.reason, 403);
+  return null;
+}
+
 async function authorizeApp(
   req: IncomingMessage,
   res: ServerResponse,
@@ -671,32 +724,7 @@ async function authorizeApp(
   verb: "app.manage" | "app.use",
   resource: RbacResource,
 ): Promise<string | null> {
-  const auth = getRequestAuth(req);
-  let principal: RbacPrincipal;
-  let actor: string;
-  if (auth?.kind === "operator") {
-    principal = { kind: "operator" };
-    actor = "operator";
-  } else if (auth?.kind === "user") {
-    principal = { kind: "user", userId: auth.userId };
-    actor = `user:${auth.userId}`;
-  } else if (auth?.kind === "guest") {
-    principal = { kind: "guest" };
-    actor = "guest";
-  } else {
-    const agent = myAgentId ? await getAgentById(myAgentId) : null;
-    principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };
-    actor = myAgentId ? `agent:${myAgentId}` : "agent";
-  }
-  const decision = can({
-    principal,
-    verb,
-    resource,
-    source: "http",
-  });
-  if (decision.allow) return actor;
-  jsonError(res, decision.reason, 403);
-  return null;
+  return (await authorizeAppCaller(req, res, myAgentId, verb, resource))?.actor ?? null;
 }
 
 async function authorizeAppManage(
@@ -736,17 +764,6 @@ function definitionNeedsRepair(
   return true;
 }
 
-/**
- * One `error` string for a sync result, or undefined when every pass succeeded.
- * Each failed pair is named so a multi-pair sync says which one broke; the pass
- * list in `result.passes` carries the rest.
- */
-function syncPassError(sync: Awaited<ReturnType<typeof runAppSync>>): string | undefined {
-  const failed = sync.passes.filter((pass) => pass.error !== undefined);
-  if (failed.length === 0) return undefined;
-  return failed.map((pass) => `${pass.model}.${pass.source}: ${pass.error}`).join("; ");
-}
-
 function snapshotFailure(res: ServerResponse): void {
   jsonError(res, "failed to snapshot app", 500);
 }
@@ -780,6 +797,7 @@ async function resolveModel(
 }
 
 function parseFilterValue(raw: string, column: ModelDef["columns"][string]): unknown {
+  if (column.kind === "json") throw new Error("json columns cannot be filtered");
   if (column.kind === "number") {
     if (!DECIMAL_NUMBER_PATTERN.test(raw)) throw new Error("must be a decimal number");
     const value = Number(raw);
@@ -971,6 +989,10 @@ function rowValue(row: AppRow, column: string): unknown {
   return Object.hasOwn(row, column) ? row[column] : undefined;
 }
 
+export function rowMatchesFilters(row: AppRow, filters: RowFilter[]): boolean {
+  return filters.every((filter) => rowValue(row, filter.column) === filter.value);
+}
+
 export function applyQuery(
   rows: AppRow[],
   query: AppQueryDef,
@@ -997,6 +1019,71 @@ export function applyQuery(
     });
   }
   return selected.slice(0, query.limit ?? 200);
+}
+
+export async function selectAppRows(
+  appId: string,
+  modelName: string,
+  model: ModelDef,
+  filters: RowFilter[],
+  sortRaw?: string,
+  limit = 200,
+  systemColumns = false,
+) {
+  // Backstop for every caller: the REST route (`filter.<col>`) and the MCP
+  // tools (`equals.<col>`) reject json filters with their own paths first.
+  const jsonFilterIssues = filters.flatMap((filter) =>
+    Object.hasOwn(model.columns, filter.column) && model.columns[filter.column]!.kind === "json"
+      ? [{ path: `filter.${filter.column}`, message: "json columns cannot be filtered" }]
+      : [],
+  );
+  if (jsonFilterIssues.length > 0) throw new AppRowValidationError(jsonFilterIssues);
+
+  // SQL narrows the scan; the `===` re-check keeps the exact filter semantics.
+  const rows = (
+    await listAppRows(
+      appId,
+      modelName,
+      filters.flatMap((filter) =>
+        typeof filter.value === "string" ||
+        typeof filter.value === "number" ||
+        typeof filter.value === "boolean"
+          ? [{ column: filter.column, value: filter.value }]
+          : [],
+      ),
+    )
+  ).filter((row) => rowMatchesFilters(row, filters));
+
+  if (sortRaw) {
+    const [column, dir, extra] = sortRaw.split(":");
+    if (
+      extra !== undefined ||
+      !column ||
+      (dir !== "asc" && dir !== "desc") ||
+      (!SORTABLE_SYSTEM_DATE_COLUMNS.has(column) &&
+        !(systemColumns && Object.hasOwn(SYSTEM_COLUMN_KINDS, column)) &&
+        (!Object.hasOwn(model.columns, column) || model.columns[column]!.hidden === true))
+    ) {
+      throw new AppRowValidationError([
+        { path: "sort", message: "must be <column>:<asc|desc> for a known column" },
+      ]);
+    }
+    if (model.columns[column]?.kind === "json") {
+      throw new AppRowValidationError([{ path: "sort", message: "json columns cannot be sorted" }]);
+    }
+    rows.sort((a, b) => {
+      const result = compareValues(
+        rowValue(a, column),
+        rowValue(b, column),
+        dir,
+        SORTABLE_SYSTEM_DATE_COLUMNS.has(column) ||
+          (Object.hasOwn(model.columns, column) && model.columns[column]!.kind === "date"),
+      );
+      return result;
+    });
+  }
+  const total = rows.length;
+  return { rows: rows.slice(0, limit), total };
 }
 
 export async function handleApps(
@@ -1169,55 +1256,23 @@ export async function handleApps(
       json(res, { error: "invalid row query", issues }, 400);
       return true;
     }
-    // SQL narrows the scan; the `===` re-check keeps the exact filter semantics.
-    const rows = (
-      await listAppRows(
-        parsed.params.id,
-        parsed.params.model,
-        filters.flatMap((filter) =>
-          typeof filter.value === "string" ||
-          typeof filter.value === "number" ||
-          typeof filter.value === "boolean"
-            ? [{ column: filter.column, value: filter.value }]
-            : [],
+    try {
+      listRowsRoute.respond(
+        res,
+        200,
+        await selectAppRows(
+          parsed.params.id,
+          parsed.params.model,
+          resolved.model,
+          filters,
+          parsed.query.sort,
+          parsed.query.limit,
         ),
-      )
-    ).filter((row) => filters.every((filter) => rowValue(row, filter.column) === filter.value));
-    const sortRaw = parsed.query.sort;
-    if (sortRaw) {
-      const [column, dir, extra] = sortRaw.split(":");
-      if (
-        extra !== undefined ||
-        !column ||
-        (dir !== "asc" && dir !== "desc") ||
-        (!SORTABLE_SYSTEM_DATE_COLUMNS.has(column) &&
-          (!Object.hasOwn(resolved.model.columns, column) ||
-            resolved.model.columns[column]!.hidden === true))
-      ) {
-        json(
-          res,
-          {
-            error: "invalid sort",
-            issues: [{ path: "sort", message: "must be <column>:<asc|desc> for a known column" }],
-          },
-          400,
-        );
-        return true;
-      }
-      rows.sort((a, b) => {
-        const result = compareValues(
-          rowValue(a, column),
-          rowValue(b, column),
-          dir,
-          SORTABLE_SYSTEM_DATE_COLUMNS.has(column) ||
-            (Object.hasOwn(resolved.model.columns, column) &&
-              resolved.model.columns[column]!.kind === "date"),
-        );
-        return result;
-      });
+      );
+    } catch (error) {
+      if (!(error instanceof AppRowValidationError)) throw error;
+      json(res, { error: "invalid sort", issues: error.issues }, 400);
     }
-    const total = rows.length;
-    listRowsRoute.respond(res, 200, { rows: rows.slice(0, parsed.query.limit ?? 200), total });
     return true;
   }
 
@@ -1326,8 +1381,12 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await runActionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
-    if (!actor) return true;
+    const identity = await authorizeAppCaller(req, res, myAgentId, "app.use", {
+      kind: "app",
+      appId: parsed.params.id,
+    });
+    if (!identity) return true;
+    const { actor, caller } = identity;
 
     const app = await getApp(parsed.params.id);
     if (!app) {
@@ -1335,121 +1394,41 @@ export async function handleApps(
       return true;
     }
     if (definitionNeedsRepair(res, app)) return true;
-    const actions = app.definition.actions;
-    if (!actions || !Object.hasOwn(actions, parsed.params.name)) {
-      jsonError(res, "app action not found", 404);
-      return true;
-    }
-
-    const action = actions[parsed.params.name]!;
-    const input = parsed.body.input ?? {};
-    if (action.kind === "script") {
-      const script = await getScriptById(action.scriptId);
-      if (!script) {
-        json(
-          res,
-          {
-            error: "invalid app action",
-            issues: [
-              {
-                path: `actions.${parsed.params.name}.scriptId`,
-                message: `script "${action.scriptId}" no longer exists`,
-              },
-            ],
-          },
-          400,
-        );
+    if (parsed.body.parentTaskId) {
+      // `parentTaskId` only means something to a task-kind action: a script or
+      // sync action rejects it rather than silently dropping it. An unknown
+      // action keeps `runAppAction`'s 404.
+      const actions = app.definition.actions;
+      const action =
+        actions && Object.hasOwn(actions, parsed.params.name)
+          ? actions[parsed.params.name]
+          : undefined;
+      if (action && action.kind !== "task") {
+        jsonError(res, "parentTaskId is only supported for task-kind actions", 400);
         return true;
       }
-
-      // Script actions run with the OWNER's bindings by design: wiring a script
-      // into an app is the owner's delegation. parseAppDefinition enforces at
-      // write time that an agent may only wire scripts it owns (or global ones),
-      // so a foreign script id cannot be smuggled in here. Invoker-brokered
-      // credentials remain a possible future tightening.
-      const runAsAgentId = getSavedScriptOwnerAgentId(script);
-      if (!runAsAgentId) {
-        jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
-        return true;
+      if (action) {
+        const parentTask = await getTaskById(parsed.body.parentTaskId);
+        if (!parentTask) {
+          jsonError(res, "parent task not found", 404);
+          return true;
+        }
+        // The same gate as POST /api/tasks: without it an app action would
+        // chain under any task past `task.parent.attach`.
+        const principal = await agentFirstPrincipal(req, myAgentId);
+        if (await denyParentAttach(req, res, myAgentId, parentTask, principal)) return true;
       }
-
-      const output = await runSavedScriptAsAgent({
-        script,
-        input: { ...action.args, ...input, app: { id: app.id } },
-        agentId: runAsAgentId,
-      });
-      const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
-      const error = ok
-        ? undefined
-        : output.runtimeError
-          ? `${output.runtimeError.name}: ${output.runtimeError.message}`
-          : (output.error ?? `Script exited with code ${output.exitCode}`);
-      runActionRoute.respond(
-        res,
-        200,
-        scrubObject({
-          ok,
-          result: output.result,
-          stdout: output.stdout,
-          ...(error === undefined ? {} : { error }),
-          durationMs: output.durationMs,
-        }),
-      );
-      return true;
     }
-
-    if (action.kind === "sync") {
-      const startedAt = Date.now();
-      const sync = await runAppSync({
-        appId: app.id,
-        ...(action.model === undefined ? {} : { model: action.model }),
-        ...(action.source === undefined ? {} : { source: action.source }),
-        invokedBy: actor,
-      });
-      const durationMs = Date.now() - startedAt;
-      if (sync.issues && sync.issues.length > 0) {
-        json(res, { error: "invalid sync action", issues: sync.issues }, 400);
-        return true;
-      }
-      // Deliberately the SCRIPT-action response shape, minus `taskId`:
-      // app-surface.tsx branches on `taskId` first, so omitting it gives the
-      // dashboard running -> ok/error + refetchAll() with zero UI changes.
-      const error = syncPassError(sync);
-      runActionRoute.respond(
-        res,
-        200,
-        scrubObject({
-          ok: sync.ok,
-          result: { passes: sync.passes },
-          ...(error === undefined ? {} : { error }),
-          durationMs,
-        }),
-      );
-      return true;
-    }
-
-    const lead = action.agentId ? null : await getLeadAgent();
-    const taskPrompt = resolveTemplate("task.app.action", {
-      prompt: action.prompt,
-      app_id: app.id,
-      action_name: parsed.params.name,
-      input_json: JSON.stringify(input),
+    const output = await runAppAction({
+      app,
+      name: parsed.params.name,
+      input: parsed.body.input,
+      parentTaskId: parsed.body.parentTaskId,
+      caller,
+      actor,
     });
-    const task = await createTaskWithSiblingAwareness(
-      taskPrompt.text,
-      {
-        source: "api",
-        agentId: action.agentId ?? lead?.id,
-        routingReason: action.agentId ? "human_pinned" : lead ? "skill" : undefined,
-        routingSource: action.agentId || lead ? "engine_default" : undefined,
-        // App-spawned tasks group under the app's asset namespace so a
-        // swarm-tasks source can pull them back via config.assetKey.
-        key: normalizeAssetKey(`shared/app:${app.id}/action:${parsed.params.name}/`),
-        ...(actor.startsWith("user:") ? { requestedByUserId: actor.slice("user:".length) } : {}),
-      },
-      { origin: "app" },
-    );
-    runActionRoute.respond(res, 200, { ok: true, taskId: task.id, status: task.status });
+    if (output.status === 200) runActionRoute.respond(res, 200, output.body);
+    else json(res, output.body, output.status);
     return true;
   }
 

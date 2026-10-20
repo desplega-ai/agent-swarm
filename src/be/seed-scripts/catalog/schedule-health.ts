@@ -63,7 +63,7 @@ export default async function scheduleHealth(args: any, ctx: any) {
   }
 
   // Get recent tasks to correlate with schedules
-  const taskRes: any = await ctx.swarm.task_list({ createdAfter: since, limit: 2000 });
+  const taskRes: any = await ctx.swarm.task_list({ createdAfter: since, limit: 2000, includeHeartbeat: true });
   const taskPayload = taskRes?.data ?? taskRes;
   const tasks: any[] = taskPayload?.tasks ?? [];
 

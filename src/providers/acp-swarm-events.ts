@@ -3,7 +3,7 @@ import type {
   SessionNotification,
   SessionUpdate,
   ToolCallUpdate,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import type { ProviderEvent } from "./types";
 
 function contentToText(content: ContentBlock): string {

@@ -31,7 +31,7 @@ import {
   splitCredentialPool,
   validateOpencodeCredentials,
 } from "../utils/credentials";
-import { isEnvFlagEnabled } from "../utils/env-flag";
+import { isEnvFlagEnabled, isSessionSummarySkipped } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import {
@@ -637,7 +637,12 @@ export class OpencodeSession implements ProviderSession {
           type: "tool_start",
           toolCallId: ev.data.id,
           toolName,
-          args: ev.data.input,
+          // OpenCode's native skill tool names the skill with `id`, not `name`.
+          // Normalize only this tool for the shared skill.invoke tracker.
+          args:
+            toolName === "skill" && typeof ev.data.input?.id === "string"
+              ? { ...ev.data.input, name: ev.data.input.id }
+              : ev.data.input,
         });
         break;
       }
@@ -792,7 +797,7 @@ export class OpencodeSession implements ProviderSession {
   /** Identity sync, session summary, and session close (Stop-hook parity). */
   private async runSessionEnd(signal: AbortSignal): Promise<void> {
     await sessionHooks.syncIdentity(this.swarm, "session_sync", signal);
-    if (process.env.SKIP_SESSION_SUMMARY) {
+    if (isSessionSummarySkipped()) {
       console.debug("session_summary skipped (opencode): SKIP_SESSION_SUMMARY is set");
     } else {
       const transcript = this.transcript.join("\n").slice(-TRANSCRIPT_TAIL_CHARS);

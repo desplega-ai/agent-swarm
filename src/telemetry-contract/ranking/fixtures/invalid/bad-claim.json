@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "claim": "rk_3F9A1C0E7B2D4A6F8E1C3B5D7F9A2C4E",
+  "name": "Example Org",
+  "domain": "example.com",
+  "category": "engineering",
+  "subcategory": "qa-testing",
+  "description": "QA and release automation for our web apps",
+  "sourceCodeUrl": "https://example.org/agents",
+  "updatedAt": "2026-10-18T10:00:00.000Z"
+}

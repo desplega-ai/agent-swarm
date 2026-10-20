@@ -4,6 +4,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
+import { buildMrkdwnSectionBlocks } from "@/slack/blocks";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { parseSlackTs } from "@/slack/message-text";
 import { markdownToSlack } from "@/slack/responses";
@@ -77,15 +78,7 @@ export const registerSlackUpdateTool = (server: McpServer) => {
           text: slackMessage,
           unfurl_links: false,
           unfurl_media: false,
-          blocks: [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: slackMessage,
-              },
-            },
-          ],
+          blocks: buildMrkdwnSectionBlocks(slackMessage),
         } satisfies ChatUpdatePayload;
         const result = await app.client.chat.update(updatePayload);
 

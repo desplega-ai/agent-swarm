@@ -12,6 +12,7 @@ const AgentsPage = lazyRoute(() => import("@/pages/agents/page"));
 const AgentDetailPage = lazyRoute(() => import("@/pages/agents/[id]/page"));
 const TasksPage = lazyRoute(() => import("@/pages/tasks/page"));
 const TaskDetailPage = lazyRoute(() => import("@/pages/tasks/[id]/page"));
+const TaskLineagePage = lazyRoute(() => import("@/pages/tasks/[id]/lineage/page"));
 const SessionsPage = lazyRoute(() => import("@/pages/sessions/page"));
 const SessionDetailPage = lazyRoute(() => import("@/pages/sessions/[rootTaskId]/page"));
 const ChatPage = lazyRoute(() => import("@/pages/chat/page"));
@@ -26,7 +27,6 @@ const AppearancePage = lazyRoute(() => import("@/pages/settings/appearance-page"
 const SecretsPage = lazyRoute(() => import("@/pages/settings/secrets-page"));
 const ConfigurationPage = lazyRoute(() => import("@/pages/settings/configuration-page"));
 const ExtensionsPage = lazyRoute(() => import("@/pages/settings/extensions-page"));
-const ExtensionDetailPage = lazyRoute(() => import("@/pages/settings/extension-detail-page"));
 const ExtensionCatalogPage = lazyRoute(() => import("@/pages/settings/extension-catalog-page"));
 const RuntimePoolsPage = lazyRoute(() => import("@/pages/settings/runtime-pools-page"));
 const RuntimePoolDetailPage = lazyRoute(() => import("@/pages/settings/runtime-pool-detail-page"));
@@ -149,6 +149,7 @@ export const router = createBrowserRouter([
       { path: "agents/:id", element: <AgentDetailPage /> },
       { path: "tasks", element: <TasksPage /> },
       { path: "tasks/:id", element: <TaskDetailPage /> },
+      { path: "tasks/:id/lineage", element: <TaskLineagePage /> },
       { path: "sessions", element: <SessionsPage /> },
       { path: "sessions/:rootTaskId", element: <SessionDetailPage /> },
       { path: "chat", element: <ChatPage /> },
@@ -189,9 +190,10 @@ export const router = createBrowserRouter([
           { path: "integrations", element: <IntegrationsPage /> },
           { path: "integrations/:id", element: <IntegrationDetailPage /> },
           { path: "configuration", element: <ConfigurationPage /> },
-          { path: "extensions", element: <ExtensionsPage /> },
           { path: "extensions/new", element: <ExtensionCatalogPage /> },
-          { path: "extensions/:id", element: <ExtensionDetailPage /> },
+          // One route for the grid and its detail sheet, so opening and closing
+          // the sheet keeps the page mounted.
+          { path: "extensions/:id?", element: <ExtensionsPage /> },
           { path: "runtime-pools", element: <RuntimePoolsPage /> },
           { path: "runtime-pools/new", element: <RuntimePoolDetailPage /> },
           { path: "runtime-pools/controllers", element: <RuntimeControllersPage /> },

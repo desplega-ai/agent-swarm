@@ -254,6 +254,12 @@ describe("RBAC admission over real HTTP", () => {
     expect(deniedTaskCreate.status).toBe(403);
     expect(deniedTaskCreate.body.error).toContain("admission: route has no permission verb");
 
+    // The ranking state carries the private claim: a requester cannot read it.
+    const deniedRanking = await api(server.base, "GET", "/api/ranking", { bearer: userToken });
+    expect(deniedRanking.status).toBe(403);
+    expect(deniedRanking.body.error).toContain("missing permission 'config.write.any'");
+    expect(deniedRanking.body.listing).toBeUndefined();
+
     const deniedAppMove = await api(server.base, "PATCH", `/api/assets/app/${appId}/key`, {
       bearer: userToken,
       body: { key: "shared/rbac-denied/" },
@@ -369,6 +375,7 @@ describe("RBAC admission over real HTTP", () => {
         return (
           [
             "GET /api/agents/{id}/mcp-servers",
+            "GET /api/ranking",
             "GET /api/scripts/{id}/apis/{endpointId}/secret",
             "PATCH /api/assets/app/{id}/key",
             "POST /api/scripts/{id}/apis",
@@ -400,6 +407,7 @@ describe("RBAC admission over real HTTP", () => {
     const denyRows = userHttpRows.filter((row) => row.decision === "deny");
     expect(denyRows.map((row) => row.resourceId).sort()).toEqual([
       "GET /api/agents/{id}/mcp-servers",
+      "GET /api/ranking",
       "GET /api/scripts/{id}/apis/{endpointId}/secret",
       "PATCH /api/assets/app/{id}/key",
       "POST /api/scripts/{id}/apis",

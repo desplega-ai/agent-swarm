@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as otelModule from "../otel";
 import { ackSlackMessage, finalizeSlackMessageReaction } from "../slack/ack";
 import {
+  completedStatusIcon,
   normalizeSlackReactionShortcode,
   reactionName,
   SLACK_REACTION_CONFIG_KEYS,
@@ -112,6 +113,25 @@ describe("reaction-shortcode.ts", () => {
     expect(normalizeSlackReactionShortcode("thumbsup::skin-tone-")).toBeNull();
     expect(normalizeSlackReactionShortcode("thumbsup:::skin-tone-6")).toBeNull();
     expect(normalizeSlackReactionShortcode("thumbsup::skin-tone-6::skin-tone-6")).toBeNull();
+  });
+
+  test("completedStatusIcon defaults to ✅ and renders a configured name as :name:", () => {
+    const previous = process.env.SLACK_STATUS_ICON_COMPLETED;
+    try {
+      delete process.env.SLACK_STATUS_ICON_COMPLETED;
+      expect(completedStatusIcon()).toBe("✅");
+      for (const value of ["bee-lgtm", ":bee-lgtm:", "  :Bee-LGTM: "]) {
+        process.env.SLACK_STATUS_ICON_COMPLETED = value;
+        expect(completedStatusIcon()).toBe(":bee-lgtm:");
+      }
+      for (const bad of ["", "::", "bee lgtm", "✅", "bee:lgtm"]) {
+        process.env.SLACK_STATUS_ICON_COMPLETED = bad;
+        expect(completedStatusIcon()).toBe("✅");
+      }
+    } finally {
+      if (previous === undefined) delete process.env.SLACK_STATUS_ICON_COMPLETED;
+      else process.env.SLACK_STATUS_ICON_COMPLETED = previous;
+    }
   });
 
   test("no Slack source file outside ack.ts names a reaction shortcode or calls reactions.add", async () => {

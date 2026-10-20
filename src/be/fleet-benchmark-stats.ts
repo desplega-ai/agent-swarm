@@ -5,15 +5,20 @@
  * registered agent count (the same count `org.snapshot` reports as
  * `agents_total`).
  *
- * Null when that start is unknown: no accepted event is recorded yet, or the
- * earliest one is inside the window.
+ * Comparisons require a known ingest start. With telemetry off, callers can
+ * use the local 30-day window without an ingest anchor.
  */
-import { fleetCountStart, type LocalFleetStats } from "../fleet-benchmark";
+import { FLEET_WINDOW_DAYS, fleetCountStart, type LocalFleetStats } from "../fleet-benchmark";
 import { getDbClient } from "./db/runtime";
 import { getTelemetryIngestAnchor } from "./telemetry-ingest-anchor";
 
-export async function getLocalFleetStats(now = new Date()): Promise<LocalFleetStats | null> {
-  const start = fleetCountStart(await getTelemetryIngestAnchor(), now);
+export async function getLocalFleetStats(
+  now = new Date(),
+  { requireIngestAnchor = true } = {},
+): Promise<LocalFleetStats | null> {
+  const start = requireIngestAnchor
+    ? fleetCountStart(await getTelemetryIngestAnchor(), now)
+    : new Date(now.getTime() - FLEET_WINDOW_DAYS * 86_400_000);
   if (!start) return null;
   const since = start.toISOString();
   const client = getDbClient();

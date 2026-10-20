@@ -17,7 +17,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 //   copy(value, "redirect");
 //
 // `copy` resolves to `false` when the clipboard is unavailable or denied, so a
-// caller that must not fail silently can show feedback.
+// caller that must not fail silently can show feedback. An empty string is a
+// real value (a JSON node `""`) and is written like any other.
 
 export interface UseCopyToClipboardResult<K extends string = string> {
   /** Whether the most recent successful copy is still flashing. */
@@ -42,7 +43,6 @@ export function useCopyToClipboard<K extends string = string>(): UseCopyToClipbo
   );
 
   const copy = useCallback(async (value: string, key?: K) => {
-    if (!value) return false;
     try {
       if (typeof navigator === "undefined" || !navigator.clipboard) return false;
       await navigator.clipboard.writeText(value);

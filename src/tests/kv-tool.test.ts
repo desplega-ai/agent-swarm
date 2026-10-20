@@ -118,6 +118,21 @@ describe("kv MCP tools", () => {
     expect(getRes.structuredContent.entry?.value).toEqual({ hello: "world" });
   });
 
+  test.each([
+    "heartbeat-checklist",
+    "heartbeat-checklist:reported-failures",
+  ])("kv-set refuses reserved heartbeat receipts even for lead (%s)", async (namespace) => {
+    const result = (await buildServer().set.handler(
+      { namespace, key: "checklist-id", value: ["forged-id"] },
+      meta(lead),
+    )) as StructuredResult<{ success: boolean; message: string }>;
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("reserved for heartbeat checklist receipts");
+    expect(
+      await getDbClient().get("SELECT key FROM kv_entries WHERE namespace = ?", [namespace]),
+    ).toBeNull();
+  });
+
   test("kv-get returns entry=null for missing keys", async () => {
     const tools = buildServer();
     const getRes = (await tools.get.handler({ key: "nope" }, meta(agentA))) as StructuredResult<{

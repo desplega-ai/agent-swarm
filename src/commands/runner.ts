@@ -55,6 +55,7 @@ import {
   skillFromToolArgs,
 } from "../providers/skill-invoke.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
+import { rankingUsageProps } from "../ranking/usage.ts";
 import { WorkerRealtimeClient } from "../realtime/worker-client";
 import { resumedTaskModelSelection, type TaskModelPinFields } from "../tasks/model-pin.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
@@ -564,11 +565,21 @@ export interface ApiConfig {
   runtimeInstanceId?: string;
 }
 
+/**
+ * One per runner process, shared by every task session it runs. Delivery
+ * entries are keyed by `steeringDispatchKey(taskId, messageId)`, not the bare
+ * message id: a row handed to a successor task keeps its id, and the
+ * successor's session must still receive it.
+ */
 export interface SteeringDispatchState {
   dispatchedIds: Set<string>;
   outcomes: Map<string, SteerDeliveryResult>;
   pollingTaskIds: Set<string>;
   inFlightMessageIds: Set<string>;
+}
+
+function steeringDispatchKey(taskId: string, messageId: string): string {
+  return `${taskId}:${messageId}`;
 }
 
 export function createSteeringDispatchState(): SteeringDispatchState {
@@ -630,16 +641,17 @@ async function pollAndStartSteeringDispatches(
   }
 
   const data = (await response.json()) as { messages?: SteeringMessage[] };
-  const prepared: Array<{ message: SteeringMessage; text?: string }> = [];
+  const prepared: Array<{ message: SteeringMessage; key: string; text?: string }> = [];
   try {
     for (const message of data.messages ?? []) {
       if (message.status !== "pending") continue;
-      if (state.inFlightMessageIds.has(message.id)) continue;
-      state.inFlightMessageIds.add(message.id);
-      const item: { message: SteeringMessage; text?: string } = { message };
+      const key = steeringDispatchKey(taskId, message.id);
+      if (state.inFlightMessageIds.has(key)) continue;
+      state.inFlightMessageIds.add(key);
+      const item: { message: SteeringMessage; key: string; text?: string } = { message, key };
       prepared.push(item);
       item.text =
-        session.deliverSteering && !state.outcomes.has(message.id)
+        session.deliverSteering && !state.outcomes.has(key)
           ? await renderSteeringDelivery(
               message.id,
               message.body,
@@ -648,27 +660,29 @@ async function pollAndStartSteeringDispatches(
           : undefined;
     }
   } catch (error) {
-    for (const { message } of prepared) state.inFlightMessageIds.delete(message.id);
+    for (const { key } of prepared) state.inFlightMessageIds.delete(key);
     throw error;
   }
-  return prepared.map(({ message, text }) =>
-    dispatchSteeringMessage(config, message, text, session, state, fetchImpl).finally(() =>
-      state.inFlightMessageIds.delete(message.id),
+  return prepared.map(({ message, key, text }) =>
+    dispatchSteeringMessage(config, taskId, message, text, session, state, fetchImpl).finally(() =>
+      state.inFlightMessageIds.delete(key),
     ),
   );
 }
 
 async function dispatchSteeringMessage(
   config: ApiConfig,
+  taskId: string,
   message: SteeringMessage,
   text: string | undefined,
   session: ProviderSession,
   state: SteeringDispatchState,
   fetchImpl: typeof fetch,
 ): Promise<void> {
-  let outcome = state.dispatchedIds.has(message.id) ? state.outcomes.get(message.id) : undefined;
+  const key = steeringDispatchKey(taskId, message.id);
+  let outcome = state.dispatchedIds.has(key) ? state.outcomes.get(key) : undefined;
   if (!outcome) {
-    state.dispatchedIds.add(message.id);
+    state.dispatchedIds.add(key);
     try {
       outcome = session.deliverSteering
         ? await session.deliverSteering({
@@ -692,11 +706,15 @@ async function dispatchSteeringMessage(
           scrubSecrets(outcome.reason).trim() || "Provider rejected steering without a reason",
       };
     }
-    state.outcomes.set(message.id, outcome);
+    state.outcomes.set(key, outcome);
   }
 
   const endpoint = outcome.delivered ? "delivered" : "undeliverable";
-  const body = outcome.delivered ? { mode: outcome.mode } : { reason: outcome.reason };
+  // `taskId` fences the callback: a row handed to a successor while this
+  // session held it answers 409 and stays pending for the successor.
+  const body = outcome.delivered
+    ? { mode: outcome.mode, taskId }
+    : { reason: outcome.reason, taskId };
   const reportResponse = await fetchImpl(
     `${config.apiUrl}/api/steering-messages/${encodeURIComponent(message.id)}/${endpoint}`,
     {
@@ -709,6 +727,7 @@ async function dispatchSteeringMessage(
       body: JSON.stringify(body),
     },
   );
+  if (reportResponse.status === 409) return;
   if (!reportResponse.ok) {
     throw new Error(`Steering ${endpoint} report failed (HTTP ${reportResponse.status})`);
   }
@@ -1210,6 +1229,13 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "TEMPLATE_REGISTRY_URL",
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
+  // Gate the public-ranking `ranking.usage` emit, so clearing the website or
+  // turning the setting off stops it on running workers.
+  "SWARM_ORG_WEBSITE",
+  "PUBLIC_RANKING_ENABLED",
+  "SWARM_ORG_TEAM_SIZE",
+  "SWARM_ORG_USE_CASE",
+  "SWARM_ORG_ACQUISITION_SOURCE",
   // pi reads these from process.env for its traits and its session.
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",
@@ -4905,6 +4931,12 @@ async function spawnProviderProcess(
             },
             { userId: opts.requestedByUserId ?? null },
           );
+          // Public ranking: token counts only, while the install is opted in.
+          const rankingUsage = rankingUsageProps(result.cost, {
+            model: result.cost.model,
+            provider: result.cost.provider ?? opts.harnessProvider,
+          });
+          if (rankingUsage) telemetry.ranking("usage", rankingUsage);
         }
 
         // Post completion context usage snapshot

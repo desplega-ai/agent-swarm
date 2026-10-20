@@ -339,14 +339,18 @@ describe("parseGhPrCommands", () => {
     );
     expect(calls).toEqual([
       {
+        action: "create",
         cwd: "/tmp/wt",
         repos: ["o/r"],
+        resolvedRepos: ["o/r"],
         alsoCheckout: false,
         unknownTarget: false,
         texts: ["t"],
+        bodyTexts: [],
         bodyFiles: ["body.md"],
         unresolvedBodyFiles: [],
         opaqueBody: false,
+        externalBody: false,
       },
     ]);
   });

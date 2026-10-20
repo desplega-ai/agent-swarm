@@ -190,3 +190,18 @@ Agents should make App changes through a read-patch-validate loop:
 Definition patches use JSON Merge Patch semantics. Arrays and scalar values replace; many declarations—including page elements, actions, columns, and parameters—are atomic, so restate the complete declaration you want to keep. Never guess the current definition or send a partial definition through `app-upsert`.
 
 For more complete starting points, continue to [App recipes](/docs/apps/recipes). For endpoint details, see the [Apps API reference](/docs/api-reference/apps). For the definition primitives, return to [App concepts](/docs/apps/concepts).
+
+
+## Access rows and actions from agents
+
+Agents can use `app-rows-list`, `app-row-get`, `app-row-create`, `app-rows-create`, `app-row-patch`, `app-row-delete`, and `app-rows-delete`.
+Each tool requires `appId` and `model`. Writes record the agent as `createdBy` and `updatedBy`. Rows contain system fields and declared columns at the top level.
+
+`app-rows-list` accepts typed `equals` filters for declared and system columns, `sort: "<column>:asc|desc"`, and `limit` (1 to 1000, default 200).
+`app-rows-delete` requires a non-empty `equals` filter and defaults to a limit of 1000.
+Bulk creation accepts `rows: values[]`, with 1 to 500 rows and a 10 MiB total cap. Each row input must fit within 1 MiB.
+All writes use the REST validation rules. Source projections and join keys remain read-only.
+
+Agents invoke declared actions with `app-action-run({ appId, action, input? })`.
+The result contains the REST action body under `data`. Script actions run as their owner and receive the verified invoking agent as `caller`.
+Scripts and extensions cannot invoke this tool.

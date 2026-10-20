@@ -1,22 +1,40 @@
-import { ArrowLeft, Blocks, Download, ExternalLink, RefreshCw } from "lucide-react";
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, Blocks, Download, ExternalLink, PanelRightOpen, RefreshCw } from "lucide-react";
+import { useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ExtensionInstallError } from "@/api/client";
 import { useExtensionCatalog, useInstallExtension } from "@/api/hooks/use-extensions";
 import type { ExtensionCatalogItem, ExtensionInstallResult } from "@/api/types";
-import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { InfoRow } from "@/components/ui/info-row";
 import { PageHeader } from "@/components/ui/page-header";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useSheetFocus } from "./extension-detail";
 
 /** Display order for known asset kinds; unknown kinds follow alphabetically. */
 const ASSET_ORDER = ["scripts", "schedules", "skills", "workflows"];
+
+/** Search param naming the catalog template whose details sheet is open. */
+const TEMPLATE_PARAM = "template";
 
 /**
  * "1 script · 2 schedules", or "hooks only" when the bundle declares no global
@@ -53,6 +71,12 @@ function formatInstallAssets(result: ExtensionInstallResult): string {
   return parts.length > 0 ? `Assets: ${parts.join(", ")}` : "";
 }
 
+interface InstallErrorState {
+  template: string;
+  message: string;
+  diagnostics: string[];
+}
+
 function InstalledBadge({ installed }: { installed: ExtensionCatalogItem["installed"] }) {
   if (!installed) {
     return (
@@ -68,7 +92,7 @@ function InstalledBadge({ installed }: { installed: ExtensionCatalogItem["instal
   );
 }
 
-function CatalogCard({
+function InstallButton({
   item,
   installing,
   busy,
@@ -81,75 +105,217 @@ function CatalogCard({
 }) {
   const installed = item.installed;
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-col gap-1">
-            <CardTitle className="flex flex-wrap items-center gap-2">
-              <span className="font-mono">{item.name}</span>
-              <InstalledBadge installed={installed} />
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">{item.description || "—"}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {installed && (
-              <Button type="button" size="sm" variant="ghost" asChild>
-                <Link to={`/settings/extensions/${installed.id}`}>
-                  <ExternalLink className="h-4 w-4" />
-                  Open
-                </Link>
-              </Button>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              variant={installed ? "outline" : "default"}
-              disabled={busy}
-              onClick={onInstall}
-            >
-              {installed ? <RefreshCw className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-              {installing ? "Installing…" : installed ? "Reinstall / update" : "Install"}
-            </Button>
-          </div>
-        </div>
+    <Button
+      type="button"
+      size="sm"
+      variant={installed ? "outline" : "default"}
+      disabled={busy}
+      onClick={onInstall}
+    >
+      {installed ? <RefreshCw className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+      {installing ? "Installing…" : installed ? "Reinstall / update" : "Install"}
+    </Button>
+  );
+}
+
+function InstallErrorAlert({ error }: { error: InstallErrorState }) {
+  return (
+    <Alert variant="destructive">
+      <AlertDescription>
+        <p>
+          Failed to install <span className="font-mono">{error.template}</span>: {error.message}
+        </p>
+        {error.diagnostics.length > 0 && (
+          <ul className="mt-2 list-disc pl-4 font-mono text-[11px] leading-relaxed">
+            {error.diagnostics.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function CatalogCard({
+  item,
+  installing,
+  busy,
+  onInstall,
+  onDetails,
+}: {
+  item: ExtensionCatalogItem;
+  installing: boolean;
+  busy: boolean;
+  onInstall: () => void;
+  onDetails: () => void;
+}) {
+  return (
+    <Card className="gap-4 py-5">
+      <CardHeader className="px-5">
+        <CardTitle className="flex min-w-0 items-center gap-2">
+          <Blocks className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="truncate font-mono" title={item.name}>
+            {item.name}
+          </span>
+        </CardTitle>
+        <CardDescription className="line-clamp-2">{item.description || "—"}</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-muted-foreground">
+      <CardContent className="flex-1 px-5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-muted-foreground">
+          <InstalledBadge installed={item.installed} />
           <span>v{item.version}</span>
-          <span>·</span>
-          <span>{item.manifestFile}</span>
           <span>·</span>
           <span>{formatAssetCounts(item.assets)}</span>
         </div>
-        {item.readme && (
-          <CollapsibleSection title="README">
-            <div className="pt-2 text-sm">
-              <MarkdownView text={item.readme} normalizeSoftBreaks={false} />
-            </div>
-          </CollapsibleSection>
-        )}
       </CardContent>
+      <CardFooter className="flex-wrap justify-end gap-2 px-5">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          data-catalog-details={item.name}
+          onClick={onDetails}
+        >
+          <PanelRightOpen className="h-4 w-4" />
+          Details
+        </Button>
+        <InstallButton item={item} installing={installing} busy={busy} onInstall={onInstall} />
+      </CardFooter>
     </Card>
   );
 }
 
 /**
+ * Details for one catalog template: the manifest summary the catalog serves,
+ * its README, and the install action. Full width on small screens.
+ * `focusFallback` names where focus goes on close when the opener is gone.
+ */
+function CatalogDetailSheet({
+  item,
+  installing,
+  busy,
+  installError,
+  onInstall,
+  onClose,
+  focusFallback,
+}: {
+  item: ExtensionCatalogItem | null;
+  installing: boolean;
+  busy: boolean;
+  installError: InstallErrorState | null;
+  onInstall: (item: ExtensionCatalogItem) => void;
+  onClose: () => void;
+  focusFallback: (name: string) => HTMLElement | null;
+}) {
+  // Keep the last item so the body stays rendered while the sheet animates closed.
+  const [shown, setShown] = useState(item);
+  if (item && item !== shown) setShown(item);
+  const focus = useSheetFocus(() => (shown ? focusFallback(shown.name) : null));
+
+  return (
+    <Sheet open={!!item} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-2xl" {...focus.contentProps}>
+        <SheetHeader className="border-b border-border px-6 py-4 pr-12">
+          <SheetTitle className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono">{shown?.name ?? "Extension"}</span>
+            {shown && <InstalledBadge installed={shown.installed} />}
+          </SheetTitle>
+          <SheetDescription>{shown?.description || "Catalog extension"}</SheetDescription>
+        </SheetHeader>
+        {shown && (
+          <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-4">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {shown.installed && (
+                <Button type="button" size="sm" variant="ghost" asChild>
+                  <Link to={`/settings/extensions/${shown.installed.id}`}>
+                    <ExternalLink className="h-4 w-4" />
+                    Open installed
+                  </Link>
+                </Button>
+              )}
+              <InstallButton
+                item={shown}
+                installing={installing}
+                busy={busy}
+                onInstall={() => onInstall(shown)}
+              />
+            </div>
+
+            {installError?.template === shown.name && <InstallErrorAlert error={installError} />}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Manifest</CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                <InfoRow label="Version">
+                  <span className="font-mono text-xs">v{shown.version}</span>
+                </InfoRow>
+                <InfoRow label="Manifest file">
+                  <span className="font-mono text-xs break-all">{shown.manifestFile}</span>
+                </InfoRow>
+                <InfoRow label="Assets">
+                  <span className="font-mono text-xs">{formatAssetCounts(shown.assets)}</span>
+                </InfoRow>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>README</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm">
+                {shown.readme ? (
+                  <MarkdownView text={shown.readme} normalizeSoftBreaks={false} />
+                ) : (
+                  <p className="text-muted-foreground">This template ships no README.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/**
  * `/settings/extensions/new` — the predefined bundles bundled with the server
- * (`GET /api/extensions/catalog`). Extensions install only from this catalog;
- * installing an already-installed template stages a new version when its
- * content changed, and is a no-op otherwise.
+ * (`GET /api/extensions/catalog`), as a card grid. Details opens a sheet driven
+ * by `?template=<name>`. Extensions install only from this catalog; installing
+ * an already-installed template stages a new version when its content changed,
+ * and is a no-op otherwise.
  */
 export default function ExtensionCatalogPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: catalog, isLoading, error } = useExtensionCatalog();
   const install = useInstallExtension();
-  const [installError, setInstallError] = useState<{
-    template: string;
-    message: string;
-    diagnostics: string[];
-  } | null>(null);
+  const [installError, setInstallError] = useState<InstallErrorState | null>(null);
+  const backLink = useRef<HTMLAnchorElement>(null);
 
   if (isLoading) return <PageSkeleton />;
+
+  /** The template card's Details control, else the page's Back link. */
+  function sheetFocusFallback(name: string) {
+    return (
+      document.querySelector<HTMLElement>(`[data-catalog-details="${CSS.escape(name)}"]`) ??
+      backLink.current
+    );
+  }
+
+  const selectedName = searchParams.get(TEMPLATE_PARAM);
+  const selected = (catalog ?? []).find((item) => item.name === selectedName) ?? null;
+
+  function setSelected(name: string | null) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (name) next.set(TEMPLATE_PARAM, name);
+      else next.delete(TEMPLATE_PARAM);
+      return next;
+    });
+  }
 
   function handleInstall(item: ExtensionCatalogItem) {
     setInstallError(null);
@@ -184,10 +350,10 @@ export default function ExtensionCatalogPage() {
     <div className="flex flex-col flex-1 min-h-0 gap-6">
       <PageHeader
         title="Install extension"
-        description="Predefined bundles shipped with this server. Installing adds the extension disabled; enable it from its detail page. Reinstalling stages a new version only when the bundle changed."
+        description="Predefined bundles shipped with this server. Installing adds the extension disabled; enable it from its details. Reinstalling stages a new version only when the bundle changed."
         action={
           <Button type="button" size="sm" variant="ghost" asChild>
-            <Link to="/settings/extensions">
+            <Link ref={backLink} to="/settings/extensions">
               <ArrowLeft className="h-4 w-4" />
               Back
             </Link>
@@ -204,23 +370,7 @@ export default function ExtensionCatalogPage() {
         </Alert>
       )}
 
-      {installError && (
-        <Alert variant="destructive">
-          <AlertDescription>
-            <p>
-              Failed to install <span className="font-mono">{installError.template}</span>:{" "}
-              {installError.message}
-            </p>
-            {installError.diagnostics.length > 0 && (
-              <ul className="mt-2 list-disc pl-4 font-mono text-[11px] leading-relaxed">
-                {installError.diagnostics.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
+      {installError && <InstallErrorAlert error={installError} />}
 
       {!error && (catalog?.length ?? 0) === 0 ? (
         <EmptyState
@@ -229,7 +379,7 @@ export default function ExtensionCatalogPage() {
           description="This server ships no extension templates."
         />
       ) : (
-        <div className="flex flex-col gap-4">
+        <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
           {(catalog ?? []).map((item) => (
             <CatalogCard
               key={item.name}
@@ -237,10 +387,21 @@ export default function ExtensionCatalogPage() {
               busy={install.isPending}
               installing={install.isPending && install.variables?.template === item.name}
               onInstall={() => handleInstall(item)}
+              onDetails={() => setSelected(item.name)}
             />
           ))}
         </div>
       )}
+
+      <CatalogDetailSheet
+        item={selected}
+        busy={install.isPending}
+        installing={install.isPending && install.variables?.template === selected?.name}
+        installError={installError}
+        onInstall={handleInstall}
+        onClose={() => setSelected(null)}
+        focusFallback={sheetFocusFallback}
+      />
     </div>
   );
 }

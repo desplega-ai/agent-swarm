@@ -13,10 +13,15 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  deletePromptTemplate,
   getDbClient,
+  getKv,
+  getRecentFailedTasks,
   initDb,
   startTask,
   updateAgentProfile,
+  upsertPromptTemplate,
+  upsertSwarmConfig,
 } from "../be/db";
 import { getScript, upsertScriptByName } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -239,6 +244,89 @@ describe("Heartbeat Checklist", () => {
       expect(tasks[0]!.priority).toBe(60);
     });
 
+    test("receipt stores exactly the ten rendered full IDs from twelve failures", async () => {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check failures" });
+      for (let i = 0; i < 12; i++) {
+        const task = await createTaskExtended(`receipt failure ${i}`, { agentId: lead.id });
+        await getDbClient().run(
+          "UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ? WHERE id = ?",
+          [`receipt reason ${i}`, new Date(Date.now() - (i + 1) * 60e3).toISOString(), task.id],
+        );
+      }
+      const failures = await getRecentFailedTasks(6);
+      const before = Date.now();
+      await checkHeartbeatChecklist();
+      const checklist = await getDbClient().get<{ id: string; task: string }>(
+        "SELECT id, task FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+      );
+      expect(checklist).toBeDefined();
+      const receipt = await getKv("heartbeat-checklist:reported-failures", checklist!.id);
+      expect(receipt?.value).toEqual(failures.slice(0, 10).map((task) => task.id));
+      expect(receipt?.expiresAt).toBeGreaterThanOrEqual(before + 7 * 24 * 3600e3);
+      expect(receipt?.expiresAt).toBeLessThanOrEqual(Date.now() + 7 * 24 * 3600e3);
+      for (const failure of failures.slice(0, 10)) {
+        expect(checklist!.task).toContain(`[${failure.id.slice(0, 8)}]`);
+      }
+      for (const failure of failures.slice(10)) {
+        expect(checklist!.task).not.toContain(`[${failure.id.slice(0, 8)}]`);
+      }
+    });
+
+    test("receipt excludes failures when the global checklist template omits system status", async () => {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check standing orders" });
+      const failure = await createTaskExtended("Unrendered failure", { agentId: lead.id });
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ? WHERE id = ?",
+        ["boom", new Date(Date.now() - 1000).toISOString(), failure.id],
+      );
+      const template = upsertPromptTemplate({
+        eventType: "heartbeat.checklist",
+        scope: "global",
+        state: "enabled",
+        body: "Review standing orders:\n{{heartbeat_content}}",
+      });
+      try {
+        await checkHeartbeatChecklist();
+        const checklist = await getDbClient().get<{ id: string; task: string }>(
+          "SELECT id, task FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+        );
+        expect(checklist?.task).toBe("Review standing orders:\n- Check standing orders");
+        expect(
+          (await getKv("heartbeat-checklist:reported-failures", checklist!.id))?.value,
+        ).toEqual([]);
+      } finally {
+        await deletePromptTemplate(template.id);
+      }
+    });
+
+    test("receipt write errors log and preserve the created checklist", async () => {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check failures" });
+      await getDbClient().run(`CREATE TRIGGER reject_heartbeat_receipt
+        BEFORE INSERT ON kv_entries
+        WHEN NEW.namespace = 'heartbeat-checklist:reported-failures'
+        BEGIN SELECT RAISE(FAIL, 'receipt unavailable'); END`);
+      const log = spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await checkHeartbeatChecklist();
+        const checklist = await getDbClient().get<{ id: string }>(
+          "SELECT id FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+        );
+        expect(checklist).toBeDefined();
+        expect(log).toHaveBeenCalledWith(
+          expect.stringContaining(
+            `Failed to save reported failures for checklist ${checklist!.id}`,
+          ),
+          expect.any(Error),
+        );
+      } finally {
+        log.mockRestore();
+        await getDbClient().run("DROP TRIGGER reject_heartbeat_receipt");
+      }
+    });
+
     test("dedup: skips when active heartbeat-checklist task exists for lead", async () => {
       const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
@@ -404,6 +492,103 @@ describe("Heartbeat Checklist", () => {
       const tasks = await checklistTasks();
       expect(tasks).toHaveLength(1);
       expect(tasks[0]!.tags.some((tag) => tag.startsWith("heartbeat-gate:"))).toBe(false);
+    });
+
+    describe("default Jev gate", () => {
+      async function setGlobal(key: string, value: string) {
+        await upsertSwarmConfig({ scope: "global", key, value, isSecret: true });
+      }
+
+      beforeEach(() => {
+        delete process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT;
+      });
+
+      afterEach(async () => {
+        await getDbClient().run("DELETE FROM swarm_config");
+        delete process.env.OPENROUTER_BASE_URL;
+        delete process.env.HEARTBEAT_JEV_GATE_PROVIDER;
+      });
+
+      test("unset script with a TypeSafe key runs heartbeat-jev-gate in shadow", async () => {
+        await setGlobal("TYPESAFE_API_KEY", "ts-test-key");
+        useGate({ quiet: true });
+        const lead = await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toEqual([{ scriptName: "heartbeat-jev-gate", leadAgentId: lead.id }]);
+        const tasks = await checklistTasks();
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0]!.tags).toContain("heartbeat-gate:quiet");
+      });
+
+      test("unset script with an OpenRouter key runs heartbeat-jev-gate", async () => {
+        await setGlobal("OPENROUTER_API_KEY", "or-test-key");
+        useGate({ quiet: false });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls.map((call) => call.scriptName)).toEqual(["heartbeat-jev-gate"]);
+      });
+
+      test("unset script and no Jev key: gate stays off", async () => {
+        await setGlobal("ANTHROPIC_API_KEY", "unrelated");
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toHaveLength(0);
+      });
+
+      test("an OpenRouter key behind a gateway base URL does not turn the gate on", async () => {
+        await setGlobal("OPENROUTER_API_KEY", "gateway-token");
+        process.env.OPENROUTER_BASE_URL = "https://gateway.example/v1";
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toHaveLength(0);
+      });
+
+      test("a provider pin with no key for that provider leaves the gate off", async () => {
+        await setGlobal("OPENROUTER_API_KEY", "or-test-key");
+        process.env.HEARTBEAT_JEV_GATE_PROVIDER = "typesafe";
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toHaveLength(0);
+      });
+
+      for (const value of ["", "  ", "off", "OFF"]) {
+        test(`script set to ${JSON.stringify(value)} keeps the gate off with a key present`, async () => {
+          await setGlobal("TYPESAFE_API_KEY", "ts-test-key");
+          process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT = value;
+          useGate({ quiet: true });
+          await seedLead();
+
+          await checkHeartbeatChecklist();
+
+          expect(calls).toHaveLength(0);
+          const tasks = await checklistTasks();
+          expect(tasks).toHaveLength(1);
+          expect(tasks[0]!.tags.some((tag) => tag.startsWith("heartbeat-gate:"))).toBe(false);
+        });
+      }
+
+      test("the default never turns on enforce: a quiet verdict still creates the task", async () => {
+        await setGlobal("TYPESAFE_API_KEY", "ts-test-key");
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(await checklistTasks()).toHaveLength(1);
+      });
     });
 
     test("shadow mode (default): a quiet verdict still creates the task, tagged quiet", async () => {
@@ -627,6 +812,7 @@ describe("Heartbeat Checklist", () => {
       expect(tasks.length).toBe(1);
       expect(tasks[0]!.agentId).toBe(lead.id);
       expect(tasks[0]!.priority).toBe(70);
+      expect(await getKv("heartbeat-checklist:reported-failures", tasks[0]!.id)).toBeNull();
     });
 
     test("boot-triage task includes reboot context", async () => {

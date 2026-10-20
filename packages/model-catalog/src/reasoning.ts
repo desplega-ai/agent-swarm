@@ -149,9 +149,20 @@ function applyHarnessOverrides(
     const hasToggle = facts.reasoning_options?.some((o) => o.type === "toggle") ?? false;
     if (direct && hasToggle && !result.includes("off")) result = ["off", ...result];
     if (!direct) result = result.filter((l) => l !== "off");
-  } else if (harness !== "codex" && harness !== "cursor") {
-    // cursor passes the model's own effort values through (`max` included),
-    // see `src/providers/cursor-adapter.ts`.
+  } else if (
+    harness !== "codex" &&
+    harness !== "cursor" &&
+    harness !== "opencode" &&
+    harness !== "pi"
+  ) {
+    // cursor, opencode and pi pass the model's own effort values through (`max`
+    // included). Cursor maps the level onto its live model list
+    // (`src/providers/cursor-adapter.ts`); opencode writes it straight into the
+    // provider transport (`reasoningEffort`, or `reasoning.effort` on
+    // OpenRouter, see `buildOpencodeReasoningOptions` in
+    // `src/providers/reasoning-effort.ts`); pi sets the session `thinkingLevel`
+    // and pi-ai clamps it to the model's `thinkingLevelMap`. models.dev declares
+    // `max` for e.g. `opencode-go/deepseek-v4.1-flash`.
     result = result.filter((l) => l !== "max");
   }
 

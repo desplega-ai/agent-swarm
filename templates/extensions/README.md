@@ -14,6 +14,7 @@ Each folder holds exactly one `manifest.yaml`, `manifest.yml`, or `manifest.json
 | `notify-on-complete` | `post.task.completed`, `post.task.failed` | Posts a summary to a Slack channel |
 | `deploy-awareness` | `pre.task.create` | Appends a one-line note to new tasks while a Dokploy deploy is in progress |
 | `slack-reply-gate` | `pre.task.create` | Asks Jev (TypeSafe or OpenRouter) whether Lead should answer a Slack thread follow-up; in `enforce` drops the wake-up and marks the message :mute: |
+| `comms-adherence-gate` | `pre.tool.call` | Asks Jev (TypeSafe or OpenRouter) whether a Slack task's final output matches the requester's comms preferences and latest request; in `enforce` blocks a non-adherent completion once per task |
 | `require-verification-note` | `pre.tool.call` | Refuses completion without a `Verified:` line in the output |
 | `task-digest` | `post.task.completed`, `post.task.failed` | Ships the `task-digest-collect` script, the `task-digest-daily` schedule (09:00 UTC), the `task-digest-report` workflow, and the `task-digest-guide` skill |
 

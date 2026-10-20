@@ -111,6 +111,7 @@ value:ReservedAgentRoleError
 value:SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS
 value:SKILL_FILE_LIMITS
 value:SUPERSEDED_RESUME_REPAIR_WINDOW_MS
+value:TASK_LINEAGE_LIMITS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
 value:abandonSlackOutcomeDelivery
@@ -412,6 +413,7 @@ value:getSystemDefaultSkills
 value:getTaskAttachments
 value:getTaskById
 value:getTaskByWorkflowRunStepId
+value:getTaskLineage
 value:getTaskStats
 value:getTasksByAgentId
 value:getTasksByStatus
@@ -612,6 +614,7 @@ type:ExistingTrackerContextWorkReason
 type:PendingChatRelay
 type:TaskFilters
 value:SUPERSEDED_RESUME_REPAIR_WINDOW_MS
+value:TASK_LINEAGE_LIMITS
 value:findCompletedTaskInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread
@@ -639,6 +642,7 @@ value:getSlackTasksMissingTree
 value:getSupersededTasksWithUnsettledDependents
 value:getSupersededTasksWithoutResume
 value:getTaskById
+value:getTaskLineage
 value:getTaskStats
 value:getTasksByAgentId
 value:getTasksByStatus
@@ -660,6 +664,7 @@ const internal = [
   "type:AgentTaskRow",
   "value:configureTaskReadDependencies",
   "value:NEVER_STARTED_TASK_STATUSES",
+  "value:readableSessionCondition",
   "value:rowToAgentTask",
   "value:rowToAgentTaskSummary",
 ].sort();

@@ -71,18 +71,18 @@ export function UsageLayout() {
     ) ?? USAGE_NAV[0];
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 md:flex-row md:gap-6">
+    <div className="flex flex-col flex-1 min-h-0 lg:flex-row lg:gap-6">
       {/* Mobile: a tab strip above the content (no select repeating the page name). */}
       <SectionTabs
         label="Usage"
         tabs={USAGE_NAV}
         activePath={activeItem.path}
-        className="md:hidden shrink-0 mb-4"
+        className="lg:hidden shrink-0 mb-4"
       />
 
       {/* Desktop: left rail. */}
       {!collapsed ? (
-        <nav aria-label="Usage" className="hidden md:flex md:flex-col md:gap-0.5 md:w-48 shrink-0">
+        <nav aria-label="Usage" className="hidden lg:flex lg:flex-col lg:gap-0.5 lg:w-48 shrink-0">
           <div className="flex items-center justify-between px-3 pb-1">
             <span className="text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
               Usage
@@ -124,9 +124,9 @@ export function UsageLayout() {
       ) : null}
 
       {/* Content area — embedded pages own their own scroll container. */}
-      <div className={cn("flex flex-col flex-1 min-h-0 relative", collapsed && "md:pl-10")}>
+      <div className={cn("flex flex-col flex-1 min-h-0 relative", collapsed && "lg:pl-10")}>
         {collapsed ? (
-          <div className="hidden md:flex absolute top-0 left-0 z-10">
+          <div className="hidden lg:flex absolute top-0 left-0 z-10">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

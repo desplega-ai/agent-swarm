@@ -1,30 +1,24 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowUpCircle, BarChart3, ExternalLink, Wrench, X } from "lucide-react";
+import { ArrowUpCircle, ExternalLink, Wrench, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { toast } from "sonner";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { useEnableTelemetry } from "@/api/hooks/use-org-profile";
 import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useDismissibleCard } from "@/hooks/use-dismissible-card";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
-import { showTelemetryBanner, TELEMETRY_BANNER_CARD_KEY } from "@/lib/telemetry-banner";
+import {
+  readTelemetryBannerDismissedAt,
+  showTelemetryBanner,
+  TELEMETRY_BANNER_CARD_KEY,
+} from "@/lib/telemetry-banner";
 import { isAdminLike } from "@/lib/user-role";
 import { cn } from "@/lib/utils";
 import { AutomationSetupRows } from "./automation-setup-rows";
+import { TelemetryBenchmarkBanner } from "./telemetry-benchmark-banner";
 
 const CURRENT_VERSION = __APP_VERSION__;
-const TELEMETRY_DOCS_URL = "https://docs.agent-swarm.dev/docs/reference/telemetry";
-
-function readDismissedAt(storageKey: string): string | null {
-  try {
-    return localStorage.getItem(storageKey);
-  } catch {
-    return null;
-  }
-}
 
 export function DashboardNudges() {
   const { user } = useCurrentUser();
@@ -34,17 +28,20 @@ export function DashboardNudges() {
   const { config } = useConfig();
   const telemetryKey = deriveStorageKey(config.apiUrl, TELEMETRY_BANNER_CARD_KEY);
   const [telemetryDismissedAt, setTelemetryDismissedAt] = useState(() =>
-    readDismissedAt(telemetryKey),
+    readTelemetryBannerDismissedAt(telemetryKey),
   );
-  const enableTelemetry = useEnableTelemetry();
+  // Set by Turn on: keeps the banner up for its profile step once telemetry is on.
+  const [telemetryFlowOpen, setTelemetryFlowOpen] = useState(false);
 
   if (!isAdminLike(user)) return null;
 
-  const showTelemetry = showTelemetryBanner({
-    telemetryEnabled: status?.telemetry?.enabled,
-    isAdmin: true,
-    dismissedAt: telemetryDismissedAt,
-  });
+  const showTelemetry =
+    telemetryFlowOpen ||
+    showTelemetryBanner({
+      telemetryEnabled: status?.telemetry?.enabled,
+      isAdmin: true,
+      dismissedAt: telemetryDismissedAt,
+    });
   function dismissTelemetry() {
     const now = new Date().toISOString();
     try {
@@ -98,38 +95,9 @@ export function DashboardNudges() {
       )}
 
       {showTelemetry && (
-        <NudgeBanner
-          priority="secondary"
-          icon={BarChart3}
-          title="Telemetry is off"
-          description={
-            <>
-              Turn it on to send usage counts, never prompts or task content. You get a benchmark
-              against similar swarms and faster fixes; we see which features matter.{" "}
-              <a
-                href={TELEMETRY_DOCS_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2"
-              >
-                What we collect
-              </a>
-            </>
-          }
-          action={
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={enableTelemetry.isPending}
-              onClick={() =>
-                enableTelemetry.mutate("banner", {
-                  onError: () => toast.error("Could not turn telemetry on. Please try again."),
-                })
-              }
-            >
-              {enableTelemetry.isPending ? "Turning on…" : "Turn on"}
-            </Button>
-          }
+        <TelemetryBenchmarkBanner
+          onStart={() => setTelemetryFlowOpen(true)}
+          onClose={() => setTelemetryFlowOpen(false)}
           onDismiss={dismissTelemetry}
         />
       )}

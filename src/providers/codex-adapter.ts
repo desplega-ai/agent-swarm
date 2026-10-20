@@ -37,7 +37,7 @@ import {
   clampContextPercent,
   computeContextUsedUnified,
 } from "../utils/context-window";
-import { isEnvFlagEnabled } from "../utils/env-flag";
+import { isEnvFlagEnabled, isSessionSummarySkipped } from "../utils/env-flag";
 import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
@@ -80,6 +80,9 @@ import type {
 } from "./types";
 
 type CodexConfig = Record<string, CodexConfigValue | undefined>;
+
+/** Plugin id the worker image installs (`codex plugin add context-mode@context-mode`). */
+const CONTEXT_MODE_CODEX_PLUGIN = "context-mode@context-mode";
 
 interface Usage {
   input_tokens: number;
@@ -542,7 +545,10 @@ export async function buildCodexConfig(
   // context-compression tools. Gated by `CONTEXT_MODE_DISABLED` so builds /
   // deploys without the `context-mode` binary on PATH don't break the session.
   // Same entry shape as the swarm + installed-server stdio entries above.
-  if (!isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false)) {
+  // When disabled, the installed Codex plugin is turned off too: it registers
+  // its own `context-mode` MCP server, skills and hooks.
+  const contextModeDisabled = isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false);
+  if (!contextModeDisabled) {
     mcpServers["context-mode"] = {
       command: "context-mode",
       enabled: true,
@@ -573,6 +579,9 @@ export async function buildCodexConfig(
     show_raw_agent_reasoning: false,
     features: { apps: false, hooks: true, plugin_hooks: true },
     mcp_servers: mcpServers as CodexConfig,
+    ...(contextModeDisabled
+      ? { plugins: { [CONTEXT_MODE_CODEX_PLUGIN]: { enabled: false } } }
+      : {}),
     ...reasoningConfig,
   };
 }
@@ -1730,8 +1739,8 @@ export class CodexSession implements ProviderSession {
     } finally {
       // Session-end summarization. Pure addition for codex — no behavior to
       // preserve. Wrapped in its own try/catch so summary failure must NOT
-      // block the existing log/AGENTS.md cleanup below. Gate `SKIP_SESSION_SUMMARY=1`
-      // matches the parity convention used by the claude Stop hook + pi/opencode.
+      // block the existing log/AGENTS.md cleanup below. `SKIP_SESSION_SUMMARY` is
+      // read with `isSessionSummarySkipped`, the same as the claude Stop hook + pi/opencode.
       //
       // Skip the summary entirely when the session was aborted. The transcript
       // is incomplete, the LLM call would retry 3× through openrouter and
@@ -1742,7 +1751,7 @@ export class CodexSession implements ProviderSession {
         this.aborted ||
         this.abortController?.signal.aborted === true ||
         this.pendingResult?.exitCode === 130;
-      if (process.env.SKIP_SESSION_SUMMARY !== "1" && !sessionWasAborted) {
+      if (!isSessionSummarySkipped() && !sessionWasAborted) {
         try {
           await this.summarizeAtEnd();
         } catch (err) {

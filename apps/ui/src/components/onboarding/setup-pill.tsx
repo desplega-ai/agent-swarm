@@ -7,10 +7,10 @@ import {
   onboardingResumeStep,
   useOnboarding,
 } from "@/api/hooks/use-onboarding";
+import { SetupChip } from "@/components/shared/setup-chip";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { SetupChip } from "./setup-card";
 import { STEP_STATUS_WORD, StepStatusGlyph, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
 

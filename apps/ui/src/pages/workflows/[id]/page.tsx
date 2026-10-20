@@ -48,6 +48,7 @@ import { CollapsibleDescription } from "@/components/shared/collapsible-descript
 import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
 import { DataGrid } from "@/components/shared/data-grid";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { JsonTree } from "@/components/shared/json-tree";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -69,7 +70,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { JsonTree } from "@/components/workflows/json-tree";
 import { subWorkflowTargetId } from "@/components/workflows/node-summary";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useTheme } from "@/hooks/use-theme";
@@ -347,7 +347,7 @@ export default function WorkflowDetailPage() {
           {/* Split view: graph + inspector */}
           <div className="flex flex-col md:flex-row flex-1 min-h-0 gap-4">
             {/* Graph panel */}
-            <div className="relative flex-[3] min-h-[300px] md:min-h-0">
+            <div className="relative flex-[3] min-w-0 min-h-[300px] md:min-h-0">
               <WorkflowGraph
                 definition={workflow.definition}
                 onNodeClick={handleNodeClick}
@@ -368,7 +368,7 @@ export default function WorkflowDetailPage() {
             </div>
 
             {/* Node inspector panel */}
-            <div className="flex-[2] min-h-0 flex flex-col rounded-lg border bg-card">
+            <div className="flex-[2] min-w-0 min-h-0 flex flex-col overflow-hidden rounded-lg border bg-card">
               <div className="shrink-0 px-4 py-3 border-b flex items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold">
                   {selectedNode ? "Node Inspector" : "Inspector"}

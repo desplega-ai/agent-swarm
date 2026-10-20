@@ -1,4 +1,4 @@
-import { SetupCard } from "@/components/onboarding/setup-card";
+import { SetupCard } from "@/components/shared/setup-card";
 import { THEME_MODES, ThemePresetPicker } from "@/components/shared/theme-picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useTheme } from "@/hooks/use-theme";

@@ -285,6 +285,8 @@ export const LEGACY_POLICY = {
   "task.action.own": requesterOwnsTask,
   "task.fs.mutate": taskFsMutate,
   "task.parent.attach": taskFsMutate,
+  "session.share": operatorOrUser,
+  "session.presence": operatorOrUser,
   "task.progress.write": taskProgressWrite,
   "favorite.write.own": anyAuthenticated,
   "memory.learning.inject": leadOnly,
@@ -316,7 +318,7 @@ export const LEGACY_POLICY = {
   "config.write.any": leadOnly,
   "config.delete.any": leadOnly,
   "config.read.secrets": leadOnly,
-  // HTTP runtime tokens can read their own resolved config in src/http/config.ts.
+  // HTTP runtime and agent tokens can read their own resolved config in src/http/config.ts.
   // Lead tokens retain config.read.secrets. This exception does not grant config administration.
   "models.catalog.write": leadOrOperator,
   "models.harness-support.write": agentOrOperator,
@@ -354,6 +356,8 @@ export const LEGACY_POLICY = {
   "runtime_pool.write": operatorOrUser,
   "runtime_pool.bind": leadOrOperatorOrUser,
   "runtime_controller.write": operatorOrUser,
+  // A worker token stands in for the swarm API key on a worker, so only humans mint it.
+  "agent.token.manage": operatorOrUser,
   "extension.write": extensionWrite,
   "extension.activate": extensionActivation,
   "extension.install.inline": leadOrOperatorOrUser,

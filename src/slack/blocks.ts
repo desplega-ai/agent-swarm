@@ -8,6 +8,7 @@
 import type { AgentTaskStatus, TaskAttachment } from "../types";
 import { getAppUrl } from "../utils/constants";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+import { completedStatusIcon } from "./reaction-shortcode";
 
 // Slack limits section text to 3000 chars; we use 2900 for safety.
 export const MAX_SECTION_LENGTH = 2900;
@@ -96,11 +97,29 @@ export function splitSlackSectionText(text: string): string[] {
     if (splitIdx < MAX_SECTION_LENGTH / 2) {
       // No good break point at all, hard split
       splitIdx = MAX_SECTION_LENGTH;
+      // Keep a surrogate pair (emoji, astral char) together: never end a
+      // chunk on a lone high surrogate.
+      const prev = remaining.charCodeAt(splitIdx - 1);
+      if (prev >= 0xd800 && prev <= 0xdbff) splitIdx -= 1;
     }
     chunks.push(remaining.slice(0, splitIdx));
     remaining = remaining.slice(splitIdx).trimStart();
   }
   return chunks;
+}
+
+// Slack's hard cap on section text.
+const SLACK_SECTION_TEXT_LIMIT = 3000;
+
+/**
+ * Default blocks for a tool message sent without explicit `blocks`: one
+ * mrkdwn section per chunk, so text over the section limit still sends.
+ * Text Slack accepts in one section stays one section, so links and code
+ * fences are never split below the limit.
+ */
+export function buildMrkdwnSectionBlocks(text: string): SlackBlock[] {
+  if (text.length <= SLACK_SECTION_TEXT_LIMIT) return [sectionBlock(text)];
+  return splitSlackSectionText(text).map((chunk) => sectionBlock(chunk));
 }
 
 // --- Block primitives ---
@@ -294,7 +313,7 @@ export function buildCompletedBlocks(opts: {
   trailer?: string;
 }): SlackBlock[] {
   const taskLink = getTaskLink(opts.taskId);
-  let line = `✅ *${opts.agentName}* (${taskLink})`;
+  let line = `${completedStatusIcon()} *${opts.agentName}* (${taskLink})`;
   if (opts.duration) line += ` · ${opts.duration}`;
 
   const blocks: SlackBlock[] = [sectionBlock(line)];
@@ -479,7 +498,8 @@ export function isTreeOutputTruncated(text: string): boolean {
  * Render a single node line: icon + bold name + task link + optional duration.
  */
 function renderNodeLine(node: TreeNode): string {
-  const icon = STATUS_ICON[node.status] ?? "•";
+  const icon =
+    node.status === "completed" ? completedStatusIcon() : (STATUS_ICON[node.status] ?? "•");
   const taskLink = getTaskLink(node.taskId);
   let line = `${icon} *${node.agentName}* (${taskLink})`;
   if (node.duration) line += ` · ${node.duration}`;

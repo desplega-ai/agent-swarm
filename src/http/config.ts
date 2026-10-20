@@ -31,6 +31,7 @@ import { SwarmConfigSchema } from "../types";
 import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
+import { syncRankingAfterConfigChange } from "./ranking";
 import { route } from "./route-def";
 import { duplicateGuardedQueryKey, jsonError } from "./utils";
 
@@ -85,7 +86,9 @@ async function requestSecretReadScope(
       }).allow
     )
       return "all";
-    if (!auth.runtimeId || resolvedScope?.agentId !== auth.agentId) return "none";
+    // Runtime and agent tokens stand in for a worker and read their own agent's
+    // scope. Task tokens are ACP harness credentials and read no secrets.
+    if (auth.tokenKind === "task" || resolvedScope?.agentId !== auth.agentId) return "none";
     return "self";
   }
   if (auth?.kind === "guest") return "none";
@@ -106,7 +109,7 @@ async function resolveSecretsRead(
   const auth = getRequestAuth(req);
   return {
     effectiveIncludeSecrets: includeSecrets && scope !== "none",
-    includeRepoSecrets: !(auth?.kind === "agent" && auth.runtimeId && scope !== "all"),
+    includeRepoSecrets: !(auth?.kind === "agent" && auth.tokenKind !== "task" && scope !== "all"),
     secretsNote: includeSecrets && scope === "none" ? SECRETS_FORCE_MASK_NOTE : "",
   };
 }
@@ -362,7 +365,7 @@ export async function handleConfig(
     const resolvedScope = {
       agentId:
         parsed.query.agentId ||
-        (auth?.kind === "agent" && auth.runtimeId ? auth.agentId : undefined),
+        (auth?.kind === "agent" && auth.tokenKind !== "task" ? auth.agentId : undefined),
       repoId: parsed.query.repoId || undefined,
     };
     const { effectiveIncludeSecrets, includeRepoSecrets, secretsNote } = await resolveSecretsRead(
@@ -527,6 +530,7 @@ export async function handleConfig(
       if (scope === "global" && key === "SWARM_ORG_WEBSITE") {
         await fillOrgLogoFromWebsite(String(value));
       }
+      if (scope === "global") await syncRankingAfterConfigChange(key, String(value));
       if (scope === "global") {
         scheduleIntegrationsReload();
       }
@@ -561,6 +565,7 @@ export async function handleConfig(
       return true;
     }
     if (existing.scope === "global") {
+      await syncRankingAfterConfigChange(existing.key, null);
       scheduleIntegrationsReload();
     }
     if (

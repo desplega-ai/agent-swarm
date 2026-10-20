@@ -160,12 +160,39 @@ describe("GET /api/users", () => {
 });
 
 describe("POST /api/users", () => {
+  test("email is optional, and valid email addresses are accepted", async () => {
+    for (const email of [undefined, "taras+swarm@example.com"]) {
+      const response = await authedFetch("/api/users", {
+        method: "POST",
+        body: JSON.stringify({ name: "Optional email", email, role: "engineer" }),
+      });
+      expect(response.status).toBe(200);
+      const { user } = await response.json();
+      expect(user.email ?? null).toBe(email ?? null);
+      expect(user.role).toBe("engineer");
+    }
+  });
+
+  test("invalid email is rejected before a user is created", async () => {
+    for (const email of ["", "not-an-email", "tester@dev", null]) {
+      const response = await authedFetch("/api/users", {
+        method: "POST",
+        body: JSON.stringify({ name: "Invalid email", email }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("email");
+    }
+    expect(await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM users")).toEqual({
+      n: 0,
+    });
+  });
+
   test("creates user + links identities + budget event, all tagged op:<fp>", async () => {
     const r = await authedFetch("/api/users", {
       method: "POST",
       body: JSON.stringify({
         name: "Tester",
-        email: "tester@dev",
+        email: "tester@dev.example",
         dailyBudgetUsd: 5,
         identities: [
           { kind: "slack", externalId: "U_QA1" },
@@ -197,6 +224,40 @@ describe("POST /api/users", () => {
 });
 
 describe("PATCH /api/users/:id", () => {
+  test("validates email when present and permits profile updates without email", async () => {
+    const user = await createUser({ name: "Email validation", email: "old@example.com" });
+    for (const email of ["", "invalid", "tester@dev"]) {
+      const response = await authedFetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ email }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("email");
+    }
+    const unchanged = await authedFetch(`/api/users/${user.id}`);
+    expect((await unchanged.json()).user.email).toBe("old@example.com");
+    for (const patch of [{ role: "founder" }, { email: "new+swarm@example.com" }]) {
+      const response = await authedFetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json()).user).toMatchObject(patch);
+    }
+  });
+
+  test("null clears the primary email", async () => {
+    const user = await createUser({ name: "Clear email", email: "clear@example.com" });
+    const response = await authedFetch(`/api/users/${user.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ email: null }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).user.email ?? null).toBeNull();
+    const reloaded = await authedFetch(`/api/users/${user.id}`);
+    expect((await reloaded.json()).user.email ?? null).toBeNull();
+  });
+
   test("dailyBudgetUsd mirrors into user-scoped budgets and null removes the mirror", async () => {
     const create = await authedFetch("/api/users", {
       method: "POST",

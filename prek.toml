@@ -54,7 +54,7 @@ name = "TypeScript type check"
 language = "system"
 entry = "bun run tsc:check"
 # Same CI "lint" domain (tsc:check is bundled in the lint-and-typecheck job).
-# tsc:check runs tsgo; CI keeps `tsc --noEmit` (tsc:check:tsc) as the authority.
+# tsc:check runs Bun's built-in `bun check`; CI keeps `tsc --noEmit` (tsc:check:tsc) as the authority.
 files = '^(src/|apps/evals/|tools/oxlint/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
@@ -160,7 +160,7 @@ stages = ["pre-push"]
 id = "ui-typecheck"
 name = "UI TypeScript type check"
 language = "system"
-entry = "bash -c 'cd apps/ui && bunx tsgo -b'"
+entry = "bash -c 'cd apps/ui && bun check -b'"
 files = "^apps/ui/"
 pass_filenames = false
 stages = ["pre-push"]

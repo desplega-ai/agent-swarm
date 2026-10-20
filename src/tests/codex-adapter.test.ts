@@ -2058,6 +2058,23 @@ describe("buildCodexConfig — context-mode + features", () => {
     expect(mcp["context-mode"]).toBeUndefined();
   });
 
+  test("CONTEXT_MODE_DISABLED also turns the installed context-mode plugin off", async () => {
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+
+    // The plugin registers its own MCP server, skills and hooks.
+    expect(merged.plugins).toEqual({ "context-mode@context-mode": { enabled: false } });
+  });
+
+  test("leaves the installed context-mode plugin alone by default", async () => {
+    delete process.env.CONTEXT_MODE_DISABLED;
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+
+    expect(merged.plugins).toBeUndefined();
+  });
+
   test("disables apps and enables hooks", async () => {
     delete process.env.CONTEXT_MODE_DISABLED;
     globalThis.fetch = stubFetch({ servers: [], total: 0 });
@@ -2275,6 +2292,48 @@ describe("CodexSession session-end summarization", () => {
     expect(runSummarizeCalls).toBe(0);
     const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
     expect(indexCalls.length).toBe(0);
+  });
+
+  test.each(["true", "TRUE"])("SKIP_SESSION_SUMMARY=%s → no runSummarize call", async (value) => {
+    process.env.SKIP_SESSION_SUMMARY = value;
+    const events = buildSummaryEvents();
+
+    let runSummarizeCalls = 0;
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => {
+        runSummarizeCalls += 1;
+        return null;
+      },
+    };
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, `skip-${value}.log`),
+      cwd: "",
+    });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    expect(runSummarizeCalls).toBe(0);
+  });
+
+  test.each(["0", "false"])("SKIP_SESSION_SUMMARY=%s → summary still runs", async (value) => {
+    process.env.SKIP_SESSION_SUMMARY = value;
+    const events = buildSummaryEvents();
+
+    let runSummarizeCalls = 0;
+    const deps: SummarizeSessionForCodexDeps = {
+      runSummarize: async () => {
+        runSummarizeCalls += 1;
+        return null;
+      },
+    };
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, `no-skip-${value}.log`),
+      cwd: "",
+    });
+    await runSessionWithFakeThreadAndDeps(events, config, deps);
+
+    expect(runSummarizeCalls).toBe(1);
   });
 
   test("missing taskId → no runSummarize call, no POST", async () => {

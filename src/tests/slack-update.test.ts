@@ -128,6 +128,61 @@ describe("slack-update", () => {
     });
   });
 
+  test("splits a long message into sections under Slack's cap", async () => {
+    const message = Array.from(
+      { length: 120 },
+      (_, index) => `line ${String(index).padStart(3, "0")} radar item with some words`,
+    )
+      .join("\n")
+      .slice(0, 3946);
+    const tool = buildTool();
+    const result = await tool.handler(
+      { channelId: "C1", messageTs: "1783411554.596189", message },
+      meta(leadAgentId),
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    const payload = mockChatUpdate.mock.calls[0][0] as {
+      text: string;
+      blocks: { type: string; text: { type: string; text: string } }[];
+    };
+    expect(payload.text).toBe(message);
+    expect(payload.blocks.length).toBeGreaterThanOrEqual(2);
+    for (const block of payload.blocks) {
+      expect(block.type).toBe("section");
+      expect(block.text.text.length).toBeLessThanOrEqual(2900);
+    }
+    const joined = payload.blocks.map((block) => block.text.text).join("");
+    expect(joined.replace(/\s/g, "")).toBe(message.replace(/\s/g, ""));
+  });
+
+  test("keeps a 2,931-char message with an emoji at 2,900 in one intact section", async () => {
+    const message = `${"x".repeat(2899)}😀${"y".repeat(30)}`;
+    expect(message.length).toBe(2931);
+    const tool = buildTool();
+    const result = await tool.handler(
+      { channelId: "C1", messageTs: "1783411554.596189", message },
+      meta(leadAgentId),
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(mockChatUpdate.mock.calls[0][0].blocks).toEqual([
+      { type: "section", text: { type: "mrkdwn", text: message } },
+    ]);
+  });
+
+  test("keeps a short message in exactly one section", async () => {
+    const tool = buildTool();
+    await tool.handler(
+      { channelId: "C1", messageTs: "1783411554.596189", message: "short" },
+      meta(leadAgentId),
+    );
+
+    expect(mockChatUpdate.mock.calls[0][0]).toMatchObject({
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "short" } }],
+    });
+  });
+
   test.each([
     ["message_not_found", "No message found at that timestamp in this channel."],
     [

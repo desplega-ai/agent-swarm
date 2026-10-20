@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createUser, initDb } from "../be/db";
+import { closeDb, createUser, getDbClient, initDb, updateUser, upsertSwarmConfig } from "../be/db";
 import { attachRole, detachRole } from "../be/rbac-roles";
+import { loadGlobalConfigsIntoEnv } from "../http/core";
 import {
   _getOrgIdForTests,
   _resetTelemetryStateForTests,
   initTelemetry,
+  setTelemetryFunctionResolver,
   setTelemetryOrgDomain,
   track,
 } from "../telemetry";
@@ -19,12 +21,22 @@ import {
   validOrgDomain,
   validOrgId,
 } from "../telemetry-context";
-import { _resetTelemetryIdentityForTests, computeOrgDomain } from "../telemetry-identity";
+import {
+  _resetTelemetryIdentityForTests,
+  cachedUserFunction,
+  computeOrgDomain,
+  primeUserRole,
+} from "../telemetry-identity";
 
 // initTelemetry no-ops when ANONYMIZED_TELEMETRY=false, and the CI env may set it.
 process.env.ANONYMIZED_TELEMETRY = "true";
 
 const TEST_DB_PATH = "./test-telemetry-context.sqlite";
+const PROFILE_KEYS = [
+  "SWARM_ORG_TEAM_SIZE",
+  "SWARM_ORG_USE_CASE",
+  "SWARM_ORG_ACQUISITION_SOURCE",
+] as const;
 
 async function removeTestDb(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -114,6 +126,30 @@ describe("telemetry context helpers", () => {
     expect(mapTriggerSurface("system")).toBe("system");
     expect(mapTriggerSurface("carrier-pigeon")).toBe("other");
     expect(mapTriggerSurface(null)).toBe("other");
+  });
+
+  test("buildContext omits invalid profile values and a function without an actor", () => {
+    const base = {
+      orgId: "org_0123456789abcdef",
+      installationId: "install_test",
+      isCloud: false,
+      isE2b: false,
+      swarmVersion: "1.2.3",
+    };
+    const context = buildContext({
+      ...base,
+      teamSize: "invalid",
+      useCase: "invalid",
+      acquisitionSource: "invalid",
+      userFunction: "founder",
+    });
+    expect(context).not.toHaveProperty("team_size");
+    expect(context).not.toHaveProperty("use_case");
+    expect(context).not.toHaveProperty("user_function");
+    expect(context.acquisition_source).toBeNull();
+    expect(
+      buildContext({ ...base, actor: { userId: "u-1" }, userFunction: "administrator" }),
+    ).not.toHaveProperty("user_function");
   });
 
   test("normalizeProperties keeps an event alive when one optional value is unsendable", () => {
@@ -248,6 +284,19 @@ describe("telemetry envelope", () => {
     }
   });
 
+  test("track resolves the actor's job function without changing the RBAC role", async () => {
+    const config = memoryConfig({ telemetry_installation_id: "install_function" });
+    await initTelemetry("api-server", config.get, config.set, { generateIfMissing: true });
+    setTelemetryFunctionResolver(() => "founder");
+    track({
+      event: "workflow.deleted",
+      properties: { workflowId: "wf-1" },
+      actor: { userId: "u-1", role: "member" },
+    });
+    await tick();
+    expect(sent[0]?.context).toMatchObject({ user_function: "founder", user_role: "member" });
+  });
+
   test("an org with no ID yet sends nothing instead of a half-identified event", async () => {
     // A worker on an old server: installation ID known, no org ID stored.
     const config = memoryConfig({ telemetry_installation_id: "install_noorg" });
@@ -270,16 +319,93 @@ describe("telemetry envelope", () => {
 });
 
 describe("org email domain", () => {
+  const savedProfile = Object.fromEntries(PROFILE_KEYS.map((key) => [key, process.env[key]]));
+
   beforeEach(async () => {
     closeDb();
     await removeTestDb();
     initDb(TEST_DB_PATH);
     _resetTelemetryIdentityForTests();
+    for (const key of PROFILE_KEYS) delete process.env[key];
   });
 
   afterEach(async () => {
+    for (const key of PROFILE_KEYS) {
+      if (savedProfile[key] === undefined) delete process.env[key];
+      else process.env[key] = savedProfile[key];
+    }
     closeDb();
     await removeTestDb();
+  });
+
+  test("stored company profile reaches context after reload and clears without restart", async () => {
+    const values = ["11-50", "features", "hacker_news"];
+    for (const [index, key] of PROFILE_KEYS.entries()) {
+      await upsertSwarmConfig({ scope: "global", key, value: values[index] as string });
+    }
+    await loadGlobalConfigsIntoEnv(true);
+    const originalFetch = globalThis.fetch;
+    const sent: Array<{ context: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (_url: string, init?: { body?: string }) => {
+      if (init?.body) sent.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+    _resetTelemetryStateForTests();
+    try {
+      const config = memoryConfig({
+        telemetry_installation_id: "install_profile",
+        telemetry_org_id: "org_0123456789abcdef",
+      });
+      await initTelemetry("api-server", config.get, config.set);
+      track({ event: "server.started", properties: { port: 3013 } });
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.context).toMatchObject({
+        team_size: "11-50",
+        use_case: "features",
+        acquisition_source: "hacker_news",
+      });
+      for (const key of PROFILE_KEYS) {
+        await upsertSwarmConfig({ scope: "global", key, value: "" });
+      }
+      await loadGlobalConfigsIntoEnv(true);
+      track({ event: "server.started", properties: { port: 3013 } });
+      expect(sent).toHaveLength(2);
+      expect(sent[1]?.context).not.toHaveProperty("team_size");
+      expect(sent[1]?.context).not.toHaveProperty("use_case");
+      expect(sent[1]?.context.acquisition_source).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+      _resetTelemetryStateForTests();
+    }
+  });
+
+  test("job function uses the role cache and invalidates after a committed user update", async () => {
+    const user = await createUser({
+      name: "Founder",
+      role: "admin",
+      metadata: { jobFunction: "founder" },
+    });
+    await primeUserRole(user.id);
+    expect(cachedUserFunction(user.id)).toBe("founder");
+    await getDbClient().transaction(async () => {
+      await updateUser(user.id, { metadata: { jobFunction: "engineer" } });
+      expect(cachedUserFunction(user.id)).toBe("founder");
+    });
+    await primeUserRole(user.id);
+    expect(cachedUserFunction(user.id)).toBe("engineer");
+    await updateUser(user.id, { metadata: { jobFunction: "a free-text legacy role" } });
+    await primeUserRole(user.id);
+    expect(cachedUserFunction(user.id)).toBeUndefined();
+    const context = buildContext({
+      orgId: "org_0123456789abcdef",
+      installationId: "install_profile",
+      isCloud: false,
+      isE2b: false,
+      swarmVersion: "1.2.3",
+      actor: { userId: user.id },
+      userFunction: cachedUserFunction(user.id),
+    });
+    expect(context).not.toHaveProperty("user_function");
   });
 
   test("is undefined with no users", async () => {

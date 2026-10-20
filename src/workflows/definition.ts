@@ -10,6 +10,7 @@ import {
   systemOneRetryViolations,
   systemOneStaticShapeViolations,
 } from "./executors/system-one-decision";
+import { systemOneExtractionStaticShapeViolations } from "./executors/system-one-extraction";
 
 /** Extract all target node IDs from a node's `next` field */
 export function getNextTargets(next: string | string[] | Record<string, string>): string[] {
@@ -212,7 +213,12 @@ export function validateDefinition(
     }
     // A system-one-decision node's question ids and return types are static, and it never carries
     // an engine retry policy (it retries transient transport errors itself).
-    errors.push(...systemOneStaticShapeViolations(node), ...systemOneRetryViolations(node));
+    // A system-one-extraction node's field ids and types are static in the same way.
+    errors.push(
+      ...systemOneStaticShapeViolations(node),
+      ...systemOneExtractionStaticShapeViolations(node),
+      ...systemOneRetryViolations(node),
+    );
     if (node.type === "foreach") {
       validateForeachNode(node, errors);
       // A legacy `#` id may stay editable as a NORMAL node, but never as a foreach

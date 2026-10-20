@@ -78,8 +78,10 @@ function request(path: string, body: unknown): Promise<Response> {
 }
 
 function getRequest(path: string, authorization = `Bearer ${API_KEY}`): Promise<Response> {
+  // A user token never names an agent; handleCore refuses that pair.
+  const asAgent = authorization === `Bearer ${API_KEY}`;
   return fetch(`http://localhost:${port}${path}`, {
-    headers: { Authorization: authorization, "X-Agent-ID": agentId },
+    headers: { Authorization: authorization, ...(asAgent ? { "X-Agent-ID": agentId } : {}) },
   });
 }
 

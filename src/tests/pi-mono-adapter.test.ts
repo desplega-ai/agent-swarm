@@ -17,6 +17,7 @@ import {
   checkPiMonoCredentials,
   createPiRuntimeAuth,
   extractPiAssistantText,
+  listPiOpencodeGoModelIds,
   PiMonoAdapter,
   resolveModel,
   type SessionModelsJson,
@@ -457,6 +458,18 @@ describe("Model name mapping", () => {
   });
 });
 
+describe("listPiOpencodeGoModelIds", () => {
+  test("every reported opencode-go id resolves, so a picked id never falls back", () => {
+    const ids = listPiOpencodeGoModelIds();
+    expect(ids).toContain("deepseek-v4.1-flash");
+    for (const id of ids) {
+      expect(resolveModel(`opencode-go/${id}`, {})?.id).toBe(id);
+    }
+    expect(ids).not.toContain("deepseek-v4-flash");
+    expect(resolveModel("opencode-go/deepseek-v4-flash", {})).toBeUndefined();
+  });
+});
+
 describe("resolveModel — OpenRouter reroute for anthropic shortnames", () => {
   // Regression coverage for task 37a4a87a: workers spawned with
   // `provider: pi` + `OPENROUTER_API_KEY` (no ANTHROPIC_API_KEY) and a task
@@ -543,6 +556,16 @@ describe("createPiRuntimeAuth", () => {
     });
     await expect(modelRuntime.getAuth("google")).resolves.toMatchObject({
       auth: { apiKey: "example-sk-google-runtime" },
+    });
+  });
+
+  test("passes OPENCODE_API_KEY to pi opencode-go runtime auth", async () => {
+    const modelRuntime = await createPiRuntimeAuth({
+      OPENCODE_API_KEY: "example-opencode-runtime",
+    });
+
+    await expect(modelRuntime.getAuth("opencode-go")).resolves.toMatchObject({
+      auth: { apiKey: "example-opencode-runtime" },
     });
   });
 

@@ -984,7 +984,7 @@ describe("ValidateExecutor", () => {
 // ─── Registry Wiring ─────────────────────────────────────────
 
 describe("createExecutorRegistry", () => {
-  test("registers all 14 executors (9 instant + 5 async)", () => {
+  test("registers all 15 executors (10 instant + 5 async)", () => {
     const registry = createExecutorRegistry(mockDeps);
     const types = registry.types();
 
@@ -993,6 +993,7 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("notify");
     expect(types).toContain("raw-llm");
     expect(types).toContain("system-one-decision");
+    expect(types).toContain("system-one-extraction");
     expect(types).toContain("script");
     expect(types).toContain("swarm-script");
     expect(types).toContain("vcs");
@@ -1002,7 +1003,7 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("human-in-the-loop");
     expect(types).toContain("wait");
     expect(types).toContain("sub-workflow");
-    expect(types).toHaveLength(14);
+    expect(types).toHaveLength(15);
   });
 
   test("instant executors have mode instant, async executors have mode async", () => {
@@ -1012,6 +1013,7 @@ describe("createExecutorRegistry", () => {
       "code-match",
       "notify",
       "raw-llm",
+      "system-one-extraction",
       "script",
       "swarm-script",
       "vcs",

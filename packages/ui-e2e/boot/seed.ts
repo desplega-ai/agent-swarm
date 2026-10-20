@@ -66,7 +66,7 @@ async function ensureUser(options: SeedOptions): Promise<User> {
   const existing = users.users.find((user): user is User => user?.name === "e2e-user");
   if (existing) return existing;
   const result = await request<{ user: User }>(options, "POST", "/api/users", {
-    body: { name: "e2e-user" },
+    body: { name: "e2e-user", email: "e2e-user@gmail.com" },
   });
   return result.user;
 }

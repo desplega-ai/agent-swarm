@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { validateConfigValue } from "../be/swarm-config-guard";
 import { buildContext } from "../telemetry-context";
 import {
+  COMPANY_ACQUISITION_SOURCES,
+  COMPANY_TEAM_SIZES,
+  COMPANY_USE_CASES,
+} from "../utils/company-profile";
+import {
   isFilledOrgLogoUrl,
   normalizeOrgWebsite,
   orgLogoUrl,
@@ -75,6 +80,48 @@ describe("websiteSuggestion", () => {
     expect(websiteSuggestion("gmail.com")).toBeNull();
     expect(websiteSuggestion(null)).toBeNull();
   });
+
+  test("never suggests a regional or single-domain free-mail provider", () => {
+    for (const domain of [
+      "hotmail.es",
+      "yahoo.co.uk",
+      "outlook.fr",
+      "web.de",
+      "gmx.net",
+      "pm.me",
+      "mail.ru",
+      "live.co.uk",
+      "live.nl",
+      "yandex.com.tr",
+      "yandex.kz",
+      "icloud.com",
+      "me.com",
+      "proton.me",
+      "protonmail.ch",
+      "aol.de",
+      "qq.com",
+      "163.com",
+      "naver.com",
+      "Hotmail.CO.UK",
+      "mail.yahoo.com",
+    ]) {
+      expect(websiteSuggestion(domain)).toBeNull();
+    }
+  });
+
+  test("keeps company domains that only look like a provider", () => {
+    for (const domain of [
+      "acme.co.uk",
+      "acme.com.br",
+      "mailchimp.com",
+      "live.acme.com",
+      "yahoo-labs.dev",
+      "proton.ai",
+      "web.dev",
+    ]) {
+      expect(websiteSuggestion(domain)).toBe(domain);
+    }
+  });
 });
 
 describe("SWARM_ORG_WEBSITE config guard", () => {
@@ -93,6 +140,21 @@ describe("SWARM_ORG_WEBSITE config guard", () => {
     expect(validateConfigValue("SWARM_USED_BY_CONSENT", "true")).toBeNull();
     expect(validateConfigValue("SWARM_USED_BY_CONSENT", "maybe")).not.toBeNull();
   });
+});
+
+describe("company profile config guards", () => {
+  for (const [key, values] of [
+    ["SWARM_ORG_TEAM_SIZE", COMPANY_TEAM_SIZES],
+    ["SWARM_ORG_USE_CASE", COMPANY_USE_CASES],
+    ["SWARM_ORG_ACQUISITION_SOURCE", COMPANY_ACQUISITION_SOURCES],
+  ] as const) {
+    test(`${key} accepts its enum or empty, and rejects other values`, () => {
+      for (const value of ["", ...values]) expect(validateConfigValue(key, value)).toBeNull();
+      for (const value of ["unknown", "OTHER", "free text", null, 1, true]) {
+        expect(validateConfigValue(key, value)).toContain(key);
+      }
+    });
+  }
 });
 
 describe("org_website in the telemetry context", () => {

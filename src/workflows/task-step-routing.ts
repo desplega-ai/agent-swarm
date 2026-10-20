@@ -2,12 +2,15 @@ import {
   detachTaskFromWorkflowRunStep,
   getDbClient,
   getTaskById,
+  getWorkflowRun,
   getWorkflowRunStep,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
 import {
+  type RetryPolicy,
   RetryPolicySchema,
+  SUPERSEDED_WORKFLOW_TASK_REASON,
   type WorkflowDefinition,
   type WorkflowNode,
   type WorkflowRunStep,
@@ -17,7 +20,7 @@ import { getSuccessors } from "./definition";
 import { joinForeach, resolveForeachParent } from "./foreach-join";
 
 export interface PortStepRoutingResult {
-  /** False when another handler already moved the step out of `waiting`. */
+  /** False when the step was already claimed or its run is terminal. */
   claimed: boolean;
   successors: WorkflowNode[];
 }
@@ -85,6 +88,10 @@ export async function checkpointPortStepAndResolveSuccessors(
   return await getDbClient().transaction(async (): Promise<PortStepRoutingResult> => {
     const current = await getWorkflowRunStep(stepId);
     if (!current || current.status !== "waiting") return { claimed: false, successors: [] };
+    const run = await getWorkflowRun(runId);
+    if (!run || (run.status !== "waiting" && run.status !== "running")) {
+      return { claimed: false, successors: [] };
+    }
     await checkpointStep(runId, stepId, nodeId, { output, nextPort }, ctx);
     await updateWorkflowRun(runId, { status: "running" });
     return { claimed: true, successors: getSuccessors(def, nodeId, nextPort) };
@@ -97,15 +104,33 @@ export async function checkpointPortStepAndResolveSuccessors(
  * - `not-claimed`: another handler already moved the step out of `waiting`,
  *   or the failed task is no longer the one bound to the step (it was
  *   already retried and a fresh task now owns it); the caller stops.
- * - `not-eligible`: no retry applies (no `node.retry`, not an agent-task node,
- *   or retries exhausted); the caller applies `onNodeFailure` as before.
+ * - `not-eligible`: no retry applies (no `node.retry` and not a supersede
+ *   cut, not an agent-task node, or retries exhausted); the caller applies
+ *   `onNodeFailure` as before.
  */
 export type TaskStepRetryOutcome = "scheduled" | "not-claimed" | "not-eligible";
+
+/**
+ * Retry applied to an agent-task step whose task was cut by a supersede
+ * (deploy drain, heartbeat remediation) when the node declares no `retry`.
+ * The cut is not the task's fault, so the step gets one fresh attempt after
+ * the restart settles. An explicit `node.retry` always wins; `retry:
+ * { maxRetries: 0 }` opts a node with external side effects out.
+ */
+export const SUPERSEDE_RETRY_POLICY: RetryPolicy = {
+  maxRetries: 1,
+  strategy: "static",
+  baseDelayMs: 30_000,
+  maxDelayMs: 30_000,
+};
 
 /**
  * Apply a node's `retry` policy to a FAILED agent-task step task. The sync
  * executor path does this in `executeStep`; an async agent-task step only
  * learns about the failure here, from `task.failed` or the recovery sweep.
+ * A node without `retry` gets `SUPERSEDE_RETRY_POLICY` when the task was
+ * failed with `SUPERSEDED_WORKFLOW_TASK_REASON`. The task row is checked as
+ * well as `reason`, because the recovery sweep passes its own reason text.
  *
  * In one transaction: re-claim the step while it is still `waiting` AND still
  * bound to the failed task, detach that task (the executor reuses any task
@@ -114,6 +139,9 @@ export type TaskStepRetryOutcome = "scheduled" | "not-claimed" | "not-eligible";
  * task. Bounded by `maxRetries` via the step's persisted `retryCount`, read
  * only after ownership is confirmed: a stale caller's step snapshot may carry
  * the counter of a newer attempt.
+ *
+ * Foreach children (`<foreachId>#<key>`) are not matched here: the retry
+ * poller resolves nodes by exact id and cannot re-dispatch a child yet.
  */
 export async function scheduleTaskStepRetry(
   def: WorkflowDefinition,
@@ -123,10 +151,16 @@ export async function scheduleTaskStepRetry(
   reason: string,
 ): Promise<TaskStepRetryOutcome> {
   const node = def.nodes.find((n) => n.id === step.nodeId);
-  if (!node || node.type !== "agent-task" || !node.retry) return "not-eligible";
-  const parsed = RetryPolicySchema.safeParse(node.retry);
-  if (!parsed.success) return "not-eligible";
-  const policy = parsed.data;
+  if (!node || node.type !== "agent-task") return "not-eligible";
+  let policy: RetryPolicy;
+  if (node.retry) {
+    const parsed = RetryPolicySchema.safeParse(node.retry);
+    if (!parsed.success) return "not-eligible";
+    policy = parsed.data;
+  } else {
+    if (!(await isSupersedeCut(taskId, reason))) return "not-eligible";
+    policy = SUPERSEDE_RETRY_POLICY;
+  }
 
   return await getDbClient().transaction(async (): Promise<TaskStepRetryOutcome> => {
     const current = await getWorkflowRunStep(step.id);
@@ -137,6 +171,12 @@ export async function scheduleTaskStepRetry(
     await checkpointStepFailure(runId, step.id, reason, current.retryCount, policy);
     return "scheduled";
   });
+}
+
+async function isSupersedeCut(taskId: string, reason: string): Promise<boolean> {
+  if (reason === SUPERSEDED_WORKFLOW_TASK_REASON) return true;
+  const task = await getTaskById(taskId);
+  return task?.failureReason === SUPERSEDED_WORKFLOW_TASK_REASON;
 }
 
 export interface TaskStepRoutingResult {

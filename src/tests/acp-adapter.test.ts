@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Usage } from "@agentclientprotocol/sdk";
+import type { Usage } from "@agentclientprotocol/sdk/unstable";
 import { normalizeSessionLogs } from "../../apps/ui/src/logs-parser";
 import {
   closeDb,
@@ -29,6 +29,7 @@ import {
   resolveAcpTarget,
 } from "../providers/acp-targets";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import { ACP_SDK_PATH, serveFakeAcpAgent } from "./acp-fake-agent";
 import { listenOnFreePort } from "./test-net";
 
 const tmpDirs: string[] = [];
@@ -148,16 +149,11 @@ describe("ACPAdapter", () => {
   }) => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
-    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
     await Bun.write(
       agentPath,
       `
 import { Readable, Writable } from "node:stream";
-import {
-  AgentSideConnection,
-  PROTOCOL_VERSION,
-  ndJsonStream,
-} from "${sdkPath}";
+import { PROTOCOL_VERSION, agent, methods, ndJsonStream } from "${ACP_SDK_PATH}";
 
 class FakeAgent {
   constructor(connection) {
@@ -313,10 +309,7 @@ class FakeAgent {
   async cancel() {}
 }
 
-const input = Writable.toWeb(process.stdout);
-const output = Readable.toWeb(process.stdin);
-const stream = ndJsonStream(input, output);
-new AgentSideConnection((connection) => new FakeAgent(connection), stream);
+${serveFakeAcpAgent("FakeAgent")}
 `,
     );
 
@@ -952,7 +945,6 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     const binDir = makeTempDir();
     const captureFile = join(binDir, "capture.json");
     const agentPath = join(binDir, "fake-copilot-acp.ts");
-    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
     const repoAgentsMd = "# Repo rules\nKeep this file as is.\n";
     await Bun.write(join(cwd, "AGENTS.md"), repoAgentsMd);
     await Bun.write(
@@ -961,7 +953,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
-import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from "${sdkPath}";
+import { PROTOCOL_VERSION, agent, methods, ndJsonStream } from "${ACP_SDK_PATH}";
 class FakeCopilot {
   constructor(connection) { this.connection = connection; }
   async initialize() {
@@ -986,8 +978,7 @@ class FakeCopilot {
   }
   async cancel() {}
 }
-const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
-new AgentSideConnection((connection) => new FakeCopilot(connection), stream);
+${serveFakeAcpAgent("FakeCopilot")}
 `,
     );
     const copilotStub = join(binDir, "copilot");
@@ -1191,7 +1182,6 @@ new AgentSideConnection((connection) => new FakeCopilot(connection), stream);
   test("completes before the revoke response and logs a failed revocation", async () => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-ephem-agent.ts");
-    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
 
     const captureFile = join(cwd, "captured-auth.txt");
 
@@ -1199,7 +1189,7 @@ new AgentSideConnection((connection) => new FakeCopilot(connection), stream);
       agentPath,
       `
 import { Readable, Writable } from "node:stream";
-import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from "${sdkPath}";
+import { PROTOCOL_VERSION, agent, methods, ndJsonStream } from "${ACP_SDK_PATH}";
 class FakeAgent {
   constructor(connection) { this.connection = connection; }
   async initialize() {
@@ -1223,8 +1213,7 @@ class FakeAgent {
   }
   async cancel() {}
 }
-const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
-new AgentSideConnection((connection) => new FakeAgent(connection), stream);
+${serveFakeAcpAgent("FakeAgent")}
 `,
     );
 
@@ -1361,12 +1350,11 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
   ])("$name", async ({ costs, totalCostUsd, costSource }) => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-cost-agent.ts");
-    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
     await Bun.write(
       agentPath,
       `
 import { Readable, Writable } from "node:stream";
-import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from "${sdkPath}";
+import { PROTOCOL_VERSION, agent, methods, ndJsonStream } from "${ACP_SDK_PATH}";
 class FakeAgent {
   constructor(connection) { this.connection = connection; }
   async initialize() {
@@ -1384,8 +1372,7 @@ class FakeAgent {
   }
   async cancel() {}
 }
-const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
-new AgentSideConnection((connection) => new FakeAgent(connection), stream);
+${serveFakeAcpAgent("FakeAgent")}
 `,
     );
     const { close: closeTokenStub, apiUrl } = await startTokenStubServer(

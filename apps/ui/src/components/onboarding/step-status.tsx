@@ -2,8 +2,8 @@ import { Check, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { ONBOARDING_STEPS } from "@/api/hooks/use-onboarding";
 import type { OnboardingStepId, OnboardingStepStatus } from "@/api/types";
+import { SetupChip, type SetupChipTone } from "@/components/shared/setup-chip";
 import { cn } from "@/lib/utils";
-import { SetupChip, type SetupChipTone } from "./setup-card";
 
 /**
  * Shared step-status vocabulary for the `/setup` header stepper, the header
