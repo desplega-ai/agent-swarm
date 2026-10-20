@@ -123,6 +123,9 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
               itemKey == null &&
                 step.nodeType === "system-one-decision" &&
                 "border-action-system-one-decision/40 text-action-system-one-decision",
+              itemKey == null &&
+                step.nodeType === "system-one-extraction" &&
+                "border-action-system-one-extraction/40 text-action-system-one-extraction",
             )}
           >
             {typeBadge}
@@ -256,6 +259,10 @@ function StepOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode
 
   if (step.nodeType === "system-one-decision") {
     return <SystemOneOutput step={step} node={node} />;
+  }
+
+  if (step.nodeType === "system-one-extraction") {
+    return <SystemOneExtractionOutput step={step} />;
   }
 
   if (step.nodeType === "sub-workflow") {
@@ -559,12 +566,18 @@ function answerConfidence(
   return answer.type === "noul" ? null : answer.confidence;
 }
 
-function ConfidenceBar({ value }: { value: number }) {
+function ConfidenceBar({
+  value,
+  fill = "bg-action-system-one-decision",
+}: {
+  value: number;
+  fill?: string;
+}) {
   const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100);
   return (
     <div className="flex items-center gap-1.5" title={`confidence ${value}`}>
       <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
-        <div className="h-full bg-action-system-one-decision" style={{ width: `${pct}%` }} />
+        <div className={cn("h-full", fill)} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-[10px] font-mono text-muted-foreground">{pct}%</span>
     </div>
@@ -655,6 +668,134 @@ export function SystemOneOutput({ step, node }: { step: WorkflowRunStep; node?: 
               {decidedBy === "human" && question?.modelAnswer !== undefined && (
                 <span className="w-full text-[10px] text-muted-foreground">
                   model said {String(question.modelAnswer)}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {output.usage && (
+        <p className="text-[10px] text-muted-foreground font-mono">
+          {output.usage.input_tokens} in · {output.usage.output_tokens} out tokens
+        </p>
+      )}
+
+      <RawJsonToggle data={output} />
+    </div>
+  );
+}
+
+type ExtractionPoint = number | string;
+
+type SystemOneExtractionAnswer = {
+  type: string;
+  value: unknown;
+  guess?: unknown;
+  p_null?: number;
+  confidence?: number;
+  unit?: string;
+  median?: ExtractionPoint | ExtractionPoint[];
+  p10?: ExtractionPoint | ExtractionPoint[];
+  p90?: ExtractionPoint | ExtractionPoint[];
+};
+
+type SystemOneExtraction = {
+  model: string;
+  answers: Record<string, SystemOneExtractionAnswer>;
+  usage?: { input_tokens: number; output_tokens: number };
+  truncated?: boolean;
+};
+
+function showPoints(value: ExtractionPoint | ExtractionPoint[] | undefined): string {
+  if (value === undefined) return "?";
+  return Array.isArray(value) ? value.join(", ") : String(value);
+}
+
+/**
+ * An extracted value as one line: a list joined, a range for estimates and forecasts.
+ * An estimate's `value` (Clairic's rounded mean) can differ from its median, so both show.
+ */
+function formatExtracted(answer: SystemOneExtractionAnswer): string {
+  if (answer.type === "estimate" || answer.type === "forecast") {
+    const range = `p10 ${showPoints(answer.p10)} – p90 ${showPoints(answer.p90)}`;
+    if (
+      answer.type === "estimate" &&
+      (typeof answer.value === "number" || typeof answer.value === "string")
+    ) {
+      return `${answer.value} · median ${showPoints(answer.median)} (${range})`;
+    }
+    return `${showPoints(answer.median)} (${range})`;
+  }
+  if (Array.isArray(answer.value)) {
+    return answer.value.length > 0 ? answer.value.map(String).join(", ") : "(none)";
+  }
+  return String(answer.value);
+}
+
+/** A `system-one-extraction` step: each field's value, how sure the model was, and what it would have guessed. */
+export function SystemOneExtractionOutput({ step }: { step: WorkflowRunStep }) {
+  const output = step.output as SystemOneExtraction | null | undefined;
+
+  if (output == null || typeof output !== "object" || !output.answers) {
+    if (step.status === "running" || step.status === "pending") {
+      return (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+          <Spinner className="size-3.5" />
+          <span>Reading the input</span>
+        </div>
+      );
+    }
+    return <GenericOutput step={step} />;
+  }
+
+  return (
+    <div className="space-y-2">
+      <span className="text-xs text-muted-foreground uppercase tracking-wide">Extraction</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        <Badge variant="outline" size="tag" className="font-mono">
+          {output.model}
+        </Badge>
+        {output.truncated && (
+          <Badge
+            variant="outline"
+            size="tag"
+            className="border-status-active/30 text-status-active-strong"
+          >
+            input truncated
+          </Badge>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        {Object.entries(output.answers).map(([id, answer]) => {
+          const missing = answer.value === null;
+          return (
+            <div
+              key={id}
+              className="rounded-md border border-border/50 px-3 py-2 flex items-center gap-2 flex-wrap"
+            >
+              <span className="text-xs text-muted-foreground font-mono">{id}</span>
+              <Badge variant="outline" size="tag" className="font-mono">
+                {answer.type}
+              </Badge>
+              {missing ? (
+                <span className="text-xs text-muted-foreground italic">not in the input</span>
+              ) : (
+                <span className="text-xs font-medium break-all">
+                  {formatExtracted(answer)}
+                  {answer.unit ? ` ${answer.unit}` : ""}
+                </span>
+              )}
+              {answer.confidence != null && (
+                <span className="ml-auto">
+                  <ConfidenceBar value={answer.confidence} fill="bg-action-system-one-extraction" />
+                </span>
+              )}
+              {missing && answer.guess != null && (
+                <span className="w-full text-[10px] text-muted-foreground">
+                  best guess {String(answer.guess)}
+                  {answer.p_null != null ? ` · p(null) ${answer.p_null.toFixed(3)}` : ""}
                 </span>
               )}
             </div>

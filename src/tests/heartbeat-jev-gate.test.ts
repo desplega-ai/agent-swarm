@@ -261,6 +261,29 @@ describe("heartbeat-jev-gate with a provider", () => {
     });
   });
 
+  test("only a bare MM-DD counts as a due tracked item", async () => {
+    const mocked = Date.now;
+    Date.now = () => Date.parse("2026-10-20T09:30:00.000Z");
+    try {
+      const { ctx } = fakeCtx({
+        configs: { TYPESAFE_API_KEY: "x" },
+        heartbeatMd: [
+          "- **2026-10-20 ~10:45Z (heartbeat 2026-10-20):** re-verified, nothing pending",
+          "- Watch: 10-20s retry window closed, nothing pending",
+          "- Watch: session 4a12-10-20-9e2f finished cleanly, nothing pending",
+          "- Watch: release on 10-20 — lift after ship",
+        ].join("\n"),
+        jev: jevSays(0.9),
+      });
+      const verdict = await run(ctx, { dryRun: true });
+      expect(verdict.state.tracked_items_mentioning_today_or_past_delete_date).toEqual([
+        "- Watch: release on 10-20 — lift after ship",
+      ]);
+    } finally {
+      Date.now = mocked;
+    }
+  });
+
   for (const ordersFirst of [true, false]) {
     test(`previous failures are not new with standing orders ${ordersFirst ? "before" : "after"} status`, async () => {
       const failures =

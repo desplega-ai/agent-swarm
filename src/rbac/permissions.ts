@@ -33,6 +33,10 @@ export const PERMISSIONS = {
     description: "View or diff another agent's context history.",
     namespace: "agent",
   },
+  "agent.token.manage": {
+    description: "Mint, rotate, or revoke an agent-bound worker token.",
+    namespace: "agent",
+  },
   "task.cancel.any": {
     description: "Cancel any task (beyond tasks the caller created).",
     namespace: "task",

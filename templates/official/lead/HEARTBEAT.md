@@ -11,5 +11,5 @@
 ## Tracked Items
 
 - Live items only: active blockers and watch items. Cap 10, 20 max during a surge; prune before you add.
-- Each item states its lift trigger and a calendar date (e.g. `lift when X; check 2026-08-22`).
+- Each item states its lift trigger and a calendar date as a bare `MM-DD` (e.g. `lift when X; check 08-22`) or `DELETE MM-DD`. A full `YYYY-MM-DD` stamp does not arm the gate.
 - An item closes: move its durable facts to memory, then delete the line. Never strike it through.

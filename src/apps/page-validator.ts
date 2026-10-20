@@ -149,7 +149,10 @@ function isActionSentinel(value: unknown): boolean {
   if (!isPlainObject(value) || Object.keys(value).length !== 1) return false;
   if (typeof value.$row === "string") return true;
   if (value.$rowIndex === true) return true;
-  return typeof value.$form === "string";
+  if (typeof value.$form === "string") return true;
+  // Chain-derived scope published by a component that runs a task chain —
+  // see `action-params.ts`'s `$chain` sentinel.
+  return typeof value.$chain === "string";
 }
 
 function appendPath(path: string, part: string | number): string {
@@ -220,7 +223,10 @@ function validateSchema(
       ? { issues: [], stateRefs: [] }
       : {
           issues: [
-            issue(path, "$row, $rowIndex, and $form bindings are only allowed in action params"),
+            issue(
+              path,
+              "$row, $rowIndex, $form, and $chain bindings are only allowed in action params",
+            ),
           ],
           stateRefs: [],
         };

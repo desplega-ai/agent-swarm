@@ -1,4 +1,4 @@
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { getSteeringMessageById } from "../be/db";
 import { getActiveSessionById } from "../be/db/active-sessions";
 import { getUserGrant } from "../be/rbac-roles";
@@ -10,10 +10,12 @@ import {
   sessionAccessForRoot,
 } from "../be/session-shares";
 import { findUserById } from "../be/users";
-import { isRbacEnabled } from "../rbac";
+import { can, isRbacEnabled, type RbacPrincipal } from "../rbac";
+import type { AgentTask } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { dashboardUserIdHeader } from "./favorite-owner";
 import { type RouteDef, routePathParams } from "./route-def";
+import { jsonError } from "./utils";
 
 /**
  * Who a request acts for when it touches a session.
@@ -75,6 +77,53 @@ export function readableByFor(actor: SessionActor): { userId: string | null } | 
 
 export const SESSION_WRITE_DENIED =
   "You can't write in this session. Ask the owner to share it with edit access.";
+
+/** True unless the request acts for a user who lacks write access to the task's session. */
+export async function hasSessionWrite(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  taskId: string,
+): Promise<boolean> {
+  const access = await sessionAccessFor(await resolveSessionActor(req, myAgentId), taskId);
+  return hasSessionAccess(access, "write");
+}
+
+/**
+ * The parent gate shared by `POST /api/tasks` and `POST /api/apps/{id}/actions/{name}`.
+ * The child inherits the parent's thread context, so an agent caller must own or
+ * have created the parent (`task.parent.attach`; operator and user callers keep
+ * their access), and a follow-up in someone else's session needs a write share.
+ * Writes the 403 and returns true when denied.
+ */
+export async function denyParentAttach(
+  req: IncomingMessage,
+  res: ServerResponse,
+  myAgentId: string | undefined,
+  parentTask: Pick<AgentTask, "id" | "requestedByUserId" | "creatorAgentId" | "agentId">,
+  principal: RbacPrincipal,
+): Promise<boolean> {
+  const attach = can({
+    principal,
+    verb: "task.parent.attach",
+    resource: {
+      kind: "task",
+      taskId: parentTask.id,
+      requestedByUserId: parentTask.requestedByUserId,
+      creatorAgentId: parentTask.creatorAgentId,
+      agentId: parentTask.agentId,
+    },
+    source: "http",
+  });
+  if (!attach.allow) {
+    jsonError(res, `You don't have context for parent task ${parentTask.id}.`, 403);
+    return true;
+  }
+  if (!(await hasSessionWrite(req, myAgentId, parentTask.id))) {
+    jsonError(res, SESSION_WRITE_DENIED, 403);
+    return true;
+  }
+  return false;
+}
 
 /**
  * The denial for an actor lacking `needed` access to the session holding

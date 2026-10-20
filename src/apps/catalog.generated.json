@@ -2507,6 +2507,9 @@
               "type": "string"
             },
             "additionalProperties": {}
+          },
+          "parentTaskId": {
+            "type": "string"
           }
         },
         "required": ["name"],

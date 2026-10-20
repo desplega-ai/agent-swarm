@@ -1954,6 +1954,7 @@ export interface paths {
                         input?: {
                             [key: string]: unknown;
                         };
+                        parentTaskId?: string;
                     };
                 };
             };
@@ -2006,7 +2007,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid action input or stale script reference */
+                /** @description Invalid action input, stale script reference, or parentTaskId on a non-task action */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2024,7 +2025,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description App or action not found */
+                /** @description App, action, or parent task not found */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -5347,7 +5348,7 @@ export interface paths {
         put?: never;
         /**
          * Locked keep-warm refresh sweep across all Codex OAuth pool slots
-         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).
+         * @description Enumerates codex_oauth_* slots and refreshes any older than CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS (default 120 hours) through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).
          */
         post: {
             parameters: {
@@ -18590,7 +18591,7 @@ export interface paths {
         put?: never;
         /**
          * Mint an ephemeral task or runtime token
-         * @description Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.
+         * @description Operators can mint task or runtime tokens. Runtime and agent tokens can mint task tokens for their own assigned tasks. A child token never outlives its parent and is revoked with it.
          */
         post: {
             parameters: {
@@ -18669,7 +18670,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an ephemeral session token
-         * @description Operators can revoke any ephemeral token. With runtime pools enabled, runtime tokens can revoke their own child task tokens. Repeated revocation has no effect.
+         * @description Operators can revoke any ephemeral token. Agent tokens, and runtime tokens when runtime pools are enabled, can revoke their own child task tokens. Repeated revocation has no effect.
          */
         delete: {
             parameters: {
@@ -18709,6 +18710,50 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint an agent-bound worker token
+         * @description Returns the token once. A worker runs on it in place of the swarm API key and acts only as this agent. Creates the agent when it does not exist and `name` is given. Fails with 409 when the agent already holds an active token.
+         */
+        post: operations["agents_mintWorkerToken"];
+        /**
+         * Revoke an agent-bound worker token
+         * @description Revokes every active worker token of the agent and the task tokens they minted. Open realtime connections on them close.
+         */
+        delete: operations["agents_revokeWorkerToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/token/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate an agent-bound worker token
+         * @description Returns a new token once. The previous token keeps working for `graceSec` (default 300), then expires. Use revoke for a token that must stop now.
+         */
+        post: operations["agents_rotateWorkerToken"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -24665,11 +24710,11 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
+                        /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'system-one-extraction', 'validate', 'property-match' */
                         type?: string;
                         /** @description Human-readable label for UI display */
                         label?: string;
-                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                         config?: {
                             [key: string]: unknown;
                         };
@@ -26739,11 +26784,11 @@ export interface components {
         WorkflowNode: {
             /** @description Unique node identifier, used in 'next' and 'inputs' mappings */
             id: string;
-            /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
+            /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'system-one-extraction', 'validate', 'property-match' */
             type: string;
             /** @description Human-readable label for UI display */
             label?: string;
-            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
             config: {
                 [key: string]: unknown;
             };
@@ -26900,11 +26945,11 @@ export interface components {
                 nodeId: string;
                 /** @description Partial node data to merge */
                 node: {
-                    /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
+                    /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'system-one-extraction', 'validate', 'property-match' */
                     type?: string;
                     /** @description Human-readable label for UI display */
                     label?: string;
-                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                     config?: {
                         [key: string]: unknown;
                     };
@@ -29995,6 +30040,158 @@ export interface operations {
                 };
             };
             /** @description Script run not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_mintWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** @description Token lifetime in ms. Omit for the default (no expiry). */
+                    ttlMs?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Minted worker token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        agentId: string;
+                        tokenId: string;
+                        plaintext: string;
+                        /** @description null when the token does not expire */
+                        expiresAt: string | null;
+                        agentCreated: boolean;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent not found and no name given */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent already holds an active token */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_revokeWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Number of worker tokens revoked (0 when none was active) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        revoked: number;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_rotateWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    graceSec?: number;
+                    /** @description Token lifetime in ms. Omit for the default (no expiry). */
+                    ttlMs?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description New worker token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        agentId: string;
+                        tokenId: string;
+                        plaintext: string;
+                        /** @description null when the token does not expire */
+                        expiresAt: string | null;
+                        previousExpiresAt: string;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent holds no active token */
             404: {
                 headers: {
                     [name: string]: unknown;

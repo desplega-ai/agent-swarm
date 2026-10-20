@@ -109,6 +109,7 @@
   --color-action-swarm-script: oklch(0.696 0.17 162.48);      /* emerald-500, catalog script */
   --color-action-sub-workflow: oklch(0.667 0.295 322.15);     /* fuchsia-500, child workflow */
   --color-action-system-one-decision: oklch(0.645 0.246 16.439); /* rose-500, model decision */
+  --color-action-system-one-extraction: oklch(0.723 0.219 149.579); /* green-500, model extraction */
   --color-action-default: oklch(0.623 0.214 259.815);         /* blue-500, fallback action */
   --color-action-property-match: oklch(0.769 0.188 70.08);    /* amber-500, condition */
   --color-action-code-match: oklch(0.795 0.184 86.047);       /* yellow-500, condition */
@@ -240,6 +241,7 @@
   --color-action-swarm-script: oklch(0.765 0.177 163.223);    /* emerald-400 */
   --color-action-sub-workflow: oklch(0.74 0.238 322.16);      /* fuchsia-400 */
   --color-action-system-one-decision: oklch(0.712 0.194 13.428); /* rose-400 */
+  --color-action-system-one-extraction: oklch(0.792 0.209 151.711); /* green-400 */
   --color-action-default: oklch(0.707 0.165 254.624);         /* blue-400 */
   --color-action-property-match: oklch(0.828 0.189 84.429);   /* amber-400 */
   --color-action-code-match: oklch(0.852 0.199 91.936);       /* yellow-400 */

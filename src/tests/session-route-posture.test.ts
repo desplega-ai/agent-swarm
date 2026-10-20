@@ -25,6 +25,7 @@ import "../http/all-routes";
 import { handleActiveSessions } from "../http/active-sessions";
 import { handleApiKeys } from "../http/api-keys";
 import { handleApprovalRequests } from "../http/approval-requests";
+import { handleApps } from "../http/apps";
 import { handleContext } from "../http/context";
 import { handleCore } from "../http/core";
 import { handleEvents } from "../http/events";
@@ -76,6 +77,7 @@ const HANDLERS: Handler[] = [
   handleFs,
   handleActiveSessions,
   handleSessions,
+  handleApps,
   (req, res, segments, query) => handleApprovalRequests(req, res, segments, query),
   (req, res, segments, query) => handleApiKeys(req, res, segments, query),
   (req, res, segments, query) => handleScriptRuns(req, res, segments, query),

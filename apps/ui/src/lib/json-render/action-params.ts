@@ -25,6 +25,9 @@
  *   - `{ $rowIndex: true }`                 — row index
  *   - `{ $form: "field" }` / `{ $form: "" }`— form field / all collected values
  *   - `{ $state: "/path" }`                 — json-render state read
+ *   - `{ $chain: "key" }` / `{ $chain: "" }`— chain-derived value (e.g. `leafTaskId` /
+ *     `newTaskId` set by a component that runs a task chain) / whole chain object.
+ *     Unlike the others, an unresolvable `$chain` is returned as-is (see below).
  * Anything else is a literal.
  */
 
@@ -39,6 +42,12 @@ export interface ParamScope {
   form?: Record<string, unknown>;
   /** Live json-render state snapshot, for `$state` reads. */
   state?: Record<string, unknown>;
+  /**
+   * Chain-derived values (current leaf / newly created task id) published by a
+   * component that runs a task chain — target of `$chain`. Table/Form dispatch
+   * scopes leave it unset, and a `$chain` they cannot resolve stays a sentinel.
+   */
+  chain?: { leafTaskId?: string; newTaskId?: string };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -64,6 +73,16 @@ export function resolveScopedValue(value: unknown, scope: ParamScope): unknown {
   }
   if ("$state" in value && typeof value.$state === "string") {
     return getByPath(scope.state ?? {}, value.$state);
+  }
+  if ("$chain" in value && typeof value.$chain === "string") {
+    // An unresolvable `$chain` is kept as the sentinel object, not collapsed to
+    // `undefined` like a missing `$row` field: a `parentTaskId` that quietly
+    // disappears changes task topology (a root task instead of a chained one).
+    // Leaving it visible lets the `app.action` handler reject the dispatch.
+    if (scope.chain === undefined) return value;
+    if (value.$chain === "") return scope.chain;
+    const resolved = getByPath(scope.chain, value.$chain);
+    return resolved === undefined ? value : resolved;
   }
 
   const out: Record<string, unknown> = {};

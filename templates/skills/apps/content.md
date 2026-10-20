@@ -640,6 +640,8 @@ Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, o
 | `{ "$form": "title" }` | One current Form value. |
 | `{ "$form": "" }` | All current Form values. |
 | `{ "$state": "/queries/allIdeas/data" }` | Current value at a valid app state path, including action state such as `/actions/refreshIssues/status`. |
+| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by a component that runs a task chain; it carries `leafTaskId` and `newTaskId`. Where no chain scope is published, the sentinel is left in place and the action fails instead of silently dropping the parent. |
+| `{ "$chain": "" }` | The whole chain scope. |
 
 Each sentinel object must contain exactly the single key shown.
 
@@ -647,7 +649,7 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 
 - `app.mutate`: `{ model, op, rowId?, values?, formId? }`, where `op` is `"create"`, `"update"`, or `"delete"`. `update`/`delete` require `rowId` (usually `{ "$row": "id" }`, or `{ "$state": "/route/params/<param>" }` in a Drawer footer); literal `values` keys must be model columns. Successful mutation refetches all queries on that model.
 - `app.refresh`: `{ query? }`; omit `query` to refetch all, or name a declared query.
-- `app.action`: `{ name, input? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`.
+- `app.action`: `{ name, input?, parentTaskId? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`. `parentTaskId` chains the created task under an existing one for task-kind actions (typically `{ "$chain": "leafTaskId" }`; a literal or `$state` task id also works); a script or sync action rejects it with 400.
 - `app.navigate`: `{ page, params? }`; `page` must be declared, supplied keys must be params of the target page, and every required target param must be supplied. `params` replace the current route params wholesale and may contain action sentinels. Navigation pushes history, so browser Back returns to the previous page/params; only `mode` is preserved automatically.
 - `ui.toast`: `{ message, description?, tone?, undo? }`, where `tone` is `"success"`, `"error"`, `"info"` (default), or `"warning"`. `undo: { label?, actions }` adds an Undo button (default label `Undo`) that runs `actions` as a chain; its steps are validated like any chain. Put it after the step it confirms, e.g. a row delete followed by `{ "action": "ui.toast", "params": { "message": "Order deleted", "undo": { "actions": [{ "action": "app.mutate", "params": { "model": "order", "op": "create", "values": { "title": { "$row": "title" } } } }] } } }`. Undo params resolve `$state` when Undo is pressed; `$row` / `$form` resolve when the toast is shown.
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.

@@ -3978,10 +3978,14 @@ class ApiClient {
     appId: string,
     name: string,
     input?: Record<string, unknown>,
+    parentTaskId?: string,
   ): Promise<AppActionResponse> {
     return this.appRequest(
       `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
-      { method: "POST", body: JSON.stringify({ input: input ?? {} }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ input: input ?? {}, ...(parentTaskId ? { parentTaskId } : {}) }),
+      },
       `Failed to run action ${name}`,
     );
   }

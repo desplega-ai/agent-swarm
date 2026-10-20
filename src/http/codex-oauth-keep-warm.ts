@@ -12,9 +12,10 @@
  * when a task happens to draw it within `REFRESH_SKEW_MS` of expiry — which
  * for an idle/rarely-drawn slot can be never, letting its refresh token sit
  * unexercised well past OpenAI's ~8-day session-staleness guidance. This
- * sweep calls the SAME `getValidCodexOAuth` with `opts.maxAgeMs` ≈ 7 days so
- * every slot refreshes on a roughly-weekly cadence regardless of task draw
- * frequency — zero logic duplication, all lock/persist/quarantine behavior
+ * sweep calls the SAME `getValidCodexOAuth` with `opts.maxAgeMs` (default 5
+ * days, `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`) so every slot refreshes on a
+ * fixed cadence regardless of task draw frequency — zero logic
+ * duplication, all lock/persist/quarantine behavior
  * reused verbatim (see storage.ts doc comment; hand-rolling a refresher here
  * would re-create the 2026-06-19 race).
  *
@@ -25,6 +26,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getKv } from "../be/db";
+import { CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS_BOUNDS } from "../be/swarm-config-guard";
 import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json.js";
 import { getValidCodexOAuth, loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
 import { getApiKey } from "../utils/api-key";
@@ -32,8 +34,25 @@ import { CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey } from "../utils/co
 import { getMcpBaseUrl } from "../utils/constants";
 import { route } from "./route-def";
 
-/** ~weekly refresh cadence, comfortably inside OpenAI's ~8-day staleness window given the 10-day TTL. */
-const KEEP_WARM_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Default refresh age. The old 7-day value lost a slot whose ChatGPT session
+ * OpenAI ended at about 6 days 20 hours, before the first attempt. 5 days
+ * leaves 44 hours of margin, so even a daily trigger refreshes by 6 days.
+ */
+const DEFAULT_KEEP_WARM_MAX_AGE_HOURS = 120;
+
+/**
+ * Read on every sweep, never at module load, so a stored override applies on
+ * config reload without a restart. A non-integer or out-of-range value falls
+ * back to the default; the config API rejects writes outside the same bounds.
+ */
+export function keepWarmMaxAgeMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS?.trim();
+  const { min, max } = CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS_BOUNDS;
+  const value = raw && /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  const hours = value >= min && value <= max ? value : DEFAULT_KEEP_WARM_MAX_AGE_HOURS;
+  return hours * 60 * 60 * 1000;
+}
 
 type SlotOutcome =
   | { slot: number; keySuffix: string; outcome: "warm" | "refreshed" }
@@ -61,7 +80,7 @@ const keepWarmRoute = route({
   pattern: ["api", "oauth", "keep-warm", "codex"],
   summary: "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
   description:
-    "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).",
+    "Enumerates codex_oauth_* slots and refreshes any older than CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS (default 120 hours) through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).",
   tags: ["OAuth"],
   responses: {
     200: {
@@ -82,6 +101,7 @@ export async function handleCodexOAuthKeepWarm(
 
   const apiUrl = getMcpBaseUrl();
   const apiKey = getApiKey();
+  const maxAgeMs = keepWarmMaxAgeMs();
   const slots = await loadAllCodexOAuthSlots(apiUrl, apiKey);
   const results: SlotOutcome[] = [];
 
@@ -95,9 +115,7 @@ export async function handleCodexOAuthKeepWarm(
 
     try {
       const beforeAccess = creds.access;
-      const refreshed = await getValidCodexOAuth(apiUrl, apiKey, slot, {
-        maxAgeMs: KEEP_WARM_MAX_AGE_MS,
-      });
+      const refreshed = await getValidCodexOAuth(apiUrl, apiKey, slot, { maxAgeMs });
       if (!refreshed) {
         results.push({ slot, outcome: "no-credentials" });
       } else {

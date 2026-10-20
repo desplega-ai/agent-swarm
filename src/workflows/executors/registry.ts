@@ -11,6 +11,7 @@ import { ScriptExecutor } from "./script";
 import { SubWorkflowExecutor } from "./sub-workflow";
 import { SwarmScriptExecutor } from "./swarm-script";
 import { SystemOneDecisionExecutor } from "./system-one-decision";
+import { SystemOneExtractionExecutor } from "./system-one-extraction";
 import { ValidateExecutor } from "./validate";
 import { VcsExecutor } from "./vcs";
 import { WaitExecutor } from "./wait";
@@ -72,6 +73,7 @@ export function createExecutorRegistry(deps: ExecutorDependencies): ExecutorRegi
   registry.register(new NotifyExecutor(deps));
   registry.register(new RawLlmExecutor(deps));
   registry.register(new SystemOneDecisionExecutor(deps));
+  registry.register(new SystemOneExtractionExecutor(deps));
   registry.register(new ScriptExecutor(deps));
   registry.register(new SwarmScriptExecutor(deps));
   registry.register(new VcsExecutor(deps));

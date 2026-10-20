@@ -22,7 +22,7 @@ Two kinds of sections:
 ## The cap
 
 - Tracked items across all tracked sections: 10. Absolute maximum 20, only during a real surge.
-- Every tracked item states its lift trigger and a date. An item with no removal condition does not go in.
+- Every tracked item states its lift trigger and a date. An item with no removal condition does not go in. Write the date as a bare `MM-DD` (`check 10-20`) or `DELETE MM-DD` for a past-date prune: those are the only forms the gate can see.
 - Write an age trigger as a calendar date (opened date + N days), never as a day count computed at check time. A floored age fires a day late.
 - Never arm a defer chain to re-check a tracked item. The next heartbeat already checks it. Defer only for work no scheduled pass owns.
 - Incident detail goes to memory: `memory-store` at `swarm` scope, one line of pointer stays in the runbook.
@@ -63,7 +63,7 @@ A gate script can run before each checklist tick and decide whether the tick nee
 - `HEARTBEAT_CHECKLIST_GATE_MODE=enforce`: a quiet verdict skips the task. A wake verdict adds the gate's summary as a Gate Findings section. Enforce is opt-in; turn it on only after shadow tags agree with your own quiet outcomes.
 - The gate fails open. A timeout (60 s), a script error or a malformed result is an `error` verdict, and the task is created in both modes.
 - Preview a verdict with `script-run` on `heartbeat-jev-gate`, `args: { dryRun: true }`.
-- The gate sees a tracked item as due when its line contains today's date (a `YYYY-MM-DD` date matches) or a `DELETE MM-DD` marker on or before today. A line with no date is invisible to it, and a date already past is only caught through `DELETE MM-DD`, so the prune in step 2 still matters.
+- The gate sees a tracked item as due when its line contains today's `MM-DD` as a bare token (`check 10-20`) or a `DELETE MM-DD` marker on or before today. A full `YYYY-MM-DD` date does not count: a line that only carries a re-verification stamp (`2026-10-20 ~10:45Z`) is invisible to the gate, so write the due date bare. A line with no date is invisible too, and a date already past is only caught through `DELETE MM-DD`, so the prune in step 2 still matters.
 
 ## Example standing orders
 
@@ -74,5 +74,5 @@ A gate script can run before each checklist tick and decide whether the tick nee
 - Slack requests older than 1 hour without a task: create the task.
 
 ## Watch Items
-- Linear webhook retries since 2026-08-18. Lift when zero retries for 48 h (check 2026-08-22).
+- Linear webhook retries since 2026-08-18. Lift when zero retries for 48 h (check 08-22).
 ```

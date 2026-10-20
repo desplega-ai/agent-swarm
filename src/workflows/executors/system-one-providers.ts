@@ -1,23 +1,29 @@
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../../utils/openrouter-base-url";
 import type { ExecutorDependencies } from "./base";
+import { CLOUDFLARE_EXTRACT_WIRE, type SystemOneExtractWire } from "./system-one-extract-wire";
 import { OPENAI_DECISIONS_WIRE } from "./system-one-openai-wire";
 import { CLOUDFLARE_WIRE, type SystemOneWire } from "./system-one-wire";
 import { resolveWorkflowLlmConfig } from "./workflow-llm";
 
 /**
- * Hosts that serve typed decisions (Jev, laya, OpenAI Decisions, Cloudflare Clef). A
- * `system-one-decision` node names one by id (`config.provider`); the endpoint, header
- * shape, and key name live here, never in a workflow definition. Most hosts take the
- * SystemOne `{ state, model, questions }` request and return its `{ model, answers, usage }`
- * body; a host that does not supplies a `wire` that translates both ways, so the
- * answer contract in `system-one-decision.ts` is shared. Adding a host is one entry
- * in `SYSTEM_ONE_PROVIDERS`.
+ * Hosts of System One models. One registry serves every capability: a host
+ * declares what it serves (`decide` for typed decisions: Jev, laya, OpenAI
+ * Decisions, Cloudflare Clef; `extract` for typed extraction: Cloudflare Clairic)
+ * and, per capability, its endpoint, models, limits, and wire. The credential, the
+ * deployment check, and every message are the host's, so a decision node and an
+ * extraction node on the same host fail with the same sentence.
+ *
+ * A node names a host by id (`config.provider`); the endpoint, header shape, and
+ * key name live here, never in a workflow definition. Adding a host, or a
+ * capability to one, is one entry in `SYSTEM_ONE_HOSTS`.
  *
  * Do not add a chat-completions route. OpenRouter's `typesafe/jev-router` is a
  * router that forwards a chat request to another model, and `~typesafe/jev-latest`
  * refuses chat/completions ("is a decisions model"). Only the decisions endpoint
  * runs Jev itself.
  */
+
+export type SystemOneCapability = "decide" | "extract";
 
 export interface SystemOneProviderContext {
   db: ExecutorDependencies["db"];
@@ -48,13 +54,18 @@ export interface SystemOneBuiltEndpoint {
   readonly build: (value: string, model: string) => string | null;
 }
 
-export interface SystemOneProvider {
-  /** Name used in messages, e.g. "TypeSafe". */
-  readonly label: string;
-  /** The single credential this host needs: a global secret name. */
-  readonly keyName: string;
+export type SystemOneEndpoint = string | SystemOneConfiguredEndpoint | SystemOneBuiltEndpoint;
+
+/** A credential read from config, with the name it was read under. */
+export interface SystemOneCredential {
+  value: string;
+  keyName: string;
+}
+
+/** What every capability of a host declares. */
+interface SystemOneServiceBase {
   /** A fixed URL, the global config key that names the server, or a URL built from config and model. */
-  readonly endpoint: string | SystemOneConfiguredEndpoint | SystemOneBuiltEndpoint;
+  readonly endpoint: SystemOneEndpoint;
   /**
    * Model used when the node sets none. Absent means no `model` is sent and the
    * host picks, for a host that ignores a model id it does not know.
@@ -62,6 +73,9 @@ export interface SystemOneProvider {
   readonly defaultModel?: string;
   /** When set, the only model ids the node may use (checked at save and at run). */
   readonly allowedModels?: readonly string[];
+}
+
+export interface SystemOneDecideService extends SystemOneServiceBase {
   /** Host limits stricter than the node's own. */
   readonly limits?: { readonly maxQuestions?: number };
   /** Request and response translation. Absent means the SystemOne wire as is. */
@@ -71,11 +85,40 @@ export interface SystemOneProvider {
    * the output reports and what a `humanReview` band is tested against.
    */
   readonly confidenceField: "confidence" | "answer_confidence";
+}
+
+export interface SystemOneExtractService extends SystemOneServiceBase {
+  /** Host limits stricter than the node's own. */
+  readonly limits?: { readonly maxFields?: number; readonly maxImages?: number };
+  /** Request and response translation. */
+  readonly wire: SystemOneExtractWire;
+}
+
+export interface SystemOneHost {
+  /** Name used in messages, e.g. "TypeSafe". */
+  readonly label: string;
+  /** The credential this host needs: a global secret name, the one messages tell an author to set. */
+  readonly keyName: string;
+  /** Other secret names read, in order, when `keyName` is unset. Messages mention them. */
+  readonly fallbackKeyNames?: readonly string[];
   /** A deployment setting that makes this host unusable, or null. */
   readonly deploymentProblem?: (env: NodeJS.ProcessEnv) => string | null;
-  /** The credential value, or null/blank when absent. May throw; callers never relay the cause. */
-  readonly readKey: (ctx: SystemOneProviderContext) => Promise<string | null | undefined>;
+  /**
+   * The credential value (a string is read under `keyName`), or null/blank when
+   * absent. May throw; callers never relay the cause.
+   */
+  readonly readKey: (
+    ctx: SystemOneProviderContext,
+  ) => Promise<SystemOneCredential | string | null | undefined>;
+  readonly decide?: SystemOneDecideService;
+  readonly extract?: SystemOneExtractService;
 }
+
+/**
+ * A decision host as one flat record: the host's credential and messages plus its
+ * `decide` service. `system-one-decision` reads this shape.
+ */
+export type SystemOneProvider = Omit<SystemOneHost, "decide" | "extract"> & SystemOneDecideService;
 
 const TYPESAFE_KEY = "TYPESAFE_API_KEY";
 const OPENROUTER_KEY = "OPENROUTER_API_KEY";
@@ -83,6 +126,7 @@ const LAYA_KEY = "LAYA_API_KEY";
 const LAYA_URL_KEY = "LAYA_URL";
 const OPENAI_DECISIONS_KEY = "OPENAI_DECISIONS_API_KEY";
 const CLOUDFLARE_TOKEN_KEY = "CLOUDFLARE_API_TOKEN";
+const CLOUDFLARE_KEY_FALLBACK = "CLOUDFLARE_API_KEY";
 const CLOUDFLARE_ACCOUNT_KEY = "CLOUDFLARE_ACCOUNT_ID";
 const CLOUDFLARE_ACCOUNT_RE = /^[0-9a-f]{32}$/;
 
@@ -95,21 +139,44 @@ async function readGlobalConfig(
   return rows.find((row) => row.scope === "global" && row.key === key)?.value;
 }
 
-export const SYSTEM_ONE_PROVIDERS = {
+/** The first of `keys` with a non-blank global value, with the key it came from. */
+async function readFirstGlobalConfig(
+  db: ExecutorDependencies["db"],
+  keys: readonly string[],
+): Promise<SystemOneCredential | undefined> {
+  for (const keyName of keys) {
+    const value = await readGlobalConfig(db, keyName);
+    if (value && value.trim() !== "") return { value, keyName };
+  }
+  return undefined;
+}
+
+/** Every Workers AI model is reached at the same account-scoped route; only the model differs. */
+const CLOUDFLARE_ENDPOINT: SystemOneBuiltEndpoint = {
+  configKey: CLOUDFLARE_ACCOUNT_KEY,
+  describe: "the 32-character id of a Cloudflare account",
+  build: (accountId, model) => {
+    const id = accountId.trim();
+    return CLOUDFLARE_ACCOUNT_RE.test(id)
+      ? `https://api.cloudflare.com/client/v4/accounts/${id}/ai/run/@cf/cloudflare/${model}`
+      : null;
+  },
+};
+
+export const SYSTEM_ONE_HOSTS = {
   typesafe: {
     label: "TypeSafe",
     keyName: TYPESAFE_KEY,
-    endpoint: "https://api.typesafe.ai/v1/systemone",
-    defaultModel: "jev-latest",
-    confidenceField: "confidence",
     readKey: ({ db }) => readGlobalConfig(db, TYPESAFE_KEY),
+    decide: {
+      endpoint: "https://api.typesafe.ai/v1/systemone",
+      defaultModel: "jev-latest",
+      confidenceField: "confidence",
+    },
   },
   openrouter: {
     label: "OpenRouter",
     keyName: OPENROUTER_KEY,
-    endpoint: "https://openrouter.ai/api/alpha/decisions",
-    defaultModel: "~typesafe/jev-latest",
-    confidenceField: "confidence",
     deploymentProblem(env) {
       // A gateway URL means OPENROUTER_API_KEY may be a gateway token, and the
       // decisions API is a sibling of /v1 that a chat gateway need not forward.
@@ -127,65 +194,114 @@ export const SYSTEM_ONE_PROVIDERS = {
         return null;
       }
     },
+    decide: {
+      endpoint: "https://openrouter.ai/api/alpha/decisions",
+      defaultModel: "~typesafe/jev-latest",
+      confidenceField: "confidence",
+    },
   },
   laya: {
     label: "laya",
     keyName: LAYA_KEY,
-    endpoint: { configKey: LAYA_URL_KEY, path: "/v1/systemone" },
-    // No default model. laya answers an id it does not know (`jev-latest` included) by
-    // routing on the text instead, with HTTP 200, so a default would be sent as if it meant something.
-    // `confidence` on a choice or score is entropy-based (0.47 top probability reads
-    // ~0.15). `answer_confidence` is the top probability, the number a `noul` band
-    // already uses, so one band means the same thing on every question type.
-    confidenceField: "answer_confidence",
     readKey: ({ db }) => readGlobalConfig(db, LAYA_KEY),
+    decide: {
+      endpoint: { configKey: LAYA_URL_KEY, path: "/v1/systemone" },
+      // No default model. laya answers an id it does not know (`jev-latest` included) by
+      // routing on the text instead, with HTTP 200, so a default would be sent as if it meant something.
+      // `confidence` on a choice or score is entropy-based (0.47 top probability reads
+      // ~0.15). `answer_confidence` is the top probability, the number a `noul` band
+      // already uses, so one band means the same thing on every question type.
+      confidenceField: "answer_confidence",
+    },
   },
   openai: {
     label: "OpenAI",
     // Not OPENAI_API_KEY: a global row of that name reaches every worker's env and
     // can change harness auth. This key serves this node only, and needs Decisions access.
     keyName: OPENAI_DECISIONS_KEY,
-    endpoint: "https://api.openai.com/v1/decisions",
-    defaultModel: "gpt-6-luna",
-    // OpenAI's own field; it is not the top probability.
-    confidenceField: "confidence",
-    wire: OPENAI_DECISIONS_WIRE,
     readKey: ({ db }) => readGlobalConfig(db, OPENAI_DECISIONS_KEY),
+    decide: {
+      endpoint: "https://api.openai.com/v1/decisions",
+      defaultModel: "gpt-6-luna",
+      // OpenAI's own field; it is not the top probability.
+      confidenceField: "confidence",
+      wire: OPENAI_DECISIONS_WIRE,
+    },
   },
   cloudflare: {
     label: "Cloudflare Workers AI",
     keyName: CLOUDFLARE_TOKEN_KEY,
-    endpoint: {
-      configKey: CLOUDFLARE_ACCOUNT_KEY,
-      describe: "the 32-character id of a Cloudflare account",
-      build: (accountId, model) => {
-        const id = accountId.trim();
-        return CLOUDFLARE_ACCOUNT_RE.test(id)
-          ? `https://api.cloudflare.com/client/v4/accounts/${id}/ai/run/@cf/cloudflare/${model}`
-          : null;
-      },
+    // A Workers AI API token is a bearer token whatever the secret is called; a
+    // deployment that stored it as CLOUDFLARE_API_KEY works without a rename.
+    fallbackKeyNames: [CLOUDFLARE_KEY_FALLBACK],
+    readKey: ({ db }) => readFirstGlobalConfig(db, [CLOUDFLARE_TOKEN_KEY, CLOUDFLARE_KEY_FALLBACK]),
+    decide: {
+      endpoint: CLOUDFLARE_ENDPOINT,
+      defaultModel: "clef",
+      // The model is part of the URL, so only these ids are accepted.
+      allowedModels: ["clef", "clef-flash"],
+      limits: { maxQuestions: 64 },
+      confidenceField: "confidence",
+      wire: CLOUDFLARE_WIRE,
     },
-    defaultModel: "clef",
-    // The model is part of the URL, so only these ids are accepted.
-    allowedModels: ["clef", "clef-flash"],
-    limits: { maxQuestions: 64 },
-    confidenceField: "confidence",
-    wire: CLOUDFLARE_WIRE,
-    readKey: ({ db }) => readGlobalConfig(db, CLOUDFLARE_TOKEN_KEY),
+    extract: {
+      endpoint: CLOUDFLARE_ENDPOINT,
+      defaultModel: "clairic",
+      allowedModels: ["clairic"],
+      limits: { maxFields: 64, maxImages: 4 },
+      wire: CLOUDFLARE_EXTRACT_WIRE,
+    },
   },
-} as const satisfies Record<string, SystemOneProvider>;
+} as const satisfies Record<string, SystemOneHost>;
 
-export type SystemOneProviderId = keyof typeof SYSTEM_ONE_PROVIDERS;
+export type SystemOneHostId = keyof typeof SYSTEM_ONE_HOSTS;
 
-export const SYSTEM_ONE_PROVIDER_IDS = Object.keys(SYSTEM_ONE_PROVIDERS) as [
-  SystemOneProviderId,
-  ...SystemOneProviderId[],
-];
+type HostsServing<C extends SystemOneCapability> = {
+  [K in SystemOneHostId]: (typeof SYSTEM_ONE_HOSTS)[K] extends Record<C, object> ? K : never;
+}[SystemOneHostId];
+
+/** A host that serves typed decisions. */
+export type SystemOneProviderId = HostsServing<"decide">;
+/** A host that serves typed extraction. */
+export type SystemOneExtractProviderId = HostsServing<"extract">;
+
+function hostsServing<C extends SystemOneCapability>(
+  capability: C,
+): [HostsServing<C>, ...HostsServing<C>[]] {
+  const ids = (Object.keys(SYSTEM_ONE_HOSTS) as SystemOneHostId[]).filter(
+    (id) => (SYSTEM_ONE_HOSTS[id] as SystemOneHost)[capability] !== undefined,
+  );
+  return ids as [HostsServing<C>, ...HostsServing<C>[]];
+}
+
+/** The decision view of every host that decides: the host's shared fields plus its `decide` service. */
+export const SYSTEM_ONE_PROVIDERS = Object.fromEntries(
+  hostsServing("decide").map((id) => {
+    const { decide, extract: _extract, ...host } = SYSTEM_ONE_HOSTS[id] as SystemOneHost;
+    return [id, { ...host, ...decide }];
+  }),
+) as {
+  [K in SystemOneProviderId]: Omit<(typeof SYSTEM_ONE_HOSTS)[K], "decide" | "extract"> &
+    (typeof SYSTEM_ONE_HOSTS)[K]["decide"];
+};
+
+export const SYSTEM_ONE_PROVIDER_IDS = hostsServing("decide");
+export const SYSTEM_ONE_EXTRACT_PROVIDER_IDS = hostsServing("extract");
 
 export const SYSTEM_ONE_DEFAULT_PROVIDER: SystemOneProviderId = "typesafe";
+export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER: SystemOneExtractProviderId = "cloudflare";
 
 export function isSystemOneProviderId(value: unknown): value is SystemOneProviderId {
-  return typeof value === "string" && Object.hasOwn(SYSTEM_ONE_PROVIDERS, value);
+  return (
+    typeof value === "string" && (SYSTEM_ONE_PROVIDER_IDS as readonly string[]).includes(value)
+  );
+}
+
+export function isSystemOneExtractProviderId(value: unknown): value is SystemOneExtractProviderId {
+  return (
+    typeof value === "string" &&
+    (SYSTEM_ONE_EXTRACT_PROVIDER_IDS as readonly string[]).includes(value)
+  );
 }
 
 /** Provider a raw node config selects. Undefined when the field is present but not a known id. */
@@ -196,11 +312,36 @@ export function systemOneProviderOf(
   return isSystemOneProviderId(config.provider) ? config.provider : undefined;
 }
 
+/** Extraction provider a raw node config selects. Undefined when present but not a known id. */
+export function systemOneExtractProviderOf(
+  config: Record<string, unknown>,
+): SystemOneExtractProviderId | undefined {
+  if (config.provider === undefined) return SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER;
+  return isSystemOneExtractProviderId(config.provider) ? config.provider : undefined;
+}
+
+/** The service a host runs for one capability. Callers pass an id that serves it. */
+function serviceOf(id: SystemOneHostId, capability: SystemOneCapability): SystemOneServiceBase {
+  const service = (SYSTEM_ONE_HOSTS[id] as SystemOneHost)[capability];
+  if (!service) throw new Error(`SystemOne provider "${id}" does not serve ${capability}`);
+  return service;
+}
+
 // ─── Messages ───────────────────────────────────────────────
 //
 // Every message names the exact credential and where to set it. They are shared by
 // the save-time warning, the run-start stop, and the step itself, so an author
 // sees the same sentence wherever the problem surfaces.
+
+/** What a call that failed did not produce, for the end of a message. */
+const NOTHING_PRODUCED: Record<SystemOneCapability, string> = {
+  decide: "No decision was made.",
+  extract: "Nothing was extracted.",
+};
+
+export function systemOneNothingProduced(capability: SystemOneCapability): string {
+  return NOTHING_PRODUCED[capability];
+}
 
 const SET_IT = (keyName: string) =>
   `Set ${keyName} as a global secret on the Secrets page (Settings > Secrets).`;
@@ -208,77 +349,91 @@ const SET_IT = (keyName: string) =>
 const SET_URL = (configKey: string) =>
   `Set ${configKey} as a global config value (set-config with scope global).`;
 
-export function systemOneKeyMissingMessage(id: SystemOneProviderId): string {
-  const { label, keyName } = SYSTEM_ONE_PROVIDERS[id];
-  return `${keyName} is not configured. SystemOne provider "${id}" needs a working ${label} API key. ${SET_IT(keyName)}`;
+export function systemOneKeyMissingMessage(id: SystemOneHostId): string {
+  const { label, keyName, fallbackKeyNames }: SystemOneHost = SYSTEM_ONE_HOSTS[id];
+  const also = fallbackKeyNames?.length
+    ? ` (${fallbackKeyNames.join(", ")} is read when it is unset, and is not configured either)`
+    : "";
+  return `${keyName} is not configured${also}. SystemOne provider "${id}" needs a working ${label} API key. ${SET_IT(keyName)}`;
 }
 
-export function systemOneKeyUnreadableMessage(id: SystemOneProviderId): string {
+export function systemOneKeyUnreadableMessage(id: SystemOneHostId): string {
   // The underlying error can name a config row id; keep the message generic.
-  return `Could not read ${SYSTEM_ONE_PROVIDERS[id].keyName} from swarm config`;
+  return `Could not read ${SYSTEM_ONE_HOSTS[id].keyName} from swarm config`;
 }
 
-export function systemOneKeyMalformedMessage(id: SystemOneProviderId): string {
-  return `${SYSTEM_ONE_PROVIDERS[id].keyName} is not a valid bearer token value. ${SET_IT(SYSTEM_ONE_PROVIDERS[id].keyName)}`;
+export function systemOneKeyMalformedMessage(id: SystemOneHostId, keyName?: string): string {
+  const name = keyName ?? SYSTEM_ONE_HOSTS[id].keyName;
+  return `${name} is not a valid bearer token value. ${SET_IT(name)}`;
 }
 
 /** A 401 or 403 from the host: the key exists but the host does not accept it. */
 export function systemOneKeyRejectedMessage(
-  id: SystemOneProviderId,
+  id: SystemOneHostId,
   status: number,
   code?: string,
+  options: { keyName?: string; capability?: SystemOneCapability } = {},
 ): string {
-  const { label, keyName } = SYSTEM_ONE_PROVIDERS[id];
+  const { label }: SystemOneHost = SYSTEM_ONE_HOSTS[id];
+  const keyName = options.keyName ?? SYSTEM_ONE_HOSTS[id].keyName;
   const detail = code ? ` (${code})` : "";
   return (
     `${keyName} was rejected by ${label} (HTTP ${status}${detail}). ` +
-    `The key is invalid, revoked, or lacks access to the model. Replace it on the Secrets page (Settings > Secrets). No decision was made.`
+    `The key is invalid, revoked, or lacks access to the model. Replace it on the Secrets page (Settings > Secrets). ${NOTHING_PRODUCED[options.capability ?? "decide"]}`
   );
 }
 
-function urlKeyOf(provider: SystemOneProvider): string | null {
-  return typeof provider.endpoint === "string" ? null : provider.endpoint.configKey;
+function urlKeyOf(endpoint: SystemOneEndpoint): string | null {
+  return typeof endpoint === "string" ? null : endpoint.configKey;
 }
 
-function isBuiltEndpoint(
-  endpoint: SystemOneProvider["endpoint"],
-): endpoint is SystemOneBuiltEndpoint {
+function isBuiltEndpoint(endpoint: SystemOneEndpoint): endpoint is SystemOneBuiltEndpoint {
   return typeof endpoint !== "string" && "build" in endpoint;
 }
 
 /** What a provider's config value names, for messages. */
-function urlDescriptionOf(provider: SystemOneProvider): string {
-  return isBuiltEndpoint(provider.endpoint)
-    ? provider.endpoint.describe
-    : `the URL of a ${provider.label} server`;
+function urlDescriptionOf(id: SystemOneHostId, endpoint: SystemOneEndpoint): string {
+  return isBuiltEndpoint(endpoint)
+    ? endpoint.describe
+    : `the URL of a ${SYSTEM_ONE_HOSTS[id].label} server`;
 }
 
-export function systemOneUrlMissingMessage(id: SystemOneProviderId): string {
-  const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[id];
-  const configKey = urlKeyOf(provider) ?? "";
-  return `${configKey} is not configured. SystemOne provider "${id}" needs ${urlDescriptionOf(provider)}. ${SET_URL(configKey)}`;
+export function systemOneUrlMissingMessage(
+  id: SystemOneHostId,
+  capability: SystemOneCapability = "decide",
+): string {
+  const { endpoint } = serviceOf(id, capability);
+  const configKey = urlKeyOf(endpoint) ?? "";
+  return `${configKey} is not configured. SystemOne provider "${id}" needs ${urlDescriptionOf(id, endpoint)}. ${SET_URL(configKey)}`;
 }
 
-export function systemOneUrlUnreadableMessage(id: SystemOneProviderId): string {
-  return `Could not read ${urlKeyOf(SYSTEM_ONE_PROVIDERS[id]) ?? ""} from swarm config`;
+export function systemOneUrlUnreadableMessage(
+  id: SystemOneHostId,
+  capability: SystemOneCapability = "decide",
+): string {
+  return `Could not read ${urlKeyOf(serviceOf(id, capability).endpoint) ?? ""} from swarm config`;
 }
 
-export function systemOneUrlInvalidMessage(id: SystemOneProviderId): string {
-  const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[id];
-  const configKey = urlKeyOf(provider) ?? "";
+export function systemOneUrlInvalidMessage(
+  id: SystemOneHostId,
+  capability: SystemOneCapability = "decide",
+): string {
+  const { endpoint } = serviceOf(id, capability);
+  const configKey = urlKeyOf(endpoint) ?? "";
   // The value is not echoed: a URL can carry a credential.
-  if (isBuiltEndpoint(provider.endpoint)) {
-    return `${configKey} is not ${provider.endpoint.describe}. ${SET_URL(configKey)}`;
+  if (isBuiltEndpoint(endpoint)) {
+    return `${configKey} is not ${endpoint.describe}. ${SET_URL(configKey)}`;
   }
-  return `${configKey} is not a usable ${provider.label} server URL. It must be an https URL (http only for localhost) with no credentials, query, or fragment. ${SET_URL(configKey)}`;
+  return `${configKey} is not a usable ${SYSTEM_ONE_HOSTS[id].label} server URL. It must be an https URL (http only for localhost) with no credentials, query, or fragment. ${SET_URL(configKey)}`;
 }
 
 /** Why a provider cannot use this model, or null. The value is not echoed: it may come from run input. */
 export function systemOneModelProblem(
-  id: SystemOneProviderId,
+  id: SystemOneHostId,
   model: string | undefined,
+  capability: SystemOneCapability = "decide",
 ): string | null {
-  const { allowedModels }: SystemOneProvider = SYSTEM_ONE_PROVIDERS[id];
+  const { allowedModels } = serviceOf(id, capability);
   if (!allowedModels || (model !== undefined && allowedModels.includes(model))) return null;
   return `SystemOne provider "${id}" serves only the models ${allowedModels.join(", ")}; set model to one of them or leave it unset.`;
 }
@@ -327,16 +482,24 @@ export function systemOneEndpointFromBase(base: string, path: string): string | 
 }
 
 export type SystemOneTarget =
-  | { ok: true; apiKey: string; endpoint: string }
+  | {
+      ok: true;
+      apiKey: string;
+      endpoint: string;
+      /** The secret name the key was read under, for a rejection message. */
+      keyName: string;
+    }
   | { ok: false; error: string };
 
 export interface SystemOneTargetOverrides {
   /** Replaces the credential lookup. */
-  apiKey?: (id: SystemOneProviderId) => Promise<string | null | undefined>;
+  apiKey?: (id: SystemOneHostId) => Promise<string | null | undefined>;
   /** Replaces the lookup of a configured server's base URL (or account id). */
-  serverUrl?: (id: SystemOneProviderId) => Promise<string | null | undefined>;
-  /** The model the call uses, for a host whose URL names it. Defaults to the provider's default. */
+  serverUrl?: (id: SystemOneHostId) => Promise<string | null | undefined>;
+  /** The model the call uses, for a host whose URL names it. Defaults to the service's default. */
   model?: string;
+  /** Which of the host's services is reached. Defaults to `decide`. */
+  capability?: SystemOneCapability;
 }
 
 /**
@@ -346,21 +509,23 @@ export interface SystemOneTargetOverrides {
  * fakes); the deployment check and the blank / malformed / URL checks still apply.
  */
 export async function resolveSystemOneTarget(
-  id: SystemOneProviderId,
+  id: SystemOneHostId,
   ctx: SystemOneProviderContext,
   overrides: SystemOneTargetOverrides = {},
 ): Promise<SystemOneTarget> {
-  const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[id];
-  const deploymentProblem = provider.deploymentProblem?.(ctx.env);
+  const host: SystemOneHost = SYSTEM_ONE_HOSTS[id];
+  const capability = overrides.capability ?? "decide";
+  const service = serviceOf(id, capability);
+  const deploymentProblem = host.deploymentProblem?.(ctx.env);
   if (deploymentProblem) return { ok: false, error: deploymentProblem };
 
   const errors: string[] = [];
 
   let endpoint: string | undefined;
-  if (typeof provider.endpoint === "string") {
-    endpoint = provider.endpoint;
+  if (typeof service.endpoint === "string") {
+    endpoint = service.endpoint;
   } else {
-    const { configKey } = provider.endpoint;
+    const { configKey } = service.endpoint;
     let base: string | null | undefined;
     let readable = true;
     try {
@@ -369,34 +534,36 @@ export async function resolveSystemOneTarget(
         : readGlobalConfig(ctx.db, configKey));
     } catch {
       readable = false;
-      errors.push(systemOneUrlUnreadableMessage(id));
+      errors.push(systemOneUrlUnreadableMessage(id, capability));
     }
     if (readable) {
       if (!base || base.trim() === "") {
-        errors.push(systemOneUrlMissingMessage(id));
+        errors.push(systemOneUrlMissingMessage(id, capability));
       } else {
-        const resolved = isBuiltEndpoint(provider.endpoint)
-          ? provider.endpoint.build(base, overrides.model ?? provider.defaultModel ?? "")
-          : systemOneEndpointFromBase(base, provider.endpoint.path);
+        const resolved = isBuiltEndpoint(service.endpoint)
+          ? service.endpoint.build(base, overrides.model ?? service.defaultModel ?? "")
+          : systemOneEndpointFromBase(base, service.endpoint.path);
         if (resolved) endpoint = resolved;
-        else errors.push(systemOneUrlInvalidMessage(id));
+        else errors.push(systemOneUrlInvalidMessage(id, capability));
       }
     }
   }
 
-  let apiKey: string | null | undefined;
+  let read: SystemOneCredential | string | null | undefined;
   let keyProblem: string | undefined;
   try {
-    apiKey = await (overrides.apiKey ? overrides.apiKey(id) : provider.readKey(ctx));
+    read = await (overrides.apiKey ? overrides.apiKey(id) : host.readKey(ctx));
   } catch {
     keyProblem = systemOneKeyUnreadableMessage(id);
   }
+  const apiKey = typeof read === "string" ? read : read?.value;
+  const keyName = (typeof read === "object" && read?.keyName) || host.keyName;
   if (!keyProblem) {
     if (!apiKey || apiKey.trim() === "") keyProblem = systemOneKeyMissingMessage(id);
-    else if (hasWhitespaceOrControl(apiKey)) keyProblem = systemOneKeyMalformedMessage(id);
+    else if (hasWhitespaceOrControl(apiKey)) keyProblem = systemOneKeyMalformedMessage(id, keyName);
   }
   if (keyProblem) errors.push(keyProblem);
 
   if (errors.length > 0 || !endpoint || !apiKey) return { ok: false, error: errors.join(" ") };
-  return { ok: true, apiKey, endpoint };
+  return { ok: true, apiKey, endpoint, keyName };
 }

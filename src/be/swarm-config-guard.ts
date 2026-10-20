@@ -149,6 +149,17 @@ export const DB_RETENTION_TUNING_BOUNDS = {
  */
 export const APPS_JSON_COLUMN_MAX_BYTES_BOUNDS = { min: 1_024, max: 16_777_216 } as const;
 
+/**
+ * Bounds for the Codex OAuth keep-warm age threshold
+ * (`CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`).
+ *
+ * `src/http/codex-oauth-keep-warm.ts` reads the knob against exactly these at
+ * call time and falls back to its default outside them. The 216 h (9 day)
+ * ceiling stays under the 9.5 day point where task-time near-expiry refresh
+ * takes over, so every accepted value still changes when a slot refreshes.
+ */
+export const CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS_BOUNDS = { min: 1, max: 216 } as const;
+
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
@@ -541,6 +552,11 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ["APPS_JSON_COLUMN_MAX_BYTES"],
     APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.min,
     APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.max,
+  ),
+  ...boundedIntegerValidators(
+    ["CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS"],
+    CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS_BOUNDS.min,
+    CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS_BOUNDS.max,
   ),
   ...boundedIntegerValidators(
     [
