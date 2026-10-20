@@ -162,14 +162,24 @@ export async function resolveChatAttachmentRefs(
   return { files };
 }
 
+/** A Slack file an agent fetched into its task; recorded with that agent's id. */
+const FETCHED_SLACK_FILE_INTENT = "slack-file";
+
 /**
  * The output files of a task, for the result relay: attachments an agent
- * added that the active provider holds. Files a user sent the bot are left
- * out, so they are not echoed back.
+ * added that the active provider holds. Input files (a user's upload, a Slack
+ * file an agent fetched) are left out, as the Slack relay does, so they are not
+ * echoed back or carried into another chat thread.
  */
 export async function taskOutputChatFiles(taskId: string): Promise<OutboundChatFile[]> {
   return (await getTaskAttachments(taskId)).flatMap((attachment) => {
-    if (attachment.agentId === null || attachment.intent === SHARED_FILE_INTENT) return [];
+    if (attachment.agentId === null) return [];
+    if (
+      attachment.intent === SHARED_FILE_INTENT ||
+      attachment.intent === FETCHED_SLACK_FILE_INTENT
+    ) {
+      return [];
+    }
     const file = chatFileOfTaskAttachment(attachment);
     return file ? [file] : [];
   });

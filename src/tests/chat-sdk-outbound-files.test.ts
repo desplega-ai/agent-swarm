@@ -595,7 +595,7 @@ describe("chat-post attachments", () => {
 });
 
 describe("relay of output attachments", () => {
-  test("a completed task relays its output attachments after the answer, not the user's uploads", async () => {
+  test("a completed task relays its output attachments after the answer, not its input files", async () => {
     const chatId = nextChatId;
     const task = await chatTask(chatId, lead.id);
     await attach(task.id, "result.pdf", PDF_BYTES, "application/pdf", { agentId: lead.id });
@@ -603,6 +603,16 @@ describe("relay of output attachments", () => {
       agentId: null,
       intent: "user-upload",
     });
+    await attach(
+      task.id,
+      "fetched-from-slack.png",
+      new Uint8Array([...PNG_BYTES, 5]),
+      "image/png",
+      {
+        agentId: lead.id,
+        intent: "slack-file",
+      },
+    );
     await completeTask(task.id, "Done, report attached.");
 
     await processPendingChatRelays();
