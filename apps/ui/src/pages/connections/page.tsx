@@ -56,7 +56,7 @@ import type {
   ScriptCredentialBinding,
   SwarmConfigScope,
 } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -2205,6 +2205,7 @@ function CredentialBindingsSection({
       {
         field: "oauthAuthorizationId",
         headerName: "OAuth Account",
+        context: HIDE_WHEN_COMPACT,
         minWidth: 150,
         cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => {
           const authorizationId = params.data?.oauthAuthorizationId;
@@ -2233,6 +2234,7 @@ function CredentialBindingsSection({
       {
         field: "allowedHosts",
         headerName: "Allowed Hosts",
+        context: HIDE_WHEN_COMPACT,
         minWidth: 210,
         flex: 1,
         cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => (
@@ -2242,6 +2244,7 @@ function CredentialBindingsSection({
       {
         field: "headerTemplate",
         headerName: "Header Template",
+        context: HIDE_WHEN_COMPACT,
         minWidth: 230,
         flex: 1,
         cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => (
@@ -2251,6 +2254,7 @@ function CredentialBindingsSection({
       {
         field: "queryTemplate",
         headerName: "Query Template",
+        context: HIDE_WHEN_COMPACT,
         minWidth: 210,
         flex: 1,
         cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => (
@@ -2259,6 +2263,7 @@ function CredentialBindingsSection({
       },
       {
         headerName: "Token",
+        context: HIDE_WHEN_COMPACT,
         width: 100,
         cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) =>
           params.data?.authKind === "oauth" ? (
@@ -2269,6 +2274,7 @@ function CredentialBindingsSection({
       },
       {
         headerName: "Used By",
+        context: HIDE_WHEN_COMPACT,
         width: 105,
         valueGetter: (params) => (params.data ? (usedByCounts.get(params.data.id) ?? 0) : 0),
         cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => {
@@ -2324,6 +2330,7 @@ function CredentialBindingsSection({
       {
         field: "createdAt",
         headerName: "Created",
+        context: HIDE_WHEN_COMPACT,
         width: 140,
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
@@ -3196,6 +3203,7 @@ export default function ConnectionsPage() {
       {
         field: "createdAt",
         headerName: "Created",
+        context: HIDE_WHEN_COMPACT,
         width: 140,
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },

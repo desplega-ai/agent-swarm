@@ -15,6 +15,9 @@ GlobalRegistrator.register();
 const { createRoot } = await import("react-dom/client");
 // happy-dom rejects a cancelled Web Animation, which motion does on unmount.
 MotionGlobalConfig.skipAnimations = true;
+mock.module("@/components/shared/setup-chip", () =>
+  require("../../../../components/shared/setup-chip"),
+);
 mock.module("@radix-ui/react-use-layout-effect", () => ({ useLayoutEffect }));
 afterAll(async () => {
   MotionGlobalConfig.skipAnimations = false;
@@ -85,7 +88,7 @@ for (const [alias, path] of [
   ["@/lib/agent-runtime-models", "../../../../lib/agent-runtime-models"],
   ["@/lib/model-dial", "../../../../lib/model-dial"],
   ["@/lib/model-vendor", "../../../../lib/model-vendor"],
-  ["@/components/onboarding/setup-card", "../../../../components/onboarding/setup-card"],
+  ["@/components/shared/setup-card", "../../../../components/shared/setup-card"],
   ["@/components/shared/animated-reveal", "../../../../components/shared/animated-reveal"],
   ["@/components/shared/harness-icon", "../../../../components/shared/harness-icon"],
   ["@/components/shared/model-logo", "../../../../components/shared/model-logo"],

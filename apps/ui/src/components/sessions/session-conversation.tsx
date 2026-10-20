@@ -5,17 +5,22 @@
  * render this, so they behave the same.
  */
 
-import { ChevronDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronDown, Lock } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { useSession } from "@/api/hooks/use-sessions";
+import { sessionErrorStatus, useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
+import { EmptyState } from "@/components/shared/empty-state";
 import { TaskComposer, type TaskComposerProps } from "@/components/shared/task-composer";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import { typingLabel } from "@/lib/session-presence";
+import { isReadOnlyAccess } from "@/lib/session-sharing";
 import { canSteerSessionTask } from "@/lib/task-steer";
 import { cn } from "@/lib/utils";
+import { ComposerReadOnlyNotice } from "./composer-dock";
+import { useSessionPresenceContext } from "./session-presence";
 import { SessionTimeline } from "./session-timeline";
 
 export interface SessionConversationProps {
@@ -38,7 +43,27 @@ export function SessionConversation({
   // composer falls back to its pre-steering chained-task behaviour.
   const steerGate = useFeatureGate("1.122.1");
   const { data: steeringEnabled = true } = useSteeringEnabled();
-  const { data: detail, isLoading } = useSession(rootTaskId);
+  const { data: detail, isLoading, error } = useSession(rootTaskId);
+  // A 403 wins over cached data, so a viewer whose share was revoked loses
+  // the conversation on the next poll instead of keeping a stale copy.
+  const noAccess = sessionErrorStatus(error) === 403;
+  const { viewers, setTyping } = useSessionPresenceContext();
+  const typing = typingLabel(viewers);
+
+  // Typing = the composer has focus and holds text. The steer box and the
+  // follow-up dock swap under a typing user, so track both on a wrapper.
+  const composer = useRef({ focused: false, hasText: false });
+  const reportTyping = useCallback(() => {
+    setTyping(composer.current.focused && composer.current.hasText);
+  }, [setTyping]);
+  const canType = !noAccess && !isReadOnlyAccess(detail?.access);
+  // The composer can unmount mid-typing when access drops to read; clear the
+  // flag so others never see a stuck "typing…".
+  useEffect(() => {
+    if (canType) return;
+    composer.current = { focused: false, hasText: false };
+    setTyping(false);
+  }, [canType, setTyping]);
 
   // The whole leaf task, not just its id: the composer needs `status`,
   // `isLeadTask`, `provider`, and `supportedSteerModes` to decide between
@@ -79,6 +104,8 @@ export function SessionConversation({
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />
             </div>
+          ) : noAccess ? (
+            <SessionNoAccess />
           ) : detail ? (
             <SessionTimeline
               rootTaskId={rootTaskId}
@@ -110,14 +137,58 @@ export function SessionConversation({
         ) : null}
       </div>
 
-      {/* Composer dock pinned to bottom */}
-      <TaskComposer
-        rootTaskId={rootTaskId}
-        targetTask={latestLeafTask}
-        canSteer={canSteer}
-        placeholder="Continue the session…"
-        renderActions={renderComposerActions}
-      />
+      {typing ? (
+        <p
+          aria-live="polite"
+          className="shrink-0 px-6 pt-2 text-xs text-muted-foreground max-w-3xl mx-auto w-full"
+        >
+          {typing}
+        </p>
+      ) : null}
+
+      {/* Composer dock pinned to bottom. A read-only share gets a notice
+          instead; a missing `access` (older servers) keeps the composer. */}
+      {noAccess ? null : isReadOnlyAccess(detail?.access) ? (
+        <ComposerReadOnlyNotice
+          message={`View only. Shared by ${detail?.owner?.name ?? "the owner"}.`}
+        />
+      ) : (
+        <div
+          className="contents"
+          onFocus={() => {
+            composer.current.focused = true;
+            reportTyping();
+          }}
+          onBlur={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+            composer.current.focused = false;
+            reportTyping();
+          }}
+        >
+          <TaskComposer
+            rootTaskId={rootTaskId}
+            targetTask={latestLeafTask}
+            canSteer={canSteer}
+            placeholder="Continue the session…"
+            renderActions={renderComposerActions}
+            onValueChange={(next) => {
+              composer.current.hasText = next.trim().length > 0;
+              reportTyping();
+            }}
+          />
+        </div>
+      )}
     </>
+  );
+}
+
+/** A session that exists but was not shared with this viewer (HTTP 403). */
+export function SessionNoAccess() {
+  return (
+    <EmptyState
+      icon={Lock}
+      title="You don't have access"
+      description="Ask the owner to share it."
+    />
   );
 }

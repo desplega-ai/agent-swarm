@@ -1,7 +1,5 @@
 import { Github } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { useHealth, useStats } from "@/api/hooks/use-stats";
-import type { StatusHealth } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { ContextPanelToggle } from "@/components/context-panel/context-session-panel";
 import { MoonIcon } from "@/components/icons/moon";
@@ -18,18 +16,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { isDemoMode } from "@/lib/deployment-config";
 import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "./breadcrumbs";
-
-const HEALTH_DOT_CLASS: Record<StatusHealth, string> = {
-  ok: "bg-status-success",
-  degraded: "bg-status-pending",
-  broken: "bg-status-error",
-};
-
-const HEALTH_LABEL: Record<StatusHealth, string> = {
-  ok: "All systems go",
-  degraded: "Some integrations need attention",
-  broken: "Setup required",
-};
+import { HealthBadge } from "./health-badge";
 
 export function AppHeader() {
   const { theme, toggleTheme } = useTheme();
@@ -37,11 +24,8 @@ export function AppHeader() {
   const stats = useStats();
   const { data: status, error: statusError } = useStatusContext();
   const { activeConnection } = useConfig();
-  const navigate = useNavigate();
 
   const isHealthy = health && !isError;
-  // `/status` 404 (older API) → fall back to the binary /health probe.
-  const aggregateHealth: StatusHealth | null = status?.health ?? null;
   // Both `/status` and `/health` share the same failure (unreachable host, bad
   // key, CORS, ...) — prefer the `/status` error since it's the richer probe,
   // fall back to `/health`'s. `null` here means "still loading", not "ok".
@@ -70,28 +54,10 @@ export function AppHeader() {
             Dev
           </Badge>
         )}
-        {/* Phase 2: aggregate health badge — clickable, pulls from /status. */}
-        {aggregateHealth ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => navigate("/#setup")}
-                aria-label={`Swarm health: ${HEALTH_LABEL[aggregateHealth]}`}
-                className={cn(
-                  "hit-area flex items-center gap-2 rounded-md px-2 py-1 text-xs",
-                  "hover:bg-accent transition-colors",
-                  "text-muted-foreground",
-                )}
-              >
-                <span className={cn("size-2 rounded-full", HEALTH_DOT_CLASS[aggregateHealth])} />
-                {/* The connection name and version live in the sidebar swarm
-                    switcher; the header only carries health. */}
-                <span className="hidden sm:inline">{HEALTH_LABEL[aggregateHealth]}</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Open setup</TooltipContent>
-          </Tooltip>
+        {/* Phase 2: aggregate health badge (components/layout/health-badge.tsx).
+            `/status` 404 (older API) → fall back to the binary /health probe. */}
+        {status ? (
+          <HealthBadge status={status} />
         ) : (
           // Fallback for older API servers that don't expose /status — keep
           // the binary green/red dot driven by /health alone, but surface the

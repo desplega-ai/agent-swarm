@@ -73,7 +73,7 @@ export async function executeRawLlm(
     const isRateLimited =
       httpStatus === 429 ||
       httpStatus === 529 ||
-      (err instanceof Error && /rate.?limit|too many requests|529/i.test(err.message));
+      (err instanceof Error && /rate.?limit|too many requests|\b529\b/i.test(err.message));
     if (isRateLimited) {
       throw err;
     }

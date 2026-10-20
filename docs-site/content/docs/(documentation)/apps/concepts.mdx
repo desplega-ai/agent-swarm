@@ -11,7 +11,7 @@ An App definition is the versioned contract for its data and interface. The serv
 
 ## Models
 
-Models define persistent rows. Each model has typed columns: `string`, `number`, `boolean`, `date`, or `enum`. Columns can be required, defaulted, or indexed where the kind supports it. The server adds identity, timestamps, and authorship fields to every row.
+Models define persistent rows. Each model has typed columns: `string`, `number`, `boolean`, `date`, `enum`, or `json` (any JSON value; serialized size capped at 256 KB by default, `APPS_JSON_COLUMN_MAX_BYTES`). Columns can be required, defaulted, or indexed where the kind supports it; a `json` column cannot be indexed, filtered, or sorted. The server adds identity, timestamps, and authorship fields to every row.
 
 Prefer hiding a column when a field is being retired. Hiding preserves existing values and keeps rollback possible. Purging a column is an explicit, irreversible migration and should be reserved for data that really must be removed.
 
@@ -30,6 +30,21 @@ An App can declare up to 20 named actions:
 - **`sync`** refreshes all or a selected subset of the App's external sources.
 
 Pages invoke these through `app.action`. Built-in interface actions also create, update, or delete rows; refresh queries; and navigate between App pages.
+
+Script actions receive `caller` as a reserved, server-stamped argument. The server overwrites `caller` from definition defaults and request input.
+
+```typescript
+type AppActionCaller = {
+  kind: "user" | "agent" | "operator" | "guest";
+  id: string | null;
+  name?: string;
+  pageId?: string;
+};
+```
+
+The caller identifies the authenticated user or agent. Operator and guest callers have `id: null`. A signed page session adds `pageId`.
+With the swarm key, a registered `X-Agent-ID` produces an agent caller and `agent:<id>` row provenance. Missing or unknown agent IDs remain operator callers.
+Task actions include the same caller as server-verified JSON in the task prompt. Script execution still uses the saved script owner's bindings.
 
 ## Pages and reusable elements
 

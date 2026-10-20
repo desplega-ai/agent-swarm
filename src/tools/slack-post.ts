@@ -8,8 +8,9 @@ import {
 } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
-import { getTaskLink } from "@/slack/blocks";
+import { buildMrkdwnSectionBlocks, getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
+import { resolveSlackConversationId } from "@/slack/dm";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -24,7 +25,12 @@ export const registerSlackPostTool = (server: McpServer) => {
       annotations: { openWorldHint: true },
 
       inputSchema: z.object({
-        channelId: z.string().min(1).describe("The Slack channel ID to post to."),
+        channelId: z
+          .string()
+          .min(1)
+          .describe(
+            "The Slack channel ID to post to. A user ID (U…/W…) posts in the bot's DM with that user.",
+          ),
         message: z.string().min(1).max(4000).describe("The message content to post."),
         blocks: z
           .array(z.record(z.string(), z.unknown()))
@@ -42,7 +48,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         messageTs: z.string().optional(),
       }),
     },
-    async ({ channelId, message, threadTs, blocks }, requestInfo, _meta) => {
+    async ({ channelId: requestedChannelId, message, threadTs, blocks }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr("Agent ID not found.");
       }
@@ -68,6 +74,14 @@ export const registerSlackPostTool = (server: McpServer) => {
         return toolErr("Slack not configured.");
       }
 
+      let channelId: string;
+      try {
+        channelId = await resolveSlackConversationId(app.client, requestedChannelId);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return toolErr(`Failed to open a DM with ${requestedChannelId}: ${errorMsg}`);
+      }
+
       const blockReason = await getChannelBlockReason(app.client, channelId);
       if (blockReason) {
         return toolErr(externalChannelToolError(channelId, blockReason));
@@ -82,15 +96,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         const contextKey = sourceTask?.contextKey;
         const tree = threadTs ? await getSlackTreeMessageByThread(channelId, threadTs) : null;
         const messageBlocks: Record<string, unknown>[] = [
-          ...(blocks ?? [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: slackMessage,
-              },
-            },
-          ]),
+          ...(blocks ?? buildMrkdwnSectionBlocks(slackMessage)),
         ];
         if (sourceTask && tree) {
           if (messageBlocks.length >= 50) {

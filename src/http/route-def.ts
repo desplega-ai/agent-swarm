@@ -76,7 +76,20 @@ export interface RouteDef<
   auth?: {
     apiKey?: boolean; // default true
     agentId?: boolean; // requires X-Agent-ID
+    /**
+     * Why a user token may name an agent in X-Agent-ID here. Everywhere else
+     * `handleCore` refuses that pair. The user still needs `agent.act.any`.
+     */
+    userNamesAgent?: string;
   };
+  /**
+   * Session posture: how a user caller's session access gates this route.
+   * Required on every route keyed by a task, steering message or attachment,
+   * on every write whose body names a task, and on every active-session write
+   * (`session-route-posture.test.ts`).
+   * `handleCore` enforces the path forms; `parse()` enforces `bodyTaskIds`.
+   */
+  session?: SessionPosture;
   /**
    * RBAC posture (DES-445). Required on every non-GET route — enforced by
    * `bun run check:rbac-coverage` (CI). Either name the `PermissionVerb` the
@@ -84,7 +97,56 @@ export interface RouteDef<
    * Declarative in slice 1: the handler still calls `can()` itself; the role
    * engine (increment 3) may enforce the declared verb centrally.
    */
-  rbac?: { permission: PermissionVerb } | { ungated: string };
+  rbac?:
+    | { permission: PermissionVerb; alsoAdmits?: readonly PermissionVerb[] }
+    | { ungated: string };
+}
+
+/**
+ * - `taskParam` / `steeringParam`: the path param naming a task, or a steering
+ *   message whose task counts. A GET needs read access, any other method write.
+ * - `activeSessionParam`: the path param naming an active-session row; its task
+ *   counts the same way. A row with no task admits no user.
+ * - `bodyTaskIds`: the task ids a write's body names; each needs write access.
+ * - `agentWide`: why the route changes sessions across a whole agent. It
+ *   refuses every user actor; agents and the operator key keep access.
+ * - `none`: why the session does not gate this route.
+ */
+export type SessionPosture =
+  | { taskParam: string }
+  | { steeringParam: string }
+  | { activeSessionParam: string }
+  | { agentWide: string }
+  | { bodyTaskIds: (body: unknown) => readonly unknown[] }
+  | { none: string };
+
+/** A `bodyTaskIds` posture reading one top-level body key. */
+export function bodyTask(key: string): SessionPosture {
+  return { bodyTaskIds: (body) => [(body as Record<string, unknown> | null | undefined)?.[key]] };
+}
+
+/** A `bodyTaskIds` posture reading `key` off every item of the body's `listKey` array. */
+export function bodyListTask(listKey: string, key: string): SessionPosture {
+  return {
+    bodyTaskIds: (body) => {
+      const items = (body as Record<string, unknown> | null | undefined)?.[listKey];
+      return Array.isArray(items)
+        ? items.map((item) => (item as Record<string, unknown> | null)?.[key])
+        : [];
+    },
+  };
+}
+
+/** The raw `{name}` path params of `def` read off the request's segments. */
+export function routePathParams(def: RouteDef, pathSegments: string[]): Record<string, string> {
+  const params: Record<string, string> = {};
+  const paramNames = def.path.match(/\{(\w+)\}/g)?.map((p) => p.slice(1, -1)) ?? [];
+  for (let i = 0; i < def.pattern.length; i++) {
+    if (def.pattern[i] === null && paramNames.length > 0) {
+      params[paramNames.shift()!] = pathSegments[i] ?? "";
+    }
+  }
+  return params;
 }
 
 interface ParsedRequest<TParams, TQuery, TBody> {
@@ -367,21 +429,25 @@ export function route<
 
     async parse(req, res, pathSegments, queryParams) {
       try {
-        // Extract path params from dynamic segments
-        const rawParams: Record<string, string> = {};
-        if (def.params) {
-          const paramNames = def.path.match(/\{(\w+)\}/g)?.map((p) => p.slice(1, -1)) ?? [];
-          for (let i = 0; i < def.pattern.length; i++) {
-            if (def.pattern[i] === null && paramNames.length > 0) {
-              rawParams[paramNames.shift()!] = pathSegments[i] ?? "";
-            }
+        const rawBody = def.body ? await parseBody(req, def.maxBodyBytes) : undefined;
+        // Session access first, so a malformed body cannot tell a reader
+        // anything about a session they cannot write in.
+        if (def.session && "bodyTaskIds" in def.session) {
+          // Lazy: session-access reaches the DB layer, which imports route files.
+          const { bodySessionDenial } = await import("./session-access");
+          const denial = await bodySessionDenial(req, def.session.bodyTaskIds(rawBody));
+          if (denial) {
+            jsonError(res, denial, 403);
+            return null;
           }
         }
 
         // Parse + validate each part
-        const params = def.params ? def.params.parse(rawParams) : undefined;
+        const params = def.params
+          ? def.params.parse(routePathParams(def, pathSegments))
+          : undefined;
         const query = def.query ? def.query.parse(Object.fromEntries(queryParams)) : undefined;
-        const body = def.body ? def.body.parse(await parseBody(req, def.maxBodyBytes)) : undefined;
+        const body = def.body ? def.body.parse(rawBody) : undefined;
 
         return { params, query, body } as ParsedRequest<
           z.infer<TParams>,

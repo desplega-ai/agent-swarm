@@ -9,7 +9,8 @@
 # This script globs the checked-out tree and fails if any NNN prefix appears on
 # more than one file. On GitHub pull_request events the merge ref is checked out
 # (PR merged into base), so both a base-vs-branch collision and a within-PR
-# duplicate surface as two files sharing one NNN — no diff-against-main needed.
+# duplicate surface as two files sharing one NNN. For stale branches, additions
+# since the merge base are also checked against the base ref's prefixes.
 #
 # It also fails if a migration that exists on the base branch was renamed,
 # renumbered, modified, or deleted. Migrations on main may already be applied
@@ -28,9 +29,9 @@
 #
 # Runnable locally too: bash scripts/check-migration-conflicts.sh
 # Base ref for the immutability and monotonicity checks defaults to
-# origin/main; override with MIGRATION_BASE_REF. Both are skipped (with a
-# notice) when the base ref is missing or is not an ancestor of HEAD — CI
-# enforces them on the PR merge ref.
+# origin/main; override with MIGRATION_BASE_REF. Base-ref checks are skipped
+# (with a notice) only when the base ref is missing. Immutability is checked
+# when HEAD contains the base ref; stale branches still check new numbering.
 
 set -euo pipefail
 
@@ -86,50 +87,49 @@ echo "Migration numbering check passed: all NNN prefixes are unique."
 BASE_REF="${MIGRATION_BASE_REF:-origin/main}"
 
 if ! git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null; then
-  echo "NOTE: base ref ${BASE_REF} not available — skipping migration immutability check."
+  echo "NOTE: base ref ${BASE_REF} not available — skipping base-ref migration checks."
   exit 0
 fi
 
-if ! git merge-base --is-ancestor "$BASE_REF" HEAD 2>/dev/null; then
-  echo "NOTE: HEAD does not contain ${BASE_REF} (stale local branch?) — skipping"
-  echo "migration immutability check. CI enforces it on the PR merge ref."
-  exit 0
-fi
+ADDITIONS_REF=$(git merge-base HEAD "$BASE_REF")
 
-VIOLATIONS=""
-while read -r _mode _type base_hash base_path; do
-  case "$base_path" in
-    *.sql) ;;
-    *) continue ;;
-  esac
-  if [ ! -f "$base_path" ]; then
-    VIOLATIONS="${VIOLATIONS}  removed or renamed: ${base_path}\n"
-  elif [ "$(git hash-object "$base_path")" != "$base_hash" ]; then
-    VIOLATIONS="${VIOLATIONS}  modified: ${base_path}\n"
+if git merge-base --is-ancestor "$BASE_REF" HEAD 2>/dev/null; then
+  VIOLATIONS=""
+  while read -r _mode _type base_hash base_path; do
+    case "$base_path" in
+      *.sql) ;;
+      *) continue ;;
+    esac
+    if [ ! -f "$base_path" ]; then
+      VIOLATIONS="${VIOLATIONS}  removed or renamed: ${base_path}\n"
+    elif [ "$(git hash-object "$base_path")" != "$base_hash" ]; then
+      VIOLATIONS="${VIOLATIONS}  modified: ${base_path}\n"
+    fi
+  done < <(git ls-tree -r "$BASE_REF" -- "$MIGRATIONS_DIR")
+
+  if [ -n "$VIOLATIONS" ]; then
+    echo "ERROR: applied migrations were renamed, modified, or deleted!"
+    echo ""
+    echo "These migrations exist on ${BASE_REF} and may already be applied in"
+    echo "production databases. The migration runner tracks applied migrations by"
+    echo "numeric version, so renumbering or editing one makes the runner silently"
+    echo "skip or mismatch it. Migrations are forward-only and immutable once merged."
+    echo ""
+    echo -e "$VIOLATIONS"
+    echo "Fix: restore these files exactly as they are on ${BASE_REF} and put your"
+    echo "changes in a NEW migration with the next unused NNN prefix."
+    exit 1
   fi
-done < <(git ls-tree -r "$BASE_REF" -- "$MIGRATIONS_DIR")
 
-if [ -n "$VIOLATIONS" ]; then
-  echo "ERROR: applied migrations were renamed, modified, or deleted!"
-  echo ""
-  echo "These migrations exist on ${BASE_REF} and may already be applied in"
-  echo "production databases. The migration runner tracks applied migrations by"
-  echo "numeric version, so renumbering or editing one makes the runner silently"
-  echo "skip or mismatch it. Migrations are forward-only and immutable once merged."
-  echo ""
-  echo -e "$VIOLATIONS"
-  echo "Fix: restore these files exactly as they are on ${BASE_REF} and put your"
-  echo "changes in a NEW migration with the next unused NNN prefix."
-  exit 1
+  echo "Migration immutability check passed: no base-branch migrations were changed."
 fi
 
-echo "Migration immutability check passed: no base-branch migrations were changed."
-
-# Monotonicity check: every migration added since the base branch (i.e. not
-# present at the same path on the base branch) must sort strictly above the
+# Monotonicity check: every migration added since the merge base must sort
+# strictly above the
 # highest NNN prefix on the base branch. Gaps already on the base branch are
 # not a problem — this only guards new work against undercutting main's tail.
 BASE_MAX=0
+declare -A BASE_PREFIX_FILES
 while read -r base_path; do
   case "$base_path" in
     *.sql) ;;
@@ -139,26 +139,25 @@ while read -r base_path; do
   prefix=$(echo "$base_name" | grep -oE '^[0-9]+' || true)
   [ -z "$prefix" ] && continue
   prefix=$((10#$prefix))
+  BASE_PREFIX_FILES[$prefix]="$base_name"
   if [ "$prefix" -gt "$BASE_MAX" ]; then
     BASE_MAX=$prefix
   fi
 done < <(git ls-tree -r --name-only "$BASE_REF" -- "$MIGRATIONS_DIR")
 
 NEW_VIOLATIONS=""
-shopt -s nullglob
-for file in "$MIGRATIONS_DIR"/*.sql; do
-  if git cat-file -e "${BASE_REF}:${file}" 2>/dev/null; then
-    continue # already exists on the base branch — not a new migration
-  fi
+while read -r file; do
   base=$(basename "$file")
   prefix=$(echo "$base" | grep -oE '^[0-9]+' || true)
   [ -z "$prefix" ] && continue
   prefix=$((10#$prefix))
+  if [ -n "${BASE_PREFIX_FILES[$prefix]:-}" ]; then
+    NEW_VIOLATIONS="${NEW_VIOLATIONS}  ${base}: duplicate prefix ${prefix} with ${BASE_REF}:${BASE_PREFIX_FILES[$prefix]}\n"
+  fi
   if [ "$prefix" -le "$BASE_MAX" ]; then
     NEW_VIOLATIONS="${NEW_VIOLATIONS}  ${base} (prefix ${prefix} <= ${BASE_REF} tail ${BASE_MAX})\n"
   fi
-done
-shopt -u nullglob
+done < <(git diff --name-only --diff-filter=A --no-renames "$ADDITIONS_REF" HEAD -- "$MIGRATIONS_DIR/*.sql")
 
 if [ -n "$NEW_VIOLATIONS" ]; then
   echo "ERROR: new migration(s) numbered at or below ${BASE_REF}'s tail (${BASE_MAX})!"

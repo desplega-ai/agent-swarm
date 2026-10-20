@@ -110,18 +110,18 @@ export function SettingsLayout() {
     navItems.find((item) => location.pathname.startsWith(item.path)) ?? navItems[0];
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 md:flex-row md:gap-6">
+    <div className="flex flex-col flex-1 min-h-0 lg:flex-row lg:gap-6">
       {/* Mobile: a tab strip above the content (no select repeating the page name). */}
       <SectionTabs
         label="Settings"
         tabs={navItems}
         activePath={activeItem.path}
-        className="md:hidden shrink-0 mb-4"
+        className="lg:hidden shrink-0 mb-4"
       />
 
       {/* Desktop: left rail. Width + fade on collapse/expand (DESIGN.md
           § Motion collapse pattern). */}
-      <AnimatedReveal open={!collapsed} axis="x" className="hidden md:block shrink-0">
+      <AnimatedReveal open={!collapsed} axis="x" className="hidden lg:block shrink-0">
         <nav aria-label="Settings" className="flex flex-col gap-0.5 w-48">
           <div className="flex items-center justify-between px-3 pb-1">
             <span className="text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
@@ -167,11 +167,11 @@ export function SettingsLayout() {
       <div
         className={cn(
           "flex flex-col flex-1 min-h-0 overflow-y-auto relative",
-          collapsed && "md:pl-10",
+          collapsed && "lg:pl-10",
         )}
       >
         {collapsed ? (
-          <div className="hidden md:flex absolute top-0 left-0 z-10">
+          <div className="hidden lg:flex absolute top-0 left-0 z-10">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

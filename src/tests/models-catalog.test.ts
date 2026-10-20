@@ -74,6 +74,33 @@ describe("buildModelsCatalog", () => {
     });
     expect(catalog.openai?.models["gpt-keyed"]?.id).toBe("gpt-keyed");
   });
+
+  test("projects opencode-go (OpenCode Go) like its sibling opencode", () => {
+    const catalog = buildModelsCatalog({
+      requesty: { models: { ignored: { id: "ignored" } } },
+      "opencode-go": {
+        id: "opencode-go",
+        name: "OpenCode Go",
+        models: {
+          "deepseek-v4.1-flash": {
+            id: "deepseek-v4.1-flash",
+            name: "DeepSeek V4.1 Flash",
+            limit: { context: 1_000_000 },
+            reasoning: true,
+            reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+          },
+        },
+      },
+    });
+    // A non-picker provider is dropped; opencode-go is kept.
+    expect(Object.keys(catalog)).toEqual(["opencode-go"]);
+    expect(catalog["opencode-go"]?.models["deepseek-v4.1-flash"]).toMatchObject({
+      id: "deepseek-v4.1-flash",
+      limit: { context: 1_000_000 },
+      reasoning: true,
+      reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+    });
+  });
 });
 
 describe("getModelsCatalog", () => {
@@ -85,6 +112,11 @@ describe("getModelsCatalog", () => {
     expect(Object.keys(result.providers.openrouter?.models ?? {}).length).toBeGreaterThan(0);
     expect(Object.keys(result.providers.anthropic?.models ?? {}).length).toBeGreaterThan(0);
     expect(Object.keys(result.providers.opencode?.models ?? {}).length).toBeGreaterThan(0);
+    // OpenCode Go is a catalog provider too (its sibling `opencode` is Zen).
+    expect(result.providers["opencode-go"]?.name).toBe("OpenCode Go");
+    expect(result.providers["opencode-go"]?.models["deepseek-v4-flash"]?.limit?.context).toBe(
+      1_000_000,
+    );
     expect(result.providers.nan?.models["glm5.3-flash"]).toBeDefined();
     expect(Object.keys(result.providers.helmcode?.models ?? {}).sort()).toEqual([
       "deepseek-v4-flash",
@@ -157,5 +189,23 @@ describe("nan and helmcode sections", () => {
     expect(getContextWindowSize("helmcode/glm5.3")).toBe(1_048_576);
     expect(getContextWindowSize("helmcode/gemma4")).toBe(262_144);
     expect(getContextWindowSize("nan/qwen3.6")).toBe(262_144);
+  });
+});
+
+describe("opencode-go section", () => {
+  test("the snapshot gives opencode-go ids their context window, not the 200k fallback", () => {
+    expect(getContextWindowSize("opencode-go/deepseek-v4-flash")).toBe(1_000_000);
+  });
+
+  test("opencode and pi keep the model's own max for an opencode-go id", () => {
+    const catalog = getModelsCatalog().providers;
+    // `deepseek-v4-flash` declares low|high|max and both harnesses pass it through.
+    for (const harness of ["opencode", "pi"] as const) {
+      expect(reasoningLevelsForModel(harness, "opencode-go/deepseek-v4-flash", catalog)).toEqual([
+        "low",
+        "high",
+        "max",
+      ]);
+    }
   });
 });

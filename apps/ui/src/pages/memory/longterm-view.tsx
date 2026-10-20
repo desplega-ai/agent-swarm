@@ -3,7 +3,7 @@ import { AlertTriangle, ChevronRight, File, Folder, FolderOpen } from "lucide-re
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMemoryKeys } from "@/api/hooks/use-memory";
 import type { MemoryKeySummary } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatTokens } from "@/lib/format-tokens";
@@ -83,6 +83,7 @@ export function LongtermView({
       {
         field: "name",
         headerName: "Name",
+        context: HIDE_WHEN_COMPACT,
         flex: 1,
         minWidth: 180,
         cellRenderer: (p: ICellRendererParams<MemoryKeySummary, string>) => (
@@ -92,6 +93,7 @@ export function LongtermView({
       {
         field: "accessCount",
         headerName: "Usage",
+        context: HIDE_WHEN_COMPACT,
         width: 110,
         type: "rightAligned",
         sort: "desc",
@@ -100,6 +102,7 @@ export function LongtermView({
       {
         field: "rating",
         headerName: "Rating",
+        context: HIDE_WHEN_COMPACT,
         width: 100,
         type: "rightAligned",
         headerTooltip: "Usefulness posterior mean alpha / (alpha + beta). Muted = no ratings yet",
@@ -117,6 +120,7 @@ export function LongtermView({
       {
         field: "estTokens",
         headerName: "Tokens",
+        context: HIDE_WHEN_COMPACT,
         width: 100,
         type: "rightAligned",
         headerTooltip: "Estimated tokens: ceil(chars / 4) over all chunks",
@@ -125,6 +129,7 @@ export function LongtermView({
       {
         field: "chunkRows",
         headerName: "Chunks",
+        context: HIDE_WHEN_COMPACT,
         width: 100,
         type: "rightAligned",
         cellRenderer: (p: ICellRendererParams<MemoryKeySummary, number>) =>
@@ -143,6 +148,7 @@ export function LongtermView({
       {
         field: "agentId",
         headerName: "Scope",
+        context: HIDE_WHEN_COMPACT,
         width: 160,
         valueGetter: (p) =>
           p.data ? (p.data.scope === "swarm" ? "swarm" : agentName(p.data.agentId)) : "",

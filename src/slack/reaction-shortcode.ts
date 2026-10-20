@@ -43,3 +43,17 @@ export function reactionName(event: SlackReactionEvent): string {
   const normalized = normalizeSlackReactionShortcode(raw);
   return normalized ?? SLACK_REACTION_DEFAULTS[event];
 }
+
+export const SLACK_STATUS_ICON_COMPLETED_KEY = "SLACK_STATUS_ICON_COMPLETED";
+export const SLACK_STATUS_ICON_COMPLETED_DEFAULT = "✅";
+
+/**
+ * The "done" glyph in thread text (task tree, thread header, outcome cards).
+ * Read per call so a global config write, which reloads `process.env`, takes
+ * effect without a restart. Unlike a reaction there is no `invalid_name`
+ * fallback in text: a name the workspace lacks renders as literal `:name:`.
+ */
+export function completedStatusIcon(): string {
+  const normalized = normalizeSlackReactionShortcode(process.env[SLACK_STATUS_ICON_COMPLETED_KEY]);
+  return normalized ? `:${normalized}:` : SLACK_STATUS_ICON_COMPLETED_DEFAULT;
+}

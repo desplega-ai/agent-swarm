@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import pkg from "../../package.json";
 import {
   _getInstallationIdForTests,
@@ -14,6 +18,7 @@ import {
   _resolveIntegrationProvider,
   _resolveIntegrationType,
   emitIntegrationConnected,
+  getTelemetryEnvironment,
   initTelemetry,
   telemetry,
   track,
@@ -686,8 +691,11 @@ describe("initTelemetry", () => {
     const originalFetch = globalThis.fetch;
     const originalNodeEnv = process.env.NODE_ENV;
     let captured: Record<string, unknown> | null = null;
+    let packageRoot: URL;
 
     beforeEach(() => {
+      packageRoot = pathToFileURL(`${mkdtempSync(join(tmpdir(), "telemetry-env-"))}/`);
+      process.env.NODE_ENV = "production";
       captured = null;
       globalThis.fetch = (async (_url: string, init?: { body?: string }) => {
         captured = init?.body ? JSON.parse(init.body) : null;
@@ -697,14 +705,59 @@ describe("initTelemetry", () => {
     });
 
     afterEach(() => {
+      rmSync(packageRoot, { recursive: true, force: true });
       globalThis.fetch = originalFetch;
       delete process.env.DESPLEGA_TELEMETRY_ENV;
       if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = originalNodeEnv;
     });
 
+    test("track detects the real checkout through the default package root with an unprimed cache", async () => {
+      await initTelemetry(
+        "api-server",
+        async (key) => (key === "telemetry_installation_id" ? "install_checkout_env" : undefined),
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "test.event", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.environment).toBe("development");
+    });
+
+    test("a .git directory marks a checkout as development", () => {
+      mkdirSync(new URL(".git", packageRoot));
+      expect(getTelemetryEnvironment(packageRoot)).toBe("development");
+      rmSync(new URL(".git", packageRoot), { recursive: true });
+      expect(getTelemetryEnvironment(packageRoot)).toBe("development");
+    });
+
+    test("a .git file marks a worktree as development", async () => {
+      await Bun.write(new URL(".git", packageRoot), "gitdir: /some/worktree");
+      expect(getTelemetryEnvironment(packageRoot)).toBe("development");
+    });
+
+    test("caches the checkout check across events", () => {
+      expect(getTelemetryEnvironment(packageRoot)).toBe("production");
+      mkdirSync(new URL(".git", packageRoot));
+      expect(getTelemetryEnvironment(packageRoot)).toBe("production");
+      process.env.DESPLEGA_TELEMETRY_ENV = "staging";
+      expect(getTelemetryEnvironment(packageRoot)).toBe("staging");
+    });
+
+    test("an unusable package root falls back to production without throwing", () => {
+      expect(getTelemetryEnvironment(new URL("data:text/plain,unavailable"))).toBe("production");
+    });
+
+    test("compiled binary paths default to production without throwing", () => {
+      expect(getTelemetryEnvironment(new URL("file:///$bunfs/root/"))).toBe("production");
+    });
+
     test("defaults to production even when NODE_ENV is development", async () => {
       process.env.NODE_ENV = "development";
+      expect(getTelemetryEnvironment(packageRoot)).toBe("production");
       await initTelemetry(
         "api-server",
         async (key) => (key === "telemetry_installation_id" ? "install_default_env" : undefined),
@@ -719,9 +772,11 @@ describe("initTelemetry", () => {
       expect(metadata.environment).toBe("production");
     });
 
-    test("uses DESPLEGA_TELEMETRY_ENV when set", async () => {
-      process.env.NODE_ENV = "production";
-      process.env.DESPLEGA_TELEMETRY_ENV = "development";
+    test("uses DESPLEGA_TELEMETRY_ENV over a git checkout and NODE_ENV=test", async () => {
+      mkdirSync(new URL(".git", packageRoot));
+      process.env.NODE_ENV = "test";
+      process.env.DESPLEGA_TELEMETRY_ENV = "staging";
+      expect(getTelemetryEnvironment(packageRoot)).toBe("staging");
       await initTelemetry(
         "api-server",
         async (key) => (key === "telemetry_installation_id" ? "install_explicit_env" : undefined),
@@ -733,11 +788,13 @@ describe("initTelemetry", () => {
       await new Promise((r) => setTimeout(r, 0));
 
       const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
-      expect(metadata.environment).toBe("development");
+      expect(metadata.environment).toBe("staging");
     });
 
-    test("preserves NODE_ENV=test when telemetry env is unset", async () => {
+    test("preserves NODE_ENV=test over a git checkout when telemetry env is unset", async () => {
+      mkdirSync(new URL(".git", packageRoot));
       process.env.NODE_ENV = "test";
+      expect(getTelemetryEnvironment(packageRoot)).toBe("test");
       await initTelemetry(
         "api-server",
         async (key) => (key === "telemetry_installation_id" ? "install_test_env" : undefined),

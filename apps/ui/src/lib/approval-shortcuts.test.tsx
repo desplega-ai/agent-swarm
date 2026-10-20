@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { matchDetailShortcut, matchListShortcut } from "./approval-shortcuts";
+import { matchDetailShortcut, matchListShortcut, overlayBlocks } from "./approval-shortcuts";
 
 /** A stand-in for an Element: `closest` matches when a selector part is in `matches`. */
 function el(...matches: string[]) {
@@ -109,5 +109,29 @@ describe("matchListShortcut", () => {
   test("a held Enter opens the row once; held j/k keep moving", () => {
     expect(matchListShortcut({ key: "Enter", repeat: true, target: page })).toBeNull();
     expect(matchListShortcut({ key: "j", repeat: true, target: page })).toEqual({ type: "next" });
+  });
+});
+
+describe("overlayBlocks", () => {
+  const flowRoot = {};
+  /** An open overlay that contains only the given nodes. */
+  const overlay = (...nodes: unknown[]) => ({ contains: (node: unknown) => nodes.includes(node) });
+
+  test("no open overlay never blocks", () => {
+    expect(overlayBlocks([])).toBe(false);
+    expect(overlayBlocks([], flowRoot)).toBe(false);
+  });
+
+  test("without a root (the Approvals pages), any open overlay blocks", () => {
+    expect(overlayBlocks([overlay(flowRoot)])).toBe(true);
+  });
+
+  test("the dialog or popover that holds the flow does not block it", () => {
+    expect(overlayBlocks([overlay(flowRoot)], flowRoot)).toBe(false);
+  });
+
+  test("another overlay (a select listbox, a second dialog) still blocks", () => {
+    expect(overlayBlocks([overlay()], flowRoot)).toBe(true);
+    expect(overlayBlocks([overlay(flowRoot), overlay()], flowRoot)).toBe(true);
   });
 });

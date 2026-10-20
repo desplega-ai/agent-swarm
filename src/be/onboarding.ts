@@ -498,6 +498,12 @@ function deriveState(
   if (state.steps.connect.status !== "done") {
     changed = completeStep(state, "connect", "api_key", true, events) || changed;
   }
+  // A name saved anywhere (setup, the org-name popup, Settings, the API) names
+  // the swarm. The old setup default "Your Swarm" does not count.
+  const orgName = process.env.SWARM_ORG_NAME?.trim();
+  if (state.steps.name.status !== "done" && orgName && orgName !== "Your Swarm") {
+    changed = completeStep(state, "name", "custom_name", true, events) || changed;
+  }
   if (
     state.steps.ai.status !== "done" &&
     signals.providers.some((entry) => entry.state === "verified")

@@ -10,6 +10,7 @@ import type { ExtensionFactory, McpServerConfig } from "@earendil-works/pi-codin
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
 import { renderGoalReminder } from "../prompts/goal-reminder";
+import { isSessionSummarySkipped } from "../utils/env-flag";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
@@ -743,7 +744,7 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
 
       // Session summarization — get session file from context's session manager
       const sessionFile = ctx.sessionManager.getSessionFile?.();
-      if (!process.env.SKIP_SESSION_SUMMARY) {
+      if (!isSessionSummarySkipped()) {
         await summarizeSessionForPi(config, sessionFile);
       } else {
         console.debug("session_summary skipped (pi): SKIP_SESSION_SUMMARY is set");

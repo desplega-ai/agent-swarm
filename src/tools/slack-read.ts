@@ -4,6 +4,7 @@ import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
+import { resolveSlackConversationId } from "@/slack/dm";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { downloadFile, type SlackFile } from "@/slack/files";
 import { attachableTask, attachSlackFilesForAgent } from "@/slack/inbound-files";
@@ -59,7 +60,9 @@ export const registerSlackReadTool = (server: McpServer) => {
         channelId: z
           .string()
           .optional()
-          .describe("Slack channel ID to read from (requires lead privileges)."),
+          .describe(
+            "Slack channel ID to read from (requires lead privileges). A user ID (U…/W…) reads the bot's DM with that user.",
+          ),
         threadTs: z
           .string()
           .optional()
@@ -153,6 +156,15 @@ export const registerSlackReadTool = (server: McpServer) => {
       const app = getSlackApp();
       if (!app) {
         return toolErr("Slack not configured.", { data: { messages: [] } });
+      }
+
+      try {
+        slackChannelId = await resolveSlackConversationId(app.client, slackChannelId);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return toolErr(`Failed to open a DM with ${slackChannelId}: ${errorMsg}`, {
+          data: { messages: [] },
+        });
       }
 
       const blockReason = await getChannelBlockReason(app.client, slackChannelId);

@@ -8,8 +8,7 @@ type Feedback = {
   message?: string;
   email?: string;
   submission_id?: string;
-  install_id?: string;
-  installed_at?: string | null;
+  org_name?: string;
 };
 
 let statusData: StatusResponse | null | undefined;
@@ -17,15 +16,12 @@ let userId: string | null;
 const submitted: Feedback[] = [];
 const events: Array<{ event: string; properties: Record<string, unknown> }> = [];
 
-const globalConfigs = [
-  { key: "telemetry_installation_id", value: "install-1" },
-  { key: "telemetry_installed_at", value: "2026-01-01T00:00:00.000Z" },
-];
-mock.module("@/api/hooks/use-config-api", () => ({
-  useConfigs: () => ({ data: globalConfigs }),
-}));
 mock.module("@/api/hooks/use-feedback", () => ({
-  useSubmitFeedback: () => ({ mutate: (input: Feedback) => submitted.push(input) }),
+  useSubmitFeedback: () => ({
+    mutateAsync: async (input: Feedback) => {
+      submitted.push(input);
+    },
+  }),
 }));
 mock.module("@/api/client", () => ({
   api: {
@@ -85,7 +81,7 @@ describe("useNotificationEvents", () => {
     const { trackEvent } = useNotificationEvents();
     trackEvent("slack-connect-invite", "view");
     trackEvent("slack-connect-invite", "dismiss");
-    trackEvent("slack-connect-invite", "submit", "acme.com");
+    trackEvent("slack-connect-invite", "submit", { email_domain: "acme.com" });
 
     expect(events).toEqual([
       { event: "notification.viewed", properties: { key: "slack-connect-invite" } },
@@ -103,7 +99,7 @@ describe("useNotificationEvents", () => {
     const { trackEvent } = useNotificationEvents();
     trackEvent("slack-connect-invite", "view");
     trackEvent("slack-connect-invite", "dismiss");
-    trackEvent("slack-connect-invite", "submit", "acme.com");
+    trackEvent("slack-connect-invite", "submit", { email_domain: "acme.com" });
 
     expect(events).toEqual([]);
   });
@@ -129,6 +125,14 @@ describe("useNotificationEvents", () => {
     expect(events).toEqual([]);
   });
 
+  test("notifyUs prefers an explicit org_name over the last /status name", () => {
+    useNotificationEvents().notifyUs("slack-connect-invite", "please invite me", "me@acme.com", {
+      org_name: "Acme",
+    });
+
+    expect(submitted[0]?.org_name).toBe("Acme");
+  });
+
   test("notifyUs is a user-typed submission and stays ungated", () => {
     statusData = status({ enabled: false });
     useNotificationEvents().notifyUs("slack-connect-invite", "please invite me", "me@acme.com");
@@ -137,21 +141,5 @@ describe("useNotificationEvents", () => {
     expect(submitted[0]?.email).toBe("me@acme.com");
     expect(submitted[0]?.message).toContain("[notification] key=slack-connect-invite");
     expect(events).toEqual([]);
-  });
-
-  test("notifyUs carries install_id and installed_at while telemetry is on", () => {
-    useNotificationEvents().notifyUs("slack-connect-invite", "please invite me", "me@acme.com");
-
-    expect(submitted[0]?.install_id).toBe("install-1");
-    expect(submitted[0]?.installed_at).toBe("2026-01-01T00:00:00.000Z");
-  });
-
-  test("notifyUs omits install_id and installed_at while telemetry is off", () => {
-    statusData = status({ enabled: false });
-    useNotificationEvents().notifyUs("slack-connect-invite", "please invite me", "me@acme.com");
-
-    expect(submitted).toHaveLength(1);
-    expect(submitted[0]).not.toHaveProperty("install_id");
-    expect(submitted[0]).not.toHaveProperty("installed_at");
   });
 });

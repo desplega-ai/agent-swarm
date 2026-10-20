@@ -5,6 +5,7 @@ import {
   Ellipsis,
   Hash,
   LifeBuoy,
+  Network,
   Pause,
   Play,
   Reply,
@@ -13,8 +14,10 @@ import {
 import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useCancelTask, usePauseTask, useResumeTask, useRetryTask } from "@/api/hooks/use-tasks";
 import type { AgentTask } from "@/api/types";
+import { BetaTag } from "@/components/shared/beta-tag";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { buildDiagnostics } from "@/components/support/task-failure-help-dialog";
@@ -77,7 +80,12 @@ interface TaskActionModel {
    * when the task does not offer "Get help".
    */
   getHelp: ((opener: HTMLElement | null) => void) | null;
+  /** Opens the experimental lineage view. Null when the API predates it. */
+  lineage: (() => void) | null;
 }
+
+/** First API version that serves `GET /api/tasks/{id}/lineage`. */
+const TASK_LINEAGE_MIN_VERSION = "2.4.2";
 
 /** Call before the page's early returns: `task` may still be loading. */
 export function useTaskActions(
@@ -91,6 +99,7 @@ export function useTaskActions(
   const navigate = useNavigate();
   const { userId } = useCurrentUser();
   const { issue, resolved, apiVersion } = useLeadCredentialIssue();
+  const lineageGate = useFeatureGate(TASK_LINEAGE_MIN_VERSION);
   if (!task) return null;
   const failed = task.status === "failed";
   return {
@@ -116,6 +125,7 @@ export function useTaskActions(
     answer: answerText(task.output),
     diagnostics: failed ? buildDiagnostics(task, apiVersion) : null,
     getHelp: shouldShowTaskFailureHelp(task.status, resolved, issue) ? handlers.onGetHelp : null,
+    lineage: lineageGate.supported ? () => void navigate(`/tasks/${task.id}/lineage`) : null,
   };
 }
 
@@ -227,7 +237,18 @@ function ResumeButton({ model }: { model: TaskActionModel }) {
   );
 }
 
-/** The wide hero's "..." menu: Retry where it is not a button, Copy task id, Get help. */
+/** "View lineage", tagged BETA: the experimental tree of every task this one belongs to. */
+function LineageMenuItem({ onSelect, className }: { onSelect: () => void; className?: string }) {
+  return (
+    <DropdownMenuItem className={className} onSelect={onSelect}>
+      <Network />
+      View lineage
+      <BetaTag tooltip="Experimental: the whole task tree" className="ml-auto" side="left" />
+    </DropdownMenuItem>
+  );
+}
+
+/** The wide hero's "..." menu: Retry where it is not a button, Copy task id, View lineage, Get help. */
 function MoreActionsMenu({ model }: { model: TaskActionModel }) {
   const { status } = model.task;
   // Failed tasks keep Retry in the menu too, next to Get help: the hero has
@@ -254,6 +275,7 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
           <Hash />
           Copy task id
         </DropdownMenuItem>
+        {model.lineage ? <LineageMenuItem onSelect={model.lineage} /> : null}
         {getHelp ? (
           <>
             <DropdownMenuSeparator />
@@ -275,7 +297,7 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
  * - completed: Copy answer, Retry. Failed, cancelled, superseded: Retry.
  * - in progress: Pause. Paused: Resume.
  * - not finished: Cancel task, behind the confirm step.
- * - always: Copy task id, and Get help for a failed task.
+ * - always: Copy task id, View lineage (beta), and Get help for a failed task.
  * The trigger and the items are 44 px tall.
  */
 export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
@@ -350,6 +372,7 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
             <Hash />
             Copy task id
           </DropdownMenuItem>
+          {model.lineage ? <LineageMenuItem className="min-h-11" onSelect={model.lineage} /> : null}
           {getHelp ? (
             <>
               <DropdownMenuSeparator />

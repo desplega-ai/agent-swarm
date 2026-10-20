@@ -6,7 +6,7 @@ import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import { useScripts } from "@/api/hooks/use-scripts";
 import type { ScriptListItem, ScriptScope } from "@/api/types";
 import { ScriptRunsGrid, ScriptRunsStatusFilter } from "@/components/scripts/script-runs-grid";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -90,6 +90,7 @@ export default function ScriptsPage() {
       {
         field: "description",
         headerName: "Description",
+        context: HIDE_WHEN_COMPACT,
         flex: 1,
         minWidth: 200,
         cellRenderer: (params: { value?: string }) => (
@@ -104,12 +105,14 @@ export default function ScriptsPage() {
       },
       {
         headerName: "Runs",
+        context: HIDE_WHEN_COMPACT,
         width: 90,
         valueGetter: (params) => (params.data ? (runCounts.get(params.data.name) ?? 0) : 0),
       },
       {
         field: "updatedAt",
         headerName: "Updated",
+        context: HIDE_WHEN_COMPACT,
         width: 150,
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },

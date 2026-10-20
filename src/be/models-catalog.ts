@@ -27,6 +27,10 @@ export const CATALOG_PROVIDER_IDS = [
   "openai",
   "amazon-bedrock",
   "opencode",
+  // OpenCode Go is opencode's first-party subscription provider, a sibling of
+  // its Zen section (`opencode`). models.dev lists it, so projecting it gives
+  // `opencode-go/<model>` ids their context window and reasoning facts.
+  "opencode-go",
   ...openAICompatibleProviderIds(),
 ] as const;
 

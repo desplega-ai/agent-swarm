@@ -17,7 +17,7 @@ import type { MemoryEntry, MemoryListRequest, MemoryScopeFilter, MemorySource } 
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { SharedBarChart } from "@/components/shared/charts/nivo-charts";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import {
   AlertDialog,
@@ -246,6 +246,7 @@ export default function MemoryPage() {
       {
         field: "key",
         headerName: "Key",
+        context: HIDE_WHEN_COMPACT,
         width: 220,
         cellRenderer: (p: ICellRendererParams<MemoryEntry, string | null | undefined>) =>
           p.value ? (
@@ -259,6 +260,7 @@ export default function MemoryPage() {
       {
         field: "agentId",
         headerName: "Agent",
+        context: HIDE_WHEN_COMPACT,
         width: 140,
         valueFormatter: (p) => agentName(p.value as string | null),
       },
@@ -275,6 +277,7 @@ export default function MemoryPage() {
       {
         field: "source",
         headerName: "Source",
+        context: HIDE_WHEN_COMPACT,
         width: 150,
         cellRenderer: (p: ICellRendererParams<MemoryEntry, string>) => (
           <Badge variant="outline" size="tag">
@@ -285,12 +288,14 @@ export default function MemoryPage() {
       {
         field: "accessCount",
         headerName: "Usage",
+        context: HIDE_WHEN_COMPACT,
         width: 100,
         type: "rightAligned",
       },
       {
         field: "rating",
         headerName: "Rating",
+        context: HIDE_WHEN_COMPACT,
         width: 90,
         type: "rightAligned",
         headerTooltip: "Usefulness posterior mean alpha / (alpha + beta). Muted = 0.5 prior",
@@ -303,6 +308,7 @@ export default function MemoryPage() {
       {
         colId: "tokens",
         headerName: "Tokens",
+        context: HIDE_WHEN_COMPACT,
         width: 90,
         type: "rightAligned",
         headerTooltip: "Estimated tokens of this row: ceil(chars / 4)",
@@ -319,6 +325,7 @@ export default function MemoryPage() {
       {
         field: "content",
         headerName: "Preview",
+        context: HIDE_WHEN_COMPACT,
         flex: 1,
         minWidth: 200,
         cellRenderer: (p: ICellRendererParams<MemoryEntry, string>) => (

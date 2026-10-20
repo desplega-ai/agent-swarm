@@ -20,7 +20,9 @@ mock.module("@/components/shared/task-status-icon", () => require("../shared/tas
 mock.module("@/components/ui/alert", () => require("../ui/alert"));
 mock.module("@/components/ui/badge", () => require("../ui/badge"));
 mock.module("@/components/workflows/graph-utils", () => require("./graph-utils"));
-mock.module("@/components/workflows/json-tree", () => require("./json-tree"));
+mock.module("@/hooks/use-copy-to-clipboard", () => require("../../hooks/use-copy-to-clipboard"));
+mock.module("@/lib/json-output", () => require("../../lib/json-output"));
+mock.module("@/components/shared/json-tree", () => require("../shared/json-tree"));
 mock.module("@/lib/synthetic-step-id", () => require("../../lib/synthetic-step-id"));
 mock.module("@/api/hooks/use-agents", () => require("../../api/hooks/use-agents"));
 mock.module("@/api/hooks/use-workflows", () => require("../../api/hooks/use-workflows"));
@@ -28,7 +30,9 @@ mock.module("@/api/hooks/use-approval-requests", () =>
   require("../../api/hooks/use-approval-requests"),
 );
 mock.module("@/lib/config", () => require("../../lib/config"));
-const { HitlOutput, SubWorkflowOutput, SystemOneOutput } = await import("./step-card");
+const { HitlOutput, SubWorkflowOutput, SystemOneExtractionOutput, SystemOneOutput } = await import(
+  "./step-card"
+);
 
 function step(status: string): WorkflowRunStep {
   return {
@@ -209,5 +213,42 @@ describe("SubWorkflowOutput", () => {
       />,
     );
     expect(html).toContain("Waiting for the child run");
+  });
+});
+
+describe("SystemOneExtractionOutput", () => {
+  const extractionStep = (output: unknown): WorkflowRunStep =>
+    ({
+      id: "step-3",
+      runId: "run-1",
+      nodeId: "claim",
+      nodeType: "system-one-extraction",
+      status: "completed",
+      output,
+      startedAt: "2026-10-20T10:00:00.000Z",
+    }) as WorkflowRunStep;
+
+  test("shows values, a missing field with its guess, and an estimate range", () => {
+    const html = renderWithQuery(
+      <SystemOneExtractionOutput
+        step={extractionStep({
+          model: "clairic",
+          answers: {
+            order_id: { type: "text", value: "A-88412", confidence: 0.99 },
+            damage: { type: "list", value: ["cracked screen", "dented corner"] },
+            tracking_number: { type: "text", value: null, guess: "$52.10", p_null: 1 },
+            repair_cost: { type: "estimate", value: 236, median: 213, p10: 122, p90: 370 },
+          },
+          usage: { input_tokens: 655, output_tokens: 0 },
+        })}
+      />,
+    );
+    expect(html).toContain("A-88412");
+    expect(html).toContain("99%");
+    expect(html).toContain("cracked screen, dented corner");
+    expect(html).toContain("not in the input");
+    expect(html).toContain("best guess $52.10");
+    expect(html).toContain("236 · median 213 (p10 122 – p90 370)");
+    expect(html).toContain("655 in");
   });
 });

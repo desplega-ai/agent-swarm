@@ -212,6 +212,13 @@ describe("applyReasoningEffort — pi-session shape", () => {
       sessionOptions: { thinkingLevel: "medium" },
     });
   });
+
+  test("max passes through for an opencode-go model that declares it", () => {
+    expect(applyReasoningEffort("pi", "opencode-go/deepseek-v4-flash", "max")).toEqual({
+      kind: "pi-session",
+      sessionOptions: { thinkingLevel: "max" },
+    });
+  });
 });
 
 describe("applyReasoningEffort — opencode-options shape", () => {
@@ -245,6 +252,30 @@ describe("applyReasoningEffort — opencode-options shape", () => {
       kind: "noop",
     });
   });
+
+  test("opencode-go passes max through on its OpenAI-compatible transport", () => {
+    // `opencode-go/deepseek-v4-flash` declares low|high|max in the snapshot.
+    expect(reasoningCapability("opencode", "opencode-go/deepseek-v4-flash").levels).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
+    expect(applyReasoningEffort("opencode", "opencode-go/deepseek-v4-flash", "max")).toEqual({
+      kind: "opencode-options",
+      providerId: "opencode-go",
+      modelId: "deepseek-v4-flash",
+      options: { reasoningEffort: "max" },
+    });
+  });
+
+  test("anthropic max uses the effort key opencode's Anthropic transport reads", () => {
+    expect(applyReasoningEffort("opencode", "anthropic/claude-opus-5-5", "max")).toEqual({
+      kind: "opencode-options",
+      providerId: "anthropic",
+      modelId: "claude-opus-5-5",
+      options: { effort: "max" },
+    });
+  });
 });
 
 // The offered levels, the API's validation and the harness application all read the same
@@ -266,16 +297,21 @@ describe("harness × model → effort matrix", () => {
     },
     { harness: "codex", model: "gpt-6-astra", levels: ["low", "medium", "high", "xhigh", "max"] },
     { harness: "codex", model: "gpt-5.1-codex", levels: ["low", "medium", "high"] },
-    { harness: "pi", model: "openrouter/deepseek/deepseek-v4.1-flash", levels: ["low", "high"] },
+    {
+      harness: "pi",
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      levels: ["low", "high", "max"],
+    },
     {
       harness: "pi",
       model: "openrouter/anthropic/claude-opus-5.5",
-      levels: ["low", "medium", "high", "xhigh"],
+      levels: ["low", "medium", "high", "xhigh", "max"],
     },
     {
       harness: "opencode",
       model: "openrouter/deepseek/deepseek-v4.1-flash",
-      levels: ["low", "high"],
+      // The facts declare max, and opencode passes it through.
+      levels: ["low", "high", "max"],
     },
     { harness: "pi", model: "openrouter/qwen/qwen3-coder-flash", levels: [] },
     { harness: "claude", model: "totally-custom-model-xyz", levels: [] },

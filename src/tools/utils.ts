@@ -347,7 +347,7 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
     const hasQueries = Object.keys(definition?.queries ?? {}).length > 0;
     const hasActions = Object.keys(definition?.actions ?? {}).length > 0;
     return hasQueries || hasActions
-      ? "This app's callable surface is `definition.queries` (run with `app-query`, passing any `$param` values) and `definition.actions` (invoke with `POST /api/apps/<id>/actions/<name>`; `sync` actions refresh sources)."
+      ? "Run `definition.queries` with `app-query` and supply each `$param` value. Invoke `definition.actions` with `app-action-run` through MCP or `POST /api/apps/<id>/actions/<name>` through REST. Sync actions refresh sources."
       : undefined;
   },
   // kv-get is spill-exempt (retrieval path), so oversized values reach the

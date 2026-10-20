@@ -6,6 +6,129 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Codex OAuth: the keep-warm sweep refreshes pool slots at 5 days instead of 7, and `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS` sets the age, so a ChatGPT session that ends before day 7 gets a refresh first (#2296).
+
+## [2.4.3] - 2026-10-20
+
+### Changed
+- Worker image bumps claude-code to 2.1.304, amp to 0.0.1792470027-g8c393d and Copilot CLI to 1.0.100 (#2284).
+- Docs: live-app follow-up edits get safeguards that preserve control numbers and verify fresh screenshots (#2282); the TLA+ heartbeat and workflows specs match main again (#2285).
+
+### Fixed
+- Skills: `code-quality` no longer tells reviewers to run the `review-post-gate` and `pr-review-ledger-write` scripts, which no release seeds, so PR reviews finish on every deployment. A new test fails when a shipped skill names a script the release does not seed (#2287).
+- GitHub: boolean configuration flags honor `FALSE`, `False`, `0` and surrounding whitespace, so disabling cancellation or no-op approval skipping takes effect (#2281).
+- Harness: every harness reads `SKIP_SESSION_SUMMARY` the same way; `0` or `false` no longer skips the summary and codex honors `true` (#2283).
+
+## [2.4.2] - 2026-10-19
+
+### Added
+- Apps: models can declare a `json` column that stores any JSON value natively, up to an operator-set limit (256 KB by default) (#2184).
+- UI: an experimental task lineage view shows a task's whole tree, ancestors and descendants, with who started whom (#2274).
+- UI: JSON task output renders as a collapsible tree with per-key copy in the session view and task sheet (#2277).
+
+### Changed
+- Worker image bumps amp to 0.0.1792411243-gb8cffc and qwen-code to 0.25.3 (#2271); agent-fs pins move to 0.18.5 (#2272).
+- Docs: env reference links point to the published page (#2278).
+
+### Fixed
+- Telemetry: git checkouts and worktrees default to the development environment, preventing local restarts from appearing as new production installs (#2276).
+- Tasks: human REST follow-ups no longer inherit a worker's output schema (#2275).
+- Status: the harness badge stays green while each provider's latest live test passed (#2270).
+- UI: the Agents grid keeps Model visible at compact widths (#2273).
+
+## [2.4.1] - 2026-10-19
+
+### Added
+- Apps: agents and scripts can write app rows and run app actions through MCP tools and `ctx.swarm` (#2253).
+- UI: telemetry surfaces ask for company context (org name, website, team size, use case, referral, job function, contact email), with a peer benchmark and a fix-in-place setup badge (#2254).
+- Hooks: `gh pr create` on a configured repo is blocked until the PR body carries the PR room line (#2252).
+
+### Changed
+- Ranking: **Get ranked** alone lists the install at the next hourly refresh; no `community/ranking` PR into this repo is needed (#2259). The telemetry contract pin points at the merged proxy commit (#2260).
+- Worker image bumps claude-code to 2.1.303 and amp to 0.0.1792368068-g91990d (#2258).
+- Docs: release notes for the week of 2026-10-19 (#2255); the workflow retry tool says it resumes the failed run and can repeat the failed node's side effects (#2261).
+
+### Fixed
+- Workflows: an `agent-task` step cut by a deploy is re-dispatched once instead of failing the run or completing on a `[FAILED: ...]` stub (#2262).
+- Workflows: a crash after a wait resolves no longer strands the run; recovery completes the saved resolution (#2257).
+
+## [2.4.0] - 2026-10-19
+
+### Added
+- Ranking: opt-in public install ranking on agent-swarm.dev/ranking. Admins click **Get ranked** in Settings → Configuration → Branding (requires telemetry plus org name and website), which sets `PUBLIC_RANKING_ENABLED`, stores the `telemetry_ranking` listing and sends `ranking.opted_in`; workers then send `ranking.usage` token counts. An install is listed once a `community/ranking/<domain>.json` PR merges, checked by the new Ranking entry workflow. New `/api/ranking` routes (#2248).
+- Apps: script actions receive a server-stamped `caller` that input cannot override; swarm-key callers with a registered `X-Agent-ID` are recorded as `agent:<id>` (#2251).
+
+### Changed
+- Worker image bumps amp to 0.0.1792324855-g9c86a5 (#2246).
+
+### Fixed
+- Slack: `slack-start-thread`, `slack-post` and `slack-read` resolve a user id through `conversations.open` to the bot's own DM, so posts and reads no longer fail with `channel_not_found` and replies reach the bot (#2250).
+- Slack: default message blocks from `slack-post`, `slack-reply`, `slack-update` and `slack-start-thread` split at Slack's 3,000-char section limit instead of failing with `invalid_blocks`, and splits keep emoji surrogate pairs whole (#2245).
+
+## [2.3.0] - 2026-10-18
+
+### Added
+- API: inbox items can move their read cursor back (mark unread), bulk inbox state updates in one call, and task key moves no longer bump task activity or lock key moves across namespaces (#2243).
+
+### Changed
+- Skills: dreaming-v2 seed patches for script, review and page QA lessons (#2230).
+- agent-fs pins bumped to 0.18.4 and `@desplega.ai/agent-fs-just-bash` to 0.18.2; worker image bumps amp (#2240, #2234, #2231).
+- Evals: benchmark 1.0 published from the weekly run (#2233).
+- Docs: heartbeat spec synced with #2217 and #2226 (#2235).
+
+### Fixed
+- Heartbeat: reported failures are tracked with checklist receipts, so shown failures stop reappearing as new (#2232).
+- UI: grids hide low-priority columns when too narrow (#2236); Settings and Usage side rails show from `lg` (#2239); the Approvals list picks its table layout by its own width (#2237); the workflow canvas and inspector stay inside the viewport (#2238); config descriptions stay on one line and debug results get room (#2242); the API keys rate-limit column no longer triggers AG Grid warning #48 (#2241).
+
+## [2.2.0] - 2026-10-18
+
+### Added
+- Scripts: quickjs host-side fetches pass an egress guard (resolved addresses and every redirect hop; `SCRIPT_EGRESS_ALLOWLIST`, `SCRIPT_EGRESS_ALLOW_PRIVATE`), and the host bearer for `ctx.swarm` calls stays host-only (#2114).
+- Scripts: `ctx.fs` and `ctx.sh` give each run a virtual filesystem with `/afs` mapped to the agent's default agent-fs drive (#2198).
+- Heartbeat: an unset `HEARTBEAT_CHECKLIST_GATE_SCRIPT` runs the seeded `heartbeat-jev-gate` in shadow mode when a global Jev key exists (`HEARTBEAT_JEV_GATE_PROVIDER` picks the key); the Lead HEARTBEAT.md template and runbook seed ship tracked-item hygiene (#2226).
+- Skills: `code-quality` gains a short review format, a post gate and a rules file (#2224).
+
+### Changed
+- Bun bumped to 1.4.3; type checking uses the built-in `bun check` (#2221).
+- pi bumped to 1.3.0; the codemode tool retries pi's worker-cap refusal with backoff (#2214).
+- agent-fs pins bumped to 0.17.5 and 0.18.2; worker image bumps for claude-code, opencode, dsh, cursor, amp, grok, goose and kiro (#2213, #2228, #2212, #2223).
+- Docs: heartbeat spec synced (#2216).
+
+### Fixed
+- Providers: `CONTEXT_MODE_DISABLED` also disables the installed context-mode plugin on Claude and Codex, not only its MCP server (#2227).
+- Steering: delivered but unaccepted steers carry into successor tasks (#2217).
+- Claude: input stays open while a backgrounded subagent is still running (#2218).
+- Users: MCP comms preferences merge per key (#2222).
+- agent-fs: uploads preserve file metadata and infer UTF-8 sizes for strings (#2220).
+- OpenCode: native skill names are recorded (#2215).
+- Secrets: the stored secret sweep reruns after the padded credential rule change (#2210).
+- Audits: seeded failure audits include heartbeat-tagged tasks (#2225).
+
+## [2.1.0] - 2026-10-17
+
+### Added
+- Model profiles: a named harness + model + effort that Lead picks per task (`send-task` / `task-action` `profile`) or sets as an agent default; resolved at claim. New `list-model-profiles` tool, operator-only profile API, and a migration that turns each `MODEL_OVERRIDE` into a profile (#2163).
+- Heartbeat: seeded `heartbeat-jev-gate` script for `HEARTBEAT_CHECKLIST_GATE_SCRIPT` skips checklist ticks with nothing to do; `request-human-input` gains `detached` (#2182).
+- Azure DevOps: opt-in work item state transitions (`AZURE_DEVOPS_WORKITEM_STATE_STARTED` / `_DONE`) and workflow triggers (#2169).
+- Slack: `SLACK_STATUS_ICON_COMPLETED` sets the "done" glyph in thread text (#2207).
+- Scripts: quickjs runtime gains URL, TextEncoder/TextDecoder, `setInterval`, crypto and non-string fetch bodies, plus a compat lint at upsert (#2115).
+- Workflows: raw-llm nodes route registry-provider models like `nan/*` to their own endpoint (#2189).
+- AgentMail: inbox and sender filters accept full addresses (#2191).
+- Extensions: `comms-adherence-gate` ships as a catalog template; the UI shows extensions as cards with a details sheet (#2195, #2196).
+
+### Changed
+- agent-fs pins bumped to 0.16.4, 0.17.0 and 0.17.3; worker image bumps for claude-code, codex, opencode, amp, grok, qwen, acp, dsh and anthropic-sdk (#2188, #2208, #2179, #2190).
+- Docs: heartbeat spec synced (#2181).
+
+### Fixed
+- Scheduler: deferred-task ceilings honour extension hooks (#2194).
+- Slack: a buffer flush blocked by a pre-task-create hook is handled cleanly (#2109).
+- Pi: per-call context usage is reported as progress, not compaction (#2183).
+- Scripts: `extract-args-schema` zod shims are staged outside the cwd snapshot (#2185).
+- Pages: keys typed in the feedback overlay no longer reach page scripts (#2187).
+- CI: stale-branch migration checks compare against the base ref; migration tests get more time under shard load (#2197, #2204).
+
 ## [2.0.0] - 2026-10-16
 
 ### Removed

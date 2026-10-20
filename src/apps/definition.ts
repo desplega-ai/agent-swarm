@@ -2,6 +2,7 @@ import * as z from "zod";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
+import { APPS_JSON_COLUMN_MAX_BYTES_BOUNDS } from "../be/swarm-config-guard";
 import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
 import catalog from "./catalog.generated.json";
 import {
@@ -16,12 +17,89 @@ export const AppNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/, {
   message: "must start with a lowercase letter and contain only letters, numbers, or underscores",
 });
 
-export const ColumnKindSchema = z.enum(["string", "number", "boolean", "date", "enum"]);
+export const ColumnKindSchema = z.enum(["string", "number", "boolean", "date", "enum", "json"]);
+
+/**
+ * Column kinds allowed where values must stay scalar (user-config fields and
+ * element props) — `json` is model-column only.
+ */
+export const ScalarColumnKindSchema = ColumnKindSchema.exclude(["json"]);
 
 const ISO_8601_PREFIX = /^\d{4}-\d{2}-\d{2}(?:T.*)?$/;
 
 export function isIso8601Date(value: string): boolean {
   return ISO_8601_PREFIX.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+/** Default serialized-size cap for json column values AND defaults: 256 KB. */
+export const DEFAULT_JSON_COLUMN_MAX_BYTES = 256 * 1024;
+
+/**
+ * The serialized-size cap for json column values and defaults, read on every
+ * call — never at module load — so a stored `APPS_JSON_COLUMN_MAX_BYTES`
+ * override, injected over the process env on config reload, applies without
+ * a restart. Mirrors the retention knobs: a non-digit or out-of-range value
+ * falls back to the default, and the config API rejects writes outside the
+ * same `APPS_JSON_COLUMN_MAX_BYTES_BOUNDS`.
+ */
+export function jsonColumnMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.APPS_JSON_COLUMN_MAX_BYTES?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return DEFAULT_JSON_COLUMN_MAX_BYTES;
+  const value = Number(raw);
+  const { min, max } = APPS_JSON_COLUMN_MAX_BYTES_BOUNDS;
+  return Number.isSafeInteger(value) && value >= min && value <= max
+    ? value
+    : DEFAULT_JSON_COLUMN_MAX_BYTES;
+}
+
+/** The cap as a message label: whole KB when it divides evenly (`256KB`), else bytes. */
+export function jsonColumnSizeLabel(bytes: number = jsonColumnMaxBytes()): string {
+  return bytes % 1024 === 0 ? `${bytes / 1024}KB` : `${bytes} bytes`;
+}
+
+export type JsonColumnValueIssue = "unserializable" | "non-finite" | "oversized";
+
+/**
+ * Why a value cannot live in a json column — not JSON-serializable, carrying a
+ * non-finite number anywhere inside it, or over `jsonColumnMaxBytes()` once
+ * serialized — or `null` when it fits. The single implementation of the cap:
+ * it serializes exactly once, flagging non-finite numbers on that same walk
+ * (a lenient parser turns `1e400` into `Infinity`, which `JSON.stringify`
+ * would quietly store as `null`), and each caller maps the reason to its own
+ * message.
+ */
+export function jsonColumnValueIssue(value: unknown): JsonColumnValueIssue | null {
+  let nonFinite = false;
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value, (_key, entry: unknown) => {
+      if (typeof entry === "number" && !Number.isFinite(entry)) nonFinite = true;
+      return entry;
+    });
+  } catch {
+    return "unserializable"; // circular reference / BigInt / throwing toJSON
+  }
+  if (serialized === undefined) return "unserializable";
+  if (nonFinite) return "non-finite";
+  return Buffer.byteLength(serialized, "utf8") > jsonColumnMaxBytes() ? "oversized" : null;
+}
+
+/**
+ * The one per-kind check for a NON-null column value, shared by the row store,
+ * schema migrations and the sync engine so a value the store accepts is a
+ * value a migration directive or a projection accepts too. Null policy
+ * (required / hidden / nulling a projection) stays with each caller.
+ */
+export function isValidColumnValue(
+  column: Pick<ColumnDef, "kind" | "enum">,
+  value: unknown,
+): boolean {
+  if (column.kind === "string") return typeof value === "string";
+  if (column.kind === "number") return typeof value === "number" && Number.isFinite(value);
+  if (column.kind === "boolean") return typeof value === "boolean";
+  if (column.kind === "date") return typeof value === "string" && isIso8601Date(value);
+  if (column.kind === "json") return jsonColumnValueIssue(value) === null;
+  return typeof value === "string" && Boolean(column.enum?.includes(value));
 }
 
 export const SourceTransformSchema = z.enum(["slug", "lower", "upper", "cents", "date-parse"]);
@@ -49,11 +127,23 @@ const ColumnDefSchema = z
     required: z.boolean().optional(),
     enum: z.array(z.string()).optional(),
     index: z.boolean().optional(),
-    default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    default: z
+      .union([
+        z.string(),
+        z.number(),
+        z.boolean(),
+        z.record(z.string(), z.unknown()),
+        z.array(z.unknown()),
+      ])
+      .optional(),
     hidden: z.boolean().optional(),
     source: ColumnSourceBindingSchema.optional(),
   })
   .superRefine((column, ctx) => {
+    if (column.kind === "json" && column.index) {
+      ctx.addIssue({ code: "custom", path: ["index"], message: "json columns cannot be indexed" });
+    }
+
     if (column.kind === "enum") {
       if (!column.enum || column.enum.length === 0) {
         ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values are required" });
@@ -71,6 +161,24 @@ const ColumnDefSchema = z
     }
 
     if (column.default === undefined) return;
+    if (column.kind === "json") {
+      // Structural checks only; the size cap is write-time (`jsonColumnDefaultSizeIssues`).
+      const issue = jsonColumnValueIssue(column.default);
+      if (issue === "unserializable") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["default"],
+          message: "json column default must be JSON-serializable",
+        });
+      } else if (issue === "non-finite") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["default"],
+          message: "json column default contains a non-finite number",
+        });
+      }
+      return;
+    }
     const valid =
       (column.kind === "string" && typeof column.default === "string") ||
       (column.kind === "number" &&
@@ -94,7 +202,7 @@ const ColumnDefSchema = z
 
 const UserConfigFieldSchema = z
   .object({
-    kind: ColumnKindSchema,
+    kind: ScalarColumnKindSchema,
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
     enum: z.array(z.string()).optional(),
     label: z.string().optional(),
@@ -276,7 +384,7 @@ const AppPageSchema = z
 
 const ElementPropDefSchema = z
   .object({
-    kind: ColumnKindSchema,
+    kind: ScalarColumnKindSchema,
     required: z.boolean().optional(),
     enum: z.array(z.string()).min(1).optional(),
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
@@ -439,6 +547,14 @@ export const AppDefinitionSchema = z
           });
           continue;
         }
+        if (columnDefinition.kind === "json") {
+          ctx.addIssue({
+            code: "custom",
+            path: ["queries", queryName, "filter", column],
+            message: "json columns cannot be filtered",
+          });
+          continue;
+        }
         if (typeof value === "object") continue;
         const valid =
           (columnDefinition.kind === "string" && typeof value === "string") ||
@@ -468,6 +584,12 @@ export const AppDefinitionSchema = z
           code: "custom",
           path: ["queries", queryName, "sort", "column"],
           message: `unknown or hidden column "${sortColumn}"`,
+        });
+      } else if (sortColumn && model.columns[sortColumn]?.kind === "json") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["queries", queryName, "sort", "column"],
+          message: "json columns cannot be sorted",
         });
       }
     }
@@ -836,6 +958,31 @@ function syncActionIssues(
   return [{ path: `actions.${name}`, message: "no model declares a source to sync" }];
 }
 
+/**
+ * The serialized-size cap on json column defaults, applied on definition
+ * WRITES only. It lives outside `AppDefinitionSchema` on purpose: the schema
+ * also decodes persisted definitions (`decodeAppDefinition`, the row store's
+ * model lookup), and a cap lowered after an app was saved must not turn that
+ * app into one that "needs repair" on every read. Writing the definition
+ * again re-applies the current cap. An oversized default would otherwise be
+ * accepted only to fail every row create that relies on it.
+ */
+function jsonColumnDefaultSizeIssues(definition: AppDefinition): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  for (const [modelName, model] of Object.entries(definition.models)) {
+    for (const [columnName, column] of Object.entries(model.columns)) {
+      if (column.kind !== "json" || column.default === undefined) continue;
+      if (jsonColumnValueIssue(column.default) === "oversized") {
+        issues.push({
+          path: `models.${modelName}.columns.${columnName}.default`,
+          message: `json column default exceeds the ${jsonColumnSizeLabel()} size limit`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 export async function parseAppDefinition(
   input: unknown,
   elementContext: AppDefinitionParseContext = {},
@@ -871,6 +1018,7 @@ export async function parseAppDefinition(
   if (!parsed.success) return { success: false, issues: appDefinitionIssues(parsed.error) };
 
   const issues = [
+    ...jsonColumnDefaultSizeIssues(parsed.data),
     ...Object.keys(parsed.data.pages).flatMap((pageName) =>
       validatePage(parsed.data, catalog, pageName),
     ),

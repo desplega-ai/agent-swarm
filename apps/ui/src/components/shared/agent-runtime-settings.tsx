@@ -95,6 +95,7 @@ const CREDENTIAL_KEYS = [
   "AMP_API_KEY",
   "CURSOR_API_KEY",
   "XAI_API_KEY",
+  "OPENCODE_API_KEY",
   // OpenAI-compatible registry provider keys, canonical and alias.
   ...openAICompatibleKeyVars(),
   ...DEVIN_CREDENTIAL_KEYS,
@@ -217,6 +218,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         : null,
     [agent.credStatus?.bedrock],
   );
+  const liveOpencodeGoModels = agent.credStatus?.opencodeGo?.models ?? null;
   const catalogQuery = useModelsCatalog();
   const liveCatalog = catalogQuery.data?.providers ?? null;
   const groups = useMemo(
@@ -227,8 +229,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         envPresenceQuery.data,
         liveBedrockStatus,
         liveCatalog,
+        liveOpencodeGoModels,
       ),
-    [harness, configs, envPresenceQuery.data, liveBedrockStatus, liveCatalog],
+    [harness, configs, envPresenceQuery.data, liveBedrockStatus, liveCatalog, liveOpencodeGoModels],
   );
   const modelOption = findModelOption(model, groups);
   // Exactly what the API accepts for this harness and model (empty for a custom
@@ -288,6 +291,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       envPresenceQuery.data,
       liveBedrockStatus,
       liveCatalog,
+      liveOpencodeGoModels,
     );
     setHarness(initialHarness);
     setDevinSelected(agent.harnessProvider === "devin");
@@ -307,6 +311,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     envPresenceQuery.data,
     liveBedrockStatus,
     liveCatalog,
+    liveOpencodeGoModels,
   ]);
 
   useEffect(() => {
@@ -337,6 +342,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       envPresenceQuery.data,
       liveBedrockStatus,
       liveCatalog,
+      liveOpencodeGoModels,
     );
     setHarness(nextHarness);
     if (nextHarness === "acp" && harness !== "acp") setAcpTarget("opencode");

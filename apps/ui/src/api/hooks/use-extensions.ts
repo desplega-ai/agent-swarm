@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ExtensionInstallInput, ExtensionPatchInput } from "@/api/types";
+import { useCallback } from "react";
+import type { Extension, ExtensionInstallInput, ExtensionPatchInput } from "@/api/types";
 import { api } from "../client";
 
 /** Run-log tail refresh cadence while the detail page is mounted. */
@@ -12,29 +13,64 @@ export function useExtensions() {
   });
 }
 
-export function useExtension(id: string | undefined) {
+/**
+ * Per-extension queries take `enabled: false` to stop fetching and polling
+ * while keeping the cache key, so a closing sheet can still render the last
+ * data without refetching (or re-creating) a removed query.
+ */
+interface ExtensionQueryOptions {
+  enabled?: boolean;
+}
+
+export function useExtension(
+  id: string | undefined,
+  { enabled = true }: ExtensionQueryOptions = {},
+) {
   return useQuery({
     queryKey: ["extension", id],
     queryFn: () => api.fetchExtension(id as string),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
-export function useExtensionVersions(id: string | undefined) {
+export function useExtensionVersions(
+  id: string | undefined,
+  { enabled = true }: ExtensionQueryOptions = {},
+) {
   return useQuery({
     queryKey: ["extension-versions", id],
     queryFn: () => api.fetchExtensionVersions(id as string),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
-export function useExtensionRuns(id: string | undefined, limit = 50) {
+export function useExtensionRuns(
+  id: string | undefined,
+  { enabled = true, limit = 50 }: ExtensionQueryOptions & { limit?: number } = {},
+) {
   return useQuery({
     queryKey: ["extension-runs", id, limit],
     queryFn: () => api.fetchExtensionRuns(id as string, limit),
-    enabled: !!id,
+    enabled: enabled && !!id,
     refetchInterval: RUNS_REFETCH_MS,
   });
+}
+
+/**
+ * Cancel the in-flight fetches and pending retries of one extension's per-id
+ * queries. `enabled: false` only stops new fetches: a retained observer keeps
+ * an already-failing fetch retrying. A removed query is not re-created.
+ */
+export function useCancelExtensionRequests() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (id: string) => {
+      void queryClient.cancelQueries({ queryKey: ["extension", id] });
+      void queryClient.cancelQueries({ queryKey: ["extension-versions", id] });
+      void queryClient.cancelQueries({ queryKey: ["extension-runs", id] });
+    },
+    [queryClient],
+  );
 }
 
 export function useExtensionTypeDefs() {
@@ -88,6 +124,11 @@ export function useDeleteExtension(id: string) {
   return useMutation({
     mutationFn: () => api.deleteExtension(id),
     onSuccess: () => {
+      // Drop the card now: the list refetch below can be slow, and until it
+      // lands the grid would still render the deleted card.
+      queryClient.setQueryData<Extension[]>(["extensions"], (list) =>
+        list?.filter((extension) => extension.id !== id),
+      );
       invalidate();
       // The record is gone; drop its per-id caches instead of refetching a 404.
       queryClient.removeQueries({ queryKey: ["extension", id] });

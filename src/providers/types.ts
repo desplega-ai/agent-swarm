@@ -320,6 +320,8 @@ export interface CredStatus {
    * string signals Bedrock mode with `AWS_REGION` unset (no region fabricated).
    */
   bedrockRegion?: string;
+  /** Pi-mono only: the `opencode-go` model ids pi-ai resolves. Undefined for other harnesses. */
+  opencodeGoModels?: string[];
 }
 
 /**

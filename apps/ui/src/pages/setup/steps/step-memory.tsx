@@ -15,12 +15,13 @@ import {
   type SecretRule,
   usePasteCommit,
 } from "@/components/onboarding/autosave-secret-field";
-import { FadeIn } from "@/components/onboarding/fade-in";
-import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { BrandLogo } from "@/components/shared/brand-logo";
+import { FadeIn } from "@/components/shared/fade-in";
 import { ModelLogo } from "@/components/shared/model-logo";
 import { SecretInput } from "@/components/shared/secret-input";
+import { SetupCard } from "@/components/shared/setup-card";
+import { SetupChip } from "@/components/shared/setup-chip";
 import { StatusIcon, StatusLine, type StatusTone } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";

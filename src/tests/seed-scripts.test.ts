@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cp, mkdir, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, getAllTasks, getDbClient, initDb } from "../be/db";
 import { getScript, listScripts, upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { typecheckScript } from "../be/scripts/typecheck";
@@ -14,6 +14,7 @@ import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
 } from "../be/seed-scripts/catalog/ops-catalog-audit";
+import scheduleHealth from "../be/seed-scripts/catalog/schedule-health";
 import taskContextGathering from "../be/seed-scripts/catalog/task-context-gathering";
 import taskFailureAudit from "../be/seed-scripts/catalog/task-failure-audit";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
@@ -258,6 +259,62 @@ describe("seed-scripts catalog", () => {
         }),
       ]),
     );
+  });
+
+  test.each([
+    "task-failure-audit",
+    "schedule-health",
+  ])("%s includes worker failures tagged heartbeat", async (name) => {
+    const db = getDbClient();
+    const scheduleId = crypto.randomUUID();
+    const failedId = crypto.randomUUID();
+    const completedIds = [crypto.randomUUID(), crypto.randomUUID()];
+    const createdAt = new Date().toISOString();
+    for (const [id, status, tags] of [
+      [failedId, "failed", '["heartbeat"]'],
+      ...completedIds.map((id) => [id, "completed", "[]"]),
+    ]) {
+      await db.run(
+        `INSERT INTO agent_tasks
+          (id, task, status, taskType, tags, scheduleId, failureReason, createdAt, lastUpdatedAt)
+         VALUES (?, 'Audit regression fixture', ?, 'bug', ?, ?, 'worker stopped', ?, ?)`,
+        [id, status, tags, scheduleId, createdAt, createdAt],
+      );
+    }
+    const ctx = {
+      swarm: {
+        async task_list(filters: Parameters<typeof getAllTasks>[0]) {
+          return { tasks: await getAllTasks(filters) };
+        },
+        async db_query(args: { sql: string; params?: string[] }) {
+          return { rows: await db.query(args.sql, args.params) };
+        },
+        async schedule_list() {
+          return { schedules: [{ id: scheduleId, name: "Regression schedule", enabled: true }] };
+        },
+      },
+    };
+    try {
+      if (name === "task-failure-audit") {
+        const failureReport = await taskFailureAudit({ days: 1, publishPage: false }, ctx);
+        expect(failureReport.totalFailed).toBe(1);
+        expect(
+          failureReport.groups.flatMap((group: { taskIds: string[] }) => group.taskIds),
+        ).toEqual([failedId]);
+      } else {
+        const scheduleReport = await scheduleHealth({ days: 1, publishPage: false }, ctx);
+        expect(scheduleReport.flaggedCount).toBe(1);
+        expect(scheduleReport.schedules[0]).toMatchObject({
+          runs: 3,
+          failed: 1,
+          completed: 2,
+          failureRate: 0.333,
+          flagged: true,
+        });
+      }
+    } finally {
+      await db.run("DELETE FROM agent_tasks WHERE scheduleId = ?", [scheduleId]);
+    }
   });
 
   test("task-failure-audit rejects scan limits above its hard cap", async () => {

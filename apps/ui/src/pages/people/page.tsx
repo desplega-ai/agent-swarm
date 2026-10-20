@@ -4,7 +4,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useUnmapped, useUsers } from "@/api/hooks/use-users";
 import type { User } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,6 +85,7 @@ function PeopleTable({
       {
         field: "role",
         headerName: "Role",
+        context: HIDE_WHEN_COMPACT,
         width: 160,
         cellRenderer: (params: { data: User | undefined }) => {
           if (!params.data) return null;
@@ -96,6 +97,7 @@ function PeopleTable({
       {
         field: "identities",
         headerName: "Identities",
+        context: HIDE_WHEN_COMPACT,
         flex: 1.4,
         minWidth: 220,
         cellRenderer: (params: { data: User | undefined }) => {
@@ -106,6 +108,7 @@ function PeopleTable({
       {
         field: "dailyBudgetUsd",
         headerName: "Budget",
+        context: HIDE_WHEN_COMPACT,
         width: 140,
         cellRenderer: (params: { data: User | undefined }) => {
           if (!params.data) return null;
@@ -133,6 +136,7 @@ function PeopleTable({
       {
         field: "lastUpdatedAt",
         headerName: "Last update",
+        context: HIDE_WHEN_COMPACT,
         width: 140,
         cellRenderer: (params: { value: string }) => (
           <Tooltip>

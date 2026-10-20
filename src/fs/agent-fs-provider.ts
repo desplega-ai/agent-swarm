@@ -130,13 +130,17 @@ export class AgentFsProvider implements FileStorageProvider {
       headers.set("x-agent-fs-message", options.message);
     }
 
+    const sizeBytes = options.sizeBytes ?? knownByteLength(body);
     const response = await this.fetchRaw(
       scope,
       { method: "PUT", headers, body },
-      agentFsUploadTimeoutMs(options.sizeBytes ?? knownByteLength(body)),
+      agentFsUploadTimeoutMs(sizeBytes ?? 0),
     );
     const parsed = (await response.json().catch(() => ({}))) as AgentFsRawUploadResponse;
     return fileObjectFromHeaders(this.id, scope, response.headers, {
+      // The PUT response headers describe the JSON receipt, not the uploaded file.
+      contentType: options.contentType,
+      sizeBytes,
       key: parsed.path ?? providerPath(scope),
       version:
         parsed.version === undefined
@@ -440,13 +444,13 @@ export class AgentFsProvider implements FileStorageProvider {
   }
 }
 
-// `FileBody` is anything `RequestInit["body"]` accepts. Streams and FormData
-// have no cheap size, so they fall back to 0 and get the base deadline only.
-function knownByteLength(body: FileBody): number {
+// Streams and FormData have no cheap byte length.
+function knownByteLength(body: FileBody): number | undefined {
+  if (typeof body === "string") return Buffer.byteLength(body, "utf8");
   if (ArrayBuffer.isView(body)) return body.byteLength;
   if (body instanceof ArrayBuffer) return body.byteLength;
   if (body instanceof Blob) return body.size;
-  return 0;
+  return undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

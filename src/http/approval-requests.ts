@@ -23,7 +23,7 @@ import { getRequestAuth } from "../utils/request-auth-context";
 import { cancelApprovalRequest } from "../workflows/approval-cancel";
 import { createApprovalFollowUpTask } from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
-import { route } from "./route-def";
+import { bodyTask, route } from "./route-def";
 import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -255,6 +255,7 @@ const createRoute = route({
   method: "post",
   path: "/api/approval-requests",
   pattern: ["api", "approval-requests"],
+  session: bodyTask("sourceTaskId"),
   summary: "Create a new approval request",
   tags: ["ApprovalRequests"],
   body: z.object({

@@ -1,6 +1,6 @@
 ---
 name: swarm-scripts
-description: "Bulk, repeat, fan-out, or data-heavy work: write and run swarm scripts (inline `script-run`, named `script-upsert`, durable `launch-script-run`). Covers the script-vs-tool rubric, the authoring contract (`args` first, `ctx` second), the seed catalog, connections and secrets, `db_query`, and exposing a script as an API."
+description: "Bulk, repeat, fan-out, or data-heavy work: write and run swarm scripts (inline `script-run`, named `script-upsert`, durable `launch-script-run`). Covers the script-vs-tool rubric, the authoring contract (`args` first, `ctx` second), the seed catalog, connections and secrets, files and bash over the agent-fs drive (`ctx.fs`, `ctx.sh`), `db_query`, and exposing a script as an API."
 ---
 
 # Swarm Scripts
@@ -15,6 +15,7 @@ A swarm script is TypeScript that runs out of process with a typed Swarm SDK. On
 | 10 or more similar calls, bulk or fan-out | Script. Inline `script-run` for a one-off, a named script for reuse. |
 | Fetch, parse, and transform heavy data | Script, or `ctx_*` (context-mode) when your harness has it. |
 | One large web fetch | `ctx_fetch_and_index` (context-mode). |
+| A schedule, workflow, or API script that reads or writes drive files | Script with `ctx.fs` and `ctx.sh`. |
 | Multi-agent fan-out, parallel work, deterministic pipeline | Workflow. See `workflow-iterate`. |
 | Work that repeats on a clock | Schedule. See `scheduling`. |
 
@@ -78,12 +79,33 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - `ctx.swarm.task_send` requires `routingReason` and `routingNote` whenever `agentId` is present. The note must explain the worker choice in at least 10 characters after trimming whitespace (maximum 200 characters). Use `human_pinned` for an explicit/configured choice, `skill` for a role or specialization match, `continuity` for the same worker/session, `reroute_fault` for a fault handoff, or `overflow` for capacity/pool escalation. Omit both `agentId` and routing fields for the pool.
 - `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for swarm config values, resolved for the agent running the script (agent scope over global, the same rows `get-config` returns for that agent). A key that is not set returns `undefined`, so `config.get("KEY") ?? fallback` works. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
 - `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
+- `ctx.fs` and `ctx.sh`: files and bash. See "Files and shell" below.
 - `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `Redacted`.
 - `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
 
+### Files and shell
+
+```ts
+await ctx.fs.writeFile("/afs/reports/today.md", "# Today\n");      // your agent-fs drive
+await ctx.sh("echo '- shipped' >> reports/today.md");              // cwd is /afs
+const { stdout, exitCode } = await ctx.sh("grep -rn TODO /afs/notes | sort | head -20");
+```
+
+- `/afs/...` is your default agent-fs drive, with your own permissions. It persists. Every other path (`/tmp`, `/work`) is memory that ends with the run. Relative paths resolve against `/afs`.
+- `ctx.fs`: `readFile`, `writeFile`, `appendFile`, `readdir`, `stat`, `exists`, `mkdir`, `rm`, `cp`, `mv`. UTF-8 text only.
+- `ctx.sh(command, { cwd, env, stdin })` returns `{ stdout, stderr, exitCode }` and does not throw on a failed command. Check `exitCode`.
+- `ctx.sh` is just-bash, a bash interpreter in TypeScript: pipes, globs, `grep`, `sed`, `awk`, `jq`, `sort`, `wc`, `find`, `xargs`. No `git`, `curl`, `node`, `python`, or network. Files stay across calls in one run; `cd`, `env`, and variables do not.
+- Limits per run: 64 MiB of scratch files, about 30,000 scratch entries (8 MiB of names and entries), 64 MiB per command, and 64 MiB per `/afs` file read (`EFBIG`). Scratch names have at most 255 characters.
+- Without agent-fs for your agent, an `/afs` path fails with `agent-fs is not configured for this agent`, in `ctx.fs` and in shell redirects. Scratch and `ctx.sh` still work.
+- Use `/afs` paths directly. A scratch symlink into `/afs` fails (`EXDEV` when the drive is mounted).
+- A change that another agent makes to the drive can take up to 5 seconds to show in `ls` or `stat` during a run. Your own writes show at once.
+
 ### Durable workflow scripts
 
-`launch-script-run` runs a script as a durable, journaled run with a different `ctx`: `ctx.run` (`id`, `agentId`, `args`) and `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, `ctx.step.swarmScript(label, config)`, plus `ctx.swarm.*`, `ctx.stdlib`, `ctx.logger`. Durable runs have no `ctx.api`, no `ctx.mcp`, and no `ctx.swarm.config`. A configured `ctx.step.agentTask` `agentId` records `human_pinned` unless `routingReason` is supplied. Call a connection from an inner script through `ctx.step.swarmScript`. See the `script-workflows` skill.
+`launch-script-run` runs a script as a durable, journaled run with a different `ctx`: `ctx.run` (`id`, `agentId`, `args`) and `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, `ctx.step.swarmScript(label, config)`, plus `ctx.swarm.*`, `ctx.stdlib`, `ctx.logger`. Durable runs have no `ctx.api`, no `ctx.mcp`, no `ctx.fs`, no `ctx.sh`, and no `ctx.swarm.config`. A configured `ctx.step.agentTask` `agentId` records `human_pinned` unless `routingReason` is supplied. Call a connection or the drive from an inner script through `ctx.step.swarmScript`. See the `script-workflows` skill.
+
+- Each `ctx.step.agentTask` step is a normal worker task (`taskType: "script-run-step"`). When it finishes, the lead gets the usual "Worker task completed — review needed" follow-up, even while the run is still awaiting that step. The step config has no `followUpConfig` field, so a value passed there is dropped. Let the script's own judge step be the gate and close those follow-ups with a one-line accept.
+- When a crash supersedes an in-flight step and resumes it as a new task, the run does not follow the new task id: it can stay `failed` (for example `write EPIPE`) while the resumed task completes. Check the resumed task's output before you re-launch the run.
 
 ## Inline script pattern
 
@@ -154,6 +176,9 @@ function rowsToObjects(res: any): any[] {
 - `script_run` returns an envelope (`result`, `truncated`, `durationMs`, `stdout`, `stderr`, `exitCode`). The callee payload is at `.result`. Take key names from a real response: a guessed key that is absent reads as a false zero.
 - An `argsSchema` validation error fires before the body runs and repeats on every retry. Fix the args instead of retrying.
 - Write a dedup or idempotency marker only after the step succeeds. A marker written after a failure blocks the next real attempt.
+- `kv_set` returns `success: false` instead of throwing when a key has a character outside `[a-zA-Z0-9._:/-]` (for example `#` or `|` from a git ref). Check `success` after every write.
+- `script_run` without `scope` runs an agent-scoped row of the same name before the global one, so a stale private copy silently wins. Pass `scope: "global"` for a shared script.
+- A nested `script_run` does not overlap with the caller's own `ctx.stdlib.fetch` calls: started alongside them it added about 8 s to one measured run. Start it after the caller's own queries.
 
 Common tables: `agent_tasks`, `session_logs`, `agent_memory`, `scheduled_tasks`, `agents`. `session_logs` has no `tool_name` column. Tool names sit inside the `content` JSON column. Extract them with `instr` and `substr` in SQL, or parse the JSON in the script.
 

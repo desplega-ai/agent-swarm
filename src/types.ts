@@ -454,6 +454,41 @@ export const ModelProfileSchema = z.object({
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
 
 // ============================================================================
+// Session sharing
+// ============================================================================
+//
+// `SessionShareAccessSchema` MUST stay in sync with the SQL CHECK constraint
+// on session_shares.access (migration 230).
+
+export const SessionShareAccessSchema = z.enum(["read", "write"]);
+export type SessionShareAccess = z.infer<typeof SessionShareAccessSchema>;
+
+/** The caller's access to a session. `none` is never returned; it is a 403. */
+export const SessionAccessSchema = z.enum(["owner", "write", "read"]);
+
+export const SessionOwnerSchema = z
+  .object({ id: z.string(), name: z.string() })
+  .openapi("SessionOwner");
+
+export const SessionSharesSchema = z
+  .object({
+    /** What every user may do. `none` = private (owner and named users only). */
+    everyone: z.enum(["none", "read", "write"]),
+    users: z.array(
+      z.object({ userId: z.string(), access: SessionShareAccessSchema, createdAt: z.string() }),
+    ),
+  })
+  .openapi("SessionShares");
+export type SessionShares = z.infer<typeof SessionSharesSchema>;
+
+export const SessionSharesUpdateSchema = z.object({
+  everyone: z.enum(["none", "read", "write"]),
+  users: z
+    .array(z.object({ userId: z.string().min(1), access: SessionShareAccessSchema }))
+    .max(500),
+});
+
+// ============================================================================
 // Task Steering Messages
 // ============================================================================
 //
@@ -1114,6 +1149,8 @@ export const InboxItemStateSchema = z
     doneAt: z.string().optional(),
     /** First-viewed timestamp, set once on first panel open. Independent of status. */
     readAt: z.string().optional(),
+    /** Read cursor: latest time the user marked the item read. Clients can set, move back, or clear it. Independent of readAt and status. */
+    lastReadAt: z.string().optional(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
   })
@@ -1325,6 +1362,14 @@ export const AgentBedrockStatusSchema = z
   .openapi("AgentBedrockStatus");
 export type AgentBedrockStatus = z.infer<typeof AgentBedrockStatusSchema>;
 
+export const AgentOpencodeGoStatusSchema = z
+  .object({
+    probedAt: z.number(), // unix ms
+    models: z.array(z.string()).default([]),
+  })
+  .openapi("AgentOpencodeGoStatus");
+export type AgentOpencodeGoStatus = z.infer<typeof AgentOpencodeGoStatusSchema>;
+
 const AcpSessionConfigSelectValueSchema = z.object({
   value: z.string(),
   name: z.string(),
@@ -1384,6 +1429,8 @@ export const AgentCredStatusSchema = z
     reportKind: z.enum(["boot", "post_task"]).default("boot"),
     /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
+    /** Pi-mono only: the `opencode-go` model ids the worker's pi-ai resolves. */
+    opencodeGo: AgentOpencodeGoStatusSchema.nullable().default(null),
     /** ACP options advertised by the most recently created session. */
     acp: AgentAcpStatusSchema.nullable().default(null),
   })
@@ -2173,6 +2220,13 @@ export const RetryPolicySchema = z
   .openapi("RetryPolicy");
 export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
 
+/**
+ * `failureReason` of a workflow-step task cut by a supersede (deploy drain,
+ * heartbeat remediation). The workflow engine re-dispatches it once even
+ * when the node declares no `retry` (see `scheduleTaskStepRetry`).
+ */
+export const SUPERSEDED_WORKFLOW_TASK_REASON = "superseded_workflow_task";
+
 // --- Executor Metadata ---
 
 export const ExecutorMetaSchema = z
@@ -2233,7 +2287,7 @@ export const WorkflowNodeSchema = z
     type: z
       .string()
       .describe(
-        "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match'",
+        "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'system-one-extraction', 'validate', 'property-match'",
       ),
     label: z.string().optional().describe("Human-readable label for UI display"),
     config: z
@@ -2243,6 +2297,7 @@ export const WorkflowNodeSchema = z
           "For script: { runtime, script, args?, timeout? }. " +
           "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
           "For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. " +
+          "For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. " +
           "Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. " +
           "SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. " +
           'Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). ' +

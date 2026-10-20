@@ -42,7 +42,7 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * A new registry entry adds key vars, so it is a rule change too
  * (`secret-scrubber.test.ts` pins the list to this number).
  */
-export const SCRUBBER_RULES_VERSION = 8;
+export const SCRUBBER_RULES_VERSION = 9;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([

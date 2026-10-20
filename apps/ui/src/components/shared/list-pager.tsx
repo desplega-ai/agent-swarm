@@ -71,19 +71,21 @@ export function ListPager({
   // Wraps rather than overflows: with five-digit totals on a phone the range
   // and the controls do not fit one row, so the controls drop below it and
   // stay right-aligned (ml-auto) instead of pushing Next off-screen.
+  // Sizes follow the pager's own width (container query), not the viewport: an
+  // open sidebar or a split panel (Debug) leaves a narrow pager on a wide screen.
   return (
     <div
       className={cn(
-        "flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1.5 text-sm text-muted-foreground",
+        "@container flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1.5 text-sm text-muted-foreground",
         className,
       )}
     >
-      <span className="whitespace-nowrap tabular-nums">
+      <span className="whitespace-nowrap text-xs tabular-nums @md:text-sm">
         {formatPagerRange(page, pageSize, total) ?? emptyLabel}
       </span>
-      <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+      <div className="ml-auto flex items-center gap-1.5 @md:gap-2">
         <div className="flex items-center gap-1.5">
-          <span className="hidden text-xs sm:inline">Rows</span>
+          <span className="hidden text-xs @md:inline">Rows</span>
           <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
             <SelectTrigger className="h-8 w-[72px]" aria-label="Rows per page">
               <SelectValue />
@@ -107,8 +109,13 @@ export function ListPager({
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <span className="whitespace-nowrap px-1 text-xs tabular-nums sm:px-2">
-          Page {page + 1} of {totalPages}
+        <span className="whitespace-nowrap px-1 text-xs tabular-nums @md:px-2">
+          <span className="@md:hidden">
+            {page + 1}/{totalPages}
+          </span>
+          <span className="hidden @md:inline">
+            Page {page + 1} of {totalPages}
+          </span>
         </span>
         <Button
           variant="outline"

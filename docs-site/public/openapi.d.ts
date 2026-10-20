@@ -965,17 +965,25 @@ export interface paths {
                         version: number;
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;
@@ -1152,17 +1160,25 @@ export interface paths {
                         definition?: unknown;
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;
@@ -1310,17 +1326,25 @@ export interface paths {
                         };
                         migration?: {
                             [key: string]: {
-                                set: string | number | boolean;
+                                set: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[];
                             } | {
                                 from: string;
                                 map?: {
-                                    [key: string]: string | number | boolean;
+                                    [key: string]: string | number | boolean | {
+                                        [key: string]: unknown;
+                                    } | unknown[];
                                 };
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 coerce: true;
-                                else?: string | number | boolean | null;
+                                else?: string | number | boolean | {
+                                    [key: string]: unknown;
+                                } | unknown[] | null;
                             } | {
                                 /** @enum {boolean} */
                                 purge: true;
@@ -1930,6 +1954,7 @@ export interface paths {
                         input?: {
                             [key: string]: unknown;
                         };
+                        parentTaskId?: string;
                     };
                 };
             };
@@ -1982,7 +2007,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid action input or stale script reference */
+                /** @description Invalid action input, stale script reference, or parentTaskId on a non-task action */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2000,7 +2025,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description App or action not found */
+                /** @description App, action, or parent task not found */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -4114,6 +4139,7 @@ export interface paths {
                             id: string;
                             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                             key: string;
+                            movedTaskIds?: string[];
                         };
                     };
                 };
@@ -4201,6 +4227,7 @@ export interface paths {
                             id: string;
                             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                             key: string;
+                            movedTaskIds?: string[];
                         };
                     };
                 };
@@ -4276,6 +4303,8 @@ export interface paths {
                     "application/json": {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key: string;
+                        /** @description For tasks only, also move every descendant task recursively through parentTaskId. */
+                        cascade?: boolean;
                     };
                 };
             };
@@ -4292,6 +4321,7 @@ export interface paths {
                             id: string;
                             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                             key: string;
+                            movedTaskIds?: string[];
                         };
                     };
                 };
@@ -4527,6 +4557,333 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/used-by": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant or revoke the 'used by' logo consent
+         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        granted: boolean;
+                        /** Format: email */
+                        contactEmail?: string;
+                        /** @enum {string} */
+                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other";
+                        quote?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Consent recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            granted: boolean;
+                            changedAt: string;
+                        };
+                    };
+                };
+                /** @description Invalid contact details, or missing organization name or website */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can change the consent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The telemetry proxy did not accept the consent */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public ranking state
+         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Ranking state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            eligible: boolean;
+                            missing: ("SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE")[];
+                            telemetryOn: boolean;
+                            enabled: boolean;
+                            name: string | null;
+                            domain: string | null;
+                            listing: {
+                                /** @enum {number} */
+                                v: 1;
+                                name: string;
+                                domain: string;
+                                /** @enum {string} */
+                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                                subcategory: string | null;
+                                description: string | null;
+                                sourceCodeUrl: string | null;
+                                updatedAt: string;
+                            } | null;
+                            listingMatchesDomain: boolean;
+                            verifyUrl: string | null;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can read the ranking state */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking/opt-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Opt this install into the public ranking
+         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                        subcategory?: string | null;
+                        description?: string | null;
+                        sourceCodeUrl?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Opted in */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            domain: string;
+                            listing: {
+                                /** @enum {number} */
+                                v: 1;
+                                name: string;
+                                domain: string;
+                                /** @enum {string} */
+                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                                subcategory: string | null;
+                                description: string | null;
+                                sourceCodeUrl: string | null;
+                                updatedAt: string;
+                            };
+                            verifyUrl: string;
+                        };
+                    };
+                };
+                /** @description A listing field is invalid */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can opt in */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking/opt-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave the public ranking
+         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Opted out */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            enabled: false;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can opt out */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4991,7 +5348,7 @@ export interface paths {
         put?: never;
         /**
          * Locked keep-warm refresh sweep across all Codex OAuth pool slots
-         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).
+         * @description Enumerates codex_oauth_* slots and refreshes any older than CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS (default 120 hours) through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).
          */
         post: {
             parameters: {
@@ -7391,7 +7748,6 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        userId: string;
                         /** @enum {string} */
                         itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template" | "notification";
                         itemId: string;
@@ -7401,6 +7757,12 @@ export interface paths {
                         snoozeUntil?: string;
                         /** Format: date-time */
                         readAt?: string;
+                        /**
+                         * Format: date-time
+                         * @description Omit to preserve the read cursor, send null to clear it, or send a timestamp to set it, including an earlier time.
+                         */
+                        lastReadAt?: string | null;
+                        userId: string;
                     };
                 };
             };
@@ -7413,6 +7775,84 @@ export interface paths {
                     content: {
                         "application/json": {
                             item: components["schemas"]["InboxItemState"];
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/inbox-state/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Upsert inbox-item state in one transaction */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        userId: string;
+                        items: {
+                            /** @enum {string} */
+                            itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template" | "notification";
+                            itemId: string;
+                            /** @enum {string} */
+                            status: "open" | "snoozed" | "dismissed" | "done";
+                            /** Format: date-time */
+                            snoozeUntil?: string;
+                            /** Format: date-time */
+                            readAt?: string;
+                            /**
+                             * Format: date-time
+                             * @description Omit to preserve the read cursor, send null to clear it, or send a timestamp to set it, including an earlier time.
+                             */
+                            lastReadAt?: string | null;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Upserted inbox state rows in request order */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["InboxItemState"][];
                         };
                     };
                 };
@@ -12104,7 +12544,7 @@ export interface paths {
         };
         /**
          * List tasks with filters
-         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
+         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
          */
         get: {
             parameters: {
@@ -12748,6 +13188,7 @@ export interface paths {
                     "application/json": {
                         /** @enum {string} */
                         mode: "steer" | "queue";
+                        taskId?: string;
                     };
                 };
             };
@@ -12783,6 +13224,15 @@ export interface paths {
                 };
                 /** @description Agent or steering message not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message moved to another task */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -12891,6 +13341,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         reason: string;
+                        taskId?: string;
                     };
                 };
             };
@@ -12927,6 +13378,15 @@ export interface paths {
                 };
                 /** @description Agent or steering message not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Steering message moved to another task */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -12990,6 +13450,132 @@ export interface paths {
                                 verified: "true" | "false" | "unchecked";
                             }[];
                         };
+                    };
+                };
+                /** @description A user caller cannot read the task's session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the tree a task belongs to (ancestors and descendants)
+         * @description Follows `parentTaskId` up to the topmost ancestor, then returns every descendant of that root as slim task rows, the task's own subtree first. Bounded: at most 50 hops up, `maxDepth` levels down and about twice `maxNodes` rows; `truncated` is true when any task in the tree is missing from the response.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    maxNodes?: number;
+                    maxDepth?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The lineage tree as a flat list linked by `parentTaskId` */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            rootTaskId: string;
+                            tasks: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                                key: string;
+                                agentId: string | null;
+                                creatorAgentId?: string;
+                                task: string;
+                                title?: string;
+                                /** @enum {string} */
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                /**
+                                 * @default mcp
+                                 * @enum {string}
+                                 */
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                taskType?: string;
+                                /** @default [] */
+                                tags: string[];
+                                /** @default 50 */
+                                priority: number;
+                                /** @default [] */
+                                dependsOn: string[];
+                                offeredTo?: string;
+                                /** Format: date-time */
+                                acceptedAt?: string;
+                                parentTaskId?: string;
+                                scheduleId?: string;
+                                model?: string;
+                                /** @enum {string} */
+                                modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                resolvedModel?: string;
+                                modelSource?: string;
+                                modelAlias?: string;
+                                /** @enum {string} */
+                                effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
+                                resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                /** @enum {string} */
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
+                                requestedByUserId?: string;
+                                progress?: string;
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                /** Format: date-time */
+                                finishedAt?: string;
+                                peakContextPercent?: number;
+                                totalCostUsd?: number;
+                                workflowRunId?: string;
+                            }[];
+                            truncated: boolean;
+                        };
+                    };
+                };
+                /** @description A user caller cannot read the task's session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Task not found */
@@ -15551,7 +16137,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Issue a one-shot dashboard realtime ticket */
+        /**
+         * Issue a one-shot dashboard realtime ticket
+         * @description The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -15573,17 +16162,8 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Comb presence is not allowed */
+                /** @description Presence is not allowed */
                 403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Comb is not enabled */
-                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -18011,7 +18591,7 @@ export interface paths {
         put?: never;
         /**
          * Mint an ephemeral task or runtime token
-         * @description Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.
+         * @description Operators can mint task or runtime tokens. Runtime and agent tokens can mint task tokens for their own assigned tasks. A child token never outlives its parent and is revoked with it.
          */
         post: {
             parameters: {
@@ -18090,7 +18670,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an ephemeral session token
-         * @description Operators can revoke any ephemeral token. With runtime pools enabled, runtime tokens can revoke their own child task tokens. Repeated revocation has no effect.
+         * @description Operators can revoke any ephemeral token. Agent tokens, and runtime tokens when runtime pools are enabled, can revoke their own child task tokens. Repeated revocation has no effect.
          */
         delete: {
             parameters: {
@@ -18135,6 +18715,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{id}/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint an agent-bound worker token
+         * @description Returns the token once. A worker runs on it in place of the swarm API key and acts only as this agent. Creates the agent when it does not exist and `name` is given. Fails with 409 when the agent already holds an active token.
+         */
+        post: operations["agents_mintWorkerToken"];
+        /**
+         * Revoke an agent-bound worker token
+         * @description Revokes every active worker token of the agent and the task tokens they minted. Open realtime connections on them close.
+         */
+        delete: operations["agents_revokeWorkerToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/token/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate an agent-bound worker token
+         * @description Returns a new token once. The previous token keeps working for `graceSec` (default 300), then expires. Use revoke for a token that must stop now.
+         */
+        post: operations["agents_rotateWorkerToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions": {
         parameters: {
             query?: never;
@@ -18156,6 +18780,7 @@ export interface paths {
                     requestedByUserId?: string;
                     contextKeyPrefix?: string;
                     fields?: "full" | "slim";
+                    scope?: "mine" | "shared";
                 };
                 header?: never;
                 path?: never;
@@ -18266,7 +18891,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Root task + chain (ordered by createdAt) */
+                /** @description Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner` */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -18305,11 +18930,23 @@ export interface paths {
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             })[];
+                            /** @enum {string} */
+                            access: "owner" | "write" | "read";
+                            owner: components["schemas"]["SessionOwner"];
                         };
                     };
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller has no access to this session */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -18329,6 +18966,156 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{rootTaskId}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a session's active shares
+         * @description Active shares only. `everyone` is the access every user has; `users` are per-person shares. A session with no shares is private to its owner.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rootTaskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Active shares */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionShares"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller has no access to this session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Root task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        /**
+         * Set who can view or edit a session
+         * @description Owner only. The body is the full desired state: users left out lose access. Changed targets have their active share revoked and a new one inserted in one transaction; shares are never deleted.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rootTaskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        everyone: "none" | "read" | "write";
+                        users: {
+                            userId: string;
+                            /** @enum {string} */
+                            access: "read" | "write";
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Active shares after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionShares"];
+                    };
+                };
+                /** @description Validation error or unknown user */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only the session owner can share it */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Root task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The session has no owner, so it is already open to everyone */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -20706,7 +21493,7 @@ export interface paths {
                          * @default banner
                          * @enum {string}
                          */
-                        via?: "banner" | "settings";
+                        via?: "banner" | "settings" | "benchmark";
                     };
                 };
             };
@@ -21595,90 +22382,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/used-by": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Grant or revoke the 'used by' logo consent
-         * @description Records whether agent-swarm.dev may show this organization's logo as a company that uses Agent Swarm. Sends the organization name and website to the telemetry proxy, where a person approves each logo by hand. An explicit admin action, so it is not gated by the telemetry opt-out.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        granted: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Consent recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            granted: boolean;
-                            changedAt: string;
-                        };
-                    };
-                };
-                /** @description Organization name or website is not set (a revoke falls back to the identity of the last grant) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can change the consent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description The telemetry proxy did not accept the consent */
-                502: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/fleet-benchmark": {
         parameters: {
             query?: never;
@@ -21688,7 +22391,7 @@ export interface paths {
         };
         /**
          * Compare this swarm with similar swarms
-         * @description Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. `unavailable` also covers an install whose first event the proxy saw cannot be established locally (until 30 days after the first accepted event). The fleet numbers are cached for a day.
+         * @description Compares local task volume and success rate with fleet percentiles over the last 30 days. Comparisons require telemetry, an organization name, and a known proxy ingest date. A website, team size, and use case enable full comparisons with peer filters. The response includes the proxy's peer group when available. With telemetry off, it returns local DB counts without a proxy request. The fleet cache key includes the peer filters.
          */
         get: {
             parameters: {
@@ -21708,6 +22411,13 @@ export interface paths {
                         "application/json": {
                             /** @enum {string} */
                             state: "ready" | "telemetry_off" | "no_org_name" | "not_enough_tasks" | "unavailable";
+                            /** @enum {string} */
+                            level: "basic" | "full";
+                            peerGroup: {
+                                teamSize: string | null;
+                                useCase: string | null;
+                                orgs: number;
+                            } | null;
                             local: {
                                 tasksPerWeek: number;
                                 taskSuccessRate: number | null;
@@ -21886,6 +22596,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         name: string;
+                        /** Format: email */
                         email?: string;
                         role?: string;
                         notes?: string;
@@ -22219,7 +22930,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         name?: string;
-                        email?: string;
+                        /** Format: email */
+                        email?: string | null;
                         role?: string;
                         notes?: string;
                         emailAliases?: string[];
@@ -23998,11 +24710,11 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
+                        /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'system-one-extraction', 'validate', 'property-match' */
                         type?: string;
                         /** @description Human-readable label for UI display */
                         label?: string;
-                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                         config?: {
                             [key: string]: unknown;
                         };
@@ -25062,6 +25774,7 @@ export interface components {
              */
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
+            opencodeGo?: components["schemas"]["AgentOpencodeGoStatus"];
             acp?: components["schemas"]["AgentAcpStatus"];
         };
         /** @default null */
@@ -25099,6 +25812,12 @@ export interface components {
                 name: string;
             }[];
             error?: string;
+        } | null;
+        /** @default null */
+        AgentOpencodeGoStatus: {
+            probedAt: number;
+            /** @default [] */
+            models: string[];
         } | null;
         /** @default null */
         AgentAcpStatus: {
@@ -25471,6 +26190,7 @@ export interface components {
             dismissedAt?: string;
             doneAt?: string;
             readAt?: string;
+            lastReadAt?: string;
             createdAt: string;
             lastUpdatedAt: string;
         };
@@ -25885,6 +26605,20 @@ export interface components {
             costUsd?: number | null;
             harnessCostUsd?: number | null;
         };
+        SessionOwner: {
+            id: string;
+            name: string;
+        } | null;
+        SessionShares: {
+            /** @enum {string} */
+            everyone: "none" | "read" | "write";
+            users: {
+                userId: string;
+                /** @enum {string} */
+                access: "read" | "write";
+                createdAt: string;
+            }[];
+        };
         Skill: {
             id: string;
             name: string;
@@ -26050,11 +26784,11 @@ export interface components {
         WorkflowNode: {
             /** @description Unique node identifier, used in 'next' and 'inputs' mappings */
             id: string;
-            /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
+            /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'system-one-extraction', 'validate', 'property-match' */
             type: string;
             /** @description Human-readable label for UI display */
             label?: string;
-            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
             config: {
                 [key: string]: unknown;
             };
@@ -26211,11 +26945,11 @@ export interface components {
                 nodeId: string;
                 /** @description Partial node data to merge */
                 node: {
-                    /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
+                    /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'system-one-extraction', 'validate', 'property-match' */
                     type?: string;
                     /** @description Human-readable label for UI display */
                     label?: string;
-                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. For system-one-extraction (typed extraction, Cloudflare Clairic by default): { provider? ('cloudflare'; a literal), state (text to read; may be empty when images are sent), fields: { <id>: { type: 'text'|'number'|'date'|'time'|'datetime'|'duration'|'list'|'estimate'|'forecast', instructions?, ...type options (number: unit?, integer?, decimals?; duration: unit? (seconds..years), integer?, decimals?; list: items ('text'|'number'|'date'); estimate: min, max, step?, scale?, unit?; forecast: min, max, horizon?, interval?, scale?, unit?; text/number/date/time/datetime/duration: null_threshold?) } }, images? (max 4 base64 data: URLs or { content_type, base64 }), referenceDate? (YYYY-MM-DD), model?, timeoutMs?, maxRetries? (0-3) }; output answers.<id> carries value (null when the input does not say), guess, p_null, confidence, span/spans, and for estimate/forecast median/p10/p90. Needs the global secret CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) and the global config CLOUDFLARE_ACCOUNT_ID; must not set retry or validation.retry. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                     config?: {
                         [key: string]: unknown;
                     };
@@ -29306,6 +30040,158 @@ export interface operations {
                 };
             };
             /** @description Script run not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_mintWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** @description Token lifetime in ms. Omit for the default (no expiry). */
+                    ttlMs?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Minted worker token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        agentId: string;
+                        tokenId: string;
+                        plaintext: string;
+                        /** @description null when the token does not expire */
+                        expiresAt: string | null;
+                        agentCreated: boolean;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent not found and no name given */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent already holds an active token */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_revokeWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Number of worker tokens revoked (0 when none was active) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        revoked: number;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_rotateWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    graceSec?: number;
+                    /** @description Token lifetime in ms. Omit for the default (no expiry). */
+                    ttlMs?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description New worker token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        agentId: string;
+                        tokenId: string;
+                        plaintext: string;
+                        /** @description null when the token does not expire */
+                        expiresAt: string | null;
+                        previousExpiresAt: string;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent holds no active token */
             404: {
                 headers: {
                     [name: string]: unknown;

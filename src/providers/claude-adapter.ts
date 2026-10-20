@@ -642,7 +642,8 @@ export async function createSessionMcpConfig(
   // installed Claude plugin — strict-mcp-config only suppresses MCP servers, not
   // hooks. Placed BEFORE mergeMcpConfig so an API-installed server can still
   // override it (unlikely, but safe). Gated by CONTEXT_MODE_DISABLED so builds
-  // and deploys without context-mode don't break.
+  // and deploys without context-mode don't break; the same flag turns the plugin
+  // (and so its hooks) off via `claudeFlagSettings()`.
   //
   // Server key uses the plugin naming convention (`plugin_context-mode_context-mode`)
   // so that the resulting tool names (`mcp__plugin_context-mode_context-mode__ctx_*`)
@@ -1235,14 +1236,18 @@ class ClaudeSession implements ProviderSession {
     try {
       const json = JSON.parse(trimmed);
 
+      this.backgroundKeepalive.observe(json);
       // In stream-json input mode Claude waits for EOF even after emitting a
       // successful result. End stdin at that turn boundary so normal tasks can
       // exit; steering messages written during the turn are already buffered
-      // ahead of the EOF and are still processed as subsequent turns.
-      if (json.type === "result") {
+      // ahead of the EOF and are still processed as subsequent turns. While a
+      // background task is live, keep stdin open for its notification turn.
+      if (
+        json.type === "result" &&
+        !this.backgroundKeepalive.holdInputForBackgroundWork(() => this.closeStdin())
+      ) {
         this.closeStdin();
       }
-      this.backgroundKeepalive.observe(json);
 
       const normalized = normalizeClaudeMessage(json, {
         taskId: this.config.taskId,

@@ -541,3 +541,102 @@ export default async (args: T) => explode(args);
     expect(outputs.map((o) => o.result)).toEqual(Array.from({ length: 12 }, (_, i) => i * 2));
   });
 });
+
+describe("quickjs egress policy", () => {
+  const deny = { allowPrivate: false, allowlist: null };
+  const probe = `export default async (_args, ctx) => {
+  const attempt = async (run) => { try { return "ok:" + (await run()); } catch (e) { return "err:" + e.message; } };
+  return {
+    fetch: await attempt(async () => (await fetch("${baseUrl}/echo")).status),
+    stdlibFetch: await attempt(async () => (await ctx.stdlib.fetch("${baseUrl}/echo")).status),
+    fetchJson: await attempt(async () => (await ctx.stdlib.fetchJson("${baseUrl}/echo")).method),
+  };
+};`;
+
+  test("denies loopback fetches from script code by default", async () => {
+    requests.length = 0;
+    const output = await executor.run(input(probe, { network: deny }));
+    expect(output.error).toBeUndefined();
+    const result = output.result as Record<string, string>;
+    for (const value of Object.values(result)) {
+      expect(value).toStartWith("err:Script egress refused");
+      expect(value).toContain("SCRIPT_EGRESS_ALLOWLIST");
+    }
+    expect(requests.filter((r) => r.path === "/echo")).toHaveLength(0);
+  });
+
+  test("control: the same probe reaches loopback with network open", async () => {
+    const output = await executor.run(input(probe));
+    expect(output.result).toEqual({ fetch: "ok:200", stdlibFetch: "ok:200", fetchJson: "ok:GET" });
+  });
+
+  test("an allowlist entry or SCRIPT_EGRESS_ALLOW_PRIVATE opens the private host", async () => {
+    const port = new URL(baseUrl).port;
+    const listed = await executor.run(
+      input(probe, { network: { allowPrivate: false, allowlist: [`127.0.0.1:${port}`] } }),
+    );
+    expect((listed.result as Record<string, string>).fetch).toBe("ok:200");
+
+    const otherPort = await executor.run(
+      input(probe, { network: { allowPrivate: false, allowlist: ["127.0.0.1:1"] } }),
+    );
+    expect((otherPort.result as Record<string, string>).fetch).toContain(
+      "not in SCRIPT_EGRESS_ALLOWLIST",
+    );
+
+    const allowPrivate = await executor.run(
+      input(probe, { network: { allowPrivate: true, allowlist: null } }),
+    );
+    expect((allowPrivate.result as Record<string, string>).fetch).toBe("ok:200");
+  });
+
+  test("ctx.swarm still reaches the swarm API under the deny policy", async () => {
+    requests.length = 0;
+    const output = await executor.run(
+      input(
+        `export default async (_args, ctx) => {
+  await ctx.swarm.kv_set({ key: "egress", value: "fine" });
+  return (await ctx.swarm.kv_get({ key: "egress" })).data.value;
+};`,
+        { network: deny },
+      ),
+    );
+    expect(output.error).toBeUndefined();
+    expect(output.result).toBe("fine");
+    expect(requests.every((r) => r.auth === "Bearer quickjs-test-secret")).toBe(true);
+  });
+
+  test("script code cannot read the host bearer or runtime id", async () => {
+    const output = await executor.run(
+      input(
+        `export default async (_args, ctx) => {
+  const read = (value) => { try { return ctx.stdlib.Redacted.value(value); } catch (e) { return "err:" + e.message; } };
+  return {
+    apiKey: read(ctx.swarm.config.apiKey),
+    runtimeInstanceId: read(ctx.swarm.config.runtimeInstanceId),
+    apiKeyMeta: ctx.stdlib.Redacted.meta(ctx.swarm.config.apiKey),
+    agentId: read(ctx.swarm.config.agentId),
+    mcpBaseUrl: read(ctx.swarm.config.mcpBaseUrl),
+  };
+};`,
+        {
+          configPayload: {
+            ...input("").configPayload,
+            system: {
+              ...input("").configPayload.system,
+              runtimeInstanceId: { value: "runtime-1", isSecret: false },
+            },
+          },
+        },
+      ),
+    );
+    expect(output.error).toBeUndefined();
+    const result = output.result as Record<string, unknown>;
+    expect(result.apiKey).toStartWith("err:host-only credential");
+    expect(result.runtimeInstanceId).toStartWith("err:host-only credential");
+    expect(result.apiKeyMeta).toEqual({ type: "system", isSecret: true });
+    expect(result.agentId).toBe("agent-q");
+    expect(result.mcpBaseUrl).toBe(baseUrl);
+    expect(JSON.stringify(output)).not.toContain("quickjs-test-secret");
+  });
+});

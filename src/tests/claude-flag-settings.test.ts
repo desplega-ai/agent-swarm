@@ -4,19 +4,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ClaudeSettingsConfigError,
+  claudeFlagSettings,
   mergeClaudeSettingsArgs,
   userClaudeMdExclude,
   WORKSPACE_CLAUDE_MD_EXCLUDE,
 } from "../providers/claude-flag-settings";
 
 let directory: string;
+// Own CONTEXT_MODE_DISABLED: an ambient value would change every expectation.
+let prevContextModeDisabled: string | undefined;
 
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "claude-flag-settings-"));
+  prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
+  delete process.env.CONTEXT_MODE_DISABLED;
 });
 
 afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
+  if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+  else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
 });
 
 describe("mergeClaudeSettingsArgs", () => {
@@ -109,6 +116,34 @@ describe("mergeClaudeSettingsArgs", () => {
       model: "b",
       env: {},
       claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
+    });
+  });
+});
+
+describe("CONTEXT_MODE_DISABLED", () => {
+  // The plugin id the worker image installs.
+  const CONTEXT_MODE_CLAUDE_PLUGIN = "context-mode@context-mode";
+
+  test("unset: the context-mode plugin is left to the user settings", () => {
+    expect(claudeFlagSettings().enabledPlugins).toBeUndefined();
+    expect(mergeClaudeSettingsArgs([[]], directory).settings.enabledPlugins).toBeUndefined();
+  });
+
+  test.each(["true", "1"])("=%s turns the context-mode plugin off for the session", (value) => {
+    process.env.CONTEXT_MODE_DISABLED = value;
+    expect(claudeFlagSettings().enabledPlugins).toEqual({ [CONTEXT_MODE_CLAUDE_PLUGIN]: false });
+    expect(mergeClaudeSettingsArgs([[]], directory).settings.enabledPlugins).toEqual({
+      [CONTEXT_MODE_CLAUDE_PLUGIN]: false,
+    });
+  });
+
+  test("overrides a caller that enables the plugin and keeps the caller's other plugins", () => {
+    process.env.CONTEXT_MODE_DISABLED = "true";
+    const caller = { enabledPlugins: { [CONTEXT_MODE_CLAUDE_PLUGIN]: true, "other@market": true } };
+    const merged = mergeClaudeSettingsArgs([["--settings", JSON.stringify(caller)]], directory);
+    expect(merged.settings.enabledPlugins).toEqual({
+      [CONTEXT_MODE_CLAUDE_PLUGIN]: false,
+      "other@market": true,
     });
   });
 });

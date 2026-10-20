@@ -1,24 +1,40 @@
 import { Bot, House, ListTodo } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useStatus } from "@/api/hooks/use-status";
-import { sendUiTelemetry } from "@/api/hooks/use-ui-telemetry";
+import { type OrgProfileField, sendUiTelemetry } from "@/api/hooks/use-ui-telemetry";
 import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
-import { SetupCard } from "@/components/onboarding/setup-card";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
+import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import {
   AutosaveScopeContext,
   useAutosave,
   useAutosaveScope,
   useContinueAction,
+  useContinueBlocker,
 } from "@/hooks/use-autosave";
 import { useTheme } from "@/hooks/use-theme";
 import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
+import {
+  companyDomain,
+  optionLabel,
+  optionValue,
+  orgNameFromDomain,
+  SWARM_ORG_TEAM_SIZE,
+  SWARM_ORG_USE_CASE,
+  TEAM_SIZES,
+  type TeamSize,
+  USE_CASES,
+  type UseCase,
+} from "@/lib/company-profile";
 import { resolveCssVarToHex } from "@/lib/css-color";
 import { cn } from "@/lib/utils";
 import {
@@ -27,7 +43,7 @@ import {
   websiteSuggestion,
 } from "../../../../../../src/utils/org-website";
 import { httpUrlError } from "../components/http-url";
-import { DEFAULT_SWARM_NAME, initialSwarmName } from "../components/swarm-name";
+import { initialSwarmName } from "../components/swarm-name";
 import type { StepProps } from "../step-contract";
 import {
   EmojiSuggestions,
@@ -36,31 +52,53 @@ import {
   parseEmojiLogo,
   useEmojiImage,
 } from "./name/emoji-logo";
+import { OptionChips } from "./name/option-chips";
 import { ThemeCard } from "./name/theme-card";
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
 type LogoMode = "emoji" | "url";
 
+type ProfileEntry = { key: string; value: string; field: OrgProfileField };
+
 /**
- * Step 2: the swarm identity (name, logo, color). Every edit saves as you
- * type. Viewing the step saves nothing: an untouched suggested name is
- * stored by Continue, which also completes the step. The theme card is this
- * browser's preference, not swarm state.
+ * Step 2: the swarm identity (name, website, team size, use case, logo,
+ * color), next to a checklist of what each answer unlocks. Every edit saves
+ * as you type or pick. The name is required: no Skip, no default name.
+ * Viewing the step saves nothing: on the first pass the name and website are
+ * pre-filled from a company domain, and Continue stores what is still
+ * untouched and completes the step. The theme card is this browser's
+ * preference, not swarm state.
  */
 export function StepName({ onboarding, act, setContinueBlocker, setContinueAction }: StepProps) {
-  const scope = useAutosaveScope(setContinueBlocker);
+  // The step's one blocker slot shows the scope's hold ("Saving…") first, then
+  // the required name (below), so the scope reports here instead of the shell.
+  const [scopeHold, setScopeHold] = useState<{ reason: string | null; busy: boolean }>({
+    reason: null,
+    busy: false,
+  });
+  const scope = useAutosaveScope(
+    useCallback(
+      (reason: string | null, options?: { busy?: boolean }) =>
+        setScopeHold({ reason, busy: options?.busy ?? false }),
+      [],
+    ),
+  );
   // The shell's top bar polls `/status`; this read shares its cache.
   const { data: status } = useStatus({ pollIntervalMs: 0 });
   const { data: configs } = useConfigs({ scope: "global" });
+  const { user } = useCurrentUser();
   const { save } = useSetupSave();
   const identity = status?.identity;
-  const storedName = configs?.find((c) => c.key === "SWARM_ORG_NAME")?.value;
+  const row = (key: string) => configs?.find((c) => c.key === key);
+  const storedName = row("SWARM_ORG_NAME")?.value;
   const storedLogo = identity?.logo_url ?? "";
   const storedEmoji = parseEmojiLogo(storedLogo);
   const nameStep = onboarding.state.steps.name;
   // Both reads decide the suggestion, so nothing stores before they answer.
   const loaded = configs !== undefined && status !== undefined;
+  // Pre-fill only until the step is done. After that, the fields show what is stored.
+  const firstPass = nameStep.status !== "done";
 
   // `null` = untouched: follow the server value until the operator edits.
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -69,8 +107,37 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   const [emojiDraft, setEmojiDraft] = useState<string | null>(null);
   const [colorDraft, setColorDraft] = useState<string | null>(null);
   const [websiteDraft, setWebsiteDraft] = useState<string | null>(null);
+  const [teamSizeDraft, setTeamSizeDraft] = useState<TeamSize | null>(null);
+  const [useCaseDraft, setUseCaseDraft] = useState<UseCase | null>(null);
 
-  const name = (nameDraft ?? initialSwarmName(storedName, identity?.name)).trim();
+  // The admin's work domain, never free mail: the API's earliest-admin
+  // domain, else the signed-in user's own address.
+  const suggestedWebsite =
+    websiteSuggestion(row("telemetry_org_domain")?.value) ?? companyDomain(user?.email ?? "");
+  const websiteRow = row("SWARM_ORG_WEBSITE");
+  const storedWebsite = websiteRow?.value ?? "";
+  const websiteInput =
+    websiteDraft ?? (websiteRow || !firstPass ? storedWebsite : (suggestedWebsite ?? ""));
+  const website = normalizeOrgWebsite(websiteInput);
+  const websiteError =
+    websiteInput.trim() && !website ? "Enter a public website, such as example.com." : null;
+  // Shown but not stored yet: Continue stores it.
+  const websitePrefilled = websiteDraft === null && !websiteRow && firstPass && website !== null;
+
+  // An untouched name follows the website (acme.com becomes Acme).
+  const nameDomain = firstPass ? (website ?? suggestedWebsite) : null;
+  const name = (
+    nameDraft ??
+    initialSwarmName(storedName, identity?.name, nameDomain ? orgNameFromDomain(nameDomain) : null)
+  ).trim();
+  const nameSuggested =
+    nameDraft === null && nameDomain !== null && name === orgNameFromDomain(nameDomain);
+  // An empty name holds Continue on every pass, also once the step is done.
+  useContinueBlocker(
+    setContinueBlocker,
+    scopeHold.reason ?? (loaded && !name ? "Name your swarm to continue." : null),
+    { busy: scopeHold.reason !== null && scopeHold.busy },
+  );
 
   // Logo: an emoji.family URL opens in Emoji mode, any other URL in Image URL mode.
   const mode: LogoMode = logoMode ?? (storedLogo && !storedEmoji ? "url" : "emoji");
@@ -115,40 +182,36 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   const color = colorInput.trim();
   const colorValid = color === "" || HEX_RE.test(color);
 
-  const storedWebsite = configs?.find((c) => c.key === "SWARM_ORG_WEBSITE")?.value ?? "";
-  const websiteInput = websiteDraft ?? storedWebsite;
-  const website = normalizeOrgWebsite(websiteInput);
-  const websiteError =
-    websiteInput.trim() && !website ? "Enter a public website, such as example.com." : null;
-  const websitePlaceholder =
-    websiteSuggestion(configs?.find((c) => c.key === "telemetry_org_domain")?.value) ??
-    "example.com";
+  /** Store org profile rows (no config reload), then report them as `org.profile_updated`. */
+  async function storeProfile(entries: ProfileEntry[]) {
+    if (entries.length === 0) return;
+    await save(entries.map(({ key, value }) => ({ key, value, isSecret: false })));
+    sendUiTelemetry(status, {
+      event: "org.profile_updated",
+      properties: { fields: entries.map((entry) => entry.field), surface: "setup" },
+    });
+  }
+
+  async function completeStep() {
+    // There is no default name, so every stored name is a custom one.
+    if (nameStep.status !== "done" || nameStep.method !== "custom_name") {
+      await act({ action: "complete", step: "name", method: "custom_name" });
+    }
+  }
+
   const websiteSave = useAutosave({
     value: website ?? "",
     dirty: websiteDraft !== null && (website ?? "") !== storedWebsite,
     // Empty clears the website.
     ready: website !== null || websiteInput.trim() === "",
-    save: async (value) => {
-      await save([{ key: "SWARM_ORG_WEBSITE", value, isSecret: false }]);
-      sendUiTelemetry(status, {
-        event: "org.profile_updated",
-        properties: { fields: ["website"], surface: "setup" },
-      });
-    },
+    save: (value) => storeProfile([{ key: "SWARM_ORG_WEBSITE", value, field: "website" }]),
   });
 
   async function storeName(value: string) {
     if (value !== storedName) {
-      await save([{ key: "SWARM_ORG_NAME", value, isSecret: false }]);
-      sendUiTelemetry(status, {
-        event: "org.profile_updated",
-        properties: { fields: ["name"], surface: "setup" },
-      });
+      await storeProfile([{ key: "SWARM_ORG_NAME", value, field: "name" }]);
     }
-    const method = value === DEFAULT_SWARM_NAME ? "default_name" : "custom_name";
-    if (nameStep.status !== "done" || nameStep.method !== method) {
-      await act({ action: "complete", step: "name", method });
-    }
+    await completeStep();
   }
 
   const nameSave = useAutosave({
@@ -158,13 +221,54 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
     ready: name.length > 0 && loaded,
     save: storeName,
   });
-  // Untouched and not done: Continue stores the suggestion and completes the step.
+  // Continue stores the untouched pre-fills (name, website) and completes the step.
   useContinueAction(
     (action) => setContinueAction(action, { unlocks: true }),
-    nameDraft === null && nameStep.status !== "done" && loaded && name.length > 0
-      ? () => storeName(name)
+    loaded && name.length > 0 && ((nameDraft === null && firstPass) || websitePrefilled)
+      ? async () => {
+          const entries: ProfileEntry[] = [];
+          if (nameDraft === null && name !== storedName) {
+            entries.push({ key: "SWARM_ORG_NAME", value: name, field: "name" });
+          }
+          if (websitePrefilled && website) {
+            entries.push({ key: "SWARM_ORG_WEBSITE", value: website, field: "website" });
+          }
+          await storeProfile(entries);
+          await completeStep();
+        }
       : null,
   );
+
+  // Team size and use case store on a pick (an explicit action).
+  const storedTeamSize = optionValue(TEAM_SIZES, row(SWARM_ORG_TEAM_SIZE)?.value);
+  const teamSize = teamSizeDraft ?? storedTeamSize;
+  const teamSizeSave = useAutosave({
+    value: teamSize ?? "",
+    dirty: teamSizeDraft !== null && teamSizeDraft !== storedTeamSize,
+    ready: true,
+    save: (value) => storeProfile([{ key: SWARM_ORG_TEAM_SIZE, value, field: "team_size" }]),
+  });
+  const storedUseCase = optionValue(USE_CASES, row(SWARM_ORG_USE_CASE)?.value);
+  const useCase = useCaseDraft ?? storedUseCase;
+  const useCaseSave = useAutosave({
+    value: useCase ?? "",
+    dirty: useCaseDraft !== null && useCaseDraft !== storedUseCase,
+    ready: true,
+    save: (value) => storeProfile([{ key: SWARM_ORG_USE_CASE, value, field: "use_case" }]),
+  });
+
+  // The checklist ticks as the fields fill, drafts included.
+  const useCaseLabel = optionLabel(USE_CASES, useCase);
+  const unlocked = {
+    name: name.length > 0,
+    logo: website !== null,
+    // The peer group needs all three answers (`level: "full"` on /api/fleet-benchmark).
+    benchmark: website !== null && teamSize !== null && useCase !== null,
+    ideas: useCase !== null,
+  };
+  const unlockedCount = Object.values(unlocked).filter(Boolean).length;
+  const unlockTotal = Object.keys(unlocked).length;
+  const telemetryOff = status?.telemetry?.enabled === false;
 
   const logoSave = useAutosave({
     value: logo.value,
@@ -200,12 +304,25 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
           }
           bodyClassName="flex flex-col gap-4"
         >
-          <SettingsRow label="Swarm name" htmlFor="setup-swarm-name" required>
+          <SettingsRow
+            label="Swarm name"
+            htmlFor="setup-swarm-name"
+            required
+            helper={
+              !name
+                ? "Name your swarm to continue. Your team sees it across the dashboard."
+                : nameSuggested
+                  ? `Suggested from ${nameDomain}. Change it if your team uses another name.`
+                  : undefined
+            }
+          >
             <WithIndicator
               indicator={<SaveIndicator phase={nameSave.phase} error={nameSave.error} />}
             >
               <Input
                 id="setup-swarm-name"
+                placeholder="Acme"
+                autoComplete="organization"
                 value={nameDraft ?? name}
                 onChange={(event) => setNameDraft(event.target.value)}
                 onBlur={nameSave.commit}
@@ -221,6 +338,8 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
             helper={
               websiteError ? (
                 <span className="text-status-error-strong">{websiteError}</span>
+              ) : websitePrefilled ? (
+                "Filled from your email. Its logo becomes your swarm logo when you have not set one."
               ) : (
                 "Its logo becomes your swarm logo when you have not set one."
               )
@@ -232,7 +351,7 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
               <Input
                 id="setup-org-website"
                 value={websiteInput}
-                placeholder={websitePlaceholder}
+                placeholder="example.com"
                 inputMode="url"
                 autoComplete="url"
                 onChange={(event) => setWebsiteDraft(event.target.value)}
@@ -241,6 +360,44 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
                 className="pr-8"
               />
             </WithIndicator>
+          </SettingsRow>
+
+          <SettingsRow
+            label={
+              <>
+                Team size (optional)
+                <SaveIndicator phase={teamSizeSave.phase} error={teamSizeSave.error} />
+              </>
+            }
+          >
+            <SegmentedControl
+              aria-label="Team size"
+              value={teamSize}
+              onValueChange={(next) => {
+                setTeamSizeDraft(next);
+                teamSizeSave.commit();
+              }}
+              options={TEAM_SIZES}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={
+              <>
+                What will the swarm work on first? (optional)
+                <SaveIndicator phase={useCaseSave.phase} error={useCaseSave.error} />
+              </>
+            }
+          >
+            <OptionChips
+              aria-label="First use case"
+              options={USE_CASES}
+              value={useCase}
+              onValueChange={(next) => {
+                setUseCaseDraft(next);
+                useCaseSave.commit();
+              }}
+            />
           </SettingsRow>
 
           <SettingsRow
@@ -376,9 +533,35 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
         </SetupCard>
 
         <div className="flex flex-col gap-3">
+          <SetupCard
+            title="What your answers unlock"
+            description={
+              <span className="tabular-nums">
+                {unlockedCount} of {unlockTotal} unlocked
+              </span>
+            }
+            bodyClassName="flex flex-col gap-3"
+          >
+            <Progress value={(unlockedCount / unlockTotal) * 100} className="h-1.5" />
+            <ul className="flex flex-col gap-2">
+              <Unlock done={unlocked.name}>Your name across the dashboard and in messages</Unlock>
+              <Unlock done={unlocked.logo}>
+                Your logo, filled from {website ?? "your website"}
+              </Unlock>
+              <Unlock done={unlocked.benchmark}>
+                Home benchmark against swarms of your size and use case. Needs the website, team
+                size and use case, and anonymous telemetry on
+                {telemetryOff ? " (it is off on this swarm)" : ""}.
+              </Unlock>
+              <Unlock done={unlocked.ideas}>
+                First-task ideas in step 7 for{" "}
+                {useCaseLabel ? `"${useCaseLabel}"` : "your use case"}
+              </Unlock>
+            </ul>
+          </SetupCard>
           <SetupCard title="Sidebar preview" bodyClassName="rounded-b-xl bg-surface">
             <SidebarPreview
-              name={name || DEFAULT_SWARM_NAME}
+              name={name}
               // An empty logo is filled from the website on save; preview that one.
               logo={logo.valid && logo.value ? logo.value : website ? orgLogoUrl(website) : null}
               color={color && colorValid ? color : null}
@@ -388,6 +571,20 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
         </div>
       </div>
     </AutosaveScopeContext.Provider>
+  );
+}
+
+/** One checklist row: an amber check once its answer is in. */
+function Unlock({ done, children }: { done: boolean; children: ReactNode }) {
+  return (
+    <li className="flex items-start gap-2 text-sm">
+      <StatusIcon
+        tone={done ? "done" : "dirty"}
+        label={done ? "Unlocked" : "Not yet"}
+        className="mt-0.5"
+      />
+      <span className={done ? undefined : "text-muted-foreground"}>{children}</span>
+    </li>
   );
 }
 
@@ -422,10 +619,13 @@ function SidebarPreview({
         />
         <div className="min-w-0">
           <p
-            className="truncate text-sm font-semibold leading-tight"
-            style={color ? { color } : undefined}
+            className={cn(
+              "truncate text-sm font-semibold leading-tight",
+              !name && "text-muted-foreground",
+            )}
+            style={color && name ? { color } : undefined}
           >
-            {name}
+            {name || "Name required"}
           </p>
           <p className="text-[11px] leading-tight text-muted-foreground">Mission control</p>
         </div>

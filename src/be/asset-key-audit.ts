@@ -90,9 +90,7 @@ function auditKeyRow(
 
 type AttachmentMappingAuditRow = {
   attachment_id: string;
-  task_key: string;
   mapping_id: string | null;
-  mapping_key: string | null;
 };
 
 type MappingSourceAuditRow = {
@@ -118,9 +116,7 @@ export function auditAssetKeys(db: Database): AssetKeyAuditResult {
     .prepare<AttachmentMappingAuditRow, []>(
       `SELECT
          a.id AS attachment_id,
-         t."key" AS task_key,
-         m.id AS mapping_id,
-         m."key" AS mapping_key
+         m.id AS mapping_id
        FROM task_attachments a
        JOIN agent_tasks t ON t.id = a.task_id
        LEFT JOIN asset_key_mappings m
@@ -132,6 +128,9 @@ export function auditAssetKeys(db: Database): AssetKeyAuditResult {
          AND COALESCE(NULLIF(a.provider_key, ''), a.path) IS NOT NULL`,
     )
     .all();
+  // One file has one mapping, which follows its source attachment (checked below). Other
+  // tasks may attach the same file from any namespace, and a mapping detached from its
+  // deleted source keeps its own namespace, so neither is drift.
   for (const row of attachmentMappings) {
     if (!row.mapping_id) {
       issues.push({
@@ -140,14 +139,6 @@ export function auditAssetKeys(db: Database): AssetKeyAuditResult {
         entityType: "file",
         entityId: row.attachment_id,
         message: "Agent-fs attachment has no logical namespace mapping.",
-      });
-    } else if (row.mapping_key !== row.task_key) {
-      issues.push({
-        severity: "warning",
-        code: "provider-mapping-drift",
-        entityType: "file",
-        entityId: row.mapping_id,
-        message: "Provider mapping namespace differs from its parent task namespace.",
       });
     }
   }

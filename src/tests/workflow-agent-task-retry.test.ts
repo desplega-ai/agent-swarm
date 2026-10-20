@@ -13,8 +13,14 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
+  updateWorkflowRunStep,
 } from "../be/db";
-import type { AgentTask, WorkflowDefinition, WorkflowRunStep } from "../types";
+import {
+  type AgentTask,
+  SUPERSEDED_WORKFLOW_TASK_REASON,
+  type WorkflowDefinition,
+  type WorkflowRunStep,
+} from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
@@ -27,6 +33,7 @@ import { ExecutorRegistry } from "../workflows/executors/registry";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 import { setupWorkflowResumeListener } from "../workflows/resume";
 import { startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
+import { SUPERSEDE_RETRY_POLICY } from "../workflows/task-step-routing";
 import { interpolate } from "../workflows/template";
 
 const TEST_DB_PATH = "./test-workflow-agent-task-retry.sqlite";
@@ -217,18 +224,18 @@ describe("agent-task node.retry on task failure", () => {
     expect((await getTaskByWorkflowRunStepId(step.id))!.id).toBe(second.id);
   });
 
-  test("a node without retry fails the run exactly as before", async () => {
+  test("a node without retry fails the run exactly as before on a non-supersede failure", async () => {
     const runId = await startRun({});
     const step = await synthesizeStep(runId);
     const first = (await getTaskByWorkflowRunStepId(step.id))!;
 
-    await failTask(first.id, "superseded_workflow_task");
+    await failTask(first.id, "agent crashed");
 
     const run = await waitFor(async () => {
       const r = await getWorkflowRun(runId);
       return r?.status === "failed" ? r : null;
     }, "run failed");
-    expect(run.error).toContain("superseded_workflow_task");
+    expect(run.error).toContain("agent crashed");
     const failedStep = await synthesizeStep(runId);
     expect(failedStep.status).toBe("failed");
     expect(failedStep.retryCount).toBe(0);
@@ -278,6 +285,125 @@ describe("agent-task node.retry on task failure", () => {
     startRetryPoller(registry, 10);
     const second = await waitForRedrive(step.id, first);
     expect(second.id).not.toBe(first.id);
+  });
+});
+
+/** Wait for the step to be queued for the poller, then make it due now. */
+async function waitForQueuedRetry(runId: string): Promise<WorkflowRunStep> {
+  const queued = await waitFor(async () => {
+    const s = await synthesizeStep(runId);
+    return s.status === "failed" && s.nextRetryAt != null ? s : null;
+  }, "step queued for retry");
+  await updateWorkflowRunStep(queued.id, { nextRetryAt: new Date(Date.now() - 1).toISOString() });
+  return queued;
+}
+
+describe("implicit retry for a superseded task on a node without retry", () => {
+  test("a cut is redriven once after the static delay; a second cut follows onNodeFailure", async () => {
+    const runId = await startRun({});
+    const step = await synthesizeStep(runId);
+    const first = (await getTaskByWorkflowRunStepId(step.id))!;
+
+    const cutAt = Date.now();
+    await failTask(first.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+
+    const queued = await waitFor(async () => {
+      const s = await synthesizeStep(runId);
+      return s.status === "failed" && s.nextRetryAt != null ? s : null;
+    }, "step queued for retry");
+    expect(queued.retryCount).toBe(1);
+    expect(queued.maxRetries).toBe(1);
+    expect(queued.error).toBe(SUPERSEDED_WORKFLOW_TASK_REASON);
+    const delayMs = new Date(queued.nextRetryAt!).getTime() - cutAt;
+    expect(delayMs).toBeGreaterThanOrEqual(SUPERSEDE_RETRY_POLICY.baseDelayMs - 1000);
+    expect(delayMs).toBeLessThanOrEqual(SUPERSEDE_RETRY_POLICY.baseDelayMs + 5000);
+    expect((await getWorkflowRun(runId))!.status).toBe("waiting");
+    expect((await getTaskById(first.id))!.workflowRunStepId).toBeFalsy();
+
+    await waitForQueuedRetry(runId);
+    startRetryPoller(registry, 10);
+    const second = await waitForRedrive(step.id, first);
+    await waitFor(async () => {
+      const s = await synthesizeStep(runId);
+      return s.status === "waiting" ? s : null;
+    }, "step waiting on redriven task");
+    stopRetryPoller();
+
+    await failTask(second.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+    const run = await waitFor(async () => {
+      const r = await getWorkflowRun(runId);
+      return r?.status === "failed" ? r : null;
+    }, "run failed via onNodeFailure:fail");
+    expect(run.error).toContain(SUPERSEDED_WORKFLOW_TASK_REASON);
+    const finalStep = await synthesizeStep(runId);
+    expect(finalStep.status).toBe("failed");
+    expect(finalStep.retryCount).toBe(1);
+    expect(finalStep.nextRetryAt).toBeFalsy();
+    expect((await getTaskByWorkflowRunStepId(step.id))!.id).toBe(second.id);
+  });
+
+  test("the redriven task completing continues the run", async () => {
+    const runId = await startRun({ onNodeFailure: "continue" });
+    const step = await synthesizeStep(runId);
+    const first = (await getTaskByWorkflowRunStepId(step.id))!;
+
+    await failTask(first.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+    await waitForQueuedRetry(runId);
+    startRetryPoller(registry, 10);
+    const second = await waitForRedrive(step.id, first);
+    await waitFor(async () => {
+      const s = await synthesizeStep(runId);
+      return s.status === "waiting" ? s : null;
+    }, "step waiting on redriven task");
+    stopRetryPoller();
+
+    await completeTask(second.id, "synthesis done");
+    const run = await waitFor(async () => {
+      const r = await getWorkflowRun(runId);
+      return r?.status === "completed" ? r : null;
+    }, "run completed");
+    expect(run.status).toBe("completed");
+    const finalStep = await synthesizeStep(runId);
+    expect(JSON.stringify(finalStep.output)).not.toContain("[FAILED:");
+  });
+
+  test("explicit retry {maxRetries:0} opts out: the cut fails the run", async () => {
+    const runId = await startRun({ retry: { ...RETRY_ONCE, maxRetries: 0 } });
+    const step = await synthesizeStep(runId);
+    const first = (await getTaskByWorkflowRunStepId(step.id))!;
+
+    await failTask(first.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+
+    const run = await waitFor(async () => {
+      const r = await getWorkflowRun(runId);
+      return r?.status === "failed" ? r : null;
+    }, "run failed");
+    expect(run.error).toContain(SUPERSEDED_WORKFLOW_TASK_REASON);
+    const failedStep = await synthesizeStep(runId);
+    expect(failedStep.retryCount).toBe(0);
+    expect(failedStep.nextRetryAt).toBeFalsy();
+    expect((await getTaskByWorkflowRunStepId(step.id))!.id).toBe(first.id);
+  });
+
+  test("the recovery sweep reads the cut from the task row", async () => {
+    const runId = await startRun({});
+    const step = await synthesizeStep(runId);
+    const first = (await getTaskByWorkflowRunStepId(step.id))!;
+
+    teardownResumeListener?.();
+    try {
+      await failTask(first.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      await new Promise((r) => setTimeout(r, 20));
+      await recoverIncompleteRuns(registry);
+    } finally {
+      teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
+    }
+
+    const queued = await synthesizeStep(runId);
+    expect(queued.status).toBe("failed");
+    expect(queued.nextRetryAt).toBeTruthy();
+    expect(queued.retryCount).toBe(1);
+    expect((await getWorkflowRun(runId))!.status).toBe("waiting");
   });
 });
 

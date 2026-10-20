@@ -12,6 +12,9 @@ GlobalRegistrator.register();
 // react-dom reads the DOM when it first loads: import it after the DOM exists
 // (a static import would load it first and leave later files without events).
 const { createRoot } = await import("react-dom/client");
+mock.module("@/components/shared/setup-chip", () =>
+  require("../../../../components/shared/setup-chip"),
+);
 mock.module("@radix-ui/react-use-layout-effect", () => ({ useLayoutEffect }));
 afterAll(async () => {
   await GlobalRegistrator.unregister();
@@ -49,9 +52,6 @@ mock.module("@/lib/utils", () => require("../../../../lib/utils"));
 mock.module("@/components/ui/spinner", () => require("../../../../components/ui/spinner"));
 mock.module("@/components/kibo-ui/spinner", () =>
   require("../../../../components/kibo-ui/spinner"),
-);
-mock.module("@/components/onboarding/setup-card", () =>
-  require("../../../../components/onboarding/setup-card"),
 );
 mock.module("@/components/shared/animated-reveal", () =>
   require("../../../../components/shared/animated-reveal"),

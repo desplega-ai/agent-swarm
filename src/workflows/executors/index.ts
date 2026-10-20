@@ -14,6 +14,7 @@ export { createExecutorRegistry, ExecutorRegistry } from "./registry";
 export { ScriptExecutor } from "./script";
 export { SwarmScriptExecutor } from "./swarm-script";
 export { SystemOneDecisionExecutor } from "./system-one-decision";
+export { SystemOneExtractionExecutor } from "./system-one-extraction";
 export { ValidateExecutor } from "./validate";
 export { VcsExecutor } from "./vcs";
 export { WaitExecutor } from "./wait";

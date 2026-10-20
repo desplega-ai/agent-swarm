@@ -72,12 +72,23 @@ describe("reasoningLevelsFor", () => {
     expect(reasoningLevelsFor("pi", "x", effort("minimal"))).toEqual(["low", "medium", "high"]);
   });
 
-  test("max is codex-only", () => {
+  test("max is kept where the transport passes it through: codex, cursor, opencode, pi", () => {
     const facts = effort("low", "high", "xhigh", "max");
-    expect(reasoningLevelsFor("codex", "gpt-x", facts)).toEqual(["low", "high", "xhigh", "max"]);
-    for (const harness of ["claude", "pi", "opencode"]) {
+    for (const harness of ["codex", "cursor", "opencode", "pi"]) {
+      expect(reasoningLevelsFor(harness, "m", facts)).toEqual(["low", "high", "xhigh", "max"]);
+    }
+    for (const harness of ["claude", "amp", "grok"]) {
       expect(reasoningLevelsFor(harness, "m", facts)).toEqual(["low", "high", "xhigh"]);
     }
+  });
+
+  test("opencode keeps max only when the catalog declares it", () => {
+    expect(reasoningLevelsFor("opencode", "x", effort("low", "high", "max"))).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
+    expect(reasoningLevelsFor("opencode", "x", effort("low", "high"))).toEqual(["low", "high"]);
   });
 
   test("claude gains off only when the model exposes a numeric thinking budget", () => {

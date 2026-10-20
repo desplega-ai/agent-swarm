@@ -265,6 +265,11 @@ The worker does not use a shared app-server daemon. It does not resume native Co
 
 App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook returns before it polls in that mode. The worker then remains the only steering transport. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for the PR body leak guard, which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2.
 
+Claude and Codex hooks also check `gh pr create` after the leak guard when [`PR_ROOM_REPOS`](/docs/ui/configuration#pr-rooms) lists the target repository.
+The body must contain `PR room: prr-` followed by ten lowercase base32 characters.
+Create the room with the `pr-room` skill (app action `createRoom`) and pass the returned `prBody` through `--body-file`.
+This workflow reminder allows edits and unresolved inputs. An empty `PR_ROOM_REPOS` disables it.
+
 For user-facing modes, degradation, entry points, and message states, see [Steer a running task](/docs/guides/task-steering).
 
 ### pi-mono + Amazon Bedrock auth (alpha)
@@ -415,7 +420,7 @@ The primary enforcement point is the MCP `store-progress` tool: a non-conforming
 
 ### Reasoning / effort control
 
-`PATCH /api/agents/{id}/runtime` accepts an optional `reasoning_effort` field — a normalized, closed enum `off | low | medium | high | xhigh | max` — persisted like `MODEL_OVERRIDE` as the agent-scoped `swarm_config` key `REASONING_EFFORT_OVERRIDE`. The runner resolves it independently of the model/`modelTier` axis and populates `ProviderSessionConfig.reasoningEffort`; when unset, every adapter behaves exactly as it does today (no fleet-wide default is injected). `minimal` remains excluded because Codex `*-codex` models reject it. `max` is capability-gated and Codex-only: non-Codex harnesses filter it even when an upstream model snapshot advertises it.
+`PATCH /api/agents/{id}/runtime` accepts an optional `reasoning_effort` field — a normalized, closed enum `off | low | medium | high | xhigh | max` — persisted like `MODEL_OVERRIDE` as the agent-scoped `swarm_config` key `REASONING_EFFORT_OVERRIDE`. The runner resolves it independently of the model/`modelTier` axis and populates `ProviderSessionConfig.reasoningEffort`; when unset, every adapter behaves exactly as it does today (no fleet-wide default is injected). `minimal` remains excluded because Codex `*-codex` models reject it. `max` is capability-gated: it is offered only where the harness transport passes the model's own values through — `codex`, `cursor`, `opencode` and `pi` keep it when the catalog declares it; `claude`, `amp` and `grok` filter it even when an upstream model snapshot advertises it.
 
 `src/providers/reasoning-effort.ts` owns capability gating (`reasoningCapability(harness, model)`) and per-harness translation (`applyReasoningEffort(harness, model, level)`, a discriminated union telling each adapter what to merge). Capability data is hybrid: the models.dev `reasoning_options` snapshot (`src/providers/modelsdev-reasoning.json`, derived from the canonical `src/be/modelsdev-cache.json`) wins where present; otherwise a hand-authored `{low, medium, high}` fallback, plus a small harness-specific override table for quirks the cache doesn't encode. The runtime route validates the requested level against this lookup and 400s unsupported combos with `{ error, harness, model, level, allowed }`.
 
@@ -424,7 +429,7 @@ The primary enforcement point is the MCP `store-progress` tool: a non-conforming
 | `claude` | `CLAUDE_CODE_EFFORT_LEVEL` env var | `off` on a legacy budget_tokens-capable model sets `MAX_THINKING_TOKENS=0` instead (the effort env is omitted). No CLI flag is used — `--effort` is buggy in `-p` mode. **Precedence**: if an operator's `additionalArgs` includes `--effort`, the CLI flag wins over `CLAUDE_CODE_EFFORT_LEVEL` (Claude CLI's own precedence) — the existing "`additionalArgs` is an escape hatch" behavior, not special-cased here. |
 | `codex` | `model_reasoning_effort` config field | `off` maps to `'none'`; `max` passes through for capability-advertising models such as GPT-5.6. `show_raw_agent_reasoning` stays pinned `false` regardless of the effort level — higher effort costs reasoning tokens (visible via `reasoning_output_tokens` cost telemetry) but produces no visible reasoning trace in the dashboard. `*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. |
 | `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; pi's native vocabulary already includes `off`. |
-| `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob). `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (a noop application) — Opencode has no explicit off switch. |
+| `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob), or `effort` for `max`. `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (a noop application) — Opencode has no explicit off switch. |
 | `amp` | `reasoningEffort` on the per-task plugin agent (`off` maps to `none`) | Amp's CLI has no effort flag (`--effort` is rejected). Effort applies only to a pinned `provider/model` (for example `openai/gpt-5-nano`), judged by the catalog like pi and opencode; a mode (`low`..`ultra`) names no model in advance, so it takes none. |
 
 Each adapter reports the level it actually applied via `ProviderResult.appliedReasoningEffort` (`null` when `applyReasoningEffort()` returned a capability-rejected noop). The runner forwards that into `agents.cred_status.latestModel.reasoningEffort`, which the dashboard surfaces in the agent runtime editor, the harness credential-status tooltip, and the agents-list Model column (a compact `[|||]`-style badge — more bars mean higher effort).
@@ -438,7 +443,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1792152053-g57ff9b`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1792506219-g025e7e`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.
@@ -615,6 +620,10 @@ Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeTh
 - **Adapter behavior**: claude / claude-managed / codex each warn and ignore any stray `resumeSessionId` they receive; the runner no longer sets one. `CodexAdapter.canResume()` returns `false` unconditionally.
 
 **What your adapter owes the task:** emit `session_init` as early as possible (so the runner can persist the provider session id), emit `tool_start`/`tool_end` faithfully (so the UI shows the agent's work), and emit a `result` with populated `CostData` before your `waitForCompletion()` resolves.
+
+OpenCode's native `skill` tool passes `{ id: "<skill-name>" }`. Its adapter emits
+`tool_start` on `session.tool.called`, after input is available, and adds `name`
+to those arguments so `skill.invoke` telemetry records the skill name.
 
 ### Session-summary transcript sourcing
 

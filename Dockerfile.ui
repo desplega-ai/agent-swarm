@@ -1,6 +1,6 @@
 # Agent Swarm dashboard (apps/ui) served by nginx
 
-FROM --platform=$BUILDPLATFORM oven/bun:1.4.0 AS builder
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.3 AS builder
 
 WORKDIR /build
 

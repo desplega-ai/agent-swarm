@@ -100,9 +100,12 @@ const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
 ];
 const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "comb.presence",
+  "session.share",
+  "session.presence",
   "approval.respond",
   "runtime_controller.write",
   "runtime_pool.write",
+  "agent.token.manage",
 ];
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
