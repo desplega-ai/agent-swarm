@@ -537,6 +537,6 @@ describe("Chat SDK inbound voice notes and size limit", () => {
       );
     expect(replies).toHaveLength(1);
     expect(replies[0]).toContain("Too large to read");
-    expect(replies[0]).toContain("big.zip: too large (30.0 MB");
+    expect(replies[0]).toContain("`big.zip`: too large (30.0 MB");
   });
 });

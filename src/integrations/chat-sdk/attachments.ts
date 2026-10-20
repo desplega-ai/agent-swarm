@@ -124,9 +124,23 @@ export function buildChatAttachmentText(
     .join("\n");
 }
 
+/**
+ * A sender-chosen file name as an inline code span, so the bot's reply shows it
+ * as literal text and never renders a link, image or heading from it. Backslash
+ * escapes are not enough: the Chat SDK parser still autolinks bare URLs.
+ */
+function markdownLiteral(value: string): string {
+  const text = value.replace(/[\r\n]+/g, " ");
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  // CommonMark strips one space from each end of a padded span.
+  const pad = /^[` ]|[` ]$/.test(text) ? " " : "";
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
 /** The reply posted to the thread when files were over the inbound cap. */
 export function formatTooLargeReply(failed: ChatFileFailure[]): string {
-  const lines = failed.map((f) => `- ${f.file.name}: ${f.reason}`);
+  const lines = failed.map((f) => `- ${markdownLiteral(f.file.name)}: ${f.reason}`);
   return [
     `Too large to read, so the swarm did not get ${failed.length === 1 ? "this file" : "these files"}:`,
     ...lines,
