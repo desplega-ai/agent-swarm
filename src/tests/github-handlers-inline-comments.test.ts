@@ -573,9 +573,16 @@ describe("no-op approved reviews", () => {
     }
   });
 
-  test("GITHUB_SKIP_NOOP_APPROVALS=false: empty-body approval still creates a task", async () => {
+  test.each([
+    "false",
+    "FALSE",
+    "False",
+    "0",
+    " false ",
+    " 0 ",
+  ])("GITHUB_SKIP_NOOP_APPROVALS=%j: empty-body approval still creates a task", async (value) => {
     const previous = process.env.GITHUB_SKIP_NOOP_APPROVALS;
-    process.env.GITHUB_SKIP_NOOP_APPROVALS = "false";
+    process.env.GITHUB_SKIP_NOOP_APPROVALS = value;
     const fetchSpy = mockFetchForApproval({ reviews: [APPROVED_BY_REVIEWER] });
 
     try {
