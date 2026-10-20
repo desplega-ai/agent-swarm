@@ -10,7 +10,7 @@ import {
 import { SYSTEM_ONE_PROVIDER_IDS } from "@/workflows/executors/system-one-providers";
 
 /**
- * One typed decision (Jev and the other SystemOne hosts) made in the API
+ * One typed decision (Jev, Clef and the other SystemOne hosts) made in the API
  * process, the same way a `system-one-decision` workflow node makes it. The
  * provider credential is read and sent here and never reaches the caller, so a
  * script can ask for a decision without a credential binding in its own realm.
@@ -22,14 +22,16 @@ export const registerSystemOneDecideTool = (server: McpServer) => {
       title: "Ask a SystemOne decision model",
       annotations: { destructiveHint: false, openWorldHint: true },
       description:
-        "Send a state and typed questions (noul, choice, score) to a SystemOne decision host such as Jev, and return the validated answers. " +
+        "Send a state and typed questions (noul, choice, score) to a SystemOne decision host such as Jev or Clef, and return the validated answers. " +
         "Same request, provider list, credentials and validation as the `system-one-decision` workflow node, without its human review band. " +
         "The provider credential is a global secret that stays on the server; this tool never returns it.",
       inputSchema: z.object({
         provider: z
           .enum(SYSTEM_ONE_PROVIDER_IDS)
           .optional()
-          .describe("Decision host (default typesafe)"),
+          .describe(
+            "Decision host (default: the SYSTEM_ONE_DEFAULT_PROVIDER global config, typesafe when unset)",
+          ),
         model: z.string().min(1).optional().describe("Provider model id (default: the provider's)"),
         state: z
           .union([z.string(), z.array(z.string()), z.record(z.string(), z.unknown())])

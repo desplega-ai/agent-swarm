@@ -306,14 +306,14 @@ Jev is weak at counting. For a hybrid, count in a `script` and pass the number t
 
 ## SystemOne Decision nodes
 
-A `system-one-decision` node (display name "SystemOne Decision") makes typed decisions with a decisions model, through TypeSafe directly, through OpenRouter, or through a laya server (see Providers). The model is a config field and defaults to Jev; the node name is not tied to one model. It answers at once, and waits only when `humanReview` sends an answer to a person (see Human review). One call sends one `state` and a map of questions, and the node returns one validated answer per question.
+A `system-one-decision` node (display name "SystemOne Decision") makes typed decisions with a SystemOne decisions model. Jev (through TypeSafe or OpenRouter) and Clef (on Cloudflare Workers AI) are peers; laya and OpenAI are also hosts (see Providers). The node name is not tied to one model. It answers at once, and waits only when `humanReview` sends an answer to a person (see Human review). One call sends one `state` and a map of questions, and the node returns one validated answer per question.
 
 ```yaml
 - id: qualify
   type: system-one-decision
   inputs: { lead: "trigger.lead" }
   config:
-    provider: typesafe # the default; or openrouter, or laya
+    provider: typesafe # or openrouter, cloudflare, laya, openai; unset = SYSTEM_ONE_DEFAULT_PROVIDER
     model: jev-1.13.0
     state: "{{lead}}"
     questions:
@@ -338,7 +338,7 @@ A `system-one-decision` node (display name "SystemOne Decision") makes typed dec
 
 ### `system-one-decision` config
 
-- `provider`: `typesafe` (default), `openrouter`, `laya`, `openai`, or `cloudflare`. A literal, not a `{{token}}`, because it decides which settings are checked before the run starts. See Providers.
+- `provider`: `typesafe`, `openrouter`, `laya`, `openai`, or `cloudflare`. Unset means the `SYSTEM_ONE_DEFAULT_PROVIDER` global config value, read at run time (`typesafe` when that is unset too). A literal, not a `{{token}}`, because it decides which settings are checked before the run starts. See Providers.
 - `state` (required): text, a string array, or a JSON object. An exact `{{token}}` keeps the upstream JSON type; mixed text is interpolated as a string. Resolved content is never interpolated again.
 - `questions` (required): a map of question id to a `noul`, `choice`, or `score` question. Ids match `[A-Za-z_][A-Za-z0-9_-]*`. Ids and types are static. Only `state` and the descriptions may use `{{tokens}}`.
   - `noul`: `instructions`, optional `criteria: { true?, false? }`. The answer is a probability that the claim is true.
@@ -374,7 +374,7 @@ Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` m
 
 | `provider` | Host | Key (global secret) | Default `model` |
 |---|---|---|---|
-| `typesafe` (default) | `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | `jev-latest` |
+| `typesafe` | `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | `jev-latest` |
 | `openrouter` | `https://openrouter.ai/api/alpha/decisions` | `OPENROUTER_API_KEY` | `~typesafe/jev-latest` |
 | `laya` | `<LAYA_URL>/v1/systemone` (`LAYA_URL` is a global config value) | `LAYA_API_KEY` | none: no `model` is sent |
 | `openai` | `https://api.openai.com/v1/decisions` (beta) | `OPENAI_DECISIONS_API_KEY` | `gpt-6-luna` |
@@ -382,7 +382,9 @@ Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` m
 
 Every node gets the same output, so `returns`, the output shape, and the validation rules are the same on each provider. `typesafe`, `openrouter`, `laya`, and `cloudflare` take the SystemOne request as is; `openai` speaks its own Decisions format, and a per-provider `wire` translates it both ways (see Other backends: OpenAI). Confidence differs per host (see Human review). The list lives in `SYSTEM_ONE_PROVIDERS` (`src/workflows/executors/system-one-providers.ts`); adding a host is one entry there, plus a `wire` when it does not speak SystemOne. `openrouter` reads its key through `resolveWorkflowLlmConfig`, the resolver `raw-llm` uses, and never falls through to `OPENAI_API_KEY`.
 
-There is no fallback between providers. A node that names none uses `typesafe`, and it does not move to `openrouter` when the TypeSafe key is missing: the two accounts bill separately and use different model ids, and the key the preflight names must be the key the node uses. Switch by setting `provider`.
+A node that names no provider uses `SYSTEM_ONE_DEFAULT_PROVIDER` (Settings → Configuration, Workflows group; any decide host id, `typesafe` when unset). The executor, the readiness check, and the `system-one-decide` tool resolve it at each run (the stored global row first, then the environment), so switching the swarm to Clef is one setting and no workflow edit. The dashboard node card shows the effective provider and model. A node that names a provider ignores the setting. Because the default is resolved at run, a defaulted node's model allowlist and question limit are checked when it runs, not at save.
+
+There is no fallback between providers. A node does not move to another provider when its key is missing: accounts bill separately and use different model ids, and the key the preflight names must be the key the node uses. Switch by setting `provider` or the default.
 
 Use the decisions endpoint only. OpenRouter's `typesafe/jev-router` is a router that forwards a chat request to another model (a live call was served by `openai/gpt-6-luna`), and `~typesafe/jev-latest` rejects chat/completions with "is a decisions model". `openrouter` refuses to run when `OPENROUTER_BASE_URL` points at a gateway, because the key may be a gateway token and the decisions API is not a chat route.
 
@@ -492,7 +494,7 @@ A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes 
 - **Reachability.** `LAYA_URL` must be reachable from the swarm's API server, not from the workers. It must be `https`, except for `localhost`.
 - **The key.** Set the same value as `LAYA_API_KEY` in the laya server's environment and as the swarm's global secret. laya-server accepts unauthenticated calls when its `LAYA_API_KEY` is unset, but the swarm always requires the secret.
 - **Sizing.** laya-js's docs size one fp32 checkpoint at about 3 GB of RAM, and the Kubernetes example requests 1 CPU with a 3 GiB limit. Its own evals measured the Docker image peaking at 7.0 GB RSS under load (laya-js PR #12, Phase 10); a fix is in progress. Until it lands, give the container about 8 GB, not 3 GiB.
-- **No laya server?** Keep the default `typesafe` provider, which needs only `TYPESAFE_API_KEY`.
+- **No laya server?** Use `typesafe` (only `TYPESAFE_API_KEY`) or `cloudflare` (`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`).
 
 ### Other backends: OpenAI
 
@@ -511,7 +513,7 @@ A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes 
 - **The key is `OPENAI_DECISIONS_API_KEY`, never `OPENAI_API_KEY`.** A global `OPENAI_API_KEY` row reaches every worker's environment and can change harness auth, and the key needs Decisions beta access. A swarm with only `OPENAI_API_KEY` fails preflight with `OPENAI_DECISIONS_API_KEY is not configured`.
 - `confidence` is OpenAI's own field, not the top probability (the guide's choice example has top probability 0.95 and confidence 0.93), so a band tuned on Jev does not carry over.
 
-### Other backends: Cloudflare Clef
+### Cloudflare Clef
 
 `cloudflare` runs Clef (27B) or Clef-flash (9B) on Workers AI. Clef takes the SystemOne request unchanged; the response arrives in Cloudflare's `{ result, success, errors, messages }` envelope, which the node unwraps.
 
@@ -533,6 +535,7 @@ A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes 
 - At most 64 questions per node, checked at save. Choice and score limits match the node's own (255 options, 10 levels). The context window is 65,536 tokens; Cloudflare truncates longer state.
 - `success: false` fails the step with Cloudflare's error code. HTTP errors read the code from `errors[0].code`. The `cf-ray` header is the `requestId`.
 - Pricing: Clef $0.24 and Clef-flash $0.09 per 1M input tokens.
+- Calibration does not carry over from Jev. On the heartbeat gate's replay of 229 checklist ticks, Clef needed a threshold of 0.2 where Jev used 0.5 to miss no tick the Lead acted on (57 quiet ticks against Jev's 100). Re-tune any threshold or `humanReview` band before moving a workflow from Jev to Clef.
 
 ### Thresholds, retries, and credentials
 

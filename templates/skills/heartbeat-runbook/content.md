@@ -57,8 +57,8 @@ Two kinds of sections:
 
 A gate script can run before each checklist tick and decide whether the tick needs you. It never runs for boot triage.
 
-- `HEARTBEAT_CHECKLIST_GATE_SCRIPT` names a global script. Unset means the seeded `heartbeat-jev-gate` runs when a global `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set (an OpenRouter key behind an `OPENROUTER_BASE_URL` gateway does not count). `off` or an empty value turns the gate off.
-- `heartbeat-jev-gate` sends a compact state (new failures, tracked items due or past their date, the previous checklist result, task and agent counts) to Jev and returns `{ quiet, reason, summary }`.
+- `HEARTBEAT_CHECKLIST_GATE_SCRIPT` names a global script. Unset means the seeded `heartbeat-jev-gate` runs when a global `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set (an OpenRouter key behind an `OPENROUTER_BASE_URL` gateway does not count), or `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) with `CLOUDFLARE_ACCOUNT_ID`. `off` or an empty value turns the gate off.
+- `heartbeat-jev-gate` sends a compact state (new failures, tracked items due or past their date, the previous checklist result, task and agent counts) to a SystemOne decision model, Jev or Clef (Clef only when it is the sole provider or `HEARTBEAT_JEV_GATE_PROVIDER=cloudflare`), and returns `{ quiet, reason, summary }`.
 - `HEARTBEAT_CHECKLIST_GATE_MODE=shadow` (default): every checklist task is still created, tagged `heartbeat-gate:quiet`, `heartbeat-gate:wake` or `heartbeat-gate:error`. The prompt is unchanged. Handle the task as usual; your outcome is the check on the gate's verdict.
 - `HEARTBEAT_CHECKLIST_GATE_MODE=enforce`: a quiet verdict skips the task. A wake verdict adds the gate's summary as a Gate Findings section. Enforce is opt-in; turn it on only after shadow tags agree with your own quiet outcomes.
 - The gate fails open. A timeout (60 s), a script error or a malformed result is an `error` verdict, and the task is created in both modes.

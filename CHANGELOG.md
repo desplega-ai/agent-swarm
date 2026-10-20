@@ -6,7 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- SystemOne: `SYSTEM_ONE_DEFAULT_PROVIDER` (Settings → Configuration) picks the decision host for a `system-one-decision` node or `system-one-decide` call that names none, read at each run. Unset stays `typesafe`; setting `cloudflare` runs those nodes on Clef with no workflow edit, and the node card shows the effective provider and model (#2186).
+- Heartbeat: the built-in `heartbeat-jev-gate` runs on Clef (`provider: cloudflare`) with a replay-measured threshold of 0.2, and turns on by default with only `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` set. `auto` still prefers Jev (#2186).
+
 ### Changed
+- Extensions: `slack-reply-gate` 1.3.0 makes its decision through the server's `system-one-decide` tool instead of its own TypeSafe and OpenRouter client, so it can use Clef and every other SystemOne host. Its `apiKey` config field is removed; store the key as a global secret (#2186).
 - ACP: the adapter moves to `@agentclientprotocol/sdk` 2.0.0 and its client app API. It imports the `/unstable` entry point, so turn `usage` still reaches cost rows. The wire protocol stays ACP v1.
 
 ### Fixed

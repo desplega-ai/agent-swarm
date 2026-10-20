@@ -374,7 +374,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "HEARTBEAT_CHECKLIST_GATE_SCRIPT",
         label: "Checklist gate script",
         description:
-          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Unset runs the built-in heartbeat-jev-gate when a global TYPESAFE_API_KEY or OPENROUTER_API_KEY is set. Set off to turn the gate off.",
+          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Unset runs the built-in heartbeat-jev-gate when a global TYPESAFE_API_KEY or OPENROUTER_API_KEY is set, or CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) with CLOUDFLARE_ACCOUNT_ID. Set off to turn the gate off.",
         kind: "string",
         defaultValue: "",
         placeholder: "heartbeat-jev-gate",
@@ -1461,6 +1461,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "10000",
         placeholder: "10000",
         restartRequired: true,
+      },
+      {
+        key: "SYSTEM_ONE_DEFAULT_PROVIDER",
+        label: "Default SystemOne provider",
+        description:
+          "Decision host for a system-one-decision node or system-one-decide call that names no provider: typesafe or openrouter (Jev), cloudflare (Clef), laya, or openai. A node that names its provider keeps it. Each host needs its own credential on the Secrets page; cloudflare also needs CLOUDFLARE_ACCOUNT_ID. Applies to the next decision, with no workflow edit.",
+        kind: "enum",
+        options: ["typesafe", "openrouter", "cloudflare", "laya", "openai"],
+        defaultValue: "typesafe",
+        docsUrl: `${DOCS}concepts/workflows`,
       },
       {
         key: "SCRIPT_EXECUTOR",

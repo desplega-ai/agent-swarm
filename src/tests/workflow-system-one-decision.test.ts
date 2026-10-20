@@ -227,7 +227,8 @@ describe("system-one-decision config schema", () => {
       questions: { fit: { type: "noul", instructions: "Is it real?" } },
       returns: { fit: { type: "noul" } },
     });
-    expect(parsed.provider).toBe("typesafe");
+    // Unset: the executor reads SYSTEM_ONE_DEFAULT_PROVIDER at run time (typesafe when unset).
+    expect(parsed.provider).toBeUndefined();
     // The model default belongs to the provider, so the schema leaves it unset.
     expect(parsed.model).toBeUndefined();
     expect(parsed.timeoutMs).toBe(30_000);

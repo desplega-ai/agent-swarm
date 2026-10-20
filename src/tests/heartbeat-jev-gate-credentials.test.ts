@@ -165,4 +165,48 @@ describe("system-one-decide keeps the key on the server", () => {
     ]);
     expect(JSON.stringify(result)).not.toContain(TYPESAFE_KEY);
   });
+
+  test("with no provider it uses SYSTEM_ONE_DEFAULT_PROVIDER, typesafe when unset", async () => {
+    const { provider: _omit, ...noProvider } = request("typesafe");
+    const unset = recordAuthorization();
+    expect((await tool().handler(noProvider, extra())).isError).toBeFalsy();
+    expect(unset.map((s) => s.url)).toEqual(["https://api.typesafe.ai/v1/systemone"]);
+
+    const account = "0123456789abcdef0123456789abcdef";
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "SYSTEM_ONE_DEFAULT_PROVIDER",
+      value: "cloudflare",
+    });
+    await upsertSwarmConfig({ scope: "global", key: "CLOUDFLARE_ACCOUNT_ID", value: account });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLOUDFLARE_API_TOKEN",
+      value: "cf-default-provider-token",
+      isSecret: true,
+    });
+    const sent: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      sent.push(input instanceof Request ? input.url : String(input));
+      return Response.json({
+        result: {
+          model: "clef",
+          answers: { act: { type: "noul", noul: 0.7 } },
+          usage: { input_tokens: 12, output_tokens: 0 },
+        },
+        success: true,
+        errors: [],
+        messages: [],
+      });
+    }) as typeof fetch;
+    const result = await tool().handler(noProvider, extra());
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      model: "clef",
+      answers: { act: { noul: 0.7 } },
+    });
+    expect(sent).toEqual([
+      `https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/@cf/cloudflare/clef`,
+    ]);
+  });
 });
