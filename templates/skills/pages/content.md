@@ -167,7 +167,7 @@ To check a page by screenshot, open it from an origin its data endpoints allow. 
 | Mode | URL behavior | When to use |
 |---|---|---|
 | `public` | No gate. Anyone with the URL sees the content. General API calls require a page session. Rooms and channels permit anonymous guests. | Static reports, marketing pages, anything safe to share externally. |
-| `authed` | SPA `app_url` works for any signed-in dashboard user. Direct `api_url` requires a `page_session` cookie (mint via `POST /api/pages/:id/launch`). User-token launches retain viewer identity. Operator launches use guest sessions. | Per-team dashboards, JSON pages with action buttons. |
+| `authed` | SPA `app_url` works for any signed-in dashboard user. Direct `api_url` requires that page's `page_session_<id>` cookie (mint via `POST /api/pages/:id/launch`). Each page has its own cookie, so several pages stay open in one browser. User-token launches retain viewer identity. Operator launches use guest sessions. | Per-team dashboards, JSON pages with action buttons. |
 | `password` | `?key=<password>` or HTTP Basic on `/p/:id` unlocks. Unlock mints an anonymous guest session. It does not establish a user identity. | Pages shared with non-swarm users (clients, contractors). |
 
 > Password unlock has to happen on `/p/:id` directly (the API origin) because
@@ -213,9 +213,11 @@ per-version body cap is 5 MiB).
 
 Every HTML page automatically gets `window.SwarmSDK` (the class) and
 `window.swarmSdk` (a ready-to-use singleton) injected. The SDK routes through
-the `/@swarm/api/*` proxy, which resolves the `page_session` cookie to a user
-identity and forwards with proper auth headers server-side — your page never
-sees or handles tokens.
+the `/@swarm/api/*` proxy, which resolves the page's own `page_session_<id>`
+cookie to a user identity and forwards with proper auth headers server-side —
+your page never sees or handles tokens. The SDK names its page in the
+`X-Swarm-Page-Id` header. A direct `fetch('/@swarm/api/...')` from the page
+works too: the proxy falls back to the `/p/<id>` Referer.
 
 The SDK is **domain-grouped**. Each domain exposes idiomatic CRUD-ish methods
 that map 1:1 to the public REST API documented at

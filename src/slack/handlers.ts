@@ -702,8 +702,8 @@ export function registerMessageHandler(app: App): void {
         return ignoreSlackInbound("rate_limited");
       }
 
-      await using inbound = await fetchSlackFiles(client, msg.files);
-      const taskText = buildEffectiveText(msg.text, inbound.files, inbound.failed);
+      await using inbound = await fetchSlackFiles(client, msg.files, { transcribe: true });
+      const taskText = buildEffectiveText(msg.text, inbound.files, inbound.failed, inbound.notes);
       const taskDescription = isImplicitMention
         ? taskText
         : extractTaskFromMessage(taskText, botUserId);
@@ -778,9 +778,9 @@ export function registerMessageHandler(app: App): void {
     }
 
     // Extract task description (the text plus a `[File: …]` line per attachment)
-    await using inbound = await fetchSlackFiles(client, msg.files);
+    await using inbound = await fetchSlackFiles(client, msg.files, { transcribe: true });
     const taskDescription = extractTaskFromMessage(
-      buildEffectiveText(msg.text, inbound.files, inbound.failed),
+      buildEffectiveText(msg.text, inbound.files, inbound.failed, inbound.notes),
       botUserId,
     );
     if (!taskDescription) {

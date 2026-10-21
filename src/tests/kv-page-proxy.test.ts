@@ -11,6 +11,9 @@
  *   3. Reading from the agent's `task:agent:*` namespace via the cookie is
  *      ALSO forced to the page namespace (the page can't see the agent's
  *      scratchpad).
+ *   4. Per-page cookies: two pages open in one browser each proxy as
+ *      themselves, a header naming another page is refused, and the legacy
+ *      `page_session` cookie still works for its own page.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -123,10 +126,93 @@ async function launchPage(pageId: string): Promise<string> {
   expect(res.status).toBe(204);
   const setCookie = res.headers.get("set-cookie");
   expect(setCookie).toBeTruthy();
-  const cookieValue = /page_session=([^;]+)/.exec(setCookie!)?.[1];
+  const cookieValue = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(setCookie!)?.[1];
   expect(cookieValue).toBeTruthy();
   return cookieValue!;
 }
+
+/** What the browser SDK sends from `/p/<id>`: its own cookie plus its page id. */
+function pageSessionHeaders(id: string, cookie: string): Record<string, string> {
+  return { Cookie: `page_session_${id}=${cookie}`, "X-Swarm-Page-Id": id };
+}
+
+async function putClick(headers: Record<string, string>): Promise<Response> {
+  return fetch(`${BASE}/@swarm/api/kv/clicks`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ value: 1, valueType: "integer" }),
+  });
+}
+
+async function namespaceOf(res: Response): Promise<string> {
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { namespace: string }).namespace;
+}
+
+describe("page proxy → kv with several pages open in one browser", () => {
+  test("two pages launched in one cookie jar each proxy as themselves, concurrently", async () => {
+    const idA = await createPage();
+    const idB = await createPage();
+    const jar = `page_session_${idA}=${await launchPage(idA)}; page_session_${idB}=${await launchPage(idB)}`;
+
+    const [resA, resB] = await Promise.all([
+      putClick({ Cookie: jar, "X-Swarm-Page-Id": idA }),
+      putClick({ Cookie: jar, "X-Swarm-Page-Id": idB }),
+    ]);
+    expect(await namespaceOf(resA)).toBe(`task:page:${idA}`);
+    expect(await namespaceOf(resB)).toBe(`task:page:${idB}`);
+  });
+
+  test("a header naming page B with only page A's session is rejected", async () => {
+    const idA = await createPage();
+    const idB = await createPage();
+    const cookieA = await launchPage(idA);
+
+    for (const cookie of [
+      `page_session_${idA}=${cookieA}`,
+      `page_session_${idB}=${cookieA}`,
+      `page_session=${cookieA}`,
+    ]) {
+      const res = await putClick({ Cookie: cookie, "X-Swarm-Page-Id": idB });
+      expect(res.status).toBe(401);
+    }
+  });
+
+  test("a header that cannot be a page id is rejected", async () => {
+    const id = await createPage();
+    const cookie = await launchPage(id);
+    const res = await putClick({
+      Cookie: `page_session_${id}=${cookie}; page_session=${cookie}`,
+      "X-Swarm-Page-Id": "../x",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("the legacy page_session cookie still works for its own page", async () => {
+    const id = await createPage();
+    const cookie = await launchPage(id);
+    // With the page named, and from a client that names no page at all.
+    const named = await putClick({ Cookie: `page_session=${cookie}`, "X-Swarm-Page-Id": id });
+    expect(await namespaceOf(named)).toBe(`task:page:${id}`);
+    const unnamed = await putClick({ Cookie: `page_session=${cookie}` });
+    expect(await namespaceOf(unnamed)).toBe(`task:page:${id}`);
+  });
+
+  test("a same-host /p/<id> Referer selects the page when no header is sent", async () => {
+    const idA = await createPage();
+    const idB = await createPage();
+    const jar = `page_session_${idA}=${await launchPage(idA)}; page_session_${idB}=${await launchPage(idB)}`;
+
+    const res = await putClick({ Cookie: jar, Referer: `${BASE}/p/${idB}` });
+    expect(await namespaceOf(res)).toBe(`task:page:${idB}`);
+
+    // A cross-site Referer picks nothing, and no per-page cookie is used unnamed.
+    const crossSite = await putClick({ Cookie: jar, Referer: `https://evil.example/p/${idB}` });
+    expect(crossSite.status).toBe(401);
+    const unnamed = await putClick({ Cookie: jar });
+    expect(unnamed.status).toBe(401);
+  });
+});
 
 describe("page proxy → kv", () => {
   test("writes via the proxy land in task:page:<id> automatically", async () => {
@@ -137,7 +223,7 @@ describe("page proxy → kv", () => {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Cookie: `page_session=${cookie}`,
+        ...pageSessionHeaders(id, cookie),
       },
       body: JSON.stringify({ value: 1, valueType: "integer" }),
     });
@@ -161,13 +247,13 @@ describe("page proxy → kv", () => {
     const cookie = await launchPage(id);
     const r1 = await fetch(`${BASE}/@swarm/api/kv/votes/incr`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: `page_session=${cookie}` },
+      headers: { "Content-Type": "application/json", ...pageSessionHeaders(id, cookie) },
       body: JSON.stringify({ by: 2 }),
     });
     expect(r1.status).toBe(200);
     const r2 = await fetch(`${BASE}/@swarm/api/kv/votes/incr`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: `page_session=${cookie}` },
+      headers: { "Content-Type": "application/json", ...pageSessionHeaders(id, cookie) },
       body: JSON.stringify({}),
     });
     const v = (await r2.json()) as { value: number; namespace: string };
@@ -184,7 +270,7 @@ describe("page proxy → kv", () => {
     const fakeNs = `task:agent:${agentId}`;
     const put = await fetch(`${BASE}/@swarm/api/kv/_/${encodeURIComponent(fakeNs)}/escape`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Cookie: `page_session=${cookie}` },
+      headers: { "Content-Type": "application/json", ...pageSessionHeaders(id, cookie) },
       body: JSON.stringify({ value: "leaked", valueType: "string" }),
     });
     // The kv handler treats X-Page-Id as the highest-priority namespace

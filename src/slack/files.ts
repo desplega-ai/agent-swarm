@@ -22,6 +22,8 @@ export interface SlackFile {
   title?: string;
   mimetype: string;
   filetype: string;
+  /** `slack_audio` on a voice clip recorded in Slack. */
+  subtype?: string;
   size: number;
   url_private: string;
   url_private_download: string;

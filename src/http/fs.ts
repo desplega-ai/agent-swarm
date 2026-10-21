@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { deleteTaskAttachment, getTaskAttachments, getTaskById } from "../be/db";
+import { appendDraftTaskText } from "../be/db/tasks/draft-text";
 import {
   ensureAgentFsCredentialsForAgent,
   inviteEmailToSharedOrg,
@@ -18,6 +19,7 @@ import { type TaskAttachment, TaskAttachmentSchema } from "../types";
 import { attachmentContentDisposition } from "../utils/content-disposition";
 import { getCurrentRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { transcribeAudioNotes } from "../utils/transcription";
 import { requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { canReadSession, SESSION_READ_DENIED } from "./session-access";
@@ -152,7 +154,7 @@ const uploadTaskFileRoute = route({
   session: { taskParam: "taskId" },
   summary: "Upload a binary task file attachment",
   description:
-    "Accepts a raw binary request body. Pass the display/path name as the `name` query parameter.",
+    "Accepts a raw binary request body. Pass the display/path name as the `name` query parameter. An `audio/*` file uploaded to a `draft` task gets a `[File: …]` line and its transcript (or why there is none) appended to the task text before the response; a failed transcription never fails the upload.",
   tags: ["FS"],
   params: taskParams,
   query: uploadQuery,
@@ -336,7 +338,14 @@ export async function handleFs(
     const task = await getTaskById(parsed.params.taskId);
     if (!task) return notFound(res, "Task not found");
     if (!(await canMutateTask(task, myAgentId, req))) return forbidden(res);
-    return sendUpload(req, res, parsed.params.taskId, parsed.query, myAgentId ?? null);
+    return sendUpload(
+      req,
+      res,
+      parsed.params.taskId,
+      parsed.query,
+      myAgentId ?? null,
+      task.status === "draft",
+    );
   }
 
   if (listTaskFilesRoute.match(req.method, pathSegments)) {
@@ -371,6 +380,7 @@ async function sendUpload(
   taskId: string,
   query: z.infer<typeof uploadQuery>,
   agentId: string | null,
+  isDraft: boolean,
 ): Promise<boolean> {
   const body = await readRawBody(req, MAX_TASK_ATTACHMENT_BYTES);
   if (body === BODY_TOO_LARGE) {
@@ -422,8 +432,43 @@ async function sendUpload(
     isPrimary: query.isPrimary === "true",
     createdBy: auth?.kind === "user" ? auth.userId : undefined,
   });
+  const mimeType = contentType.split(";")[0]!.trim().toLowerCase();
+  if (isDraft && mimeType.startsWith("audio/")) {
+    await appendAudioTranscript(taskId, query.name, mimeType, body);
+  }
   uploadTaskFileRoute.respond(res, 201, attachment);
   return true;
+}
+
+/**
+ * A voice note uploaded to a draft (the composer's pre-dispatch window) gets
+ * its transcript in the task text, as one sent over Slack or a chat app does.
+ * Runs before the upload responds, so the composer promotes the draft only
+ * after the text is final. Never throws: the attachment has already landed.
+ */
+async function appendAudioTranscript(
+  taskId: string,
+  name: string,
+  mimeType: string,
+  body: Buffer,
+): Promise<void> {
+  try {
+    const notes = await transcribeAudioNotes(
+      [{ key: name, name, data: new Blob([body], { type: mimeType }), mimeType }],
+      "[fs]",
+    );
+    const note = notes.get(name);
+    if (!note) return;
+    if (!(await appendDraftTaskText(taskId, `[File: ${name} (${mimeType})]\n${note}`))) {
+      console.warn(`[fs] task ${taskId} left draft before the transcript of ${name} was added`);
+    }
+  } catch (error) {
+    console.warn(
+      scrubSecrets(
+        `[fs] could not add the transcript of ${name} to task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+  }
 }
 
 async function sendDownload(res: ServerResponse, attachment: TaskAttachment): Promise<boolean> {

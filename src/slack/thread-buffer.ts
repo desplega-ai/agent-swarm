@@ -177,7 +177,7 @@ async function slackFlush(
   const app = getSlackApp();
   const files = items.flatMap((item) => item.files ?? []);
   await using inbound = app
-    ? await fetchSlackFiles(app.client, files)
+    ? await fetchSlackFiles(app.client, files, { transcribe: true })
     : {
         files,
         fetched: [],
@@ -196,6 +196,7 @@ async function slackFlush(
           item.text,
           item.files?.map((file) => resolvedFiles.get(file.id) ?? file),
           inbound.failed,
+          inbound.notes,
         ),
       )
       .join("\n---\n"),

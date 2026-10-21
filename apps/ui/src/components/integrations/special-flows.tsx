@@ -7,6 +7,7 @@ import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section
 import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
 import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
 import { MemoryEmbeddingsSection } from "@/components/integrations/memory-embeddings-section";
+import { TranscriptionSection } from "@/components/integrations/transcription-section";
 import type { IntegrationDef, IntegrationSpecialFlow } from "@/lib/integrations-catalog";
 
 export interface SpecialFlowSectionProps {
@@ -38,4 +39,5 @@ export const SPECIAL_FLOWS: Record<IntegrationSpecialFlow, SpecialFlow> = {
   "memory-embeddings": { Section: MemoryEmbeddingsSection, genericFields: "advanced" },
   // The card edits every key itself; a second generic form only duplicated the save bar.
   "chat-sdk": { Section: ChatSdkSection, genericFields: "replaced" },
+  transcription: { Section: TranscriptionSection, genericFields: "shown" },
 };

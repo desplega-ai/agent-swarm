@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect, useState } from "react";
 
@@ -21,19 +21,37 @@ mock.module("@/components/sessions/composer-dock", () => require("../sessions/co
 mock.module("@/components/sessions/compose-attachment-upload", () =>
   require("../sessions/compose-attachment-upload"),
 );
+mock.module("@/components/sessions/audio-recorder", () => require("../sessions/audio-recorder"));
 
 const createdTasks: Array<Record<string, unknown>> = [];
 const uploads: Array<{ taskId: string; file: File }> = [];
+// Promotions the server committed, and every promotion request sent.
+const promoted: string[] = [];
+const promoteCalls: string[] = [];
+// "reject": every request fails before the server commits it.
+// "lose-first-response": the first request commits, then its response is lost.
+let promoteMode: "ok" | "reject" | "lose-first-response" = "ok";
+let rejectUploads = false;
 mock.module("@/api/client", () => ({
   api: {
     createTask: async (input: Record<string, unknown>) => {
       createdTasks.push(input);
       return { id: "follow-up", ...input };
     },
+    promoteDraftTask: async (id: string) => {
+      promoteCalls.push(id);
+      if (promoteMode === "reject") throw new Error("promotion failed");
+      if (!promoted.includes(id)) promoted.push(id);
+      if (promoteMode === "lose-first-response" && promoteCalls.length === 1) {
+        throw new Error("network error");
+      }
+      return { id };
+    },
   },
 }));
 mock.module("@/api/fs", () => ({
   uploadTaskAttachment: async (input: { taskId: string; file: File }) => {
+    if (rejectUploads) throw new Error("upload failed");
     uploads.push(input);
     return {};
   },
@@ -111,9 +129,23 @@ async function send(container: HTMLElement) {
   await act(async () => {});
 }
 
+/** Waits for `done`, up to 2 s (promotion retries back off for 600 ms). */
+async function waitFor(done: () => boolean) {
+  for (let i = 0; i < 200 && !done(); i++) {
+    await act(async () => new Promise((r) => setTimeout(r, 10)));
+  }
+}
+
+const sendButton = (container: HTMLElement) =>
+  container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+
 beforeEach(() => {
   createdTasks.length = 0;
   uploads.length = 0;
+  promoted.length = 0;
+  promoteCalls.length = 0;
+  promoteMode = "ok";
+  rejectUploads = false;
 });
 
 describe("TaskComposer on Sessions", () => {
@@ -148,11 +180,17 @@ describe("TaskComposer on Sessions", () => {
       task: "see the screenshot",
       parentTaskId: "lead-1",
       source: "ui",
+      // A draft until its uploads settle, so no worker claims it without them.
+      draft: true,
     });
     // Sessions never pins an agent: the server routes the follow-up to the Lead.
     expect(createdTasks[0]).not.toHaveProperty("agentId");
     expect(createdTasks[0]).not.toHaveProperty("routingReason");
     expect(uploads).toEqual([{ taskId: "follow-up", file: screenshot, intent: "user-upload" }]);
+    for (let i = 0; i < 50 && promoted.length === 0; i++) {
+      await act(async () => new Promise((r) => setTimeout(r, 10)));
+    }
+    expect(promoted).toEqual(["follow-up"]);
     // Sent: the attachment clears and steering is back for the running task.
     await act(async () => {});
     expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
@@ -178,6 +216,57 @@ describe("TaskComposer on Sessions", () => {
 
     expect(createdTasks[0]).toMatchObject({ task: "next step", parentTaskId: "root-1" });
     expect(createdTasks[0]).not.toHaveProperty("agentId");
+    await unmount();
+  });
+
+  test("a promotion response lost after the server committed it is retried, not resent", async () => {
+    promoteMode = "lose-first-response";
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={null}
+        canSteer={false}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "do this once");
+    await send(container);
+    await waitFor(() => promoteCalls.length === 2);
+    await act(async () => {});
+
+    // The retry finds the task promoted; the send counts as done.
+    expect(promoted).toEqual(["follow-up"]);
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("");
+    expect(container.textContent).not.toContain("network error");
+    await act(async () => sendButton(container).click());
+    expect(createdTasks).toHaveLength(1);
+    await unmount();
+  });
+
+  test("a failed upload still promotes the task", async () => {
+    rejectUploads = true;
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={null}
+        canSteer={false}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "see the screenshot");
+    await send(container);
+    await waitFor(() => promoted.length === 1);
+
+    expect(uploads).toEqual([]);
+    expect(promoted).toEqual(["follow-up"]);
     await unmount();
   });
 });
@@ -225,6 +314,44 @@ describe("TaskComposer on the task page", () => {
     await unmount();
   });
 
+  test("a promotion that keeps failing still counts as one sent task", async () => {
+    promoteMode = "reject";
+    const created: Array<{ id: string }> = [];
+    function Page() {
+      const [draft, setDraft] = useState("");
+      return (
+        <TaskComposer
+          targetTask={completedWorkerTask}
+          canSteer={false}
+          followUpAgentId="worker-7"
+          value={draft}
+          onValueChange={setDraft}
+          onCreated={(task) => created.push(task)}
+          renderActions={(add) => (
+            <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+          )}
+        />
+      );
+    }
+    const { container, unmount } = await mount(<Page />);
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "do this once");
+    await send(container);
+    await waitFor(() => created.length === 1);
+
+    // Every attempt failed, so the heartbeat promotes the draft later. The
+    // task exists: the text clears and the page hears about it once.
+    expect(promoteCalls).toEqual(["follow-up", "follow-up", "follow-up"]);
+    expect(created.map((task) => task.id)).toEqual(["follow-up"]);
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("");
+    expect(container.textContent).not.toContain("promotion failed");
+    await act(async () => sendButton(container).click());
+    await act(async () => new Promise((r) => setTimeout(r, 30)));
+    expect(createdTasks).toHaveLength(1);
+    await unmount();
+  });
+
   test("a steerable task gets the steer box, whatever agent it runs on", async () => {
     const { container, unmount } = await mount(
       <TaskComposer
@@ -235,5 +362,192 @@ describe("TaskComposer on the task page", () => {
     );
     expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
     await unmount();
+  });
+});
+
+describe("composer attachment types", () => {
+  test("audio files are accepted, so they reach the draft and get transcribed", async () => {
+    const { partitionAttachmentFiles } = await import("../sessions/composer-dock");
+    const audio = [
+      "note.mp3",
+      "memo.m4a",
+      "clip.wav",
+      "voice.ogg",
+      "voice.oga",
+      "a.opus",
+      "b.flac",
+    ];
+    const files = audio.map((name) => new File([new Uint8Array([1])], name));
+    expect(partitionAttachmentFiles(files)).toEqual({ valid: files, error: null });
+
+    const binary = new File([new Uint8Array([1])], "tool.exe");
+    expect(partitionAttachmentFiles([binary]).error).toContain(
+      '"tool.exe" isn\'t an allowed file type',
+    );
+  });
+});
+
+// A fake mic: `getUserMedia` hands out a stream whose track stop is counted,
+// and the recorder emits one webm chunk on stop, as Chrome does.
+let micMode: "ok" | "blocked" = "ok";
+let micPermission: PermissionState = "prompt";
+let stoppedTracks = 0;
+const micRequests: unknown[] = [];
+
+class FakeMediaRecorder {
+  static isTypeSupported = (type: string) => type.startsWith("audio/webm");
+  state: "inactive" | "recording" = "inactive";
+  mimeType: string;
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  onstop: (() => void) | null = null;
+  constructor(_stream: unknown, options?: { mimeType?: string }) {
+    this.mimeType = options?.mimeType ?? "";
+  }
+  start() {
+    this.state = "recording";
+  }
+  stop() {
+    this.state = "inactive";
+    this.ondataavailable?.({
+      data: new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])], { type: this.mimeType }),
+    });
+    this.onstop?.();
+  }
+}
+
+function installMic() {
+  (globalThis as { MediaRecorder?: unknown }).MediaRecorder = FakeMediaRecorder;
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: async (constraints: unknown) => {
+        micRequests.push(constraints);
+        if (micMode === "blocked") throw new DOMException("Permission denied", "NotAllowedError");
+        return { getTracks: () => [{ stop: () => stoppedTracks++ }] };
+      },
+    },
+  });
+  Object.defineProperty(navigator, "permissions", {
+    configurable: true,
+    value: {
+      query: async () => ({
+        state: micPermission,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    },
+  });
+}
+
+function removeMic() {
+  delete (globalThis as { MediaRecorder?: unknown }).MediaRecorder;
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
+}
+
+const micButton = (container: HTMLElement) =>
+  container.querySelector('button[aria-label^="Record audio"]') as HTMLButtonElement;
+
+describe("composer audio recording", () => {
+  beforeEach(() => {
+    micMode = "ok";
+    micPermission = "prompt";
+    stoppedTracks = 0;
+    micRequests.length = 0;
+    installMic();
+  });
+  afterEach(() => {
+    removeMic();
+  });
+
+  test("record then stop attaches a webm clip, which the follow-up uploads to its draft", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer rootTaskId="root-1" targetTask={runningLeadTask} canSteer />,
+    );
+    // The mic button sits in the steer box too.
+    expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
+    expect(micButton(container).disabled).toBe(false);
+
+    await act(async () => micButton(container).click());
+    expect(micRequests).toEqual([{ audio: true }]);
+    const stop = container.querySelector(
+      'button[aria-label="Stop recording"]',
+    ) as HTMLButtonElement;
+    expect(stop.textContent).toContain("0:00");
+
+    await act(async () => stop.click());
+    // The mic is released, and the clip moves the composer to the follow-up path.
+    expect(stoppedTracks).toBe(1);
+    expect(container.querySelector('[data-testid="steer-composer"]')).toBeNull();
+    const remove = container.querySelector(
+      'button[aria-label^="Remove recording-"]',
+    ) as HTMLButtonElement;
+    expect(remove.getAttribute("aria-label")).toMatch(/^Remove recording-[\d-]+\.webm$/);
+
+    await type(container, "listen to this");
+    await send(container);
+    await waitFor(() => promoted.length === 1);
+
+    expect(createdTasks[0]).toMatchObject({ task: "listen to this", draft: true });
+    expect(uploads).toHaveLength(1);
+    const clip = uploads[0]!.file;
+    expect(clip.name).toMatch(/^recording-[\d-]+\.webm$/);
+    // No `;codecs=`: the server reads the container from the content type.
+    expect(clip.type).toBe("audio/webm");
+    expect(clip.size).toBe(4);
+    expect(promoted).toEqual(["follow-up"]);
+    await unmount();
+  });
+
+  test("a refused mic disables the button and the composer still sends", async () => {
+    micMode = "blocked";
+    const { container, unmount } = await mount(
+      <TaskComposer rootTaskId="root-1" targetTask={null} canSteer={false} />,
+    );
+    await act(async () => micButton(container).click());
+
+    expect(micButton(container).disabled).toBe(true);
+    expect(micButton(container).getAttribute("aria-label")).toBe(
+      "Record audio (Microphone access is blocked)",
+    );
+    await type(container, "typed instead");
+    await send(container);
+    expect(createdTasks[0]).toMatchObject({ task: "typed instead", draft: false });
+    await unmount();
+  });
+
+  test("a mic blocked before the first click disables the button on mount", async () => {
+    micPermission = "denied";
+    const { container, unmount } = await mount(
+      <TaskComposer rootTaskId="root-1" targetTask={null} canSteer={false} />,
+    );
+    await act(async () => {});
+    expect(micButton(container).disabled).toBe(true);
+    expect(micRequests).toEqual([]);
+    await unmount();
+  });
+
+  test("a browser without MediaRecorder gets a disabled button, nothing else changes", async () => {
+    removeMic();
+    const { container, unmount } = await mount(
+      <TaskComposer rootTaskId="root-1" targetTask={null} canSteer={false} />,
+    );
+    expect(micButton(container).disabled).toBe(true);
+    expect(micButton(container).getAttribute("aria-label")).toBe(
+      "Record audio (This browser cannot record audio)",
+    );
+    await type(container, "still works");
+    await send(container);
+    expect(createdTasks[0]).toMatchObject({ task: "still works" });
+    await unmount();
+  });
+
+  test("a recorded webm clip passes the dock's attachment check", async () => {
+    const { partitionAttachmentFiles } = await import("../sessions/composer-dock");
+    const { recordingFileName } = await import("../sessions/audio-recorder");
+    const clips = ["audio/webm", "audio/mp4", "audio/ogg"].map(
+      (type) => new File([new Uint8Array([1])], recordingFileName(type), { type }),
+    );
+    expect(clips.map((clip) => clip.name.split(".").pop())).toEqual(["webm", "m4a", "ogg"]);
+    expect(partitionAttachmentFiles(clips)).toEqual({ valid: clips, error: null });
   });
 });

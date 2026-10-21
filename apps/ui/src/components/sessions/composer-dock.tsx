@@ -56,6 +56,16 @@ const ALLOWED_ATTACHMENT_EXTENSIONS = [
   ".gif",
   ".webp",
   ".zip",
+  // Audio is transcribed into the task text when it reaches a draft task.
+  ".mp3",
+  ".m4a",
+  ".wav",
+  ".ogg",
+  ".oga",
+  ".opus",
+  ".flac",
+  // The mic button records webm (Chrome, Firefox); Safari's mp4 clips are `.m4a`.
+  ".webm",
 ] as const;
 
 function fileExtension(name: string): string {
@@ -66,7 +76,7 @@ function fileExtension(name: string): string {
 /** Splits a dropped/selected/pasted file batch into what's safe to attach and a
  * human-readable reason for anything rejected. Returns at most one message:
  * multiple bad files still name only the first, to keep the row short. */
-function partitionAttachmentFiles(files: File[]): { valid: File[]; error: string | null } {
+export function partitionAttachmentFiles(files: File[]): { valid: File[]; error: string | null } {
   const valid: File[] = [];
   let error: string | null = null;
   for (const file of files) {
