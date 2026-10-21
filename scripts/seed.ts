@@ -656,6 +656,115 @@ function seedSessionState(db: Database, userIds: string[], tasks: { id: string }
   }
 }
 
+/**
+ * Two sessions in the swarm's real turn shape, for the sessions v2 turn
+ * timeline (fixed ids, no faker, so the random seed above stays the same):
+ * a person writes, the lead replies, workers run (one fails and retries,
+ * one is superseded and resumed), each worker wakes the lead with a `system`
+ * follow-up, the lead waits on a `deferred` wake-up, and the last answer asks
+ * for an approval. The second session is one a schedule started, then a
+ * person replied, and a worker still waits in the queue.
+ */
+function seedTurnSessions(
+  db: Database,
+  agents: { id: string; isLead: boolean }[],
+  userIds: string[],
+): void {
+  const lead = agents.find((agent) => agent.isLead);
+  const [scout, forge] = agents.filter((agent) => !agent.isLead);
+  const [alex, morgan] = userIds;
+  if (!lead || !scout || !forge || !alex || !morgan) return;
+  const ago = (minutes: number) => secondsAgo(minutes * 60);
+  const insert = db.prepare(`INSERT OR IGNORE INTO agent_tasks
+    (id, agentId, task, status, source, taskType, parentTaskId, createdAt, lastUpdatedAt,
+     finishedAt, output, failureReason, "key", requestedByUserId, title)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  type Row = {
+    n: number;
+    agent: string | null;
+    task: string;
+    status: string;
+    source: string;
+    type?: string;
+    parent?: number;
+    start: number;
+    end?: number;
+    output?: string;
+    failure?: string;
+    user?: string;
+    title?: string;
+  };
+  const write = (key: string, rows: Row[]) => {
+    for (const row of rows) {
+      const finished = row.end === undefined ? null : ago(row.end);
+      insert.run(
+        seedId("turn-task", row.n),
+        row.agent,
+        row.task,
+        row.status,
+        row.source,
+        row.type ?? null,
+        row.parent === undefined ? null : seedId("turn-task", row.parent),
+        ago(row.start),
+        finished ?? ago(row.start),
+        finished,
+        row.output ?? null,
+        row.failure ?? null,
+        key,
+        row.user ?? null,
+        row.title ?? null,
+      );
+    }
+  };
+  const followUp = "Worker task completed, review needed.";
+
+  write("shared/northwind/pricing/", [
+    { n: 1, agent: lead.id, task: "Rewrite the pricing page for Q4. Three tiers, an annual discount, and a comparison table.", status: "completed", source: "ui", start: 180, end: 179, output: "Plan: research the competitor tiers and draft the copy in parallel. Starting both now.", user: alex, title: "Q4 pricing page rewrite" },
+    { n: 2, agent: scout.id, task: "Research competitor pricing tiers.", status: "completed", source: "mcp", type: "research", parent: 1, start: 178, end: 170, output: "Compared 6 competitors. 5 of 6 show annual pricing first. The median annual discount is 17%." },
+    { n: 3, agent: forge.id, task: "Draft the Q4 pricing copy.", status: "failed", source: "mcp", type: "content", parent: 1, start: 178, end: 175, failure: "Could not open the brand guide (permission denied on the shared drive)." },
+    { n: 4, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 3, start: 175, end: 175, output: "The draft failed on the brand guide. Sending it back to the Writer with the cached copy." },
+    { n: 5, agent: forge.id, task: "Draft the Q4 pricing copy with the cached brand guide.", status: "completed", source: "mcp", type: "content", parent: 4, start: 174, end: 161, output: "Draft v1: three tiers (Starter, Team, Scale), a feature table with 14 rows, and an FAQ with 6 questions." },
+    { n: 6, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 2, start: 170, end: 169, output: "Researcher finished. I merged the findings into the plan." },
+    { n: 7, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 5, start: 160, end: 159, output: "Draft v1 is ready. Annual pricing shows first, with a 17% discount. Morgan, can you review the copy?" },
+    { n: 8, agent: lead.id, task: "The Scale tier reads like enterprise. Can we call it Business and move SSO to Business only?", status: "completed", source: "ui", parent: 7, start: 120, end: 119, output: "Renaming Scale to Business and moving SSO. I will check with finance first, so I scheduled a wake-up.", user: morgan },
+    { n: 9, agent: lead.id, task: "Wake-up: check whether the finance numbers are final.", status: "completed", source: "schedule", type: "deferred", parent: 8, start: 90, end: 89, output: "Finance confirmed the numbers. Team goes from 29 to 32 per seat. Sending the change to the Writer." },
+    { n: 10, agent: forge.id, task: "Rename Scale to Business, move SSO, and set Team to 32 per seat.", status: "superseded", source: "mcp", type: "content", parent: 9, start: 88, end: 80 },
+    { n: 11, agent: forge.id, task: "Rename Scale to Business, move SSO, and set Team to 32 per seat.", status: "completed", source: "system", type: "resume", parent: 10, start: 80, end: 72, output: "Draft v2: Business tier, SSO only on Business, Team at 32 per seat." },
+    { n: 12, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 11, start: 71, end: 70, output: "Draft v2 is ready. Publishing needs an approval." },
+  ]);
+  write("shared/infra/", [
+    { n: 20, agent: lead.id, task: "Weekly dependency audit: list outdated packages and open security advisories.", status: "completed", source: "schedule", type: "scheduled", start: 300, end: 299, output: "Sending the audit to the Researcher.", user: alex, title: "Weekly dependency audit" },
+    { n: 21, agent: scout.id, task: "Audit the dependencies.", status: "completed", source: "mcp", type: "research", parent: 20, start: 299, end: 291, output: "2 minor bumps (zod, hono). No open advisories." },
+    { n: 22, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 21, start: 290, end: 290, output: "The audit is clean: 2 minor bumps and no advisories." },
+    { n: 23, agent: lead.id, task: "Open a PR for the two bumps.", status: "completed", source: "ui", parent: 22, start: 200, end: 199, output: "Opening the PR. Sending the bumps to the Coder.", user: alex },
+    { n: 24, agent: forge.id, task: "Bump zod and hono, run the tests, and open a PR.", status: "pending", source: "mcp", type: "implementation", parent: 23, start: 199 },
+  ]);
+
+  db.prepare(`INSERT OR IGNORE INTO session_shares
+    (id, rootTaskId, userId, access, createdAt, created_by, updated_by)
+    VALUES (?, ?, ?, 'write', ?, ?, ?)`).run(
+    seedId("turn-share", 1),
+    seedId("turn-task", 1),
+    morgan,
+    now(),
+    alex,
+    alex,
+  );
+  // REPLACE: a re-seed brings the approval back to pending.
+  db.prepare(`INSERT OR REPLACE INTO approval_requests
+    (id, title, questions, sourceTaskId, approvers, status, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
+    seedId("turn-approval", 1),
+    "Publish the new pricing page?",
+    JSON.stringify([{ id: "publish", type: "approval", label: "Publish the new Q4 pricing page?" }]),
+    seedId("turn-task", 12),
+    JSON.stringify({ users: [alex], policy: "any" }),
+    ago(70),
+    ago(70),
+  );
+  console.log("  ✓ Seeded 2 turn-shaped sessions");
+}
+
 function seedTasks(
   db: Database,
   config: SeedConfig,
@@ -1856,6 +1965,8 @@ async function main(): Promise<void> {
   seedMemories(db, config, agents);
   seedServices(db, config, agents);
   seedMcpServers(db, config, agents);
+  // Last, and without faker: the random seed above stays the same.
+  seedTurnSessions(db, agents, userIds);
 
   db.close();
 

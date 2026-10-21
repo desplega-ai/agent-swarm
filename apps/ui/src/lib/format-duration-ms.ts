@@ -32,3 +32,17 @@ export function formatDurationMs(ms: number, opts?: { precise?: boolean }): stri
   const remainingMinutes = minutes % 60;
   return `${hours}h ${remainingMinutes}m`;
 }
+
+/**
+ * A wall-clock span for activity lines ("worked for 17m"): seconds under a
+ * minute, then whole minutes rounded to the nearest one, "1h 36m", "2d 3h".
+ * Rounds like the SPEC R8.3 mockup, not down like `formatDurationMs`.
+ */
+export function formatSpan(ms: number): string {
+  if (ms < 59_500) return `${Math.max(1, Math.round(ms / 1000))}s`;
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
+  return `${Math.floor(hours / 24)}d${hours % 24 ? ` ${hours % 24}h` : ""}`;
+}

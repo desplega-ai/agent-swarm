@@ -41,6 +41,8 @@ const createdTasks: CreateTaskInput[] = [];
 const listCalls: Array<Record<string, unknown>> = [];
 let sessions: Array<{ root: Record<string, unknown>; lastActivityAt: string }> = [];
 let currentUserId: string | null = "u1";
+// The "Legacy sessions" preference the panel follows (plan D15).
+let sessionsView: "v2" | "legacy" = "v2";
 
 mock.module("@/api/client", () => ({
   api: {
@@ -69,6 +71,11 @@ mock.module("modern-screenshot", () => ({
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ userId: currentUserId }),
 }));
+let viewPending = false;
+mock.module("@/hooks/use-sessions-view", () => ({
+  useStoredSessionsView: () => ({ view: sessionsView, pending: viewPending }),
+}));
+mock.module("@/components/ui/skeleton", () => require("../ui/skeleton"));
 mock.module("@/api/hooks/use-sessions", () => ({
   useSessions: (opts: Record<string, unknown>) => {
     listCalls.push(opts);
@@ -91,11 +98,13 @@ mock.module("@/components/sessions/session-conversation", () => ({
   SessionConversation: ({
     rootTaskId,
     renderComposerActions,
+    timeline,
   }: {
     rootTaskId: string;
     renderComposerActions?: (add: (file: File) => void) => React.ReactNode;
+    timeline?: string;
   }) => (
-    <div data-testid="session-conversation" data-root={rootTaskId}>
+    <div data-testid="session-conversation" data-root={rootTaskId} data-timeline={timeline}>
       {renderComposerActions?.((file) => followUpFiles.push(file))}
     </div>
   ),
@@ -129,6 +138,8 @@ function reset() {
   followUpFiles.length = 0;
   sessions = [];
   currentUserId = "u1";
+  sessionsView = "v2";
+  viewPending = false;
 }
 
 function withProviders(ui: React.ReactElement): React.ReactElement {
@@ -324,6 +335,37 @@ describe("SessionPanel", () => {
 
     await act(async () => root.unmount());
     container.remove();
+  });
+
+  test("the conversation uses the turn timeline, and today's timeline with the Legacy preference", async () => {
+    reset();
+    const storage = memoryStorage({ "session-panel:last:task:ui:workflow:w1": "s1" });
+    const conversation = (container: HTMLElement) =>
+      container.querySelector('[data-testid="session-conversation"]');
+
+    const v2 = await mount(
+      <SessionPanel pageKey="task:ui:workflow:w1" contextLabel="workflow w1" storage={storage} />,
+    );
+    expect(conversation(v2.container)?.getAttribute("data-timeline")).toBe("turns");
+    await act(async () => v2.root.unmount());
+    v2.container.remove();
+
+    sessionsView = "legacy";
+    const legacy = await mount(
+      <SessionPanel pageKey="task:ui:workflow:w1" contextLabel="workflow w1" storage={storage} />,
+    );
+    expect(conversation(legacy.container)?.getAttribute("data-timeline")).toBe("legacy");
+    await act(async () => legacy.root.unmount());
+    legacy.container.remove();
+
+    // While the version check runs, no timeline yet: it could still flip.
+    viewPending = true;
+    const pending = await mount(
+      <SessionPanel pageKey="task:ui:workflow:w1" contextLabel="workflow w1" storage={storage} />,
+    );
+    expect(conversation(pending.container)).toBeNull();
+    await act(async () => pending.root.unmount());
+    pending.container.remove();
   });
 
   test("a different page key starts from New session", async () => {

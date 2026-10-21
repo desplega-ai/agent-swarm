@@ -33,9 +33,7 @@ export interface SessionsView {
  */
 export function useSessionsView(): SessionsView {
   const gate = useFeatureGate(SESSIONS_V2_MIN_VERSION);
-  // The gate reads dev mode from stats. Until stats load, an older version
-  // reports "unsupported" and the page would flash the legacy view.
-  const stats = useStats();
+  const pending = useGatePending(gate);
   const [legacyPref, setLegacyPref] = useLocalToggle("sessions:legacy", false);
   const { searchParams, setParam } = useUrlSearchState();
   const legacyParam = searchParams.get("legacy");
@@ -58,10 +56,29 @@ export function useSessionsView(): SessionsView {
     [setLegacyPref],
   );
 
-  const pending =
-    !gate.supported && !gate.isError && (gate.currentVersion == null || stats.isPending);
   const legacy = !gate.supported || (forced ?? legacyPref);
   return { view: legacy ? "legacy" : "v2", supported: gate.supported, pending, setView };
+}
+
+/**
+ * The gate reads dev mode from stats. Until stats load, an older version
+ * reports "unsupported", and a view would flash legacy.
+ */
+function useGatePending(gate: ReturnType<typeof useFeatureGate>): boolean {
+  const stats = useStats();
+  return !gate.supported && !gate.isError && (gate.currentVersion == null || stats.isPending);
+}
+
+/**
+ * The stored view only, for a surface outside the sessions page (the Cmd+I
+ * panel): no `?legacy=` handling and no setter. That stays with the page's
+ * one `useSessionsView`.
+ */
+export function useStoredSessionsView(): Pick<SessionsView, "view" | "pending"> {
+  const gate = useFeatureGate(SESSIONS_V2_MIN_VERSION);
+  const pending = useGatePending(gate);
+  const [legacyPref] = useLocalToggle("sessions:legacy", false);
+  return { view: !gate.supported || legacyPref ? "legacy" : "v2", pending };
 }
 
 /**

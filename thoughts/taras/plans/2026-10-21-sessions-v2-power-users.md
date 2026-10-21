@@ -587,7 +587,7 @@ The session pane has the two-row header from SPEC Round 8 with People, rename, s
 
 #### Automated Verification:
 - [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
-- [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
+- [x] Smoke passes: `bun run e2e:ui -- --grep @smoke` (clean worktree at 2ff77e0a7)
 
 #### Automated QA:
 - [x] Rename to the 120-character seeded title. Then measure `scrollWidth <= clientWidth` with `agent-browser eval` on the header title and the sidebar row. No horizontal page scroll at 1280 px. (The tab title is measured in Phase 8.) (Measured on the header rows and the sidebar row: a truncated title span always has scrollWidth > clientWidth by design.)
@@ -643,18 +643,18 @@ The session pane body matches SPEC Round 8 to 10. It has a turn timeline with fo
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Turn tests pass: `bun test apps/ui/src/lib/session-turns.test.ts`
-- [ ] Panel tests pass: `bun test apps/ui/src/components/session-panel/session-panel.test.tsx`
-- [ ] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
+- [x] Turn tests pass: `bun test apps/ui/src/lib/session-turns.test.ts`
+- [x] Panel tests pass: `bun test apps/ui/src/components/session-panel/session-panel.test.tsx`
+- [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
 - [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
 
 #### Automated QA:
-- [ ] Open a seeded session with workers. The worker line shows the right agent count and duration, and expanding it shows the steps and holds the scroll.
-- [ ] Hover a person bubble: Copy fades in. Click Copy on a swarm reply: the icon becomes Check for 1.5 s.
-- [ ] Send a follow-up in the composer: the reply appears and the view follows it.
-- [ ] Open the Cmd+I panel on a page linked to a seeded session: it shows the turn timeline, with no horizontal scroll inside the panel. With the Legacy preference on, the panel shows today's timeline.
-- [ ] Scroll up while a second browser session types: the typing bubble and the "Latest" pill do not overlap each other, any message, or the composer (`getBoundingClientRect` checks with `agent-browser eval`).
-- [ ] Compare against the mockup at 1440x900 (side by side): `/tmp/sessions-v2-build/p7-*.png` and `/tmp/sessions-v2/option-ab-merged-r10-*.png`. `/tmp` does not survive a reboot. When those files are gone, capture the committed mockup: `agent-browser open "file://$PWD/mockups/sessions-v2/option-ab-merged/index.html?open=sB1" && agent-browser screenshot /tmp/sessions-v2-build/mock-sB1.png`.
+- [x] Open a seeded session with workers. The worker line shows the right agent count and duration, and expanding it shows the steps and holds the scroll.
+- [x] Hover a person bubble: Copy fades in. Click Copy on a swarm reply: the icon becomes Check for 1.5 s.
+- [x] Send a follow-up in the composer: the reply appears and the view follows it.
+- [x] Open the Cmd+I panel on a page linked to a seeded session: it shows the turn timeline, with no horizontal scroll inside the panel. With the Legacy preference on, the panel shows today's timeline.
+- [x] Scroll up while a second browser session types: the typing bubble and the "Latest" pill do not overlap each other, any message, or the composer (`getBoundingClientRect` checks with `agent-browser eval`).
+- [x] Compare against the mockup at 1440x900 (side by side): `/tmp/sessions-v2-build/p7-*.png` and `/tmp/sessions-v2/option-ab-merged-r10-*.png`. `/tmp` does not survive a reboot. When those files are gone, capture the committed mockup: `agent-browser open "file://$PWD/mockups/sessions-v2/option-ab-merged/index.html?open=sB1" && agent-browser screenshot /tmp/sessions-v2-build/mock-sB1.png`.
 
 #### Manual Verification:
 - [ ] None.
@@ -908,6 +908,9 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Phase 5 skipped (mockup only, not in the plan): Shift-click range selection, and keeping the Start in group in `?tabs=`. Free-text search matches root titles and text (server `q`), not people or group names.
   - Follow-ups from the Phase 5 review (after this PR): decide whether the operator key plus a picked user may write `personal/<self>/` keys (Taras leans yes, as the operator key can already read and move everything else). Show ownerless roots (unmapped Slack users, agent-started sessions) in an "Unassigned" section for operators, since `scope=tree` hides them from v2 while Legacy still shows them.
   - Phase 6 decisions: the session detail query key includes the viewer (`["session", id, userId]`). Before, a user switch showed the previous user's detail and read-on-open marked it read for the new user (a Phase 4 bug). Read-on-open is keyed by user, root, and activity. Triage refetches only the affected details. The header crumb is a button that reveals the group in the tree. The meta line order of drops: started and the Handoffs label under 65rem, cost under 55rem, agents under 45rem, tasks under 37.5rem. The status chip and the Handoffs icon never clip, and the Done or Later note truncates first. Cmd+K rows show the full title while highlighted. The rename gate is access other than Can view (SPEC R8.2).
+  - Phase 7 turn model (decided in review, autopilot, following mockup sB1): `buildTurns` returns `{turns, rest}`. A turn opens at the root or at a person message: a `ui` task (with or without a requester), or a `slack` or `chat` task. A task-page Retry (a `ui` copy of its parent with the same prompt, type, and agent) is another try, not a message. A lead `deferred` wake-up splits a turn into parts. Each part shows its reply, its latest completed lead answer, and its own worker line, so a span never includes a wait. Lead notes in between stay under Handoffs. A lead task still running after the latest answer renders as a live line under it. Approvals render in their own part.
+  - Phase 7 fallback (Implementation Note): a root that no person wrote (schedule, workflow, api, mcp) has no person bubble. It renders as the legacy `TaskCard`, and its workers fold under it as usual. Tasks with no path to the root go to `rest` and render as `TaskCard` in chain order. A late follow-up of turn N stays in turn N (turns group by ancestry, not time).
+  - Phase 7 QA: the QA API loaded the repo `.env`, so one task completion wrote a memory with a real OpenAI embedding. The QA API now boots with the LLM and embedding keys blank, and QA tasks carry the `auto-generated` tag. `scripts/seed.ts` gained `seedTurnSessions` (fixed ids, runs last, existing rows unchanged) for workers, retries, an approval, handoffs, and a schedule root.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
 - **UX-REVIEW-R9 status**: (table filled in during Phase 10).

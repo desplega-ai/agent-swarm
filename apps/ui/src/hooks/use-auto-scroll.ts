@@ -5,6 +5,8 @@ interface UseAutoScrollResult {
   isFollowing: boolean;
   /** Manually scroll to bottom and re-enable auto-follow */
   scrollToBottom: () => void;
+  /** Read the position again after a layout change that fired no scroll event (a block opened). */
+  recheck: () => void;
 }
 
 /**
@@ -78,5 +80,5 @@ export function useAutoScroll(
     }
   }, [element, isFollowing, ...deps]);
 
-  return { isFollowing, scrollToBottom };
+  return { isFollowing, scrollToBottom, recheck: handleScroll };
 }

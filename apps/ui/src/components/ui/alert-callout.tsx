@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import type { AriaRole, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 // AlertCallout — an inline status-toned callout box. shadcn's `Alert` only
@@ -85,6 +85,8 @@ export interface AlertCalloutProps {
   children: ReactNode;
   /** A control at the callout's end (e.g. a small Button), vertically centered. */
   action?: ReactNode;
+  /** `alert` by default. A callout that is part of a page (not news) takes `note`. */
+  role?: AriaRole;
 }
 
 export function AlertCallout({
@@ -94,11 +96,12 @@ export function AlertCallout({
   className,
   children,
   action,
+  role = "alert",
 }: AlertCalloutProps) {
   const t = TONE_CLASSES[tone];
   return (
     <div
-      role="alert"
+      role={role}
       className={cn(
         "flex items-start gap-2 rounded-md border p-3 text-sm",
         t.border,

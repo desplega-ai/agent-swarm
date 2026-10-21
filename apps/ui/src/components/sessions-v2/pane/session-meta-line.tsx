@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCost } from "@/lib/cost-format";
 import { deriveSessionStatus, sessionChipStatus } from "@/lib/session-status";
+import { buildTurns, hasHandoffs } from "@/lib/session-turns";
 import { plural } from "@/lib/sessions-v2";
 import { formatRelativeTime } from "@/lib/utils";
 import { formatWakeShort } from "../sidebar/snooze-times";
@@ -66,8 +67,8 @@ export function SessionMetaLine({
     [detail],
   );
   const workers = useMemo(() => sessionWorkers(detail).map((worker) => worker.id), [detail]);
-  // The toggle shows only when the chain has internal handoffs to show.
-  const hasHandoffs = detail.chain.some((t) => t.source === "system" && t.taskType === "follow-up");
+  // The toggle shows only when the turn timeline has internal handoffs to show.
+  const handoffRows = useMemo(() => hasHandoffs(buildTurns(detail.chain).turns), [detail.chain]);
   const handoffs = `Handoffs · ${showHandoffs ? "On" : "Off"}`;
 
   return (
@@ -95,7 +96,7 @@ export function SessionMetaLine({
           started {formatRelativeTime(detail.root.createdAt)}
         </span>
       </div>
-      {hasHandoffs ? (
+      {handoffRows ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -113,8 +114,8 @@ export function SessionMetaLine({
           </TooltipTrigger>
           <TooltipContent>
             {showHandoffs
-              ? `${handoffs}. Hide the internal follow-up tasks.`
-              : `${handoffs}. Show the internal follow-up tasks as full rows.`}
+              ? `${handoffs}. Hide the internal handoffs.`
+              : `${handoffs}. Open every step and show the internal handoffs.`}
           </TooltipContent>
         </Tooltip>
       ) : null}

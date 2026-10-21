@@ -7,10 +7,10 @@ import { SessionHeader, SessionHeaderSkeleton } from "./session-header";
 import { useMarkReadOnOpen } from "./use-mark-read-on-open";
 
 /**
- * The focused session in the v2 pane: the two-row header (Phase 6), then
- * today's conversation (timeline, prompt attachments, composer, presence).
- * Phase 7 swaps in the turn timeline. The pane is a size container: the
- * header's meta line drops items when the pane is narrow.
+ * The focused session in the v2 pane: the two-row header, then the
+ * conversation with the turn timeline, the composer, and presence. The pane
+ * is a size container: the header's meta line drops items when the pane is
+ * narrow.
  */
 export function SessionPane({
   rootTaskId,
@@ -54,7 +54,11 @@ export function SessionPane({
         ) : isLoading ? (
           <SessionHeaderSkeleton />
         ) : null}
-        <SessionConversation rootTaskId={rootTaskId} showInternalHandoffs={showInternalHandoffs} />
+        <SessionConversation
+          rootTaskId={rootTaskId}
+          showInternalHandoffs={showInternalHandoffs}
+          timeline="turns"
+        />
       </div>
     </SessionPresenceProvider>
   );
