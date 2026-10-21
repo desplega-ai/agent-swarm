@@ -4,9 +4,10 @@
  * session detail page.
  */
 
-import { useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
+import type { AgentTask } from "@/api/types";
 import { SuggestionChips } from "@/components/shared/suggestion-chips";
 import { ComposerDock } from "./composer-dock";
 import { useStartSession } from "./use-start-session";
@@ -18,10 +19,22 @@ export const SUGGESTIONS = [
   "Draft a tech-spec for a feature idea",
 ];
 
-export function NewSessionView() {
+export function NewSessionView({
+  startKey,
+  onStarted,
+  startIn,
+}: {
+  /** The group the session starts in (sessions v2). Omit for no group. */
+  startKey?: string;
+  /** After the start. Default: open the new session's page. */
+  onStarted?: (created: AgentTask) => void;
+  /** The "Start in" picker, at the left of the composer's action row (sessions v2). */
+  startIn?: ReactNode;
+} = {}) {
   const navigate = useNavigate();
   const { userId, setDraft, isPending, composerProps } = useStartSession({
-    onStarted: (created) => void navigate(`/sessions/${created.id}`),
+    key: startKey,
+    onStarted: onStarted ?? ((created) => void navigate(`/sessions/${created.id}`)),
   });
   const [searchParams, setSearchParams] = useSearchParams();
   const prefillTemplateId = searchParams.get("prefill");
@@ -72,6 +85,7 @@ export function NewSessionView() {
 
       <ComposerDock
         {...composerProps}
+        modeControl={startIn}
         placeholder={
           userId ? "What's the goal?" : "Pick an identity in the sidebar before starting a session."
         }

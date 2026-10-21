@@ -1,4 +1,4 @@
-import type { CSSProperties, HTMLAttributes, MouseEvent, ReactNode } from "react";
+import type { CSSProperties, HTMLAttributes, MouseEvent, ReactNode, Ref } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,11 @@ export function TreeRow({
   className,
   style,
   ...props
-}: HTMLAttributes<HTMLDivElement> & { level: number; cursor: boolean }) {
+}: HTMLAttributes<HTMLDivElement> & {
+  level: number;
+  cursor: boolean;
+  ref?: Ref<HTMLDivElement>;
+}) {
   return (
     // biome-ignore lint/a11y/useFocusableInteractive: the tree keeps the focus and points at the cursor row with aria-activedescendant, so rows can leave without dropping it
     <div

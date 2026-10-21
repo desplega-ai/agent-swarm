@@ -5,7 +5,7 @@
  * full title and the latest output.
  */
 
-import { AlarmClock, Hash, SquareDashed, Users } from "lucide-react";
+import { AlarmClock, FolderInput, Hash, SquareDashed, Users } from "lucide-react";
 import { type MouseEvent, memo, useState } from "react";
 import type { AgentTaskStatus, SessionListItem } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
@@ -17,10 +17,12 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { peerColor } from "@/lib/comb/presence";
 import { groupCrumb, groupLabel, isNoGroupKey } from "@/lib/session-groups";
+import { splitMatches } from "@/lib/session-search";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime, parseUTCDate, sessionDisplayTitle } from "@/lib/utils";
 import { formatWakeShort, wakePhrase } from "./snooze-times";
 import { keepTreeFocus, NeedsYouBadge, rowPropsEqual, TipKey, TreeRow } from "./tree-row";
+import { useRowDraggable } from "./use-row-drag";
 
 type Activity = "needs" | "running" | "failed" | null;
 
@@ -191,8 +193,8 @@ interface SessionRowProps {
   selected: boolean;
   /** Show the checkbox in the left slot (selection mode, or the keyboard cursor). */
   showCheckbox: boolean;
-  /** Triage needs a picked user: without one, no checkbox. */
-  canTriage: boolean;
+  /** Search words to mark in the title (search results only). */
+  highlight?: readonly string[];
   /** The keyboard cursor rests here: open the hover card. */
   peek: boolean;
   /** Keys drive the list: only the cursor's card opens, and with no motion. */
@@ -201,7 +203,8 @@ interface SessionRowProps {
   onRowClick: (rowKey: string, event: MouseEvent) => void;
   onRowAuxClick: (rowKey: string, event: MouseEvent) => void;
   onRowContextMenu: (rowKey: string, event: MouseEvent) => void;
-  onToggleSelect: (rootId: string) => void;
+  /** The checkbox: select or unselect this row (the tree also puts its cursor and focus here). */
+  onToggleSelect: (rowKey: string) => void;
   /** The keyboard card closed itself (Escape). */
   onPeekClose: () => void;
 }
@@ -218,7 +221,7 @@ function SessionRowView({
   cursor,
   selected,
   showCheckbox,
-  canTriage,
+  highlight,
   peek,
   keyboard,
   nameOf,
@@ -229,6 +232,8 @@ function SessionRowView({
   onPeekClose,
 }: SessionRowProps) {
   const [hover, setHover] = useState(false);
+  // Drag onto a group to move it (plan Phase 5).
+  const { dragRef, dragListeners, isDragging } = useRowDraggable(rowKey, session);
   const title = sessionDisplayTitle(session.root);
   const unread = session.readState === "unread";
   const wake = session.readState === "later" ? session.snoozeUntil : null;
@@ -241,7 +246,7 @@ function SessionRowView({
     <HoverCard
       openDelay={400}
       closeDelay={100}
-      open={keyboard ? peek : hover}
+      open={keyboard ? peek : hover && !isDragging}
       onOpenChange={(next) => {
         setHover(next);
         if (!next && keyboard) onPeekClose();
@@ -249,10 +254,12 @@ function SessionRowView({
     >
       <HoverCardTrigger asChild>
         <TreeRow
+          ref={dragRef}
+          {...dragListeners}
           id={domId}
           level={level}
           cursor={cursor}
-          aria-selected={canTriage ? selected : undefined}
+          aria-selected={selected}
           aria-label={rowLabel(session, me, title, group, nowDate)}
           data-open={open ? "true" : undefined}
           onClick={(event) => onRowClick(rowKey, event)}
@@ -264,37 +271,36 @@ function SessionRowView({
             // The open session's marker sits inside the row (UX review R9).
             "data-[open=true]:after:absolute data-[open=true]:after:inset-y-1.5 data-[open=true]:after:left-0 data-[open=true]:after:w-0.5 data-[open=true]:after:rounded-full data-[open=true]:after:bg-primary",
             selected && "bg-primary/10 hover:bg-primary/15",
+            isDragging && "opacity-50",
           )}
         >
           <span className="grid size-4 shrink-0 place-items-center">
-            {canTriage ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Checkbox
-                    tabIndex={-1}
-                    aria-hidden
-                    checked={selected}
-                    onCheckedChange={() => onToggleSelect(session.root.id)}
-                    onClick={(event) => event.stopPropagation()}
-                    onMouseDown={keepTreeFocus}
-                    className={cn(
-                      "col-start-1 row-start-1",
-                      showCheckbox || selected ? "flex" : "hidden group-hover/row:flex",
-                    )}
-                  />
-                </TooltipTrigger>
-                <TooltipContent className="flex items-center gap-1.5">
-                  Select
-                  <TipKey>X</TipKey>
-                </TooltipContent>
-              </Tooltip>
-            ) : null}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Checkbox
+                  tabIndex={-1}
+                  aria-hidden
+                  checked={selected}
+                  onCheckedChange={() => onToggleSelect(rowKey)}
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={keepTreeFocus}
+                  className={cn(
+                    "col-start-1 row-start-1",
+                    showCheckbox || selected ? "flex" : "hidden group-hover/row:flex",
+                  )}
+                />
+              </TooltipTrigger>
+              <TooltipContent className="flex items-center gap-1.5">
+                Select
+                <TipKey>X</TipKey>
+              </TooltipContent>
+            </Tooltip>
             {unread ? (
               <span
                 aria-hidden
                 className={cn(
                   "col-start-1 row-start-1 size-1.5 rounded-full bg-foreground",
-                  canTriage && (showCheckbox || selected ? "hidden" : "group-hover/row:hidden"),
+                  showCheckbox || selected ? "hidden" : "group-hover/row:hidden",
                 )}
               />
             ) : null}
@@ -306,7 +312,17 @@ function SessionRowView({
               open && "text-foreground",
             )}
           >
-            {title}
+            {highlight?.length
+              ? splitMatches(title, highlight).map((piece, i) =>
+                  piece.match ? (
+                    <mark key={i} className="rounded-xs bg-primary/25 text-inherit">
+                      {piece.text}
+                    </mark>
+                  ) : (
+                    piece.text
+                  ),
+                )
+              : title}
           </span>
           {/* In the 320 px sidebar the title keeps its room: an activity mark or
               a wake time hides the group label (UX review R9). */}
@@ -370,3 +386,18 @@ function SessionRowView({
 }
 
 export const SessionRow = memo(SessionRowView, rowPropsEqual);
+
+/** What follows the pointer while rows drag onto a group: the title, or the count. */
+export function SessionDragPreview({ sessions }: { sessions: SessionListItem[] }) {
+  const [only] = sessions;
+  return (
+    <div className="flex max-w-72 cursor-grabbing items-center gap-1.5 rounded-md border border-border bg-popover px-2.5 py-1.5 text-data font-medium shadow-md">
+      <FolderInput aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 truncate">
+        {sessions.length === 1 && only
+          ? sessionDisplayTitle(only.root)
+          : `${sessions.length} sessions`}
+      </span>
+    </div>
+  );
+}

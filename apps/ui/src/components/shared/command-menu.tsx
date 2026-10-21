@@ -103,14 +103,26 @@ export function CommandMenuProvider({ children }: { children: ReactNode }) {
 /**
  * Adds a group of commands to the palette while the caller is mounted. An
  * empty `items` list hides the group. Memoize `items`: a new array registers
- * the group again.
+ * the group again. With `enabled` false the caller leaves the group alone,
+ * so another caller can own the same id (the sessions page hands the
+ * `sessions` group to the v2 view).
  */
-export function useCommandMenuGroup(id: string, heading: string, items: CommandMenuItem[]) {
+export function useCommandMenuGroup(
+  id: string,
+  heading: string,
+  items: CommandMenuItem[],
+  enabled = true,
+) {
   const register = useContext(RegisterContext);
   useEffect(() => {
-    register?.(id, items.length > 0 ? { id, heading, items } : null);
-  }, [register, id, heading, items]);
-  useEffect(() => () => register?.(id, null), [register, id]);
+    if (enabled) register?.(id, items.length > 0 ? { id, heading, items } : null);
+  }, [register, id, heading, items, enabled]);
+  // React runs every cleanup before any new effect, so a hand-over between
+  // two callers never drops the other caller's group.
+  useEffect(() => {
+    if (!enabled) return;
+    return () => register?.(id, null);
+  }, [register, id, enabled]);
 }
 
 /** The palette's search text. Empty while the palette is closed. */

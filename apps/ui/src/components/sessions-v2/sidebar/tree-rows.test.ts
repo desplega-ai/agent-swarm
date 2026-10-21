@@ -73,6 +73,7 @@ describe("buildTreeRows", () => {
       "box:nogroup",
       "section:mine",
       "group:shared/a/",
+      "add:group",
     ]);
     // Later is open but empty, No group and the group are folded.
     expect(containers).toEqual(["inbox"]);
@@ -133,6 +134,7 @@ describe("buildTreeRows", () => {
       "s:shared/a/:s0",
       "group:shared/x/",
       "empty:shared/x/",
+      "add:group",
     ]);
     expect(containers).toEqual(["shared/a/"]);
     expect(rows.find((row) => row.key === "group:shared/a/b/")?.level).toBe(1);
@@ -141,6 +143,52 @@ describe("buildTreeRows", () => {
   test("no groups: the My groups empty state describes its section", () => {
     const row = build(tree()).rows.find((r) => r.key === "empty:groups");
     expect(row).toMatchObject({ kind: "groups", parentKey: "section:mine" });
+    // "New group" stays a row the keys reach, after the invite.
+    expect(keys(build(tree()).rows).slice(-2)).toEqual(["empty:groups", "add:group"]);
+  });
+
+  test("a new group's name field takes the place of New group, or sits under its parent", () => {
+    const t = tree([group("shared/a/", 1)]);
+    const top = (creating: string) =>
+      keys(
+        buildTreeRows({
+          tree: t,
+          groups: buildSessionGroupTree(t.groups, ME),
+          isOpen: () => false,
+          expanded: new Set(),
+          lists: new Map(),
+          creating,
+        }).rows,
+      ).slice(-3);
+    expect(top("shared/")).toEqual(["section:mine", "group:shared/a/", "create:shared/"]);
+    expect(top("shared/a/")).toEqual(["group:shared/a/", "create:shared/a/", "add:group"]);
+    // With no groups yet, the field replaces the first-run invite.
+    const none = buildTreeRows({
+      tree: tree(),
+      groups: buildSessionGroupTree([], ME),
+      isOpen: () => false,
+      expanded: new Set(),
+      lists: new Map(),
+      creating: "shared/",
+    }).rows;
+    expect(none.some((r) => r.key === "empty:groups")).toBe(false);
+    expect(none.at(-1)?.type).toBe("create");
+  });
+
+  test("a group that lives only in this browser invites a move", () => {
+    const t = tree([group("shared/a/", 0)]);
+    const rows = buildTreeRows({
+      tree: t,
+      groups: buildSessionGroupTree(t.groups, ME),
+      isOpen: (id) => id === "shared/a/",
+      expanded: new Set(),
+      lists: new Map(),
+      localGroups: new Set(["shared/a/"]),
+    }).rows;
+    expect(rows.find((r) => r.key === "empty:shared/a/")).toMatchObject({
+      kind: "fresh",
+      groupKey: "shared/a/",
+    });
   });
 
   test("Shared with me shows owners, open owners list their groups open", () => {
@@ -163,7 +211,13 @@ describe("buildTreeRows", () => {
 
   test("sections, empty states, and loading rows are not cursor stops", () => {
     const { rows } = build(tree([], { inbox: counts(1) }));
-    expect(rows.filter(isNavRow).map((row) => row.type)).toEqual(["box", "box", "box", "box"]);
+    expect(rows.filter(isNavRow).map((row) => row.type)).toEqual([
+      "box",
+      "box",
+      "box",
+      "box",
+      "add",
+    ]);
   });
 
   test("foldIds lists every section, group, and owner the tree can show", () => {

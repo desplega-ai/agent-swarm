@@ -60,6 +60,66 @@ export function isNoGroupKey(key: string, me: string | null): boolean {
   return key === "shared/" || (me !== null && key === `personal/${me}/`);
 }
 
+/** A root key's group: the key without a trailing `<kind>:<id>/` leaf (plan D4, the server's rule). */
+export function groupKeyOf(key: string): string {
+  return key.replace(/\/(?:task|thread|schedule|workflow):[^/]+\/$/, "/");
+}
+
+/**
+ * A group name as one key segment: lower case, spaces to `-`, only
+ * `a-z 0-9 . _ -`, at most 48 characters. No `:`, so a name never reads as a
+ * `<kind>:<id>` leaf (plan D4).
+ */
+export function groupSlug(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 48)
+    .replace(/[-.]+$/, "");
+}
+
+/** The key of group `name` under `parent` (`shared/` or a group key), or null for an empty name. */
+export function childGroupKey(parent: string, name: string): string | null {
+  const slug = groupSlug(name);
+  return slug ? `${parent}${slug}/` : null;
+}
+
+/** The key with its last segment renamed, or null for an empty name. */
+export function renamedGroupKey(key: string, name: string): string | null {
+  const parent = key.replace(/[^/]+\/$/, "");
+  return childGroupKey(parent, name);
+}
+
+/** The key a session gets when it moves to No group (`null`): `shared/task:<rootId>/` (the server's default). */
+export function defaultSessionKey(rootId: string): string {
+  return `shared/task:${rootId}/`;
+}
+
+/**
+ * What to send to put a session back on `key` (Undo after a move). `null`
+ * gives back `shared/task:<rootId>/` only, so any other key goes as itself
+ * (`personal/<me>/task:…`, `shared/schedule:…/`, a group).
+ */
+export function restoreKey(rootId: string, key: string): string | null {
+  return key === defaultSessionKey(rootId) ? null : key;
+}
+
+/** Why a session or group write into `personal/…` fails on this connection. */
+export const PERSONAL_WRITE_REASON = "Personal groups need a user token.";
+
+/**
+ * Why a write into `key` fails here, or null when it works. The server
+ * takes writes into a `personal/` key only from a user token (`aswt_`), not
+ * from the operator key with a picked user. Moving out of a personal group
+ * and deleting one work on both. `null` (No group) never fails.
+ */
+export function groupWriteBlock(key: string | null, userToken: boolean): string | null {
+  return !userToken && key?.startsWith("personal/") ? PERSONAL_WRITE_REASON : null;
+}
+
 /** The owner of a `personal/<owner>/...` key, or null for any other key. */
 export function personalOwner(key: string): string | null {
   const parts = segments(key);
@@ -98,6 +158,49 @@ export function groupCrumb(
   const parts = segments(groupKey).slice(owner ? 2 : 1);
   if (owner && owner !== me) return [nameOf(owner), ...parts].join(" › ");
   return parts.join(" › ");
+}
+
+/** A group a session can move into or start in, with the path the sidebar shows. */
+export interface GroupTarget {
+  key: string;
+  /** `northwind › pricing`. */
+  label: string;
+  /** A `personal/<me>/` group whose path a `shared/` group also uses: show the lock. */
+  privateClash: boolean;
+}
+
+/**
+ * My groups as one flat list (the move dialog, the Start in picker): every
+ * group and every parent, `shared/` groups first, then my personal groups,
+ * each by path. Shared with me is not a target (SPEC R3).
+ */
+export function groupTargets(groups: SessionGroupTree, me: string | null): GroupTarget[] {
+  const targets: GroupTarget[] = [];
+  const walk = (node: GroupNode) => {
+    targets.push({
+      key: node.key,
+      label: groupCrumb(node.key, me, () => ""),
+      privateClash: node.privateClash,
+    });
+    for (const child of node.children) walk(child);
+  };
+  for (const node of groups.myGroups) walk(node);
+  return targets.sort((a, b) => {
+    const personal = Number(a.key.startsWith("personal/")) - Number(b.key.startsWith("personal/"));
+    return personal || a.label.localeCompare(b.label);
+  });
+}
+
+/** Every group in the tree, other people's too, by path: what search can name with `in:`. */
+export function searchableGroups(
+  groups: SessionGroupTree,
+  me: string | null,
+  nameOf: (userId: string) => string,
+): Array<{ key: string; label: string }> {
+  const others = groups.sharedWithMe.flatMap((owner) =>
+    owner.groups.map((node) => ({ key: node.key, label: groupCrumb(node.key, me, nameOf) })),
+  );
+  return [...groupTargets(groups, me), ...others];
 }
 
 /** Newest activity first, then by name, so the order holds still between polls. */

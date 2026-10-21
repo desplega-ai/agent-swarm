@@ -41,6 +41,7 @@ describe("listKeyOf", () => {
       E: "done",
       l: "later",
       u: "read",
+      M: "move",
       t: "newTab",
       n: "nextUnread",
       c: "newSession",
@@ -50,8 +51,8 @@ describe("listKeyOf", () => {
     for (const [key, action] of Object.entries(map)) {
       expect({ key, action: listKeyOf(keyEvent(key)) }).toEqual({ key, action });
     }
+    // `v` (split) lands in Phase 8.
     expect(listKeyOf(keyEvent("v"))).toBeNull();
-    expect(listKeyOf(keyEvent("m"))).toBeNull();
   });
 
   test("leaves modifier combos to the browser, except Shift+F10 for the menu", () => {

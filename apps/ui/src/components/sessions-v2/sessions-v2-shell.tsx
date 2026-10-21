@@ -3,10 +3,11 @@
  * collapses the global nav to icons while it is open, so the sidebar and the
  * panes keep their width (UX review R9).
  *
- * The sidebar holds the session tree (Phase 4). The pane shows the New
- * session composer on `/sessions` (it keeps the `?seed=` and `?prefill=`
- * links working) and today's conversation on `/sessions/:rootTaskId`, until
- * Phases 5 to 7 replace them.
+ * The sidebar holds the search and the session tree (Phases 4 and 5). The
+ * pane shows the New session tab on `/sessions` (the shipped composer with
+ * a "Start in" picker; it keeps the `?seed=` and `?prefill=` links working)
+ * and today's conversation on `/sessions/:rootTaskId`, until Phases 6 and 7
+ * replace it.
  */
 
 import { History } from "lucide-react";
@@ -20,13 +21,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { NewSessionView } from "@/components/sessions/new-session-view";
 import { Button } from "@/components/ui/button";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { MAIN_BLEED } from "@/lib/main-gutter";
 import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
+import { NewSessionTab } from "./new-session-tab";
 import { SessionPane } from "./pane/session-pane";
 import { SessionTree } from "./sidebar/session-tree";
 import { useSessionsUrlState } from "./use-sessions-url-state";
@@ -161,9 +162,18 @@ export interface SessionsV2ShellProps {
 
 export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   useCollapseNavWhile(true);
-  const { focused, openSession, focusTab, setView } = useSessionsUrlState();
+  const { focused, openSession, focusTab, setView, q, setQuery } = useSessionsUrlState();
   const [width, setWidth] = useSidebarWidth();
   const sidebarId = useId();
+  // The group the New session tab starts in: the one it was opened from.
+  const [startIn, setStartIn] = useState<string | null>(null);
+  const newSession = useCallback(
+    (group: string | null = null) => {
+      setStartIn(group);
+      focusTab(NEW_SESSION_TAB);
+    },
+    [focusTab],
+  );
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row", MAIN_BLEED)}>
@@ -171,9 +181,11 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
         id={sidebarId}
         aria-label="Sessions"
         style={{ "--sessions-sidebar-w": `${width}px` } as CSSProperties}
-        className="relative flex shrink-0 flex-col border-b border-border bg-surface md:w-(--sessions-sidebar-w) md:border-r md:border-b-0"
+        className="group/nav relative flex shrink-0 flex-col border-b border-border bg-surface md:w-(--sessions-sidebar-w) md:border-r md:border-b-0"
       >
-        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle pr-2 pl-4 max-md:border-b-0">
+        {/* The bulk bar covers this header while sessions are selected: hide
+            it from the pointer, the keys, and screen readers then. */}
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle pr-2 pl-4 group-has-[[data-bulk-bar]]/nav:invisible max-md:border-b-0">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">Sessions</h2>
           <Button
             size="xs"
@@ -190,8 +202,11 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
           <SessionTree
             focused={focused}
             openSession={openSession}
-            newSession={() => focusTab(NEW_SESSION_TAB)}
+            newSession={newSession}
             setView={setView}
+            query={q}
+            setQuery={setQuery}
+            onViewChange={onViewChange}
           />
         </div>
         <SidebarResizeHandle width={width} onResize={setWidth} sidebarId={sidebarId} />
@@ -199,7 +214,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
 
       <section aria-label="Open sessions" className="flex min-h-0 min-w-0 flex-1 flex-col">
         {focused === NEW_SESSION_TAB ? (
-          <NewSessionView />
+          <NewSessionTab startIn={startIn} onStarted={(id) => openSession(id)} />
         ) : (
           // A new key per session: the composer draft and the scroll state
           // never carry over to the next session.

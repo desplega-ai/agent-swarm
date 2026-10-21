@@ -1,10 +1,9 @@
 /**
  * The session row menu. Right-click and the menu key open it at the row;
  * `l` opens its Later part alone (sessions already in Later go straight
- * back to the Inbox, with no menu). One controlled DropdownMenu on a hidden
- * anchor, so no ContextMenu primitive is needed (plan Phase 4). "Move to
- * group…" joins with the move picker (Phase 5), "Open in split" with the
- * split (Phase 8).
+ * back to the Inbox, with no menu). It opens at a point (`PointMenu`, plan
+ * Phase 4). "Move to group…" opens the move dialog (Phase 5). "Open in
+ * split" lands with the split (Phase 8).
  */
 
 import {
@@ -12,23 +11,20 @@ import {
   AppWindow,
   Archive,
   CornerDownLeft,
+  FolderInput,
   Inbox,
   Mail,
   MailOpen,
 } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
 import type { SessionListItem } from "@/api/types";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Kbd } from "@/components/ui/kbd";
+import { MenuKey, PointMenu } from "./point-menu";
 import { SnoozeMenuItems } from "./snooze-picker";
 
 export interface RowMenuState {
@@ -51,118 +47,116 @@ export interface RowMenuActions {
   later: (targets: SessionListItem[], at: string) => void;
   backToInbox: (targets: SessionListItem[]) => void;
   pickDate: (targets: SessionListItem[]) => void;
-}
-
-function MenuKey({ children }: { children: string }) {
-  return (
-    <Kbd aria-hidden className="ml-auto">
-      {children}
-    </Kbd>
-  );
+  /** Open the move dialog for these sessions. */
+  move: (targets: SessionListItem[]) => void;
 }
 
 export function RowMenu({
   state,
   actions,
+  canTriage,
   onClose,
   onRestoreFocus,
 }: {
   state: RowMenuState | null;
   actions: RowMenuActions;
+  /** Read, Done, and Later need a picked user. Moves do not. */
+  canTriage: boolean;
   onClose: () => void;
   /** Focus goes back to the list when the menu closes. */
   onRestoreFocus: () => void;
 }) {
-  // The menu keeps its place and items while it fades out.
-  const last = useRef(state);
-  useLayoutEffect(() => {
-    if (state) last.current = state;
-  }, [state]);
-  const shown = state ?? last.current;
-  if (!shown) return null;
+  return (
+    <PointMenu state={state} onClose={onClose} onRestoreFocus={onRestoreFocus} className="min-w-56">
+      {(shown) => <RowMenuItems shown={shown} actions={actions} canTriage={canTriage} />}
+    </PointMenu>
+  );
+}
+
+function RowMenuItems({
+  shown,
+  actions,
+  canTriage,
+}: {
+  shown: RowMenuState;
+  actions: RowMenuActions;
+  canTriage: boolean;
+}) {
   const { targets, session } = shown;
   const allDone = targets.every((row) => row.readState === "done");
   const allLater = targets.every((row) => row.readState === "later");
   const anyUnread = targets.some((row) => row.readState === "unread");
 
   return (
-    <DropdownMenu open={state !== null} onOpenChange={(open) => !open && onClose()}>
-      <DropdownMenuTrigger asChild>
-        <span
-          aria-hidden
-          className="pointer-events-none fixed size-px"
-          style={{ left: shown.x, top: shown.y }}
+    <>
+      {shown.kind === "later" ? (
+        <SnoozeMenuItems
+          onSnooze={(at) => actions.later(targets, at)}
+          onPickDate={() => actions.pickDate(targets)}
         />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        sideOffset={2}
-        className="min-w-56"
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          onRestoreFocus();
-        }}
-      >
-        {shown.kind === "later" ? (
-          <SnoozeMenuItems
-            onSnooze={(at) => actions.later(targets, at)}
-            onPickDate={() => actions.pickDate(targets)}
-          />
-        ) : (
-          <>
-            <DropdownMenuItem onSelect={() => actions.open(session)}>
-              <CornerDownLeft />
-              Open
-              <MenuKey>↵</MenuKey>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => actions.openNewTab(session)}>
-              <AppWindow />
-              Open in new tab
-              <MenuKey>T</MenuKey>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => actions.toggleRead(targets)}>
-              {anyUnread ? <MailOpen /> : <Mail />}
-              {anyUnread ? "Mark read" : "Mark unread"}
-              <MenuKey>U</MenuKey>
-            </DropdownMenuItem>
-            {allDone ? (
-              <DropdownMenuItem onSelect={() => actions.backToInbox(targets)}>
-                <Inbox />
-                Move back to the Inbox
-                <MenuKey>E</MenuKey>
+      ) : (
+        <>
+          <DropdownMenuItem onSelect={() => actions.open(session)}>
+            <CornerDownLeft />
+            Open
+            <MenuKey>↵</MenuKey>
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => actions.openNewTab(session)}>
+            <AppWindow />
+            Open in new tab
+            <MenuKey>T</MenuKey>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {canTriage ? (
+            <>
+              <DropdownMenuItem onSelect={() => actions.toggleRead(targets)}>
+                {anyUnread ? <MailOpen /> : <Mail />}
+                {anyUnread ? "Mark read" : "Mark unread"}
+                <MenuKey>U</MenuKey>
               </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem onSelect={() => actions.done(targets)}>
-                <Archive />
-                Done
-                <MenuKey>E</MenuKey>
-              </DropdownMenuItem>
-            )}
-            {allLater ? (
-              <DropdownMenuItem onSelect={() => actions.backToInbox(targets)}>
-                <Inbox />
-                Move back to the Inbox
-                <MenuKey>L</MenuKey>
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <AlarmClock />
-                  Later…
+              {allDone ? (
+                <DropdownMenuItem onSelect={() => actions.backToInbox(targets)}>
+                  <Inbox />
+                  Move back to the Inbox
+                  <MenuKey>E</MenuKey>
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onSelect={() => actions.done(targets)}>
+                  <Archive />
+                  Done
+                  <MenuKey>E</MenuKey>
+                </DropdownMenuItem>
+              )}
+              {allLater ? (
+                <DropdownMenuItem onSelect={() => actions.backToInbox(targets)}>
+                  <Inbox />
+                  Move back to the Inbox
                   <MenuKey>L</MenuKey>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="min-w-60">
-                  <SnoozeMenuItems
-                    onSnooze={(at) => actions.later(targets, at)}
-                    onPickDate={() => actions.pickDate(targets)}
-                  />
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            )}
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <AlarmClock />
+                    Later…
+                    <MenuKey>L</MenuKey>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="min-w-60">
+                    <SnoozeMenuItems
+                      onSnooze={(at) => actions.later(targets, at)}
+                      onPickDate={() => actions.pickDate(targets)}
+                    />
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              )}
+            </>
+          ) : null}
+          <DropdownMenuItem onSelect={() => actions.move(targets)}>
+            <FolderInput />
+            Move to group…
+            <MenuKey>M</MenuKey>
+          </DropdownMenuItem>
+        </>
+      )}
+    </>
   );
 }

@@ -26,11 +26,14 @@ export function useTreeTriage({
   openSession,
   clearSelection,
   pickDate,
+  pickGroup,
 }: {
   openSession: (id: string, options?: { newTab?: boolean }) => void;
   clearSelection: () => void;
   /** "Pick a date and time…": open the date dialog for these sessions. */
   pickDate: (sessions: SessionListItem[]) => void;
+  /** "Move to group…": open the move dialog for these sessions. */
+  pickGroup: (sessions: SessionListItem[]) => void;
 }) {
   const triage = useSessionTriage();
 
@@ -91,6 +94,7 @@ export function useTreeTriage({
       undoToast(`${whatOf(sessions)} moved back to the Inbox.`, sessions);
     },
     pickDate,
+    move: pickGroup,
   };
 
   return { canTriage: triage.canTriage, actions };

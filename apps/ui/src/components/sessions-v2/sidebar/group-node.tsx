@@ -2,8 +2,9 @@
  * A container row in the sidebar: a section box (Inbox, Later, Done, No
  * group), a group, or an owner under Shared with me (SPEC R4, R5). It shows
  * its icon, its name, a chevron when it has subgroups (the one fold
- * control), a "+" on hover or on the keyboard cursor, and the counts. The
- * "+" sits next to the counts and never covers them.
+ * control), the group menu "⋯" and a "+" on hover or on the keyboard
+ * cursor, and the counts. The actions sit next to the counts and never
+ * cover them. My groups and No group take dropped rows (plan Phase 5).
  */
 
 import {
@@ -14,14 +15,16 @@ import {
   Inbox,
   Lock,
   type LucideIcon,
+  MoreHorizontal,
   Plus,
   SquareDashed,
 } from "lucide-react";
-import { type MouseEvent, memo } from "react";
+import { type KeyboardEvent, type MouseEvent, memo, type ReactNode, useRef, useState } from "react";
 import type { SessionSectionCounts } from "@/api/types";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { SessionSection } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
@@ -34,6 +37,7 @@ import {
   TreeRow,
 } from "./tree-row";
 import type { TreeRow as TreeRowModel } from "./tree-rows";
+import { useGroupDroppable } from "./use-row-drag";
 
 const SECTION_META: Record<SessionSection, { label: string; icon: LucideIcon }> = {
   inbox: { label: "Inbox", icon: Inbox },
@@ -118,7 +122,102 @@ interface GroupNodeProps {
   onRowClick: (rowKey: string, event: MouseEvent) => void;
   onToggle: (rowKey: string) => void;
   /** "+": a new session. Missing on rows that take none (Inbox, Later, Done, Shared with me). */
-  onNewSession?: () => void;
+  onNewSession?: (rowKey: string) => void;
+  /** "⋯", a right-click: the group menu. Missing on rows with no menu. */
+  onMenu?: (rowKey: string, event: MouseEvent) => void;
+  /** Dropped rows move here: a group key, null for No group. Missing: no drops. */
+  dropKey?: string | null;
+  /** The name is an input (Rename group). */
+  renaming?: boolean;
+  /** The rename ended: the group key, and the typed name or null to cancel. */
+  onRenameDone?: (groupKey: string, name: string | null) => void;
+}
+
+/**
+ * The inline group name field (New group, New subgroup, Rename group).
+ * Enter saves, Escape and leaving the field cancel (SPEC R5).
+ */
+export function GroupNameField({
+  initial = "",
+  label,
+  onDone,
+}: {
+  initial?: string;
+  label: string;
+  onDone: (name: string | null) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  // Enter and Escape end it once. The blur that follows (the focus goes back
+  // to the tree in the same event) must not end it again, so a ref, not state.
+  const ended = useRef(false);
+  const end = (name: string | null) => {
+    if (ended.current) return;
+    ended.current = true;
+    onDone(name);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") end(value);
+    else if (event.key === "Escape") end(null);
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  return (
+    <Input
+      autoFocus
+      value={value}
+      aria-label={label}
+      placeholder="group-name"
+      spellCheck={false}
+      maxLength={48}
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={onKeyDown}
+      onBlur={() => end(null)}
+      onClick={(event) => event.stopPropagation()}
+      onFocus={(event) => event.currentTarget.select()}
+      className="h-6 flex-1 rounded-sm bg-background px-1.5 py-0 text-data shadow-none md:text-data"
+    />
+  );
+}
+
+/** A row action that shows on hover and on the keyboard cursor. */
+function RowAction({
+  label,
+  shortcut,
+  keyName,
+  onClick,
+  children,
+}: {
+  label: string;
+  shortcut?: string;
+  keyName?: string;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={label}
+          aria-keyshortcuts={keyName}
+          onMouseDown={keepTreeFocus}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick(event);
+          }}
+          className="grid size-6 place-items-center rounded-sm bg-accent text-foreground hover:bg-muted"
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="flex items-center gap-1.5">
+        {label}
+        {shortcut ? <TipKey>{shortcut}</TipKey> : null}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function RowIcon({ row, ownerName }: { row: ContainerRow; ownerName?: string }) {
@@ -146,39 +245,56 @@ function GroupNodeView({
   onRowClick,
   onToggle,
   onNewSession,
+  onMenu,
+  dropKey,
+  renaming,
+  onRenameDone,
 }: GroupNodeProps) {
   const name = rowName(row, ownerName);
+  const searchMatch = row.type === "group" && row.searchMatch;
   const hasChildren =
-    row.type === "owner" || (row.type === "group" && row.node.children.length > 0);
+    row.type === "owner" || (row.type === "group" && row.node.children.length > 0 && !searchMatch);
+  const { dropRef, isOver } = useGroupDroppable(row.key, dropKey);
   const counts = row.counts;
   const plain = row.type === "box" && (row.id === "later" || row.id === "done");
   const onlyYou = row.type === "group" && row.node.privateClash;
   const foldTip = row.open ? "Hide subgroups" : "Show subgroups";
   return (
     <TreeRow
+      ref={dropRef}
       id={domId}
       level={row.level}
       cursor={cursor}
-      aria-expanded={row.open}
+      aria-expanded={searchMatch ? undefined : row.open}
       aria-label={[name, onlyYou && "Only you", counts && countsLabel(counts, plain)]
         .filter(Boolean)
         .join(", ")}
       aria-describedby={describedBy}
+      data-drop-over={isOver ? "true" : undefined}
       onClick={(event) => onRowClick(row.key, event)}
-      className="h-7 text-data"
+      onContextMenu={onMenu ? (event) => onMenu(row.key, event) : undefined}
+      className="h-7 text-data data-[drop-over=true]:bg-primary/10 data-[drop-over=true]:ring-1 data-[drop-over=true]:ring-primary/60 data-[drop-over=true]:ring-inset"
     >
       <span className="grid size-4 shrink-0 place-items-center">
         <RowIcon row={row} ownerName={ownerName} />
       </span>
-      <span
-        className={cn(
-          "min-w-0 truncate",
-          row.type === "box" ? "font-semibold" : "font-medium",
-          row.type === "group" && !row.node.name && "text-muted-foreground",
-        )}
-      >
-        {name}
-      </span>
+      {renaming && row.type === "group" ? (
+        <GroupNameField
+          initial={row.node.name}
+          label="Rename group"
+          onDone={(next) => onRenameDone?.(row.node.key, next)}
+        />
+      ) : (
+        <span
+          className={cn(
+            "min-w-0 truncate",
+            row.type === "box" ? "font-semibold" : "font-medium",
+            row.type === "group" && !row.node.name && "text-muted-foreground",
+          )}
+        >
+          {name}
+        </span>
+      )}
       {onlyYou ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -221,41 +337,38 @@ function GroupNodeView({
         </Tooltip>
       ) : null}
       <span className="min-w-0 flex-1" />
-      {onNewSession ? (
-        // No width of its own: the "+" lies over the end of the name, left of
-        // the counts, so the name keeps its room and the counts never move.
+      {(onNewSession || onMenu) && !renaming ? (
+        // No width of its own: the actions lie over the end of the name, left
+        // of the counts, so the name keeps its room and the counts never move.
         <span className="relative h-6 w-0 shrink-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-label="New session"
-                aria-keyshortcuts="c"
-                onMouseDown={keepTreeFocus}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onNewSession();
-                }}
-                className={cn(
-                  "absolute top-0 right-0 grid size-6 place-items-center rounded-sm bg-accent text-foreground hover:bg-muted",
-                  // In at once, out with the row's linger (UX review R9). No
-                  // fade at all while keys move the cursor.
-                  "transition-opacity delay-50 duration-200 ease-snappy group-hover/row:delay-0 group-hover/row:duration-0",
-                  NO_KEYBOARD_MOTION,
-                  showActions
-                    ? "opacity-100"
-                    : "pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100",
-                )}
+          <span
+            className={cn(
+              "absolute top-0 right-0 flex gap-0.5",
+              // In at once, out with the row's linger (UX review R9). No
+              // fade at all while keys move the cursor.
+              "transition-opacity delay-50 duration-200 ease-snappy group-hover/row:delay-0 group-hover/row:duration-0",
+              NO_KEYBOARD_MOTION,
+              showActions
+                ? "opacity-100"
+                : "pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100",
+            )}
+          >
+            {onMenu ? (
+              <RowAction label="Group actions" onClick={(event) => onMenu(row.key, event)}>
+                <MoreHorizontal aria-hidden className="size-3.5" />
+              </RowAction>
+            ) : null}
+            {onNewSession ? (
+              <RowAction
+                label="New session"
+                shortcut="C"
+                keyName="c"
+                onClick={() => onNewSession(row.key)}
               >
                 <Plus aria-hidden className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent className="flex items-center gap-1.5">
-              New session
-              <TipKey>C</TipKey>
-            </TooltipContent>
-          </Tooltip>
+              </RowAction>
+            ) : null}
+          </span>
         </span>
       ) : null}
       {counts ? <SessionCounts counts={counts} plain={plain} /> : null}

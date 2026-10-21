@@ -30,6 +30,11 @@ mock.module("@/components/sessions/composer-dock", () => require("../sessions/co
 mock.module("@/components/sessions/use-start-session", () =>
   require("../sessions/use-start-session"),
 );
+// The start invalidates the sessions v2 tree by this key.
+mock.module("@/api/hooks/use-session-tree", () => ({
+  SESSION_TREE_KEY: ["session-tree"],
+  useSessionTree: () => ({ data: undefined, isPending: true }),
+}));
 
 type CreateTaskInput = Record<string, unknown>;
 const createdTasks: CreateTaskInput[] = [];

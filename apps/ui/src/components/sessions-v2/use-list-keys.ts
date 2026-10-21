@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useCallback, useLayoutEffect, useRef } from "react";
 
-/** What a list key does. `v` (split) lands in Phase 8, `m` (move) with the move picker. */
+/** What a list key does. `v` (split) lands in Phase 8. */
 type ListKey =
   | "next"
   | "prev"
@@ -17,6 +17,7 @@ type ListKey =
   | "nextUnread"
   | "newSession"
   | "menu"
+  | "move"
   | "clear";
 
 type ListKeyHandlers = Partial<Record<ListKey, () => void>>;
@@ -30,6 +31,7 @@ const LETTERS: Record<string, ListKey> = {
   e: "done",
   l: "later",
   u: "read",
+  m: "move",
   t: "newTab",
   n: "nextUnread",
   c: "newSession",
@@ -99,7 +101,7 @@ export function listKeyOf(event: ListKeyEvent): ListKey | null {
 
 /**
  * The keydown handler of a keyboard list (`j`/`k`, arrows, Home, End, Enter
- * or `o`, `x`, `e`, `l`, `u`, `t`, `n`, `c`, the menu key, Escape). It runs on
+ * or `o`, `x`, `e`, `l`, `u`, `m`, `t`, `n`, `c`, the menu key, Escape). It runs on
  * the list element, so the keys work only while the list has focus. A key
  * with no handler passes through.
  */

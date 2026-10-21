@@ -1,10 +1,9 @@
 import { type UseQueryResult, useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { useSessionTree } from "@/api/hooks/use-session-tree";
 import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import type { SessionsListResponse } from "@/api/types";
-import { buildSessionGroupTree } from "@/lib/session-groups";
 import { sidebarListParams } from "@/lib/sessions-v2";
+import type { MyGroups } from "../use-my-groups";
 import { buildTreeRows, type ContainerId, type ListState, type TreeRow } from "./tree-rows";
 
 const NO_LISTS: ReadonlyMap<ContainerId, ListState> = new Map();
@@ -15,22 +14,29 @@ function listStates(results: UseQueryResult<SessionsListResponse>[]): ListState[
 }
 
 /**
- * The sidebar data: the tree counts, the group tree, the open lists, and the
- * flat row list. Only open lists with sessions load (`containers`), so a
- * poll never loads a folded list.
+ * The sidebar rows: the open lists and the flat row list over the group
+ * tree of `useMyGroups`. Only open lists with sessions load (`containers`),
+ * so a poll never loads a folded list. `paused` (search shows instead)
+ * stops the list polls.
  */
 export function useTreeRows({
   me,
+  myGroups,
   isOpen,
   expanded,
+  creating,
+  paused,
 }: {
   me: string | null;
+  myGroups: MyGroups;
   isOpen: (id: string) => boolean;
   expanded: ReadonlySet<ContainerId>;
+  /** A new group's name field shows under this parent. */
+  creating: string | null;
+  paused: boolean;
 }) {
-  const treeQuery = useSessionTree();
-  const tree = treeQuery.data;
-  const groups = useMemo(() => (tree ? buildSessionGroupTree(tree.groups, me) : null), [tree, me]);
+  const tree = myGroups.treeQuery.data;
+  const { groups, localGroups } = myGroups;
 
   // Learn which open lists to load, load them, then build the rows with them.
   const containers = useMemo(
@@ -41,14 +47,14 @@ export function useTreeRows({
     [tree, groups, isOpen, expanded],
   );
   const states = useQueries({
-    queries: containers.map((container) => sessionsQueryOptions(me, sidebarListParams(container))),
+    queries: containers.map((container) =>
+      sessionsQueryOptions(me, { ...sidebarListParams(container), enabled: !paused }),
+    ),
     combine: listStates,
   });
-  const rows = useMemo((): TreeRow[] => {
+  return useMemo((): TreeRow[] => {
     if (!tree || !groups) return [];
     const lists = new Map(containers.map((container, i) => [container, states[i]]));
-    return buildTreeRows({ tree, groups, isOpen, expanded, lists }).rows;
-  }, [tree, groups, isOpen, expanded, containers, states]);
-
-  return { treeQuery, groups, rows };
+    return buildTreeRows({ tree, groups, isOpen, expanded, lists, creating, localGroups }).rows;
+  }, [tree, groups, isOpen, expanded, containers, states, creating, localGroups]);
 }

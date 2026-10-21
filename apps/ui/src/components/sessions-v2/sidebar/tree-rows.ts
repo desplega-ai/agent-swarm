@@ -18,8 +18,11 @@ import {
 /** A list in the sidebar: a section (`inbox`, `later`, `done`, `nogroup`) or a group key. */
 export type ContainerId = string;
 
-/** Which centered empty state a list shows. */
-export type EmptyKind = SessionSection | "group" | "groups" | "failed";
+/**
+ * Which centered empty state a list shows. `fresh`: a new group with no
+ * sessions yet (plan D8). `search`: no session matches, with a `note`.
+ */
+export type EmptyKind = SessionSection | "group" | "groups" | "fresh" | "search" | "failed";
 
 interface RowBase {
   /** Stable across polls: the cursor and React keys use it. */
@@ -42,6 +45,8 @@ export type TreeRow =
       counts: SessionSectionCounts;
       /** Under Shared with me: no "+" (SPEC R3), and the name is the path below the owner. */
       sharedWithMe: boolean;
+      /** A search match: the name is the whole path, and the row does not fold. */
+      searchMatch?: boolean;
     })
   | (RowBase & {
       type: "owner";
@@ -50,13 +55,21 @@ export type TreeRow =
       /** Folded only: an open owner shows the counts on its groups. */
       counts: SessionSectionCounts | null;
     })
-  | (RowBase & { type: "section"; label: string; count: number })
+  | (RowBase & {
+      type: "section";
+      label: string;
+      count: number;
+      /** What `count` counts. Sessions unless said. */
+      unit?: "group";
+    })
   | (RowBase & {
       type: "session";
       container: ContainerId;
       session: SessionListItem;
       /** Inbox, Later, and Done are flat: each row names its group. */
       flat: boolean;
+      /** Search results: the free words to mark in the title. */
+      match?: readonly string[];
     })
   | (RowBase & { type: "more"; container: ContainerId; count: number })
   | (RowBase & { type: "all"; container: ContainerId; total: number })
@@ -65,15 +78,31 @@ export type TreeRow =
       kind: EmptyKind;
       /** The row (or section) this state describes, for its `aria-describedby`. */
       parentKey: string;
+      /** `fresh`: the group a new session starts in. */
+      groupKey?: string;
+      /** `search`: why nothing matches, in one sentence. */
+      note?: string;
     })
-  | (RowBase & { type: "loading"; parentKey: string });
+  | (RowBase & { type: "loading"; parentKey: string })
+  /** "New group" at the end of My groups. */
+  | (RowBase & { type: "add" })
+  /** The inline name field of a new group under `parent` (`shared/` or a group key). */
+  | (RowBase & { type: "create"; parent: string });
 
 export type NavRow = Extract<
   TreeRow,
-  { type: "box" | "group" | "owner" | "session" | "more" | "all" }
+  { type: "box" | "group" | "owner" | "session" | "more" | "all" | "add" }
 >;
 
-const NAV_TYPES = new Set<TreeRow["type"]>(["box", "group", "owner", "session", "more", "all"]);
+const NAV_TYPES = new Set<TreeRow["type"]>([
+  "box",
+  "group",
+  "owner",
+  "session",
+  "more",
+  "all",
+  "add",
+]);
 
 /** Rows the keyboard cursor stops on. */
 export function isNavRow(row: TreeRow): row is NavRow {
@@ -126,6 +155,10 @@ interface BuildTreeRowsInput {
   expanded: ReadonlySet<ContainerId>;
   /** The loaded lists. Missing means not loaded yet. */
   lists: ReadonlyMap<ContainerId, ListState>;
+  /** A new group's name field shows under this parent (`shared/` for the top level). */
+  creating?: string | null;
+  /** Groups that live only in this browser (plan D8): their empty state invites a move. */
+  localGroups?: ReadonlySet<string>;
 }
 
 /**
@@ -134,7 +167,15 @@ interface BuildTreeRowsInput {
  * load: open lists with sessions only, so a poll never loads a folded one.
  * Run it once with no lists to learn `containers`, then again with them.
  */
-export function buildTreeRows({ tree, groups, isOpen, expanded, lists }: BuildTreeRowsInput): {
+export function buildTreeRows({
+  tree,
+  groups,
+  isOpen,
+  expanded,
+  lists,
+  creating = null,
+  localGroups,
+}: BuildTreeRowsInput): {
   rows: TreeRow[];
   containers: ContainerId[];
 } {
@@ -151,7 +192,9 @@ export function buildTreeRows({ tree, groups, isOpen, expanded, lists }: BuildTr
     emptyKind: EmptyKind | null,
   ) => {
     const empty = (kind: EmptyKind | null) => {
-      if (kind) rows.push({ type: "empty", key: `empty:${container}`, level, kind, parentKey });
+      if (!kind) return;
+      const groupKey = kind === "fresh" ? container : undefined;
+      rows.push({ type: "empty", key: `empty:${container}`, level, kind, parentKey, groupKey });
     };
     if (total === 0) return empty(emptyKind);
     containers.push(container);
@@ -215,20 +258,26 @@ export function buildTreeRows({ tree, groups, isOpen, expanded, lists }: BuildTr
       counts: open ? node.own : node.subtree,
       sharedWithMe: false,
     });
+    if (creating === node.key) {
+      rows.push({ type: "create", key: `create:${node.key}`, level: level + 1, parent: node.key });
+    }
     if (!open) return;
     for (const child of node.children) groupNode(child, level + 1);
-    fill(
-      node.key,
-      key,
-      node.own.total,
-      level + 1,
-      false,
-      node.children.length > 0 ? null : "group",
-    );
+    const emptyKind =
+      node.children.length > 0 ? null : localGroups?.has(node.key) ? "fresh" : "group";
+    fill(node.key, key, node.own.total, level + 1, false, emptyKind);
   };
   for (const node of groups.myGroups) groupNode(node, 0);
-  if (groups.myGroups.length === 0) {
-    rows.push({ type: "empty", key: "empty:groups", level: 0, kind: "groups", parentKey: mine });
+  // The name field of a new top-level group, else "New group" (after the
+  // first-run invite when there are no groups yet). "New group" is a row the
+  // keys reach, so the invite holds text only.
+  if (creating === "shared/") {
+    rows.push({ type: "create", key: "create:shared/", level: 0, parent: "shared/" });
+  } else {
+    if (groups.myGroups.length === 0) {
+      rows.push({ type: "empty", key: "empty:groups", level: 0, kind: "groups", parentKey: mine });
+    }
+    rows.push({ type: "add", key: "add:group", level: 0 });
   }
 
   // Shared with me: other people's personal groups, one node per owner.

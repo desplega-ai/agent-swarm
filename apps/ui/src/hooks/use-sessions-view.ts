@@ -1,4 +1,4 @@
-import { History, PanelsTopLeft } from "lucide-react";
+import { PanelsTopLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useStats } from "@/api/hooks/use-stats";
@@ -64,30 +64,28 @@ export function useSessionsView(): SessionsView {
   return { view: legacy ? "legacy" : "v2", supported: gate.supported, pending, setView };
 }
 
-/** Adds the view switch ("Legacy sessions" or "New sessions view") to the Cmd+K palette. */
+/**
+ * Adds "New sessions view" to the Cmd+K palette in the legacy view. The v2
+ * view owns the `sessions` group itself (its actions plus "Legacy
+ * sessions", `use-sessions-commands.ts`), so this one stays out of it there.
+ */
 export function useSessionsViewCommand({ view, supported, setView }: SessionsView) {
   // Through a ref, so a new `setView` never registers the group again.
   const setViewRef = useRef(setView);
   setViewRef.current = setView;
-  const items = useMemo<CommandMenuItem[]>(() => {
-    if (!supported) return [];
-    return view === "v2"
-      ? [
-          {
-            id: "legacy",
-            label: "Legacy sessions",
-            icon: History,
-            onSelect: () => setViewRef.current("legacy"),
-          },
-        ]
-      : [
-          {
-            id: "v2",
-            label: "New sessions view",
-            icon: PanelsTopLeft,
-            onSelect: () => setViewRef.current("v2"),
-          },
-        ];
-  }, [view, supported]);
-  useCommandMenuGroup("sessions", "Sessions", items);
+  const items = useMemo<CommandMenuItem[]>(
+    () =>
+      supported
+        ? [
+            {
+              id: "v2",
+              label: "New sessions view",
+              icon: PanelsTopLeft,
+              onSelect: () => setViewRef.current("v2"),
+            },
+          ]
+        : [],
+    [supported],
+  );
+  useCommandMenuGroup("sessions", "Sessions", items, view === "legacy");
 }

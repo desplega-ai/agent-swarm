@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionTreeGroup } from "../api/types";
+import { stillEmpty, withEmptyGroups } from "./empty-groups";
 import {
   buildSessionGroupTree,
+  defaultSessionKey,
   groupCrumb,
+  groupKeyOf,
   groupLabel,
+  groupSlug,
+  groupTargets,
+  groupWriteBlock,
   isNoGroupKey,
+  PERSONAL_WRITE_REASON,
   personalOwner,
+  renamedGroupKey,
+  restoreKey,
 } from "./session-groups";
 
 const ME = "me-1";
@@ -156,5 +165,71 @@ describe("group keys", () => {
     expect(groupCrumb(`personal/${ME}/notes/`, ME, nameOf)).toBe("notes");
     expect(groupCrumb("personal/lena/notes/", ME, nameOf)).toBe("Lena › notes");
     expect(groupCrumb("shared/", ME, nameOf)).toBe("No group");
+  });
+});
+
+describe("move targets and new groups (Phase 5)", () => {
+  test("groupKeyOf drops a session leaf only when it is a whole segment", () => {
+    expect(groupKeyOf("shared/task:abc/")).toBe("shared/");
+    expect(groupKeyOf("shared/northwind/schedule:s1/")).toBe("shared/northwind/");
+    expect(groupKeyOf("shared/northwind/pricing/")).toBe("shared/northwind/pricing/");
+    expect(groupKeyOf("shared/footask:x/")).toBe("shared/footask:x/");
+  });
+
+  test("groupTargets lists every group and parent, shared first, by path", () => {
+    const tree = buildSessionGroupTree(
+      [
+        group(`personal/${ME}/notes/`, "2026-10-21T09:00:00.000Z"),
+        group("shared/northwind/pricing/", "2026-10-21T10:00:00.000Z"),
+        group("shared/infra/", "2026-10-21T08:00:00.000Z"),
+        group("personal/other/x/", "2026-10-21T08:00:00.000Z"),
+      ],
+      ME,
+    );
+    expect(groupTargets(tree, ME).map((target) => [target.key, target.label])).toEqual([
+      ["shared/infra/", "infra"],
+      ["shared/northwind/", "northwind"],
+      ["shared/northwind/pricing/", "northwind › pricing"],
+      [`personal/${ME}/notes/`, "notes"],
+    ]);
+  });
+
+  test("a group name becomes one safe key segment", () => {
+    expect(groupSlug("  QA Bulk  ")).toBe("qa-bulk");
+    expect(groupSlug("task:123 / sub")).toBe("task123--sub");
+    expect(groupSlug("..")).toBe("");
+    expect(renamedGroupKey("shared/a/b/", "New Name")).toBe("shared/a/new-name/");
+    expect(renamedGroupKey("shared/a/", "!!")).toBeNull();
+  });
+
+  test("an empty group stays until the server has it or a group inside it", () => {
+    const local = ["shared/qa/", "shared/new/"];
+    expect(stillEmpty(local, ["shared/qa/sub/", "shared/infra/"])).toEqual(["shared/new/"]);
+    const merged = withEmptyGroups([group("shared/infra/", "2026-10-21T08:00:00.000Z")], local);
+    expect(merged.map((g) => [g.key, g.total])).toEqual([
+      ["shared/infra/", 1],
+      ["shared/qa/", 0],
+      ["shared/new/", 0],
+    ]);
+  });
+});
+
+describe("Undo keys and personal writes (Phase 5 fixes)", () => {
+  test("restoreKey sends null only when null gives the same key back", () => {
+    expect(defaultSessionKey("r1")).toBe("shared/task:r1/");
+    expect(restoreKey("r1", "shared/task:r1/")).toBeNull();
+    expect(restoreKey("r1", `personal/${ME}/task:r1/`)).toBe(`personal/${ME}/task:r1/`);
+    expect(restoreKey("r1", "shared/schedule:s9/")).toBe("shared/schedule:s9/");
+    expect(restoreKey("r1", "shared/northwind/pricing/")).toBe("shared/northwind/pricing/");
+    // Another session's default key is not this one's.
+    expect(restoreKey("r1", "shared/task:r2/")).toBe("shared/task:r2/");
+  });
+
+  test("only writes into a personal key need a user token", () => {
+    expect(groupWriteBlock(`personal/${ME}/notes/`, false)).toBe(PERSONAL_WRITE_REASON);
+    expect(groupWriteBlock(`personal/${ME}/notes/`, true)).toBeNull();
+    expect(groupWriteBlock("shared/infra/", false)).toBeNull();
+    // No group (a move out of a personal group) works on the operator key.
+    expect(groupWriteBlock(null, false)).toBeNull();
   });
 });

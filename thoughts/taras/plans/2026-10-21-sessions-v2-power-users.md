@@ -478,7 +478,7 @@ The sidebar shows every section and group with server counts, paged rows, read s
 #### Automated Verification:
 - [x] Tree builder tests pass: `bun test apps/ui/src/lib/session-groups.test.ts`
 - [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
-- [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
+- [x] Smoke passes: `bun run e2e:ui -- --grep @smoke` (clean worktree at 03dbfe7be)
 
 #### Automated QA:
 - [x] On the seeded stack, the sidebar counts match `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.inbox, (.groups[] | select(.key=="shared/northwind/pricing/"))'` for Inbox and that group.
@@ -539,18 +539,18 @@ Users can select many sessions, move them by bulk bar, drag, picker, or Cmd+K, a
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Parser tests pass: `bun test apps/ui/src/lib/session-search.test.ts`
-- [ ] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
+- [x] Parser tests pass: `bun test apps/ui/src/lib/session-search.test.ts`
+- [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
 - [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
 
 #### Automated QA:
-- [ ] Select 3 rows, press `m`, choose "Create group #qa-bulk": the group appears with 3 sessions, and the server agrees: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.groups[] | select(.key=="shared/qa-bulk/") | .total'` prints `3`.
-- [ ] Drag one row onto another group: the row moves.
-- [ ] Rename `qa-bulk` to `qa-renamed`, then delete it. The sessions land in No group.
-- [ ] "+" on a group opens a New session tab with that group in "Start in". Send creates a session in that group.
-- [ ] `with:<seeded name> is:unread` shows only matching sessions.
-- [ ] Cmd+K, type "Done", Enter: the focused session moves to Done.
-- [ ] Record the move flow: `agent-browser record start /tmp/sessions-v2-build/p5-move.mp4 --cursor`.
+- [x] Select 3 rows, press `m`, choose "Create group #qa-bulk": the group appears with 3 sessions, and the server agrees: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.groups[] | select(.key=="shared/qa-bulk/") | .total'` prints `3`.
+- [x] Drag one row onto another group: the row moves.
+- [x] Rename `qa-bulk` to `qa-renamed`, then delete it. The sessions land in No group.
+- [x] "+" on a group opens a New session tab with that group in "Start in". Send creates a session in that group.
+- [x] `with:<seeded name> is:unread` shows only matching sessions.
+- [x] Cmd+K, type "Done", Enter: the focused session moves to Done.
+- [x] Record the move flow: `agent-browser record start /tmp/sessions-v2-build/p5-move.mp4 --cursor`. (recorded before the review fix round; Phase 10 records the final flows)
 
 #### Manual Verification:
 - [ ] None.
@@ -904,6 +904,9 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Phase 4 backend additions: `GET /api/sessions/{id}` returns `readState` and `lastActivityAt` for a user viewer (same SQL rule as the list), so read-on-open lives with the pane and works for deep links. List rows carry an optional `shares: [{userId, name, access}]` for the row label and hover card.
   - Phase 4 decisions backed by UX-REVIEW-R9: 1 avatar plus "+N" on rows, the shared icon only when no other avatar shows, Undo toasts (5200 ms, bottom-left). "Pick a date and time" is a Dialog, not the mockup's inline field.
   - Phase 1: `approvals` on the session detail is omitted when empty. The client reads a missing field as `[]`. Bypass actors get no `readState`.
+  - Phase 5 review decisions: on the operator key (no `aswt_` token), the UI disables writes into `personal/` keys with "Personal groups need a user token." (Taras agreed). This covers the move dialog, Start in, drop targets, "+", and the New session here, New subgroup, and Rename items. Moves out of a personal group and Delete stay, because the server accepts them (probed live). Undo restores each session's exact previous key, and sends `null` only when `null` gives the same key. Moves are not optimistic: the toast comes after the server answers.
+  - Phase 5 skipped (mockup only, not in the plan): Shift-click range selection, and keeping the Start in group in `?tabs=`. Free-text search matches root titles and text (server `q`), not people or group names.
+  - Follow-ups from the Phase 5 review (after this PR): decide whether the operator key plus a picked user may write `personal/<self>/` keys (Taras leans yes, as the operator key can already read and move everything else). Show ownerless roots (unmapped Slack users, agent-started sessions) in an "Unassigned" section for operators, since `scope=tree` hides them from v2 while Legacy still shows them.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
 - **UX-REVIEW-R9 status**: (table filled in during Phase 10).
