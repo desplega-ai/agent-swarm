@@ -350,6 +350,43 @@ describe("foreach with any executor body", () => {
     expect(((run.context as Record<string, unknown>).fan as { okCount: number }).okCount).toBe(2);
     expect((await stepByNodeId(runId, "after"))?.status).toBe("completed");
   });
+
+  test.each([
+    ["the body config", "{{trigger.items}}"],
+    ["over", "{{ITEMS}}"],
+  ])("install params render into %s", async (_path, over) => {
+    const workflow = await createWorkflow({
+      name: `foreach-bodies-${crypto.randomUUID()}`,
+      params: { P: "hi", ITEMS },
+      definition: {
+        nodes: [
+          {
+            id: "fan",
+            type: "foreach",
+            config: {
+              over,
+              itemKey: "id",
+              body: {
+                type: "agent-task",
+                config: { agentId, template: "Hello {{P}} {{item.name}}" },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry);
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
+
+    const children = await childSteps(runId);
+    expect(children.map((step) => step.status)).toEqual(["waiting", "waiting", "waiting"]);
+    const prompts = await Promise.all(
+      children.map(async (step) =>
+        (await getTaskByWorkflowRunStepId(step.id))?.task.split("\n").at(-1),
+      ),
+    );
+    expect(prompts).toEqual(["Hello hi Ada", "Hello hi Babbage", "Hello hi Curie"]);
+  });
 });
 
 describe("foreach restart reconciliation", () => {

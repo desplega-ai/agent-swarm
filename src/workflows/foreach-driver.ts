@@ -1,3 +1,4 @@
+import { renderAutomationTokens } from "../be/automation-preflight";
 import {
   detachTaskFromWorkflowRunStep,
   getDbClient,
@@ -10,7 +11,13 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import type { WorkflowDefinition, WorkflowNode, WorkflowRun, WorkflowRunStep } from "../types";
+import type {
+  Workflow,
+  WorkflowDefinition,
+  WorkflowNode,
+  WorkflowRun,
+  WorkflowRunStep,
+} from "../types";
 import { checkpointStepWaiting } from "./checkpoint";
 import { FOREACH_ITEMS_WAIT_FOR } from "./constants";
 import {
@@ -115,7 +122,7 @@ export async function driveForeach(
 ): Promise<ForeachDriveResult> {
   const run = await getWorkflowRun(runId);
   if (!run || (run.status !== "running" && run.status !== "waiting")) return NOT_JOINED;
-  const workflow = await getWorkflow(run.workflowId);
+  const workflow = await getRenderedWorkflow(run.workflowId);
   if (!workflow) return NOT_JOINED;
   const def = workflow.definition;
   const parentNode = def.nodes.find((node) => node.id === parentNodeId);
@@ -246,7 +253,7 @@ export async function runForeachDrive(
       return drive;
     }
     const run = await getWorkflowRun(runId);
-    const workflow = run ? await getWorkflow(run.workflowId) : null;
+    const workflow = run ? await getRenderedWorkflow(run.workflowId) : null;
     if (!run || !workflow) return drive;
     const ctx = (run.context ?? {}) as Record<string, unknown>;
     if (drive.successors.length > 0) {
@@ -274,6 +281,17 @@ export async function drainForeachDrives(): Promise<void> {
   while (activeDrives.size > 0) {
     await Promise.allSettled([...activeDrives]);
   }
+}
+
+/**
+ * The run's workflow with its install params rendered in, as
+ * startWorkflowExecution rendered it before the walk. The driver and its
+ * post-join walk reload the definition, so without this a `{{PARAM}}` token in
+ * the body config or in `over` would reach the per-item pass unresolved.
+ */
+async function getRenderedWorkflow(workflowId: string): Promise<Workflow | null> {
+  const workflow = await getWorkflow(workflowId);
+  return workflow ? renderAutomationTokens(workflow, workflow.params ?? {}) : null;
 }
 
 async function requeueChild(stepId: string): Promise<void> {
