@@ -6,16 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.4.5] - 2026-10-21
+
 ### Added
-- Transcription: audio shared with the Slack bot (voice clips included) and audio attached or recorded (new mic button) in the dashboard's session composer get a `[Transcript of <file>]` block in the task text, through the same config as Chat SDK voice notes. Without `TRANSCRIPTION_API_KEY`, transcription reuses an existing `ELEVENLABS_API_KEY`, `OPENAI_API_KEY` or `GROQ_API_KEY`, in that order, and sends it only to that provider's own endpoint; Groq is a new provider. A **Transcription** card under Settings → Integrations sets provider, key, base URL and model and shows the active provider; the `TRANSCRIPTION_*` keys left the Configuration page. Session follow-ups with attachments are now created as drafts until their uploads settle (#2300).
-- SystemOne: `SYSTEM_ONE_DEFAULT_PROVIDER` (Settings → Configuration) picks the decision host for a `system-one-decision` node or `system-one-decide` call that names none, read at each run. Unset stays `typesafe`; setting `cloudflare` runs those nodes on Clef with no workflow edit, and the node card shows the effective provider and model (#2186).
-- Heartbeat: the built-in `heartbeat-jev-gate` runs on Clef (`provider: cloudflare`) with a replay-measured threshold of 0.2, and turns on by default with only `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` set. `auto` still prefers Jev, and both this gate and `slack-reply-gate` move on to the next provider when the server refuses OpenRouter behind an `OPENROUTER_BASE_URL` gateway (#2186).
+- Chat SDK: `chat-reply`, `chat-post` and the result relay send files back to the chat thread (#2202).
+- Chat SDK: each chat task records who asked and where, and a Telegram group reaches the swarm only when a message is meant for the bot (#2205).
+- Chat SDK: voice notes land as transcripts in the task text, and a Telegram file too large to fetch gets a "too large" reply instead of failing silently (#2206).
+- Apps: the page catalog adds a `NumberInput` control, `defaultValue` on `Select`, and an opt-in `fill` prop on `Stack` and `Split` (#2310).
+- Apps: the page catalog adds a `CardGrid` (one card per row, with a click chain), and a `Table` column can combine row fields with a `{{field}}` template (#2319).
+- Apps: the page catalog adds a `Tree` component, a collapsible outline of a `{ root, elements }` value; clicking a row writes its key to `/ui/<id>/value` (#2315).
+- Transcription: audio shared with the Slack bot (voice clips included) and audio attached or recorded (new mic button) in the dashboard's session composer get a `[Transcript of <file>]` block in the task text, through the same config as Chat SDK voice notes. Without `TRANSCRIPTION_API_KEY`, transcription reuses an existing `ELEVENLABS_API_KEY`, `OPENAI_API_KEY` or `GROQ_API_KEY`, in that order, and sends it only to that provider's own endpoint; Groq is a new provider. A **Transcription** card under Settings → Integrations sets provider, key, base URL and model and shows the active provider; the `TRANSCRIPTION_*` keys left the Configuration page. Session follow-ups with attachments are now created as drafts until their uploads settle (#2309).
+- SystemOne: `SYSTEM_ONE_DEFAULT_PROVIDER` (Settings → Configuration) picks the decision host for a `system-one-decision` node or `system-one-decide` call that names none, read at each run. Unset stays `typesafe`; setting `cloudflare` runs those nodes on Clef with no workflow edit, and the node card shows the effective provider and model (#2301).
+- Heartbeat: the built-in `heartbeat-jev-gate` runs on Clef (`provider: cloudflare`) with a replay-measured threshold of 0.2, and turns on by default with only `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` set. `auto` still prefers Jev, and both this gate and `slack-reply-gate` move on to the next provider when the server refuses OpenRouter behind an `OPENROUTER_BASE_URL` gateway (#2301).
 
 ### Changed
-- Extensions: `slack-reply-gate` 1.3.0 makes its decision through the server's `system-one-decide` tool instead of its own TypeSafe and OpenRouter client, so it can use Clef and every other SystemOne host. Its `apiKey` config field is removed; store the key as a global secret (#2186).
+- Extensions: `slack-reply-gate` 1.3.0 makes its decision through the server's `system-one-decide` tool instead of its own TypeSafe and OpenRouter client, so it can use Clef and every other SystemOne host. Its `apiKey` config field is removed; store the key as a global secret (#2301).
+- MCP: `@modelcontextprotocol/sdk` moves to 1.32.1 (Dependabot alerts 221-224). `/mcp` and `/mcp-user` reject a body over 4 MiB with a 413 JSON-RPC error before parsing, and both servers cap tool input at 25,000 elements (#2312).
+- Worker image bumps claude-code to 2.1.306, opencode to 2.1.2, Cursor SDK to 1.0.40, gemini to 0.65.0, Copilot CLI to 1.0.101, kiro to 2.33.0 and amp to 0.0.1792584044-g15483c, plus `@anthropic-ai/sdk` (#2307, #2318).
+- Docs: a PR review playbook at `/docs/playbooks/pr-review` (#2320), dreaming-v2 seed skill patches (#2305), and the `heartbeat` and `workflows` TLA+ specs synced with main (#2308).
 
 ### Fixed
-- Pages: each page gets its own session cookie (`page_session_<pageId>`), so opening a second page no longer breaks the first tab with 403 "page-session cookie scoped to a different page id", and its `/@swarm/api/*` calls no longer run as the newest page. The browser SDK names its page in `X-Swarm-Page-Id`; the proxy falls back to a same-host `/p/<id>` Referer, and the legacy `page_session` cookie still works for its own page.
+- Memory: task completion memories are chunked like `memory-store`, so a long output gets a vector for every chunk. Search keeps the best chunk per task and widens its candidate window so one task's chunks cannot crowd out other matches. A repeat write for a task replaces its earlier chunks in one transaction. The chunker no longer drops markdown sections under 50 characters; it packs them into shared chunks. The embedding provider cuts any input over the model's token cap, and one oversized input no longer fails its whole batch, so the boot backfill now fills rows it used to leave without a vector (#2302).
+- Codex: session instructions stay out of the worktree's `AGENTS.md`, so an active session no longer leaves the repo dirty and blocks sync and publication (#2298).
+- Scripts: `ctx.step.agentTask(label, { dependsOn })` keeps `dependsOn`, so the step's task waits for its dependency instead of starting at once (#2313).
+- Pages: each page gets its own session cookie (`page_session_<pageId>`), so opening a second page no longer breaks the first tab with 403 "page-session cookie scoped to a different page id", and its `/@swarm/api/*` calls no longer run as the newest page. The browser SDK names its page in `X-Swarm-Page-Id`; the proxy falls back to a same-host `/p/<id>` Referer, and the legacy `page_session` cookie still works for its own page (#2311).
 
 ## [2.4.4] - 2026-10-21
 
@@ -29,7 +43,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Worker image bumps opencode to 2.1.1 and amp to 0.0.1792506219-g025e7e (#2295); the UI image moves to `nginx-unprivileged` 1.31.6 (#2299).
 
 ### Fixed
-- Memory: task completion memories are chunked like `memory-store`, so a long output gets a vector for every chunk. Search keeps the best chunk per task and widens its candidate window so one task's chunks cannot crowd out other matches. A repeat write for a task replaces its earlier chunks in one transaction. The chunker no longer drops markdown sections under 50 characters; it packs them into shared chunks. The embedding provider cuts any input over the model's token cap, and one oversized input no longer fails its whole batch, so the boot backfill now fills rows it used to leave without a vector.
 - Codex OAuth: the keep-warm sweep refreshes pool slots at 5 days instead of 7, and `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS` sets the age, so a ChatGPT session that ends before day 7 gets a refresh first (#2296).
 - Heartbeat: the checklist gate counts an `MM-DD` date as due only when it is a bare token, so a line carrying a full date such as a `2026-10-20T09:30Z` timestamp no longer counts as a due item (#2293).
 
