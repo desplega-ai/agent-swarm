@@ -17,6 +17,7 @@ import {
   type IntegrationDef,
   type IntegrationField,
 } from "./integrations-catalog";
+import { resolveTranscriptionStatus } from "./transcription-status";
 
 export type IntegrationStatus = "configured" | "partial" | "disabled" | "none";
 
@@ -105,6 +106,11 @@ export function deriveIntegrationStatus(
   }
 
   if (def.id === "chat-sdk") return deriveChatSdkStatus(configs, envPresence, live);
+
+  // Configured by an explicit key or by a provider key the swarm already has.
+  if (def.id === "transcription") {
+    return resolveTranscriptionStatus(configs, envPresence) ? "configured" : "none";
+  }
 
   const groups = def.configGroups ?? [];
   if (groups.length > 0) {

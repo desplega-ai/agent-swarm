@@ -23,7 +23,9 @@
  * Attachments go out on the follow-up path only: steering carries text. They
  * also survive the swap. A file added through `renderActions` (the session
  * panel's "Add screenshot") while steering is up switches to the follow-up
- * path, so the message goes out as a follow-up task with the file.
+ * path, so the message goes out as a follow-up task with the file. A clip
+ * from the mic button is one such file: its upload to the draft task puts its
+ * transcript in the task text.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -31,11 +33,12 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import type { AgentTask } from "@/api/types";
+import { RecordAudioButton, useAudioRecorder } from "@/components/sessions/audio-recorder";
 import {
   formatComposeAttachmentUploadError,
   uploadComposeAttachments,
 } from "@/components/sessions/compose-attachment-upload";
-import { ComposerDock } from "@/components/sessions/composer-dock";
+import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
 
@@ -81,6 +84,28 @@ export interface TaskComposerProps {
   className?: string;
 }
 
+const PROMOTE_ATTEMPTS = 3;
+const PROMOTE_RETRY_DELAY_MS = 200;
+
+/**
+ * Promotion is idempotent, so a retry also covers a response lost after the
+ * server committed it. False when every attempt failed: the heartbeat then
+ * promotes the abandoned draft within 5 minutes.
+ */
+async function promoteDraft(taskId: string): Promise<boolean> {
+  for (let attempt = 1; attempt <= PROMOTE_ATTEMPTS; attempt++) {
+    try {
+      await api.promoteDraftTask(taskId);
+      return true;
+    } catch {
+      if (attempt < PROMOTE_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, PROMOTE_RETRY_DELAY_MS * attempt));
+      }
+    }
+  }
+  return false;
+}
+
 export function TaskComposer({
   targetTask,
   canSteer,
@@ -124,6 +149,9 @@ export function TaskComposer({
     }) => {
       setAttachmentError(null);
       setUploadedCount(0);
+      // A draft (#1240) until its uploads settle, so no worker claims it
+      // before its attachments and any voice-note transcript are in.
+      const isDraft = input.attachments.length > 0;
       const created = await api.createTask({
         task: input.task,
         parentTaskId: input.parentTaskId,
@@ -133,18 +161,27 @@ export function TaskComposer({
           : {}),
         requestedByUserId: input.requestedByUserId,
         source: "ui",
+        draft: isDraft,
       });
+      // Per-file failures come back in the result; the upload never throws.
       const uploadResult = await uploadComposeAttachments({
         taskId: created.id,
         files: input.attachments,
         onUploaded: setUploadedCount,
       });
-      return { created, uploadResult };
+      // Always promote, even after an upload failure. A promotion failure
+      // never fails the send: the task exists, and a failed send keeps the
+      // text, so Send again would create a second task.
+      const promoted = isDraft ? await promoteDraft(created.id) : true;
+      return { created, uploadResult, promoted };
     },
-    onSuccess: ({ created, uploadResult }, input) => {
+    onSuccess: ({ created, uploadResult, promoted }, input) => {
       const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);
       setAttachmentError(uploadError);
       if (uploadError) toast.error(uploadError);
+      if (!promoted) {
+        toast.warning("Task created, but it could not start yet. It starts within 5 minutes.");
+      }
       if (rootTaskId) queryClient.invalidateQueries({ queryKey: ["session", rootTaskId] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -183,10 +220,26 @@ export function TaskComposer({
   // follow-up task instead.
   const steerTarget = attachments.length === 0 && canSteer ? targetTask : null;
 
-  const extraActions = renderActions?.((file) => {
+  const addAttachment = useCallback((file: File) => {
     setAttachments((current) => [...current, file]);
     setAttachmentError(null);
+  }, []);
+
+  // A clip passes the dock's type and size checks, as a picked file does. The
+  // toast covers the steer box, which shows no attachment error.
+  const recorder = useAudioRecorder((clip) => {
+    const { valid, error } = partitionAttachmentFiles([clip]);
+    if (valid.length > 0) return addAttachment(clip);
+    setAttachmentError(error);
+    if (error) toast.error(error);
   });
+
+  const extraActions = (
+    <>
+      {renderActions?.(addAttachment)}
+      <RecordAudioButton recorder={recorder} disabled={!userId || createTask.isPending} bar={bar} />
+    </>
+  );
 
   if (steerTarget) {
     return (

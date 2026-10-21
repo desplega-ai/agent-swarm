@@ -36,7 +36,7 @@ import {
 } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { getNodeEnv } from "../utils/node-env";
-import { issuePageSessionCookie } from "../utils/page-session";
+import { pageSessionSetCookies } from "../utils/page-session";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
@@ -175,7 +175,7 @@ const resolvePageRoute = route({
  *     `?key=` query / HTTP Basic on `/p/:id` directly (step-5). Bearer-side
  *     issuance would bypass the password check entirely.
  *
- * Response: 204 No Content + `Set-Cookie: page_session=<signed>; HttpOnly; ...`.
+ * Response: 204 No Content + `Set-Cookie: page_session_<id>=<signed>; HttpOnly; ...`.
  */
 const launchPageRoute = route({
   method: "post",
@@ -981,13 +981,13 @@ export async function handlePages(
         : auth?.kind === "operator"
           ? { name: `guest-${randomUUID().slice(0, 8)}`, op: true as const }
           : undefined;
-    const cookie = await issuePageSessionCookie(page.id, {
+    const cookies = await pageSessionSetCookies(req, page.id, {
       dev: isDevRequest(req),
       ...identity,
     });
 
     applyLaunchCors(req, res);
-    res.setHeader("Set-Cookie", cookie);
+    res.setHeader("Set-Cookie", cookies);
     res.writeHead(204);
     res.end();
     return true;

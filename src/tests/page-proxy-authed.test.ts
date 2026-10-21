@@ -122,7 +122,7 @@ describe("/@swarm/api/* proxy — authed-mode page", () => {
     expect(launch.status).toBe(204);
     const setCookie = launch.headers.get("set-cookie");
     expect(setCookie).toBeTruthy();
-    const cookieValue = /page_session=([^;]+)/.exec(setCookie!)?.[1];
+    const cookieValue = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(setCookie!)?.[1];
     expect(cookieValue).toBeTruthy();
 
     // Drive the proxy with the cookie — should resolve to the page owner's

@@ -14,6 +14,7 @@ import {
   Mail,
   MessageCircle,
   MessageSquare,
+  Mic,
   Plug,
   Route,
   Search,
@@ -52,6 +53,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "key-round": KeyRound,
   "chart-line": ChartLine,
   cloud: Cloud,
+  mic: Mic,
 };
 
 function resolveIcon(iconKey: string): LucideIcon {

@@ -4,6 +4,7 @@ import * as z from "zod";
 import pkg from "../package.json";
 import { enqueueAdmissionRow } from "./be/rbac-audit";
 import { getUserGrant } from "./be/rbac-roles";
+import { MCP_MAX_TOOL_INPUT_ELEMENTS } from "./mcp-limits";
 import {
   type AdmissionRbac,
   decideToolAdmission,
@@ -107,6 +108,7 @@ export function createUserServer(user: User): McpServer {
       capabilities: {
         logging: {},
       },
+      maxToolInputElements: MCP_MAX_TOOL_INPUT_ELEMENTS,
     },
   );
 

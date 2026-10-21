@@ -204,13 +204,13 @@ export function createAssistant(): Assistant {
         // Fetch shared files before the task text is final: a file that can't be
         // downloaded is flagged in it.
         if (files?.length) await safeSetStatus("Downloading attachments...");
-        await using inbound = await fetchSlackFiles(client, files);
+        await using inbound = await fetchSlackFiles(client, files, { transcribe: true });
         // Any in-body `<@U…>` mention the requester typed is rewritten via
         // the identity primitive before it reaches agent-visible task text —
         // never a raw Slack ID. Bot-mention routing checks above use the
         // raw `messageText`, not this rendered copy.
         const renderedMessageText = await rewriteSlackMentions(
-          buildEffectiveText(messageText, inbound.files, inbound.failed),
+          buildEffectiveText(messageText, inbound.files, inbound.failed, inbound.notes),
           cachedBotUserId ?? undefined,
         );
 

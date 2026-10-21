@@ -23,11 +23,7 @@ import { providerPath } from "@/fs/provider";
 import { getFileStorageProvider } from "@/fs/registry";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import type { AgentTask, CreateTaskOptions } from "@/types";
-import {
-  isTranscriptionConfigured,
-  TRANSCRIPTION_API_KEY_ENV,
-  transcribeAudio,
-} from "@/utils/transcription";
+import { transcribeAudioNotes } from "@/utils/transcription";
 import { errorMessage } from "./logger";
 
 /** How often a draft's lease is renewed while its uploads run; the sweep waits 5 minutes. */
@@ -148,17 +144,6 @@ export function formatTooLargeReply(failed: ChatFileFailure[]): string {
   ].join("\n");
 }
 
-const AUDIO_EXTENSIONS: Record<string, string> = {
-  "audio/ogg": "ogg",
-  "audio/opus": "ogg",
-  "audio/mpeg": "mp3",
-  "audio/mp4": "m4a",
-  "audio/x-m4a": "m4a",
-  "audio/wav": "wav",
-  "audio/x-wav": "wav",
-  "audio/webm": "webm",
-};
-
 /**
  * Transcribe every fetched audio file. Returns one task-text note per file:
  * the transcript, the failure, or (when no provider is configured) a line
@@ -167,36 +152,17 @@ const AUDIO_EXTENSIONS: Record<string, string> = {
 export async function transcribeChatAudio(
   fetched: FetchedChatFile[],
 ): Promise<Map<string, string>> {
-  const notes = new Map<string, string>();
-  const audio = fetched.filter(({ file }) => file.attachment.type === "audio");
-  if (audio.length === 0) return notes;
-  if (!isTranscriptionConfigured()) {
-    for (const { file } of audio) {
-      notes.set(
-        file.id,
-        `(not transcribed: no transcription provider configured, set ${TRANSCRIPTION_API_KEY_ENV})`,
-      );
-    }
-    return notes;
-  }
-  for (const { file, path } of audio) {
-    // Telegram voice notes carry no file name; the endpoint reads the format from the extension.
-    const extension = AUDIO_EXTENSIONS[file.mimeType ?? ""] ?? "ogg";
-    const filename = /\.\w+$/.test(file.name) ? file.name : `${file.name}.${extension}`;
-    try {
-      const text = await transcribeAudio({
+  return transcribeAudioNotes(
+    fetched
+      .filter(({ file }) => file.attachment.type === "audio")
+      .map(({ file, path }) => ({
+        key: file.id,
+        name: file.name,
         data: Bun.file(path),
-        filename,
         mimeType: file.mimeType,
-      });
-      notes.set(file.id, `[Transcript of ${file.name}]\n${text || "(no speech recognized)"}`);
-    } catch (error) {
-      const reason = errorMessage(error);
-      console.warn(`[chat-sdk] could not transcribe file ${file.id}: ${reason}`);
-      notes.set(file.id, `(transcription failed: ${reason})`);
-    }
-  }
-  return notes;
+      })),
+    "[chat-sdk]",
+  );
 }
 
 async function readAttachment(attachment: Attachment): Promise<Uint8Array> {

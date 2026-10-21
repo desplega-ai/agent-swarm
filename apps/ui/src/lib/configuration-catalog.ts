@@ -1264,39 +1264,6 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/chat-sdk`,
       },
       {
-        key: "TRANSCRIPTION_PROVIDER",
-        label: "Transcription provider",
-        description:
-          "Request shape for voice-note transcription. openai covers OpenAI, Groq and self-hosted whisper; elevenlabs is ElevenLabs speech-to-text. Transcription stays off until the TRANSCRIPTION_API_KEY secret is set. Applies to the next voice note.",
-        kind: "enum",
-        options: ["openai", "elevenlabs"],
-        defaultValue: "openai",
-        restartRequired: false,
-        docsUrl: `${DOCS}integrations/chat-sdk#voice-notes`,
-      },
-      {
-        key: "TRANSCRIPTION_BASE_URL",
-        label: "Transcription base URL",
-        description:
-          "Base URL of the transcription service. Empty uses the provider's default: https://api.openai.com/v1 for openai, https://api.elevenlabs.io/v1 for elevenlabs.",
-        kind: "string",
-        defaultValue: "",
-        placeholder: "https://api.openai.com/v1",
-        restartRequired: false,
-        docsUrl: `${DOCS}integrations/chat-sdk#voice-notes`,
-      },
-      {
-        key: "TRANSCRIPTION_MODEL",
-        label: "Transcription model",
-        description:
-          "Model name sent to the transcription service. Empty uses the provider's default: whisper-1 for openai, scribe_v2 for elevenlabs.",
-        kind: "string",
-        defaultValue: "",
-        placeholder: "whisper-1",
-        restartRequired: false,
-        docsUrl: `${DOCS}integrations/chat-sdk#voice-notes`,
-      },
-      {
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         description:

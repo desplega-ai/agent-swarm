@@ -27,6 +27,7 @@ import { isChatThreadBuffered } from "../integrations/chat-sdk/thread-buffer";
 import { chatSdkContextKey } from "../tasks/context-key";
 import { registerDeferTaskTool } from "../tools/defer-task";
 import type { Agent } from "../types";
+import { NOT_TRANSCRIBED_NOTE, TRANSCRIPTION_ENV_KEYS } from "../utils/transcription";
 import {
   flushChatBuffers,
   postChatWebhook,
@@ -45,10 +46,7 @@ const ENV_KEYS = [
   "STEERING_ENABLED",
   "TELEGRAM_MENTION_ON_REPLY",
   "CHAT_SDK_OWNER_WINDOW_MIN",
-  "TRANSCRIPTION_API_KEY",
-  "TRANSCRIPTION_BASE_URL",
-  "TRANSCRIPTION_MODEL",
-  "TRANSCRIPTION_PROVIDER",
+  ...TRANSCRIPTION_ENV_KEYS,
 ];
 const savedEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
@@ -90,6 +88,8 @@ beforeAll(async () => {
   // The adapter must treat a reply to the bot as a mention without the env fallback.
   delete process.env.TELEGRAM_MENTION_ON_REPLY;
   delete process.env.CHAT_SDK_OWNER_WINDOW_MIN;
+  // A provider key in the shell (OPENAI_API_KEY, ...) would switch transcription on.
+  for (const key of TRANSCRIPTION_ENV_KEYS) delete process.env[key];
   resetFileStorageProviderForTests();
   initDb(TEST_DB_PATH);
   lead = await createAgent({
@@ -870,9 +870,7 @@ describe("Chat SDK inbound voice notes and size limit", () => {
 
     const tasks = await chatTasks(2102);
     expect(tasks).toHaveLength(1);
-    expect(tasks[0]!.task).toContain(
-      "(not transcribed: no transcription provider configured, set TRANSCRIPTION_API_KEY)",
-    );
+    expect(tasks[0]!.task).toContain(NOT_TRANSCRIBED_NOTE);
     expect(await getTaskAttachments(tasks[0]!.id)).toHaveLength(1);
   });
 

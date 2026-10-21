@@ -1,0 +1,182 @@
+---
+title: PR Review
+description: Review a pull request for about $0.02. Two small models, Clairic and Jev, triage every hunk against what the PR claims, and one cheap coding agent reads only the batches they flag. One workflow and five scripts, ready to import.
+---
+
+**Small models triage. The agent reads only what they flag.**
+
+This playbook reviews a GitHub pull request with the two System One models in Agent Swarm. Clairic reads the PR description and extracts what it claims. Jev tags every hunk of the diff, groups the hunks into category batches, and judges each batch against those claims and the repo's rules. A coding agent on a cheap model then reviews only the top flagged batches and proposes a patch for each finding. A clean PR never reaches the agent.
+
+It is read-only and manual: it posts nothing to GitHub, and nothing fires on its own.
+
+![Review of a 24-file PR: the seven-node run on the left, a finding with the diff and a suggested two-line patch on the right](/playbooks/pr-review/final-real-patch.png)
+
+## How it works
+
+<Mermaid title="PR review: fetch the diff, then claims, context and hunk tags in parallel, Jev judges each batch, the agent reviews only flagged batches, and a report closes the run." chart={`flowchart TD
+  T["trigger<br/>{repo, pr}"] --> F["fetch<br/>diff split into hunks"]
+  F --> C["claims<br/>Clairic extracts the PR's claims"]
+  F --> X["context<br/>CI, repo rules, related files"]
+  F --> G["tag<br/>Jev tags every hunk"]
+  C --> D["decide<br/>N category batches, Jev judges each"]
+  X --> D
+  G --> D
+  D --> R["review<br/>agent reads the top flagged batches"]
+  R --> P["report<br/>verdict, findings, cost"]
+`} />
+
+| Node | Type | What it does |
+|---|---|---|
+| `fetch` | `swarm-script` (`pr-review-fetch-diff`) | Fetches the PR diff from GitHub and splits it into numbered hunks. A PR with more than 60 hunks falls back to one unit per file. |
+| `claims` | `system-one-extraction` (Clairic) | Extracts the PR's claims from its description: intent, stated risk, breaking changes, touched areas. |
+| `context` | `swarm-script` (`pr-review-context`) | Collects CI on the reviewed commit, repo rules (the repo's guidelines in the swarm and its `CLAUDE.md`), recent PRs on the same paths, and untouched files that import the changed modules. Jev ranks the related files. |
+| `tag` | `swarm-script` (`pr-review-tag-units`) | Jev tags each hunk with one category (tests, database, API, auth, deps/CI, UI, logic, docs), one parallel `choice` call per hunk. |
+| `decide` | `swarm-script` (`pr-review-batches`) | Groups the hunks into one batch per category, so the number of batches follows what the PR touches. Jev judges every batch in parallel: a general concern, drift from the PR's claims, overall risk, a category-specific question, and a repo-rule check. |
+| `review` | `foreach` of `agent-task` | One agent task per flagged batch, capped at the top 2 (`maxAgentBatches`). The agent sees only its batch's diff and the context, returns at most 3 findings, and proposes a minimal patch for each. |
+| `report` | `swarm-script` (`pr-review-report`) | Writes the verdict, findings, files, CI and the cost of each model. |
+
+The verdict is one of `clean` (Jev flagged nothing), `flags_cleared_by_agent`, `comment` or `request_changes`.
+
+`claims`, `context` and `tag` run in parallel. The workflow sets `onNodeFailure: "continue"`, so a failed context lookup does not stop the review.
+
+## What you import
+
+Every file lives next to this page on the docs site.
+
+| File | What it is |
+|---|---|
+| [`pr-review.workflow.json`](/playbooks/pr-review/pr-review.workflow.json) | The workflow: 7 nodes, manual trigger with `{repo, pr}` |
+| [`pr-review-fetch-diff.script.ts`](/playbooks/pr-review/pr-review-fetch-diff.script.ts) | PR, one commit, or a commit range to numbered hunks plus Clairic's input |
+| [`pr-review-context.script.ts`](/playbooks/pr-review/pr-review-context.script.ts) | CI, repo rules, related files and recent PRs |
+| [`pr-review-tag-units.script.ts`](/playbooks/pr-review/pr-review-tag-units.script.ts) | Jev tags each hunk with a category |
+| [`pr-review-batches.script.ts`](/playbooks/pr-review/pr-review-batches.script.ts) | Category batches, Jev judges each one |
+| [`pr-review-report.script.ts`](/playbooks/pr-review/pr-review-report.script.ts) | The per-PR report |
+| [`github-list-open-prs.script.ts`](/playbooks/pr-review/github-list-open-prs.script.ts) | Optional, for a review page: lists a repo's open PRs |
+| [`pr-review-demo-info.script.ts`](/playbooks/pr-review/pr-review-demo-info.script.ts) | Optional, for a review page: review cost per PR, commits, CI and past reviews per commit |
+
+## Prerequisites
+
+- **Agent Swarm with a Lead.** Install as the Lead: global scripts can only be saved by a lead.
+- **A reviewer worker.** One online worker that will run the review tasks. The export pins `model: "gpt-5.6-luna"`, a Codex model, so the original runs on a Codex worker. On another harness, set `model` to a cheap model that harness serves, or replace it with `"modelTier": "smol"`.
+- **Clairic** (the `claims` node). It runs on Cloudflare Workers AI and needs the `CLOUDFLARE_ACCOUNT_ID` global config value and the `CLOUDFLARE_API_TOKEN` global secret (`CLOUDFLARE_API_KEY` also works). Without them, the run fails before any node executes.
+- **Jev** (the `tag`, `context` and `decide` scripts). The scripts call `ctx.swarm.systemOne_decide` without a provider, so the calls go to the host in the `SYSTEM_ONE_DEFAULT_PROVIDER` global config value, `typesafe` when unset. For `typesafe`, set the `TYPESAFE_API_KEY` secret. For OpenRouter, set `SYSTEM_ONE_DEFAULT_PROVIDER=openrouter` and `OPENROUTER_API_KEY`. The thresholds in `pr-review-batches` are tuned on Jev. If you point the default at another host (for example `cloudflare`, which serves Clef), re-tune them.
+- **GitHub access.** A `GITHUB_TOKEN` global secret that can read the repo's pull requests, contents, commit statuses and checks, and use code search. The scripts never see the token: they send a `[REDACTED:GITHUB_TOKEN]` placeholder, and the default [credential binding](/docs/guides/scripts-credential-broker#default-github-binding) swaps in the real value for `api.github.com` only. The workers do not need repo access, because the agent reviews the diff it is given and never clones.
+
+See [SystemOne Decision](/docs/concepts/workflows#systemone-decision) and [SystemOne Extraction](/docs/concepts/workflows#systemone-extraction) for every provider, key and model.
+
+## Install
+
+```bash
+export SWARM_URL=https://api.example.com   # your agent-swarm API
+export API_KEY=...                         # swarm API key
+export LEAD_ID=...                         # your Lead's agent id
+H=(-H "Authorization: Bearer $API_KEY" -H "X-Agent-ID: $LEAD_ID" -H "Content-Type: application/json")
+DOCS=https://docs.agent-swarm.dev/playbooks/pr-review
+```
+
+**1. Keys.** Skip any you already have. Use `isSecret: false` for `CLOUDFLARE_ACCOUNT_ID`.
+
+```bash
+put() { curl -s "${H[@]}" -X PUT $SWARM_URL/api/config \
+  -d "{\"scope\":\"global\",\"key\":\"$1\",\"value\":\"$2\",\"isSecret\":$3}"; }
+put CLOUDFLARE_ACCOUNT_ID "$CF_ACCOUNT_ID" false
+put CLOUDFLARE_API_TOKEN  "$CF_API_TOKEN"  true
+put TYPESAFE_API_KEY      "$TYPESAFE_KEY"  true
+put GITHUB_TOKEN          "$GH_TOKEN"      true
+```
+
+**2. The scripts.** The workflow's `swarm-script` nodes call them by name.
+
+```bash
+for s in pr-review-fetch-diff pr-review-context pr-review-tag-units pr-review-batches pr-review-report; do
+  curl -s $DOCS/$s.script.ts \
+    | jq -Rs --arg n "$s" '{name: $n, scope: "global", source: .}' \
+    | curl -s "${H[@]}" -X POST $SWARM_URL/api/scripts/upsert --data-binary @-
+done
+```
+
+**3. The workflow.** Fill in the reviewer's agent id. `GET /api/agents` lists agents with their ids and harness.
+
+```bash
+REVIEWER_ID=$(curl -s "${H[@]}" $SWARM_URL/api/agents | jq -r '.agents[] | select(.name=="<your reviewer>") | .id')
+
+WORKFLOW_ID=$(curl -s $DOCS/pr-review.workflow.json \
+  | sed "s|<REVIEWER_AGENT_ID>|$REVIEWER_ID|" \
+  | curl -s "${H[@]}" -X POST $SWARM_URL/api/workflows --data-binary @- | jq -r .id)
+```
+
+Leave `agentId` out of the `review` node's config to let the swarm route each review task to any worker instead.
+
+## Run a review
+
+Trigger it by hand with the repo and the PR number:
+
+```bash
+RUN_ID=$(curl -s "${H[@]}" -X POST $SWARM_URL/api/workflows/$WORKFLOW_ID/trigger \
+  -d '{"repo":"acme/api","pr":123}' | jq -r .runId)
+```
+
+Add `"sha"` to review one commit, or `"sha"` and `"base"` to review only what changed between two commits. A re-review after a new push then costs only the size of that push. You can also use `trigger-workflow` from an agent, or the dashboard.
+
+The run takes about 30 seconds. Read the verdict from the `report` step:
+
+```bash
+curl -s "${H[@]}" $SWARM_URL/api/workflow-runs/$RUN_ID \
+  | jq '.steps[] | select(.nodeId=="report") | .output.result | {verdict, summary, cost, findings: [.agentReviews[].review]}'
+```
+
+Each entry in `agentReviews` is one agent task: its batch, its own verdict (`ok`, `comment` or `block`) and its findings with file, line, severity, comment and patch.
+
+## Results
+
+We ran it on 14 open PRs in `desplega-ai/agent-swarm`:
+
+| | |
+|---|---|
+| Median run | 30 s per PR |
+| Total cost | $0.26 for 14 PRs, about $0.02 per PR |
+| Jev | 495 calls, $0.024 in total |
+| Agent | 24 review tasks, $0.24 in total, about 16 s each |
+| Verdicts | 2 clean, 4 flags cleared by the agent, 4 worth a comment, 4 request changes |
+
+Two of those runs:
+
+- **#2117**, a 24-file sandbox hardening PR: 45 hunks, 9 batches, the top 2 sent to the agent. Verdict: worth a comment, $0.037, 35 s. The agent found that the new uid bound lets the shared workflow uid land at 999, inside the system uid range, and proposed a two-line patch (the screenshot at the top).
+- **#2315**, a one-file commit: one batch, the agent found nothing. Verdict: looks fine, under $0.01, 16 s.
+
+![A one-file commit: one batch, the agent found nothing, the verdict is looks fine](/playbooks/pr-review/bee-1440.png)
+
+## Optional: a review page
+
+We put the workflow behind a swarm Page, an HTML page the swarm hosts for signed-in users: pick a repo and a PR, review the whole PR or only what changed since the last review, and watch the run as a live graph. Its tabs show the findings with suggested patches, the changed files, the context, the claims, Jev's score per batch, the agent's progress updates, and the commits with CI and review cost per commit.
+
+![Triage tab: Jev's score for each batch and which batches went to the agent](/playbooks/pr-review/load-triage-1440.png)
+
+![Commits tab: review cost for the PR, and CI and past reviews for each commit](/playbooks/pr-review/final-commits-1440.png)
+
+The page reads its data from two extra scripts. Install them like the others, with your workflow id filled into `pr-review-demo-info`:
+
+```bash
+curl -s $DOCS/github-list-open-prs.script.ts \
+  | jq -Rs '{name: "github-list-open-prs", scope: "global", source: .}' \
+  | curl -s "${H[@]}" -X POST $SWARM_URL/api/scripts/upsert --data-binary @-
+curl -s $DOCS/pr-review-demo-info.script.ts | sed "s|<PR_REVIEW_WORKFLOW_ID>|$WORKFLOW_ID|" \
+  | jq -Rs '{name: "pr-review-demo-info", scope: "global", source: .}' \
+  | curl -s "${H[@]}" -X POST $SWARM_URL/api/scripts/upsert --data-binary @-
+```
+
+Then ask your Lead to build the page with the `pages` skill: a repo and PR picker from `github-list-open-prs`, a Review button that triggers the workflow, the run's steps polled from `GET /api/workflow-runs/<id>`, and the cost and commit views from `pr-review-demo-info`.
+
+## Tuning
+
+- `maxAgentBatches` on the `decide` node caps agent spend per PR (2 by default).
+- `pr-review-batches` also takes `threshold`, `concernThreshold` and `driftThreshold` (0.5, 0.6 and 0.6). Raise them to send fewer batches to the agent.
+- Repo rules come from the repo's guidelines in the swarm and its `CLAUDE.md`. Better rules give Jev and the agent better checks.
+- `pr-review-context` adds hotspots and temporal coupling when a `code-maat` KV entry `<repo-name>:review-index` exists. Without it, that part is skipped.
+
+## Limits
+
+- **The agent sees only its batch.** A reference into another batch can look like a bug.
+- **Findings are model output and unverified.** On big PRs Jev flags most batches; the 2-batch cap bounds the agent's spend, so the lower-scored batches go unread.
+- **Manual only.** Nothing is posted back to GitHub, and no trigger fires on new PRs. Add a GitHub webhook trigger and a posting step if you want that.
+- **CI is reported, not judged.** The agent is told never to raise red CI as a finding; the report shows CI separately.

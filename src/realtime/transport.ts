@@ -159,8 +159,7 @@ async function authenticate(req: IncomingMessage): Promise<AuthenticatedConnecti
       throw new Error("Invalid page origin");
     const page = await getPage(pageId);
     if (!page) throw new Error("Page not found");
-    const cookie = await extractAndVerifyCookie(req);
-    const session = cookie?.pageId === pageId ? cookie : null;
+    const session = await extractAndVerifyCookie(req, pageId);
     if (!session && page.authMode !== "public") throw new Error("Page session required");
     if (session?.uid && (await findUserById(session.uid))?.status !== "active")
       throw new Error("Viewer is inactive");
