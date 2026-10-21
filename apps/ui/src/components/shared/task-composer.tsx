@@ -81,6 +81,28 @@ export interface TaskComposerProps {
   className?: string;
 }
 
+const PROMOTE_ATTEMPTS = 3;
+const PROMOTE_RETRY_DELAY_MS = 200;
+
+/**
+ * Promotion is idempotent, so a retry also covers a response lost after the
+ * server committed it. False when every attempt failed: the heartbeat then
+ * promotes the abandoned draft within 5 minutes.
+ */
+async function promoteDraft(taskId: string): Promise<boolean> {
+  for (let attempt = 1; attempt <= PROMOTE_ATTEMPTS; attempt++) {
+    try {
+      await api.promoteDraftTask(taskId);
+      return true;
+    } catch {
+      if (attempt < PROMOTE_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, PROMOTE_RETRY_DELAY_MS * attempt));
+      }
+    }
+  }
+  return false;
+}
+
 export function TaskComposer({
   targetTask,
   canSteer,
@@ -138,22 +160,25 @@ export function TaskComposer({
         source: "ui",
         draft: isDraft,
       });
-      try {
-        const uploadResult = await uploadComposeAttachments({
-          taskId: created.id,
-          files: input.attachments,
-          onUploaded: setUploadedCount,
-        });
-        return { created, uploadResult };
-      } finally {
-        // Always promote: an upload failure must never strand the task in draft.
-        if (isDraft) await api.promoteDraftTask(created.id);
-      }
+      // Per-file failures come back in the result; the upload never throws.
+      const uploadResult = await uploadComposeAttachments({
+        taskId: created.id,
+        files: input.attachments,
+        onUploaded: setUploadedCount,
+      });
+      // Always promote, even after an upload failure. A promotion failure
+      // never fails the send: the task exists, and a failed send keeps the
+      // text, so Send again would create a second task.
+      const promoted = isDraft ? await promoteDraft(created.id) : true;
+      return { created, uploadResult, promoted };
     },
-    onSuccess: ({ created, uploadResult }, input) => {
+    onSuccess: ({ created, uploadResult, promoted }, input) => {
       const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);
       setAttachmentError(uploadError);
       if (uploadError) toast.error(uploadError);
+      if (!promoted) {
+        toast.warning("Task created, but it could not start yet. It starts within 5 minutes.");
+      }
       if (rootTaskId) queryClient.invalidateQueries({ queryKey: ["session", rootTaskId] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });

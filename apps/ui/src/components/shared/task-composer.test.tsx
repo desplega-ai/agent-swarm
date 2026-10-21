@@ -24,7 +24,13 @@ mock.module("@/components/sessions/compose-attachment-upload", () =>
 
 const createdTasks: Array<Record<string, unknown>> = [];
 const uploads: Array<{ taskId: string; file: File }> = [];
+// Promotions the server committed, and every promotion request sent.
 const promoted: string[] = [];
+const promoteCalls: string[] = [];
+// "reject": every request fails before the server commits it.
+// "lose-first-response": the first request commits, then its response is lost.
+let promoteMode: "ok" | "reject" | "lose-first-response" = "ok";
+let rejectUploads = false;
 mock.module("@/api/client", () => ({
   api: {
     createTask: async (input: Record<string, unknown>) => {
@@ -32,13 +38,19 @@ mock.module("@/api/client", () => ({
       return { id: "follow-up", ...input };
     },
     promoteDraftTask: async (id: string) => {
-      promoted.push(id);
+      promoteCalls.push(id);
+      if (promoteMode === "reject") throw new Error("promotion failed");
+      if (!promoted.includes(id)) promoted.push(id);
+      if (promoteMode === "lose-first-response" && promoteCalls.length === 1) {
+        throw new Error("network error");
+      }
       return { id };
     },
   },
 }));
 mock.module("@/api/fs", () => ({
   uploadTaskAttachment: async (input: { taskId: string; file: File }) => {
+    if (rejectUploads) throw new Error("upload failed");
     uploads.push(input);
     return {};
   },
@@ -116,10 +128,23 @@ async function send(container: HTMLElement) {
   await act(async () => {});
 }
 
+/** Waits for `done`, up to 2 s (promotion retries back off for 600 ms). */
+async function waitFor(done: () => boolean) {
+  for (let i = 0; i < 200 && !done(); i++) {
+    await act(async () => new Promise((r) => setTimeout(r, 10)));
+  }
+}
+
+const sendButton = (container: HTMLElement) =>
+  container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+
 beforeEach(() => {
   createdTasks.length = 0;
   uploads.length = 0;
   promoted.length = 0;
+  promoteCalls.length = 0;
+  promoteMode = "ok";
+  rejectUploads = false;
 });
 
 describe("TaskComposer on Sessions", () => {
@@ -192,6 +217,57 @@ describe("TaskComposer on Sessions", () => {
     expect(createdTasks[0]).not.toHaveProperty("agentId");
     await unmount();
   });
+
+  test("a promotion response lost after the server committed it is retried, not resent", async () => {
+    promoteMode = "lose-first-response";
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={null}
+        canSteer={false}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "do this once");
+    await send(container);
+    await waitFor(() => promoteCalls.length === 2);
+    await act(async () => {});
+
+    // The retry finds the task promoted; the send counts as done.
+    expect(promoted).toEqual(["follow-up"]);
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("");
+    expect(container.textContent).not.toContain("network error");
+    await act(async () => sendButton(container).click());
+    expect(createdTasks).toHaveLength(1);
+    await unmount();
+  });
+
+  test("a failed upload still promotes the task", async () => {
+    rejectUploads = true;
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={null}
+        canSteer={false}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "see the screenshot");
+    await send(container);
+    await waitFor(() => promoted.length === 1);
+
+    expect(uploads).toEqual([]);
+    expect(promoted).toEqual(["follow-up"]);
+    await unmount();
+  });
 });
 
 describe("TaskComposer on the task page", () => {
@@ -234,6 +310,44 @@ describe("TaskComposer on the task page", () => {
     // The page owns the draft: the composer clears it through `onValueChange`.
     expect(drafts.at(-1)).toBe("");
     expect(textarea.value).toBe("");
+    await unmount();
+  });
+
+  test("a promotion that keeps failing still counts as one sent task", async () => {
+    promoteMode = "reject";
+    const created: Array<{ id: string }> = [];
+    function Page() {
+      const [draft, setDraft] = useState("");
+      return (
+        <TaskComposer
+          targetTask={completedWorkerTask}
+          canSteer={false}
+          followUpAgentId="worker-7"
+          value={draft}
+          onValueChange={setDraft}
+          onCreated={(task) => created.push(task)}
+          renderActions={(add) => (
+            <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+          )}
+        />
+      );
+    }
+    const { container, unmount } = await mount(<Page />);
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    await type(container, "do this once");
+    await send(container);
+    await waitFor(() => created.length === 1);
+
+    // Every attempt failed, so the heartbeat promotes the draft later. The
+    // task exists: the text clears and the page hears about it once.
+    expect(promoteCalls).toEqual(["follow-up", "follow-up", "follow-up"]);
+    expect(created.map((task) => task.id)).toEqual(["follow-up"]);
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("");
+    expect(container.textContent).not.toContain("promotion failed");
+    await act(async () => sendButton(container).click());
+    await act(async () => new Promise((r) => setTimeout(r, 30)));
+    expect(createdTasks).toHaveLength(1);
     await unmount();
   });
 
