@@ -347,6 +347,35 @@ describe("re-persisting a task replaces its document", () => {
     expect(vec?.n).toBe(0);
   });
 
+  test("an embedding racing a replace leaves no orphan vec row", async () => {
+    const store = getMemoryStore();
+    const task = await createTaskExtended("embed races replace", { agentId: worker.id });
+    const input = {
+      agentId: worker.id,
+      scope: "agent" as const,
+      name: "race",
+      content: "original completion",
+      source: "task_completion" as const,
+      key: taskCompletionMemoryKey(task.id),
+    };
+    const memory = await store.store(input);
+    const vector = new Float32Array(EMBEDDING_DIMENSIONS).fill(0.1);
+    await store.updateEmbedding(memory.id, vector, "t");
+
+    // The background embed of the old row is in flight when the re-persist
+    // lands: the replace must not slip between its row UPDATE and vec insert.
+    const [, replaced] = await Promise.all([
+      store.updateEmbedding(memory.id, vector, "t"),
+      store.replaceDocument(input, [{ ...input, content: "new completion" }]),
+    ]);
+
+    expect(await store.peek(memory.id)).toBeNull();
+    expect(replaced.map((r) => r.content)).toEqual(["new completion"]);
+    expect(await hasTable("memory_vec")).toBe(true);
+    const orphans = await orphanCounts();
+    for (const n of Object.values(orphans)) expect(n).toBe(0);
+  });
+
   test("a document under the key from another source is not deleted", async () => {
     const task = await createTaskExtended("keyed manual collision", { agentId: worker.id });
     await startTask(task.id);
