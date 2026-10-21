@@ -5103,6 +5103,21 @@ export function resolveTaskReconcileIntervalMs(
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TASK_RECONCILE_INTERVAL_MS;
 }
 
+/**
+ * True when the delivery loop should run its periodic orphan recovery.
+ *
+ * The boot recovery seeds `lastRecoveryAt` with the time it finished, so the
+ * first loop tick does not repeat the call the process just made; seeding it
+ * with 0 (the pre-fix behavior) always re-ran it immediately.
+ */
+export function orphanRecoveryDue(
+  now: number,
+  lastRecoveryAt: number,
+  intervalMs: number,
+): boolean {
+  return now - lastRecoveryAt > intervalMs;
+}
+
 export interface ReconcileActiveTasksOptions {
   /** Tasks already aborted because the server cancelled them. */
   cancelledSignaled: Set<string>;
@@ -6648,6 +6663,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     );
   }
 
+  // Boot is over. Resumed tasks, dispatch and everything after this point
+  // render against the live templates again, so an edit made while the first
+  // resumed task runs is visible to the next one.
+  endBootRenderCache();
+
   // ========== Resume paused tasks with PRIORITY ==========
   // LEGACY SAFETY NET — kept for tasks that were paused by older worker
   // builds during partial-deploy windows (when the API server already
@@ -6939,10 +6959,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
   const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
 
-  // Boot is over: template renders go back to one round trip per call so a
-  // freshly edited prompt is visible to the first dispatched task.
-  endBootRenderCache();
-
   while (shouldRunDeliveryLoop(state.deliveryMode, shuttingDown)) {
     const deliveryChecks = pushDelivery.checks(state.deliveryMode ?? "poll");
     // Poll workers ping each iteration. Push workers retain a 30 second ping.
@@ -7086,7 +7102,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
       await pushDelivery.waitForSchedule(schedule);
     } else {
-      if (Date.now() - lastOrphanRecoveryAt > ORPHAN_RECOVERY_INTERVAL_MS) {
+      if (orphanRecoveryDue(Date.now(), lastOrphanRecoveryAt, ORPHAN_RECOVERY_INTERVAL_MS)) {
         lastOrphanRecoveryAt = Date.now();
         const recoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
         if (recoveredOrphans > 0) {

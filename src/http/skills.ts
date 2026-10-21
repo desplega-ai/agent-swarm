@@ -18,7 +18,11 @@ import {
   upsertSkillFiles,
 } from "../be/db";
 import { parseSkillContent } from "../be/skill-parser";
-import { computeAgentSkillsSignature, syncSkillsToFilesystem } from "../be/skill-sync";
+import {
+  computeAgentSkillsSignature,
+  computeSkillsSignature,
+  syncSkillsToFilesystem,
+} from "../be/skill-sync";
 import { getSkillUsageDetail, getSkillUsageSummary, SKILL_USAGE_WINDOWS } from "../be/skill-usage";
 import {
   AgentSkillSchema,
@@ -588,13 +592,16 @@ export async function handleSkills(
     const parsed = await getAgentSkillsBundleRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const skills = await getAgentSkills(parsed.params.id);
+    // Sign the rows this response carries, not a second read: an edit landing
+    // between the two reads would pair stale bytes with a fresh hash, and the
+    // worker would then skip every later refresh.
+    const signature = computeSkillsSignature(skills).hash;
     const bundled = await Promise.all(
       skills.map(async (skill) => ({
         ...skill,
         files: skill.isComplex ? await getSkillFiles(skill.id) : [],
       })),
     );
-    const signature = (await computeAgentSkillsSignature(parsed.params.id)).hash;
     getAgentSkillsBundleRoute.respond(res, 200, {
       skills: bundled,
       total: bundled.length,
