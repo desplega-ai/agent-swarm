@@ -17,8 +17,8 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import { getChildWorkflowRunId } from "../be/db/workflow-runs";
-import type { WaitStateRow, WorkflowDefinition } from "../types";
+import { createForeachAttemptSteps, getChildWorkflowRunId } from "../be/db/workflow-runs";
+import type { WaitStateRow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ApprovalSlackClient,
@@ -27,14 +27,21 @@ import {
 import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
-import { getNextTargets } from "./definition";
+import { getNextTargets, getSuccessors } from "./definition";
 import { failRunOnUnreadableReplay, findReadyNodes, hasRunningStep, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 import { childRunOutcome } from "./executors/sub-workflow";
 import { computeNextPort } from "./executors/wait";
-import { resolveForeachParent } from "./foreach-join";
+import { stepFailureMode } from "./foreach-body";
+import { startForeachDrive } from "./foreach-driver";
+import {
+  FOREACH_TERMINAL_STEP_STATUSES,
+  parseSyntheticNodeId,
+  resolveForeachParent,
+} from "./foreach-join";
+import { getMaxWorkflowStepsPerRun } from "./limits";
 import { getSecretInputKeys } from "./input";
 import { findWorkflowReadinessProblems, formatReadinessProblems } from "./readiness";
 import {
@@ -328,7 +335,9 @@ async function handleTaskFailureUnguarded(
     if (retry === "not-claimed") return;
   }
 
-  const onFailure = workflow.definition.onNodeFailure ?? "fail";
+  // A foreach item follows its fan-out's failure policy (fail-fast or
+  // collect-outcomes); any other step follows the workflow's onNodeFailure.
+  const onFailure = stepFailureMode(workflow.definition, step.nodeId);
 
   if (onFailure === "fail") {
     await markRunFailed(workflow.definition, event, reason, registry);
@@ -417,9 +426,11 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const workflow = await getWorkflow(run.workflowId);
   if (!workflow) throw new Error("Workflow not found");
 
-  // Find the failed step
+  // Find the failed step. Only the latest row per node id counts: a foreach
+  // item keeps its earlier attempt rows as history.
   const steps = await getWorkflowRunStepsByRunId(runId);
-  const failedStep = steps.find((s) => s.status === "failed");
+  const latestSteps = [...latestStepPerNode(steps).values()];
+  const failedStep = latestSteps.find((s) => s.status === "failed");
   if (!failedStep) throw new Error("No failed step found");
 
   const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
@@ -444,6 +455,12 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const failedNode =
     foreachParent ?? workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
   if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
+  // Fan-outs with failed or cancelled items get one new attempt row per such
+  // item; completed items are never rerun.
+  const attempts = foreachRetryAttempts(workflow.definition, latestSteps);
+  const attemptRows = attempts.flatMap((attempt) => attempt.rows);
+  const capError = foreachRetryCapError(workflow.definition, steps.length, attempts);
+  if (capError) throw new Error(`Retry not started, run left failed: ${capError}`);
   const hasStructuralPredecessor = workflow.definition.nodes.some(
     (node) => node.next && getNextTargets(node.next).includes(failedNode.id),
   );
@@ -458,10 +475,16 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const claimed = await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
     if (!current || current.status !== "failed") return false;
-    await updateWorkflowRunStep(failedStep.id, {
-      status: shouldRetryFailedNode ? "pending" : "cancelled",
-      error: shouldRetryFailedNode ? null : "Skipped on retry because its branch was not active",
-    });
+    // A foreach item retries as a new attempt row instead of a reset: a fresh
+    // step id is a fresh invocation identity for every body type, and the
+    // failed row stays as history.
+    if (!foreachParent) {
+      await updateWorkflowRunStep(failedStep.id, {
+        status: shouldRetryFailedNode ? "pending" : "cancelled",
+        error: shouldRetryFailedNode ? null : "Skipped on retry because its branch was not active",
+      });
+    }
+    await createForeachAttemptSteps(runId, attemptRows);
     await updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
     return true;
   });
@@ -486,6 +509,78 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
       : [failedNode, ...readyNodes];
   const secretKeys = getSecretInputKeys(workflow.input);
   await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id, secretKeys);
+  // Another fan-out with new attempts is not on the walk (its parent step is
+  // still waiting): drive it directly.
+  for (const attempt of attempts) {
+    if (attempt.parent.id !== failedNode.id) {
+      startForeachDrive(runId, attempt.parent.id, registry);
+    }
+  }
+}
+
+/** The latest row per node id, in insert order of each node's first row. */
+function latestStepPerNode(steps: WorkflowRunStep[]): Map<string, WorkflowRunStep> {
+  const latest = new Map<string, WorkflowRunStep>();
+  for (const step of steps) latest.set(step.nodeId, step);
+  return latest;
+}
+
+interface ForeachRetryAttempts {
+  parent: WorkflowNode;
+  rows: Array<{ nodeId: string; nodeType: string; itemKey: string; index: number }>;
+}
+
+/**
+ * The new attempt rows a run retry adds: one per foreach item whose latest
+ * row is `failed` or `cancelled`, for every fan-out whose parent step is still
+ * open (a closed join already routed its successors).
+ */
+function foreachRetryAttempts(
+  def: WorkflowDefinition,
+  latestSteps: WorkflowRunStep[],
+): ForeachRetryAttempts[] {
+  const byParent = new Map<string, ForeachRetryAttempts>();
+  const latestByNode = new Map(latestSteps.map((step) => [step.nodeId, step]));
+  for (const step of latestSteps) {
+    if (step.status !== "failed" && step.status !== "cancelled") continue;
+    const parent = resolveForeachParent(def, step.nodeId);
+    if (!parent) continue;
+    const parentStep = latestByNode.get(parent.id);
+    if (!parentStep || FOREACH_TERMINAL_STEP_STATUSES.has(parentStep.status)) continue;
+    const input = (step.input ?? {}) as Record<string, unknown>;
+    const entry = byParent.get(parent.id) ?? { parent, rows: [] };
+    entry.rows.push({
+      nodeId: step.nodeId,
+      nodeType: step.nodeType,
+      itemKey:
+        typeof input.itemKey === "string"
+          ? input.itemKey
+          : (parseSyntheticNodeId(step.nodeId)?.itemKey ?? ""),
+      index: typeof input.index === "number" ? input.index : 0,
+    });
+    byParent.set(parent.id, entry);
+  }
+  return [...byParent.values()];
+}
+
+/**
+ * Refuse a retry whose new attempt rows would breach WORKFLOW_MAX_STEPS_PER_RUN,
+ * by the rule the foreach executor applies at materialization: a fan-out with
+ * successors keeps one step of headroom for the post-join walk.
+ */
+function foreachRetryCapError(
+  def: WorkflowDefinition,
+  existingSteps: number,
+  attempts: ForeachRetryAttempts[],
+): string | null {
+  const added = attempts.reduce((sum, attempt) => sum + attempt.rows.length, 0);
+  if (added === 0) return null;
+  const maxSteps = getMaxWorkflowStepsPerRun();
+  const total = existingSteps + added;
+  const hasSuccessors = attempts.some((attempt) => getSuccessors(def, attempt.parent.id).length > 0);
+  const breached = hasSuccessors ? total >= maxSteps : total > maxSteps;
+  if (!breached) return null;
+  return `foreach retry would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${existingSteps} existing + ${added} new attempts${hasSuccessors ? " leaves no room for the post-join walk" : " exceeds the per-run cap"}`;
 }
 
 /**

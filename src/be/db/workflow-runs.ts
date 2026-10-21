@@ -167,3 +167,47 @@ export async function createForeachChildSteps(
     return created;
   });
 }
+
+/**
+ * Insert a new `pending` attempt row for each foreach item being retried. Each
+ * row reuses its item's child node id and gets a fresh step id, so the body
+ * starts a new invocation (a new task, child run, approval or wait) while the
+ * earlier attempt rows stay as history. `attempt` is the number of rows the
+ * item already has, and the idempotency key `<runId>:<childNodeId>:<attempt>`
+ * is UNIQUE, so a duplicated retry of the same attempt inserts nothing.
+ * Call it inside the retry's transaction. Returns how many rows it inserted.
+ */
+export async function createForeachAttemptSteps(
+  runId: string,
+  rows: Array<{ nodeId: string; nodeType: string; itemKey: string; index: number }>,
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  return getDbClient().transaction(async (tx) => {
+    const now = new Date().toISOString();
+    let created = 0;
+    for (const row of rows) {
+      const count = await tx.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
+        [runId, row.nodeId],
+      );
+      const attempt = count?.n ?? 0;
+      const inserted = await tx.get<{ id: string }>(
+        `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input, idempotencyKey)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+           ON CONFLICT(idempotencyKey) DO NOTHING
+           RETURNING id`,
+        [
+          crypto.randomUUID(),
+          runId,
+          row.nodeId,
+          row.nodeType,
+          now,
+          scrubJsonValue({ itemKey: row.itemKey, index: row.index, attempt }),
+          `${runId}:${row.nodeId}:${attempt}`,
+        ],
+      );
+      if (inserted) created++;
+    }
+    return created;
+  });
+}

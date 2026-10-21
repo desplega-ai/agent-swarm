@@ -24,7 +24,12 @@ export const ForeachConfigSchema = z.object({
   over: z.array(z.record(z.string(), z.unknown())),
   itemKey: z.string().min(1),
   body: ForeachBodySchema,
-  concurrency: z.never().optional(),
+  /** Items in flight at once (`running` or `waiting` children). Unbounded when absent. */
+  concurrency: z.number().int().min(1).optional(),
+  /** Defaults from the workflow `onNodeFailure` (see effectiveFailurePolicy). */
+  // Literal, not FOREACH_FAILURE_POLICIES: foreach-body.ts sits in an import
+  // cycle with this module and would be read before it initializes.
+  failurePolicy: z.enum(["fail-fast", "collect-outcomes"]).optional(),
 });
 
 const ForeachResultSchema = z.object({
@@ -37,6 +42,8 @@ export const ForeachOutputSchema = z.object({
   results: z.array(ForeachResultSchema),
   okCount: z.number().int().nonnegative(),
   failedCount: z.number().int().nonnegative(),
+  /** Items cancelled before they finished (fail-fast queued items, cancelled bodies). Counted in failedCount too. */
+  cancelledCount: z.number().int().nonnegative().optional(),
 });
 
 export type ForeachOutput = z.infer<typeof ForeachOutputSchema>;

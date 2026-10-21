@@ -101,6 +101,46 @@ export function resolveStepNode(
 
 const FOREACH_ITEM_BINDINGS = new Set(["item", "index"]);
 
+export const FOREACH_FAILURE_POLICIES = ["fail-fast", "collect-outcomes"] as const;
+export type ForeachFailurePolicy = (typeof FOREACH_FAILURE_POLICIES)[number];
+
+/**
+ * How a failed or cancelled item affects its fan-out. `config.failurePolicy`
+ * wins; otherwise it follows the workflow's `onNodeFailure`, so a definition
+ * without the field behaves as before: `"continue"` collects outcomes, the
+ * default `"fail"` is fail-fast.
+ */
+export function effectiveFailurePolicy(
+  node: WorkflowNode,
+  def: Pick<WorkflowDefinition, "onNodeFailure">,
+): ForeachFailurePolicy {
+  const configured = node.config.failurePolicy;
+  if (configured === "fail-fast" || configured === "collect-outcomes") return configured;
+  return def.onNodeFailure === "continue" ? "collect-outcomes" : "fail-fast";
+}
+
+/** How many items of a fan-out may be in flight at once. Unbounded by default. */
+export function foreachConcurrencyCap(node: WorkflowNode): number {
+  const cap = node.config.concurrency;
+  return typeof cap === "number" && Number.isInteger(cap) && cap >= 1
+    ? cap
+    : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * The failure mode a foreach child's task failure takes: the fan-out's
+ * effective policy for a synthetic child, the workflow's `onNodeFailure`
+ * otherwise.
+ */
+export function stepFailureMode(
+  def: Pick<WorkflowDefinition, "nodes" | "onNodeFailure">,
+  nodeId: string,
+): "fail" | "continue" {
+  const parent = resolveForeachParent(def, nodeId);
+  if (parent) return effectiveFailurePolicy(parent, def) === "fail-fast" ? "fail" : "continue";
+  return def.onNodeFailure ?? "fail";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

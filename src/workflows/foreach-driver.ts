@@ -31,8 +31,14 @@ import type { AsyncExecutorResult } from "./executors/base";
 import { ForeachConfigSchema } from "./executors/foreach";
 import type { ExecutorRegistry } from "./executors/registry";
 import { systemOneUnresolvedError } from "./executors/system-one-decision";
-import { isForeachBodyType, resolveStepNode } from "./foreach-body";
 import {
+  effectiveFailurePolicy,
+  foreachConcurrencyCap,
+  isForeachBodyType,
+  resolveStepNode,
+} from "./foreach-body";
+import {
+  cancelQueuedForeachChildren,
   FOREACH_TERMINAL_STEP_STATUSES,
   type ForeachChildOutcome,
   latestForeachChildren,
@@ -43,13 +49,6 @@ import { resolveNodeTimeoutMs } from "./node-timeout";
 import { rebuildNodeExecutionInput } from "./step-input";
 
 export { FOREACH_ITEMS_WAIT_FOR };
-
-/**
- * Concurrency cap of a fan-out. PR A keeps today's behavior: every item
- * starts at once. The cap enters the claim below so a bounded cap only
- * changes this value.
- */
-const FOREACH_CAP = Number.POSITIVE_INFINITY;
 
 /**
  * Child step ids a drive in this process is starting right now. A `running`
@@ -143,17 +142,19 @@ export async function driveForeach(
     if (!current || (current.status !== "running" && current.status !== "waiting")) {
       return notJoined();
     }
-    const claimed = await claimChildren(def, runId, parentNodeId);
+    const claimed = await claimChildren(def, runId, parentNode);
     if (claimed.length === 0) return notJoined();
     claimedTotal += claimed.length;
     const started = new Set<string>();
+    let failedFast: string | undefined;
     try {
       parentInput ??= await loadParentInput(def, run, parentNode, registry, workflow.id, options);
       const { ctx, items, itemKeyField, meta } = parentInput;
       for (const child of claimed) {
         // An earlier body in this batch can run for a long time. A cancel (of
         // the run or this child) that landed meanwhile must stop the rest of
-        // the batch before it reaches an executor.
+        // the batch before it reaches an executor. A fail-fast failure of a
+        // sibling elsewhere ends the run too; `finally` cancels the rest.
         const liveness = await childLiveness(runId, child.id);
         if (liveness === "run-ended") return notJoined();
         if (liveness === "child-ended") continue;
@@ -175,15 +176,25 @@ export async function driveForeach(
         if (settled.joined) {
           return { joined: true, successors: settled.successors, claimed: claimedTotal };
         }
-        if (settled.runFailed) return notJoined();
+        if (settled.runFailed) {
+          failedFast = child.nodeId;
+          return notJoined();
+        }
       }
     } finally {
       // A child claimed but never started (an earlier sibling failed the run,
       // or the input rebuild threw) goes back to the queue, so a run retry
-      // starts it.
+      // starts it. After a fail-fast failure it is cancelled with the rest of
+      // the queue instead: it never started.
       for (const child of claimed) {
         ownedChildren.delete(child.id);
         if (!started.has(child.id)) await requeueChild(child.id);
+      }
+      if (
+        effectiveFailurePolicy(parentNode, def) === "fail-fast" &&
+        (failedFast || (await getWorkflowRun(runId))?.status === "failed")
+      ) {
+        await cancelQueuedForeachChildren(def, runId, parentNodeId, failedFast);
       }
     }
   }
@@ -335,21 +346,25 @@ async function parkRunIfRunning(runId: string): Promise<void> {
 }
 
 /**
- * Flip free `pending` children to `running`, in item order, and collect
- * unowned `running` ones. Ownership is registered before commit, so no other
+ * Flip `pending` children to `running`, in item order, while fewer than the
+ * fan-out's `concurrency` cap are in flight (`running` or `waiting`, latest
+ * attempt rows only), and collect unowned `running` ones. Ownership is registered before commit, so no other
  * drive can see a claimed row without also seeing it owned.
  */
 async function claimChildren(
   def: WorkflowDefinition,
   runId: string,
-  parentNodeId: string,
+  parentNode: WorkflowNode,
 ): Promise<WorkflowRunStep[]> {
   const claimed: WorkflowRunStep[] = [];
   try {
+    // The in-flight count and the claim share one BEGIN IMMEDIATE transaction,
+    // so concurrent drives (a settlement's drive and the recovery sweep)
+    // serialize here and never exceed the cap together.
     await getDbClient().transaction(async () => {
       const children = latestForeachChildren(
         def,
-        parentNodeId,
+        parentNode.id,
         await getWorkflowRunStepsByRunId(runId),
       );
       for (const child of children) {
@@ -361,7 +376,7 @@ async function claimChildren(
       const inFlight = children.filter(
         (child) => child.status === "running" || child.status === "waiting",
       ).length;
-      let free = FOREACH_CAP - inFlight;
+      let free = foreachConcurrencyCap(parentNode) - inFlight;
       for (const child of children) {
         if (free <= 0) break;
         if (child.status !== "pending") continue;

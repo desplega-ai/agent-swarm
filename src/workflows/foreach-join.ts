@@ -17,6 +17,7 @@ import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import type { ForeachOutput } from "./executors/foreach";
 import type { ExecutorRegistry } from "./executors/registry";
+import { effectiveFailurePolicy } from "./foreach-body";
 import { startForeachDrive } from "./foreach-driver";
 
 export const FOREACH_TERMINAL_STEP_STATUSES = new Set([
@@ -129,11 +130,15 @@ export function buildForeachAggregate(children: WorkflowRunStep[]): ForeachOutpu
       output: step.output,
     };
   });
+  // Only `completed` without an error is ok: failed, cancelled, skipped and the
+  // legacy completed+error shape all count as failed.
   const failedCount = results.filter((result) => result.status !== "completed").length;
+  const cancelledCount = results.filter((result) => result.status === "cancelled").length;
   const aggregate: ForeachOutput = {
     results,
     okCount: results.length - failedCount,
     failedCount,
+    ...(cancelledCount > 0 ? { cancelledCount } : {}),
   };
   return aggregate;
 }
@@ -175,7 +180,7 @@ export interface ForeachSettleResult {
   joined: boolean;
   /** The parent's successors to walk, when `joined`. */
   successors: WorkflowNode[];
-  /** True when this settlement failed the run (a failed item under `onNodeFailure: "fail"`). */
+  /** True when this settlement failed the run (a failed item under fail-fast). */
   runFailed: boolean;
 }
 
@@ -190,9 +195,10 @@ export interface ForeachSettleResult {
  * 2. Write the terminal status, output, error and port.
  * 3. A run that is no longer live (failed, cancelled) only records the
  *    outcome: a late sibling must not revive a failed run or route its join.
- * 4. A failed or cancelled item under `onNodeFailure: "fail"` (the default)
- *    fails the run; in-flight siblings still record their outcomes. Under
- *    `"continue"` it counts as failed in the aggregate and the join proceeds.
+ * 4. A failed or cancelled item under fail-fast (see effectiveFailurePolicy)
+ *    cancels the queued siblings and fails the run; in-flight siblings still
+ *    record their outcomes. Under collect-outcomes it counts as failed in the
+ *    aggregate and the join proceeds.
  * 5. Otherwise run the join and set the run `running`.
  *
  * When the join stays open with a queued (`pending`) item and a `registry` is
@@ -239,8 +245,9 @@ export async function settleForeachChild(
 
     if (run.status !== "running" && run.status !== "waiting") return unclaimed;
 
-    if (outcome.status !== "completed" && (def.onNodeFailure ?? "fail") === "fail") {
+    if (outcome.status !== "completed" && effectiveFailurePolicy(parent, def) === "fail-fast") {
       const reason = options.runError ?? outcome.error ?? `foreach item ${current.nodeId} failed`;
+      await cancelQueuedForeachChildren(def, runId, parent.id, current.nodeId);
       await updateWorkflowRun(runId, { status: "failed", error: reason, finishedAt });
       return { ...unclaimed, claimed: true, runFailed: true };
     }
@@ -259,6 +266,43 @@ export async function settleForeachChild(
       runFailed: false,
     };
   });
+}
+
+/**
+ * Fail-fast: cancel every queued (`pending`) child of the fan-out so none of
+ * them starts. In-flight children are left to finish and record their outcome.
+ * A run retry gives each cancelled item a new attempt.
+ */
+export async function cancelQueuedForeachChildren(
+  def: WorkflowDefinition,
+  runId: string,
+  parentNodeId: string,
+  failedChildNodeId?: string,
+): Promise<number> {
+  const failedKey = failedChildNodeId
+    ? (parseSyntheticNodeId(failedChildNodeId)?.itemKey ?? failedChildNodeId)
+    : undefined;
+  const error = failedKey
+    ? `not started: fail-fast after item ${failedKey} failed`
+    : "not started: fail-fast after the run failed";
+  const finishedAt = new Date().toISOString();
+  let cancelled = 0;
+  await getDbClient().transaction(async () => {
+    const children = latestForeachChildren(
+      def,
+      parentNodeId,
+      await getWorkflowRunStepsByRunId(runId),
+    );
+    for (const child of children) {
+      if (child.status !== "pending") continue;
+      const row = await getDbClient().get<{ id: string }>(
+        "UPDATE workflow_run_steps SET status = 'cancelled', error = ?, finishedAt = ? WHERE id = ? AND status = 'pending' RETURNING id",
+        [error, finishedAt, child.id],
+      );
+      if (row) cancelled++;
+    }
+  });
+  return cancelled;
 }
 
 async function hasQueuedChild(

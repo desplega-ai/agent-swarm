@@ -24,6 +24,7 @@ import {
   walkGraph,
 } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
+import { stepFailureMode } from "./foreach-body";
 import { isForeachChildOwned, runForeachDrive } from "./foreach-driver";
 import { getSecretInputKeys } from "./input";
 import {
@@ -215,7 +216,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         if (retry === "scheduled") recovered++;
         if (retry !== "not-eligible") continue;
       }
-      if (!taskCompleted && (workflow.definition.onNodeFailure ?? "fail") === "fail") {
+      if (!taskCompleted && stepFailureMode(workflow.definition, stuck.nodeId) === "fail") {
         // Preserve the fail-fast recovery policy for failed/cancelled tasks.
         // Claimed: this sweep runs on every heartbeat, so the live task.failed
         // bus event may already have routed this step — a blind write here

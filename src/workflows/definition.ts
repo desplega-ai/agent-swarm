@@ -11,7 +11,12 @@ import {
   systemOneStaticShapeViolations,
 } from "./executors/system-one-decision";
 import { systemOneExtractionStaticShapeViolations } from "./executors/system-one-extraction";
-import { foreachBodyTypeError, isForeachBodyType } from "./foreach-body";
+import {
+  FOREACH_FAILURE_POLICIES,
+  type ForeachFailurePolicy,
+  foreachBodyTypeError,
+  isForeachBodyType,
+} from "./foreach-body";
 
 /** Extract all target node IDs from a node's `next` field */
 export function getNextTargets(next: string | string[] | Record<string, string>): string[] {
@@ -413,8 +418,21 @@ function validateForeachNode(
   registry?: ExecutorRegistry,
 ): void {
   const config = node.config;
-  if (Object.hasOwn(config, "concurrency")) {
-    errors.push(`Node "${node.id}" foreach concurrency is not supported in v1`);
+  if (
+    config.concurrency !== undefined &&
+    !(Number.isInteger(config.concurrency) && (config.concurrency as number) >= 1)
+  ) {
+    errors.push(
+      `Node "${node.id}" foreach config.concurrency must be an integer of 1 or more, got ${JSON.stringify(config.concurrency)}`,
+    );
+  }
+  if (
+    config.failurePolicy !== undefined &&
+    !FOREACH_FAILURE_POLICIES.includes(config.failurePolicy as ForeachFailurePolicy)
+  ) {
+    errors.push(
+      `Node "${node.id}" foreach config.failurePolicy must be one of ${FOREACH_FAILURE_POLICIES.map((p) => `"${p}"`).join(", ")}, got ${JSON.stringify(config.failurePolicy)}`,
+    );
   }
 
   // The asynchronous join (joinForeach) checkpoints the aggregate and routes
