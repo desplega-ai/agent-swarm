@@ -15,7 +15,7 @@ A workflow consists of:
 - **Executors** — Class-based step implementations with Zod-typed config and output schemas
 - **Triggers** — Entry points: webhook (HMAC-SHA256, timestamped HMAC, shared token), schedule (ref), or manual
 - **Checkpoint durability** — Atomic DB write after every step; resume from last checkpoint on crash
-- **Fan-out / convergence** — Parallel execution via array `next`, or item-driven agent-task fan-out via `foreach`, with automatic convergence gating
+- **Fan-out / convergence** — Parallel execution via array `next`, or item-driven fan-out via `foreach` (any executor as the body, with an optional concurrency cap), with automatic convergence gating
 
 ### Executor Types
 
@@ -240,7 +240,7 @@ Each answer is at `<node>.answers.<field>`. `value` is the extracted value, or `
 
 ### Foreach fan-out
 
-A `foreach` node resolves `config.over` to an array, creates one `agent-task` child for each item, waits for all children to finish, and exposes an aggregate result to its successor. Use an exact interpolation token for `over` so the value remains an array; `itemKey` must identify a unique, non-empty string property on every item.
+A `foreach` node resolves `config.over` to an array, runs its `body` (any executor except `foreach`; `sub-workflow` runs one child workflow per item) once for each item, waits for all children to finish, and exposes an aggregate result to its successor. Use an exact interpolation token for `over` so the value remains an array; `itemKey` must identify a unique, non-empty string property on every item.
 
 ```yaml
 - id: review-by-agent
@@ -257,7 +257,9 @@ A `foreach` node resolves `config.over` to an array, creates one `agent-task` ch
   next: summarize
 ```
 
-In v1, `body.type` is limited to `agent-task`, all children fan out together, and `concurrency` is rejected. Child steps use synthetic IDs such as `review-by-agent#agent-id`. The default `onNodeFailure: "fail"` stops the run on a failed child; `"continue"` lets the remaining children finish and records failed entries in the aggregate alongside `okCount` and `failedCount`.
+Set `concurrency` (an integer, 1 or more) to cap how many items are in flight; without it every item starts at once. The cap holds across restarts. Child steps use synthetic IDs such as `review-by-agent#agent-id`.
+
+`failurePolicy` is `"fail-fast"` or `"collect-outcomes"`, and defaults from `onNodeFailure` (`"continue"` collects outcomes, the default `"fail"` is fail-fast). Fail-fast cancels the queued items, lets in-flight items finish, and fails the run. Collect-outcomes lets every item finish and records failed entries in the aggregate alongside `okCount` and `failedCount`. Retrying a failed fan-out with `retry-workflow-run` reruns only the failed and cancelled items, each as a new attempt; completed items keep their output.
 
 ## Defining a Workflow
 
@@ -496,7 +498,7 @@ Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed
 
 For an `agent-task` node, `retry` also covers a task that fails after dispatch, for example one the heartbeat fails with `superseded_workflow_task` after a worker restart. The engine detaches the failed task and the poller dispatches a fresh task for the same step. `onNodeFailure` applies only once `maxRetries` is spent. A cancelled task is never retried. Before a retry, the engine restores completed upstream outputs from step checkpoints, so declared inputs resolve to the same values as the original execution. Retrying a failed run also reconstructs the branch selected by each completed step and never revives a branch that was not taken.
 
-A deploy or heartbeat remediation that cuts an in-flight `agent-task` step fails its task with `superseded_workflow_task`. When the node has no `retry`, the engine applies an implicit policy for that reason only: one retry, `static`, after 30 seconds. A second cut, or any other failure, follows `onNodeFailure`. An explicit `retry` always wins, so set `"retry": { "maxRetries": 0 }` on a node with external side effects (posting, paying, merging) that must not run twice. Steps inside a `foreach` body do not get the implicit retry yet.
+A deploy or heartbeat remediation that cuts an in-flight `agent-task` step fails its task with `superseded_workflow_task`. When the node has no `retry`, the engine applies an implicit policy for that reason only: one retry, `static`, after 30 seconds. A second cut, or any other failure, follows `onNodeFailure`. An explicit `retry` always wins, so set `"retry": { "maxRetries": 0 }` on a node with external side effects (posting, paying, merging) that must not run twice. Steps inside a `foreach` body do not get the implicit retry yet; a cut item follows its fan-out's failure policy, and `retry-workflow-run` reruns only the failed items.
 
 ### Per-Node Timeout
 

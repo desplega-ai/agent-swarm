@@ -40,11 +40,13 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " +
         "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" +
         "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n" +
-        "- FOREACH NODE: type 'foreach' fans out one agent-task per item. Config: " +
-        "{ over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: 'agent-task', config: {...} } }. " +
+        "- FOREACH NODE: type 'foreach' runs its body once per item. Config: " +
+        "{ over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: <any executor except foreach>, config: {...} }, " +
+        "concurrency?: <integer >= 1, items in flight; unbounded when absent>, failurePolicy?: 'fail-fast' | 'collect-outcomes' }. " +
         "The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs " +
         "'<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. " +
-        "concurrency is not supported in v1; use definition-level onNodeFailure: 'continue' to aggregate failed children.\n" +
+        "failurePolicy defaults from onNodeFailure ('continue' = collect-outcomes, else fail-fast); fail-fast cancels queued items. " +
+        "retry-workflow-run on a failed fan-out reruns only failed and cancelled items.\n" +
         "- TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. " +
         "Supported keywords: type, required, properties, enum, const, items (recursive into arrays). " +
         "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.\n" +
