@@ -25,6 +25,9 @@ type Captured = {
 };
 
 const captured: Captured[] = [];
+// The file part's Content-Type as sent. Bun's `formData()` re-derives a File's
+// type from its extension (`.webm` reads back as video/webm), so read it raw.
+const sentFileTypes: string[] = [];
 let reply: () => Response = () => Response.json({ text: " hello " });
 let stt: ReturnType<typeof Bun.serve>;
 
@@ -34,6 +37,10 @@ beforeAll(() => {
     port: 0,
     hostname: "127.0.0.1",
     async fetch(req) {
+      const raw = await req.clone().text();
+      sentFileTypes.push(
+        /name="file"; filename="[^"]*"\r\nContent-Type: ([^\r\n]+)/.exec(raw)?.[1] ?? "",
+      );
       const form = await req.formData();
       captured.push({
         path: new URL(req.url).pathname,
@@ -59,6 +66,7 @@ afterAll(() => {
 
 afterEach(() => {
   captured.length = 0;
+  sentFileTypes.length = 0;
   reply = () => Response.json({ text: " hello " });
   for (const key of ENV_KEYS) delete process.env[key];
 });
@@ -267,5 +275,25 @@ describe("provider key fallback", () => {
     process.env.ELEVENLABS_API_KEY = ELEVEN_FAKE;
     reply = () => Response.json({ detail: `bad key ${ELEVEN_FAKE}` }, { status: 401 });
     await expect(transcribeAudio(audio)).rejects.toThrow("bad key [REDACTED:ELEVENLABS_API_KEY]");
+  });
+
+  // The composer's mic button records webm in Chrome and Firefox; the upload
+  // route drops `;codecs=` before it gets here. Each provider reads the format
+  // from the file name, and all three list webm as supported.
+  test.each([
+    ["elevenlabs", "ELEVENLABS_API_KEY", "https://api.elevenlabs.io/v1/speech-to-text"],
+    ["openai", "OPENAI_API_KEY", "https://api.openai.com/v1/audio/transcriptions"],
+    ["groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1/audio/transcriptions"],
+  ])("a recorded webm clip reaches %s as a .webm audio/webm file", async (name, keyEnv, url) => {
+    process.env[keyEnv] = fake(name);
+    const clip = new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])], { type: "audio/webm" });
+    const notes = await transcribeAudioNotes(
+      [{ key: "c", name: "recording-2026-10-21-143005.webm", data: clip, mimeType: "audio/webm" }],
+      "t",
+    );
+    expect(notes.get("c")).toBe("[Transcript of recording-2026-10-21-143005.webm]\nhello");
+    expect(calledUrls).toEqual([url]);
+    expect(captured[0]).toMatchObject({ filename: "recording-2026-10-21-143005.webm" });
+    expect(sentFileTypes).toEqual(["audio/webm"]);
   });
 });

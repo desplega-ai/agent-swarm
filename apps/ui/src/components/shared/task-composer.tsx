@@ -23,7 +23,9 @@
  * Attachments go out on the follow-up path only: steering carries text. They
  * also survive the swap. A file added through `renderActions` (the session
  * panel's "Add screenshot") while steering is up switches to the follow-up
- * path, so the message goes out as a follow-up task with the file.
+ * path, so the message goes out as a follow-up task with the file. A clip
+ * from the mic button is one such file: its upload to the draft task puts its
+ * transcript in the task text.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -31,11 +33,12 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import type { AgentTask } from "@/api/types";
+import { RecordAudioButton, useAudioRecorder } from "@/components/sessions/audio-recorder";
 import {
   formatComposeAttachmentUploadError,
   uploadComposeAttachments,
 } from "@/components/sessions/compose-attachment-upload";
-import { ComposerDock } from "@/components/sessions/composer-dock";
+import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
 
@@ -217,10 +220,26 @@ export function TaskComposer({
   // follow-up task instead.
   const steerTarget = attachments.length === 0 && canSteer ? targetTask : null;
 
-  const extraActions = renderActions?.((file) => {
+  const addAttachment = useCallback((file: File) => {
     setAttachments((current) => [...current, file]);
     setAttachmentError(null);
+  }, []);
+
+  // A clip passes the dock's type and size checks, as a picked file does. The
+  // toast covers the steer box, which shows no attachment error.
+  const recorder = useAudioRecorder((clip) => {
+    const { valid, error } = partitionAttachmentFiles([clip]);
+    if (valid.length > 0) return addAttachment(clip);
+    setAttachmentError(error);
+    if (error) toast.error(error);
   });
+
+  const extraActions = (
+    <>
+      {renderActions?.(addAttachment)}
+      <RecordAudioButton recorder={recorder} disabled={!userId || createTask.isPending} bar={bar} />
+    </>
+  );
 
   if (steerTarget) {
     return (

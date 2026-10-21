@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect, useState } from "react";
 
@@ -21,6 +21,7 @@ mock.module("@/components/sessions/composer-dock", () => require("../sessions/co
 mock.module("@/components/sessions/compose-attachment-upload", () =>
   require("../sessions/compose-attachment-upload"),
 );
+mock.module("@/components/sessions/audio-recorder", () => require("../sessions/audio-recorder"));
 
 const createdTasks: Array<Record<string, unknown>> = [];
 const uploads: Array<{ taskId: string; file: File }> = [];
@@ -383,5 +384,170 @@ describe("composer attachment types", () => {
     expect(partitionAttachmentFiles([binary]).error).toContain(
       '"tool.exe" isn\'t an allowed file type',
     );
+  });
+});
+
+// A fake mic: `getUserMedia` hands out a stream whose track stop is counted,
+// and the recorder emits one webm chunk on stop, as Chrome does.
+let micMode: "ok" | "blocked" = "ok";
+let micPermission: PermissionState = "prompt";
+let stoppedTracks = 0;
+const micRequests: unknown[] = [];
+
+class FakeMediaRecorder {
+  static isTypeSupported = (type: string) => type.startsWith("audio/webm");
+  state: "inactive" | "recording" = "inactive";
+  mimeType: string;
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  onstop: (() => void) | null = null;
+  constructor(_stream: unknown, options?: { mimeType?: string }) {
+    this.mimeType = options?.mimeType ?? "";
+  }
+  start() {
+    this.state = "recording";
+  }
+  stop() {
+    this.state = "inactive";
+    this.ondataavailable?.({
+      data: new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])], { type: this.mimeType }),
+    });
+    this.onstop?.();
+  }
+}
+
+function installMic() {
+  (globalThis as { MediaRecorder?: unknown }).MediaRecorder = FakeMediaRecorder;
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: async (constraints: unknown) => {
+        micRequests.push(constraints);
+        if (micMode === "blocked") throw new DOMException("Permission denied", "NotAllowedError");
+        return { getTracks: () => [{ stop: () => stoppedTracks++ }] };
+      },
+    },
+  });
+  Object.defineProperty(navigator, "permissions", {
+    configurable: true,
+    value: {
+      query: async () => ({
+        state: micPermission,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    },
+  });
+}
+
+function removeMic() {
+  delete (globalThis as { MediaRecorder?: unknown }).MediaRecorder;
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
+}
+
+const micButton = (container: HTMLElement) =>
+  container.querySelector('button[aria-label^="Record audio"]') as HTMLButtonElement;
+
+describe("composer audio recording", () => {
+  beforeEach(() => {
+    micMode = "ok";
+    micPermission = "prompt";
+    stoppedTracks = 0;
+    micRequests.length = 0;
+    installMic();
+  });
+  afterEach(() => {
+    removeMic();
+  });
+
+  test("record then stop attaches a webm clip, which the follow-up uploads to its draft", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer rootTaskId="root-1" targetTask={runningLeadTask} canSteer />,
+    );
+    // The mic button sits in the steer box too.
+    expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
+    expect(micButton(container).disabled).toBe(false);
+
+    await act(async () => micButton(container).click());
+    expect(micRequests).toEqual([{ audio: true }]);
+    const stop = container.querySelector(
+      'button[aria-label="Stop recording"]',
+    ) as HTMLButtonElement;
+    expect(stop.textContent).toContain("0:00");
+
+    await act(async () => stop.click());
+    // The mic is released, and the clip moves the composer to the follow-up path.
+    expect(stoppedTracks).toBe(1);
+    expect(container.querySelector('[data-testid="steer-composer"]')).toBeNull();
+    const remove = container.querySelector(
+      'button[aria-label^="Remove recording-"]',
+    ) as HTMLButtonElement;
+    expect(remove.getAttribute("aria-label")).toMatch(/^Remove recording-[\d-]+\.webm$/);
+
+    await type(container, "listen to this");
+    await send(container);
+    await waitFor(() => promoted.length === 1);
+
+    expect(createdTasks[0]).toMatchObject({ task: "listen to this", draft: true });
+    expect(uploads).toHaveLength(1);
+    const clip = uploads[0]!.file;
+    expect(clip.name).toMatch(/^recording-[\d-]+\.webm$/);
+    // No `;codecs=`: the server reads the container from the content type.
+    expect(clip.type).toBe("audio/webm");
+    expect(clip.size).toBe(4);
+    expect(promoted).toEqual(["follow-up"]);
+    await unmount();
+  });
+
+  test("a refused mic disables the button and the composer still sends", async () => {
+    micMode = "blocked";
+    const { container, unmount } = await mount(
+      <TaskComposer rootTaskId="root-1" targetTask={null} canSteer={false} />,
+    );
+    await act(async () => micButton(container).click());
+
+    expect(micButton(container).disabled).toBe(true);
+    expect(micButton(container).getAttribute("aria-label")).toBe(
+      "Record audio (Microphone access is blocked)",
+    );
+    await type(container, "typed instead");
+    await send(container);
+    expect(createdTasks[0]).toMatchObject({ task: "typed instead", draft: false });
+    await unmount();
+  });
+
+  test("a mic blocked before the first click disables the button on mount", async () => {
+    micPermission = "denied";
+    const { container, unmount } = await mount(
+      <TaskComposer rootTaskId="root-1" targetTask={null} canSteer={false} />,
+    );
+    await act(async () => {});
+    expect(micButton(container).disabled).toBe(true);
+    expect(micRequests).toEqual([]);
+    await unmount();
+  });
+
+  test("a browser without MediaRecorder gets a disabled button, nothing else changes", async () => {
+    removeMic();
+    const { container, unmount } = await mount(
+      <TaskComposer rootTaskId="root-1" targetTask={null} canSteer={false} />,
+    );
+    expect(micButton(container).disabled).toBe(true);
+    expect(micButton(container).getAttribute("aria-label")).toBe(
+      "Record audio (This browser cannot record audio)",
+    );
+    await type(container, "still works");
+    await send(container);
+    expect(createdTasks[0]).toMatchObject({ task: "still works" });
+    await unmount();
+  });
+
+  test("a recorded webm clip passes the dock's attachment check", async () => {
+    const { partitionAttachmentFiles } = await import("../sessions/composer-dock");
+    const { recordingFileName } = await import("../sessions/audio-recorder");
+    const clips = ["audio/webm", "audio/mp4", "audio/ogg"].map(
+      (type) => new File([new Uint8Array([1])], recordingFileName(type), { type }),
+    );
+    expect(clips.map((clip) => clip.name.split(".").pop())).toEqual(["webm", "m4a", "ogg"]);
+    expect(partitionAttachmentFiles(clips)).toEqual({ valid: clips, error: null });
   });
 });

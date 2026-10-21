@@ -64,6 +64,8 @@ const ALLOWED_ATTACHMENT_EXTENSIONS = [
   ".oga",
   ".opus",
   ".flac",
+  // The mic button records webm (Chrome, Firefox); Safari's mp4 clips are `.m4a`.
+  ".webm",
 ] as const;
 
 function fileExtension(name: string): string {

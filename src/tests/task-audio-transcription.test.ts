@@ -145,16 +145,18 @@ async function draftTask(text: string): Promise<string> {
 }
 
 describe("sessions UI upload", () => {
-  test("an audio file uploaded to a draft puts its transcript in the task text", async () => {
+  test("a recorded webm clip uploaded to a draft puts its transcript in the task text", async () => {
     useTranscription();
     const taskId = await draftTask("what did I say?");
 
-    const res = await upload(taskId, "memo.webm", "audio/webm;codecs=opus");
+    // What the composer's mic button uploads in Chrome and Firefox.
+    const name = "recording-2026-10-21-143005.webm";
+    const res = await upload(taskId, name, "audio/webm;codecs=opus");
 
     expect(res.status).toBe(201);
-    expect(sttFilenames).toEqual(["memo.webm"]);
+    expect(sttFilenames).toEqual([name]);
     expect((await getTaskById(taskId))!.task).toBe(
-      "what did I say?\n\n[File: memo.webm (audio/webm)]\n[Transcript of memo.webm]\nShip the release notes today.",
+      `what did I say?\n\n[File: ${name} (audio/webm)]\n[Transcript of ${name}]\nShip the release notes today.`,
     );
     expect(await getTaskAttachments(taskId)).toHaveLength(1);
   });
