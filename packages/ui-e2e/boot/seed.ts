@@ -243,7 +243,7 @@ async function ensureForeachRun(options: SeedOptions & { db: Database }): Promis
     ) => {
       const stepId = id(next++);
       const childRunId = childRun ? id(next++) : null;
-      if (childRunId) {
+      if (childRun && childRunId) {
         const finished = at(minutes[1] ?? minutes[0]);
         insertRun.run(
           childRunId,
