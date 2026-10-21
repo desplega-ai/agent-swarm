@@ -70,6 +70,7 @@ import "./trackers/linear";
 import "./ranking";
 import "./used-by";
 import "./fleet-benchmark";
+import "./user-roles";
 import "./users";
 import "./webhooks";
 import "./workflow-events";

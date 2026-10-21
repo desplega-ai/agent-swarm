@@ -22470,6 +22470,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rbac/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List RBAC roles with their verbs */
+        get: operations["rbac_listRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/{id}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a user's RBAC roles */
+        get: operations["users_getRbacRoles"];
+        /**
+         * Set a user's RBAC roles
+         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin.
+         */
+        put: operations["users_setRbacRoles"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/whoami": {
         parameters: {
             query?: never;
@@ -26747,6 +26785,19 @@ export interface components {
             tags: string[];
             createdAt: string;
         };
+        RbacRole: {
+            id: string;
+            name: string;
+            description: string | null;
+            isBuiltin: boolean;
+            grantsAll: boolean;
+            primary: boolean;
+            verbs: string[];
+        };
+        UserRbacRoles: {
+            userId: string;
+            roles: components["schemas"]["RbacRole"][];
+        };
         User: {
             id: string;
             name: string;
@@ -30920,6 +30971,123 @@ export interface operations {
             };
             /** @description Endpoint not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rbac_listRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        roles: components["schemas"]["RbacRole"][];
+                    };
+                };
+            };
+        };
+    };
+    users_getRbacRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user's roles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRbacRoles"];
+                };
+            };
+            /** @description User not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    users_setRbacRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    roles: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The user's roles after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRbacRoles"];
+                };
+            };
+            /** @description Invalid role set */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not allowed to change roles */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description User not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Would leave no active admin */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
