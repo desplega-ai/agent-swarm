@@ -24,11 +24,16 @@ mock.module("@/components/sessions/compose-attachment-upload", () =>
 
 const createdTasks: Array<Record<string, unknown>> = [];
 const uploads: Array<{ taskId: string; file: File }> = [];
+const promoted: string[] = [];
 mock.module("@/api/client", () => ({
   api: {
     createTask: async (input: Record<string, unknown>) => {
       createdTasks.push(input);
       return { id: "follow-up", ...input };
+    },
+    promoteDraftTask: async (id: string) => {
+      promoted.push(id);
+      return { id };
     },
   },
 }));
@@ -114,6 +119,7 @@ async function send(container: HTMLElement) {
 beforeEach(() => {
   createdTasks.length = 0;
   uploads.length = 0;
+  promoted.length = 0;
 });
 
 describe("TaskComposer on Sessions", () => {
@@ -148,11 +154,17 @@ describe("TaskComposer on Sessions", () => {
       task: "see the screenshot",
       parentTaskId: "lead-1",
       source: "ui",
+      // A draft until its uploads settle, so no worker claims it without them.
+      draft: true,
     });
     // Sessions never pins an agent: the server routes the follow-up to the Lead.
     expect(createdTasks[0]).not.toHaveProperty("agentId");
     expect(createdTasks[0]).not.toHaveProperty("routingReason");
     expect(uploads).toEqual([{ taskId: "follow-up", file: screenshot, intent: "user-upload" }]);
+    for (let i = 0; i < 50 && promoted.length === 0; i++) {
+      await act(async () => new Promise((r) => setTimeout(r, 10)));
+    }
+    expect(promoted).toEqual(["follow-up"]);
     // Sent: the attachment clears and steering is back for the running task.
     await act(async () => {});
     expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();

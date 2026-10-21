@@ -124,6 +124,9 @@ export function TaskComposer({
     }) => {
       setAttachmentError(null);
       setUploadedCount(0);
+      // A draft (#1240) until its uploads settle, so no worker claims it
+      // before its attachments and any voice-note transcript are in.
+      const isDraft = input.attachments.length > 0;
       const created = await api.createTask({
         task: input.task,
         parentTaskId: input.parentTaskId,
@@ -133,13 +136,19 @@ export function TaskComposer({
           : {}),
         requestedByUserId: input.requestedByUserId,
         source: "ui",
+        draft: isDraft,
       });
-      const uploadResult = await uploadComposeAttachments({
-        taskId: created.id,
-        files: input.attachments,
-        onUploaded: setUploadedCount,
-      });
-      return { created, uploadResult };
+      try {
+        const uploadResult = await uploadComposeAttachments({
+          taskId: created.id,
+          files: input.attachments,
+          onUploaded: setUploadedCount,
+        });
+        return { created, uploadResult };
+      } finally {
+        // Always promote: an upload failure must never strand the task in draft.
+        if (isDraft) await api.promoteDraftTask(created.id);
+      }
     },
     onSuccess: ({ created, uploadResult }, input) => {
       const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);

@@ -284,6 +284,8 @@ Voice notes and other audio files are transcribed through OpenAI-compatible `/au
 
 The task text then carries a `[Transcript of <file>]` block under the file line. Without a key, the task text gets one line saying no transcription provider is configured. A failed call is noted the same way, and the task is still created.
 
+The same keys transcribe audio shared with the [Slack bot](/docs/integrations/slack#attachment-handling) and audio attached in the dashboard's session composer.
+
 ## Slash commands
 
 One handler answers the commands on every adapter that delivers them: Telegram, Slack and Discord. Teams has no slash commands. A command creates no task and is not part of the thread context. An unknown command (`/deploy`) gets the command list back, so no `/word` message is dropped.

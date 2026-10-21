@@ -13,6 +13,8 @@
  * could not be attached — never dropped silently. A download failure is
  * also flagged on that line; a storage failure happens after the text is
  * written, so it shows up only in the reply and in the missing attachment.
+ * Audio files (voice clips) a user shares get their transcript on the next
+ * line when transcription is configured, and keep the audio attached.
  */
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,6 +29,7 @@ import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import type { AgentTask, CreateTaskOptions, TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentFetchCommand } from "../utils/task-attachment-links";
+import { transcribeAudioNotes } from "../utils/transcription";
 import { getFileInfo, type SlackFile } from "./files";
 import { noteSlackInboundSideEffect } from "./inbound-dispatch";
 // Side-effect import: registers all Slack event templates in the in-memory registry
@@ -73,6 +76,8 @@ export type InboundSlackFiles = {
   files: SlackFile[];
   fetched: FetchedSlackFile[];
   failed: SlackFileFailure[];
+  /** Task-text note per audio file id (a transcript), filled when fetched with `transcribe`. */
+  notes?: Map<string, string>;
   /** Deletes the downloaded copies; hold the batch with `await using`. */
   [Symbol.asyncDispose](): Promise<void>;
 };
@@ -96,9 +101,14 @@ export function formatFileSize(bytes: number): string {
  * Build a text representation of file attachments for inclusion in messages.
  * Each file is formatted as: [File: filename.ext (mimetype, size) id=FILE_ID],
  * followed by `(not attached: <reason>)` when the file never made it into the
- * task's attachments.
+ * task's attachments, and by the file's note (a voice-clip transcript) on the
+ * next line.
  */
-export function buildAttachmentText(files: SlackFile[], failed: SlackFileFailure[] = []): string {
+export function buildAttachmentText(
+  files: SlackFile[],
+  failed: SlackFileFailure[] = [],
+  notes: Map<string, string> = new Map(),
+): string {
   const reasons = new Map(failed.map((f) => [f.file.id, f.reason]));
   return files
     .map((f) => {
@@ -106,7 +116,8 @@ export function buildAttachmentText(files: SlackFile[], failed: SlackFileFailure
       const size = typeof f.size === "number" ? formatFileSize(f.size) : "unknown size";
       const line = `[File: ${f.name ?? f.id} (${f.mimetype ?? "unknown type"}, ${size}) id=${f.id}]`;
       const reason = reasons.get(f.id);
-      return reason ? `${line} (not attached: ${reason})` : line;
+      const note = notes.get(f.id);
+      return [reason ? `${line} (not attached: ${reason})` : line, note].filter(Boolean).join("\n");
     })
     .join("\n");
 }
@@ -121,15 +132,16 @@ export function buildEffectiveText(
   text: string | undefined,
   files?: SlackFile[],
   failed?: SlackFileFailure[],
+  notes?: Map<string, string>,
 ): string {
   const hasText = !!text?.trim();
   const hasFiles = files && files.length > 0;
 
   if (hasText && hasFiles) {
-    return `${text}\n\n${buildAttachmentText(files, failed)}`;
+    return `${text}\n\n${buildAttachmentText(files, failed, notes)}`;
   }
   if (hasFiles) {
-    return buildAttachmentText(files, failed);
+    return buildAttachmentText(files, failed, notes);
   }
   return text || "";
 }
@@ -147,11 +159,14 @@ export function bufferedFileFailures(files: SlackFile[] | undefined): SlackFileF
  * Download every file on a Slack message with the bot token, each to its own
  * temp file. Never throws: a file that can't be fetched lands in `failed` with
  * a reason the user and the agent can read. Hold the result with `await using`
- * so the temp files go away with it.
+ * so the temp files go away with it. With `transcribe`, every downloaded audio
+ * file also gets a `notes` entry: its transcript, the failure, or a line saying
+ * no provider is configured.
  */
 export async function fetchSlackFiles(
   client: WebClient,
   files: SlackFile[] | undefined,
+  options: { transcribe?: boolean } = {},
 ): Promise<InboundSlackFiles> {
   let dir: string | undefined;
   const result: InboundSlackFiles = {
@@ -182,7 +197,25 @@ export async function fetchSlackFiles(
       result.fetched.push({ file, ...outcome });
     }
   }
+  if (options.transcribe) {
+    result.notes = await transcribeAudioNotes(
+      result.fetched
+        .filter(({ file }) => isSlackAudio(file))
+        .map(({ file, path }) => ({
+          key: file.id,
+          name: file.name ?? file.id,
+          data: Bun.file(path),
+          mimeType: file.mimetype,
+        })),
+      "[Slack]",
+    );
+  }
   return result;
+}
+
+/** An audio file, or a voice clip recorded in Slack (its MIME type can read `video/…`). */
+function isSlackAudio(file: SlackFile): boolean {
+  return file.subtype === "slack_audio" || Boolean(file.mimetype?.startsWith("audio/"));
 }
 
 /** Does the start of an HTML response read like Slack's sign-in page? */

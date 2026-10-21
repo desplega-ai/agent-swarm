@@ -122,3 +122,52 @@ export async function transcribeAudio(input: {
   }
   return payload.text.trim();
 }
+
+/** The task-text note for an audio file when no provider is configured. */
+export const NOT_TRANSCRIBED_NOTE = `(not transcribed: no transcription provider configured, set ${TRANSCRIPTION_API_KEY_ENV})`;
+
+const AUDIO_EXTENSIONS: Record<string, string> = {
+  "audio/ogg": "ogg",
+  "audio/opus": "ogg",
+  "audio/mpeg": "mp3",
+  "audio/mp4": "m4a",
+  "audio/x-m4a": "m4a",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/webm": "webm",
+};
+
+/** One audio file to transcribe. `key` names its note in the returned map. */
+export type AudioFile = { key: string; name: string; data: Blob; mimeType?: string };
+
+/**
+ * Transcribe audio files into task-text notes, one per file: `[Transcript of
+ * <name>]` and the text, `(transcription failed: <reason>)`, or (when no
+ * provider is configured) `NOT_TRANSCRIBED_NOTE`. Never throws, so a failed
+ * call never blocks the task it belongs to. `logPrefix` tags the warning.
+ */
+export async function transcribeAudioNotes(
+  files: AudioFile[],
+  logPrefix: string,
+): Promise<Map<string, string>> {
+  const notes = new Map<string, string>();
+  if (files.length === 0) return notes;
+  if (!isTranscriptionConfigured()) {
+    for (const file of files) notes.set(file.key, NOT_TRANSCRIBED_NOTE);
+    return notes;
+  }
+  for (const file of files) {
+    // Voice notes can carry no file name; the endpoint reads the format from the extension.
+    const extension = AUDIO_EXTENSIONS[file.mimeType ?? ""] ?? "ogg";
+    const filename = /\.\w+$/.test(file.name) ? file.name : `${file.name}.${extension}`;
+    try {
+      const text = await transcribeAudio({ data: file.data, filename, mimeType: file.mimeType });
+      notes.set(file.key, `[Transcript of ${file.name}]\n${text || "(no speech recognized)"}`);
+    } catch (error) {
+      const reason = scrubSecrets(error instanceof Error ? error.message : String(error));
+      console.warn(`${logPrefix} could not transcribe file ${file.key}: ${reason}`);
+      notes.set(file.key, `(transcription failed: ${reason})`);
+    }
+  }
+  return notes;
+}
