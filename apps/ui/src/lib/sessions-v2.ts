@@ -11,7 +11,7 @@ import { groupKeyOf } from "./session-groups";
  * the v2 list filters. It is the patch after the `package.json` version that
  * the sessions v2 branch started from. Recheck it before the merge.
  */
-export const SESSIONS_V2_MIN_VERSION = "2.4.5";
+export const SESSIONS_V2_MIN_VERSION = "2.4.6";
 
 /**
  * Where sessions toasts sit: bottom left, over the sidebar. Bottom right

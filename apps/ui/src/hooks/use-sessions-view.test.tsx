@@ -28,8 +28,8 @@ const API_URL = "http://sessions-view.test";
 mock.module("@/api/hooks/use-feature-gate", () => ({
   useFeatureGate: () => ({
     supported: true,
-    currentVersion: "2.4.5",
-    requiredVersion: "2.4.5",
+    currentVersion: "2.4.6",
+    requiredVersion: "2.4.6",
     isError: false,
     error: null,
   }),

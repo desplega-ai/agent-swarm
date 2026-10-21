@@ -758,7 +758,7 @@ Below 768 px, the sessions view is a list screen, then a detail screen with hist
 
 #### Automated Verification:
 - [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
-- [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`. This runs desktop Chromium only. The `mobile-iphone` project runs only `composer-enter-key.spec.ts`, so phone coverage comes in Phase 10.
+- [x] Smoke passes: `bun run e2e:ui -- --grep @smoke`. This runs desktop Chromium only. The `mobile-iphone` project runs only `composer-enter-key.spec.ts`, so phone coverage comes in Phase 10. (clean worktree at 1e96cd53c, before the rebase)
 
 #### Automated QA:
 - [x] At 390x844 (agent-browser `set viewport 390 844`): tap a row, the detail pushes, and browser back returns to the list at the same scroll position.
@@ -916,6 +916,7 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Taras decision (2026-10-22, while testing Phase 8): every running mark spins (TaskStatusIcon `active`, 3 s turn) in rows, tabs, counts, phone rows, and worker steps. This reverses UX-REVIEW-R9 lines 55 and 88 (static rings in data rows). Reduced motion still stops it.
   - Phase 9 decisions: phones (below 768 px) get `MobileSessions`, with the URL as the screen stack (`useIsPhone` reads the breakpoint in the first render). `ResponsiveOverlay` is a Popover or Dialog from md up and a vaul Drawer on phones, so Share is a drawer on phones in the Legacy view too. Every drawer eats the click that ends a drag. Phone taps are at least 44 px, through `--hit-size: 44px` and the phone branch, and desktop sizes are unchanged. Search chips `with:` and `in:` suggest people and groups. A swiped Done row collapses in 150 ms (a height animation, which UX-REVIEW-R9 asks for). Crossing md swaps the whole tree and drops selection and unsent composer text.
   - Phase 9 open items for Taras (PR Heads-up): the app header stays on the phone list screen (SPEC R8.5 says none), because it is the only way to global nav. No `viewport-fit=cover` or `interactive-widget` meta change, because it is global. The real-iPhone check shows if the safe area and keyboard need them. No "Select all" (P2). The group screen pager buttons (shared `ListPager`) stay 32 px.
+  - Phase 10 start: rebased onto origin/main 2a81a2129 (package.json 2.4.5), so `SESSIONS_V2_MIN_VERSION` is now 2.4.6. Only the generated API reference index conflicted (endpoint counts). The pre-rebase head is kept as branch `backup/sv2-pre-rebase-1e96cd53c` until the PR merges.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
 - **UX-REVIEW-R9 status**: (table filled in during Phase 10).
