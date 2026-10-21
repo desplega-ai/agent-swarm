@@ -6,8 +6,8 @@
  * The sidebar holds the search and the session tree (Phases 4 and 5). The
  * pane shows the New session tab on `/sessions` (the shipped composer with
  * a "Start in" picker; it keeps the `?seed=` and `?prefill=` links working)
- * and today's conversation on `/sessions/:rootTaskId`, until Phases 6 and 7
- * replace it.
+ * and the session pane on `/sessions/:rootTaskId`: the header (Phase 6) over
+ * today's conversation, until Phase 7 swaps in the turn timeline.
  */
 
 import { History } from "lucide-react";
@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { SessionListItem } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
@@ -29,7 +30,7 @@ import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { NewSessionTab } from "./new-session-tab";
 import { SessionPane } from "./pane/session-pane";
-import { SessionTree } from "./sidebar/session-tree";
+import { SessionTree, type SessionTreeHandle } from "./sidebar/session-tree";
 import { useSessionsUrlState } from "./use-sessions-url-state";
 
 const WIDTH_DEFAULT = 320;
@@ -174,6 +175,20 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     },
     [focusTab],
   );
+  // The session whose header title is its rename field (Cmd+K "Rename
+  // session", the pencil). A switch to another session ends it.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // The tree's move dialog and group reveal, for the pane header.
+  const treeRef = useRef<SessionTreeHandle>(null);
+  const moveSessions = useCallback(
+    (sessions: SessionListItem[], returnFocus: () => void) =>
+      treeRef.current?.move(sessions, returnFocus),
+    [],
+  );
+  const revealGroup = useCallback(
+    (groupKey: string | null) => treeRef.current?.revealGroup(groupKey),
+    [],
+  );
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row", MAIN_BLEED)}>
@@ -181,6 +196,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
         id={sidebarId}
         aria-label="Sessions"
         style={{ "--sessions-sidebar-w": `${width}px` } as CSSProperties}
+        data-sessions-sidebar=""
         className="group/nav relative flex shrink-0 flex-col border-b border-border bg-surface md:w-(--sessions-sidebar-w) md:border-r md:border-b-0"
       >
         {/* The bulk bar covers this header while sessions are selected: hide
@@ -207,6 +223,8 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
             query={q}
             setQuery={setQuery}
             onViewChange={onViewChange}
+            onRename={() => setRenaming(focused)}
+            ref={treeRef}
           />
         </div>
         <SidebarResizeHandle width={width} onResize={setWidth} sidebarId={sidebarId} />
@@ -218,7 +236,14 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
         ) : (
           // A new key per session: the composer draft and the scroll state
           // never carry over to the next session.
-          <SessionPane key={focused} rootTaskId={focused} />
+          <SessionPane
+            key={focused}
+            rootTaskId={focused}
+            renaming={renaming === focused}
+            onRenamingChange={(on) => setRenaming(on ? focused : null)}
+            onMove={moveSessions}
+            onRevealGroup={revealGroup}
+          />
         )}
       </section>
     </div>

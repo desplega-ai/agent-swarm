@@ -249,9 +249,14 @@ export function CommandMenu() {
                   close();
                   item.onSelect();
                 }}
+                className="group/item"
               >
                 {item.icon ? <item.icon className="h-4 w-4" /> : null}
-                <span className="truncate">{item.label}</span>
+                {/* One line with an ellipsis. The highlighted row (keys or
+                    pointer) shows the whole label, e.g. a long session title. */}
+                <span className="truncate group-data-[selected=true]/item:whitespace-normal group-data-[selected=true]/item:wrap-anywhere">
+                  {item.label}
+                </span>
                 {item.shortcut ? <CommandShortcut>{item.shortcut}</CommandShortcut> : null}
               </CommandItem>
             ))}

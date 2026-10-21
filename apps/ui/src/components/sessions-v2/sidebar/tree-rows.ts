@@ -110,7 +110,7 @@ export function isNavRow(row: TreeRow): row is NavRow {
 }
 
 /** The fold id of an owner node under Shared with me. */
-const ownerFoldId = (ownerId: string) => `owner:${ownerId}`;
+export const ownerFoldId = (ownerId: string) => `owner:${ownerId}`;
 
 /** The fold id of a container row: a section, a group key, or an owner. */
 export function foldId(row: TreeRow): string | null {

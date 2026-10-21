@@ -541,7 +541,7 @@ Users can select many sessions, move them by bulk bar, drag, picker, or Cmd+K, a
 #### Automated Verification:
 - [x] Parser tests pass: `bun test apps/ui/src/lib/session-search.test.ts`
 - [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
-- [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
+- [x] Smoke passes: `bun run e2e:ui -- --grep @smoke` (clean worktree at 77584691c)
 
 #### Automated QA:
 - [x] Select 3 rows, press `m`, choose "Create group #qa-bulk": the group appears with 3 sessions, and the server agrees: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.groups[] | select(.key=="shared/qa-bulk/") | .total'` prints `3`.
@@ -586,14 +586,14 @@ The session pane has the two-row header from SPEC Round 8 with People, rename, s
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
+- [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
 - [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
 
 #### Automated QA:
-- [ ] Rename to the 120-character seeded title. Then measure `scrollWidth <= clientWidth` with `agent-browser eval` on the header title and the sidebar row. No horizontal page scroll at 1280 px. (The tab title is measured in Phase 8.)
-- [ ] The meta line drops started, then cost, then the agent avatars when the pane is narrowed (agent-browser `set viewport 1024 800`). The status chip and the Handoffs toggle stay.
-- [ ] The Share icon shows only for the owner. As a Can view user (the seeded share), the pencil and Share are absent.
-- [ ] Open the People popover: it lists the requester and the share user with their access.
+- [x] Rename to the 120-character seeded title. Then measure `scrollWidth <= clientWidth` with `agent-browser eval` on the header title and the sidebar row. No horizontal page scroll at 1280 px. (The tab title is measured in Phase 8.) (Measured on the header rows and the sidebar row: a truncated title span always has scrollWidth > clientWidth by design.)
+- [x] The meta line drops started, then cost, then the agent avatars when the pane is narrowed (agent-browser `set viewport 1024 800`). The status chip and the Handoffs toggle stay. (No seeded session has handoffs, so the toggle was checked with a DOM probe on Done and Later sessions at 1440, 1280, 1024, and 900.)
+- [x] The Share icon shows only for the owner. As a Can view user (the seeded share), the pencil and Share are absent.
+- [x] Open the People popover: it lists the requester and the share user with their access.
 
 #### Manual Verification:
 - [ ] None.
@@ -907,6 +907,7 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Phase 5 review decisions: on the operator key (no `aswt_` token), the UI disables writes into `personal/` keys with "Personal groups need a user token." (Taras agreed). This covers the move dialog, Start in, drop targets, "+", and the New session here, New subgroup, and Rename items. Moves out of a personal group and Delete stay, because the server accepts them (probed live). Undo restores each session's exact previous key, and sends `null` only when `null` gives the same key. Moves are not optimistic: the toast comes after the server answers.
   - Phase 5 skipped (mockup only, not in the plan): Shift-click range selection, and keeping the Start in group in `?tabs=`. Free-text search matches root titles and text (server `q`), not people or group names.
   - Follow-ups from the Phase 5 review (after this PR): decide whether the operator key plus a picked user may write `personal/<self>/` keys (Taras leans yes, as the operator key can already read and move everything else). Show ownerless roots (unmapped Slack users, agent-started sessions) in an "Unassigned" section for operators, since `scope=tree` hides them from v2 while Legacy still shows them.
+  - Phase 6 decisions: the session detail query key includes the viewer (`["session", id, userId]`). Before, a user switch showed the previous user's detail and read-on-open marked it read for the new user (a Phase 4 bug). Read-on-open is keyed by user, root, and activity. Triage refetches only the affected details. The header crumb is a button that reveals the group in the tree. The meta line order of drops: started and the Handoffs label under 65rem, cost under 55rem, agents under 45rem, tasks under 37.5rem. The status chip and the Handoffs icon never clip, and the Done or Later note truncates first. Cmd+K rows show the full title while highlighted. The rename gate is access other than Can view (SPEC R8.2).
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
 - **UX-REVIEW-R9 status**: (table filled in during Phase 10).

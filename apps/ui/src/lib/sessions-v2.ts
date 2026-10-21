@@ -1,6 +1,10 @@
-// Sessions v2: the version gate and the pure URL-state rules (plan D12).
+// Sessions v2: the version gate, the pure URL-state rules (plan D12), and
+// small pure helpers the sidebar and the pane share.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
+
+import type { SessionDetailResponse, SessionListItem } from "../api/types";
+import { groupKeyOf } from "./session-groups";
 
 /**
  * The first API that serves `GET /api/session-tree`, the session moves, and
@@ -127,4 +131,38 @@ export function sidebarListParams(
   }
   if (container === "nogroup") return { ...base, noGroup: true };
   return { ...base, groupKey: container };
+}
+
+/** "1 task", "3 tasks". */
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/** A user's name from the `/api/users` list, or "Someone" while it loads or for an unknown id. */
+export function userName(
+  users: readonly { id: string; name: string }[] | undefined,
+  id: string,
+): string {
+  return users?.find((user) => user.id === id)?.name ?? "Someone";
+}
+
+/**
+ * A list row for a session from its detail: the focused session when no
+ * loaded list holds it (Cmd+K), and the pane header. The detail has no
+ * Later wake time: pass it when known, so Undo can snooze again.
+ */
+export function itemFromDetail(
+  detail: SessionDetailResponse,
+  snoozeUntil: string | null = null,
+): SessionListItem {
+  const last = detail.chain.at(-1) ?? detail.root;
+  return {
+    root: detail.root,
+    chainTaskCount: detail.chain.length,
+    lastActivityAt: detail.lastActivityAt ?? last.lastUpdatedAt,
+    latestStatus: last.status,
+    readState: detail.readState,
+    snoozeUntil,
+    groupKey: detail.root.key ? groupKeyOf(detail.root.key) : undefined,
+  };
 }

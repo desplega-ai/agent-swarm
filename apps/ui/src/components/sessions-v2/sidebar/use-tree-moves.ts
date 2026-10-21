@@ -11,16 +11,17 @@ import {
   childGroupKey,
   groupCrumb,
   isNoGroupKey,
+  personalOwner,
   renamedGroupKey,
   restoreKey,
 } from "@/lib/session-groups";
-import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
+import { plural, SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
+import { ownerFoldId } from "./tree-rows";
 
 /** An Undo toast stays long enough to reach (UX review R9 P0). */
 const UNDO_TOAST_MS = 5200;
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const say = (message: string) => toast(message, { position: SESSIONS_TOAST_POSITION });
 
 /** A toast names one session in one line: a long title is cut (SPEC R10.3). */
@@ -98,10 +99,19 @@ export function useTreeMoves({
   /** The group a session sits in, null for No group. */
   const groupOf = (session: SessionListItem) =>
     session.groupKey && !isNoGroupKey(session.groupKey, me) ? session.groupKey : null;
-  /** Open a group and its parents (No group for null), so a landing row is on screen. */
+  /**
+   * Open a group and its parents (No group for null), so a landing row is
+   * on screen. Another person's group also opens its owner under Shared
+   * with me.
+   */
   const reveal = (key: string | null) => {
-    if (key === null) setOpen("nogroup", true);
-    else for (const id of withParents(key)) setOpen(id, true);
+    if (key === null) {
+      setOpen("nogroup", true);
+      return;
+    }
+    const owner = personalOwner(key);
+    if (owner && owner !== me) setOpen(ownerFoldId(owner), true);
+    for (const id of withParents(key)) setOpen(id, true);
   };
   const hasServerSessions = (key: string) => serverKeys.some((server) => server.startsWith(key));
   /** A blocked write toasts why and stops (the controls already hide it; this is the guard). */

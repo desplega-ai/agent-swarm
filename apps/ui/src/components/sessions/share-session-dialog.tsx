@@ -36,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { PEER_FOREGROUND_VAR, peerColor, peerColorVar } from "@/lib/comb/presence";
@@ -47,30 +48,69 @@ import {
   setEveryone,
   setPerson,
 } from "@/lib/session-sharing";
+import { PersonRow } from "./person-row";
 
 export interface ShareSessionButtonProps {
   rootTaskId: string;
   title: string;
   owner: SessionOwner;
+  /** An icon button with a "Share" tooltip (the sessions v2 header). */
+  icon?: boolean;
+  /** Set both to open the dialog from another control (the People popover's "Share…"). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Where the focus goes when the dialog closes. Default: back to the button. */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 /** The Share button. Renders nothing until the server confirms it supports shares. */
-export function ShareSessionButton({ rootTaskId, title, owner }: ShareSessionButtonProps) {
-  const [open, setOpen] = useState(false);
+export function ShareSessionButton({
+  rootTaskId,
+  title,
+  owner,
+  icon = false,
+  open: openProp,
+  onOpenChange,
+  onCloseAutoFocus,
+}: ShareSessionButtonProps) {
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = openProp ?? ownOpen;
+  const setOpen = onOpenChange ?? setOwnOpen;
   const { data: shares } = useSessionShares(rootTaskId);
   // `null`: the API predates session sharing. `undefined`: still loading.
   if (!shares) return null;
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs">
-          <Share2 className="h-3.5 w-3.5" />
-          Share
-        </Button>
-      </DialogTrigger>
+      {icon ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DialogTrigger asChild>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Share"
+                className="size-7 text-muted-foreground hover:text-foreground"
+              >
+                <Share2 className="size-3.5" />
+              </Button>
+            </DialogTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Share</TooltipContent>
+        </Tooltip>
+      ) : (
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs">
+            <Share2 className="h-3.5 w-3.5" />
+            Share
+          </Button>
+        </DialogTrigger>
+      )}
       {/* One shrinkable column: a long session title truncates instead of
           widening the grid track past the dialog. */}
-      <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-md">
+      <DialogContent
+        className="grid-cols-[minmax(0,1fr)] sm:max-w-md"
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         <ShareSessionDialogBody
           rootTaskId={rootTaskId}
           title={title}
@@ -96,7 +136,8 @@ function PersonAvatar({ id, name }: { id: string; name: string }) {
   );
 }
 
-function PersonRow({
+/** A person in this dialog: the shared row with this dialog's avatar and "(you)". */
+function ShareRow({
   id,
   name,
   isYou,
@@ -110,21 +151,23 @@ function PersonRow({
   children: React.ReactNode;
 }) {
   return (
-    <li className="flex items-center gap-2.5 py-1.5 min-w-0">
-      <PersonAvatar id={id} name={name} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm text-foreground">
+    <PersonRow
+      avatar={<PersonAvatar id={id} name={name} />}
+      name={
+        <span className="truncate">
           {name}
           {isYou ? " (you)" : ""}
         </span>
-        {detail ? <span className="truncate text-xs text-muted-foreground">{detail}</span> : null}
-      </div>
+      }
+      detail={detail}
+    >
       {children}
-    </li>
+    </PersonRow>
   );
 }
 
-const EVERYONE_ICON: Record<SessionEveryoneAccess, typeof Lock> = {
+/** General access as an icon: Lock = Private, Globe = Everyone can view, Users = Everyone can edit. */
+export const EVERYONE_ICON: Record<SessionEveryoneAccess, typeof Lock> = {
   none: Lock,
   read: Globe,
   write: Users,
@@ -136,7 +179,10 @@ function ShareSessionDialogBody({
   owner,
   shares,
   onDone,
-}: ShareSessionButtonProps & { shares: SessionShares; onDone: () => void }) {
+}: Pick<ShareSessionButtonProps, "rootTaskId" | "title" | "owner"> & {
+  shares: SessionShares;
+  onDone: () => void;
+}) {
   const { userId } = useCurrentUser();
   const { config } = useConfig();
   const { data: users } = useUsers();
@@ -186,19 +232,19 @@ function ShareSessionDialogBody({
       <section className="flex flex-col gap-1">
         <h3 className="text-xs font-medium text-muted-foreground">People with access</h3>
         <ul className="flex flex-col">
-          <PersonRow
+          <ShareRow
             id={owner.id}
             name={owner.name}
             isYou={owner.id === userId}
             detail={userById.get(owner.id)?.email}
           >
             <span className="px-2 text-xs text-muted-foreground">Owner</span>
-          </PersonRow>
+          </ShareRow>
           {shares.users.map((share) => {
             const person = userById.get(share.userId);
             const name = person?.name ?? share.userId.slice(0, 8);
             return (
-              <PersonRow
+              <ShareRow
                 key={share.userId}
                 id={share.userId}
                 name={name}
@@ -226,7 +272,7 @@ function ShareSessionDialogBody({
                     </SelectItem>
                   </SelectContent>
                 </Select>
-              </PersonRow>
+              </ShareRow>
             );
           })}
         </ul>

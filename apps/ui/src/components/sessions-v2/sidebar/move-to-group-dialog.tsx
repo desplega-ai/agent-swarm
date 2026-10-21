@@ -21,10 +21,16 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { type GroupTarget, groupSlug } from "@/lib/session-groups";
 import { sessionDisplayTitle } from "@/lib/utils";
 import { GroupTargetItems } from "../group-target-items";
+import { TruncatedTitle } from "../truncated-title";
 import { useLastValue } from "./point-menu";
 
-/** What the picked group is for. */
-export type GroupPick = { purpose: "move"; sessions: SessionListItem[] } | { purpose: "new" };
+/**
+ * What the picked group is for. A move started outside the tree (the pane
+ * header) gives `returnFocus`: the dialog gives the focus back there.
+ */
+export type GroupPick =
+  | { purpose: "move"; sessions: SessionListItem[]; returnFocus?: () => void }
+  | { purpose: "new" };
 
 /** "Move "Title" to", "Move 3 sessions to", or "New session in". */
 function DialogLead({ pick }: { pick: GroupPick }) {
@@ -43,7 +49,7 @@ function DialogLead({ pick }: { pick: GroupPick }) {
       {pick.sessions.length === 1 && only ? (
         <span className="flex min-w-0">
           <span className="shrink-0">Move "</span>
-          <span className="truncate">{sessionDisplayTitle(only.root)}</span>
+          <TruncatedTitle title={sessionDisplayTitle(only.root)} />
           <span className="shrink-0">" to</span>
         </span>
       ) : (

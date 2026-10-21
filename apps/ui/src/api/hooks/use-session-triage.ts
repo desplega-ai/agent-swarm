@@ -6,12 +6,18 @@ import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
 import { api } from "../client";
 import type {
   InboxItemStatus,
+  SessionDetailResponse,
   SessionListItem,
   SessionReadState,
   SessionsListResponse,
 } from "../types";
 import { SESSION_TREE_KEY } from "./use-session-tree";
-import { SESSION_LIST_KEY, type SessionListParams, sessionListParamsOf } from "./use-sessions";
+import {
+  SESSION_LIST_KEY,
+  type SessionListParams,
+  sessionDetailKey,
+  sessionListParamsOf,
+} from "./use-sessions";
 
 /** The read cursor that marks a session unread. The my-swarm app writes the same value. */
 const UNREAD_CURSOR = "1970-01-01T00:00:00.000Z";
@@ -118,6 +124,8 @@ interface PageChange {
 interface TriageContext {
   patch: RowPatch;
   changes: PageChange[];
+  /** The open session details this write patched, with their read state before it. */
+  details: Array<{ key: QueryKey; before: SessionReadState }>;
 }
 
 /**
@@ -149,7 +157,8 @@ function rollBack(
  * Read, unread, Done, Later, and back to the Inbox for one session or a
  * selection. One session writes `PATCH /api/inbox-state`; a selection writes
  * the bulk route. Rows in the cached list pages change at once (a row that
- * leaves a list drops out of it) and roll back with a toast on failure. The
+ * leaves a list drops out of it), and so does the read state of a cached
+ * session detail (the pane header). Both roll back with a toast on failure. The
  * tree is not recounted here (that would repeat the server's read rule):
  * the tree and the lists refetch when the last write in flight settles.
  *
@@ -180,11 +189,29 @@ export function useSessionTriage() {
     onMutate: async ({ targets, action }) => {
       // Only this user's pages: the rows carry this user's read state.
       const listKey = [...SESSION_LIST_KEY, userId ?? null];
-      // A poll that started before the write would bring the old state back.
-      await queryClient.cancelQueries({ queryKey: listKey });
-      const pages = queryClient.getQueriesData<SessionsListResponse>({ queryKey: listKey });
       const ids = new Set(targets.map((target) => target.rootId));
+      // A poll that started before the write would bring the old state back.
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: listKey }),
+        ...[...ids].map((id) =>
+          queryClient.cancelQueries({ queryKey: sessionDetailKey(id, userId ?? null) }),
+        ),
+      ]);
+      const pages = queryClient.getQueriesData<SessionsListResponse>({ queryKey: listKey });
       const patch = optimisticRow(action);
+      // The open session's header shows the new state at once, too.
+      const details: TriageContext["details"] = [];
+      for (const id of ids) {
+        // This user's detail (the pane header reads its read state).
+        const key = sessionDetailKey(id, userId ?? null);
+        const detail = queryClient.getQueryData<SessionDetailResponse>(key);
+        if (!detail?.readState) continue;
+        details.push({ key, before: detail.readState });
+        queryClient.setQueryData<SessionDetailResponse>(key, {
+          ...detail,
+          readState: patch.readState,
+        });
+      }
       const changes: PageChange[] = [];
       // A row that leaves its list (Done or Later out of the Inbox and the
       // groups, back to the Inbox out of Later and Done) drops out at once,
@@ -208,7 +235,7 @@ export function useSessionTriage() {
           total: Math.max(0, page.total - change.removed.length),
         });
       }
-      return { patch, changes };
+      return { patch, changes, details };
     },
     onError: (error, _variables, context) => {
       for (const change of context?.changes ?? []) {
@@ -216,19 +243,40 @@ export function useSessionTriage() {
           page ? rollBack(page, change, context!.patch) : page,
         );
       }
+      // A newer write to the same session keeps its own state.
+      for (const { key, before } of context?.details ?? []) {
+        queryClient.setQueryData<SessionDetailResponse>(key, (detail) =>
+          detail && detail.readState === context!.patch.readState
+            ? { ...detail, readState: before }
+            : detail,
+        );
+      }
       // Bottom left, over the sidebar: bottom right covers the composer's Send button.
       toast.error(error.message || "Couldn't update the session", {
         position: SESSIONS_TOAST_POSITION,
       });
     },
-    onSettled: () => {
+    onSettled: (_data, _error, { targets }) => {
+      // Each session's detail refetches once no other write to it is in
+      // flight (this write still counts), so a fast toggle never shows the
+      // first answer over the second.
+      for (const { rootId } of targets) {
+        const writes = queryClient.isMutating({
+          mutationKey: TRIAGE_MUTATION_KEY,
+          predicate: (m) =>
+            (m.state.variables as TriageVariables | undefined)?.targets.some(
+              (target) => target.rootId === rootId,
+            ) ?? false,
+        });
+        if (writes <= 1) void queryClient.invalidateQueries({ queryKey: ["session", rootId] });
+      }
       // Fast triage (keys, the bulk bar) overlaps writes. A refetch after an
       // early one would bring back rows that a later write already changed,
       // and the rows would flicker. Refetch once, after the last one.
       if (queryClient.isMutating({ mutationKey: TRIAGE_MUTATION_KEY }) > 1) return;
       void queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      // The dashboard inbox reads the same rows.
+      // The dashboard inbox (and the pane's Later wake time) read the same rows.
       void queryClient.invalidateQueries({ queryKey: ["inbox-state"] });
     },
   });

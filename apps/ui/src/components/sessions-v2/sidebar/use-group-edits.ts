@@ -36,11 +36,14 @@ export function useGroupEdits({
   placeCursor: (rowKey: string) => void;
   focusTree: () => void;
 }) {
-  /** Back to the tree, with the group and its parents open and the cursor on it. */
-  const revealGroup = (key: string) => {
+  /**
+   * Back to the tree, with the group and its parents open and the cursor on
+   * it. Null is No group.
+   */
+  const revealGroup = (key: string | null) => {
     setQuery("");
     moves.reveal(key);
-    placeCursor(`group:${key}`);
+    placeCursor(key === null ? "box:nogroup" : `group:${key}`);
   };
   const startCreate = (parent: string) => {
     setRenaming(null);

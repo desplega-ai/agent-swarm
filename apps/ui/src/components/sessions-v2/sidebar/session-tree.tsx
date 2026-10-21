@@ -6,7 +6,7 @@
  *
  * The parts: `useMyGroups` (the groups), `useTreeRows` (the flat row list),
  * `useSearchRows`, `useTreeFolds`, `useTreeCursor` (keys, focus, the
- * hover-card peek), `useSessionSelection`, `useTreeTriage`, `useTreeMoves`,
+ * hover-card peek), `useSessionSelection`, `useSessionTriageActions`, `useTreeMoves`,
  * `useGroupEdits`, `useRowDrag`, `useTreeDialogs` with `TreeDialogs`, and
  * `useSessionsCommands` (Cmd+K). This file holds the key map, the pointer
  * handlers, and the render.
@@ -18,9 +18,11 @@ import {
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
+  type Ref,
   useCallback,
   useEffect,
   useId,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -35,14 +37,15 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { useStableHandler } from "@/hooks/use-stable-handler";
-import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
+import { SESSIONS_TOAST_POSITION, userName } from "@/lib/sessions-v2";
 import { useListKeys } from "../use-list-keys";
 import { useMyGroups } from "../use-my-groups";
+import { useSessionTriageActions } from "../use-session-triage-actions";
 import { type SessionsCommandsApi, useSessionsCommands } from "../use-sessions-commands";
 import { BulkBar } from "./bulk-bar";
 import { GroupNode } from "./group-node";
 import { AddGroupRow, CreateGroupRow, EmptyRow, LoadingRow, PagingRow } from "./list-state-rows";
-import type { RowMenuState } from "./row-menu";
+import type { RowMenuActions, RowMenuState } from "./row-menu";
 import { SectionHeader } from "./section-header";
 import { SessionDragPreview, SessionRow } from "./session-row";
 import { SidebarSearch } from "./sidebar-search";
@@ -62,7 +65,6 @@ import { useTreeCursor } from "./use-tree-cursor";
 import { useTreeFolds } from "./use-tree-folds";
 import { useTreeMoves } from "./use-tree-moves";
 import { useTreeRows } from "./use-tree-rows";
-import { useTreeTriage } from "./use-tree-triage";
 
 /** The clock rows read their times from. It ticks once a minute, with no animation. */
 function useMinuteClock(): number {
@@ -108,6 +110,18 @@ interface SessionTreeProps {
   setQuery: (query: string) => void;
   /** "Legacy sessions" in Cmd+K. */
   onViewChange: (view: SessionsViewMode) => void;
+  /** Cmd+K "Rename session": the pane header's title turns into its rename field. */
+  onRename: () => void;
+  /** The tree's move dialog and group reveal, for the pane header. */
+  ref: Ref<SessionTreeHandle>;
+}
+
+/** What the pane header asks of the tree. */
+export interface SessionTreeHandle {
+  /** Open the move dialog. `returnFocus` runs when it closes. */
+  move: (sessions: SessionListItem[], returnFocus: () => void) => void;
+  /** Show a group (null: No group) with the tree cursor on it, and focus the tree. */
+  revealGroup: (groupKey: string | null) => void;
 }
 
 export function SessionTree({
@@ -118,6 +132,8 @@ export function SessionTree({
   query,
   setQuery,
   onViewChange,
+  onRename,
+  ref,
 }: SessionTreeProps) {
   const { userId } = useCurrentUser();
   const me = userId ?? null;
@@ -137,10 +153,7 @@ export function SessionTree({
   }, [groups, prune]);
 
   const users = useUsers({ enabled: (groups?.sharedWithMe.length ?? 0) > 0 });
-  const nameOf = useCallback(
-    (id: string) => users.data?.find((user) => user.id === id)?.name ?? "Someone",
-    [users.data],
-  );
+  const nameOf = useCallback((id: string) => userName(users.data, id), [users.data]);
   const search = useSearchRows({ me, query, groups, nameOf });
   const rows = search.active ? search.rows : treeRows;
   const targetKeys = useMemo(() => new Set(targets.map((target) => target.key)), [targets]);
@@ -159,17 +172,22 @@ export function SessionTree({
   const cursorSession = cursorRow?.type === "session" ? cursorRow.session : null;
   const selection = useSessionSelection(rows);
 
-  const openMove = (sessions: SessionListItem[]) => {
+  const openMove = (sessions: SessionListItem[], returnFocus?: () => void) => {
     if (sessions.length === 0) return;
     dialogs.takeFocus();
-    dialogs.setPick({ purpose: "move", sessions });
+    dialogs.setPick({ purpose: "move", sessions, returnFocus });
   };
-  const { canTriage, actions } = useTreeTriage({
-    openSession,
+  const triage = useSessionTriageActions({
     clearSelection: selection.clear,
     pickDate: dialogs.pickDate,
     pickGroup: openMove,
   });
+  const { canTriage } = triage;
+  const actions: RowMenuActions = {
+    ...triage.actions,
+    open: (session) => openSession(session.root.id),
+    openNewTab: (session) => openSession(session.root.id, { newTab: true }),
+  };
   const moves = useTreeMoves({
     me,
     nameOf,
@@ -198,6 +216,16 @@ export function SessionTree({
     placeCursor: cursor.place,
     focusTree,
   });
+  useImperativeHandle(ref, () => ({
+    move: openMove,
+    revealGroup: (groupKey) => {
+      // Focus first: a first focus puts the cursor on its default row.
+      focusTree();
+      edits.revealGroup(groupKey);
+      // Keyboard mode scrolls the cursor row into view and shows the cursor.
+      cursor.enterKeyMode();
+    },
+  }));
 
   /** Open the row menu (or its Later part) at a row, for the keys and Cmd+K. */
   const menuAtRow = (
@@ -420,7 +448,7 @@ export function SessionTree({
     newSessionIn: () => dialogs.setPick({ purpose: "new" }),
     nextUnread: goNextUnread,
     move: openMove,
-    rename: () => dialogs.setRenameOpen(true),
+    rename: onRename,
     triage: actions,
     later: (session) => {
       const id = session.root.id;

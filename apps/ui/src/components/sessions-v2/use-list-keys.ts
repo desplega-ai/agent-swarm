@@ -85,6 +85,8 @@ const hasClosest = (value: unknown): value is Closest =>
  * handled key never reaches the list.
  */
 export function listKeyOf(event: ListKeyEvent): ListKey | null {
+  // Chrome autofill sends keydown events with no key.
+  if (typeof event.key !== "string") return null;
   if (event.defaultPrevented || event.nativeEvent.isComposing) return null;
   if (event.altKey || event.ctrlKey || event.metaKey) return null;
   if (event.shiftKey) return event.key === "F10" && !event.repeat ? "menu" : null;

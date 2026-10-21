@@ -97,9 +97,19 @@ export function sessionErrorStatus(error: unknown): number | undefined {
   return typeof status === "number" ? status : undefined;
 }
 
+/** The session detail query: `["session", rootTaskId, userId]`. */
+export function sessionDetailKey(rootTaskId: string | undefined, userId: string | null): QueryKey {
+  return ["session", rootTaskId, userId];
+}
+
 export function useSession(rootTaskId: string | undefined) {
+  // The detail carries the viewer's access and read state, so it is cached
+  // per dashboard user: after a switch of user, the pane shows that user's
+  // access and read state, never the cached one of the previous user.
+  // Read-on-open keys its once-per-open mark by user too.
+  const { userId } = useCurrentUser();
   return useQuery({
-    queryKey: ["session", rootTaskId],
+    queryKey: sessionDetailKey(rootTaskId, userId ?? null),
     queryFn: () => api.getSession(rootTaskId!),
     enabled: !!rootTaskId,
     // A 403 does not get better with retries; it changes when the owner shares.

@@ -88,7 +88,7 @@ export function SessionMeta({ detail, children }: SessionMetaProps) {
 const MAX_STACKED_AGENTS = 5;
 
 /** The session's agents as an overlapping avatar stack; hover lists their names. */
-function SessionAgents({ agentIds }: { agentIds: string[] }) {
+export function SessionAgents({ agentIds }: { agentIds: string[] }) {
   const { data: agents } = useAgents();
   const knownName = (id: string) => agents?.find((a) => a.id === id)?.name;
   const names = agentIds.map((id) => knownName(id) ?? `${id.slice(0, 8)}…`);

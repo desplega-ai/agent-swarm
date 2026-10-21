@@ -7,7 +7,7 @@
 
 import { AlarmClock, FolderInput, Hash, SquareDashed, Users } from "lucide-react";
 import { type MouseEvent, memo, useState } from "react";
-import type { AgentTaskStatus, SessionListItem } from "@/api/types";
+import type { SessionListItem } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { peerColor } from "@/lib/comb/presence";
 import { groupCrumb, groupLabel, isNoGroupKey } from "@/lib/session-groups";
 import { splitMatches } from "@/lib/session-search";
+import { sessionChipStatus } from "@/lib/session-status";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime, parseUTCDate, sessionDisplayTitle } from "@/lib/utils";
 import { formatWakeShort, wakePhrase } from "./snooze-times";
@@ -110,15 +111,6 @@ function rowLabel(
     .join(". ");
 }
 
-/**
- * The status in the hover card. Any live status reads RUNNING (the `running`
- * label, not IN PROGRESS, UX review R9), as the row's ring does.
- */
-function cardStatus(session: SessionListItem): AgentTaskStatus | "running" {
-  const status = session.latestStatus;
-  return TERMINAL_STATUSES.has(status) || status === "paused" ? status : "running";
-}
-
 function SessionCard({
   session,
   me,
@@ -153,7 +145,7 @@ function SessionCard({
         ) : (
           // A still ring, as on the row: only live lines turn (UX review R9).
           <span className="[&_[data-slot=task-status-icon]]:animate-none">
-            <StatusBadge status={cardStatus(session)} />
+            <StatusBadge status={sessionChipStatus(session.latestStatus)} />
           </span>
         )}
         {session.readState === "unread" ? (

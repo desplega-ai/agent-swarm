@@ -1,15 +1,14 @@
 /**
  * The menus and dialogs of the sidebar tree: the row menu, the group menu,
- * "Pick a date and time", the move dialog, the group delete confirm, and
- * Rename session (Cmd+K). `useTreeDialogs` holds their state and the focus
- * rule; `TreeDialogs` renders them.
+ * "Pick a date and time", the move dialog, and the group delete confirm.
+ * `useTreeDialogs` holds their state and the focus rule; `TreeDialogs`
+ * renders them.
  */
 
 import { useRef, useState } from "react";
 import type { SessionListItem } from "@/api/types";
 import type { GroupTarget } from "@/lib/session-groups";
 import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
-import { RenameSessionDialog } from "../rename-session-dialog";
 import {
   DeleteGroupDialog,
   GroupMenu,
@@ -34,7 +33,6 @@ export function useTreeDialogs(focusTree: () => void) {
   const [dateFor, setDateFor] = useState<SessionListItem[] | null>(null);
   const [pick, setPick] = useState<GroupPick | null>(null);
   const [deleting, setDeleting] = useState<{ key: string; open: boolean } | null>(null);
-  const [renameOpen, setRenameOpen] = useState(false);
   const menuDone = useRef<(() => void) | null>(null);
   const menuOpen = menu !== null || groupMenu !== null;
 
@@ -48,8 +46,6 @@ export function useTreeDialogs(focusTree: () => void) {
     setPick,
     deleting,
     setDeleting,
-    renameOpen,
-    setRenameOpen,
     menuOpen,
     takeFocus: () => {
       if (menuOpen) menuDone.current = () => {};
@@ -88,7 +84,7 @@ export function TreeDialogs({
   focusTree,
 }: {
   dialogs: TreeDialogState;
-  /** The focused tab: Rename session acts on it. */
+  /** The focused tab: a pick into a New session tab that is open already keeps the list focus. */
   focused: string;
   canTriage: boolean;
   triage: RowMenuActions;
@@ -150,8 +146,10 @@ export function TreeDialogs({
           else startNew(made.key);
         }}
         onRestoreFocus={(current, picked) => {
-          // A new tab focuses its composer itself. Every other close gives the list the focus.
-          if (current.purpose === "move" || !picked || newTabWasOpen.current) focusTree();
+          // A move from the pane header goes back there. A new tab focuses its
+          // composer itself. Every other close gives the list the focus.
+          if (current.purpose === "move" && current.returnFocus) current.returnFocus();
+          else if (current.purpose === "move" || !picked || newTabWasOpen.current) focusTree();
         }}
       />
       <DeleteGroupDialog
@@ -165,13 +163,6 @@ export function TreeDialogs({
         }}
         onRestoreFocus={focusTree}
       />
-      {focused !== NEW_SESSION_TAB ? (
-        <RenameSessionDialog
-          rootTaskId={focused}
-          open={dialogs.renameOpen}
-          onOpenChange={dialogs.setRenameOpen}
-        />
-      ) : null}
     </>
   );
 }

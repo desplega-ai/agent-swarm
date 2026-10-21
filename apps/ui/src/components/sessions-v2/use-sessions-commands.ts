@@ -15,7 +15,7 @@ import {
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { sessionsQueryOptions, useSession } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
-import type { SessionDetailResponse, SessionListItem } from "@/api/types";
+import type { SessionListItem } from "@/api/types";
 import {
   type CommandMenuItem,
   useCommandMenuGroup,
@@ -23,9 +23,9 @@ import {
 } from "@/components/shared/command-menu";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { groupKeyOf, searchableGroups } from "@/lib/session-groups";
+import { searchableGroups } from "@/lib/session-groups";
 import { paletteSearchParams, parseSessionSearch } from "@/lib/session-search";
-import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
+import { itemFromDetail, NEW_SESSION_TAB, userName } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
 import type { RowMenuActions } from "./sidebar/row-menu";
 import type { TreeRow } from "./sidebar/tree-rows";
@@ -58,20 +58,6 @@ function sessionsOf(rows: TreeRow[]): SessionListItem[] {
   const found = new Map<string, SessionListItem>();
   for (const row of rows) if (row.type === "session") found.set(row.session.root.id, row.session);
   return [...found.values()];
-}
-
-/** A list row for the focused session, from its detail, when no loaded list holds it. */
-function itemFromDetail(detail: SessionDetailResponse): SessionListItem {
-  const last = detail.chain.at(-1) ?? detail.root;
-  return {
-    root: detail.root,
-    chainTaskCount: detail.chain.length,
-    lastActivityAt: detail.lastActivityAt ?? last.lastUpdatedAt,
-    latestStatus: last.status,
-    readState: detail.readState,
-    snoozeUntil: null,
-    groupKey: detail.root.key ? groupKeyOf(detail.root.key) : undefined,
-  };
 }
 
 /** Needs you first, then unread, then the newest. */
@@ -124,7 +110,7 @@ export function useSessionsCommands({
   const { groups } = useMyGroups(me);
   const params = useMemo(() => {
     const people = users.data ?? [];
-    const nameOf = (id: string) => people.find((user) => user.id === id)?.name ?? "Someone";
+    const nameOf = (id: string) => userName(people, id);
     const searchGroups = groups ? searchableGroups(groups, me, nameOf) : [];
     return paletteSearchParams(text, { people, groups: searchGroups });
   }, [text, users.data, groups, me]);
