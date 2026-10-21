@@ -2,7 +2,7 @@
 //
 // Exposes a domain-grouped API on `window.SwarmSDK` (class) and a ready-to-use
 // singleton `window.swarmSdk`. All calls route through the `/@swarm/api/*`
-// proxy, which strips the page-session cookie and forwards to `/api/*` with
+// proxy, which strips the page's own session cookie and forwards to `/api/*` with
 // a server-side bearer and signed page session. Memory operations use the
 // page owner's agent scope. Viewer identity and permissions remain separate.
 // The browser never handles the server bearer.
@@ -30,10 +30,15 @@ class SwarmSDK {
     this.channel = async (name) => (await loadRealtime()).channel(name);
 
     const base = '/@swarm/api';
+    // Each page has its own session cookie. Naming the page tells the proxy
+    // which one to read; the cookie's signed payload must still match it.
+    const pathParts = typeof location === 'undefined' ? [] : location.pathname.split('/');
+    const pageId = pathParts[1] === 'p' && pathParts[2] ? pathParts[2].split('.')[0] : '';
     const call = async (method, path, body) => {
-      const init = { method };
+      const init = { method, headers: {} };
+      if (pageId) init.headers['X-Swarm-Page-Id'] = pageId;
       if (body !== undefined) {
-        init.headers = { 'Content-Type': 'application/json' };
+        init.headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(body);
       }
       const res = await fetch(base + path, init);

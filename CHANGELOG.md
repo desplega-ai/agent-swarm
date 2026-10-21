@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - Extensions: `slack-reply-gate` 1.3.0 makes its decision through the server's `system-one-decide` tool instead of its own TypeSafe and OpenRouter client, so it can use Clef and every other SystemOne host. Its `apiKey` config field is removed; store the key as a global secret (#2186).
 
+### Fixed
+- Pages: each page gets its own session cookie (`page_session_<pageId>`), so opening a second page no longer breaks the first tab with 403 "page-session cookie scoped to a different page id", and its `/@swarm/api/*` calls no longer run as the newest page. The browser SDK names its page in `X-Swarm-Page-Id`; the proxy falls back to a same-host `/p/<id>` Referer, and the legacy `page_session` cookie still works for its own page.
+
 ## [2.4.4] - 2026-10-21
 
 ### Added

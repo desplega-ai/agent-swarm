@@ -134,17 +134,21 @@ afterAll(async () => {
 describe("proxy allowlist for a guest session", () => {
   test("allows the page's own record and its KV", async () => {
     const own = await fetch(`${BASE}/@swarm/api/pages/${pageId}`, {
-      headers: { Cookie: `page_session=${guestCookie}` },
+      headers: { Cookie: `page_session_${pageId}=${guestCookie}`, "X-Swarm-Page-Id": pageId },
     });
     expect(own.status).toBe(200);
     const put = await fetch(`${BASE}/@swarm/api/kv/probe`, {
       method: "PUT",
-      headers: { Cookie: `page_session=${guestCookie}`, "Content-Type": "application/json" },
+      headers: {
+        Cookie: `page_session_${pageId}=${guestCookie}`,
+        "X-Swarm-Page-Id": pageId,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ value: "v" }),
     });
     expect(put.status).toBe(200);
     const get = await fetch(`${BASE}/@swarm/api/kv/probe`, {
-      headers: { Cookie: `page_session=${guestCookie}` },
+      headers: { Cookie: `page_session_${pageId}=${guestCookie}`, "X-Swarm-Page-Id": pageId },
     });
     expect(get.status).toBe(200);
   });
@@ -162,7 +166,11 @@ describe("proxy allowlist for a guest session", () => {
     test(`refuses ${method} ${path} with 403`, async () => {
       const res = await fetch(`${BASE}/@swarm/api/${path}`, {
         method,
-        headers: { Cookie: `page_session=${guestCookie}`, "Content-Type": "application/json" },
+        headers: {
+          Cookie: `page_session_${pageId}=${guestCookie}`,
+          "X-Swarm-Page-Id": pageId,
+          "Content-Type": "application/json",
+        },
         body: method === "POST" ? "{}" : undefined,
       });
       expect(res.status).toBe(403);
@@ -206,13 +214,16 @@ describe("a password-page guest is isolated from another page", () => {
 
     const unlock = await fetch(`${BASE}/p/${pageA}?key=open-sesame`);
     expect(unlock.status).toBe(200);
-    const cookieA = /page_session=([^;]+)/.exec(unlock.headers.get("set-cookie") ?? "")?.[1];
+    const cookieA = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(
+      unlock.headers.get("set-cookie") ?? "",
+    )?.[1];
     expect(cookieA).toBeTruthy();
     const asGuest = (path: string, init: RequestInit = {}) =>
       fetch(`${BASE}/@swarm/api/${path}`, {
         ...init,
         headers: {
-          Cookie: `page_session=${cookieA}`,
+          Cookie: `page_session_${pageA}=${cookieA}`,
+          "X-Swarm-Page-Id": pageA,
           "Content-Type": "application/json",
           "X-Page-Id": pageB,
           "X-Agent-ID": agentId,
@@ -377,12 +388,12 @@ describe("server-side gates deny a guest and keep the operator and user", () => 
   test("a user session through the proxy and an operator-launched session still work", async () => {
     for (const cookie of [userCookie, operatorCookie]) {
       const res = await fetch(`${BASE}/@swarm/api/tasks`, {
-        headers: { Cookie: `page_session=${cookie}` },
+        headers: { Cookie: `page_session_${pageId}=${cookie}`, "X-Swarm-Page-Id": pageId },
       });
       expect(res.status).toBe(200);
     }
     const whoami = await fetch(`${BASE}/@swarm/api/whoami`, {
-      headers: { Cookie: `page_session=${userCookie}` },
+      headers: { Cookie: `page_session_${pageId}=${userCookie}`, "X-Swarm-Page-Id": pageId },
     });
     expect(((await whoami.json()) as { kind: string }).kind).toBe("user");
   });

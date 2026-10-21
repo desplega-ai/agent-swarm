@@ -182,11 +182,13 @@ type BrowserSdk = {
   };
 };
 
-function browserSdk(cookie: string, spoofedAgentId?: string): BrowserSdk {
+function browserSdk(pageId: string, cookie: string, spoofedAgentId?: string): BrowserSdk {
   const window: { swarmSdk?: BrowserSdk } = {};
   const pageFetch = (input: string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
-    headers.set("Cookie", `page_session=${cookie}`);
+    // The SDK must name its own page; the test only supplies the cookie jar.
+    if (headers.get("X-Swarm-Page-Id") !== pageId) throw new Error("SDK did not name its page");
+    headers.set("Cookie", `page_session_${pageId}=${cookie}`);
     if (spoofedAgentId) headers.set("X-Agent-ID", spoofedAgentId);
     return fetch(new URL(input, BASE), { ...init, headers });
   };
@@ -195,6 +197,7 @@ function browserSdk(cookie: string, spoofedAgentId?: string): BrowserSdk {
     encodeURIComponent,
     fetch: pageFetch,
     URLSearchParams,
+    location: { pathname: `/p/${pageId}` },
     window,
   });
   if (!window.swarmSdk) throw new Error("browser SDK did not initialize");
@@ -207,7 +210,9 @@ async function launchPageCookie(id: string, bearer = API_KEY): Promise<string> {
     headers: { Authorization: `Bearer ${bearer}` },
   });
   expect(launch.status).toBe(204);
-  const cookie = /page_session=([^;]+)/.exec(launch.headers.get("set-cookie") ?? "")?.[1];
+  const cookie = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(
+    launch.headers.get("set-cookie") ?? "",
+  )?.[1];
   if (!cookie) throw new Error("failed to mint page session cookie");
   return cookie;
 }
@@ -243,14 +248,14 @@ describe("/api/pages/:id/launch", () => {
     expect(res.status).toBe(204);
     const cookie = res.headers.get("set-cookie");
     expect(cookie).toBeTruthy();
-    expect(cookie!).toContain("page_session=");
+    expect(cookie!).toContain("page_session_");
     expect(cookie!).toContain("HttpOnly");
     expect(cookie!).toContain("Path=/");
     expect(cookie!).toContain("Max-Age=3600");
     // In dev (NODE_ENV != production) the cookie should be SameSite=Lax sans Secure.
     expect(cookie!).toContain("SameSite=Lax");
     expect(cookie!).not.toMatch(/\bSecure\b/);
-    const cookieValue = /page_session=([^;]+)/.exec(cookie!)?.[1];
+    const cookieValue = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(cookie!)?.[1];
     const payload = await verifyPageSession(cookieValue);
     expect(payload?.uid).toBeUndefined();
     expect(payload?.name).toMatch(/^guest-/);
@@ -294,7 +299,9 @@ describe("/@swarm/api/* proxy", () => {
       headers: { Authorization: `Bearer ${viewer.token}` },
     });
     expect(launch.status).toBe(204);
-    const cookieValue = /page_session=([^;]+)/.exec(launch.headers.get("set-cookie") ?? "")?.[1];
+    const cookieValue = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(
+      launch.headers.get("set-cookie") ?? "",
+    )?.[1];
     expect(cookieValue).toBeTruthy();
     const payload = await verifyPageSession(cookieValue);
     expect(payload?.uid).toBe(viewer.id);
@@ -322,7 +329,7 @@ describe("/@swarm/api/* proxy", () => {
     const setCookie = launch.headers.get("set-cookie");
     expect(setCookie).toBeTruthy();
 
-    const cookieValue = /page_session=([^;]+)/.exec(setCookie!)?.[1];
+    const cookieValue = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(setCookie!)?.[1];
     expect(cookieValue).toBeTruthy();
 
     const res = await fetch(`${BASE}/@swarm/api/agents/${agentId}`, {
@@ -410,7 +417,7 @@ describe("/@swarm/api/* page execution context", () => {
 
     // Execute the shipped browser SDK with a forged client identity. The
     // proxy must ignore that header and derive memory scope from the page.
-    const sdk = browserSdk(cookie, otherAgentId);
+    const sdk = browserSdk(pageId, cookie, otherAgentId);
     const search = await sdk.memory.search({ query: searchToken, scope: "agent", limit: 10 });
     expect(search.results.map((memory) => memory.id)).toContain(ownerMemoryId);
     expect(search.results.map((memory) => memory.id)).not.toContain(otherMemoryId);
@@ -432,7 +439,7 @@ describe("/@swarm/api/* page execution context", () => {
     const viewer = await createUserToken(`Page Viewer ${randomUUID().slice(0, 8)}`);
     const pageId = await createPage();
     const cookie = await launchPageCookie(pageId, viewer.token);
-    const sdk = browserSdk(cookie);
+    const sdk = browserSdk(pageId, cookie);
 
     const search = await sdk.memory.search({ query: searchToken, scope: "agent", limit: 5 });
     expect(search.results.map((memory) => memory.id)).toContain(ownerMemoryId);
@@ -506,7 +513,7 @@ describe("/@swarm/api/* proxy — suffix normalization", () => {
       headers: { Authorization: `Bearer ${API_KEY}`, "X-Agent-ID": agentId },
     });
     const setCookie = launch.headers.get("set-cookie");
-    const cookieValue = /page_session=([^;]+)/.exec(setCookie!)?.[1];
+    const cookieValue = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(setCookie!)?.[1];
     if (!cookieValue) throw new Error("failed to mint test cookie");
     return cookieValue;
   }

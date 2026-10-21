@@ -3,7 +3,13 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { PageSessionPayload } from "../utils/page-session";
-import { parseCookieHeader, signPageSession, verifyPageSession } from "../utils/page-session";
+import {
+  extractPageSession,
+  issuePageSessionCookie,
+  parseCookieHeader,
+  signPageSession,
+  verifyPageSession,
+} from "../utils/page-session";
 
 const ORIGINAL_SECRET = process.env.PAGE_SESSION_SECRET;
 const ORIGINAL_API_KEY = process.env.API_KEY;
@@ -264,5 +270,41 @@ describe("parseCookieHeader", () => {
   test("does NOT match a cookie whose name is a suffix of another", () => {
     // `xxpage_session=evil` must not be returned for name `page_session`.
     expect(parseCookieHeader("xxpage_session=evil; other=ok", "page_session")).toBeUndefined();
+  });
+});
+
+describe("per-page session cookies", () => {
+  const exp = () => Math.floor(Date.now() / 1000) + 3600;
+  const req = (cookie: string) => ({ headers: { cookie } });
+
+  test("issuance names the cookie after the page", async () => {
+    const header = await issuePageSessionCookie("pagea", { dev: true });
+    expect(header.startsWith("page_session_pagea=")).toBe(true);
+  });
+
+  test("each page reads its own cookie from a shared jar", async () => {
+    const a = await signPageSession({ pageId: "pagea", exp: exp() });
+    const b = await signPageSession({ pageId: "pageb", exp: exp() });
+    const jar = req(`page_session_pagea=${a}; page_session_pageb=${b}`);
+    expect((await extractPageSession(jar, "pagea"))?.token).toBe(a);
+    expect((await extractPageSession(jar, "pageb"))?.token).toBe(b);
+  });
+
+  test("the legacy page_session cookie is accepted only for the page it names", async () => {
+    const a = await signPageSession({ pageId: "pagea", exp: exp() });
+    expect((await extractPageSession(req(`page_session=${a}`), "pagea"))?.payload.pageId).toBe(
+      "pagea",
+    );
+    expect(await extractPageSession(req(`page_session=${a}`), "pageb")).toBeNull();
+  });
+
+  test("a token for another page under this page's name is ignored", async () => {
+    const a = await signPageSession({ pageId: "pagea", exp: exp() });
+    expect(await extractPageSession(req(`page_session_pageb=${a}`), "pageb")).toBeNull();
+  });
+
+  test("an id that is not cookie-name safe is refused", async () => {
+    const a = await signPageSession({ pageId: "a=b", exp: exp() });
+    expect(await extractPageSession(req(`page_session=${a}`), "a=b")).toBeNull();
   });
 });

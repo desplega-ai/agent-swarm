@@ -52,17 +52,19 @@ test("realtime browser replicas converge and recover after a stale schema reset"
     headers: { Authorization: `Bearer ${tokenBody.plaintext}` },
   });
   expect(launchResponse.status()).toBe(204);
-  const cookie = launchResponse.headers()["set-cookie"]?.match(/page_session=([^;]+)/)?.[1];
+  const cookie = launchResponse
+    .headers()
+    ["set-cookie"]?.match(/page_session_[A-Za-z0-9_-]+=([^;]+)/)?.[1];
   expect(cookie).toBeTruthy();
 
   const firstContext = await browser.newContext();
   const secondContext = await browser.newContext();
   try {
     await firstContext.addCookies([
-      { name: "page_session", value: cookie!, url: `${swarm.apiUrl}/` },
+      { name: `page_session_${pageId}`, value: cookie!, url: `${swarm.apiUrl}/` },
     ]);
     await secondContext.addCookies([
-      { name: "page_session", value: cookie!, url: `${swarm.apiUrl}/` },
+      { name: `page_session_${pageId}`, value: cookie!, url: `${swarm.apiUrl}/` },
     ]);
     const first = await firstContext.newPage();
     const second = await secondContext.newPage();

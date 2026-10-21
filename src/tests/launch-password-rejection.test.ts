@@ -112,7 +112,7 @@ describe("POST /api/pages/:id/launch — password mode rejection (step-4)", () =
       headers: { "X-Agent-ID": agentId },
     });
     expect(launch.status).toBe(204);
-    expect(launch.headers.get("set-cookie")).toContain("page_session=");
+    expect(launch.headers.get("set-cookie")).toContain("page_session_");
   });
 
   test("public page → launch still issues a cookie (uniform path)", async () => {
@@ -135,6 +135,6 @@ describe("POST /api/pages/:id/launch — password mode rejection (step-4)", () =
       headers: { "X-Agent-ID": agentId },
     });
     expect(launch.status).toBe(204);
-    expect(launch.headers.get("set-cookie")).toContain("page_session=");
+    expect(launch.headers.get("set-cookie")).toContain("page_session_");
   });
 });

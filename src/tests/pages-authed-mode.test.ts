@@ -5,8 +5,9 @@
  *   2. `GET /p/:id` without cookie → 401.
  *   3. `POST /api/pages/:id/launch` (bearer) → 204 + Set-Cookie.
  *   4. `GET /p/:id` with cookie → 200 + SDK injected.
- *   5. `GET /p/:id` with cookie scoped to a DIFFERENT page id → 403.
- *   6. `GET /p/:id.json` with cookie → 200 + JSON metadata.
+ *   5. A session signed for a DIFFERENT page id is ignored → 401.
+ *   6. Two launched pages both load from one cookie jar.
+ *   7. `GET /p/:id.json` with cookie → 200 + JSON metadata.
  *
  * Uses the same in-process handler wiring as `pages-public-html.test.ts` so
  * we don't have to boot the full http server. The proxy in
@@ -47,7 +48,7 @@ function createTestServer(): Server {
 /** Pull the cookie value out of a Set-Cookie header line. */
 function extractCookieValue(setCookie: string | null): string {
   expect(setCookie).toBeTruthy();
-  const match = /page_session=([^;]+)/.exec(setCookie!);
+  const match = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(setCookie!);
   expect(match).toBeTruthy();
   return match![1]!;
 }
@@ -132,7 +133,7 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
     expect(text).toContain("class SwarmSDK");
   });
 
-  test("cookie scoped to a different page id → 403", async () => {
+  test("a session signed for another page is ignored → 401", async () => {
     const idA = await createAuthedPage("page-a");
     const idB = await createAuthedPage("page-b");
 
@@ -140,13 +141,32 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
     const exp = Math.floor(Date.now() / 1000) + 3600;
     const tokenForA = await signPageSession({ pageId: idA, exp });
 
-    // … and try to use it for page B.
-    const res = await fetch(`${BASE}/p/${idB}`, {
-      headers: { Cookie: `page_session=${tokenForA}` },
-    });
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("different page id");
+    // … and try to use it for page B, under the legacy name and under B's own name.
+    for (const cookie of [`page_session=${tokenForA}`, `page_session_${idB}=${tokenForA}`]) {
+      const res = await fetch(`${BASE}/p/${idB}`, { headers: { Cookie: cookie } });
+      expect(res.status).toBe(401);
+    }
+  });
+
+  test("two launched pages both load from one cookie jar", async () => {
+    const idA = await createAuthedPage("tab-a");
+    const idB = await createAuthedPage("tab-b");
+    const jar: string[] = [];
+    for (const id of [idA, idB]) {
+      const launch = await fetch(`${BASE}/api/pages/${id}/launch`, {
+        method: "POST",
+        headers: { "X-Agent-ID": agentId },
+      });
+      expect(launch.status).toBe(204);
+      const setCookie = launch.headers.get("set-cookie")!;
+      expect(setCookie.startsWith(`page_session_${id}=`)).toBe(true);
+      jar.push(setCookie.split(";")[0]!);
+    }
+    const cookie = jar.join("; ");
+    for (const id of [idA, idB]) {
+      const res = await fetch(`${BASE}/p/${id}`, { headers: { Cookie: cookie } });
+      expect(res.status).toBe(200);
+    }
   });
 
   test("/p/:id.json with cookie → 200 + JSON metadata", async () => {

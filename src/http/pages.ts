@@ -175,7 +175,7 @@ const resolvePageRoute = route({
  *     `?key=` query / HTTP Basic on `/p/:id` directly (step-5). Bearer-side
  *     issuance would bypass the password check entirely.
  *
- * Response: 204 No Content + `Set-Cookie: page_session=<signed>; HttpOnly; ...`.
+ * Response: 204 No Content + `Set-Cookie: page_session_<id>=<signed>; HttpOnly; ...`.
  */
 const launchPageRoute = route({
   method: "post",

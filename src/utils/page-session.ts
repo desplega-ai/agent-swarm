@@ -246,23 +246,83 @@ export function parseCookieHeader(
 }
 
 /**
- * One-shot helper: pull `page_session` out of a request's `Cookie` header and
- * verify it. Returns the parsed payload on success, `null` on any failure
- * (no cookie, malformed, bad signature, expired, etc.).
- *
- * Shared by `/@swarm/api/*` (`src/http/page-proxy.ts`) and the authed `/p/:id`
- * branch (`src/http/pages-public.ts`) so both call sites converge on the same
- * verification semantics.
+ * The single shared cookie name used before sessions became per-page. Every
+ * launch overwrote it, so only the newest page in a browser had a session.
+ * Still read for back-compat, but only for the page its payload names.
+ */
+export const LEGACY_PAGE_SESSION_COOKIE = "page_session";
+
+/** Page ids are 32 hex chars today; anything outside the cookie-name-safe set is refused. */
+const COOKIE_SAFE_PAGE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function isCookieSafePageId(pageId: string): boolean {
+  return COOKIE_SAFE_PAGE_ID.test(pageId);
+}
+
+/** Per-page cookie name, so sessions for different pages coexist in one browser. */
+export function pageSessionCookieName(pageId: string): string {
+  return `${LEGACY_PAGE_SESSION_COOKIE}_${pageId}`;
+}
+
+export interface VerifiedPageSession {
+  /** The raw signed token, forwarded upstream by the page proxy. */
+  token: string;
+  payload: PageSessionPayload;
+}
+
+type CookieRequest = { headers: { cookie?: string | string[] | undefined } };
+
+async function verifyNamedCookie(
+  req: CookieRequest,
+  name: string,
+): Promise<VerifiedPageSession | null> {
+  const token = parseCookieHeader(req.headers.cookie, name);
+  const payload = await verifyPageSession(token);
+  return payload && token ? { token, payload } : null;
+}
+
+/**
+ * Find and verify the session for `pageId`: `page_session_<pageId>` first,
+ * then the legacy `page_session`. A cookie whose signed payload names a
+ * different page is ignored, so the result always satisfies
+ * `payload.pageId === pageId`. Returns `null` on any failure (no cookie,
+ * malformed, bad signature, expired, wrong page).
+ */
+export async function extractPageSession(
+  req: CookieRequest,
+  pageId: string,
+): Promise<VerifiedPageSession | null> {
+  if (!isCookieSafePageId(pageId)) return null;
+  for (const name of [pageSessionCookieName(pageId), LEGACY_PAGE_SESSION_COOKIE]) {
+    const session = await verifyNamedCookie(req, name);
+    if (session?.payload.pageId === pageId) return session;
+  }
+  return null;
+}
+
+/**
+ * Verify the legacy `page_session` cookie for whatever page it names. Only for
+ * callers that send no page id (clients predating per-page cookies).
+ */
+export async function extractLegacyPageSession(
+  req: CookieRequest,
+): Promise<VerifiedPageSession | null> {
+  return verifyNamedCookie(req, LEGACY_PAGE_SESSION_COOKIE);
+}
+
+/**
+ * Payload-only form of `extractPageSession`. Shared by the `/p/:id` handler
+ * (`src/http/pages-public.ts`) and the realtime upgrade
+ * (`src/realtime/transport.ts`) so they converge on the same semantics.
  *
  * Accepts an object with a `headers.cookie` field — duck-typed to keep this
  * helper test-friendly without dragging `node:http` types into the utility.
  */
-export async function extractAndVerifyCookie(req: {
-  headers: { cookie?: string | string[] | undefined };
-}): Promise<PageSessionPayload | null> {
-  const token = parseCookieHeader(req.headers.cookie, "page_session");
-  if (!token) return null;
-  return verifyPageSession(token);
+export async function extractAndVerifyCookie(
+  req: CookieRequest,
+  pageId: string,
+): Promise<PageSessionPayload | null> {
+  return (await extractPageSession(req, pageId))?.payload ?? null;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -284,6 +344,10 @@ const PAGE_SESSION_TTL_SECONDS = 3600;
  * - `dev=true` → `SameSite=Lax` without `Secure` (works on http://localhost).
  * - `dev=false` → `SameSite=None; Secure` (cross-site iframe embedding in prod).
  *
+ * The cookie is named `page_session_<pageId>`, so launching page B leaves
+ * page A's session intact. `Max-Age` is the only bound on how many accumulate:
+ * a browser holds one per page launched within the last hour.
+ *
  * The caller is responsible for setting `Set-Cookie` on the response — this
  * helper only builds the string. TTL is 1 hour; renewed on every issuance.
  */
@@ -300,7 +364,7 @@ export async function issuePageSessionCookie(
     ...(opts.op ? { op: true as const } : {}),
   });
   const attrs = [
-    `page_session=${token}`,
+    `${pageSessionCookieName(pageId)}=${token}`,
     "HttpOnly",
     "Path=/",
     `Max-Age=${PAGE_SESSION_TTL_SECONDS}`,
