@@ -26,12 +26,7 @@ import {
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
 import { type RelevantMemory, renderMemoriesPrompt } from "../prompts/memories.ts";
-import {
-  beginBootRenderCache,
-  configureHttpResolver,
-  endBootRenderCache,
-  resolveTemplateAsync,
-} from "../prompts/resolver.ts";
+import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import {
   authJsonToCredentialSelection,
@@ -94,7 +89,6 @@ import {
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
-import { createOrphanRecoveryThrottle } from "../utils/orphan-recovery-throttle.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
@@ -3187,7 +3181,7 @@ async function cleanupActiveSessions(config: ApiConfig): Promise<void> {
 }
 
 /** Reset orphaned in-progress tasks for this agent back to pending dispatch. */
-export async function recoverOrphanedInProgressTasks(config: ApiConfig): Promise<number> {
+async function recoverOrphanedInProgressTasks(config: ApiConfig): Promise<number> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Agent-ID": config.agentId,
@@ -5104,12 +5098,6 @@ export function resolveTaskReconcileIntervalMs(
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TASK_RECONCILE_INTERVAL_MS;
 }
 
-/**
- * Period between delivery-loop orphan recoveries. The boot recovery seeds it,
- * so the first tick after boot does not repeat that call.
- */
-export const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
-
 export interface ReconcileActiveTasksOptions {
   /** Tasks already aborted because the server cancelled them. */
   cancelledSignaled: Set<string>;
@@ -5756,11 +5744,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Configure HTTP-based template resolution (workers resolve via API, not local DB)
   if (apiKey) {
     configureHttpResolver(apiUrl, apiKey);
-    // Boot resolves the same system-prompt templates repeatedly (adapter
-    // creation, registration, capability refresh, first reconcile). Memoize
-    // them until the worker is ready to poll; task dispatch below is
-    // unaffected because the cache is empty again by then.
-    beginBootRenderCache();
   }
 
   // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false).
@@ -6384,11 +6367,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Clean up any stale active sessions from previous runs (crash recovery)
   await cleanupActiveSessions(apiConfig);
   console.log(`[${role}] Cleaned up stale active sessions`);
-  const orphanRecovery = createOrphanRecoveryThrottle({
-    recover: () => recoverOrphanedInProgressTasks(apiConfig),
-    intervalMs: ORPHAN_RECOVERY_INTERVAL_MS,
-  });
-  const startupRecoveredOrphans = await orphanRecovery.boot();
+  const startupRecoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
   if (startupRecoveredOrphans > 0) {
     console.log(
       `[${role}] Recovered ${startupRecoveredOrphans} orphaned in-progress task(s) to pending`,
@@ -6654,11 +6633,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       `[${role}] Skipping skill sync (claude-managed reads skills from agent definition)`,
     );
   }
-
-  // Boot is over. Resumed tasks, dispatch and everything after this point
-  // render against the live templates again, so an edit made while the first
-  // resumed task runs is visible to the next one.
-  endBootRenderCache();
 
   // ========== Resume paused tasks with PRIORITY ==========
   // LEGACY SAFETY NET — kept for tasks that were paused by older worker
@@ -6946,6 +6920,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // state persists across iterations.
   let consecutiveBudgetRefusals = 0;
 
+  // Throttle orphan recovery so it runs periodically while the worker is idle or under capacity.
+  let lastOrphanRecoveryAt = 0;
+  const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
   const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
 
   while (shouldRunDeliveryLoop(state.deliveryMode, shuttingDown)) {
@@ -7091,11 +7068,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
       await pushDelivery.waitForSchedule(schedule);
     } else {
-      const recoveredOrphans = await orphanRecovery.tick();
-      if (recoveredOrphans > 0) {
-        console.log(
-          `[${role}] Recovered ${recoveredOrphans} orphaned in-progress task(s) to pending`,
-        );
+      if (Date.now() - lastOrphanRecoveryAt > ORPHAN_RECOVERY_INTERVAL_MS) {
+        lastOrphanRecoveryAt = Date.now();
+        const recoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
+        if (recoveredOrphans > 0) {
+          console.log(
+            `[${role}] Recovered ${recoveredOrphans} orphaned in-progress task(s) to pending`,
+          );
+        }
       }
 
       console.log(
