@@ -975,7 +975,9 @@ describe("workflow foreach", () => {
       expect(result.valid).toBe(false);
       expect(
         result.errors.some((error) =>
-          error.includes('Node "reflect" foreach config.concurrency must be an integer of 1 or more'),
+          error.includes(
+            'Node "reflect" foreach config.concurrency must be an integer of 1 or more',
+          ),
         ),
       ).toBe(true);
     }
