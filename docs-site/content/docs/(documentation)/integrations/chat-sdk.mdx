@@ -273,7 +273,7 @@ Long output is split into several messages at the platform limit.
 
 ## Voice notes
 
-Voice notes and other audio files are transcribed through OpenAI-compatible `/audio/transcriptions` (OpenAI, Groq, self-hosted whisper) or ElevenLabs `/speech-to-text`. Transcription is off until `TRANSCRIPTION_API_KEY` is set. Store it as a secret. Deepgram and AssemblyAI are not supported.
+Voice notes and other audio files are transcribed through OpenAI-compatible `/audio/transcriptions` (OpenAI, Groq, self-hosted whisper) or ElevenLabs `/speech-to-text`. Transcription is off until `TRANSCRIPTION_API_KEY` is set. Store it as a secret. Only the API server reads it: it is never exported to agent env or scripts, and the config API does not list it. Deepgram and AssemblyAI are not supported.
 
 | Key | Default | What it does |
 |---|---|---|

@@ -68,7 +68,11 @@ const RESERVED_KEYS = new Set([
 // the agent-fs bootstrap admin key would let a compromised worker administer the
 // shared org. The API materializes these into its own process.env at boot via
 // getInjectableGlobalConfigs, so no HTTP consumer legitimately needs them.
-const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY", "SLACK_SIGNING_SECRET"]);
+const API_ONLY_CONFIG_KEYS = new Set([
+  "API_AGENT_FS_API_KEY",
+  "SLACK_SIGNING_SECRET",
+  "TRANSCRIPTION_API_KEY",
+]);
 
 export function isApiOnlyConfigKey(key: string): boolean {
   return API_ONLY_CONFIG_KEYS.has(key);

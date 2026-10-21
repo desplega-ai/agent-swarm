@@ -785,6 +785,7 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
         missingIsUndefined: ctx.swarm.config.get("SCRIPT_CFG_NOT_SET") === undefined,
         fallback: read("SCRIPT_CFG_NOT_SET") ?? "fallback",
         apiOnly: read("SLACK_SIGNING_SECRET"),
+        transcriptionKey: read("TRANSCRIPTION_API_KEY"),
         proto: read("__proto__"),
       };
     };`;
@@ -798,6 +799,7 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
     missingIsUndefined: boolean;
     fallback: string;
     apiOnly: string | null;
+    transcriptionKey: string | null;
     proto: string | null;
   };
 
@@ -829,11 +831,17 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
       value: `signing-${randomToken(24)}`,
       isSecret: true,
     });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "TRANSCRIPTION_API_KEY",
+      value: `stt-${randomToken(24)}`,
+      isSecret: true,
+    });
   });
 
   afterAll(async () => {
     await getDbClient().run(
-      "DELETE FROM swarm_config WHERE key LIKE 'SCRIPT_CFG_%' OR key IN ('SLACK_SIGNING_SECRET', '__proto__')",
+      "DELETE FROM swarm_config WHERE key LIKE 'SCRIPT_CFG_%' OR key IN ('SLACK_SIGNING_SECRET', 'TRANSCRIPTION_API_KEY', '__proto__')",
     );
     clearVolatileSecretsForTesting();
   });
@@ -862,6 +870,7 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
         missingIsUndefined: true,
         fallback: "fallback",
         apiOnly: null,
+        transcriptionKey: null,
         proto: "proto-global",
       });
       // The unwrapped secret is scrubbed from everything the run returns.
