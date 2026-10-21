@@ -20,6 +20,7 @@ import {
   checkUserAccess,
   isBotMessage,
   isSwarmThreadRoot,
+  isUserAllowed,
   registerMessageHandler,
   type UserFilterConfig,
 } from "./handlers";
@@ -186,6 +187,80 @@ describe("checkUserAccess", () => {
       expect(checkUserAccess("U3", "c@vendor.net", config)).toBe(true);
       expect(checkUserAccess("U4", "d@other.io", config)).toBe(false);
     });
+  });
+});
+
+describe("isUserAllowed", () => {
+  const usersInfo = mock(async () => ({ ok: true, user: {} }));
+  const client = { users: { info: usersInfo } } as never;
+  let enrichSpy: ReturnType<typeof spyOn<typeof slackEnrichModule, "enrichSlackUserEmail">>;
+  let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
+
+  const domainConfig: UserFilterConfig = {
+    allowedEmailDomains: ["company.com"],
+    allowedUserIds: ["U_LISTED"],
+  };
+
+  beforeEach(() => {
+    usersInfo.mockClear();
+    enrichSpy = spyOn(slackEnrichModule, "enrichSlackUserEmail");
+    logSpy = spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    enrichSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  const loggedLines = () => logSpy.mock.calls.map((call) => String(call[0]));
+
+  test("allows everyone without an email lookup when filtering is off", async () => {
+    const config: UserFilterConfig = { allowedEmailDomains: [], allowedUserIds: [] };
+    expect(await isUserAllowed(client, "U_ANY", config)).toBe(true);
+    expect(enrichSpy).not.toHaveBeenCalled();
+    expect(usersInfo).not.toHaveBeenCalled();
+  });
+
+  test("allows an allowlisted user ID without an email lookup", async () => {
+    expect(await isUserAllowed(client, "U_LISTED", domainConfig)).toBe(true);
+    expect(enrichSpy).not.toHaveBeenCalled();
+    expect(usersInfo).not.toHaveBeenCalled();
+  });
+
+  test("denies an unlisted user ID without an email lookup when no domains are configured", async () => {
+    const config: UserFilterConfig = { allowedEmailDomains: [], allowedUserIds: ["U_LISTED"] };
+    expect(await isUserAllowed(client, "U_OTHER", config)).toBe(false);
+    expect(enrichSpy).not.toHaveBeenCalled();
+  });
+
+  test("allows a user whose email domain is allowed", async () => {
+    enrichSpy.mockResolvedValue("person@Company.com");
+    expect(await isUserAllowed(client, "U_OTHER", domainConfig)).toBe(true);
+    expect(enrichSpy).toHaveBeenCalledTimes(1);
+    expect(enrichSpy).toHaveBeenCalledWith(client, "U_OTHER");
+    expect(loggedLines()).toEqual([]);
+  });
+
+  test("denies and logs a user whose email domain is not allowed", async () => {
+    enrichSpy.mockResolvedValue("person@other.com");
+    expect(await isUserAllowed(client, "U_OTHER", domainConfig)).toBe(false);
+    expect(loggedLines()).toEqual([
+      '[Slack] User U_OTHER email domain "other.com" not in allowed list',
+    ]);
+  });
+
+  test("denies and logs a user with no email", async () => {
+    enrichSpy.mockResolvedValue(null);
+    expect(await isUserAllowed(client, "U_OTHER", domainConfig)).toBe(false);
+    expect(loggedLines()).toEqual(["[Slack] User U_OTHER has no email, denying access"]);
+  });
+
+  test("denies and logs a user with a malformed email", async () => {
+    enrichSpy.mockResolvedValue("no-at-sign");
+    expect(await isUserAllowed(client, "U_OTHER", domainConfig)).toBe(false);
+    expect(loggedLines()).toEqual([
+      "[Slack] User U_OTHER has invalid email format, denying access",
+    ]);
   });
 });
 
