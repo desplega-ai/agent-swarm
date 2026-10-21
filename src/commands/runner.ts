@@ -94,6 +94,7 @@ import {
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
+import { createOrphanRecoveryThrottle } from "../utils/orphan-recovery-throttle.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
@@ -3186,7 +3187,7 @@ async function cleanupActiveSessions(config: ApiConfig): Promise<void> {
 }
 
 /** Reset orphaned in-progress tasks for this agent back to pending dispatch. */
-async function recoverOrphanedInProgressTasks(config: ApiConfig): Promise<number> {
+export async function recoverOrphanedInProgressTasks(config: ApiConfig): Promise<number> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Agent-ID": config.agentId,
@@ -5104,19 +5105,10 @@ export function resolveTaskReconcileIntervalMs(
 }
 
 /**
- * True when the delivery loop should run its periodic orphan recovery.
- *
- * The boot recovery seeds `lastRecoveryAt` with the time it finished, so the
- * first loop tick does not repeat the call the process just made; seeding it
- * with 0 (the pre-fix behavior) always re-ran it immediately.
+ * Period between delivery-loop orphan recoveries. The boot recovery seeds it,
+ * so the first tick after boot does not repeat that call.
  */
-export function orphanRecoveryDue(
-  now: number,
-  lastRecoveryAt: number,
-  intervalMs: number,
-): boolean {
-  return now - lastRecoveryAt > intervalMs;
-}
+export const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
 
 export interface ReconcileActiveTasksOptions {
   /** Tasks already aborted because the server cancelled them. */
@@ -6392,16 +6384,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Clean up any stale active sessions from previous runs (crash recovery)
   await cleanupActiveSessions(apiConfig);
   console.log(`[${role}] Cleaned up stale active sessions`);
-  const startupRecoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
+  const orphanRecovery = createOrphanRecoveryThrottle({
+    recover: () => recoverOrphanedInProgressTasks(apiConfig),
+    intervalMs: ORPHAN_RECOVERY_INTERVAL_MS,
+  });
+  const startupRecoveredOrphans = await orphanRecovery.boot();
   if (startupRecoveredOrphans > 0) {
     console.log(
       `[${role}] Recovered ${startupRecoveredOrphans} orphaned in-progress task(s) to pending`,
     );
   }
-  // The call above is this process's first poll: start the in-loop throttle
-  // from it so the delivery loop does not repeat the same recovery a second
-  // time on its first iteration.
-  let lastOrphanRecoveryAt = Date.now();
 
   // Fetch full agent profile to get soul/identity content
   try {
@@ -6954,9 +6946,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // state persists across iterations.
   let consecutiveBudgetRefusals = 0;
 
-  // Throttle orphan recovery so it runs periodically while the worker is idle or under capacity.
-  // `lastOrphanRecoveryAt` is seeded by the boot recovery above.
-  const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
   const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
 
   while (shouldRunDeliveryLoop(state.deliveryMode, shuttingDown)) {
@@ -7102,14 +7091,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
       await pushDelivery.waitForSchedule(schedule);
     } else {
-      if (orphanRecoveryDue(Date.now(), lastOrphanRecoveryAt, ORPHAN_RECOVERY_INTERVAL_MS)) {
-        lastOrphanRecoveryAt = Date.now();
-        const recoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
-        if (recoveredOrphans > 0) {
-          console.log(
-            `[${role}] Recovered ${recoveredOrphans} orphaned in-progress task(s) to pending`,
-          );
-        }
+      const recoveredOrphans = await orphanRecovery.tick();
+      if (recoveredOrphans > 0) {
+        console.log(
+          `[${role}] Recovered ${recoveredOrphans} orphaned in-progress task(s) to pending`,
+        );
       }
 
       console.log(

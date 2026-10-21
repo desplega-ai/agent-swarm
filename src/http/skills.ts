@@ -19,8 +19,8 @@ import {
 } from "../be/db";
 import { parseSkillContent } from "../be/skill-parser";
 import {
+  buildSkillsBundle,
   computeAgentSkillsSignature,
-  computeSkillsSignature,
   syncSkillsToFilesystem,
 } from "../be/skill-sync";
 import { getSkillUsageDetail, getSkillUsageSummary, SKILL_USAGE_WINDOWS } from "../be/skill-usage";
@@ -591,22 +591,11 @@ export async function handleSkills(
   if (getAgentSkillsBundleRoute.match(req.method, pathSegments)) {
     const parsed = await getAgentSkillsBundleRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const skills = await getAgentSkills(parsed.params.id);
-    // Sign the rows this response carries, not a second read: an edit landing
-    // between the two reads would pair stale bytes with a fresh hash, and the
-    // worker would then skip every later refresh.
-    const signature = computeSkillsSignature(skills).hash;
-    const bundled = await Promise.all(
-      skills.map(async (skill) => ({
-        ...skill,
-        files: skill.isComplex ? await getSkillFiles(skill.id) : [],
-      })),
+    const bundle = await buildSkillsBundle(
+      () => getAgentSkills(parsed.params.id),
+      (skillId) => getSkillFiles(skillId),
     );
-    getAgentSkillsBundleRoute.respond(res, 200, {
-      skills: bundled,
-      total: bundled.length,
-      signature,
-    });
+    getAgentSkillsBundleRoute.respond(res, 200, bundle);
     return true;
   }
 

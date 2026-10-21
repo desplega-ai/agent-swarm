@@ -10,7 +10,7 @@
  */
 
 import { homedir } from "node:os";
-import type { SkillWithInstallInfo } from "../types";
+import type { SkillFile, SkillWithInstallInfo } from "../types";
 import {
   type SkillFsEntry,
   type SkillHarnessTarget,
@@ -100,4 +100,33 @@ export function computeSkillsSignature(skills: readonly SkillWithInstallInfo[]):
  */
 export async function computeAgentSkillsSignature(agentId: string): Promise<SkillsSignature> {
   return computeSkillsSignature(await getAgentSkills(agentId));
+}
+
+export interface SkillsBundle {
+  skills: (SkillWithInstallInfo & { files: SkillFile[] })[];
+  total: number;
+  signature: string;
+}
+
+/**
+ * Build the worker boot payload: every installed skill plus its bundled files,
+ * signed over the rows this same call returned.
+ *
+ * The readers are injected so the ordering the fix depends on is testable: the
+ * signature is taken before the first `readFiles`, so an edit that lands while
+ * the files are being read cannot pair stale bytes with a newer hash.
+ */
+export async function buildSkillsBundle(
+  readSkills: () => Promise<SkillWithInstallInfo[]>,
+  readFiles: (skillId: string) => Promise<SkillFile[]>,
+): Promise<SkillsBundle> {
+  const skills = await readSkills();
+  const signature = computeSkillsSignature(skills).hash;
+  const entries = await Promise.all(
+    skills.map(async (skill) => ({
+      ...skill,
+      files: skill.isComplex ? await readFiles(skill.id) : [],
+    })),
+  );
+  return { skills: entries, total: entries.length, signature };
 }
