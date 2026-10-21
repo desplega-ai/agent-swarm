@@ -48,6 +48,14 @@ export interface IndexMemoryContentResult {
   chunks: number;
 }
 
+/**
+ * Key shared by every chunk of one task's completion memory, so the chunks
+ * group as one document (access counting, chunk listing, search collapse).
+ */
+export function taskCompletionMemoryKey(taskId: string): string {
+  return `/task-completions/${taskId.toLowerCase().replace(/[^a-z0-9._-]/g, "-")}`;
+}
+
 export async function indexMemoryContent(
   params: IndexMemoryContentParams,
 ): Promise<IndexMemoryContentResult> {

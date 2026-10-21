@@ -1,0 +1,204 @@
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { unlinkSync } from "node:fs";
+import { closeDb, createAgent, createTaskExtended, getDbClient, initDb, startTask } from "../be/db";
+import { getEmbeddingProvider } from "../be/memory";
+import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
+import { taskCompletionMemoryKey } from "../be/memory/index-content";
+import { rerank } from "../be/memory/reranker";
+import type { MemoryCandidate } from "../be/memory/types";
+import { runTaskTerminalEffects } from "../tasks/task-terminal-effects";
+import type { Agent } from "../types";
+
+const TEST_DB_PATH = "./test-task-completion-memory-chunking.sqlite";
+
+let worker: Agent;
+const embedded: string[] = [];
+
+beforeAll(async () => {
+  initDb(TEST_DB_PATH);
+  // Never hit the network: every input gets a valid vector.
+  spyOn(getEmbeddingProvider(), "embed").mockImplementation(async (text: string) => {
+    embedded.push(text);
+    return new Float32Array(EMBEDDING_DIMENSIONS).fill(0.1);
+  });
+  spyOn(getEmbeddingProvider(), "embedBatch").mockImplementation(async (texts: string[]) => {
+    embedded.push(...texts);
+    return texts.map(() => new Float32Array(EMBEDDING_DIMENSIONS).fill(0.1));
+  });
+  await createAgent({ name: "chunk-lead", isLead: true, status: "idle", capabilities: [] });
+  worker = await createAgent({
+    name: "chunk-worker",
+    isLead: false,
+    status: "idle",
+    capabilities: [],
+  });
+});
+
+afterAll(() => {
+  closeDb();
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      unlinkSync(`${TEST_DB_PATH}${suffix}`);
+    } catch {
+      // ignore
+    }
+  }
+});
+
+type Row = {
+  id: string;
+  scope: string;
+  key: string | null;
+  content: string;
+  chunkIndex: number;
+  totalChunks: number;
+  embedded: number;
+};
+
+async function rowsFor(taskId: string): Promise<Row[]> {
+  return getDbClient().query<Row>(
+    `SELECT id, scope, key, content, chunkIndex, totalChunks, embedding IS NOT NULL AS embedded
+       FROM agent_memory WHERE sourceTaskId = ? AND source = 'task_completion'
+      ORDER BY scope, chunkIndex`,
+    [taskId],
+  );
+}
+
+async function waitForEmbedded(taskId: string, ms = 3000): Promise<Row[]> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const rows = await rowsFor(taskId);
+    if (rows.length > 0 && rows.every((r) => r.embedded)) return rows;
+    await Bun.sleep(20);
+  }
+  return rowsFor(taskId);
+}
+
+/** ~60k chars in paragraphs, the shape of a long dreaming-run output. */
+function longOutput(): string {
+  return Array.from(
+    { length: 300 },
+    (_, i) => `Paragraph ${i}: ${crypto.randomUUID()} ${"lane finding ".repeat(12)}`,
+  ).join("\n\n");
+}
+
+describe("task_completion memory goes through chunking", () => {
+  test("a long output is stored as chunks of one document, each with an embedding", async () => {
+    const task = await createTaskExtended("dreaming-v2 run: publish the nightly report", {
+      agentId: worker.id,
+      taskType: "research",
+    });
+    await startTask(task.id);
+    const output = longOutput();
+
+    await runTaskTerminalEffects({
+      task,
+      status: "completed",
+      output,
+      agentId: worker.id,
+      persistMemory: true,
+    });
+
+    const rows = await waitForEmbedded(task.id);
+    const agentRows = rows.filter((r) => r.scope === "agent");
+    const swarmRows = rows.filter((r) => r.scope === "swarm");
+
+    expect(agentRows.length).toBeGreaterThan(1);
+    expect(swarmRows.length).toBeGreaterThan(1);
+    for (const scoped of [agentRows, swarmRows]) {
+      expect(scoped.map((r) => r.chunkIndex)).toEqual(scoped.map((_, i) => i));
+      expect(new Set(scoped.map((r) => r.totalChunks))).toEqual(new Set([scoped.length]));
+    }
+    expect(new Set(rows.map((r) => r.key))).toEqual(new Set([taskCompletionMemoryKey(task.id)]));
+    expect(rows.every((r) => r.embedded)).toBe(true);
+    for (const row of rows) expect(row.content.length).toBeLessThanOrEqual(2_200);
+    expect(agentRows[0]!.content).toContain("Task: dreaming-v2 run");
+    expect(Math.max(...embedded.map((t) => t.length))).toBeLessThanOrEqual(2_200);
+  });
+
+  test("a short output stays one row, keyed to its task", async () => {
+    const task = await createTaskExtended("short task", { agentId: worker.id });
+    await startTask(task.id);
+
+    await runTaskTerminalEffects({
+      task,
+      status: "completed",
+      output: "done, nothing else to report",
+      agentId: worker.id,
+      persistMemory: true,
+    });
+
+    const rows = await waitForEmbedded(task.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      scope: "agent",
+      key: taskCompletionMemoryKey(task.id),
+      chunkIndex: 0,
+      totalChunks: 1,
+      embedded: 1,
+    });
+  });
+});
+
+describe("rerank collapses chunks of one task", () => {
+  function candidate(overrides: Partial<MemoryCandidate>): MemoryCandidate {
+    return {
+      id: crypto.randomUUID(),
+      agentId: worker.id,
+      scope: "agent",
+      name: "Task: x",
+      content: "x",
+      summary: null,
+      source: "task_completion",
+      sourceTaskId: null,
+      sourcePath: null,
+      key: null,
+      chunkIndex: 0,
+      totalChunks: 1,
+      tags: [],
+      createdAt: new Date().toISOString(),
+      accessedAt: new Date().toISOString(),
+      accessCount: 0,
+      expiresAt: null,
+      embeddingModel: null,
+      alpha: 1,
+      beta: 1,
+      similarity: 0.5,
+      ...overrides,
+    };
+  }
+
+  test("keeps the best chunk per task document and fills the limit with other memories", () => {
+    const keyA = taskCompletionMemoryKey("aaaa");
+    const keyB = taskCompletionMemoryKey("bbbb");
+    const chunksA = [0.9, 0.85, 0.8, 0.75].map((similarity, chunkIndex) =>
+      candidate({ key: keyA, chunkIndex, totalChunks: 4, similarity }),
+    );
+    const chunkB = candidate({ key: keyB, chunkIndex: 2, totalChunks: 3, similarity: 0.7 });
+    const swarmCopyA = candidate({ key: keyA, scope: "swarm", totalChunks: 4, similarity: 0.65 });
+    const manual = candidate({ source: "manual", key: "/longterm/facts/x", similarity: 0.3 });
+
+    const ranked = rerank([...chunksA, chunkB, swarmCopyA, manual], { limit: 4 });
+
+    expect(new Set(ranked.map((r) => r.id))).toEqual(
+      new Set([chunksA[0]!.id, chunkB.id, swarmCopyA.id, manual.id]),
+    );
+  });
+
+  test("manual chunks and single-chunk task rows are left alone", () => {
+    const manualChunks = [0.9, 0.8].map((similarity, chunkIndex) =>
+      candidate({
+        source: "manual",
+        key: "/longterm/facts/y",
+        chunkIndex,
+        totalChunks: 2,
+        similarity,
+      }),
+    );
+    const legacy = [0.7, 0.6].map((similarity) => candidate({ key: null, similarity }));
+
+    const ranked = rerank([...manualChunks, ...legacy], { limit: 10 });
+
+    expect(ranked).toHaveLength(4);
+  });
+});

@@ -160,5 +160,24 @@ export function rerank(candidates: MemoryCandidate[], options: RerankOptions): M
   });
 
   scored.sort((a, b) => b.similarity - a.similarity || b.rawSimilarity - a.rawSimilarity);
-  return scored.slice(0, limit);
+  return collapseTaskCompletionChunks(scored).slice(0, limit);
+}
+
+/**
+ * Keep only the best-ranked chunk of each multi-chunk task_completion memory.
+ * One long task output splits into a hundred chunks or more, which would
+ * otherwise fill every result slot. Chunks of one task share a key (see
+ * taskCompletionMemoryKey), scoped by owner and visibility.
+ */
+function collapseTaskCompletionChunks<T extends MemoryCandidate>(ranked: T[]): T[] {
+  const seen = new Set<string>();
+  return ranked.filter((candidate) => {
+    if (candidate.source !== "task_completion" || candidate.totalChunks <= 1 || !candidate.key) {
+      return true;
+    }
+    const document = JSON.stringify([candidate.agentId, candidate.scope, candidate.key]);
+    if (seen.has(document)) return false;
+    seen.add(document);
+    return true;
+  });
 }

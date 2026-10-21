@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ACP: the adapter moves to `@agentclientprotocol/sdk` 2.0.0 and its client app API. It imports the `/unstable` entry point, so turn `usage` still reaches cost rows. The wire protocol stays ACP v1.
 
 ### Fixed
+- Memory: task completion memories are chunked like `memory-store`, so a long output gets a vector for every chunk. Search keeps the best chunk per task. The embedding provider cuts any input over the model's token cap, and one oversized input no longer fails its whole batch, so the boot backfill now fills rows it used to leave without a vector.
 - Codex OAuth: the keep-warm sweep refreshes pool slots at 5 days instead of 7, and `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS` sets the age, so a ChatGPT session that ends before day 7 gets a refresh first (#2296).
 
 ## [2.4.3] - 2026-10-20
