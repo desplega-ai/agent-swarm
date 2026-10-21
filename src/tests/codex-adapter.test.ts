@@ -7,7 +7,16 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   AgentMessageItem,
@@ -17,7 +26,6 @@ import type {
   ThreadItem,
 } from "../providers/codex-adapter";
 import { buildCodexConfig, CodexAdapter } from "../providers/codex-adapter";
-import { writeCodexAgentsMd } from "../providers/codex-agents-md";
 import {
   CODEX_DEFAULT_MODEL,
   computeCodexCostUsd,
@@ -863,7 +871,7 @@ describe("CodexSession event mapping", () => {
 
     const config = testConfig({
       logFile: join(tmpLogDir, "happy.log"),
-      cwd: "", // disable AGENTS.md writing
+      cwd: "",
     });
 
     const { emitted, result } = await runSessionWithFakeThread(events, config);
@@ -1268,242 +1276,161 @@ describe("CodexAdapter.canResume", () => {
   });
 });
 
-describe("writeCodexAgentsMd round-trip", () => {
-  const tmpDir = `/tmp/codex-agents-md-test-${Date.now()}`;
-  // Crash-recovery records live outside every per-test repo dir.
-  const stateDir = join(tmpDir, ".state");
-
-  beforeAll(() => {
-    mkdirSync(tmpDir, { recursive: true });
-  });
-
-  afterAll(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  afterEach(async () => {
-    // Clean any stray files between tests.
-    await Bun.$`rm -f ${tmpDir}/*`.quiet().nothrow();
-  });
-
-  test("no-op when systemPrompt is empty", async () => {
-    const handle = await writeCodexAgentsMd(tmpDir, "");
-    expect(await Bun.file(join(tmpDir, "AGENTS.md")).exists()).toBe(false);
-    await handle.cleanup();
-    expect(await Bun.file(join(tmpDir, "AGENTS.md")).exists()).toBe(false);
-  });
-
-  test("no-op when cwd is falsy", async () => {
-    const handle = await writeCodexAgentsMd(undefined, "test prompt");
-    await handle.cleanup();
-    // Nothing to assert on fs — just make sure no throw happens.
-    expect(true).toBe(true);
-  });
-
-  test("creates fresh file when AGENTS.md and CLAUDE.md are absent", async () => {
-    const dir = join(tmpDir, "fresh-no-claude");
-    mkdirSync(dir, { recursive: true });
-    const handle = await writeCodexAgentsMd(dir, "my prompt");
-    const agentsMd = join(dir, "AGENTS.md");
-
-    expect(await Bun.file(agentsMd).exists()).toBe(true);
-    const content = await Bun.file(agentsMd).text();
-    expect(content).toContain("<swarm_system_prompt>");
-    expect(content).toContain("my prompt");
-    expect(content).toContain("</swarm_system_prompt>");
-
-    await handle.cleanup();
-    expect(await Bun.file(agentsMd).exists()).toBe(false);
-  });
-
-  test("prepends block above CLAUDE.md content when only CLAUDE.md exists", async () => {
-    const dir = join(tmpDir, "fresh-with-claude");
-    mkdirSync(dir, { recursive: true });
-    await Bun.write(join(dir, "CLAUDE.md"), "# My Project\n\nInstructions.");
-
-    const handle = await writeCodexAgentsMd(dir, "swarm prompt");
-    const agentsMd = join(dir, "AGENTS.md");
-
-    const content = await Bun.file(agentsMd).text();
-    expect(content.indexOf("<swarm_system_prompt>")).toBeLessThan(content.indexOf("# My Project"));
-    expect(content).toContain("swarm prompt");
-    expect(content).toContain("# My Project");
-
-    await handle.cleanup();
-    // Fresh creation → cleanup removes the file entirely (even though CLAUDE.md remains).
-    expect(await Bun.file(agentsMd).exists()).toBe(false);
-    expect(await Bun.file(join(dir, "CLAUDE.md")).exists()).toBe(true);
-  });
-
-  test("replaces existing managed block in place", async () => {
-    const dir = join(tmpDir, "replace-block");
-    mkdirSync(dir, { recursive: true });
-    const original = `<swarm_system_prompt>
-stale
-</swarm_system_prompt>
-
-# Keep me`;
-    await Bun.write(join(dir, "AGENTS.md"), original);
-
-    const handle = await writeCodexAgentsMd(dir, "fresh prompt");
-    const agentsMd = join(dir, "AGENTS.md");
-
-    const updated = await Bun.file(agentsMd).text();
-    expect(updated).toContain("fresh prompt");
-    expect(updated).not.toContain("stale");
-    expect(updated).toContain("# Keep me");
-
-    await handle.cleanup();
-    // Not a fresh file — cleanup strips the block but leaves the rest intact.
-    expect(await Bun.file(agentsMd).exists()).toBe(true);
-    const after = await Bun.file(agentsMd).text();
-    expect(after).not.toContain("<swarm_system_prompt>");
-    expect(after).toContain("# Keep me");
-  });
-
-  test("prepends block when existing AGENTS.md has no block", async () => {
-    const dir = join(tmpDir, "prepend-block");
-    mkdirSync(dir, { recursive: true });
-    await Bun.write(join(dir, "AGENTS.md"), "# Project instructions");
-
-    const handle = await writeCodexAgentsMd(dir, "swarm prompt");
-    const agentsMd = join(dir, "AGENTS.md");
-
-    const updated = await Bun.file(agentsMd).text();
-    expect(updated).toContain("swarm prompt");
-    expect(updated).toContain("# Project instructions");
-    expect(updated.indexOf("<swarm_system_prompt>")).toBeLessThan(
-      updated.indexOf("# Project instructions"),
+describe("Codex session instructions", () => {
+  for (const kind of [
+    "file",
+    "in-tree link",
+    "out-of-tree link",
+    "dangling link",
+    "missing link",
+  ]) {
+    // Windows requires symlink privileges; CI exercises the link cases on Linux.
+    test.skipIf(kind !== "file" && process.platform === "win32")(
+      `recovers a crashed legacy session before starting Codex (${kind})`,
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codex-legacy-instructions-"));
+        const cwd = join(dir, "repo");
+        mkdirSync(cwd);
+        const agentsMd = join(cwd, "AGENTS.md");
+        const claudeMd = join(cwd, "CLAUDE.md");
+        const original = "# Repo rules\n";
+        const edited = `${original}- Keep the agent's edit\n`;
+        const outside = join(dir, "outside.md");
+        const linkTarget =
+          kind === "out-of-tree link"
+            ? "../outside.md"
+            : kind === "dangling link"
+              ? "missing.md"
+              : "CLAUDE.md";
+        const realCwd = realpathSync(cwd);
+        const stateDir = join(homedir(), ".cache", "agent-swarm", "codex-agents-md");
+        const key = new Bun.CryptoHasher("sha256").update(realCwd).digest("hex");
+        const recordPath = join(stateDir, `${key}.json`);
+        try {
+          await Bun.write(claudeMd, original);
+          await Bun.write(outside, "OUTSIDE\n");
+          if (kind !== "missing link") {
+            await Bun.write(
+              agentsMd,
+              `<swarm_system_prompt>\nSTALE\n</swarm_system_prompt>\n${edited}`,
+            );
+          }
+          if (kind !== "file") {
+            mkdirSync(stateDir, { recursive: true });
+            await Bun.write(recordPath, JSON.stringify({ cwd: realCwd, linkTarget }));
+          }
+          const fake = makeFakeAppServer(async (method, params, emit) => {
+            if (method === "thread/start") {
+              expect(params).toMatchObject({ developerInstructions: "new session instructions" });
+              expect(await Bun.file(recordPath).exists()).toBe(false);
+              if (kind === "file") {
+                expect(lstatSync(agentsMd).isFile()).toBe(true);
+                expect(await Bun.file(agentsMd).text()).toBe(edited);
+              } else {
+                expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
+                expect(readlinkSync(agentsMd)).toBe(linkTarget);
+              }
+              expect(await Bun.file(claudeMd).text()).toBe(
+                kind === "in-tree link" ? edited : original,
+              );
+              expect(await Bun.file(outside).text()).toBe("OUTSIDE\n");
+              return { thread: { id: "legacy-thread" } };
+            }
+            if (method === "turn/start") {
+              queueMicrotask(() => {
+                emit("turn/completed", {
+                  threadId: "legacy-thread",
+                  turn: { id: "legacy-turn", status: "completed", error: null },
+                });
+              });
+              return { turn: { id: "legacy-turn" } };
+            }
+            throw new Error(`Unexpected method: ${method}`);
+          });
+          const session = await new CodexAdapter({
+            bypassSubprocess: true,
+            appServerFactory: () => fake.client as never,
+          }).createSession(
+            testConfig({
+              cwd,
+              systemPrompt: "new session instructions",
+              logFile: join(dir, "session.log"),
+              taskId: "",
+            }),
+          );
+          await session.waitForCompletion();
+        } finally {
+          rmSync(recordPath, { force: true });
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
     );
+  }
 
-    await handle.cleanup();
-    const after = await Bun.file(agentsMd).text();
-    expect(after).not.toContain("<swarm_system_prompt>");
-    expect(after).toContain("# Project instructions");
-  });
+  for (const kind of ["file", "missing", "symlink"]) {
+    // Windows requires symlink privileges; CI exercises this case on Linux.
+    test.skipIf(kind === "symlink" && process.platform === "win32")(
+      `passes native instructions without changing ${kind} AGENTS.md during the session`,
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codex-instructions-"));
+        const cwd = join(dir, "repo");
+        mkdirSync(cwd);
+        const agentsMd = join(cwd, "AGENTS.md");
+        const claudeMd = join(cwd, "CLAUDE.md");
+        const original = "# Repo rules\r\n\r\nKeep this file unchanged.\r\n";
+        const systemPrompt = 'Swarm instructions: "quoted"\n第二行';
+        await Bun.write(claudeMd, original);
+        if (kind === "file") await Bun.write(agentsMd, original);
+        if (kind === "symlink") symlinkSync("CLAUDE.md", agentsMd);
 
-  test("cleanup restores a plain AGENTS.md byte-identically", async () => {
-    const dir = join(tmpDir, "byte-identical");
-    mkdirSync(dir, { recursive: true });
-    const original = "# Project instructions\n\nDo things.\n";
-    await Bun.write(join(dir, "AGENTS.md"), original);
-
-    const handle = await writeCodexAgentsMd(dir, "swarm prompt");
-    await handle.cleanup();
-
-    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toBe(original);
-  });
-
-  test("never writes through an AGENTS.md -> CLAUDE.md symlink", async () => {
-    const dir = join(tmpDir, "symlink");
-    mkdirSync(dir, { recursive: true });
-    const original = "# Repo rules\n\nDo things.\n";
-    const claudeMd = join(dir, "CLAUDE.md");
-    const agentsMd = join(dir, "AGENTS.md");
-    await Bun.write(claudeMd, original);
-    symlinkSync("CLAUDE.md", agentsMd);
-
-    const handle = await writeCodexAgentsMd(dir, "swarm prompt", { stateDir });
-
-    // During the session: AGENTS.md is a real file, CLAUDE.md is untouched.
-    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
-    const during = readFileSync(agentsMd, "utf8");
-    expect(during).toContain("swarm prompt");
-    expect(during).toContain("# Repo rules");
-    expect(readFileSync(claudeMd, "utf8")).toBe(original);
-
-    await handle.cleanup();
-
-    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(agentsMd)).toBe("CLAUDE.md");
-    expect(readFileSync(claudeMd, "utf8")).toBe(original);
-  });
-
-  test("carries agent edits to a symlinked AGENTS.md over to the link target", async () => {
-    const dir = join(tmpDir, "symlink-edit");
-    mkdirSync(dir, { recursive: true });
-    const claudeMd = join(dir, "CLAUDE.md");
-    const agentsMd = join(dir, "AGENTS.md");
-    await Bun.write(claudeMd, "# Repo rules\n");
-    symlinkSync("CLAUDE.md", agentsMd);
-
-    const handle = await writeCodexAgentsMd(dir, "swarm prompt", { stateDir });
-    await Bun.write(agentsMd, `${readFileSync(agentsMd, "utf8")}- new rule\n`);
-    await handle.cleanup();
-
-    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
-    expect(readFileSync(claudeMd, "utf8")).toBe("# Repo rules\n- new rule\n");
-  });
-
-  test("restores a symlink left swapped out by a crashed session", async () => {
-    const dir = join(tmpDir, "symlink-crash");
-    mkdirSync(dir, { recursive: true });
-    const original = "# Repo rules\n";
-    const claudeMd = join(dir, "CLAUDE.md");
-    const agentsMd = join(dir, "AGENTS.md");
-    await Bun.write(claudeMd, original);
-    symlinkSync("CLAUDE.md", agentsMd);
-
-    // First session never runs cleanup (crash).
-    await writeCodexAgentsMd(dir, "first prompt", { stateDir });
-    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
-
-    const handle = await writeCodexAgentsMd(dir, "second prompt", { stateDir });
-    const during = readFileSync(agentsMd, "utf8");
-    expect(during).toContain("second prompt");
-    expect(during).not.toContain("first prompt");
-    expect(readFileSync(claudeMd, "utf8")).toBe(original);
-
-    await handle.cleanup();
-    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
-    expect(readFileSync(claudeMd, "utf8")).toBe(original);
-  });
-
-  test("ignores a forged symlink marker pointing out of the repo", async () => {
-    const dir = join(tmpDir, "forged-marker");
-    mkdirSync(dir, { recursive: true });
-    const secretPath = join(tmpDir, "outside-secret.txt");
-    const secret = "TOP-SECRET-CONTENTS\n";
-    await Bun.write(secretPath, secret);
-    const agentsMd = join(dir, "AGENTS.md");
-
-    for (const forged of ["../outside-secret.txt", secretPath]) {
-      const original = `<swarm_system_prompt symlink="${encodeURIComponent(forged)}">\nold\n</swarm_system_prompt>\n# Rules\n`;
-      await Bun.write(agentsMd, original);
-
-      const handle = await writeCodexAgentsMd(dir, "swarm prompt", { stateDir });
-      expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
-      expect(readFileSync(agentsMd, "utf8")).not.toContain("TOP-SECRET");
-      expect(readFileSync(secretPath, "utf8")).toBe(secret);
-
-      await handle.cleanup();
-      expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
-      expect(readFileSync(agentsMd, "utf8")).toBe(original);
-      expect(readFileSync(secretPath, "utf8")).toBe(secret);
-    }
-  });
-
-  test("never reads or writes an out-of-tree symlink target", async () => {
-    const dir = join(tmpDir, "symlink-out-of-tree");
-    mkdirSync(dir, { recursive: true });
-    const secretPath = join(tmpDir, "outside-target.txt");
-    const secret = "OUT-OF-TREE\n";
-    await Bun.write(secretPath, secret);
-    const agentsMd = join(dir, "AGENTS.md");
-    symlinkSync("../outside-target.txt", agentsMd);
-
-    const handle = await writeCodexAgentsMd(dir, "swarm prompt", { stateDir });
-    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
-    const during = readFileSync(agentsMd, "utf8");
-    expect(during).toContain("swarm prompt");
-    expect(during).not.toContain("OUT-OF-TREE");
-
-    await Bun.write(agentsMd, `${during}- agent edit\n`);
-    await handle.cleanup();
-
-    expect(readlinkSync(agentsMd)).toBe("../outside-target.txt");
-    expect(readFileSync(secretPath, "utf8")).toBe(secret);
-  });
+        let startParams: unknown;
+        const started = Promise.withResolvers<void>();
+        const fake = makeFakeAppServer((method, params) => {
+          if (method === "thread/start") {
+            startParams = params;
+            return { thread: { id: "instructions-thread" } };
+          }
+          if (method === "turn/start") {
+            started.resolve();
+            return { turn: { id: "instructions-turn" } };
+          }
+          throw new Error(`Unexpected method: ${method}`);
+        });
+        const assertRepoUnchanged = async () => {
+          expect(await Bun.file(claudeMd).text()).toBe(original);
+          if (kind === "missing") {
+            expect(await Bun.file(agentsMd).exists()).toBe(false);
+          } else {
+            expect(await Bun.file(agentsMd).text()).toBe(original);
+            expect(lstatSync(agentsMd).isSymbolicLink()).toBe(kind === "symlink");
+            if (kind === "symlink") expect(readlinkSync(agentsMd)).toBe("CLAUDE.md");
+          }
+        };
+        const session = await new CodexAdapter({
+          bypassSubprocess: true,
+          appServerFactory: () => fake.client as never,
+        }).createSession(
+          testConfig({ cwd, systemPrompt, logFile: join(dir, "session.log"), taskId: "" }),
+        );
+        try {
+          await started.promise;
+          await assertRepoUnchanged();
+          expect(startParams).toMatchObject({ developerInstructions: systemPrompt });
+        } finally {
+          fake.emit("turn/completed", {
+            threadId: "instructions-thread",
+            turn: { id: "instructions-turn", status: "completed", error: null },
+          });
+          await session.waitForCompletion();
+          try {
+            await assertRepoUnchanged();
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      },
+    );
+  }
 });
 
 // ─── Phase 3: model catalogue ────────────────────────────────────────────────
@@ -2359,9 +2286,7 @@ describe("CodexSession session-end summarization", () => {
     expect(indexCalls.length).toBe(0);
   });
 
-  test("runSummarize throws → existing logFileHandle.end() + agentsMdHandle.cleanup() still run", async () => {
-    // Use a real temp dir as cwd so we exercise writeCodexAgentsMd, then spy on
-    // the resulting AGENTS.md file. After cleanup the file MUST be gone.
+  test("runSummarize throws → logFileHandle.end() still runs", async () => {
     const cwd = `/tmp/codex-summary-cleanup-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     mkdirSync(cwd, { recursive: true });
     const agentsMdPath = join(cwd, "AGENTS.md");
@@ -2377,11 +2302,11 @@ describe("CodexSession session-end summarization", () => {
     const config = testConfig({
       logFile,
       cwd,
-      systemPrompt: "test system prompt", // ensures AGENTS.md gets written
+      systemPrompt: "test system prompt",
     });
     await runSessionWithFakeThreadAndDeps(events, config, deps);
 
-    // AGENTS.md cleanup must have run despite the summarize throw.
+    // Summarization failure must not create an instruction file.
     expect(await Bun.file(agentsMdPath).exists()).toBe(false);
 
     // Log file flush must have run despite the summarize throw — the log file

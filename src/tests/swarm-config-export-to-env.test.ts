@@ -7,7 +7,11 @@ import { closeDb, createAgent, getSwarmConfigs, initDb, upsertSwarmConfig } from
 import { handleConfig } from "../http/config";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
-import { ENV_EXPORT_RESTRICTED_KEYS, envExportRestrictedError } from "../utils/config-env-export";
+import {
+  ENV_EXPORT_RESTRICTED_KEYS,
+  effectiveExportToEnv,
+  envExportRestrictedError,
+} from "../utils/config-env-export";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
@@ -153,6 +157,16 @@ describe("swarm_config exportToEnv", () => {
     expect(row?.exportToEnv).toBe(false);
   });
 
+  test("the speech-to-text key never exports, even from an older stored true", async () => {
+    const key = "TRANSCRIPTION_API_KEY";
+    const stored = await upsertSwarmConfig({ scope: "global", key, value: "t", isSecret: true });
+    expect(stored.exportToEnv).toBe(false);
+    await expect(
+      upsertSwarmConfig({ scope: "global", key, value: "t", isSecret: true, exportToEnv: true }),
+    ).rejects.toThrow(envExportRestrictedError(key));
+    expect(effectiveExportToEnv(key, true)).toBe(false);
+  });
+
   test("the config API and /api/config/resolved carry the flag", async () => {
     const put = await fetch(`${baseUrl}/api/config`, {
       method: "PUT",
@@ -231,6 +245,11 @@ describe("migration 215", () => {
     "X_CLIENT_SECRET",
     "connection.example.secret",
   ];
+  // Restricted after migration 215 shipped. Row readers force the flag off
+  // (effectiveExportToEnv), so an older stored true never reaches an agent.
+  const RESTRICTED_AT_215 = [...ENV_EXPORT_RESTRICTED_KEYS].filter(
+    (key) => key !== "TRANSCRIPTION_API_KEY",
+  );
 
   test("backfills true and turns off only the deny list", () => {
     const db = new Database(":memory:");
@@ -243,7 +262,7 @@ describe("migration 215", () => {
       const insert = db.prepare(
         "INSERT INTO swarm_config (id, scope, key, value, isSecret, createdAt, lastUpdatedAt) VALUES (?, 'global', ?, 'v', 1, 'now', 'now')",
       );
-      const keys = [...MUST_STAY_EXPORTED, ...DENY_ONLY, ...ENV_EXPORT_RESTRICTED_KEYS];
+      const keys = [...MUST_STAY_EXPORTED, ...DENY_ONLY, ...RESTRICTED_AT_215];
       for (const key of keys) insert.run(crypto.randomUUID(), key);
 
       db.exec(readFileSync(MIGRATION, "utf8"));
@@ -257,7 +276,7 @@ describe("migration 215", () => {
           .map((row) => [row.key, row.exportToEnv]),
       );
       for (const key of MUST_STAY_EXPORTED) expect([key, flags[key]]).toEqual([key, 1]);
-      for (const key of [...DENY_ONLY, ...ENV_EXPORT_RESTRICTED_KEYS]) {
+      for (const key of [...DENY_ONLY, ...RESTRICTED_AT_215]) {
         expect([key, flags[key]]).toEqual([key, 0]);
       }
     } finally {

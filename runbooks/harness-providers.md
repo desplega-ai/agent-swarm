@@ -485,6 +485,7 @@ When disabled, the adapter keeps `-p <prompt>` and the live session exposes no `
 
 Production Codex sessions start a fresh `codex app-server` inside the existing isolated per-task runner. The parent adapter and task runner keep their JSONL control channel open. The task runner uses JSON-RPC with the app-server.
 
+- Session system instructions go in `thread/start.developerInstructions`. Never inject them into the task repository's `AGENTS.md` or `CLAUDE.md`. Before startup, `recoverLegacyCodexAgentsMd` strips stale blocks and restores swapped symlinks from older versions' out-of-repo records, preserving in-tree edits without reading or writing out-of-tree targets. New sessions leave repository instruction files and symlinks unchanged.
 - `steer` sends native `turn/steer`. Codex adds the input to the active turn.
 - `queue` stores the message in the adapter. Delivery succeeds only after Codex accepts the next native turn.
 - If the session ends before that turn starts, delivery fails and the pending message remains eligible for follow-up promotion.
