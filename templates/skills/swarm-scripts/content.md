@@ -66,7 +66,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - `agentId` is propagated through the `X-Agent-ID` header, so SDK calls run as you. `taskId` is not ambient: pass it in `args` when the script calls `task_storeProgress`.
 - A script invoked from a workflow node may run under a workflow identity.
 - Return compact structured data. Raw logs, full HTML, big JSON arrays, and file contents stay inside the script.
-- Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead. The cap also applies to a script called through `ctx.step.swarmScript`; the step's `timeoutMs` does not extend it. A long LLM call, such as a 2,000-word draft, goes in a `ctx.step.rawLlm` step inside `launch-script-run`, never in a called script.
+- Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead. The cap also applies to a script called through `ctx.step.swarmScript`; the step's `timeoutMs` does not extend it. A long LLM call, such as a 2,000-word draft, goes in a `ctx.step.rawLlm` step inside `launch-script-run`, never in a called script. A `targetType: "script"` schedule gets 60 s; a manual `script-run` gets 30 s, so a candidate that finishes well under 30 s by hand has margin on the schedule. A nested `ctx.swarm.script_run` gets its own 30 s but runs inside its caller's remaining time: run slow children as sibling calls from the outer script, not deeper in the chain.
 
 ### What `ctx` holds
 
@@ -130,7 +130,7 @@ Order of preference:
 
 1. A registered connection: `ctx.api.<slug>.<operationId>({ path, query, header, body })` (OpenAPI), `ctx.api.<slug>.graphql(query, variables)` (GraphQL), `ctx.mcp.<slug>.<toolName>(args)` (MCP, proxied server-side, returns the raw MCP envelope: read `res.structuredContent ?? res.content?.[0]?.text`). Credentials attach at egress. The script never sees them. OAuth tokens refresh on their own.
 2. A credential binding placeholder in a hand-written request: `Authorization: Bearer [REDACTED:GITHUB_TOKEN]`. The runtime substitutes the value at egress, only for the binding's allowed hosts.
-3. `ctx.swarm.config.get("KEY")` for a config value you pass to `ctx.stdlib.fetch` as a header value. Unwrap it with `ctx.stdlib.Redacted.value(...)` inside the header itself (a wrapped value sends the literal `<redacted>`), and never log it. Secret values are scrubbed from run output.
+3. `ctx.swarm.config.get("KEY")` for a config value you pass to `ctx.stdlib.fetch` as a header value. Unwrap it with `ctx.stdlib.Redacted.value(...)` inside the header itself (a wrapped value sends the literal `<redacted>`), and never log it. Secret values are scrubbed from run output. Not available in `launch-script-run` (durable runs have no `ctx.swarm.config`): collect there without secrets, then pass the run's output to a short `script-run` that makes the authenticated calls.
 
 A raw secret, or the output of `get-config` with `includeSecrets: true`, must not appear in script source, script `args`, a schedule's `taskTemplate` or `scriptArgs`, or a task description. Those are stored as plain text and replayed on every run.
 
