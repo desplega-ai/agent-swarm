@@ -214,6 +214,20 @@ describe("Memory System", () => {
       expect(xChars).toBeGreaterThanOrEqual(2500);
     });
 
+    test("keeps sections under MIN_CHUNK_SIZE, packed into shared chunks", () => {
+      const preamble = "Report preamble with enough words to stand as its own chunk here.";
+      const sections = Array.from({ length: 100 }, (_, i) => `## Lane ${i}\n\nfact-${i} ok`);
+      const chunks = chunkContent([preamble, ...sections].join("\n\n"));
+
+      const stored = chunks.map((c) => c.content).join("\n");
+      for (let i = 0; i < 100; i++) {
+        expect(stored).toContain(`## Lane ${i}\n\nfact-${i} ok`);
+      }
+      expect(chunks[0]!.content).toBe(preamble);
+      expect(chunks.length).toBeLessThan(6);
+      for (const chunk of chunks) expect(chunk.content.length).toBeLessThanOrEqual(2000);
+    });
+
     test("chunk indices are sequential", () => {
       const longText = "A ".repeat(3000);
       const chunks = chunkContent(longText);

@@ -42,18 +42,51 @@ export function chunkContent(text: string): MemoryChunk[] {
     }
   }
 
-  // Filter out trivially small chunks and build final result
-  const filtered = rawChunks.filter((c) => c.content.trim().length >= MIN_CHUNK_SIZE);
-  if (filtered.length === 0) {
-    return [{ content: trimmed, chunkIndex: 0, totalChunks: 1, headings: [] }];
-  }
-
-  return filtered.map((c, i) => ({
-    content: c.headings.length > 0 ? `${c.headings.join(" > ")}\n\n${c.content}` : c.content,
+  const packed = packSmallSections(rawChunks);
+  return packed.map((c, i) => ({
+    content: c.content,
     chunkIndex: i,
-    totalChunks: filtered.length,
+    totalChunks: packed.length,
     headings: c.headings,
   }));
+}
+
+function renderSection(section: Section): string {
+  return section.headings.length > 0
+    ? `${section.headings.join(" > ")}\n\n${section.content}`
+    : section.content;
+}
+
+/**
+ * Render each section with its heading path. A section below MIN_CHUNK_SIZE
+ * is too small to embed on its own, so consecutive small sections share a
+ * chunk up to MAX_CHUNK_SIZE. No section content is dropped.
+ */
+function packSmallSections(sections: Section[]): Section[] {
+  const out: Section[] = [];
+  let pending: { parts: string[]; length: number; headings: string[] } | null = null;
+  const flush = () => {
+    if (pending) out.push({ content: pending.parts.join("\n\n"), headings: pending.headings });
+    pending = null;
+  };
+
+  for (const section of sections) {
+    const rendered = renderSection(section);
+    if (section.content.trim().length >= MIN_CHUNK_SIZE) {
+      flush();
+      out.push({ content: rendered, headings: section.headings });
+      continue;
+    }
+    if (pending && pending.length + 2 + rendered.length > MAX_CHUNK_SIZE) flush();
+    if (pending) {
+      pending.parts.push(rendered);
+      pending.length += 2 + rendered.length;
+    } else {
+      pending = { parts: [rendered], length: rendered.length, headings: section.headings };
+    }
+  }
+  flush();
+  return out;
 }
 
 interface Section {

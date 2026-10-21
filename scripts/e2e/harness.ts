@@ -23,6 +23,8 @@ const DEFAULT_MODELS: Record<string, string> = {
   cursor: "gpt-5.4-nano",
   // xAI's cheapest model (`grok models` with an API key).
   grok: "grok-build-0.1",
+  // The generic ACP provider on its opencode target (`opencode acp`).
+  acp: "openrouter/deepseek/deepseek-v4-flash",
 };
 // OpenAI-compatible registry providers: keys (canonical and alias) and their
 // `<ID>_BASE_URL` overrides, forwarded to pi/opencode workers.
@@ -59,6 +61,10 @@ const PROVIDER_CREDENTIAL_KEYS = {
   grok: {
     keys: ["XAI_API_KEY", "GROK_BINARY", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
     fallbackKeys: [],
+  },
+  acp: {
+    keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", ...OPENAI_COMPATIBLE_KEYS],
+    fallbackKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   },
 } as const;
 type HarnessChild = Bun.Subprocess<"ignore", "pipe", "pipe">;
@@ -147,12 +153,13 @@ function workerEnv(
   if (provider === "claude" && process.env.E2E_CLAUDE_BINARY) {
     env.CLAUDE_BINARY = process.env.E2E_CLAUDE_BINARY;
   }
+  if (provider === "acp") env.ACP_TARGET = "opencode";
   return env;
 }
 
 function requireCredential(provider: string): void {
   const directKey =
-    provider === "pi" || provider === "opencode"
+    provider === "pi" || provider === "opencode" || provider === "acp"
       ? openAICompatibleKeyRequirement(modelFor(provider))
       : null;
   if (directKey) {
@@ -196,11 +203,14 @@ function requireCredential(provider: string): void {
       Bun.which(process.env.AMP_BINARY || "amp"),
       "Amp requires a preinstalled amp executable",
     );
-  } else if (provider === "opencode") {
+  } else if (provider === "opencode" || provider === "acp") {
     expect(
       process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY,
-      "Opencode requires OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY",
+      `${provider} requires OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY`,
     );
+  }
+  if (provider === "acp") {
+    expect(Bun.which("opencode"), "acp requires a preinstalled opencode executable");
   }
 }
 
@@ -402,7 +412,9 @@ async function runHarnessAttempt(
   let cost: HarnessCost | undefined;
   try {
     expect(
-      ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp", "grok"].includes(provider),
+      ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp", "grok", "acp"].includes(
+        provider,
+      ),
       `Unsupported harness provider: ${provider}`,
     );
     requireCredential(provider);
@@ -504,6 +516,12 @@ async function runHarnessAttempt(
       expect(cost.records > 0, "Claude task has no persisted cost record");
       expect(cost.inputTokens > 0, "Claude persisted cost has no input tokens");
       expect(cost.outputTokens > 0, "Claude persisted cost has no output tokens");
+    }
+    if (provider === "acp") {
+      // ACP turn usage arrives only through the SDK's unstable schema types.
+      expect(cost.records > 0, "acp task has no persisted cost record");
+      expect(cost.inputTokens > 0, "acp persisted cost has no input tokens");
+      expect(cost.outputTokens > 0, "acp persisted cost has no output tokens");
     }
     return { status: "pass", durationMs: Date.now() - started, cost };
   } catch (error) {

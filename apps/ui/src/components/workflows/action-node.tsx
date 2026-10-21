@@ -17,12 +17,18 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
+import { useConfigs } from "@/api/hooks/use-config-api";
 import { useExecutorTypes, useWorkflows } from "@/api/hooks/use-workflows";
 import { WorkflowNodeShell } from "@/components/shared/workflow-node-shell";
 import { Badge } from "@/components/ui/badge";
 import type { FlowNodeData } from "./graph-utils";
 import { statusBorderColor } from "./node-styles";
-import { subWorkflowTargetId, systemOneExtractionSummary, systemOneSummary } from "./node-summary";
+import {
+  SYSTEM_ONE_DEFAULT_PROVIDER,
+  subWorkflowTargetId,
+  systemOneExtractionSummary,
+  systemOneSummary,
+} from "./node-summary";
 
 type NodeStyle = {
   border: string;
@@ -153,12 +159,22 @@ function SubWorkflowTarget({ workflowId }: { workflowId: string }) {
   );
 }
 
+/** A node with no provider runs on the swarm's `SYSTEM_ONE_DEFAULT_PROVIDER`, read like the server does. */
+function SystemOneDecisionSubtitle({ config }: { config: Record<string, unknown> | undefined }) {
+  const { data: configs } = useConfigs({ scope: "global" });
+  const configured = configs
+    ?.find((c) => c.key === "SYSTEM_ONE_DEFAULT_PROVIDER")
+    ?.value.trim()
+    .toLowerCase();
+  return <>{systemOneSummary(config, configured || SYSTEM_ONE_DEFAULT_PROVIDER)}</>;
+}
+
 function nodeSubtitle(d: FlowNodeData) {
   if (d.nodeType === "sub-workflow") {
     const workflowId = subWorkflowTargetId(d.config);
     return workflowId ? <SubWorkflowTarget workflowId={workflowId} /> : undefined;
   }
-  if (d.nodeType === "system-one-decision") return systemOneSummary(d.config);
+  if (d.nodeType === "system-one-decision") return <SystemOneDecisionSubtitle config={d.config} />;
   if (d.nodeType === "system-one-extraction") return systemOneExtractionSummary(d.config);
   return undefined;
 }

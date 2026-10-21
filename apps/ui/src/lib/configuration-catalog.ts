@@ -374,7 +374,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "HEARTBEAT_CHECKLIST_GATE_SCRIPT",
         label: "Checklist gate script",
         description:
-          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Unset runs the built-in heartbeat-jev-gate when a global TYPESAFE_API_KEY or OPENROUTER_API_KEY is set. Set off to turn the gate off.",
+          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Unset runs the built-in heartbeat-jev-gate when a global TYPESAFE_API_KEY or OPENROUTER_API_KEY is set, or CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) with CLOUDFLARE_ACCOUNT_ID. Set off to turn the gate off.",
         kind: "string",
         defaultValue: "",
         placeholder: "heartbeat-jev-gate",
@@ -1253,6 +1253,39 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/chat-sdk`,
       },
       {
+        key: "TRANSCRIPTION_PROVIDER",
+        label: "Transcription provider",
+        description:
+          "Request shape for voice-note transcription. openai covers OpenAI, Groq and self-hosted whisper; elevenlabs is ElevenLabs speech-to-text. Transcription stays off until the TRANSCRIPTION_API_KEY secret is set. Applies to the next voice note.",
+        kind: "enum",
+        options: ["openai", "elevenlabs"],
+        defaultValue: "openai",
+        restartRequired: false,
+        docsUrl: `${DOCS}integrations/chat-sdk#voice-notes`,
+      },
+      {
+        key: "TRANSCRIPTION_BASE_URL",
+        label: "Transcription base URL",
+        description:
+          "Base URL of the transcription service. Empty uses the provider's default: https://api.openai.com/v1 for openai, https://api.elevenlabs.io/v1 for elevenlabs.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "https://api.openai.com/v1",
+        restartRequired: false,
+        docsUrl: `${DOCS}integrations/chat-sdk#voice-notes`,
+      },
+      {
+        key: "TRANSCRIPTION_MODEL",
+        label: "Transcription model",
+        description:
+          "Model name sent to the transcription service. Empty uses the provider's default: whisper-1 for openai, scribe_v2 for elevenlabs.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "whisper-1",
+        restartRequired: false,
+        docsUrl: `${DOCS}integrations/chat-sdk#voice-notes`,
+      },
+      {
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         description:
@@ -1461,6 +1494,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "10000",
         placeholder: "10000",
         restartRequired: true,
+      },
+      {
+        key: "SYSTEM_ONE_DEFAULT_PROVIDER",
+        label: "Default SystemOne provider",
+        description:
+          "Decision host for a system-one-decision node or system-one-decide call that names no provider: typesafe or openrouter (Jev), cloudflare (Clef), laya, or openai. A node that names its provider keeps it. Each host needs its own credential on the Secrets page; cloudflare also needs CLOUDFLARE_ACCOUNT_ID. Applies to the next decision, with no workflow edit.",
+        kind: "enum",
+        options: ["typesafe", "openrouter", "cloudflare", "laya", "openai"],
+        defaultValue: "typesafe",
+        docsUrl: `${DOCS}concepts/workflows`,
       },
       {
         key: "SCRIPT_EXECUTOR",

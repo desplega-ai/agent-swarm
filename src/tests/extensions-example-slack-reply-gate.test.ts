@@ -1,8 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import * as contractRuntime from "../extensions/contract-runtime";
+import { registerSystemOneDecideTool } from "../tools/system-one-decide";
 
-// Unit tests for templates/extensions/slack-reply-gate/hooks.ts. Every Jev and Slack
-// call goes to a mocked fetch; nothing reaches the network.
+// Unit tests for templates/extensions/slack-reply-gate/hooks.ts. Decisions go to a
+// stubbed `ctx.swarm.systemOne_decide` and Slack calls to a mocked fetch; nothing
+// reaches the network. The last block runs the real system-one-decide tool behind it.
 
 // `swarm-extension` is a bare import the extension loader shims to contract-runtime.
 mock.module("swarm-extension", () => contractRuntime);
@@ -11,11 +15,14 @@ type Handler = (event: any, ctx: any) => Promise<any>;
 let handler: Handler;
 let mod: any;
 
-// The hook reads its secrets from the API process env. Each test sets its own; the
-// runner's values are saved here and restored after the file.
+// The hook reads credential presence and the Slack token from the API process env.
+// Each test sets its own; the runner's values are saved here and restored after the file.
 const ENV_KEYS = [
   "TYPESAFE_API_KEY",
   "OPENROUTER_API_KEY",
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_API_KEY",
+  "CLOUDFLARE_ACCOUNT_ID",
   "SLACK_BOT_TOKEN",
   ...["ACCEPTED", "BUFFERED", "NOW", "STEERED"].map((k) => `SLACK_REACTION_${k}`),
 ];
@@ -54,8 +61,25 @@ const slackOk = (method: string, body: any): Response => {
 };
 let slackReply: SlackReply = slackOk;
 
-/** Mocked Jev client: answer every call with `reply(body)`. Slack calls go to `slackReply`. */
-const mockJev = (reply: (body: any) => Response | Promise<Response>) => {
+/** What the MCP bridge returns for a tool call: the tool's structured content in `data`. */
+type BridgeResult = { success: boolean; status: number; data: Record<string, unknown> };
+const served = (data: Record<string, unknown>): BridgeResult => ({
+  success: true,
+  status: 200,
+  data: { success: true, message: "Decision", ...data },
+});
+const refused = (message: string): BridgeResult => ({
+  success: true,
+  status: 200,
+  data: { success: false, message },
+});
+
+type DecideReply = (args: any) => BridgeResult | Promise<BridgeResult>;
+let decideReply: DecideReply = () => refused("no decision stub");
+
+/** Stub `systemOne_decide` with `reply(args)`. Slack calls go to `slackReply` through fetch. */
+const mockJev = (reply: DecideReply) => {
+  decideReply = reply;
   globalThis.fetch = (async (url: any, init: any) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
     const href = String(url);
@@ -64,8 +88,7 @@ const mockJev = (reply: (body: any) => Response | Promise<Response>) => {
       slackCalls.push({ method, body, auth: String(init?.headers?.Authorization ?? "") });
       return slackReply(method, body);
     }
-    jevCalls.push({ url: href, body, signal: init?.signal });
-    return reply(body);
+    throw new Error(`unexpected fetch: ${href}`);
   }) as typeof fetch;
 };
 const jevChoice = (
@@ -73,27 +96,29 @@ const jevChoice = (
   confidence = 0.9,
   probabilities: Record<string, number> | null = { [choice]: confidence, other: 1 - confidence },
 ) =>
-  mockJev(
-    () =>
-      new Response(
-        JSON.stringify({
-          model: "jev-1.13.0",
-          answers: {
-            reason: {
-              type: "choice",
-              choice,
-              confidence,
-              ...(probabilities ? { probabilities } : {}),
-            },
-          },
-        }),
-        { status: 200 },
-      ),
+  mockJev(() =>
+    served({
+      model: "jev-1.13.0",
+      answers: {
+        reason: {
+          type: "choice",
+          choice,
+          confidence,
+          ...(probabilities ? { probabilities } : {}),
+        },
+      },
+    }),
   );
 
 const makeCtx = (
   config: Record<string, unknown> = {},
-  opts: { key?: string; openrouterKey?: string; slackToken?: string } = {},
+  opts: {
+    key?: string;
+    openrouterKey?: string;
+    cloudflareToken?: string;
+    cloudflareAccount?: string;
+    slackToken?: string;
+  } = {},
 ) => {
   const kv: Record<string, unknown> = {};
   const counters: Record<string, number> = {};
@@ -103,8 +128,14 @@ const makeCtx = (
   };
   setEnv("TYPESAFE_API_KEY", opts.key ?? "tsk-test");
   setEnv("OPENROUTER_API_KEY", opts.openrouterKey ?? "");
+  setEnv("CLOUDFLARE_API_TOKEN", opts.cloudflareToken ?? "");
+  setEnv("CLOUDFLARE_ACCOUNT_ID", opts.cloudflareAccount ?? "");
   setEnv("SLACK_BOT_TOKEN", opts.slackToken ?? "xoxb-test");
-  const swarm = {
+  const swarm: Record<string, (args: any) => Promise<unknown>> = {
+    systemOne_decide: async (args: any) => {
+      jevCalls.push({ provider: args.provider, body: args });
+      return decideReply(args);
+    },
     kv_set: async ({ key, value }: any) => {
       kv[key] = value;
       return { success: true };
@@ -154,6 +185,7 @@ beforeEach(() => {
   jevCalls = [];
   slackCalls = [];
   slackReply = slackOk;
+  decideReply = () => refused("no decision stub");
   mod.resetKeyCache();
 });
 afterEach(async () => {
@@ -325,107 +357,112 @@ describe("decide", () => {
   });
 });
 
-describe("Jev transport", () => {
+describe("provider", () => {
   const cfg = (extra: Record<string, unknown> = {}) => mod.config.parse(extra);
+  const CF_ACCOUNT = "0123456789abcdef0123456789abcdef";
 
-  test("auto prefers TypeSafe when both keys are set", () => {
-    makeCtx({}, { key: "tsk-test", openrouterKey: "or-test" });
-    expect(mod.resolveTransport(cfg())).toEqual({
-      provider: "typesafe",
-      endpoint: "https://api.typesafe.ai/v1/systemone",
-      key: "tsk-test",
-      model: "jev-latest",
-    });
+  test("auto prefers TypeSafe when every credential is set", () => {
+    makeCtx(
+      {},
+      {
+        key: "tsk-test",
+        openrouterKey: "or-test",
+        cloudflareToken: "cf",
+        cloudflareAccount: CF_ACCOUNT,
+      },
+    );
+    expect(mod.resolveProvider(cfg())).toEqual({ provider: "typesafe", model: "jev-latest" });
   });
 
-  test("auto falls back to OpenRouter when only its key is set", () => {
-    makeCtx({}, { key: "", openrouterKey: "or-test" });
-    expect(mod.resolveTransport(cfg())).toEqual({
+  test("auto falls back to OpenRouter, then to Clef", () => {
+    makeCtx(
+      {},
+      { key: "", openrouterKey: "or-test", cloudflareToken: "cf", cloudflareAccount: CF_ACCOUNT },
+    );
+    expect(mod.resolveProvider(cfg())).toEqual({
       provider: "openrouter",
-      endpoint: "https://openrouter.ai/api/alpha/decisions",
-      key: "or-test",
       model: "typesafe/jev-1.13",
     });
-  });
-
-  test("an explicit provider wins over auto order and needs its own key", () => {
-    makeCtx({}, { key: "tsk-test", openrouterKey: "or-test" });
-    expect(mod.resolveTransport(cfg({ provider: "openrouter" })).provider).toBe("openrouter");
     mod.resetKeyCache();
-    makeCtx({}, { key: "", openrouterKey: "or-test" });
-    expect(() => mod.resolveTransport(cfg({ provider: "typesafe" }))).toThrow(
-      "no TYPESAFE_API_KEY",
-    );
+    makeCtx({}, { key: "", cloudflareToken: "cf", cloudflareAccount: CF_ACCOUNT });
+    expect(mod.resolveProvider(cfg())).toEqual({ provider: "cloudflare", model: "clef" });
   });
 
-  test("auto with no key names both secrets", () => {
+  test("auto accepts CLOUDFLARE_API_KEY and needs the account id", () => {
+    makeCtx({}, { key: "", cloudflareAccount: CF_ACCOUNT });
+    process.env.CLOUDFLARE_API_KEY = "cf-key";
+    expect(mod.resolveProvider(cfg()).provider).toBe("cloudflare");
+    mod.resetKeyCache();
+    makeCtx({}, { key: "", cloudflareToken: "cf" });
+    delete process.env.CLOUDFLARE_API_KEY;
+    expect(() => mod.resolveProvider(cfg())).toThrow("CLOUDFLARE_ACCOUNT_ID");
+  });
+
+  test("an explicit provider is used as is; the server checks its credential", () => {
+    makeCtx({}, { key: "tsk-test", openrouterKey: "or-test" });
+    expect(mod.resolveProvider(cfg({ provider: "openrouter" })).provider).toBe("openrouter");
+    expect(
+      mod.resolveProvider(cfg({ provider: "cloudflare", cloudflareModel: "clef-flash" })),
+    ).toEqual({
+      provider: "cloudflare",
+      model: "clef-flash",
+    });
+    // A host with no model setting sends none: the server uses the host's default.
+    expect(mod.resolveProvider(cfg({ provider: "laya" }))).toEqual({
+      provider: "laya",
+      model: undefined,
+    });
+  });
+
+  test("auto with no credential names every secret", () => {
     makeCtx({}, { key: "", openrouterKey: "" });
-    expect(() => mod.resolveTransport(cfg())).toThrow("no TYPESAFE_API_KEY or OPENROUTER_API_KEY");
+    expect(() => mod.resolveProvider(cfg())).toThrow(
+      "no TYPESAFE_API_KEY, OPENROUTER_API_KEY, or CLOUDFLARE_API_TOKEN with CLOUDFLARE_ACCOUNT_ID",
+    );
   });
 
-  test("an OpenRouter-only swarm classifies through the Decisions endpoint", async () => {
-    // Shape captured from a live OpenRouter Decisions call to typesafe/jev-1.13.
-    mockJev(() =>
-      Response.json({
-        model: "typesafe/jev-1.13-20260917",
-        answers: {
-          reason: {
-            type: "choice",
-            choice: "reaction_only",
-            probabilities: { direct_ask: 0, reaction_only: 0.95, banter_between_others: 0.05 },
-            confidence: 0.93,
-          },
-        },
-        usage: { input_tokens: 430, output_tokens: 53, cost: 0.00001806 },
-        id: "gen-dec-1",
-        provider: "TypeSafe",
-      }),
-    );
+  test("the decision goes through systemOne_decide, never a direct fetch", async () => {
+    jevChoice("reaction_only", 0.95);
     const { ctx, kv } = makeCtx({ mode: "enforce" }, { key: "", openrouterKey: "or-test" });
     const result = await handler(slackEvent(["lol nice"]), ctx);
-    expect(result).toEqual({ action: "block", reason: expect.stringContaining("p(skip) 1.00") });
+    expect(result).toEqual({ action: "block", reason: expect.stringContaining("reaction_only") });
     expect(jevCalls).toHaveLength(1);
-    expect(jevCalls[0].url).toBe("https://openrouter.ai/api/alpha/decisions");
-    expect(jevCalls[0].body.model).toBe("typesafe/jev-1.13");
+    expect(jevCalls[0].body).toMatchObject({
+      provider: "openrouter",
+      model: "typesafe/jev-1.13",
+      timeoutMs: 3000,
+      maxRetries: 0,
+    });
     expect(Object.keys(jevCalls[0].body.questions.reason.criteria)).toEqual(
       Object.keys(mod.REASONS),
     );
+    expect(JSON.stringify(jevCalls[0].body)).not.toContain("or-test");
     expect(kv.last).toMatchObject({ provider: "openrouter", reason: "reaction_only" });
   });
 
-  test("an OpenRouter HTTP error fails open and names the provider", async () => {
-    mockJev(() => Response.json({ error: { message: "no credits" } }, { status: 402 }));
+  test("a provider error relayed by the server fails open and names the provider", async () => {
+    mockJev(() => refused("OpenRouter returned HTTP 402"));
     const { ctx, kv } = makeCtx({ mode: "enforce" }, { key: "", openrouterKey: "or-test" });
     expect(await handler(slackEvent(["lol"]), ctx)).toBeUndefined();
     expect(kv.last).toMatchObject({
       action: "fail-open",
-      error: expect.stringContaining("openrouter 402"),
+      error: expect.stringContaining("openrouter: OpenRouter returned HTTP 402"),
     });
   });
 });
 
 describe("fail open", () => {
   const cases: Array<[string, () => void, Record<string, unknown>]> = [
-    ["HTTP 500", () => mockJev(() => new Response("boom", { status: 500 })), {}],
-    ["network error", () => mockJev(() => Promise.reject(new Error("ECONNRESET"))), {}],
+    ["provider error", () => mockJev(() => refused("TypeSafe returned HTTP 500")), {}],
     [
-      "malformed answer",
-      () => mockJev(() => new Response(JSON.stringify({ answers: {} }), { status: 200 })),
+      "bridge error",
+      () => mockJev(() => ({ success: false, status: 500, data: { error: "boom" } })),
       {},
     ],
+    ["network error", () => mockJev(() => Promise.reject(new Error("ECONNRESET"))), {}],
+    ["malformed answer", () => mockJev(() => served({ answers: {} })), {}],
     ["unknown label", () => jevChoice("definitely_skip"), {}],
-    [
-      "timeout",
-      () =>
-        mockJev(
-          (_body) =>
-            new Promise<Response>((_resolve, reject) => {
-              const signal = jevCalls.at(-1)?.signal as AbortSignal;
-              signal.addEventListener("abort", () => reject(new Error("aborted")));
-            }),
-        ),
-      { timeoutMs: 50 },
-    ],
+    ["timeout", () => mockJev(() => new Promise<BridgeResult>(() => {})), { timeoutMs: 50 }],
   ];
   for (const [label, arrange, cfg] of cases) {
     test(`${label} -> continue, error recorded`, async () => {
@@ -440,7 +477,7 @@ describe("fail open", () => {
     });
   }
 
-  test("missing API key -> continue without calling Jev", async () => {
+  test("missing API key under auto -> continue without a decision call", async () => {
     jevChoice("reaction_only");
     const { ctx, counters } = makeCtx({ mode: "enforce" }, { key: "" });
     const result = await handler(slackEvent(["lol"]), ctx);
@@ -752,5 +789,139 @@ describe("mute on drop (enforce)", () => {
     await handler(slackEvent(["lol"]), makeCtx({ mode: "enforce" }).ctx);
     await mod.settleMutes();
     expect(slackCalls).toHaveLength(0);
+  });
+});
+
+describe("on the real system-one-decide tool", () => {
+  const CF_ACCOUNT = "0123456789abcdef0123456789abcdef";
+  const CF_TOKEN = "cf-reply-gate-example-token";
+  const CLEF_URL = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/ai/run/@cf/cloudflare/clef`;
+  let agentId: string;
+  let workersAi: Array<{ url: string; authorization: string | null; body: any }> = [];
+
+  beforeAll(async () => {
+    initDb(":memory:");
+    agentId = (await createAgent({ name: "reply-gate-ext", isLead: false, status: "idle" })).id;
+    await upsertSwarmConfig({ scope: "global", key: "CLOUDFLARE_ACCOUNT_ID", value: CF_ACCOUNT });
+  });
+  afterAll(() => closeDb());
+
+  /** `ctx.swarm.systemOne_decide` as the MCP bridge serves it, backed by the registered tool. */
+  const viaTool = (ctx: any) => {
+    const server = new McpServer({ name: "reply-gate-decide", version: "1" });
+    registerSystemOneDecideTool(server);
+    const tool = (server as any)._registeredTools["system-one-decide"];
+    ctx.swarm.systemOne_decide = async (args: any) => {
+      jevCalls.push({ provider: args.provider, body: args });
+      const result = await tool.handler(args, {
+        sessionId: "extension",
+        requestInfo: { headers: { "x-agent-id": agentId } },
+      });
+      return { success: true, status: 200, data: result.structuredContent };
+    };
+  };
+
+  /** Workers AI answering in its REST envelope; Slack calls go to `slackReply`. */
+  const mockWorkersAi = (choice: string, p: number) => {
+    workersAi = [];
+    globalThis.fetch = (async (input: any, init: any) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      if (url.startsWith("https://slack.com/api/")) {
+        const method = url.slice("https://slack.com/api/".length);
+        slackCalls.push({ method, body, auth: String(init?.headers?.authorization ?? "") });
+        return slackReply(method, body);
+      }
+      workersAi.push({ url, authorization: new Headers(init?.headers).get("authorization"), body });
+      const labels = Object.keys(mod.REASONS);
+      const rest = (1 - p) / (labels.length - 1);
+      const probabilities = Object.fromEntries(labels.map((l) => [l, l === choice ? p : rest]));
+      return Response.json({
+        result: {
+          model: "clef",
+          answers: { reason: { type: "choice", choice, probabilities, confidence: p } },
+          usage: { input_tokens: 412, output_tokens: 0 },
+        },
+        success: true,
+        errors: [],
+        messages: [],
+      });
+    }) as typeof fetch;
+  };
+
+  test("Clef classifies on the server; the hook never holds the token", async () => {
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLOUDFLARE_API_TOKEN",
+      value: CF_TOKEN,
+      isSecret: true,
+    });
+    mockWorkersAi("reaction_only", 0.9);
+    const { ctx, kv } = makeCtx(
+      { mode: "enforce" },
+      { key: "", cloudflareToken: "present", cloudflareAccount: CF_ACCOUNT },
+    );
+    viaTool(ctx);
+
+    const result = await handler(slackEvent(["lol nice"]), ctx);
+    expect(result).toEqual({ action: "block", reason: expect.stringContaining("reaction_only") });
+    expect(workersAi).toHaveLength(1);
+    expect(workersAi[0]).toMatchObject({ url: CLEF_URL, authorization: `Bearer ${CF_TOKEN}` });
+    expect(workersAi[0]!.body.model).toBe("clef");
+    expect(kv.last).toMatchObject({
+      provider: "cloudflare",
+      reason: "reaction_only",
+      action: "skipped",
+    });
+    expect(JSON.stringify(kv)).not.toContain(CF_TOKEN);
+  });
+
+  test("auto skips OpenRouter behind a gateway, which the server refuses, and reaches Clef", async () => {
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLOUDFLARE_API_TOKEN",
+      value: CF_TOKEN,
+      isSecret: true,
+    });
+    const prevBase = process.env.OPENROUTER_BASE_URL;
+    process.env.OPENROUTER_BASE_URL = "https://llm-gateway.example.com/v1";
+    try {
+      mockWorkersAi("reaction_only", 0.9);
+      const { ctx, kv } = makeCtx(
+        { mode: "enforce" },
+        {
+          key: "",
+          openrouterKey: "or-gateway-token",
+          cloudflareToken: "present",
+          cloudflareAccount: CF_ACCOUNT,
+        },
+      );
+      viaTool(ctx);
+
+      const result = await handler(slackEvent(["lol nice"]), ctx);
+      expect(result).toEqual({ action: "block", reason: expect.stringContaining("reaction_only") });
+      expect(jevCalls.map((c) => c.provider)).toEqual(["openrouter", "cloudflare"]);
+      expect(workersAi).toHaveLength(1);
+      expect(workersAi[0]!.url).toBe(CLEF_URL);
+      expect(kv.last).toMatchObject({ provider: "cloudflare", action: "skipped" });
+    } finally {
+      if (prevBase === undefined) delete process.env.OPENROUTER_BASE_URL;
+      else process.env.OPENROUTER_BASE_URL = prevBase;
+    }
+  });
+
+  test("a token missing on the server fails open, as before", async () => {
+    await getDbClient().run("DELETE FROM swarm_config WHERE key = 'CLOUDFLARE_API_TOKEN'");
+    mockWorkersAi("reaction_only", 0.9);
+    const { ctx, kv, counters } = makeCtx({ mode: "enforce", provider: "cloudflare" }, { key: "" });
+    viaTool(ctx);
+
+    expect(await handler(slackEvent(["lol"]), ctx)).toBeUndefined();
+    expect(workersAi).toHaveLength(0);
+    expect(counters.error).toBe(1);
+    expect(kv.last).toMatchObject({
+      action: "fail-open",
+      error: expect.stringContaining("CLOUDFLARE_API_TOKEN is not configured"),
+    });
   });
 });

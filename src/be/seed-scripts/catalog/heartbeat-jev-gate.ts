@@ -13,11 +13,15 @@ export const argsSchema = z.object({
     .min(0)
     .max(1)
     .optional()
-    .describe("Quiet when Jev's p(needs action) is below this (default 0.5)"),
+    .describe(
+      "Quiet when the model's p(needs action) is below this (default: the provider's measured threshold, 0.5 for Jev, 0.2 for Clef)",
+    ),
   provider: z
-    .enum(["auto", "typesafe", "openrouter"])
+    .enum(["auto", "typesafe", "openrouter", "cloudflare"])
     .optional()
-    .describe("Jev host; auto prefers TypeSafe (default auto)"),
+    .describe(
+      "Decision host: typesafe or openrouter (Jev), cloudflare (Clef). auto tries them in that order (default auto)",
+    ),
   timeZone: z
     .string()
     .optional()
@@ -28,25 +32,56 @@ export const argsSchema = z.object({
     .min(1_000)
     .max(45_000)
     .optional()
-    .describe("Abandon the Jev call after this many ms (default 25000); the gate deadline is 60 s"),
+    .describe(
+      "Abandon the decision call after this many ms (default 25000); the gate deadline is 60 s",
+    ),
 });
 
 const KV_NAMESPACE = "heartbeat-jev-gate";
 const KV_KEY = "setup";
-// Measured per decision in the 2026-10-15 heartbeat replay (229 states).
-const COST_PER_DECISION = "$0.00004";
+// Jev's cost, measured per decision in the 2026-10-15 heartbeat replay (229 states).
+const JEV_COST_PER_DECISION = "$0.00004";
+// Clef replayed on the same 229 states and labels (2026-10-20): 0.2 is the highest
+// threshold that misses none of the 9 ticks where the Lead acted (57 quiet ticks;
+// Jev at 0.5 has 100). Above 0.21 Clef starts missing real asks.
+const CLEF_THRESHOLD = 0.2;
 
-// Jev is called through `ctx.swarm.systemOne_decide`: the API server reads the
-// key and sends the request, so no key ever enters this script's realm. The
+// The model is called through `ctx.swarm.systemOne_decide`: the API server reads
+// the key and sends the request, so no key ever enters this script's realm. The
 // server also refuses OpenRouter when the effective OPENROUTER_BASE_URL (stored
-// config or deployment env) points at a gateway.
+// config or deployment env) points at a gateway; `auto` then tries the next
+// usable provider, since this script cannot read the deployment env.
+//
+// `credentials` lists what must be set: every group needs one of its keys.
+// `threshold` is the default the provider's own replay measured (see `CLEF_THRESHOLD`).
 const PROVIDERS = {
-  typesafe: { keyName: "TYPESAFE_API_KEY", model: "jev-latest" },
-  openrouter: { keyName: "OPENROUTER_API_KEY", model: "~typesafe/jev-latest" },
+  typesafe: {
+    model: "jev-latest",
+    family: "jev",
+    threshold: 0.5,
+    credentials: [["TYPESAFE_API_KEY"]],
+    setup: "`TYPESAFE_API_KEY` (Jev on TypeSafe)",
+  },
+  openrouter: {
+    model: "~typesafe/jev-latest",
+    family: "jev",
+    threshold: 0.5,
+    credentials: [["OPENROUTER_API_KEY"]],
+    setup: "`OPENROUTER_API_KEY` (Jev on OpenRouter)",
+  },
+  cloudflare: {
+    model: "clef",
+    family: "clef",
+    threshold: CLEF_THRESHOLD,
+    credentials: [["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY"], ["CLOUDFLARE_ACCOUNT_ID"]],
+    setup:
+      "`CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) as a secret plus the `CLOUDFLARE_ACCOUNT_ID` config value (Clef on Cloudflare Workers AI)",
+  },
 } as const;
 type ProviderId = keyof typeof PROVIDERS;
+const AUTO_ORDER: ProviderId[] = ["typesafe", "openrouter", "cloudflare"];
 
-// Worded exactly as in the replay that set the 0.5 threshold; changing it voids that result.
+// Worded exactly as in the replays that set the thresholds; changing it voids those results.
 const QUESTIONS = {
   act: {
     type: "noul",
@@ -229,21 +264,25 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
   };
 }
 
-function setupPrompt(keys: string[]) {
+function setupPrompt(candidates: ProviderId[]) {
+  const options = candidates.map((id) => `- ${PROVIDERS[id].setup}`);
   return {
-    title: "Heartbeat Jev gate: add a Jev credential or decline",
+    title: "Heartbeat gate: add a decision model credential or decline",
     detached: true,
     questions: [
       {
         id: "enable",
         type: "approval",
-        label: "Enable the Jev heartbeat gate?",
+        label: "Enable the heartbeat checklist gate?",
         description: [
-          "Before each recurring heartbeat checklist, the `heartbeat-jev-gate` script sends a short summary of swarm state (about 1,500 characters: new failures, due tracked items, task and agent counts) to Jev, a small decision model by TypeSafe, and asks whether the Lead needs to act. With `HEARTBEAT_CHECKLIST_GATE_MODE=enforce`, quiet ticks skip the Lead's checklist task.",
+          "Before each recurring heartbeat checklist, the `heartbeat-jev-gate` script sends a short summary of swarm state (about 1,500 characters: new failures, due tracked items, task and agent counts) to a small SystemOne decision model (Jev by TypeSafe, or Clef on Cloudflare Workers AI) and asks whether the Lead needs to act. With `HEARTBEAT_CHECKLIST_GATE_MODE=enforce`, quiet ticks skip the Lead's checklist task.",
           "",
-          `Cost: about ${COST_PER_DECISION} per decision, one decision per checklist tick.`,
+          `Cost: one decision per checklist tick, about ${JEV_COST_PER_DECISION} each with Jev.`,
           "",
-          `No Jev credential is configured. To enable, approve and add one of ${keys.map((k) => `\`${k}\``).join(" or ")} as a global secret on the Secrets page (Settings > Secrets). Do not paste the key here. The next tick picks it up.`,
+          "No credential for the gate is configured. To enable, approve and add one of these as a global value on the Secrets page (Settings > Secrets):",
+          ...options,
+          "",
+          "Do not paste a key here. The next tick picks it up.",
           "",
           "Reject to decline. The gate then stays inactive, with no further prompts, until a key is added.",
         ].join("\n"),
@@ -253,9 +292,10 @@ function setupPrompt(keys: string[]) {
 }
 
 /**
- * Heartbeat checklist gate backed by Jev: asks Jev whether a recurring checklist
- * tick needs the Lead and returns { quiet, reason, summary }. With no Jev
- * credential it asks a human once, then stays a no-op until a key is added.
+ * Heartbeat checklist gate backed by a SystemOne decision model (Jev or Clef):
+ * asks whether a recurring checklist tick needs the Lead and returns
+ * { quiet, reason, summary }. With no credential it asks a human once, then
+ * stays a no-op until a key is added.
  */
 export default async function heartbeatJevGate(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args ?? {});
@@ -276,25 +316,21 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
   };
 
   const cfgThreshold = Number.parseFloat(cfg("HEARTBEAT_JEV_GATE_THRESHOLD"));
-  const threshold =
-    a.threshold ?? (cfgThreshold >= 0 && cfgThreshold <= 1 ? cfgThreshold : 0.5);
   const providerPref = a.provider ?? (cfg("HEARTBEAT_JEV_GATE_PROVIDER").toLowerCase() || "auto");
   const timeZone = a.timeZone ?? (cfg("HEARTBEAT_JEV_GATE_TIMEZONE") || "UTC");
 
-  const usable: Record<ProviderId, boolean> = {
-    typesafe: cfg(PROVIDERS.typesafe.keyName) !== "",
-    openrouter: cfg(PROVIDERS.openrouter.keyName) !== "",
-  };
+  const usable = (id: ProviderId) =>
+    PROVIDERS[id].credentials.every((group) => group.some((key) => cfg(key) !== ""));
   const candidates: ProviderId[] =
-    providerPref === "typesafe"
-      ? ["typesafe"]
-      : providerPref === "openrouter"
-        ? ["openrouter"]
-        : ["typesafe", "openrouter"];
-  const provider = candidates.find((id) => usable[id]);
+    Object.hasOwn(PROVIDERS, providerPref) ? [providerPref as ProviderId] : AUTO_ORDER;
+  const usableCandidates = candidates.filter(usable);
 
-  if (!provider) {
-    const keys = candidates.map((id) => PROVIDERS[id].keyName);
+  if (usableCandidates.length === 0) {
+    const keys = candidates.map((id) =>
+      PROVIDERS[id].credentials
+        .map((group) => (group.length > 1 ? `(${group.join(" or ")})` : group[0]))
+        .join(" + "),
+    );
     const inactive = (state: string, extra: Record<string, unknown> = {}) => ({
       quiet: false,
       reason: `jev-gate inactive: ${state}`.slice(0, 300),
@@ -305,7 +341,7 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
     let setup: SetupState | null = typeof stored === "string" ? JSON.parse(stored) : (stored ?? null);
 
     if (!setup) {
-      const prompt = setupPrompt(keys);
+      const prompt = setupPrompt(candidates);
       if (dryRun) {
         const state = await buildState(ctx, leadId, Date.now(), timeZone);
         return inactive("no credential, would ask a human", { prompt, state });
@@ -349,35 +385,51 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
     return inactive(why, { setup });
   }
 
-  const target = PROVIDERS[provider];
   const state = await buildState(ctx, leadId, Date.now(), timeZone);
 
-  // The server enforces the time budget. No retries, as in the replay.
-  const res: any = await ctx.swarm.systemOne_decide({
-    provider,
-    model: target.model,
-    state,
-    questions: QUESTIONS,
-    timeoutMs: a.jevTimeoutMs ?? 25_000,
-    maxRetries: 0,
-  });
-  const body: any = res?.data ?? res;
-  if (res?.success === false || body?.success === false) {
-    throw new Error(`jev ${provider}: ${String(body?.message ?? body?.error ?? `HTTP ${res?.status}`).slice(0, 250)}`);
+  // The server enforces the time budget. No retries, as in the replay. A provider
+  // this deployment refuses (OpenRouter behind a gateway) sends nothing, so the
+  // next usable one is tried; only an explicit choice or the last one throws.
+  let provider = usableCandidates[0] as ProviderId;
+  let body: any;
+  const skipped: string[] = [];
+  for (const [i, id] of usableCandidates.entries()) {
+    provider = id;
+    const res: any = await ctx.swarm.systemOne_decide({
+      provider: id,
+      model: PROVIDERS[id].model,
+      state,
+      questions: QUESTIONS,
+      timeoutMs: a.jevTimeoutMs ?? 25_000,
+      maxRetries: 0,
+    });
+    body = res?.data ?? res;
+    if (res?.success !== false && body?.success !== false) break;
+    const why = String(body?.message ?? body?.error ?? `HTTP ${res?.status}`).slice(0, 250);
+    if (body?.providerUnavailable === true && i < usableCandidates.length - 1) {
+      skipped.push(`${id}: ${why}`);
+      continue;
+    }
+    throw new Error(`${PROVIDERS[id].family} ${id}: ${why}`);
   }
+  const target = PROVIDERS[provider];
+  // A configured threshold applies to every provider; unset, each uses its measured one.
+  const threshold =
+    a.threshold ?? (cfgThreshold >= 0 && cfgThreshold <= 1 ? cfgThreshold : target.threshold);
   const p = body?.answers?.act?.noul;
   if (typeof p !== "number" || !Number.isFinite(p)) {
-    throw new Error(`jev ${provider}: response has no numeric answers.act.noul`);
+    throw new Error(`${target.family} ${provider}: response has no numeric answers.act.noul`);
   }
 
   const pText = p.toFixed(3);
   const quiet = p < threshold;
   const verdict: Record<string, unknown> = {
     quiet,
-    reason: `jev p(needs action)=${pText} ${quiet ? "<" : ">="} ${threshold} via ${provider}`,
+    reason: `${target.family} p(needs action)=${pText} ${quiet ? "<" : ">="} ${threshold} via ${provider}`,
   };
   if (!quiet) {
-    const lines = [`Jev p(needs action) = ${pText} (threshold ${threshold}, ${provider}).`];
+    const model = target.family === "jev" ? "Jev" : "Clef";
+    const lines = [`${model} p(needs action) = ${pText} (threshold ${threshold}, ${provider}).`];
     const failures = state.new_failures_since_previous_heartbeat;
     const tracked = state.tracked_items_mentioning_today_or_past_delete_date;
     if (Array.isArray(failures)) {
@@ -387,9 +439,9 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
       lines.push("", "Tracked items due today or past their DELETE date:", ...tracked.map((t) => `- ${t.replace(/^[-*] /, "")}`));
     }
     if (!Array.isArray(failures) && !Array.isArray(tracked)) {
-      lines.push("", "No new failures or due tracked items; Jev flagged the overall state.");
+      lines.push("", `No new failures or due tracked items; ${model} flagged the overall state.`);
     }
     verdict.summary = lines.join("\n").slice(0, 4000);
   }
-  return dryRun ? { ...verdict, dryRun: true, provider, p, threshold, state } : verdict;
+  return dryRun ? { ...verdict, dryRun: true, provider, skipped, p, threshold, state } : verdict;
 }

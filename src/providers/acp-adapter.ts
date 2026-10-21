@@ -1,15 +1,21 @@
+// `/unstable` keeps the full ACP v1 surface the 1.x default import carried:
+// turn `usage` on the prompt response is unstable, and the stable entrypoint
+// does not type it. Both entrypoints speak ACP v1 on the wire.
 import {
-  type Client,
-  ClientSideConnection,
+  client as acpClient,
+  type ClientContext,
   type McpServer,
+  methods,
   ndJsonStream,
   PROTOCOL_VERSION,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionConfigOption,
   type SessionNotification,
+  type SetSessionConfigOptionRequest,
+  type SetSessionConfigOptionResponse,
   type Usage,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import pkg from "../../package.json";
 import type { AcpSessionConfigOption } from "../types";
 import { mintAcpSessionToken, revokeAcpSessionToken } from "../utils/acp-session-token";
@@ -154,7 +160,7 @@ function boundedAcpLogScalar(value: unknown): unknown {
   return typeof value === "string" ? value.slice(0, 500) : value;
 }
 
-class SwarmAcpClient implements Client {
+class SwarmAcpClient {
   /** Latest cumulative USD cost the target reported for the session. */
   reportedCostUsd: number | null = null;
 
@@ -199,7 +205,7 @@ class ACPSession implements ProviderSession {
   private ephemeralTokenId: string | null = null;
 
   constructor(
-    private readonly connection: ClientSideConnection,
+    private readonly agent: ClientContext,
     private readonly client: SwarmAcpClient,
     private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">,
     private readonly config: ProviderSessionConfig,
@@ -234,7 +240,7 @@ class ACPSession implements ProviderSession {
     if (this.aborted) return;
     this.aborted = true;
     try {
-      await this.connection.cancel({ sessionId: this.sessionId });
+      await this.agent.notify(methods.agent.session.cancel, { sessionId: this.sessionId });
       await Promise.race([this.completionPromise, Bun.sleep(ACP_CANCEL_SETTLE_MS)]);
     } catch (err) {
       this.emit({
@@ -282,7 +288,7 @@ class ACPSession implements ProviderSession {
   private async runPrompt(): Promise<void> {
     let result: ProviderResult;
     try {
-      const response = await this.connection.prompt({
+      const response = await this.agent.request(methods.agent.session.prompt, {
         sessionId: this.sessionId,
         prompt: [{ type: "text", text: this.config.prompt }],
       });
@@ -441,11 +447,16 @@ export class ACPAdapter implements ProviderAdapter {
       else preSessionEvents.push(event);
     }, target);
     const stream = ndJsonStream(fileSinkWritableStream(proc.stdin), proc.stdout);
-    const connection = new ClientSideConnection(() => client, stream);
+    const agent = acpClient()
+      .onRequest(methods.client.session.requestPermission, ({ params }) =>
+        client.requestPermission(params),
+      )
+      .onNotification(methods.client.session.update, ({ params }) => client.sessionUpdate(params))
+      .connect(stream).agent;
 
     let ephemeralToken: { tokenId: string; plaintext: string } | null = null;
     try {
-      await connection.initialize({
+      await agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: "agent-swarm", version: pkg.version },
         clientCapabilities: { session: { configOptions: { boolean: {} } } },
@@ -473,7 +484,7 @@ export class ACPAdapter implements ProviderAdapter {
       // shape for an ACP agent with no network route to the swarm API. Gated on
       // `mcpCapabilities.acp` and UNSTABLE; not adopted here.
       const sessionMeta = target.sessionMeta?.(config);
-      const newSession = await connection.newSession({
+      const newSession = await agent.request(methods.agent.session.new, {
         ...(sessionMeta ? { _meta: sessionMeta } : {}),
         cwd: config.cwd,
         mcpServers: [
@@ -491,13 +502,16 @@ export class ACPAdapter implements ProviderAdapter {
         ],
       });
       const configOptions = await applyConfiguredOptions(
-        connection,
+        {
+          setSessionConfigOption: (params) =>
+            agent.request(methods.agent.session.setConfigOption, params),
+        },
         newSession.sessionId,
         newSession.configOptions ?? [],
         target.configuredOptions(config),
       );
       session = new ACPSession(
-        connection,
+        agent,
         client,
         proc,
         config,
@@ -537,8 +551,14 @@ export class ACPAdapter implements ProviderAdapter {
   }
 }
 
+export interface AcpConfigOptionSetter {
+  setSessionConfigOption(
+    params: SetSessionConfigOptionRequest,
+  ): Promise<SetSessionConfigOptionResponse>;
+}
+
 export async function applyConfiguredOptions(
-  connection: Pick<ClientSideConnection, "setSessionConfigOption">,
+  connection: AcpConfigOptionSetter,
   sessionId: string,
   advertised: SessionConfigOption[],
   configured: Record<string, string | boolean>,

@@ -47,7 +47,7 @@ The swarm splits longer text into several messages at line breaks. Long answers 
 
 ## Attachments
 
-Files and images the user sends in the thread are stored as attachments of the task. The task text names them. Download them with the `download-task-attachment` skill.
+Files and images the user sends in the thread are stored as attachments of the task. The task text names them. Download them with the `download-task-attachment` skill. Voice notes and audio files come with a `[Transcript of <file>]` block in the task text when the swarm has transcription configured; answer from the transcript and download the audio only when you need it. A file over the inbound limit (20 MB on Telegram) never reaches you: the task text says so and the user was already told.
 
 To send files back, pass `attachments` to `chat-reply` (or `chat-post`): up to 10 attachment ids of your task, or agent-fs paths such as `thoughts/<agent-id>/report.pdf`. The files go out after the text. On Telegram, JPEG and PNG show as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. When a task's final output is relayed to the thread, the files attached to that task go with it, so do not send them twice.
 

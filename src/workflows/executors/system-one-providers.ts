@@ -288,13 +288,39 @@ export const SYSTEM_ONE_PROVIDERS = Object.fromEntries(
 export const SYSTEM_ONE_PROVIDER_IDS = hostsServing("decide");
 export const SYSTEM_ONE_EXTRACT_PROVIDER_IDS = hostsServing("extract");
 
+/** The decision provider when neither the call nor `SYSTEM_ONE_DEFAULT_PROVIDER` names one. */
 export const SYSTEM_ONE_DEFAULT_PROVIDER: SystemOneProviderId = "typesafe";
 export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER: SystemOneExtractProviderId = "cloudflare";
+
+/** Global config key naming the decision provider a node or call without `provider` uses. */
+export const SYSTEM_ONE_DEFAULT_PROVIDER_CONFIG_KEY = "SYSTEM_ONE_DEFAULT_PROVIDER";
 
 export function isSystemOneProviderId(value: unknown): value is SystemOneProviderId {
   return (
     typeof value === "string" && (SYSTEM_ONE_PROVIDER_IDS as readonly string[]).includes(value)
   );
+}
+
+/**
+ * The decision provider for a node or call that names none: the global
+ * `SYSTEM_ONE_DEFAULT_PROVIDER` row, then the same key in the environment, then
+ * `typesafe`. Read at run time, so changing the setting needs no workflow edit.
+ * A value that is not a decide host is skipped; the config guard refuses it on save.
+ */
+export async function resolveSystemOneDefaultProvider(
+  ctx: SystemOneProviderContext,
+): Promise<SystemOneProviderId> {
+  let stored: string | undefined;
+  try {
+    stored = await readGlobalConfig(ctx.db, SYSTEM_ONE_DEFAULT_PROVIDER_CONFIG_KEY);
+  } catch {
+    // An unreadable row falls back like an unset one: the default stays usable.
+  }
+  for (const raw of [stored, ctx.env[SYSTEM_ONE_DEFAULT_PROVIDER_CONFIG_KEY]]) {
+    const id = raw?.trim().toLowerCase();
+    if (isSystemOneProviderId(id)) return id;
+  }
+  return SYSTEM_ONE_DEFAULT_PROVIDER;
 }
 
 export function isSystemOneExtractProviderId(value: unknown): value is SystemOneExtractProviderId {
@@ -304,11 +330,15 @@ export function isSystemOneExtractProviderId(value: unknown): value is SystemOne
   );
 }
 
-/** Provider a raw node config selects. Undefined when the field is present but not a known id. */
+/**
+ * Provider a raw node config selects, `defaultId` when it names none. Undefined
+ * when the field is present but not a known id.
+ */
 export function systemOneProviderOf(
   config: Record<string, unknown>,
+  defaultId: SystemOneProviderId = SYSTEM_ONE_DEFAULT_PROVIDER,
 ): SystemOneProviderId | undefined {
-  if (config.provider === undefined) return SYSTEM_ONE_DEFAULT_PROVIDER;
+  if (config.provider === undefined) return defaultId;
   return isSystemOneProviderId(config.provider) ? config.provider : undefined;
 }
 
@@ -489,7 +519,12 @@ export type SystemOneTarget =
       /** The secret name the key was read under, for a rejection message. */
       keyName: string;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /** This deployment refuses the host whatever its credential (`deploymentProblem`). */
+      deploymentRefused?: true;
+    };
 
 export interface SystemOneTargetOverrides {
   /** Replaces the credential lookup. */
@@ -517,7 +552,7 @@ export async function resolveSystemOneTarget(
   const capability = overrides.capability ?? "decide";
   const service = serviceOf(id, capability);
   const deploymentProblem = host.deploymentProblem?.(ctx.env);
-  if (deploymentProblem) return { ok: false, error: deploymentProblem };
+  if (deploymentProblem) return { ok: false, error: deploymentProblem, deploymentRefused: true };
 
   const errors: string[] = [];
 

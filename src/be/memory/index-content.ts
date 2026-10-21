@@ -37,6 +37,12 @@ export interface IndexMemoryContentParams {
    * out, the writer has no authority. Throws `MemoryKeyError`.
    */
   writer?: MemoryKeyWriter;
+  /**
+   * With `key`: replace this owner's existing document under the key (same
+   * scope and source) in the same transaction as the insert, instead of
+   * failing on the unique key index. A re-write may change the chunk count.
+   */
+  replaceExisting?: boolean;
 }
 
 export interface IndexMemoryContentResult {
@@ -46,6 +52,14 @@ export interface IndexMemoryContentResult {
   edited?: boolean;
   /** Number of chunks the content was split into. */
   chunks: number;
+}
+
+/**
+ * Key shared by every chunk of one task's completion memory, so the chunks
+ * group as one document (access counting, chunk listing, search collapse).
+ */
+export function taskCompletionMemoryKey(taskId: string): string {
+  return `/task-completions/${taskId.toLowerCase().replace(/[^a-z0-9._-]/g, "-")}`;
 }
 
 export async function indexMemoryContent(
@@ -111,23 +125,28 @@ export async function indexMemoryContent(
   }
 
   // Atomic batch insert: all chunks or none
-  const memories = await store.storeBatch(
-    contentChunks.map((chunk) => ({
-      agentId: agentId || null,
-      content: chunk.content,
-      name,
-      scope,
-      source,
-      sourcePath: sourcePath || null,
-      sourceTaskId: sourceTaskId || null,
-      chunkIndex: chunk.chunkIndex,
-      totalChunks: chunk.totalChunks,
-      tags: tags || [],
-      contextKey: params.contextKey ?? null,
-      intent: params.intent ?? "index memory content",
-      key: rowKey,
-    })),
-  );
+  const inputs = contentChunks.map((chunk) => ({
+    agentId: agentId || null,
+    content: chunk.content,
+    name,
+    scope,
+    source,
+    sourcePath: sourcePath || null,
+    sourceTaskId: sourceTaskId || null,
+    chunkIndex: chunk.chunkIndex,
+    totalChunks: chunk.totalChunks,
+    tags: tags || [],
+    contextKey: params.contextKey ?? null,
+    intent: params.intent ?? "index memory content",
+    key: rowKey,
+  }));
+  const memories =
+    params.replaceExisting && params.key
+      ? await store.replaceDocument(
+          { key: params.key, scope, agentId: agentId || null, source },
+          inputs,
+        )
+      : await store.storeBatch(inputs);
 
   // Resolve and store deterministic links (wikilinks, PR refs, agent-fs paths)
   if (agentId) {

@@ -11,6 +11,7 @@ import {
   recordRetrievals,
 } from "@/be/memory/raters/retrieval";
 import { rerank } from "@/be/memory/reranker";
+import { searchMemoryCandidates } from "@/be/memory/search-candidates";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { AgentMemorySource } from "@/types";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@/types";
@@ -122,7 +123,8 @@ export const registerMemorySearchTool = (server: McpServer) => {
       const queryEmbedding = await provider.embed(query);
 
       const candidateLimit = limit * CANDIDATE_SET_MULTIPLIER;
-      const candidates = await store.search(
+      const candidates = await searchMemoryCandidates(
+        store,
         queryEmbedding ?? new Float32Array(0),
         requestInfo.agentId,
         {

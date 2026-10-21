@@ -6,8 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- SystemOne: `SYSTEM_ONE_DEFAULT_PROVIDER` (Settings → Configuration) picks the decision host for a `system-one-decision` node or `system-one-decide` call that names none, read at each run. Unset stays `typesafe`; setting `cloudflare` runs those nodes on Clef with no workflow edit, and the node card shows the effective provider and model (#2186).
+- Heartbeat: the built-in `heartbeat-jev-gate` runs on Clef (`provider: cloudflare`) with a replay-measured threshold of 0.2, and turns on by default with only `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` set. `auto` still prefers Jev, and both this gate and `slack-reply-gate` move on to the next provider when the server refuses OpenRouter behind an `OPENROUTER_BASE_URL` gateway (#2186).
+
+### Changed
+- Extensions: `slack-reply-gate` 1.3.0 makes its decision through the server's `system-one-decide` tool instead of its own TypeSafe and OpenRouter client, so it can use Clef and every other SystemOne host. Its `apiKey` config field is removed; store the key as a global secret (#2186).
+
+## [2.4.4] - 2026-10-21
+
+### Added
+- Auth: agent-bound worker tokens. `agent-swarm worker-token create|rotate|revoke` and `POST`/`DELETE /api/agents/{id}/token` (plus `.../token/rotate`) mint a token that acts only as its agent, so a worker no longer runs on the operator's swarm API key. The new `agent.token.manage` permission gates it, and rotating or revoking a token expires the child task tokens it minted (#2099).
+- Workflows: a `system-one-extraction` node returns typed per-field values (text, numbers, dates, durations, lists, estimates) with calibrated uncertainty. It shares one System One provider registry with `system-one-decision`, and Cloudflare falls back to `CLOUDFLARE_API_KEY` when `CLOUDFLARE_API_TOKEN` is unset (#2290).
+- Apps: `app.action` accepts an optional `parentTaskId` that chains a task action under an existing task, and a `$chain` action-param sentinel resolves values from chain scope (#2292).
+
+### Changed
+- ACP: the adapter moves to `@agentclientprotocol/sdk` 2.0.0 and its client app API. It imports the `/unstable` entry point, so turn `usage` still reaches cost rows. The wire protocol stays ACP v1.
+- Worker image bumps opencode to 2.1.1 and amp to 0.0.1792506219-g025e7e (#2295); the UI image moves to `nginx-unprivileged` 1.31.6 (#2299).
+
 ### Fixed
+- Memory: task completion memories are chunked like `memory-store`, so a long output gets a vector for every chunk. Search keeps the best chunk per task and widens its candidate window so one task's chunks cannot crowd out other matches. A repeat write for a task replaces its earlier chunks in one transaction. The chunker no longer drops markdown sections under 50 characters; it packs them into shared chunks. The embedding provider cuts any input over the model's token cap, and one oversized input no longer fails its whole batch, so the boot backfill now fills rows it used to leave without a vector.
 - Codex OAuth: the keep-warm sweep refreshes pool slots at 5 days instead of 7, and `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS` sets the age, so a ChatGPT session that ends before day 7 gets a refresh first (#2296).
+- Heartbeat: the checklist gate counts an `MM-DD` date as due only when it is a bare token, so a line carrying a full date such as a `2026-10-20T09:30Z` timestamp no longer counts as a due item (#2293).
 
 ## [2.4.3] - 2026-10-20
 
