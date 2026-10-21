@@ -598,10 +598,69 @@ function seedMessages(
   console.log(`  ✓ Seeded ${total} messages across ${channels.length} channels`);
 }
 
+function seedSessionUsers(db: Database): string[] {
+  const stmt = db.prepare(`INSERT OR IGNORE INTO users
+    (id, name, email, status, createdAt, lastUpdatedAt) VALUES (?, ?, ?, 'active', ?, ?)`);
+  return ["Alex", "Morgan", "Sam"].map((name, i) => {
+    const id = seedId("user", i);
+    stmt.run(id, `${name} Demo`, `${name.toLowerCase()}@example.com`, daysAgo(30), now());
+    return id;
+  });
+}
+
+function seedSessionState(db: Database, userIds: string[], tasks: { id: string }[]): void {
+  const seededIds = new Set(tasks.map((task) => task.id));
+  const roots = db
+    .query<{ id: string; requestedByUserId: string | null; lastUpdatedAt: string }, []>(
+      "SELECT id, requestedByUserId, lastUpdatedAt FROM agent_tasks WHERE parentTaskId IS NULL ORDER BY createdAt DESC",
+    )
+    .all()
+    .filter((root) => seededIds.has(root.id));
+  const state = db.prepare(`INSERT OR IGNORE INTO inbox_item_state
+    (id, userId, itemType, itemId, status, snoozeUntil, lastReadAt, createdAt, lastUpdatedAt)
+    VALUES (?, ?, 'to_read', ?, ?, ?, ?, ?, ?)`);
+  for (const userId of userIds) {
+    const owned = roots.filter((r) => r.requestedByUserId === userId);
+    for (const [i, root] of owned.slice(0, 3).entries()) {
+      const status = ["done", "snoozed", "open"][i];
+      state.run(
+        seedId("inbox", root.id),
+        userId,
+        root.id,
+        status,
+        status === "snoozed" ? new Date(Date.now() + 3600000).toISOString() : null,
+        status === "open" ? now() : null,
+        now(),
+        now(),
+      );
+    }
+  }
+  const root = roots.find((root) => root.requestedByUserId);
+  if (root) {
+    const sharee = userIds.find((id) => id !== root.requestedByUserId)!;
+    db.prepare(`INSERT OR IGNORE INTO session_shares
+      (id, rootTaskId, userId, access, createdAt, created_by, updated_by)
+      VALUES (?, ?, ?, 'read', ?, ?, ?)`).run(
+      seedId("share", root.id),
+      root.id,
+      sharee,
+      now(),
+      root.requestedByUserId,
+      root.requestedByUserId,
+    );
+    // Long titles exercise session title truncation during QA.
+    db.prepare("UPDATE agent_tasks SET title = ? WHERE id = ?").run(
+      `Session ${"x".repeat(112)}`,
+      root.id,
+    );
+  }
+}
+
 function seedTasks(
   db: Database,
   config: SeedConfig,
   agents: { id: string }[],
+  userIds: string[],
 ): { id: string; agentId: string | null }[] {
   const count = config.tasks.count;
 
@@ -611,9 +670,10 @@ function seedTasks(
       priority, dependsOn, createdAt, lastUpdatedAt, finishedAt,
       failureReason, output, progress,
       model, dir, parentTaskId, claudeSessionId,
-      vcsProvider, vcsRepo, vcsNumber, vcsEventType, vcsUrl, vcsAuthor
+      vcsProvider, vcsRepo, vcsNumber, vcsEventType, vcsUrl, vcsAuthor,
+      "key", requestedByUserId
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const logStmt = db.prepare(`
@@ -621,7 +681,14 @@ function seedTasks(
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
-  const seededTasks: { id: string; agentId: string | null; createdAt: string }[] = [];
+  const seededTasks: {
+    id: string;
+    agentId: string | null;
+    createdAt: string;
+    key: string;
+    requestedByUserId: string | null;
+  }[] = [];
+  const groups = ["shared/northwind/pricing/", "shared/northwind/ios/", "shared/infra/"];
 
   for (let i = 0; i < count; i++) {
     const template = generateTaskDescription();
@@ -632,22 +699,21 @@ function seedTasks(
     const priority = faker.number.int({ min: 20, max: 80 });
     // Second-resolution start, and a finish derived from it. Drawing the two
     // independently (as this used to) produced tasks that finished before they
-    // started, and multi-day bars on any duration-aware view. Starts are spread
-    // over 3 days so an 8h default window still lands on real activity.
+    // started, and multi-day bars on any duration-aware view. Most starts use
+    // three days; half the roots later use 30 days for older session activity.
     // A task still marked in_progress started recently — anything else is a
     // stalled run, not the common case, and would draw a days-long live bar.
-    const startedSecondsAgo =
+    let startedSecondsAgo =
       statusInfo.status === "in_progress"
         ? faker.number.int({ min: 30, max: 90 * 60 })
         : faker.number.int({ min: 30, max: 3 * 24 * 60 * 60 });
-    const createdAt = secondsAgo(startedSecondsAgo);
+    let createdAt = secondsAgo(startedSecondsAgo);
     const runSeconds = Math.min(sampleRunSeconds(), startedSecondsAgo);
-    const finishedAt = statusInfo.needsFinish ? secondsAgo(startedSecondsAgo - runSeconds) : null;
+    let finishedAt = statusInfo.needsFinish ? secondsAgo(startedSecondsAgo - runSeconds) : null;
     // Only a live task has been touched "now"; a queued one was last touched
     // when it was created. Views that infer an end time from lastUpdatedAt
     // otherwise stretch every pending task from its creation to the present.
-    const lastUpdatedAt =
-      finishedAt ?? (statusInfo.status === "in_progress" ? now() : createdAt);
+    let lastUpdatedAt = finishedAt ?? (statusInfo.status === "in_progress" ? now() : createdAt);
 
     let failureReason: string | null = null;
     let output: string | null = null;
@@ -661,7 +727,7 @@ function seedTasks(
       progress = `Working on ${faker.hacker.ingverb()} — ~${faker.number.int({ min: 10, max: 90 })}% done`;
     }
 
-    const source = faker.helpers.arrayElement(["mcp", "slack", "api"]);
+    let source = faker.helpers.arrayElement(["mcp", "slack", "api"]);
 
     // ~60% of tasks get a model
     const model = faker.datatype.boolean(0.6)
@@ -687,6 +753,27 @@ function seedTasks(
       parentCandidates.length >= 3 && faker.datatype.boolean(0.35)
         ? parentCandidates[faker.number.int({ min: 0, max: parentCandidates.length - 1 })].id
         : null;
+
+    const parent = seededTasks.find((t) => t.id === parentTaskId);
+    const grouped = i % 5 < 3;
+    const requestedByUserId = parent
+      ? parent.requestedByUserId
+      : grouped || i % 2 === 0
+        ? userIds[i % userIds.length]!
+        : null;
+    const group = groups[i % 4] ?? `personal/${requestedByUserId}/notes/`;
+    const key = parent?.key ?? (grouped ? group : `shared/task:${id}/`);
+    if (!parentTaskId) {
+      if (requestedByUserId) source = "ui";
+      if (i % 2 === 0 && statusInfo.status !== "in_progress") {
+        startedSecondsAgo = faker.number.int({ min: 30, max: 30 * 24 * 60 * 60 });
+        createdAt = secondsAgo(startedSecondsAgo);
+        finishedAt = statusInfo.needsFinish
+          ? secondsAgo(startedSecondsAgo - Math.min(runSeconds, startedSecondsAgo))
+          : null;
+        lastUpdatedAt = finishedAt ?? createdAt;
+      }
+    }
 
     // ~25% of in_progress/completed tasks get a claudeSessionId
     const claudeSessionId =
@@ -750,10 +837,12 @@ function seedTasks(
       vcsEventType,
       vcsUrl,
       vcsAuthor,
+      key,
+      requestedByUserId,
     );
 
     logStmt.run(seedId("log", `task:${i}`), "task_created", creator.id, id, statusInfo.status, createdAt);
-    seededTasks.push({ id, agentId: agent?.id ?? null, createdAt });
+    seededTasks.push({ id, agentId: agent?.id ?? null, createdAt, key, requestedByUserId });
   }
 
   console.log(`  ✓ Seeded ${count} tasks`);
@@ -1757,7 +1846,9 @@ async function main(): Promise<void> {
   const agents = seedAgents(db, config);
   const channels = seedChannels(db, config, agents);
   seedMessages(db, config, agents, channels);
-  const tasks = seedTasks(db, config, agents);
+  const userIds = seedSessionUsers(db);
+  const tasks = seedTasks(db, config, agents, userIds);
+  seedSessionState(db, userIds, tasks);
   seedSessionLogs(db, config, tasks);
   seedContextSnapshots(db, config, tasks);
   seedWorkflows(db, config);

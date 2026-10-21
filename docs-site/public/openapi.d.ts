@@ -18779,8 +18779,15 @@ export interface paths {
                     q?: string;
                     requestedByUserId?: string;
                     contextKeyPrefix?: string;
+                    keyPrefix?: string;
+                    groupKey?: string;
+                    noGroup?: "true" | "false";
+                    triage?: "inbox" | "later" | "done" | "unread";
+                    status?: "running" | "failed" | "needs";
+                    withUserId?: string;
                     fields?: "full" | "slim";
-                    scope?: "mine" | "shared";
+                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. */
+                    scope?: "mine" | "shared" | "tree";
                 };
                 header?: never;
                 path?: never;
@@ -18846,10 +18853,100 @@ export interface paths {
                                 lastActivityAt: string;
                                 /** @enum {string} */
                                 latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                /** @enum {string} */
+                                readState?: "unread" | "read" | "later" | "done";
+                                snoozeUntil?: string | null;
+                                needsYou?: boolean;
+                                groupKey?: string;
+                                shared?: boolean;
+                                people?: {
+                                    id: string;
+                                    name: string;
+                                }[];
+                                peopleCount?: number;
+                                preview?: string | null;
                             }[];
                             total: number;
                             limit: number;
                             offset: number;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session-tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get session groups and triage counts */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Visible groups and section counts */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            groups: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                                key: string;
+                                lastActivityAt: string;
+                            }[];
+                            inbox: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
+                            later: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
+                            done: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
+                            noGroup: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
                         };
                     };
                 };
@@ -18933,6 +19030,13 @@ export interface paths {
                             /** @enum {string} */
                             access: "owner" | "write" | "read";
                             owner: components["schemas"]["SessionOwner"];
+                            approvals?: {
+                                id: string;
+                                /** @enum {string} */
+                                status: "pending";
+                                sourceTaskId: string;
+                                title: string;
+                            }[];
                         };
                     };
                 };

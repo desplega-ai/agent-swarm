@@ -48408,6 +48408,70 @@
           },
           {
             "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "keyPrefix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "groupKey",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "noGroup",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "inbox",
+                "later",
+                "done",
+                "unread"
+              ]
+            },
+            "required": false,
+            "name": "triage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "running",
+                "failed",
+                "needs"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "withUserId",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string",
               "enum": [
                 "full",
@@ -48423,10 +48487,13 @@
               "type": "string",
               "enum": [
                 "mine",
-                "shared"
-              ]
+                "shared",
+                "tree"
+              ],
+              "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope."
             },
             "required": false,
+            "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope.",
             "name": "scope",
             "in": "query"
           }
@@ -48654,6 +48721,57 @@
                               "cancelled",
                               "superseded"
                             ]
+                          },
+                          "readState": {
+                            "type": "string",
+                            "enum": [
+                              "unread",
+                              "read",
+                              "later",
+                              "done"
+                            ]
+                          },
+                          "snoozeUntil": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "needsYou": {
+                            "type": "boolean"
+                          },
+                          "groupKey": {
+                            "type": "string"
+                          },
+                          "shared": {
+                            "type": "boolean"
+                          },
+                          "people": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name"
+                              ]
+                            }
+                          },
+                          "peopleCount": {
+                            "type": "integer"
+                          },
+                          "preview": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -48679,6 +48797,176 @@
                     "total",
                     "limit",
                     "offset"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/session-tree": {
+      "get": {
+        "summary": "Get session groups and triage counts",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visible groups and section counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "total": {
+                            "type": "integer"
+                          },
+                          "unread": {
+                            "type": "integer"
+                          },
+                          "running": {
+                            "type": "integer"
+                          },
+                          "needsYou": {
+                            "type": "integer"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "lastActivityAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "total",
+                          "unread",
+                          "running",
+                          "needsYou",
+                          "key",
+                          "lastActivityAt"
+                        ]
+                      }
+                    },
+                    "inbox": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "unread": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "needsYou": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "unread",
+                        "running",
+                        "needsYou"
+                      ]
+                    },
+                    "later": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "unread": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "needsYou": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "unread",
+                        "running",
+                        "needsYou"
+                      ]
+                    },
+                    "done": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "unread": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "needsYou": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "unread",
+                        "running",
+                        "needsYou"
+                      ]
+                    },
+                    "noGroup": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "unread": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "needsYou": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "unread",
+                        "running",
+                        "needsYou"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "groups",
+                    "inbox",
+                    "later",
+                    "done",
+                    "noGroup"
                   ]
                 }
               }
@@ -48929,6 +49217,35 @@
                     },
                     "owner": {
                       "$ref": "#/components/schemas/SessionOwner"
+                    },
+                    "approvals": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending"
+                            ]
+                          },
+                          "sourceTaskId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "status",
+                          "sourceTaskId",
+                          "title"
+                        ]
+                      }
                     }
                   },
                   "required": [

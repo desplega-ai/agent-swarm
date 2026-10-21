@@ -167,14 +167,14 @@ Branch `feat/sessions-v2` from `main` exists, with one commit that adds the brai
 
 #### Automated Verification:
 - [x] No customer names in the docs: `! grep -rniE "$SV2_CUSTOMER_RE" mockups/sessions-v2 thoughts/taras/` (the pattern lives outside the repo, so this file does not name the customer)
-- [ ] No em dashes in the docs: `! rg -n '\x{2014}' mockups/sessions-v2/*.md thoughts/taras/plans/2026-10-21-sessions-v2-power-users.md`
-- [ ] Branch is correct: `git branch --show-current` prints `feat/sessions-v2`
+- [x] No em dashes in the docs: `! rg -n '\x{2014}' mockups/sessions-v2/*.md thoughts/taras/plans/2026-10-21-sessions-v2-power-users.md`
+- [x] Branch is correct: `git branch --show-current` prints `feat/sessions-v2`
 
 #### Automated QA:
-- [ ] `git show --stat HEAD` lists only `mockups/sessions-v2/` and `thoughts/taras/` files.
+- [x] `git show --stat HEAD` lists only `mockups/sessions-v2/` and `thoughts/taras/` files.
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
 
 **Implementation Note**: Commit `[phase 0] docs: sessions v2 brainstorm, research, mockups, plan`.
 
@@ -270,23 +270,23 @@ Branch `feat/sessions-v2` from `main` exists, with one commit that adds the brai
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New and existing session tests pass: `bun run test:root -- src/tests/sessions-tree.test.ts src/tests/sessions.test.ts src/tests/sessions-detail-batch.test.ts src/tests/list-endpoint-slimming.test.ts src/tests/inbox-state.test.ts src/tests/session-route-posture.test.ts src/tests/session-sharing-routes.test.ts`
-- [ ] Types pass: `bun run tsc:check:tsc`
-- [ ] Lint passes: `bun run lint && bun run lint:slop`
-- [ ] OpenAPI is fresh: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference` (after committing the regenerated files)
-- [ ] Route gates pass: `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
-- [ ] DB seams pass: `bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh`
+- [x] New and existing session tests pass: `bun run test:root -- src/tests/sessions-tree.test.ts src/tests/sessions.test.ts src/tests/sessions-detail-batch.test.ts src/tests/list-endpoint-slimming.test.ts src/tests/inbox-state.test.ts src/tests/session-route-posture.test.ts src/tests/session-sharing-routes.test.ts`
+- [x] Types pass: `bun run tsc:check:tsc`
+- [x] Lint passes: `bun run lint && bun run lint:slop`
+- [x] OpenAPI is fresh: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference` (after committing the regenerated files)
+- [x] Route gates pass: `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
+- [x] DB seams pass: `bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
-- [ ] Boot the seeded stack (Quick Verification Reference), then pick a user id: `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/users | jq -r '.users[0].id'`.
-- [ ] The tree has groups and counts: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.groups | length, .inbox'`
-- [ ] One group lists only its sessions: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" "http://localhost:3013/api/sessions?groupKey=shared/northwind/pricing/&limit=10" | jq '.total, ([.sessions[].root.key] | unique)'`
-- [ ] Pick an unread session: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" "http://localhost:3013/api/sessions?triage=unread&limit=1" | jq -r '.sessions[0] | .root.id, .lastActivityAt'`
-- [ ] Mark it read, then check that its `readState` becomes `read` and the tree's `inbox.unread` drops by 1: `curl -s -X PATCH -H "Authorization: Bearer 123123" -H "Content-Type: application/json" http://localhost:3013/api/inbox-state -d '{"userId":"<userId>","itemType":"to_read","itemId":"<rootId>","status":"open","lastReadAt":"<lastActivityAt>"}'`
-- [ ] Performance: a throwaway script in `/tmp` calls `initDb("/tmp/sv2-perf.sqlite")` (never the dev DB). It seeds 20,000 roots and 30,000 children, all visible to one user, with the `db.ts` functions. It then times one full sidebar poll: `getSessionTree`, plus one page each of `triage=inbox`, `triage=later`, `triage=done`, and one `groupKey`. Targets: the tree under 300 ms, a `groupKey` page under 50 ms, the full poll under 600 ms. Record the numbers under Appendix, Derail notes. If a target fails, stop and report before Phase 2.
+- [x] Boot the seeded stack (Quick Verification Reference), then pick a user id: `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/users | jq -r '.users[0].id'`.
+- [x] The tree has groups and counts: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.groups | length, .inbox'`
+- [x] One group lists only its sessions: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" "http://localhost:3013/api/sessions?groupKey=shared/northwind/pricing/&limit=10" | jq '.total, ([.sessions[].root.key] | unique)'`
+- [x] Pick an unread session: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" "http://localhost:3013/api/sessions?triage=unread&limit=1" | jq -r '.sessions[0] | .root.id, .lastActivityAt'`
+- [x] Mark it read, then check that its `readState` becomes `read` and the tree's `inbox.unread` drops by 1: `curl -s -X PATCH -H "Authorization: Bearer 123123" -H "Content-Type: application/json" http://localhost:3013/api/inbox-state -d '{"userId":"<userId>","itemType":"to_read","itemId":"<rootId>","status":"open","lastReadAt":"<lastActivityAt>"}'`
+- [x] Performance: a throwaway script in `/tmp` calls `initDb("/tmp/sv2-perf.sqlite")` (never the dev DB). It seeds 20,000 roots and 30,000 children, all visible to one user, with the `db.ts` functions. It then times one full sidebar poll: `getSessionTree`, plus one page each of `triage=inbox`, `triage=later`, `triage=done`, and one `groupKey`. Targets: the tree under 300 ms, a `groupKey` page under 50 ms, the full poll under 600 ms. Record the numbers under Appendix, Derail notes. If a target fails, stop and report before Phase 2.
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
 
 **Implementation Note**: Codex `gpt-6.1-sol` at `high`. Claude reviews the SQL for the D5 rule and the visibility join. Commit `[phase 1] feat(sessions): group filters, read state, and tree summary`.
 
@@ -392,6 +392,7 @@ The new shell renders on `/sessions` by default: a resizable sidebar frame, a pa
 - Add client methods `getSessionTree`, `moveSessions`, `moveSessionPrefix`, and `patchInboxStateBulk` (`PATCH /api/inbox-state/bulk`, for the bulk bar).
 - `useSessionTree()` uses key `["session-tree"]` and the app default polling.
 - Extend the `useSessions` options with `groupKey`, `keyPrefix`, `noGroup`, `triage`, `status`, and `withUserId`. Do not add a second list hook.
+- Every v2 list call sends `scope=tree` (added in Phase 1 review). It gives the same visibility as `GET /api/session-tree` (mine plus shared, no ownerless roots), so list totals match the tree counts. The default scope `all` still includes ownerless roots for the Legacy view.
 - `useMoveSessions` and `useMovePrefix` loop on `remaining` and invalidate `["session-tree"]` and `["sessions"]`.
 - `useSessionTriage(rootId)`:
   - `markRead` writes `{status:"open", readAt: now, lastReadAt: <lastActivityAt>}`. `markUnread` writes `lastReadAt: "1970-01-01T00:00:00.000Z"`. These are the app's shapes.
@@ -892,7 +893,9 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - A server-side wake job for Later.
   - Removing the Legacy view.
 - **Derail notes**:
-  - Phase 1 performance numbers: (filled in during Phase 1).
+  - Phase 1 performance numbers (20,000 roots, 30,000 children, one user, median of 3 runs, no index hints): tree 90 ms, Inbox page 92 ms plus count 64 ms, Later page 19 ms plus count 12 ms, Done page 27 ms plus count 19 ms, `groupKey` page 5 ms plus count 3 ms, full sidebar poll 331 ms. All targets pass. The spec reviewer measured one noisy run at 640 to 670 ms for the full poll. The Inbox list and its count each walk the full chain CTE, so watch that one if the poll grows.
+  - Phase 1 review added `scope=tree` to `GET /api/sessions`. The default scope `all` keeps ownerless roots (Legacy behavior). The tree and `scope=tree` lists exclude them for user viewers. A bypass actor with `scope=tree` sees every root.
+  - Phase 1: `approvals` on the session detail is omitted when empty. The client reads a missing field as `[]`. Bypass actors get no `readState`.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
 - **UX-REVIEW-R9 status**: (table filled in during Phase 10).
