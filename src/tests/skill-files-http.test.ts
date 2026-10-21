@@ -169,4 +169,41 @@ describe("/api/skills/:id/files", () => {
     });
     expect(del.status).toBe(403);
   });
+
+  test("bundle returns the agent's skills with file contents and the signature", async () => {
+    const swarmSkill = await createSkill({
+      name: `bundle-skill-${crypto.randomUUID()}`,
+      description: "Bundle skill",
+      content: "---\nname: bundle-skill\ndescription: Bundle skill\n---\n\nBody.",
+      type: "personal",
+      scope: "swarm",
+      isComplex: true,
+    });
+    const post = await dispatch(`/api/skills/${swarmSkill.id}/files`, {
+      method: "POST",
+      body: JSON.stringify({
+        files: [{ path: "refs/notes.md", content: "bundled note", mimeType: "text/markdown" }],
+      }),
+    });
+    expect(post.status).toBe(200);
+
+    const bundle = await dispatch(`/api/agents/some-agent/skills/bundle`);
+    expect(bundle.status).toBe(200);
+    const body = (await bundle.json()) as {
+      skills: Array<{
+        id: string;
+        files: Array<{ path: string; content: string; isBinary: boolean }>;
+      }>;
+      total: number;
+      signature: string;
+    };
+
+    const bundled = body.skills.find((skill) => skill.id === swarmSkill.id);
+    expect(bundled?.files).toEqual([
+      expect.objectContaining({ path: "refs/notes.md", content: "bundled note", isBinary: false }),
+    ]);
+    expect(typeof body.signature).toBe("string");
+    expect(body.signature.length).toBeGreaterThan(0);
+    expect(body.total).toBe(body.skills.length);
+  });
 });

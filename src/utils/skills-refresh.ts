@@ -77,26 +77,56 @@ export async function refreshSkillsIfChanged(
     isEnabled: boolean;
     isActive: boolean;
   };
+  type BundledFile = { path: string; content: string; isBinary: boolean };
   let skillRows: SkillRow[] = [];
+  // Present when the bundle call succeeded: every complex skill's files arrive
+  // in the same response, so Step 3 never fans out per file.
+  let bundledFiles: Map<string, BundledFile[]> | null = null;
   let newHash: string | null = null;
   let listFetchOk = false;
+
+  // Preferred path: one request for the skills and all of their bundled files.
+  // A 4xx from an older server (no bundle endpoint yet) falls through to the
+  // legacy list + per-file path below.
   try {
-    const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
+    const bundleResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills/bundle`, {
       headers: authHeaders,
     });
-    if (skillsResp.ok) {
-      const skillsData = (await skillsResp.json()) as {
-        skills: SkillRow[];
+    if (bundleResp.ok) {
+      const bundle = (await bundleResp.json()) as {
+        skills: (SkillRow & { files?: BundledFile[] })[];
         signature?: string;
       };
-      skillRows = skillsData.skills;
-      if (typeof skillsData.signature === "string") {
-        newHash = skillsData.signature;
+      skillRows = bundle.skills;
+      bundledFiles = new Map(bundle.skills.map((skill) => [skill.id, skill.files ?? []]));
+      if (typeof bundle.signature === "string") {
+        newHash = bundle.signature;
       }
       listFetchOk = true;
     }
   } catch {
-    // Transient network / parse error — bail out without touching the local FS
+    // Transient network / parse error — the legacy path below gets a chance.
+  }
+
+  if (!listFetchOk) {
+    try {
+      const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
+        headers: authHeaders,
+      });
+      if (skillsResp.ok) {
+        const skillsData = (await skillsResp.json()) as {
+          skills: SkillRow[];
+          signature?: string;
+        };
+        skillRows = skillsData.skills;
+        if (typeof skillsData.signature === "string") {
+          newHash = skillsData.signature;
+        }
+        listFetchOk = true;
+      }
+    } catch {
+      // Transient network / parse error — bail out without touching the local FS
+    }
   }
 
   // Guard: a failed list fetch must not proceed to writeSkillsToFilesystem.
@@ -125,45 +155,55 @@ export async function refreshSkillsIfChanged(
       const files: { path: string; content: string; isBinary: boolean }[] = [];
 
       if (skill.isComplex) {
-        // Fetch manifest to know which files exist + which are binary
-        try {
-          const manifestResp = await fetch(`${apiUrl}/api/skills/${skill.id}/files`, {
-            headers: authHeaders,
-          });
-          if (manifestResp.ok) {
-            const manifestData = (await manifestResp.json()) as {
-              files: { path: string; isBinary: boolean }[];
-            };
+        const bundled = bundledFiles?.get(skill.id);
+        if (bundled) {
+          // Bundle path: every file (including binaries) arrived with the
+          // skill list, so there is nothing left to fetch.
+          files.push(...bundled);
+        } else {
+          // Legacy server: fetch manifest to know which files exist + which are binary
+          try {
+            const manifestResp = await fetch(`${apiUrl}/api/skills/${skill.id}/files`, {
+              headers: authHeaders,
+            });
+            if (manifestResp.ok) {
+              const manifestData = (await manifestResp.json()) as {
+                files: { path: string; isBinary: boolean }[];
+              };
 
-            // Fetch content for each non-binary file (N+1 — acceptable for v1)
-            for (const manifestEntry of manifestData.files) {
-              if (manifestEntry.isBinary) {
-                files.push({ path: manifestEntry.path, content: "", isBinary: true });
-                continue;
-              }
-              try {
-                const encodedPath = manifestEntry.path.split("/").map(encodeURIComponent).join("/");
-                const fileResp = await fetch(
-                  `${apiUrl}/api/skills/${skill.id}/files/${encodedPath}`,
-                  { headers: authHeaders },
-                );
-                if (fileResp.ok) {
-                  const fileData = (await fileResp.json()) as {
-                    file: { path: string; content: string; isBinary: boolean };
-                  };
-                  files.push({
-                    path: fileData.file.path,
-                    content: fileData.file.content,
-                    isBinary: fileData.file.isBinary,
-                  });
+              // Fetch content for each non-binary file (N+1 — acceptable for v1)
+              for (const manifestEntry of manifestData.files) {
+                if (manifestEntry.isBinary) {
+                  files.push({ path: manifestEntry.path, content: "", isBinary: true });
+                  continue;
                 }
-              } catch {
-                // Non-fatal — skip this file
+                try {
+                  const encodedPath = manifestEntry.path
+                    .split("/")
+                    .map(encodeURIComponent)
+                    .join("/");
+                  const fileResp = await fetch(
+                    `${apiUrl}/api/skills/${skill.id}/files/${encodedPath}`,
+                    { headers: authHeaders },
+                  );
+                  if (fileResp.ok) {
+                    const fileData = (await fileResp.json()) as {
+                      file: { path: string; content: string; isBinary: boolean };
+                    };
+                    files.push({
+                      path: fileData.file.path,
+                      content: fileData.file.content,
+                      isBinary: fileData.file.isBinary,
+                    });
+                  }
+                } catch {
+                  // Non-fatal — skip this file
+                }
               }
             }
+          } catch {
+            // Non-fatal — treat as no files (will skip complex skill per writer logic)
           }
-        } catch {
-          // Non-fatal — treat as no files (will skip complex skill per writer logic)
         }
       }
 

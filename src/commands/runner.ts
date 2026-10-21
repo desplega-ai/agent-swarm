@@ -26,7 +26,12 @@ import {
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
 import { type RelevantMemory, renderMemoriesPrompt } from "../prompts/memories.ts";
-import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
+import {
+  beginBootRenderCache,
+  configureHttpResolver,
+  endBootRenderCache,
+  resolveTemplateAsync,
+} from "../prompts/resolver.ts";
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import {
   authJsonToCredentialSelection,
@@ -5744,6 +5749,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Configure HTTP-based template resolution (workers resolve via API, not local DB)
   if (apiKey) {
     configureHttpResolver(apiUrl, apiKey);
+    // Boot resolves the same system-prompt templates repeatedly (adapter
+    // creation, registration, capability refresh, first reconcile). Memoize
+    // them until the worker is ready to poll; task dispatch below is
+    // unaffected because the cache is empty again by then.
+    beginBootRenderCache();
   }
 
   // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false).
@@ -6373,6 +6383,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       `[${role}] Recovered ${startupRecoveredOrphans} orphaned in-progress task(s) to pending`,
     );
   }
+  // The call above is this process's first poll: start the in-loop throttle
+  // from it so the delivery loop does not repeat the same recovery a second
+  // time on its first iteration.
+  let lastOrphanRecoveryAt = Date.now();
 
   // Fetch full agent profile to get soul/identity content
   try {
@@ -6921,9 +6935,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let consecutiveBudgetRefusals = 0;
 
   // Throttle orphan recovery so it runs periodically while the worker is idle or under capacity.
-  let lastOrphanRecoveryAt = 0;
+  // `lastOrphanRecoveryAt` is seeded by the boot recovery above.
   const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
   const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
+
+  // Boot is over: template renders go back to one round trip per call so a
+  // freshly edited prompt is visible to the first dispatched task.
+  endBootRenderCache();
 
   while (shouldRunDeliveryLoop(state.deliveryMode, shuttingDown)) {
     const deliveryChecks = pushDelivery.checks(state.deliveryMode ?? "poll");

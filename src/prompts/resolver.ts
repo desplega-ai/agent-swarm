@@ -86,13 +86,37 @@ export function isHttpResolverConfigured(): boolean {
  */
 export function resetHttpResolver(): void {
   httpResolverConfig = null;
+  bootRenderCache = null;
 }
 
-async function resolveTemplateViaHttp(
+// ─── Boot-scoped render cache ──────────────────────────────────────────────
+//
+// A worker resolves the same system-prompt templates several times while it
+// boots (adapter creation, registration, capability refresh, first poll), and
+// every resolution is a round trip to `/api/prompt-templates/render`. Identical
+// inputs produce identical output, so the boot window can reuse the first
+// answer. The cache is explicitly scoped: outside boot it is empty, because a
+// task dispatch must always see a template an operator just edited.
+
+const BOOT_RENDER_CACHE_MAX_ENTRIES = 200;
+
+let bootRenderCache: Map<string, ResolveResult> | null = null;
+
+/** Start memoizing HTTP template renders for the current boot. */
+export function beginBootRenderCache(): void {
+  bootRenderCache = new Map();
+}
+
+/** Drop the boot cache so every render does its own round trip again. */
+export function endBootRenderCache(): void {
+  bootRenderCache = null;
+}
+
+async function requestRenderedTemplate(
   eventType: string,
   variables: Record<string, unknown>,
   options: ResolveOptions,
-): Promise<ResolveResult> {
+): Promise<ResolveResult | null> {
   const config = httpResolverConfig!;
   const url = `${config.apiUrl}/api/prompt-templates/render`;
 
@@ -115,7 +139,7 @@ async function resolveTemplateViaHttp(
       console.warn(
         `[prompt-resolver] HTTP render failed (${resp.status}), falling back to code defaults`,
       );
-      return resolveTemplateFromCode(eventType, variables);
+      return null;
     }
 
     return (await resp.json()) as ResolveResult;
@@ -124,8 +148,36 @@ async function resolveTemplateViaHttp(
       `[prompt-resolver] HTTP render error, falling back to code defaults:`,
       err instanceof Error ? err.message : err,
     );
+    return null;
+  }
+}
+
+async function resolveTemplateViaHttp(
+  eventType: string,
+  variables: Record<string, unknown>,
+  options: ResolveOptions,
+): Promise<ResolveResult> {
+  const bootCache = bootRenderCache;
+  const cacheKey =
+    bootCache === null
+      ? null
+      : JSON.stringify([eventType, options.agentId ?? null, options.repoId ?? null, variables]);
+  if (bootCache !== null && cacheKey !== null) {
+    const cached = bootCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+  }
+
+  const result = await requestRenderedTemplate(eventType, variables, options);
+  if (result === null) {
+    // A failed render is never cached: a later call in the same boot gets its
+    // own attempt instead of inheriting the code-default fallback.
     return resolveTemplateFromCode(eventType, variables);
   }
+
+  if (bootCache !== null && cacheKey !== null && bootCache.size < BOOT_RENDER_CACHE_MAX_ENTRIES) {
+    bootCache.set(cacheKey, result);
+  }
+  return result;
 }
 
 /**

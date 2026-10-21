@@ -7,6 +7,7 @@ import {
   getAgentSkills,
   getSkillById,
   getSkillFile,
+  getSkillFiles,
   installSkill,
   listSkillFileManifest,
   listSkills,
@@ -98,6 +99,21 @@ const syncFilesystemResponseSchema = z.object({
 
 const agentSkillsListResponseSchema = z.object({
   skills: z.array(SkillWithInstallInfoSchema),
+  total: z.number(),
+  signature: z.string(),
+});
+
+/**
+ * Boot payload for workers: every installed-and-enabled skill together with
+ * the full content of its bundled files. Replaces the list call plus the
+ * per-skill, per-file fan-out a worker used to make while booting.
+ */
+const agentSkillsBundleResponseSchema = z.object({
+  skills: z.array(
+    SkillWithInstallInfoSchema.extend({
+      files: z.array(SkillFileSchema),
+    }),
+  ),
   total: z.number(),
   signature: z.string(),
 });
@@ -543,6 +559,21 @@ const getAgentSkillsSignatureRoute = route({
   },
 });
 
+const getAgentSkillsBundleRoute = route({
+  method: "get",
+  path: "/api/agents/{id}/skills/bundle",
+  pattern: ["api", "agents", null, "skills", "bundle"],
+  summary: "Get an agent's installed skills together with their bundled files",
+  description:
+    "Single-request boot payload: every installed-and-enabled skill with the full content of its bundled files, plus the same signature the cheap probe returns. Lets a worker sync its local skill tree without an N+1 file fan-out.",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Agent skills bundle", schema: agentSkillsBundleResponseSchema },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleSkills(
@@ -552,6 +583,26 @@ export async function handleSkills(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  // GET /api/agents/:id/skills/bundle (must come before the shorter patterns)
+  if (getAgentSkillsBundleRoute.match(req.method, pathSegments)) {
+    const parsed = await getAgentSkillsBundleRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const skills = await getAgentSkills(parsed.params.id);
+    const bundled = await Promise.all(
+      skills.map(async (skill) => ({
+        ...skill,
+        files: skill.isComplex ? await getSkillFiles(skill.id) : [],
+      })),
+    );
+    const signature = (await computeAgentSkillsSignature(parsed.params.id)).hash;
+    getAgentSkillsBundleRoute.respond(res, 200, {
+      skills: bundled,
+      total: bundled.length,
+      signature,
+    });
+    return true;
+  }
+
   // GET /api/agents/:id/skills/signature (must come before the shorter pattern)
   if (getAgentSkillsSignatureRoute.match(req.method, pathSegments)) {
     const parsed = await getAgentSkillsSignatureRoute.parse(req, res, pathSegments, queryParams);
