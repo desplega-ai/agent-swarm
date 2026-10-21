@@ -363,3 +363,25 @@ describe("TaskComposer on the task page", () => {
     await unmount();
   });
 });
+
+describe("composer attachment types", () => {
+  test("audio files are accepted, so they reach the draft and get transcribed", async () => {
+    const { partitionAttachmentFiles } = await import("../sessions/composer-dock");
+    const audio = [
+      "note.mp3",
+      "memo.m4a",
+      "clip.wav",
+      "voice.ogg",
+      "voice.oga",
+      "a.opus",
+      "b.flac",
+    ];
+    const files = audio.map((name) => new File([new Uint8Array([1])], name));
+    expect(partitionAttachmentFiles(files)).toEqual({ valid: files, error: null });
+
+    const binary = new File([new Uint8Array([1])], "tool.exe");
+    expect(partitionAttachmentFiles([binary]).error).toContain(
+      '"tool.exe" isn\'t an allowed file type',
+    );
+  });
+});
