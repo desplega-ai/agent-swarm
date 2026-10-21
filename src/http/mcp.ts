@@ -13,6 +13,7 @@ import {
   parseTaskToolManifest,
   selectTaskTools,
 } from "@/utils/task-tool-manifest";
+import { MCP_BODY_TOO_LARGE, readMcpBody } from "./mcp-body";
 
 export type McpTransportActivity = Record<string, number>;
 export type McpSessionAgents = Record<string, string>;
@@ -166,19 +167,17 @@ export async function handleMcp(
   if (agentMismatch) return true;
 
   if (req.method === "POST") {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
+    const body = await readMcpBody(req, res);
+    if (body === MCP_BODY_TOO_LARGE) return true;
+    const rpc = body as { method?: unknown; id?: unknown } | null;
 
-    if (!sessionId && body.method === "server/discover") {
+    if (!sessionId && rpc?.method === "server/discover") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
           jsonrpc: "2.0",
           error: { code: -32601, message: "Method not found" },
-          id: body.id ?? null,
+          id: rpc.id ?? null,
         }),
       );
       return true;
