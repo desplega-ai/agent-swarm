@@ -259,7 +259,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `API_KEY` | Yes | — | API key for MCP server |
+| `API_KEY` | Yes | — | API key for MCP server. Either the shared swarm API key or an agent-bound worker token from `agent-swarm worker-token create`, which acts only as `AGENT_ID` |
 | `AGENT_ID` | No | Auto-generated | Agent UUID. Keep stable for task resume |
 | `AGENT_ROLE` | No | `worker` | Role: `worker` or `lead` |
 | `AGENT_NAME` | No | Auto-generated | Display name for the agent |
