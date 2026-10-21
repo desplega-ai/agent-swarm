@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { closeDb, createAgent, createTaskExtended, getDbClient, initDb, startTask } from "../be/db";
-import { getEmbeddingProvider } from "../be/memory";
+import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
 import { taskCompletionMemoryKey } from "../be/memory/index-content";
 import { rerank } from "../be/memory/reranker";
@@ -200,5 +200,206 @@ describe("rerank collapses chunks of one task", () => {
     const ranked = rerank([...manualChunks, ...legacy], { limit: 10 });
 
     expect(ranked).toHaveLength(4);
+  });
+});
+
+async function waitForRows(
+  taskId: string,
+  done: (rows: Row[]) => boolean,
+  ms = 3000,
+): Promise<Row[]> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const rows = await rowsFor(taskId);
+    if (done(rows)) return rows;
+    await Bun.sleep(20);
+  }
+  return rowsFor(taskId);
+}
+
+async function hasTable(name: string): Promise<boolean> {
+  const row = await getDbClient().get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = ?",
+    [name],
+  );
+  return (row?.n ?? 0) > 0;
+}
+
+/** Rows left behind for memory ids that no longer exist. */
+async function orphanCounts(): Promise<Record<string, number>> {
+  const db = getDbClient();
+  const count = async (sql: string) => (await db.get<{ n: number }>(sql))?.n ?? 0;
+  const counts: Record<string, number> = {
+    versions: await count(
+      "SELECT COUNT(*) AS n FROM agent_memory_version WHERE memory_id NOT IN (SELECT id FROM agent_memory)",
+    ),
+  };
+  if (await hasTable("memory_fts")) {
+    counts.fts = await count(
+      "SELECT COUNT(*) AS n FROM memory_fts WHERE memory_id NOT IN (SELECT id FROM agent_memory)",
+    );
+  }
+  if (await hasTable("memory_vec")) {
+    counts.vec = await count(
+      "SELECT COUNT(*) AS n FROM memory_vec WHERE memory_id NOT IN (SELECT id FROM agent_memory)",
+    );
+  }
+  return counts;
+}
+
+describe("re-persisting a task replaces its document", () => {
+  test("long -> short -> long replaces each scope's chunks, no duplicates or orphans", async () => {
+    const task = await createTaskExtended("research: rewrite the memory report", {
+      agentId: worker.id,
+      taskType: "research",
+    });
+    await startTask(task.id);
+    const key = taskCompletionMemoryKey(task.id);
+    const persist = (output: string) =>
+      runTaskTerminalEffects({
+        task,
+        status: "completed",
+        output,
+        agentId: worker.id,
+        persistMemory: true,
+      });
+    const scoped = (rows: Row[], scope: string) => rows.filter((r) => r.scope === scope);
+
+    await persist(longOutput());
+    const first = await waitForRows(
+      task.id,
+      (rows) =>
+        scoped(rows, "agent").length > 1 &&
+        scoped(rows, "swarm").length > 1 &&
+        rows.every((r) => r.embedded),
+    );
+    expect(scoped(first, "agent").length).toBeGreaterThan(1);
+    expect(scoped(first, "swarm").length).toBeGreaterThan(1);
+
+    // Another owner's document under the same key must survive the replace.
+    const foreign = await getMemoryStore().store({
+      agentId: crypto.randomUUID(),
+      scope: "agent",
+      name: "Task: someone else's run",
+      content: "another owner's completion of the same task",
+      source: "task_completion",
+      sourceTaskId: task.id,
+      key,
+    });
+
+    await persist("short re-run answer");
+    const second = await waitForRows(
+      task.id,
+      (rows) => rows.length === 3 && rows.every((r) => r.embedded || r.id === foreign.id),
+    );
+    const mine = second.filter((r) => r.id !== foreign.id);
+    expect(mine.map((r) => [r.scope, r.chunkIndex, r.totalChunks])).toEqual([
+      ["agent", 0, 1],
+      ["swarm", 0, 1],
+    ]);
+    for (const row of mine) expect(row.content).toContain("short re-run answer");
+    expect(second.some((r) => r.id === foreign.id)).toBe(true);
+    const oldIds = new Set(first.map((r) => r.id));
+    expect(second.filter((r) => oldIds.has(r.id))).toEqual([]);
+
+    await persist(longOutput());
+    const third = await waitForRows(
+      task.id,
+      (rows) =>
+        scoped(rows, "agent").length > 2 && rows.every((r) => r.embedded || r.id === foreign.id),
+    );
+    for (const scope of ["agent", "swarm"]) {
+      const rows = scoped(third, scope).filter((r) => r.id !== foreign.id);
+      expect(rows.length).toBeGreaterThan(1);
+      expect(rows.map((r) => r.chunkIndex)).toEqual(rows.map((_, i) => i));
+      expect(new Set(rows.map((r) => r.totalChunks))).toEqual(new Set([rows.length]));
+    }
+
+    const duplicates = await getDbClient().get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM (
+         SELECT 1 FROM agent_memory WHERE key = ?
+          GROUP BY scope, COALESCE(agentId, ''), chunkIndex HAVING COUNT(*) > 1)`,
+      [key],
+    );
+    expect(duplicates?.n).toBe(0);
+    const orphans = await orphanCounts();
+    for (const n of Object.values(orphans)) expect(n).toBe(0);
+  });
+
+  test("an embedding that lands after its row was replaced writes no vec row", async () => {
+    const store = getMemoryStore();
+    const memory = await store.store({
+      agentId: worker.id,
+      scope: "agent",
+      name: "replaced before embed",
+      content: "a chunk whose background embed finishes after a re-persist",
+      source: "task_completion",
+    });
+    await store.delete(memory.id);
+
+    await store.updateEmbedding(memory.id, new Float32Array(EMBEDDING_DIMENSIONS).fill(0.1), "t");
+
+    expect(await hasTable("memory_vec")).toBe(true);
+    const vec = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM memory_vec WHERE memory_id = ?",
+      [memory.id],
+    );
+    expect(vec?.n).toBe(0);
+  });
+
+  test("a document under the key from another source is not deleted", async () => {
+    const task = await createTaskExtended("keyed manual collision", { agentId: worker.id });
+    await startTask(task.id);
+    const manual = await getMemoryStore().store({
+      agentId: worker.id,
+      scope: "agent",
+      name: "manual note",
+      content: "a manual memory that happens to use the task key",
+      source: "manual",
+      key: taskCompletionMemoryKey(task.id),
+    });
+
+    await runTaskTerminalEffects({
+      task,
+      status: "completed",
+      output: "the task output that collides with the manual key",
+      agentId: worker.id,
+      persistMemory: true,
+    });
+    await Bun.sleep(200);
+
+    expect((await getMemoryStore().peek(manual.id))?.content).toBe(manual.content);
+  });
+});
+
+describe("structured completion output keeps every section", () => {
+  test("100 markdown sections with short findings are all stored", async () => {
+    const task = await createTaskExtended(
+      "structured findings report: summarize every lane with one line each",
+      { agentId: worker.id },
+    );
+    await startTask(task.id);
+    const output = Array.from({ length: 100 }, (_, i) => `## Lane ${i}\n\nfinding-${i} holds`).join(
+      "\n\n",
+    );
+
+    await runTaskTerminalEffects({
+      task,
+      status: "completed",
+      output,
+      agentId: worker.id,
+      persistMemory: true,
+    });
+
+    const rows = await waitForRows(task.id, (r) => r.length > 0 && r.every((x) => x.embedded));
+    const stored = rows.map((r) => r.content).join("\n");
+    const missing = Array.from({ length: 100 }, (_, i) => `finding-${i} holds`).filter(
+      (finding) => !stored.includes(finding),
+    );
+    expect(missing).toEqual([]);
+    expect(stored).toContain("## Lane 99");
+    for (const row of rows) expect(row.content.length).toBeLessThanOrEqual(2_200);
+    // Packed into a few chunks, not one row per three-word section.
+    expect(rows.length).toBeLessThan(10);
   });
 });

@@ -57,7 +57,8 @@ export async function runTaskTerminalEffects(args: {
 
         // Same path as memory-store: chunk, store, and embed each chunk, so a
         // long output never meets the embedding model's input cap. The per-task
-        // key makes the chunks one document, like a keyed manual memory.
+        // key makes the chunks one document, like a keyed manual memory, and a
+        // repeat write for the task replaces that document atomically.
         const key = taskCompletionMemoryKey(taskId);
         await indexMemoryContent({
           agentId: agentId ?? null,
@@ -68,6 +69,7 @@ export async function runTaskTerminalEffects(args: {
           sourceTaskId: taskId,
           key,
           intent: "task completion memory",
+          replaceExisting: true,
         });
 
         // Auto-promote high-value completions to swarm memory (P3)
@@ -88,6 +90,7 @@ export async function runTaskTerminalEffects(args: {
               sourceTaskId: taskId,
               key,
               intent: "task completion memory",
+              replaceExisting: true,
             });
           } catch {
             // Non-blocking — swarm memory promotion failure is not critical

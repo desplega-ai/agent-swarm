@@ -164,6 +164,19 @@ export function rerank(candidates: MemoryCandidate[], options: RerankOptions): M
 }
 
 /**
+ * The document rerank() collapses a candidate into, or null when the candidate
+ * is ranked on its own (anything but a chunk of a multi-chunk task memory).
+ */
+export function collapsedDocumentKey(
+  candidate: Pick<MemoryCandidate, "source" | "totalChunks" | "key" | "agentId" | "scope">,
+): string | null {
+  if (candidate.source !== "task_completion" || candidate.totalChunks <= 1 || !candidate.key) {
+    return null;
+  }
+  return JSON.stringify([candidate.agentId, candidate.scope, candidate.key]);
+}
+
+/**
  * Keep only the best-ranked chunk of each multi-chunk task_completion memory.
  * One long task output splits into a hundred chunks or more, which would
  * otherwise fill every result slot. Chunks of one task share a key (see
@@ -172,10 +185,8 @@ export function rerank(candidates: MemoryCandidate[], options: RerankOptions): M
 function collapseTaskCompletionChunks<T extends MemoryCandidate>(ranked: T[]): T[] {
   const seen = new Set<string>();
   return ranked.filter((candidate) => {
-    if (candidate.source !== "task_completion" || candidate.totalChunks <= 1 || !candidate.key) {
-      return true;
-    }
-    const document = JSON.stringify([candidate.agentId, candidate.scope, candidate.key]);
+    const document = collapsedDocumentKey(candidate);
+    if (document === null) return true;
     if (seen.has(document)) return false;
     seen.add(document);
     return true;

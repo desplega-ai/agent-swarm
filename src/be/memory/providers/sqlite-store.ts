@@ -14,6 +14,7 @@ import { isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
 import { recencyDecay } from "../reranker";
 import type {
   MemoryCandidate,
+  MemoryDocumentRef,
   MemoryEditInput,
   MemoryEditResult,
   MemoryHealth,
@@ -505,6 +506,32 @@ export class SqliteMemoryStore implements MemoryStore {
   async storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]> {
     const results: AgentMemory[] = [];
     await getDbClient().transaction(async () => {
+      for (const input of inputs) {
+        results.push(await this.store(input));
+      }
+    });
+    return results;
+  }
+
+  async replaceDocument(
+    document: MemoryDocumentRef,
+    inputs: MemoryInput[],
+  ): Promise<AgentMemory[]> {
+    const results: AgentMemory[] = [];
+    await getDbClient().transaction(async (tx) => {
+      // Only this owner's rows of this source, in this scope, under this key.
+      // Another source holding the key is left alone and the insert fails.
+      const rows = await tx.query<{ id: string }>(
+        `SELECT id FROM agent_memory
+          WHERE key = ? AND scope = ? AND COALESCE(agentId, '') = COALESCE(?, '') AND source = ?`,
+        [document.key, document.scope, document.agentId ?? null, document.source],
+      );
+      const ids = rows.map((row) => row.id);
+      if (ids.length > 0) {
+        await this.purgeByIds(ids);
+        const placeholders = ids.map(() => "?").join(",");
+        await tx.run(`DELETE FROM agent_memory WHERE id IN (${placeholders})`, ids);
+      }
       for (const input of inputs) {
         results.push(await this.store(input));
       }
@@ -1256,11 +1283,13 @@ export class SqliteMemoryStore implements MemoryStore {
   async updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void> {
     const db = getDbClient();
     const buffer = serializeEmbedding(embedding);
-    await db.run("UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?", [
-      buffer,
-      model,
-      id,
-    ]);
+    const updated = await db.run(
+      "UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?",
+      [buffer, model, id],
+    );
+    // The row was deleted (or replaced) while its embedding was in flight:
+    // a vec row now would point at nothing.
+    if (updated.changes === 0) return;
 
     if (this.vecInitialized && this.getVecTableSchema()) {
       const vecBuffer = this.toVecBuffer(embedding);
