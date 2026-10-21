@@ -583,6 +583,45 @@ describe("Chat SDK requester and group addressing", () => {
     );
   });
 
+  // A supergroup reply carries `message_thread_id`: the id of the reply chain's
+  // first message. Replying to a bot message that starts a chain (a scheduled
+  // post, a chat-post) gives `message_thread_id` = the bot message's id, the
+  // same shape as a forum topic root, but `is_topic_message` is absent.
+  test("a supergroup reply to a bot message that starts a reply chain reaches the gate; chatter still drops", async () => {
+    const chatId = -3017;
+    const botPost = {
+      message_id: 55,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: "supergroup", title: "Life" },
+      from: { id: 4242, is_bot: true, first_name: "Swarm", username: "swarm_test_bot" },
+      text: "Calendar sync is done.",
+    };
+    const tasksIn = () =>
+      getDbClient().query<{ task: string }>(
+        "SELECT task FROM agent_tasks WHERE source = 'chat' AND contextKey LIKE ?",
+        [`${chatSdkContextKey(`telegram:${chatId}`)}%`],
+      );
+
+    // Control: an unaddressed message drops.
+    await postTelegramUpdate(groupUpdate(chatId, "anyone up for dinner Thursday?", BOB));
+    await flushChatBuffers();
+    expect(await tasksIn()).toHaveLength(0);
+
+    await postTelegramUpdate(
+      groupUpdate(chatId, "what's on tomorrow?", {
+        ...ALICE,
+        message_thread_id: botPost.message_id,
+        reply_to_message: botPost,
+      }),
+    );
+    await flushChatBuffers();
+    const tasks = await tasksIn();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.task).toStartWith(
+      '[chat] telegram · supergroup "Life" · from: Alice (@alice) · addressed: reply-to-bot · reply-to: "Calendar sync is done."\n\n',
+    );
+  });
+
   test("an unknown sender in a known requester's thread does not inherit that requester", async () => {
     const chatId = -3008;
     const alice = await createUser({ name: "Alice", timezone: "Europe/Madrid" });

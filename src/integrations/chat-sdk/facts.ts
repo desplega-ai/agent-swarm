@@ -30,7 +30,7 @@ export interface ChatMessageFacts {
 
 const SNIPPET_MAX = 80;
 
-interface TelegramRawMessage {
+export interface TelegramRawMessage {
   message_id?: number;
   message_thread_id?: number;
   is_topic_message?: boolean;
@@ -57,16 +57,37 @@ function personLabel(name: string | undefined, username: string | undefined, fal
   return name || fallback;
 }
 
-function telegramFacts(raw: TelegramRawMessage, message: Message, botUserId?: string) {
+/**
+ * In a forum topic every plain message replies to the topic's creation
+ * message, so that reply is the topic, not an answer to anyone. Only
+ * `is_topic_message` marks a topic: a plain supergroup reply also carries
+ * `message_thread_id`, the id of its reply chain's first message.
+ */
+function replyIsTopicRoot(raw: TelegramRawMessage): boolean {
   const reply = raw.reply_to_message;
-  // In a forum topic every plain message replies to the topic's creation
-  // message, so that reply is the topic, not an answer to anyone.
-  const replyIsTopicRoot =
+  return (
     reply !== undefined &&
     (reply.forum_topic_created !== undefined ||
-      (raw.is_topic_message === true && reply.message_id === raw.message_thread_id));
-  const realReply = reply && !replyIsTopicRoot ? reply : undefined;
-  const topicName = replyIsTopicRoot ? reply?.forum_topic_created?.name : undefined;
+      (raw.is_topic_message === true && reply.message_id === raw.message_thread_id))
+  );
+}
+
+/** The raw Telegram message replies to one of the bot's own messages, not to a forum topic root. */
+export function isTelegramReplyToBot(raw: TelegramRawMessage, botUserId?: string): boolean {
+  const fromId = raw.reply_to_message?.from?.id;
+  return (
+    !replyIsTopicRoot(raw) &&
+    fromId !== undefined &&
+    botUserId !== undefined &&
+    String(fromId) === botUserId
+  );
+}
+
+function telegramFacts(raw: TelegramRawMessage, message: Message, botUserId?: string) {
+  const reply = raw.reply_to_message;
+  const topicRoot = replyIsTopicRoot(raw);
+  const realReply = reply && !topicRoot ? reply : undefined;
+  const topicName = topicRoot ? reply?.forum_topic_created?.name : undefined;
   const name = [raw.from?.first_name, raw.from?.last_name].filter(Boolean).join(" ").trim();
   return {
     chatType: raw.chat?.type,
@@ -79,10 +100,7 @@ function telegramFacts(raw: TelegramRawMessage, message: Message, botUserId?: st
           : `#${raw.message_thread_id}`
         : undefined,
     from: personLabel(name || undefined, raw.from?.username, message.author.userId),
-    replyToBot:
-      realReply?.from?.id !== undefined &&
-      botUserId !== undefined &&
-      String(realReply.from.id) === botUserId,
+    replyToBot: isTelegramReplyToBot(raw, botUserId),
     replyToSnippet: snippet(realReply?.text ?? realReply?.caption),
   } satisfies ChatMessageFacts;
 }

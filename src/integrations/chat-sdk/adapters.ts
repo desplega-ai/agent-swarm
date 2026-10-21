@@ -1,5 +1,7 @@
+import type { TelegramMessage } from "@chat-adapter/telegram";
 import type { Adapter, Logger } from "chat";
 import { type ChatSdkAdapterName, type ResolvedAdapterConfig, readApiUrlOverrides } from "./config";
+import { isTelegramReplyToBot, type TelegramRawMessage } from "./facts";
 import { withInfoFilter } from "./logger";
 import { getChatSdkTestHooks } from "./test-hooks";
 
@@ -61,15 +63,29 @@ export async function loadAdapter(
   const base = { ...config, apiUrl, logger };
   switch (name) {
     case "telegram": {
-      const { createTelegramAdapter } = await import("@chat-adapter/telegram");
+      const { TelegramAdapter } = await import("@chat-adapter/telegram");
+      // The adapter's `mentionOnReply` skips a reply whose target id equals
+      // `message_thread_id`, meant for forum topic roots. A plain supergroup
+      // reply to a bot message that starts a reply chain has that same shape,
+      // so it was never a mention and never reached a handler. Core decides
+      // with `is_topic_message`, as the task header facts do.
+      class SwarmTelegramAdapter extends TelegramAdapter {
+        protected override isBotMentioned(message: TelegramMessage, text: string): boolean {
+          return (
+            super.isBotMentioned(message, text) ||
+            (String(message.from?.id) !== this.botUserId &&
+              isTelegramReplyToBot(message as TelegramRawMessage, this.botUserId))
+          );
+        }
+      }
       // Explicit `false` blocks the TELEGRAM_ALLOW_UNVERIFIED_WEBHOOKS env fallback.
       // Explicit `true` makes a reply to the bot a mention whatever
       // TELEGRAM_MENTION_ON_REPLY says.
-      return createTelegramAdapter({
+      return new SwarmTelegramAdapter({
         ...base,
         allowUnverifiedWebhooks: false,
         mentionOnReply: true,
-      } as Parameters<typeof createTelegramAdapter>[0]);
+      } as ConstructorParameters<typeof TelegramAdapter>[0]);
     }
     case "slack": {
       const { createSlackAdapter } = await import("@chat-adapter/slack");
