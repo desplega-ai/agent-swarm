@@ -142,7 +142,7 @@ function SessionPanelBody({
     limit: 20,
     enabled: !!userId,
   });
-  const items = userId ? (list.data ?? []) : [];
+  const items = userId ? (list.data?.sessions ?? []) : [];
 
   const isNew = selected === NEW_SESSION;
   // The trigger label comes from the session itself: a search can filter it

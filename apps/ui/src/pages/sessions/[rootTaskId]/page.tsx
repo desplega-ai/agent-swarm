@@ -29,7 +29,12 @@ import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { SESSION_SHARING_MIN_VERSION } from "@/lib/session-sharing";
 import { sessionDisplayTitle } from "@/lib/utils";
 
-export default function SessionDetailPage() {
+/**
+ * The legacy detail page. `pages/sessions/page.tsx` renders it for
+ * `/sessions/:rootTaskId` when the legacy view is on. `onNewView` switches to
+ * the sessions v2 view. It is absent when the API cannot serve v2.
+ */
+export default function SessionDetailPage({ onNewView }: { onNewView?: () => void }) {
   const { rootTaskId } = useParams<{ rootTaskId: string }>();
   const gate = useFeatureGate("1.76.0");
   const renameGate = useFeatureGate("1.120.0");
@@ -87,14 +92,14 @@ export default function SessionDetailPage() {
 
   if (!rootTaskId) {
     return (
-      <SessionsShell>
+      <SessionsShell onNewView={onNewView}>
         <p className="text-muted-foreground p-3">Missing session id.</p>
       </SessionsShell>
     );
   }
 
   return (
-    <SessionsShell activeRootTaskId={rootTaskId}>
+    <SessionsShell activeRootTaskId={rootTaskId} onNewView={onNewView}>
       <SessionPresenceProvider rootTaskId={rootTaskId} enabled={!!detail}>
         {/* Editorial header — serif title + quiet meta caption. Single 72px
           band, no double divider. */}

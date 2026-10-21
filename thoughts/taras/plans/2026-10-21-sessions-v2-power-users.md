@@ -418,20 +418,20 @@ The new shell renders on `/sessions` by default: a resizable sidebar frame, a pa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI lint, types, and tokens pass: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun check -b && bun run check:tokens`
-- [ ] The lockfile is in sync: `bun install --frozen-lockfile`
-- [ ] The images still build with the new lock: `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .`
-- [ ] The dashboard image builds and serves: `bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest`
+- [x] UI lint, types, and tokens pass: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun check -b && bun run check:tokens`
+- [x] The lockfile is in sync: `bun install --frozen-lockfile`
+- [x] The images still build with the new lock: `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .`
+- [x] The dashboard image builds and serves: `bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest`
 - [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
 
 #### Automated QA:
-- [ ] With agent-browser on the seeded stack, `http://localhost:5274/sessions` renders the v2 shell, and the global nav is collapsed to icons.
-- [ ] Click "Legacy sessions": the old shell renders at once, without a reload, and again after a reload. `?legacy=0` returns to v2.
-- [ ] `http://localhost:5274/sessions/<rootId>?tabs=<rootId>,new` keeps both tabs in the URL after a reload.
-- [ ] Zero console errors on each URL (`agent-browser errors`).
+- [x] With agent-browser on the seeded stack, `http://localhost:5274/sessions` renders the v2 shell, and the global nav is collapsed to icons.
+- [x] Click "Legacy sessions": the old shell renders at once, without a reload, and again after a reload. `?legacy=0` returns to v2.
+- [x] `http://localhost:5274/sessions/<rootId>?tabs=<rootId>,new` keeps both tabs in the URL after a reload.
+- [x] Zero console errors on each URL (`agent-browser errors`).
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
 
 **Implementation Note**: Opus agent. Commit `[phase 3] feat(ui): sessions v2 shell, data layer, Legacy toggle`.
 
@@ -897,6 +897,9 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Phase 1 review added `scope=tree` to `GET /api/sessions`. The default scope `all` keeps ownerless roots (Legacy behavior). The tree and `scope=tree` lists exclude them for user viewers. A bypass actor with `scope=tree` sees every root.
   - Phase 2 review (assumed, autopilot): a user's prefix move moves only roots that user requested. Roots with no requester in the range are not moved and not listed (the tree hides them). Without this, `sessionAccessForRoot` gives every user `owner` on an ownerless root, so a rename swept up agent-created roots, even under another user's `personal/` prefix. Bulk moves by id keep the old route's rule.
   - Known limit (not changed): `resolveHttpAuditUserId` ignores `x-swarm-user-id`. So an operator-key dashboard user (API key plus a picked user) gets 403 when a move or a new session targets `personal/<self>/`. User tokens (`aswt_`) work. Every key-writing route behaves this way today. The UI shows the server error. Follow-up for Taras.
+  - Phase 3 scope addition (asked by Taras while he tested): the global nav got a collapse button in its header, a hover-to-expand logo when collapsed, and a more visible rail line. The rail hit area stays 16 px (8 px each side of the edge), because a 24 px rail took clicks from full-bleed content such as the v2 sidebar.
+  - Phase 3 decisions: both session routes render one `SessionsPage` (two page components remounted the shell). `?legacy=1|0` stores the preference once and leaves the URL. `useCollapseNavWhile` restores the nav on unmount, with a hold count, and route-driven toggles do not animate. Until Phases 6 and 7, the v2 pane renders today's `SessionConversation` for the focused session, so old links keep working.
+  - Phase 3: `bun run e2e:ui` must run in a clean worktree without `.env`. The repo `.env` loads real Slack tokens into the test API and breaks its boot. The local QA DB stores `SWARM_DEV_MODE=true`, because the API is 2.4.4 and `SESSIONS_V2_MIN_VERSION` is 2.4.5. The UI E2E test API needs the same for Phase 10 specs.
   - Phase 1: `approvals` on the session detail is omitted when empty. The client reads a missing field as `[]`. Bypass actors get no `readState`.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.

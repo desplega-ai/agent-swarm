@@ -4,7 +4,8 @@
  *
  * - `useSessions()` powers the `/sessions` sidebar list (root-task chains
  *   ordered by chain-wide last activity). Filter (`source`) and search
- *   (`q`) are pushed up to the API — the UI never filters in memory.
+ *   (`q`) are pushed up to the API, so the UI never filters in memory. The
+ *   data is one page (`sessions`, `total`, `limit`, `offset`).
  * - `useSession(rootTaskId)` returns the full chain payload for the
  *   selected session.
  *
@@ -14,10 +15,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { sessionSharesMutationOptions } from "@/lib/session-shares-mutation";
 import { sharesInput } from "@/lib/session-sharing";
 import { sessionRefetchInterval } from "@/lib/task-activity";
 import { api } from "../client";
+import type { SessionStatusFilter, SessionTriageFilter } from "../types";
 
 export interface UseSessionsOptions {
   limit?: number;
@@ -30,28 +33,42 @@ export interface UseSessionsOptions {
   requestedByUserId?: string;
   /** Root tasks whose `contextKey` starts with this prefix (≥1.157.1). */
   contextKeyPrefix?: string;
-  /** `mine` / `shared` (session sharing servers only, see `SESSION_SHARING_MIN_VERSION`). */
-  scope?: "mine" | "shared";
+  /**
+   * `mine` / `shared` (session sharing servers only, see `SESSION_SHARING_MIN_VERSION`).
+   * Every sessions v2 list sends `tree`, so its totals match `useSessionTree()`.
+   */
+  scope?: "mine" | "shared" | "tree";
+  /** Asset key prefix, subgroups included (sessions v2). */
+  keyPrefix?: string;
+  /** Exactly this group, not its subgroups (sessions v2). */
+  groupKey?: string;
+  /** Sessions in no group (sessions v2). */
+  noGroup?: boolean;
+  /** Read-state section: Inbox, Later, Done, or every unread session (sessions v2). */
+  triage?: SessionTriageFilter;
+  /** Running, failed, or "Needs you" (sessions v2). */
+  status?: SessionStatusFilter;
+  /** A person in the chain or a share user (sessions v2). */
+  withUserId?: string;
   /** Disable the query entirely (e.g. when user identity is not yet resolved). */
   enabled?: boolean;
 }
 
+/**
+ * Query key prefix of every session list page. The triage hooks patch rows
+ * under it. Invalidate with `["sessions"]`.
+ */
+export const SESSION_LIST_KEY = ["sessions", "list"] as const;
+
 export function useSessions(options?: UseSessionsOptions) {
-  const limit = options?.limit ?? 50;
-  const offset = options?.offset;
-  const source = options?.source;
-  const q = options?.q;
-  const requestedByUserId = options?.requestedByUserId;
-  const contextKeyPrefix = options?.contextKeyPrefix;
-  const scope = options?.scope;
-  const enabled = options?.enabled ?? true;
+  const { enabled = true, ...rest } = options ?? {};
+  const params = { ...rest, limit: rest.limit ?? 50 };
+  // Rows carry the viewer's read state, and `scope` and `triage` depend on
+  // the viewer, so a user switch must not show the last user's page.
+  const { userId } = useCurrentUser();
   return useQuery({
-    queryKey: [
-      "sessions",
-      { limit, offset, source, q, requestedByUserId, contextKeyPrefix, scope },
-    ],
-    queryFn: () =>
-      api.listSessions({ limit, offset, source, q, requestedByUserId, contextKeyPrefix, scope }),
+    queryKey: [...SESSION_LIST_KEY, userId ?? null, params],
+    queryFn: () => api.listSessions(params),
     enabled,
   });
 }

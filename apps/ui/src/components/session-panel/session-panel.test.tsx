@@ -67,7 +67,13 @@ mock.module("@/contexts/current-user-context", () => ({
 mock.module("@/api/hooks/use-sessions", () => ({
   useSessions: (opts: Record<string, unknown>) => {
     listCalls.push(opts);
-    return { data: opts.enabled === false ? undefined : sessions, isLoading: false };
+    return {
+      data:
+        opts.enabled === false
+          ? undefined
+          : { sessions, total: sessions.length, limit: 20, offset: 0 },
+      isLoading: false,
+    };
   },
   useSession: (id: string | undefined) => ({
     data: id ? { root: { id, task: `session ${id}` }, chain: [] } : undefined,

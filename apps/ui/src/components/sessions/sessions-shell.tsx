@@ -14,7 +14,15 @@
  * the right pane; the new-session button sits next to it.
  */
 
-import { ChevronLeft, Filter, MessageSquare, PanelLeftOpen, Plus, Search } from "lucide-react";
+import {
+  ChevronLeft,
+  Filter,
+  MessageSquare,
+  PanelLeftOpen,
+  PanelsTopLeft,
+  Plus,
+  Search,
+} from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -138,6 +146,8 @@ interface SessionsListProps {
   onShowSystemChange: (value: boolean) => void;
   onCollapse?: () => void;
   onNewSession: () => void;
+  /** Switch to the sessions v2 view. Absent when the API cannot serve it. */
+  onNewView?: () => void;
   identityState: "pending" | "needs-pick" | "ready";
 }
 
@@ -152,6 +162,7 @@ function SessionsList({
   onShowSystemChange,
   onCollapse,
   onNewSession,
+  onNewView,
   identityState,
 }: SessionsListProps) {
   const items = sessions ?? [];
@@ -164,6 +175,17 @@ function SessionsList({
           Sessions
         </h2>
         <div className="flex items-center gap-0.5">
+          {onNewView ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={onNewView}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <PanelsTopLeft />
+              New sessions view
+            </Button>
+          ) : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -307,6 +329,7 @@ interface MobileSessionPickerProps {
   isLoading: boolean;
   activeRootTaskId?: string;
   onNewSession: () => void;
+  onNewView?: () => void;
 }
 
 function MobileSessionPicker({
@@ -314,6 +337,7 @@ function MobileSessionPicker({
   isLoading,
   activeRootTaskId,
   onNewSession,
+  onNewView,
 }: MobileSessionPickerProps) {
   const navigate = useNavigate();
   const items = sessions ?? [];
@@ -354,6 +378,22 @@ function MobileSessionPicker({
         <Plus className="h-3.5 w-3.5" />
         New
       </Button>
+      {onNewView ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={onNewView}
+              className="size-9"
+              aria-label="New sessions view"
+            >
+              <PanelsTopLeft className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>New sessions view</TooltipContent>
+        </Tooltip>
+      ) : null}
     </div>
   );
 }
@@ -374,10 +414,12 @@ export function useSessionsShell(): SessionsShellApi {
 
 export interface SessionsShellProps {
   activeRootTaskId?: string;
+  /** Switch to the sessions v2 view. Pass it only when the API can serve v2. */
+  onNewView?: () => void;
   children: ReactNode;
 }
 
-export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps) {
+export function SessionsShell({ activeRootTaskId, onNewView, children }: SessionsShellProps) {
   const navigate = useNavigate();
   const { userId, state: identityState } = useCurrentUser();
   const { searchParams, setParam } = useUrlSearchState();
@@ -416,7 +458,7 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
     [showSystem],
   );
 
-  const { data: sessions, isLoading } = useSessions({
+  const { data: sessionsPage, isLoading } = useSessions({
     limit: 50,
     source: sourceFilter,
     q: debouncedQuery.trim() || undefined,
@@ -425,13 +467,15 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
   });
   // "Shared with me": someone else's sessions shared with me or everyone.
   const sharingGate = useFeatureGate(SESSION_SHARING_MIN_VERSION);
-  const { data: sharedSessions } = useSessions({
+  const { data: sharedPage } = useSessions({
     limit: 50,
     source: sourceFilter,
     q: debouncedQuery.trim() || undefined,
     scope: "shared",
     enabled: sharingGate.supported && identityState === "ready",
   });
+  const sessions = sessionsPage?.sessions;
+  const sharedSessions = sharedPage?.sessions;
 
   const openNew = useCallback(() => navigate("/sessions"), [navigate]);
   const api = useMemo<SessionsShellApi>(() => ({ openNew }), [openNew]);
@@ -444,6 +488,7 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
           isLoading={isLoading}
           activeRootTaskId={activeRootTaskId}
           onNewSession={openNew}
+          onNewView={onNewView}
         />
 
         <div
@@ -465,6 +510,7 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
                 onShowSystemChange={setShowSystem}
                 onCollapse={() => setCollapsed(true)}
                 onNewSession={openNew}
+                onNewView={onNewView}
                 identityState={identityState}
               />
             </aside>

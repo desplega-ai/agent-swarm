@@ -8,7 +8,7 @@ import { ContextSessionPanel } from "@/components/context-panel/context-session-
 import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { IdentityModal } from "@/components/identity/identity-modal";
 import { OnboardingRedirect } from "@/components/onboarding/onboarding-redirect";
-import { CommandMenu } from "@/components/shared/command-menu";
+import { CommandMenu, CommandMenuProvider } from "@/components/shared/command-menu";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { NameConnectionModal } from "@/components/shared/name-connection-modal";
@@ -66,47 +66,51 @@ export function RootLayout() {
   return (
     <StatusProvider pollIntervalMs={30_000}>
       <AgentFsProvider>
-        <ContextPanelProvider>
-          {/* The first Tab stop: it moves focus past the sidebar and the
+        {/* Pages add their own palette commands through it, so it wraps the
+            routes and the palette. */}
+        <CommandMenuProvider>
+          <ContextPanelProvider>
+            {/* The first Tab stop: it moves focus past the sidebar and the
               header to the page content (the browser focuses the target,
               which has tabIndex -1). Off screen until it has focus. */}
-          <a
-            href="#main-content"
-            className="fixed top-3 left-3 z-50 -translate-y-[calc(100%+1rem)] rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm outline-none focus:translate-y-0 focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            Skip to content
-          </a>
-          <SidebarProvider className="h-svh max-w-full overflow-hidden">
-            <AppSidebar />
-            <SidebarInset className="min-w-0">
-              <AppHeader />
-              {/* The page's one `main` landmark (the inset is a div). Below lg
+            <a
+              href="#main-content"
+              className="fixed top-3 left-3 z-50 -translate-y-[calc(100%+1rem)] rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm outline-none focus:translate-y-0 focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              Skip to content
+            </a>
+            <SidebarProvider className="h-svh max-w-full overflow-hidden">
+              <AppSidebar />
+              <SidebarInset className="min-w-0">
+                <AppHeader />
+                {/* The page's one `main` landmark (the inset is a div). Below lg
                 the main column is the scroll container so pages that flow
                 naturally (detail pages, forms) can scroll; at lg+ it goes
                 back to overflow-hidden and pages own their scroll regions
                 (pinned headers, grid-internal scrolling). */}
-              <main
-                id="main-content"
-                tabIndex={-1}
-                className={cn(
-                  "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden outline-none",
-                  mainPadding,
-                )}
-              >
-                <ErrorBoundary>
-                  <Suspense fallback={<HiveLoadingScreen />}>
-                    <Outlet />
-                  </Suspense>
-                </ErrorBoundary>
-              </main>
-              <AppFooter />
-            </SidebarInset>
-            {/* Contextual session panel: a flex sibling of the inset, so the page
+                <main
+                  id="main-content"
+                  tabIndex={-1}
+                  className={cn(
+                    "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden outline-none",
+                    mainPadding,
+                  )}
+                >
+                  <ErrorBoundary>
+                    <Suspense fallback={<HiveLoadingScreen />}>
+                      <Outlet />
+                    </Suspense>
+                  </ErrorBoundary>
+                </main>
+                <AppFooter />
+              </SidebarInset>
+              {/* Contextual session panel: a flex sibling of the inset, so the page
               stays interactive while the user gives feedback. */}
-            <ContextSessionPanel />
-          </SidebarProvider>
-        </ContextPanelProvider>
-        <CommandMenu />
+              <ContextSessionPanel />
+            </SidebarProvider>
+          </ContextPanelProvider>
+          <CommandMenu />
+        </CommandMenuProvider>
         <OnboardingRedirect />
         <IdentityGate />
         <NameConnectionModal />

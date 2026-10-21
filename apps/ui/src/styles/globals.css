@@ -422,6 +422,33 @@ summary {
   transition-delay: 0s;
 }
 
+/* vaul Drawer (components/ui/drawer.tsx): the large-surface timing, 400ms
+ * open and 250ms close. vaul's own curve is ease-swift, so only the
+ * durations change. vaul injects un-layered CSS at runtime, so these rules
+ * add selectors to outrank it instead of relying on source order. A drag
+ * release that snaps back keeps vaul's own inline transition. */
+[data-vaul-drawer][data-vaul-drawer-direction][data-state="open"],
+[data-vaul-overlay][data-vaul-snap-points][data-state="open"] {
+  animation-duration: 400ms;
+}
+
+[data-vaul-drawer][data-vaul-drawer-direction][data-state="closed"],
+[data-vaul-overlay][data-vaul-snap-points][data-state="closed"] {
+  animation-duration: 250ms;
+}
+
+/* Reduced motion keeps the fade and drops the slide (vaul ships the
+ * fadeIn and fadeOut keyframes). */
+@media (prefers-reduced-motion: reduce) {
+  [data-vaul-drawer][data-vaul-snap-points][data-vaul-drawer-direction][data-state="open"][data-slot] {
+    animation-name: fadeIn;
+  }
+
+  [data-vaul-drawer][data-vaul-snap-points][data-vaul-drawer-direction][data-state="closed"][data-slot] {
+    animation-name: fadeOut;
+  }
+}
+
 /* Theme switch, set by use-theme.ts for the one frame the dark class or
  * preset flips, so the new palette lands at once instead of smearing through
  * each control's own color transition. */
@@ -430,6 +457,16 @@ summary {
 .theme-switching *::before,
 .theme-switching *::after {
   transition: none !important;
+}
+
+/* Nav toggled by a route or a panel, set by use-collapse-nav-while.ts for
+ * two frames: route changes get no animation (DESIGN.md § Motion). A click
+ * on the nav buttons or Cmd+B keeps the 200ms rail transition. Un-layered,
+ * so it outranks the sidebar's layered transition utilities. */
+.nav-instant [data-slot="sidebar-gap"],
+.nav-instant [data-slot="sidebar-container"],
+.nav-instant [data-slot="sidebar-container"] * {
+  transition: none;
 }
 
 /* Scrollbar */

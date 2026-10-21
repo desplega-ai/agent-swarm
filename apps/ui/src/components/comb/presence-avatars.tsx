@@ -30,7 +30,16 @@ export interface StackPeer {
  * A small stack of people: 3 avatars, then "+N". The tooltip names each one
  * and what they are doing. Comb files and session headers share it.
  */
-export function AvatarStack({ peers, className }: { peers: StackPeer[]; className?: string }) {
+export function AvatarStack({
+  peers,
+  label,
+  className,
+}: {
+  peers: StackPeer[];
+  /** The group's accessible name. Defaults to the presence wording ("2 other people here"). */
+  label?: string;
+  className?: string;
+}) {
   if (peers.length === 0) return null;
   const shown = peers.slice(0, MAX_AVATARS);
   const rest = peers.slice(MAX_AVATARS);
@@ -40,7 +49,9 @@ export function AvatarStack({ peers, className }: { peers: StackPeer[]; classNam
     // biome-ignore lint/a11y/useSemanticElements: a fieldset groups form controls, not avatars
     <div
       role="group"
-      aria-label={peers.length === 1 ? "1 other person here" : `${peers.length} other people here`}
+      aria-label={
+        label ?? (peers.length === 1 ? "1 other person here" : `${peers.length} other people here`)
+      }
       className={cn("flex items-center -space-x-1.5", className)}
     >
       {shown.map((peer) => (
