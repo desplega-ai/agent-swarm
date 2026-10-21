@@ -76,7 +76,7 @@ export function useAudioRecorder(onClip: (file: File) => void): AudioRecorder {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const mountedRef = useRef(true);
+  const mountedRef = useRef(false);
   const onClipRef = useRef(onClip);
   onClipRef.current = onClip;
 
@@ -113,17 +113,18 @@ export function useAudioRecorder(onClip: (file: File) => void): AudioRecorder {
     };
   }, []);
 
-  // Unmount mid-recording drops the clip and frees the mic.
-  useEffect(
-    () => () => {
+  // Unmount mid-recording drops the clip and frees the mic. Set on every mount:
+  // StrictMode runs this cleanup once before the real mount.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
       const recorder = recorderRef.current;
       if (recorder) recorder.onstop = null;
       if (recorder && recorder.state !== "inactive") recorder.stop();
       release();
-    },
-    [release],
-  );
+    };
+  }, [release]);
 
   const start = useCallback(async () => {
     if (recorderRef.current || unavailableReason) return;
