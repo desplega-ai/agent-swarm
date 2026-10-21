@@ -18,6 +18,7 @@ import { getChatInstance } from "../integrations/chat-sdk/runtime";
 import { isChatThreadBuffered } from "../integrations/chat-sdk/thread-buffer";
 import { chatSdkContextKey } from "../tasks/context-key";
 import type { Agent } from "../types";
+import { NOT_TRANSCRIBED_NOTE, TRANSCRIPTION_ENV_KEYS } from "../utils/transcription";
 import {
   flushChatBuffers,
   postChatWebhook,
@@ -34,10 +35,7 @@ const ENV_KEYS = [
   "AGENT_FS_LOCAL_DIR",
   "AGENT_FS_API_URL",
   "STEERING_ENABLED",
-  "TRANSCRIPTION_API_KEY",
-  "TRANSCRIPTION_BASE_URL",
-  "TRANSCRIPTION_MODEL",
-  "TRANSCRIPTION_PROVIDER",
+  ...TRANSCRIPTION_ENV_KEYS,
 ];
 const savedEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
@@ -76,6 +74,8 @@ beforeAll(async () => {
   process.env.AGENT_FS_LOCAL_DIR = fsDir;
   delete process.env.AGENT_FS_API_URL;
   process.env.STEERING_ENABLED = "true";
+  // A provider key in the shell (OPENAI_API_KEY, ...) would switch transcription on.
+  for (const key of TRANSCRIPTION_ENV_KEYS) delete process.env[key];
   resetFileStorageProviderForTests();
   initDb(TEST_DB_PATH);
   lead = await createAgent({
@@ -493,9 +493,7 @@ describe("Chat SDK inbound voice notes and size limit", () => {
 
     const tasks = await chatTasks(2102);
     expect(tasks).toHaveLength(1);
-    expect(tasks[0]!.task).toContain(
-      "(not transcribed: no transcription provider configured, set TRANSCRIPTION_API_KEY)",
-    );
+    expect(tasks[0]!.task).toContain(NOT_TRANSCRIBED_NOTE);
     expect(await getTaskAttachments(tasks[0]!.id)).toHaveLength(1);
   });
 

@@ -32,14 +32,15 @@ import {
   createSlackTaskWithFiles,
   fetchSlackFiles,
 } from "../slack/inbound-files";
+import { NOT_TRANSCRIBED_NOTE, TRANSCRIPTION_ENV_KEYS } from "../utils/transcription";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-task-audio-transcription.sqlite";
 const API_KEY = "example-task-audio-key";
 const BOT_TOKEN = "example-task-audio-slack-token";
 const AUDIO = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4, 5]);
-const NO_PROVIDER =
-  "(not transcribed: no transcription provider configured, set TRANSCRIPTION_API_KEY)";
+const NO_PROVIDER = NOT_TRANSCRIBED_NOTE;
+const savedEnv = new Map(TRANSCRIPTION_ENV_KEYS.map((key) => [key, process.env[key]]));
 
 let api: Server;
 let apiPort: number;
@@ -114,13 +115,17 @@ afterAll(async () => {
   await rm(fsDir, { recursive: true, force: true });
   delete process.env.AGENT_FS_LOCAL_DIR;
   resetFileStorageProviderForTests();
+  for (const [key, value] of savedEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 });
 
 beforeEach(() => {
   sttMode = "ok";
   sttFilenames = [];
-  delete process.env.TRANSCRIPTION_API_KEY;
-  delete process.env.TRANSCRIPTION_BASE_URL;
+  // A provider key in the shell (OPENAI_API_KEY, ...) would switch transcription on.
+  for (const key of TRANSCRIPTION_ENV_KEYS) delete process.env[key];
 });
 
 /** The composer's upload: raw body, `name` query, the file's own content type. */

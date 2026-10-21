@@ -50,6 +50,7 @@ export default function IntegrationsPage() {
     const keys = new Set<string>();
     for (const def of INTEGRATIONS) {
       for (const f of getIntegrationFields(def)) keys.add(f.key);
+      for (const key of def.presenceKeys ?? []) keys.add(key);
       if (def.disableKey) keys.add(def.disableKey);
     }
     return Array.from(keys);

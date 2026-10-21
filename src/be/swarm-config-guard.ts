@@ -417,7 +417,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   },
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
-  ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs"]),
+  ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
   SCRIPT_EGRESS_ALLOWLIST: (value) =>
