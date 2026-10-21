@@ -58605,6 +58605,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Source is the last active admin (last_admin)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }

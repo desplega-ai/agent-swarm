@@ -274,6 +274,32 @@ export class LastAdminError extends Error {
 }
 
 /**
+ * Throw LastAdminError when removing this user would leave the swarm without
+ * an active grant-all user. Joins the caller's transaction.
+ */
+export async function assertNotLastAdmin(userId: string): Promise<void> {
+  const client = getDbClient();
+  const self = await client.get<{ n: number }>(
+    `SELECT COUNT(*) AS n
+     FROM users u
+     JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
+     JOIN roles r ON r.id = pr.roleId AND r.grantsAll = 1
+     WHERE u.status = 'active' AND u.id = ?`,
+    [userId],
+  );
+  if ((self?.n ?? 0) === 0) return;
+  const others = await client.get<{ n: number }>(
+    `SELECT COUNT(DISTINCT u.id) AS n
+     FROM users u
+     JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
+     JOIN roles r ON r.id = pr.roleId AND r.grantsAll = 1
+     WHERE u.status = 'active' AND u.id <> ?`,
+    [userId],
+  );
+  if ((others?.n ?? 0) === 0) throw new LastAdminError();
+}
+
+/**
  * Replace a user's RBAC roles. The set holds exactly one primary role
  * (admin, requester or viewer) plus any extra roles. Refuses to leave the
  * swarm without an active grant-all user.
