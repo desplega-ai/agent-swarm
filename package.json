@@ -217,7 +217,7 @@
     "@inkjs/ui": "^2.0.0",
     "@jitl/quickjs-singlefile-mjs-release-sync": "0.32.0",
     "@linear/sdk": "^77.0.0",
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@openai/codex": "0.163.0",
     "@openfort/openfort-node": "^0.9.1",
     "@opentelemetry/api": "^1.9.1",
