@@ -1039,7 +1039,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         type: "text",
         placeholder: "Provider default",
         helpText:
-          "Empty uses the provider's default: https://api.elevenlabs.io/v1, https://api.openai.com/v1 or https://api.groq.com/openai/v1.",
+          "Applies only with the API key above; an auto-detected key always goes to its provider. Empty uses the provider's default: https://api.elevenlabs.io/v1, https://api.openai.com/v1 or https://api.groq.com/openai/v1.",
         advanced: true,
       },
       {

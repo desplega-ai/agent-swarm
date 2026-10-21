@@ -287,7 +287,7 @@ The API server reads global config rows and its own deployment env. A provider k
 |---|---|---|
 | `TRANSCRIPTION_API_KEY` | unset | Explicit key. Overrides the auto-detected provider key. |
 | `TRANSCRIPTION_PROVIDER` | auto-detect (`openai` with an explicit key) | `elevenlabs` sends `xi-api-key` and `model_id`; `openai` and `groq` send `Authorization: Bearer` and `model`. |
-| `TRANSCRIPTION_BASE_URL` | `https://api.elevenlabs.io/v1`, `https://api.openai.com/v1` or `https://api.groq.com/openai/v1` | Base URL of the service. |
+| `TRANSCRIPTION_BASE_URL` | `https://api.elevenlabs.io/v1`, `https://api.openai.com/v1` or `https://api.groq.com/openai/v1` | Base URL of the service, for an explicit `TRANSCRIPTION_API_KEY` only. An auto-detected key always goes to its own provider. |
 | `TRANSCRIPTION_MODEL` | `scribe_v2`, `whisper-1` or `whisper-large-v3-turbo` | Model name sent to the service. |
 
 The task text then carries a `[Transcript of <file>]` block under the file line. Without a key, the task text gets one line saying no transcription provider is configured. A failed call is noted the same way, and the task is still created.

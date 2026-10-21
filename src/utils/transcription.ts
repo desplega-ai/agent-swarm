@@ -15,8 +15,9 @@
  * set, else the first of `ELEVENLABS_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`.
  * Off when none is set.
  *
- * `TRANSCRIPTION_BASE_URL` and `TRANSCRIPTION_MODEL` override the provider's
- * defaults. Deepgram and AssemblyAI use other request shapes and are not
+ * `TRANSCRIPTION_MODEL` overrides the provider's default model.
+ * `TRANSCRIPTION_BASE_URL` overrides its base URL for an explicit key only: an
+ * auto-detected key always goes to its provider's own endpoint. Deepgram and AssemblyAI use other request shapes and are not
  * supported. Read at call time, so a config reload applies without a restart.
  */
 import { createValueScrubber, scrubSecrets } from "./secret-scrubber";
@@ -157,10 +158,11 @@ export async function transcribeAudio(input: {
   if (!config) throw new TranscriptionError("no transcription provider key is set");
   const { apiKey } = config;
   const provider = providerSpec(config.provider);
-  const baseUrl = (process.env.TRANSCRIPTION_BASE_URL?.trim() || provider.defaultBaseUrl).replace(
-    /\/+$/,
-    "",
-  );
+  // An auto-detected key only goes to its own provider: a base URL set in
+  // config must not receive a key that was stored for another purpose.
+  const baseUrlOverride =
+    config.source === "explicit" ? process.env.TRANSCRIPTION_BASE_URL?.trim() : undefined;
+  const baseUrl = (baseUrlOverride || provider.defaultBaseUrl).replace(/\/+$/, "");
   // scrubSecrets skips known values under 12 chars, and a self-hosted key can
   // be shorter, so the submitted key is scrubbed by value from every error.
   const keyScrubber = createValueScrubber([{ value: apiKey, name: config.keyEnv }]);
