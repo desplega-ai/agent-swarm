@@ -29,7 +29,8 @@ export function MessageCopyButton({ text, hover = false }: { text: string; hover
             value={text}
             label="Copy message"
             size="icon-xs"
-            className="text-muted-foreground hover:text-foreground"
+            // A 44 px touch area on touch screens; the row keeps its height.
+            className="text-muted-foreground hit-area [--hit-size:44px] hover:text-foreground"
           />
         </TooltipTrigger>
         <TooltipContent>Copy message</TooltipContent>

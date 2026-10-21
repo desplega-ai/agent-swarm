@@ -3,6 +3,9 @@
  * sidebar in place (`?q=`, a short pause after the last key). `/` focuses
  * it from anywhere on the page, Escape clears it and gives the focus back
  * to the tree, and the down arrow moves into the results.
+ *
+ * On a phone (SPEC R8.5) `MobileSearch` draws the field: token chips,
+ * suggestions for `with:` and `in:`, and Cancel.
  */
 
 import { type KeyboardEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
@@ -10,6 +13,8 @@ import { useKeyboardShortcuts } from "@/components/shared/questions/keyboard";
 import { SearchBox } from "@/components/shared/search-box";
 import { Kbd } from "@/components/ui/kbd";
 import { isTypingTarget, type ShortcutKeyEvent } from "@/lib/approval-shortcuts";
+import type { SearchGroup } from "@/lib/session-search";
+import { MobileSearch } from "../mobile/mobile-search";
 
 /** Typing pauses this long before the search runs. */
 const SEARCH_DEBOUNCE_MS = 250;
@@ -26,6 +31,9 @@ export function SidebarSearch({
   onChange,
   onLeave,
   inputRef,
+  phone = false,
+  groups = [],
+  onSearchMode,
 }: {
   /** The search in the URL. */
   value: string;
@@ -33,6 +41,12 @@ export function SidebarSearch({
   /** Give the focus back to the tree. */
   onLeave: () => void;
   inputRef: RefObject<HTMLInputElement | null>;
+  /** The phone field (`MobileSearch`): token chips, suggestions, and Cancel. */
+  phone?: boolean;
+  /** My groups, for the phone's `in:` suggestions. */
+  groups?: SearchGroup[];
+  /** The phone search mode turned on or off (the list screen hides its top bar). */
+  onSearchMode?: (on: boolean) => void;
 }) {
   const [text, setText] = useState(value);
   // The last value this field sent. A different URL value came from
@@ -79,6 +93,25 @@ export function SidebarSearch({
   };
 
   const helpId = useId();
+  if (phone) {
+    return (
+      <MobileSearch
+        text={text}
+        setText={setText}
+        runNow={(next) => {
+          setText(next);
+          sent.current = next;
+          onChange(next);
+        }}
+        clear={clear}
+        onKeyDown={onKeyDown}
+        inputRef={inputRef}
+        onLeave={onLeave}
+        groups={groups}
+        onSearchMode={onSearchMode}
+      />
+    );
+  }
   return (
     <search className="shrink-0 px-2 pt-2 pb-1">
       <SearchBox

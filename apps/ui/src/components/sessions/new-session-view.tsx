@@ -23,6 +23,7 @@ export function NewSessionView({
   startKey,
   onStarted,
   startIn,
+  touch,
 }: {
   /** The group the session starts in (sessions v2). Omit for no group. */
   startKey?: string;
@@ -30,6 +31,8 @@ export function NewSessionView({
   onStarted?: (created: AgentTask) => void;
   /** The "Start in" picker, at the left of the composer's action row (sessions v2). */
   startIn?: ReactNode;
+  /** The phone screen: 44 px composer buttons. */
+  touch?: boolean;
 } = {}) {
   const navigate = useNavigate();
   const { userId, setDraft, isPending, composerProps } = useStartSession({
@@ -90,6 +93,7 @@ export function NewSessionView({
           userId ? "What's the goal?" : "Pick an identity in the sidebar before starting a session."
         }
         sendLabel="Start session"
+        touch={touch}
         autoFocus
       />
     </>

@@ -97,5 +97,18 @@ export function useSessionTriageActions({
     move: pickGroup,
   };
 
-  return { canTriage: triage.canTriage, actions };
+  /** Done, or back to the Inbox when every session is in Done already (the `e` toggle). */
+  const doneOrBack = (sessions: SessionListItem[]) => {
+    if (sessions.length === 0) return;
+    if (sessions.every((s) => s.readState === "done")) actions.backToInbox(sessions);
+    else actions.done(sessions);
+  };
+  /** Back to the Inbox when every session is in Later already, else `pick` a wake time (the `l` toggle). */
+  const laterOrBack = (sessions: SessionListItem[], pick: () => void) => {
+    if (sessions.length === 0) return;
+    if (sessions.every((s) => s.readState === "later")) actions.backToInbox(sessions);
+    else pick();
+  };
+
+  return { canTriage: triage.canTriage, actions, doneOrBack, laterOrBack };
 }

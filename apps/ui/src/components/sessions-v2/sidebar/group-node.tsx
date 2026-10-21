@@ -39,7 +39,7 @@ import {
 import type { TreeRow as TreeRowModel } from "./tree-rows";
 import { useGroupDroppable } from "./use-row-drag";
 
-const SECTION_META: Record<SessionSection, { label: string; icon: LucideIcon }> = {
+export const SECTION_META: Record<SessionSection, { label: string; icon: LucideIcon }> = {
   inbox: { label: "Inbox", icon: Inbox },
   later: { label: "Later", icon: AlarmClock },
   done: { label: "Done", icon: Archive },
@@ -58,57 +58,104 @@ function countsTip(counts: SessionSectionCounts): string {
 }
 
 /** The counts in words, for the tooltip and the row's accessible name. */
-function countsLabel(counts: SessionSectionCounts, plain?: boolean): string {
+export function countsLabel(counts: SessionSectionCounts, plain?: boolean): string {
   const tip = countsTip(counts);
   if (tip || !plain || counts.total === 0) return tip;
   return `${counts.total} ${counts.total === 1 ? "session" : "sessions"}`;
 }
 
 /**
- * The counts of a container in the row words: a still running ring with its
+ * The counts of a container in the row words: a running ring with its
  * number, "1 needs you", "3 unread" (SPEC R4, R9). `plain` (Later, Done)
  * shows the session total when nothing else shows. The row's name already
- * says them, so they are hidden from screen readers here.
+ * says them, so they are hidden from screen readers here. `touch` (the
+ * phone rows): larger text and no tooltip.
  */
-function SessionCounts({ counts, plain }: { counts: SessionSectionCounts; plain?: boolean }) {
+export function SessionCounts({
+  counts,
+  plain,
+  touch = false,
+}: {
+  counts: SessionSectionCounts;
+  plain?: boolean;
+  touch?: boolean;
+}) {
   const tip = countsLabel(counts, plain);
   if (!tip) return null;
+  const number = cn(
+    "font-mono tabular-nums text-muted-foreground",
+    touch ? "text-data" : "px-0.5 text-meta",
+  );
+  const marks = (
+    <span
+      aria-hidden
+      className={cn("ml-auto flex shrink-0 items-center", touch ? "gap-1.5" : "gap-1")}
+    >
+      {counts.running > 0 ? (
+        <span className={cn("flex items-center gap-1", number)}>
+          <TaskStatusIcon variant="active" className={touch ? "size-3.5" : "size-3"} />
+          {counts.running}
+        </span>
+      ) : null}
+      {counts.needsYou > 0 ? (
+        <NeedsYouBadge>
+          {counts.needsYou} {counts.needsYou === 1 ? "needs" : "need"} you
+        </NeedsYouBadge>
+      ) : null}
+      {counts.unread > 0 ? (
+        <Badge
+          variant="outline"
+          className={cn(
+            "rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums",
+            touch ? "h-5" : "h-[18px]",
+          )}
+        >
+          {counts.unread} unread
+        </Badge>
+      ) : null}
+      {plain && !countsTip(counts) ? <span className={number}>{counts.total}</span> : null}
+    </span>
+  );
+  if (touch) return marks;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span aria-hidden className="ml-auto flex shrink-0 items-center gap-1">
-          {counts.running > 0 ? (
-            <span className="flex items-center gap-1 px-0.5 font-mono text-meta tabular-nums text-muted-foreground">
-              <TaskStatusIcon variant="active" className="size-3 animate-none" />
-              {counts.running}
-            </span>
-          ) : null}
-          {counts.needsYou > 0 ? (
-            <NeedsYouBadge>
-              {counts.needsYou} {counts.needsYou === 1 ? "needs" : "need"} you
-            </NeedsYouBadge>
-          ) : null}
-          {counts.unread > 0 ? (
-            <Badge
-              variant="outline"
-              className="h-[18px] rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums"
-            >
-              {counts.unread} unread
-            </Badge>
-          ) : null}
-          {plain && !countsTip(counts) ? (
-            <span className="px-0.5 font-mono text-meta tabular-nums text-muted-foreground">
-              {counts.total}
-            </span>
-          ) : null}
-        </span>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{marks}</TooltipTrigger>
       <TooltipContent side="right">{tip}</TooltipContent>
     </Tooltip>
   );
 }
 
-type ContainerRow = Extract<TreeRowModel, { type: "box" | "group" | "owner" }>;
+export type ContainerRow = Extract<TreeRowModel, { type: "box" | "group" | "owner" }>;
+
+/**
+ * What a container row shows, for the desktop and the phone rows: its
+ * name, whether it folds subgroups, whether its counts are plain (Later,
+ * Done), the "Only you" lock, and the accessible name with the counts.
+ */
+export function containerFacts(row: ContainerRow, ownerName?: string) {
+  const name =
+    row.type === "box"
+      ? SECTION_META[row.id].label
+      : row.type === "owner"
+        ? (ownerName ?? row.ownerId)
+        : // Another person's sessions with no group sit directly under the owner.
+          row.node.name || "No group";
+  const searchMatch = row.type === "group" && row.searchMatch === true;
+  const plain = row.type === "box" && (row.id === "later" || row.id === "done");
+  const onlyYou = row.type === "group" && row.node.privateClash === true;
+  return {
+    name,
+    searchMatch,
+    hasChildren:
+      row.type === "owner" ||
+      (row.type === "group" && row.node.children.length > 0 && !searchMatch),
+    plain,
+    onlyYou,
+    label: [name, onlyYou && "Only you", row.counts && countsLabel(row.counts, plain)]
+      .filter(Boolean)
+      .join(", "),
+  };
+}
 
 interface GroupNodeProps {
   row: ContainerRow;
@@ -141,10 +188,13 @@ export function GroupNameField({
   initial = "",
   label,
   onDone,
+  className,
 }: {
   initial?: string;
   label: string;
   onDone: (name: string | null) => void;
+  /** The phone rows use a taller field with 16 px text. */
+  className?: string;
 }) {
   const [value, setValue] = useState(initial);
   // Enter and Escape end it once. The blur that follows (the focus goes back
@@ -175,7 +225,10 @@ export function GroupNameField({
       onBlur={() => end(null)}
       onClick={(event) => event.stopPropagation()}
       onFocus={(event) => event.currentTarget.select()}
-      className="h-6 flex-1 rounded-sm bg-background px-1.5 py-0 text-data shadow-none md:text-data"
+      className={cn(
+        "h-6 flex-1 rounded-sm bg-background px-1.5 py-0 text-data shadow-none md:text-data",
+        className,
+      )}
     />
   );
 }
@@ -220,19 +273,23 @@ function RowAction({
   );
 }
 
-function RowIcon({ row, ownerName }: { row: ContainerRow; ownerName?: string }) {
+/** The icon of a container row: the section's, a hash, or the owner's avatar. `touch`: a size larger. */
+export function RowIcon({
+  row,
+  ownerName,
+  touch = false,
+}: {
+  row: ContainerRow;
+  ownerName?: string;
+  touch?: boolean;
+}) {
   if (row.type === "owner") {
     return <UserAvatar id={row.ownerId} name={ownerName ?? row.ownerId} size="xs" />;
   }
   const Icon = row.type === "box" ? SECTION_META[row.id].icon : Hash;
-  return <Icon aria-hidden className="size-3.5 text-muted-foreground" />;
-}
-
-function rowName(row: ContainerRow, ownerName?: string): string {
-  if (row.type === "box") return SECTION_META[row.id].label;
-  if (row.type === "owner") return ownerName ?? row.ownerId;
-  // Another person's sessions with no group sit directly under the owner.
-  return row.node.name || "No group";
+  return (
+    <Icon aria-hidden className={cn("text-muted-foreground", touch ? "size-4" : "size-3.5")} />
+  );
 }
 
 function GroupNodeView({
@@ -250,14 +307,9 @@ function GroupNodeView({
   renaming,
   onRenameDone,
 }: GroupNodeProps) {
-  const name = rowName(row, ownerName);
-  const searchMatch = row.type === "group" && row.searchMatch;
-  const hasChildren =
-    row.type === "owner" || (row.type === "group" && row.node.children.length > 0 && !searchMatch);
+  const { name, searchMatch, hasChildren, plain, onlyYou, label } = containerFacts(row, ownerName);
   const { dropRef, isOver } = useGroupDroppable(row.key, dropKey);
   const counts = row.counts;
-  const plain = row.type === "box" && (row.id === "later" || row.id === "done");
-  const onlyYou = row.type === "group" && row.node.privateClash;
   const foldTip = row.open ? "Hide subgroups" : "Show subgroups";
   return (
     <TreeRow
@@ -266,9 +318,7 @@ function GroupNodeView({
       level={row.level}
       cursor={cursor}
       aria-expanded={searchMatch ? undefined : row.open}
-      aria-label={[name, onlyYou && "Only you", counts && countsLabel(counts, plain)]
-        .filter(Boolean)
-        .join(", ")}
+      aria-label={label}
       aria-describedby={describedBy}
       data-drop-over={isOver ? "true" : undefined}
       onClick={(event) => onRowClick(row.key, event)}

@@ -125,7 +125,9 @@ function OutcomeCopyShell({
             size="icon"
             variant="ghost"
             onClick={() => copy(copyText)}
-            className="absolute top-0 right-0 h-6 w-6 opacity-70 md:opacity-0 md:group-hover/outcome:opacity-70 hover:opacity-100 transition-opacity"
+            // Touch screens: a 44 px button around the same icon spot (the `hit-area`
+            // utility would undo `absolute`).
+            className="absolute top-0 right-0 h-6 w-6 opacity-70 md:opacity-0 md:group-hover/outcome:opacity-70 hover:opacity-100 transition-opacity pointer-coarse:-top-2.5 pointer-coarse:-right-2.5 pointer-coarse:size-11"
             aria-label={copied ? "Copied" : "Copy output to clipboard"}
           >
             {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}

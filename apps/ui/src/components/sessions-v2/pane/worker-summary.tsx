@@ -18,7 +18,7 @@ const ICON = {
  * The folded worker line of a part (SPEC R8.3): the worker avatars, then
  * "Writer worked for 17m" or "2 workers worked for 26m", with a muted
  * "· 2 retries", a red "· 1 failed", or a muted "· 1 cancelled". While work
- * runs: "Coder is working · 3m". Only this line turns (UX review R9). It
+ * runs: "Coder is working · 3m", with a turning ring and shimmer text. It
  * opens the steps below.
  */
 export function WorkerSummaryLine({

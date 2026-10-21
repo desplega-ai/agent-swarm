@@ -3,12 +3,17 @@
  * and a "Create group #name" row for a name that is not a group yet. It
  * moves sessions (`m`, the row menu, the bulk bar, Cmd+K), or picks where a
  * new session starts (Cmd+K "New session in group…"). One cmdk list in a
- * Dialog, on the dialog timing.
+ * Dialog, on the dialog timing. On a phone it is a bottom sheet
+ * (`ResponsiveOverlay`).
  */
 
 import { FolderInput, FolderPlus, Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import type { SessionListItem } from "@/api/types";
+import {
+  ResponsiveOverlay,
+  ResponsiveOverlayContent,
+} from "@/components/shared/responsive-overlay";
 import {
   Command,
   CommandEmpty,
@@ -17,7 +22,8 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { useIsPhone } from "@/hooks/use-mobile";
 import { type GroupTarget, groupSlug } from "@/lib/session-groups";
 import { sessionDisplayTitle } from "@/lib/utils";
 import { GroupTargetItems } from "../group-target-items";
@@ -81,6 +87,10 @@ export function MoveToGroupDialog({
   onRestoreFocus: (pick: GroupPick, picked: boolean) => void;
 }) {
   const [query, setQuery] = useState("");
+  // A phone sheet marks no row until the user types: a touch screen has no
+  // keyboard cursor, so a marked row reads as picked (UX review R9).
+  const phone = useIsPhone();
+  const [active, setActive] = useState("");
   const shown = useLastValue(pick);
   const picked = useRef(false);
 
@@ -94,21 +104,25 @@ export function MoveToGroupDialog({
   };
 
   return (
-    <Dialog
+    <ResponsiveOverlay
+      desktop="dialog"
       open={pick !== null}
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
     >
-      <DialogContent
+      <ResponsiveOverlayContent
         showCloseButton={false}
         className="top-[22%] translate-y-0 overflow-hidden p-0 sm:max-w-xl"
+        // Phone: 44 px rows, and a 16 px field so iOS does not zoom in.
+        drawerClassName="px-0 pt-0 [&_[cmdk-input]]:text-base [&_[cmdk-item]]:min-h-11"
         onOpenAutoFocus={() => {
           picked.current = false;
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           setQuery("");
+          setActive("");
           if (shown) onRestoreFocus(shown, picked.current);
         }}
       >
@@ -116,7 +130,7 @@ export function MoveToGroupDialog({
           {shown?.purpose === "new" ? "New session in a group" : "Move to group"}
         </DialogTitle>
         <DialogDescription className="sr-only">Pick a group, or type a new name.</DialogDescription>
-        <Command loop>
+        <Command loop {...(phone ? { value: query ? active : "", onValueChange: setActive } : {})}>
           <div className="flex min-w-0 items-center gap-1.5 border-b border-border-subtle px-3 pt-3 pb-2 text-xs font-medium text-muted-foreground">
             {shown ? <DialogLead pick={shown} /> : null}
           </div>
@@ -149,7 +163,7 @@ export function MoveToGroupDialog({
             ) : null}
           </CommandList>
         </Command>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveOverlayContent>
+    </ResponsiveOverlay>
   );
 }

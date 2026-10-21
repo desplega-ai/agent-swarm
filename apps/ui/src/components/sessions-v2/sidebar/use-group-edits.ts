@@ -22,6 +22,7 @@ export function useGroupEdits({
   newSession,
   placeCursor,
   focusTree,
+  phone = false,
 }: {
   /** The parent the name field shows under (`shared/` for the top level), or null. */
   creating: string | null;
@@ -35,6 +36,8 @@ export function useGroupEdits({
   newSession: (group: string | null) => void;
   placeCursor: (rowKey: string) => void;
   focusTree: () => void;
+  /** Touch words in the toasts: a phone has no keys and no drag. */
+  phone?: boolean;
 }) {
   /**
    * Back to the tree, with the group and its parents open and the cursor on
@@ -83,7 +86,9 @@ export function useGroupEdits({
     toast(
       made.existed
         ? "A group with that name already exists."
-        : `Group ${moves.labelOf(made.key)} created. Drag sessions onto it, or press M on a session.`,
+        : phone
+          ? `Group ${moves.labelOf(made.key)} created. Long-press sessions, then tap Move.`
+          : `Group ${moves.labelOf(made.key)} created. Drag sessions onto it, or press M on a session.`,
       { position: SESSIONS_TOAST_POSITION },
     );
   };

@@ -261,3 +261,73 @@ export function toggleQuickFilter(query: string, filter: QuickFilter): string {
   const kept = tokens.filter((token) => quickTokenOf(token) === null);
   return (on ? kept : [...kept, `is:${filter}`]).join(" ");
 }
+
+/** A `with:` or `in:` token at the end of the search that waits for, or is getting, its value. */
+export interface TypingToken {
+  kind: "with" | "in";
+  /** What follows the colon so far, lower case (may be empty). */
+  value: string;
+  /** Where the token starts in the text. */
+  start: number;
+}
+
+const TYPING = /(^|\s)((with|in):\s?(\S*))$/i;
+
+/**
+ * The `with:` or `in:` token the user is typing at the end of the search
+ * (`with:`, `with: le`, `in:pri`), so the phone can suggest its value. A
+ * token that ends with a space is done.
+ */
+export function typingToken(text: string): TypingToken | null {
+  const match = TYPING.exec(text);
+  if (!match) return null;
+  return {
+    kind: match[3].toLowerCase() as TypingToken["kind"],
+    value: match[4].toLowerCase(),
+    start: match.index + match[1].length,
+  };
+}
+
+/** The search with its typing token completed: `with:lena `, ready for the next word. */
+export function completeToken(text: string, token: TypingToken, value: string): string {
+  return `${text.slice(0, token.start)}${token.kind}:${value} `;
+}
+
+/** A suggestion for a typing token: the value it completes, and what the row shows. */
+export interface TokenSuggestion {
+  value: string;
+  label: string;
+  id: string;
+}
+
+/**
+ * The people a `with:` value can name, as `resolveSessionSearch` reads them:
+ * a name word that starts with the value. The token is the first name, or
+ * the id's first 8 characters when two people share it.
+ */
+export function suggestPeople(value: string, people: SearchPerson[]): TokenSuggestion[] {
+  const first = (person: SearchPerson) => person.name.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  const shared = (name: string) => people.filter((person) => first(person) === name).length > 1;
+  return people
+    .filter((person) =>
+      person.name
+        .toLowerCase()
+        .split(/\s+/)
+        .some((word) => word.startsWith(value)),
+    )
+    .map((person) => ({
+      id: person.id,
+      label: person.name,
+      value: shared(first(person)) ? person.id.slice(0, 8) : first(person),
+    }));
+}
+
+/**
+ * The groups an `in:` value can name, as `resolveSessionSearch` reads them:
+ * the path holds the value. The token is the group's last name.
+ */
+export function suggestGroups(value: string, groups: SearchGroup[]): TokenSuggestion[] {
+  return groups
+    .filter((group) => group.label.toLowerCase().includes(value))
+    .map((group) => ({ id: group.key, label: group.label, value: lastName(group) }));
+}

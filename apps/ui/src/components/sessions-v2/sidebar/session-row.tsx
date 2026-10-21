@@ -43,16 +43,30 @@ export function activityOf(session: SessionListItem): Activity {
   return null;
 }
 
-/** A still mark for the activity (SPEC R9: rows never spin). */
+/** The activity mark of a row. Running turns slowly, as everywhere (Taras, 2026-10-22). */
 export function ActivityMark({ activity }: { activity: Activity }) {
   if (activity === "needs") return <NeedsYouBadge>Needs you</NeedsYouBadge>;
   if (activity === "running") {
-    return <TaskStatusIcon variant="active" label="Running" className="size-3.5 animate-none" />;
+    return <TaskStatusIcon variant="active" label="Running" className="size-3.5" />;
   }
   if (activity === "failed") {
     return <TaskStatusIcon status="failed" label="Failed" className="size-3.5" />;
   }
   return null;
+}
+
+/** A title with the search words marked (search results), else the plain title. */
+export function MatchedTitle({ title, words }: { title: string; words?: readonly string[] }) {
+  if (!words?.length) return title;
+  return splitMatches(title, words).map((piece, i) =>
+    piece.match ? (
+      <mark key={i} className="rounded-xs bg-primary/25 text-inherit">
+        {piece.text}
+      </mark>
+    ) : (
+      piece.text
+    ),
+  );
 }
 
 /** "now", "4m", "2h", "3d", "Oct 2": the time column of a row. */
@@ -69,7 +83,7 @@ export function shortAgo(iso: string, now: number): string {
 }
 
 /** The people on a row other than me. With no picked user, everyone. */
-function othersOf(session: SessionListItem, me: string | null) {
+export function othersOf(session: SessionListItem, me: string | null) {
   return (session.people ?? []).filter((person) => person.id !== me);
 }
 
@@ -95,7 +109,7 @@ function sharedText(session: SessionListItem, me: string | null): string {
 }
 
 /** The row's accessible name: state, title, group, people, sharing, and time. */
-function rowLabel(
+export function rowLabel(
   session: SessionListItem,
   me: string | null,
   title: string,
@@ -151,10 +165,7 @@ function SessionCard({
         {session.needsYou ? (
           <NeedsYouBadge>Needs you</NeedsYouBadge>
         ) : (
-          // A still ring, as on the row: only live lines turn (UX review R9).
-          <span className="[&_[data-slot=task-status-icon]]:animate-none">
-            <StatusBadge status={sessionChipStatus(session.latestStatus)} />
-          </span>
+          <StatusBadge status={sessionChipStatus(session.latestStatus)} />
         )}
         {session.readState === "unread" ? (
           <Badge variant="outline" size="tag">
@@ -312,17 +323,7 @@ function SessionRowView({
               open && "text-foreground",
             )}
           >
-            {highlight?.length
-              ? splitMatches(title, highlight).map((piece, i) =>
-                  piece.match ? (
-                    <mark key={i} className="rounded-xs bg-primary/25 text-inherit">
-                      {piece.text}
-                    </mark>
-                  ) : (
-                    piece.text
-                  ),
-                )
-              : title}
+            <MatchedTitle title={title} words={highlight} />
           </span>
           {/* In the 320 px sidebar the title keeps its room: an activity mark or
               a wake time hides the group label (UX review R9). */}

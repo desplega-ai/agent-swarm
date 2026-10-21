@@ -707,7 +707,7 @@ Users can work in several tabs and one split, see live counts in a status bar, o
 
 #### Automated Verification:
 - [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
-- [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
+- [x] Smoke passes: `bun run e2e:ui -- --grep @smoke` (clean worktree at 3e8269a15)
 
 #### Automated QA:
 - [x] Open 13 tabs at 1280 px. The active tab stays visible, clicking an overflowed tab keeps the scroll, and "All tabs" lists all 13.
@@ -757,15 +757,15 @@ Below 768 px, the sessions view is a list screen, then a detail screen with hist
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
+- [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
 - [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`. This runs desktop Chromium only. The `mobile-iphone` project runs only `composer-enter-key.spec.ts`, so phone coverage comes in Phase 10.
 
 #### Automated QA:
-- [ ] At 390x844 (agent-browser `set viewport 390 844`): tap a row, the detail pushes, and browser back returns to the list at the same scroll position.
-- [ ] Swipe a row left past 80 px: it goes to Done, and Undo restores it.
-- [ ] Long-press a row: selection mode and the bottom bar appear.
-- [ ] Open the snooze drawer and drag it down from the middle: it closes.
-- [ ] No horizontal scroll at 375 px and 390 px. Screenshots: `/tmp/sessions-v2-build/p9-*.png`. Recording: `agent-browser record start /tmp/sessions-v2-build/p9-mobile.mp4 --cursor`, then `agent-browser record stop`.
+- [x] At 390x844 (agent-browser `set viewport 390 844`): tap a row, the detail pushes, and browser back returns to the list at the same scroll position.
+- [x] Swipe a row left past 80 px: it goes to Done, and Undo restores it. (CDP mouse pointer events; agent-browser has no real touch.)
+- [x] Long-press a row: selection mode and the bottom bar appear. (CDP mouse pointer events; agent-browser has no real touch.)
+- [x] Open the snooze drawer and drag it down from the middle: it closes. (CDP mouse pointer events; agent-browser has no real touch.)
+- [x] No horizontal scroll at 375 px and 390 px. Screenshots: `/tmp/sessions-v2-build/p9-*.png`. Recording: `agent-browser record start /tmp/sessions-v2-build/p9-mobile.mp4 --cursor`, then `agent-browser record stop`.
 
 #### Manual Verification:
 - [ ] On a real iPhone (Safari), check swipe, long-press, the drawer drag, and the composer with the keyboard open. Agent-browser cannot reproduce real touch.
@@ -913,6 +913,9 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Phase 7 QA: the QA API loaded the repo `.env`, so one task completion wrote a memory with a real OpenAI embedding. The QA API now boots with the LLM and embedding keys blank, and QA tasks carry the `auto-generated` tag. `scripts/seed.ts` gained `seedTurnSessions` (fixed ids, runs last, existing rows unchanged) for workers, retries, an approval, handoffs, and a schedule root.
   - Phase 8 decisions: the group tab is the token `view` in `?tabs=`, `?view=` names its list, and one group tab is open at a time. A New session tab focused while the group tab is open uses `/sessions/new`. A click never replaces a New session tab or the group tab. The split holds one session (`?split=<id>`), and a session never shows in both panes: an open goes to the pane that already has it. Opening another session in the split sends the old one back to the main tabs. Status bar toggles are `is:` tokens in the sidebar search (new token `is:needs`), and the counts add Inbox, Later, and Done so each count equals its list. Middle-click opens a background tab with "Opened in a new tab." and does not mark read. `v` and `c` work outside the tree. `?guide=0` skips the guide for one load only, and the guide waits for "Who are you?". Tab state follows the server's latest-task rule. Only the conversation polls an open session; background tabs poll every 30 s.
   - Phase 10 notes from Phase 8: UI E2E specs must set localStorage `agent-swarm-sessions-v2-guide=off` (or pass `?guide=0` on every load), or the guide blocks clicks. The pane header status chip uses the Phase 6 rule (any live task shows RUNNING) and can disagree with the tab and row on chains with tied `lastUpdatedAt` (seen on 06ba3a2b).
+  - Taras decision (2026-10-22, while testing Phase 8): every running mark spins (TaskStatusIcon `active`, 3 s turn) in rows, tabs, counts, phone rows, and worker steps. This reverses UX-REVIEW-R9 lines 55 and 88 (static rings in data rows). Reduced motion still stops it.
+  - Phase 9 decisions: phones (below 768 px) get `MobileSessions`, with the URL as the screen stack (`useIsPhone` reads the breakpoint in the first render). `ResponsiveOverlay` is a Popover or Dialog from md up and a vaul Drawer on phones, so Share is a drawer on phones in the Legacy view too. Every drawer eats the click that ends a drag. Phone taps are at least 44 px, through `--hit-size: 44px` and the phone branch, and desktop sizes are unchanged. Search chips `with:` and `in:` suggest people and groups. A swiped Done row collapses in 150 ms (a height animation, which UX-REVIEW-R9 asks for). Crossing md swaps the whole tree and drops selection and unsent composer text.
+  - Phase 9 open items for Taras (PR Heads-up): the app header stays on the phone list screen (SPEC R8.5 says none), because it is the only way to global nav. No `viewport-fit=cover` or `interactive-widget` meta change, because it is global. The real-iPhone check shows if the safe area and keyboard need them. No "Select all" (P2). The group screen pager buttons (shared `ListPager`) stay 32 px.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
 - **UX-REVIEW-R9 status**: (table filled in during Phase 10).

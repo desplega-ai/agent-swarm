@@ -15,10 +15,13 @@ import { useMyGroups } from "./use-my-groups";
 export function NewSessionTab({
   startIn,
   onStarted,
+  touch = false,
 }: {
   /** The group the tab was opened from, or null for No group. */
   startIn: string | null;
   onStarted: (rootTaskId: string) => void;
+  /** The phone New session screen: 44 px controls. */
+  touch?: boolean;
 }) {
   const { userId } = useCurrentUser();
   const me = userId ?? null;
@@ -39,8 +42,10 @@ export function NewSessionTab({
     <NewSessionView
       startKey={group ?? undefined}
       onStarted={(created) => onStarted(created.id)}
+      touch={touch}
       startIn={
         <StartInPicker
+          touch={touch}
           value={group}
           label={label}
           targets={targets}

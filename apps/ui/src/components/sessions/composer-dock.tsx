@@ -158,6 +158,11 @@ export interface ComposerDockProps {
    * touch targets.
    */
   bar?: boolean;
+  /**
+   * 44 px buttons, as in a bar, with no fold (the phone New session screen,
+   * whose action row holds "Start in").
+   */
+  touch?: boolean;
   className?: string;
 }
 
@@ -213,6 +218,7 @@ export function ComposerDock({
   fullWidth,
   decoration,
   bar = false,
+  touch = false,
   className,
 }: ComposerDockProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -438,7 +444,7 @@ export function ComposerDock({
                     aria-label="Attach files"
                     className={cn(
                       "rounded-full text-muted-foreground hover:text-foreground",
-                      bar ? "size-11" : "h-8 w-8",
+                      bar || touch ? "size-11" : "h-8 w-8",
                     )}
                     onClick={() => fileInputRef.current?.click()}
                   >
@@ -458,7 +464,7 @@ export function ComposerDock({
                   size="icon"
                   disabled={!canSubmit}
                   aria-label={sendLabel}
-                  className={cn("rounded-full shadow-sm", bar ? "size-11" : "h-8 w-8")}
+                  className={cn("rounded-full shadow-sm", bar || touch ? "size-11" : "h-8 w-8")}
                 >
                   <ArrowUp className="h-4 w-4" />
                 </Button>

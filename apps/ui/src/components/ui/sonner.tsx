@@ -19,6 +19,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
           toast: "!bg-popover !text-popover-foreground !border-border shadow-lg backdrop-blur-none",
         },
       }}
+      // Phones: 16 px from the bottom (sonner's own), or above a screen's
+      // composer while that screen sets `--toast-mobile-bottom`.
+      mobileOffset={{ bottom: "var(--toast-mobile-bottom, 16px)" }}
       style={
         {
           "--normal-bg": "var(--color-popover)",

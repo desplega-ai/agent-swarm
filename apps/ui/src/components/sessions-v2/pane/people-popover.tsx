@@ -16,6 +16,7 @@ import { PersonRow } from "@/components/sessions/person-row";
 import { useSessionPresenceContext } from "@/components/sessions/session-presence";
 import { EVERYONE_ICON } from "@/components/sessions/share-session-dialog";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { useOverlayKind } from "@/components/shared/responsive-overlay";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -23,7 +24,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { peerColorVar } from "@/lib/comb/presence";
 import type { SessionViewer } from "@/lib/session-presence";
 import { plural, userName } from "@/lib/sessions-v2";
-import { formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 
 export interface PanePerson {
   id: string;
@@ -154,6 +155,8 @@ export function PeopleList({
   onShare,
 }: ReturnType<typeof useSessionPeople> & { onShare?: () => void }) {
   const { data: allAgents } = useAgents();
+  // In a phone sheet, Share… is a 44 px row.
+  const touch = useOverlayKind() === "drawer";
   const agentName = (id: string) =>
     allAgents?.find((agent) => agent.id === id)?.name ?? `${id.slice(0, 8)}…`;
   const access = (label: string) => (
@@ -244,7 +247,12 @@ export function PeopleList({
       {onShare ? (
         <>
           <Separator className="my-1 bg-border-subtle" />
-          <Button variant="ghost" size="sm" onClick={onShare} className="justify-start px-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onShare}
+            className={cn("justify-start px-2", touch && "h-11 text-base")}
+          >
             <Share2 className="size-3.5" />
             Share…
           </Button>

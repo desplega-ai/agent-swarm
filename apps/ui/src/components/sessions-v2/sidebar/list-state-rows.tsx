@@ -105,13 +105,22 @@ export function PagingRow({
   );
 }
 
+/** The phone words for the hints that name a key: touch has no keys (SPEC R8.5). */
+const PHONE_HINT: Partial<Record<EmptyKind, string>> = {
+  later: "Swipe a session to the right.",
+  done: "Swipe a session to the left.",
+  groups: "Long-press sessions, then tap Move.",
+  fresh: "Long-press a session, then tap Move.",
+};
+
 /** Hints that need a picked user: Later and Done (triage). Move hints work for anyone. */
 const TRIAGE_HINTS = new Set<EmptyKind>(["later", "done"]);
 
 /**
  * A centered empty state: text only, so no control sits inside the tree.
  * "New group" is a row of its own. A Later or Done key hint shows only to
- * someone who can triage. `note` replaces the hint (search).
+ * someone who can triage. `note` replaces the hint (search). `phone` swaps
+ * the key hints for touch words.
  */
 export function EmptyRow({
   id,
@@ -119,15 +128,18 @@ export function EmptyRow({
   kind,
   canTriage,
   note,
+  phone,
 }: {
   id: string;
   level: number;
   kind: EmptyKind;
   canTriage: boolean;
   note?: string;
+  phone?: boolean;
 }) {
   const empty = EMPTY[kind];
-  const hint = canTriage || !TRIAGE_HINTS.has(kind) ? empty.hint : undefined;
+  const keyHint = phone && PHONE_HINT[kind] !== undefined ? PHONE_HINT[kind] : empty.hint;
+  const hint = canTriage || !TRIAGE_HINTS.has(kind) ? keyHint : undefined;
   return (
     <div id={id} role="none" style={{ paddingLeft: `${level * 14}px` }} className="mx-1.5">
       <EmptyState

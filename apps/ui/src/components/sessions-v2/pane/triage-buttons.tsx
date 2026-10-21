@@ -92,7 +92,7 @@ export function TriageButtons({
   const moveRef = useRef<HTMLButtonElement>(null);
   const [laterOpen, setLaterOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
-  const { canTriage, actions } = useSessionTriageActions({
+  const { canTriage, actions, doneOrBack, laterOrBack } = useSessionTriageActions({
     pickDate: () => setDateOpen(true),
     pickGroup: (sessions) => onMove(sessions, () => focusQuietly(moveRef.current)),
   });
@@ -102,8 +102,8 @@ export function TriageButtons({
   const inLater = session.readState === "later";
 
   const toggleRead = () => actions.toggleRead(targets);
-  const done = () => (inDone ? actions.backToInbox(targets) : actions.done(targets));
-  const later = () => (inLater ? actions.backToInbox(targets) : setLaterOpen(true));
+  const done = () => doneOrBack(targets);
+  const later = () => laterOrBack(targets, () => setLaterOpen(true));
   const move = () => actions.move(targets);
   usePaneKeys(canTriage ? { read: toggleRead, done, later, move } : { move }, keysActive);
 

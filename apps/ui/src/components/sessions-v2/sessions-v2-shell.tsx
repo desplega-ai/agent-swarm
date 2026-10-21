@@ -339,7 +339,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
                 Legacy sessions
               </Button>
             </div>
-            {/* The phone layout lands in Phase 9. */}
+            {/* Phones render `MobileSessions` instead (pages/sessions/page.tsx). */}
             <div className="hidden min-h-0 flex-1 flex-col md:flex">
               <SessionTree
                 focused={current}

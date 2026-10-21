@@ -13,27 +13,29 @@ import {
   Sunset,
 } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveOverlay,
+  ResponsiveOverlayContent,
+  useOverlayKind,
+} from "@/components/shared/responsive-overlay";
+import { Button } from "@/components/ui/button";
+import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenuItem, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { localInputValue, menuTime, type SnoozeChoice, snoozeOptions } from "./snooze-times";
 
 /** "In 1 hour" keeps `Clock`, the one other meaning that glyph has (SPEC R9). */
-const CHOICE_ICON: Record<SnoozeChoice, LucideIcon> = {
+export const CHOICE_ICON: Record<SnoozeChoice, LucideIcon> = {
   hour: Clock,
   evening: Sunset,
   tomorrow: Sunrise,
   week: CalendarDays,
 };
+
+/** Later alerts come from this browser (plan A13): the Later menu and the phone sheet say so. */
+export const LATER_NOTE = "We notify you in this browser while the dashboard is open.";
 
 /** The items of the Later menu, for a dropdown or a submenu. */
 export function SnoozeMenuItems({
@@ -67,13 +69,13 @@ export function SnoozeMenuItems({
       </DropdownMenuItem>
       <p className="flex max-w-64 gap-1.5 px-2 pt-1.5 pb-1 text-meta text-muted-foreground">
         <Bell aria-hidden className="mt-px size-3 shrink-0" />
-        We notify you in this browser while the dashboard is open.
+        {LATER_NOTE}
       </p>
     </>
   );
 }
 
-/** "Pick a date and time…": a small dialog with a date and time field. */
+/** "Pick a date and time…": a small dialog with a date and time field (a bottom sheet on a phone). */
 export function SnoozeDateDialog({
   open,
   onOpenChange,
@@ -87,8 +89,8 @@ export function SnoozeDateDialog({
   onRestoreFocus: () => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
+    <ResponsiveOverlay desktop="dialog" open={open} onOpenChange={onOpenChange}>
+      <ResponsiveOverlayContent
         className="sm:max-w-sm"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -97,8 +99,8 @@ export function SnoozeDateDialog({
       >
         {/* A new form per open: the field starts from tomorrow 14:00 each time. */}
         {open ? <SnoozeDateForm onSnooze={onSnooze} onCancel={() => onOpenChange(false)} /> : null}
-      </DialogContent>
-    </Dialog>
+      </ResponsiveOverlayContent>
+    </ResponsiveOverlay>
   );
 }
 
@@ -116,6 +118,8 @@ function SnoozeDateForm({
     return localInputValue(d);
   });
   const [hint, setHint] = useState(false);
+  // In a phone sheet: 44 px controls, and the reason shows as a line (no tooltips on touch).
+  const touch = useOverlayKind() === "drawer";
   const at = value ? new Date(value) : null;
   const time = at?.getTime() ?? Number.NaN;
   const blocked = Number.isNaN(time)
@@ -140,9 +144,11 @@ function SnoozeDateForm({
         min={localInputValue(new Date())}
         onChange={(event) => setValue(event.target.value)}
         aria-invalid={blocked !== null}
+        className={cn(touch && "h-11 text-base")}
       />
+      {touch && blocked ? <p className="-mt-2 text-data text-muted-foreground">{blocked}</p> : null}
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} className={cn(touch && "h-11")}>
           Cancel
         </Button>
         {/* Blocked, not disabled: the tooltip says why (dashboard-ui rule). It stays
@@ -152,7 +158,7 @@ function SnoozeDateForm({
             <Button
               type="submit"
               aria-disabled={blocked !== null}
-              className="aria-disabled:opacity-50"
+              className={cn("aria-disabled:opacity-50", touch && "h-11")}
             >
               Snooze
             </Button>

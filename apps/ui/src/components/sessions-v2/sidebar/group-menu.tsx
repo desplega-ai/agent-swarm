@@ -6,7 +6,7 @@
  * keeps only Delete, which works there. Delete asks first.
  */
 
-import { FolderPlus, Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderPlus, type LucideIcon, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +42,56 @@ export interface GroupMenuActions {
   remove: (groupKey: string) => void;
 }
 
+interface GroupMenuItem {
+  label: string;
+  icon: LucideIcon;
+  /** The desktop menu's key hint. */
+  shortcut?: string;
+  disabled: boolean;
+  run: () => void;
+}
+
+/**
+ * The group menu's items, for the desktop menu and the phone sheet: the
+ * edits (off where this connection cannot write), then Delete, which works
+ * everywhere.
+ */
+export function groupMenuItems(
+  { groupKey, writeBlock }: Pick<GroupMenuState, "groupKey" | "writeBlock">,
+  actions: GroupMenuActions,
+): { edits: GroupMenuItem[]; remove: GroupMenuItem } {
+  const blocked = writeBlock !== null;
+  return {
+    edits: [
+      {
+        label: "New session here",
+        icon: Plus,
+        shortcut: "C",
+        disabled: blocked,
+        run: () => actions.newSession(groupKey),
+      },
+      {
+        label: "New subgroup",
+        icon: FolderPlus,
+        disabled: blocked,
+        run: () => actions.newSubgroup(groupKey),
+      },
+      {
+        label: "Rename group",
+        icon: Pencil,
+        disabled: blocked,
+        run: () => actions.rename(groupKey),
+      },
+    ],
+    remove: {
+      label: "Delete group…",
+      icon: Trash2,
+      disabled: false,
+      run: () => actions.remove(groupKey),
+    },
+  };
+}
+
 export function GroupMenu({
   state,
   actions,
@@ -56,43 +106,32 @@ export function GroupMenu({
 }) {
   return (
     <PointMenu state={state} onClose={onClose} onRestoreFocus={onRestoreFocus} className="min-w-56">
-      {({ groupKey, label, writeBlock }) => (
-        <>
-          <DropdownMenuLabel className="truncate text-meta font-medium text-muted-foreground">
-            # {label}
-          </DropdownMenuLabel>
-          <DropdownMenuItem
-            disabled={writeBlock !== null}
-            onSelect={() => actions.newSession(groupKey)}
-          >
-            <Plus />
-            New session here
-            <MenuKey>C</MenuKey>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={writeBlock !== null}
-            onSelect={() => actions.newSubgroup(groupKey)}
-          >
-            <FolderPlus />
-            New subgroup
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={writeBlock !== null}
-            onSelect={() => actions.rename(groupKey)}
-          >
-            <Pencil />
-            Rename group
-          </DropdownMenuItem>
-          {writeBlock ? (
-            <p className="px-2 pb-1 text-meta text-muted-foreground">{writeBlock}</p>
-          ) : null}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onSelect={() => actions.remove(groupKey)}>
-            <Trash2 />
-            Delete group…
-          </DropdownMenuItem>
-        </>
-      )}
+      {(shown) => {
+        const { edits, remove } = groupMenuItems(shown, actions);
+        const RemoveIcon = remove.icon;
+        return (
+          <>
+            <DropdownMenuLabel className="truncate text-meta font-medium text-muted-foreground">
+              # {shown.label}
+            </DropdownMenuLabel>
+            {edits.map(({ label, icon: Icon, shortcut, disabled, run }) => (
+              <DropdownMenuItem key={label} disabled={disabled} onSelect={run}>
+                <Icon />
+                {label}
+                {shortcut ? <MenuKey>{shortcut}</MenuKey> : null}
+              </DropdownMenuItem>
+            ))}
+            {shown.writeBlock ? (
+              <p className="px-2 pb-1 text-meta text-muted-foreground">{shown.writeBlock}</p>
+            ) : null}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={remove.run}>
+              <RemoveIcon />
+              {remove.label}
+            </DropdownMenuItem>
+          </>
+        );
+      }}
     </PointMenu>
   );
 }

@@ -19,7 +19,7 @@ import { TruncatedTitle } from "../truncated-title";
 import { focusQuietly, useQuietTooltip } from "./quiet-focus";
 
 /** The rename limit of `PATCH /api/tasks/{id}/title`. */
-const TITLE_MAX = 120;
+export const TITLE_MAX = 120;
 
 /**
  * The rename field. Enter or a blur saves, Escape cancels. `onDone(title,
@@ -80,6 +80,28 @@ function TitleField({
   );
 }
 
+/**
+ * Save a typed title: null or the same title saves nothing, and an empty
+ * title clears the override (the session shows its first message again).
+ * Saved here, not in the field: the field is gone before the server
+ * answers. The promise also settles when a switch to another session
+ * unmounts the header (a `mutate` callback would not run then).
+ */
+export function useSaveTitle(detail: SessionDetailResponse) {
+  const updateTitle = useUpdateSessionTitle();
+  return (typed: string | null) => {
+    const next = typed?.trim();
+    if (next === undefined || next === (detail.root.title ?? "")) return;
+    void updateTitle.mutateAsync({ id: detail.root.id, title: next || null }).then(
+      () => toast("Renamed", { position: SESSIONS_TOAST_POSITION }),
+      (error: unknown) =>
+        toast.error(error instanceof Error ? error.message : "Couldn't rename the session", {
+          position: SESSIONS_TOAST_POSITION,
+        }),
+    );
+  };
+}
+
 export function SessionTitle({
   detail,
   canRename,
@@ -104,23 +126,11 @@ export function SessionTitle({
   }, [renaming]);
   const startRename = () => onRenamingChange(true);
 
-  // Saved here, not in the field: the field is gone before the server
-  // answers. The promise also settles when a switch to another session
-  // unmounts the header (a `mutate` callback would not run then).
-  const updateTitle = useUpdateSessionTitle();
+  const saveTitle = useSaveTitle(detail);
   const endRename = (typed: string | null, refocus: boolean) => {
     refocusPencil.current = refocus;
     onRenamingChange(false);
-    const next = typed?.trim();
-    if (next === undefined || next === (detail.root.title ?? "")) return;
-    // An empty title clears the override: the session shows its first message again.
-    void updateTitle.mutateAsync({ id: detail.root.id, title: next || null }).then(
-      () => toast("Renamed", { position: SESSIONS_TOAST_POSITION }),
-      (error: unknown) =>
-        toast.error(error instanceof Error ? error.message : "Couldn't rename the session", {
-          position: SESSIONS_TOAST_POSITION,
-        }),
-    );
+    saveTitle(typed);
   };
 
   if (renaming && canRename) {

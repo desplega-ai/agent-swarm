@@ -10,6 +10,10 @@
  * `useGroupEdits`, `useRowDrag`, `useTreeDialogs` with `TreeDialogs`, and
  * `useSessionsCommands` (Cmd+K). This file holds the key map, the pointer
  * handlers, and the render.
+ *
+ * `phone` (plan Phase 9) draws the same rows for touch (`MobileTreeBody`):
+ * swipe, long-press, the phone selection bars, and sheets for the Later and
+ * group menus. No drag, no hover card.
  */
 
 import { DndContext, DragOverlay } from "@dnd-kit/core";
@@ -38,6 +42,8 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import { SESSIONS_TOAST_POSITION, userName } from "@/lib/sessions-v2";
+import { MobileBulkBar } from "../mobile/mobile-bulk-bar";
+import { MobileTreeBody } from "../mobile/mobile-tree-body";
 import { useListKeys } from "../use-list-keys";
 import { useMyGroups } from "../use-my-groups";
 import { useSessionTriageActions } from "../use-session-triage-actions";
@@ -46,7 +52,7 @@ import { BulkBar } from "./bulk-bar";
 import { GroupNode } from "./group-node";
 import { AddGroupRow, CreateGroupRow, EmptyRow, LoadingRow, PagingRow } from "./list-state-rows";
 import type { RowMenuActions, RowMenuState } from "./row-menu";
-import { SectionHeader } from "./section-header";
+import { segmentsOf, TreeSection } from "./section-header";
 import { SessionDragPreview, SessionRow } from "./session-row";
 import { SidebarSearch } from "./sidebar-search";
 import { TreeDialogs, useTreeDialogs } from "./tree-dialogs";
@@ -67,28 +73,13 @@ import { useTreeMoves } from "./use-tree-moves";
 import { useTreeRows } from "./use-tree-rows";
 
 /** The clock rows read their times from. It ticks once a minute, with no animation. */
-function useMinuteClock(): number {
+export function useMinuteClock(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
   return now;
-}
-
-/** A section and the rows under it, so the section can label its tree group. */
-interface Segment {
-  section: Extract<TreeRowModel, { type: "section" }> | null;
-  rows: TreeRowModel[];
-}
-
-function segmentsOf(rows: TreeRowModel[]): Segment[] {
-  const segments: Segment[] = [{ section: null, rows: [] }];
-  for (const row of rows) {
-    if (row.type === "section") segments.push({ section: row, rows: [] });
-    else segments[segments.length - 1].rows.push(row);
-  }
-  return segments;
 }
 
 /** Registers the Cmd+K commands. Its own component, so palette typing renders only it. */
@@ -117,6 +108,10 @@ interface SessionTreeProps {
   paneCommands: PaneCommands;
   /** The tree's move dialog and group reveal, for the pane header. */
   ref: Ref<SessionTreeHandle>;
+  /** The phone list screen: touch rows, swipe, long-press, and sheets. */
+  phone?: boolean;
+  /** The phone search mode turned on or off. */
+  onSearchMode?: (on: boolean) => void;
 }
 
 /** What the tree asks of the pane area (plan Phase 8). */
@@ -147,6 +142,8 @@ export function SessionTree({
   onRename,
   paneCommands,
   ref,
+  phone = false,
+  onSearchMode,
 }: SessionTreeProps) {
   const { userId } = useCurrentUser();
   const me = userId ?? null;
@@ -190,6 +187,9 @@ export function SessionTree({
     dialogs.takeFocus();
     dialogs.setPick({ purpose: "move", sessions, returnFocus });
   };
+  /** The Later sheet on a phone (a right swipe, the selection bar). */
+  const laterMenu = (session: SessionListItem, targets: SessionListItem[]) =>
+    dialogs.setMenu({ x: 0, y: 0, kind: "later", session, targets });
   const triage = useSessionTriageActions({
     clearSelection: selection.clear,
     pickDate: dialogs.pickDate,
@@ -229,6 +229,7 @@ export function SessionTree({
     newSession,
     placeCursor: cursor.place,
     focusTree,
+    phone,
   });
   useImperativeHandle(ref, () => ({
     move: openMove,
@@ -373,17 +374,13 @@ export function SessionTree({
     },
     ...(canTriage
       ? {
-          done: () => {
-            const targets = keyTargets();
-            if (targets.length === 0) return;
-            if (targets.every((s) => s.readState === "done")) actions.backToInbox(targets);
-            else actions.done(targets);
-          },
+          done: () => triage.doneOrBack(keyTargets()),
           later: () => {
             const targets = keyTargets();
-            if (targets.length === 0 || !cursorRow) return;
-            if (targets.every((s) => s.readState === "later")) actions.backToInbox(targets);
-            else menuAtRow(cursorRow.key, "later", cursorSession ?? targets[0], targets);
+            if (!cursorRow) return;
+            triage.laterOrBack(targets, () =>
+              menuAtRow(cursorRow.key, "later", cursorSession ?? targets[0], targets),
+            );
           },
           read: () => {
             const targets = keyTargets();
@@ -609,6 +606,34 @@ export function SessionTree({
         description={myGroups.treeQuery.error?.message}
       />
     );
+  } else if (phone) {
+    body = (
+      <MobileTreeBody
+        treeRef={treeRef}
+        label={searching ? "Search results" : "Sessions"}
+        segments={segmentsOf(rows)}
+        rowsByKey={rowsByKey}
+        loading={rows.some((row) => row.type === "loading")}
+        domId={domId}
+        stateId={stateId}
+        describedBy={describedBy}
+        me={me}
+        now={now}
+        nameOf={nameOf}
+        selection={selection}
+        canTriage={canTriage}
+        renaming={renaming}
+        doneOrBack={triage.doneOrBack}
+        laterOrBack={triage.laterOrBack}
+        openLater={laterMenu}
+        openGroupMenu={openGroupMenu}
+        onRowClick={onRowClick}
+        onRenameDone={onRenameDone}
+        onCreateDone={edits.onCreateDone}
+        onPointerDown={onTreePointerDown}
+        renderRow={renderRow}
+      />
+    );
   } else {
     body = (
       <DndContext
@@ -635,17 +660,13 @@ export function SessionTree({
         >
           {segmentsOf(rows).map(({ section, rows: segmentRows }) =>
             section ? (
-              // Screen readers hear the section when the cursor enters its rows.
-              // biome-ignore lint/a11y/useSemanticElements: a tree groups its items with role="group"; a fieldset is a form control group
-              <div
+              <TreeSection
                 key={section.key}
-                role="group"
-                aria-label={`${section.label}, ${section.count} ${section.unit ?? "session"}${section.count === 1 ? "" : "s"}`}
-                aria-describedby={describedBy(section.key)}
+                section={section}
+                describedBy={describedBy(section.key)}
               >
-                <SectionHeader label={section.label} count={section.count} />
                 {segmentRows.map(renderRow)}
-              </div>
+              </TreeSection>
             ) : (
               segmentRows.map(renderRow)
             ),
@@ -669,7 +690,19 @@ export function SessionTree({
   };
   return (
     <TooltipProvider delayDuration={300} skipDelayDuration={300}>
-      {selected.length > 0 ? (
+      {phone ? (
+        <MobileBulkBar
+          open={selected.length > 0}
+          count={selected.length}
+          canTriage={canTriage}
+          anyUnread={selected.some((session) => session.readState === "unread")}
+          onDone={() => actions.done(selected)}
+          onLater={() => laterMenu(selected[0], selected)}
+          onToggleRead={() => actions.toggleRead(selected)}
+          onMove={() => openMove(selected)}
+          onClear={selection.clear}
+        />
+      ) : selected.length > 0 ? (
         <BulkBar
           count={selected.length}
           canTriage={canTriage}
@@ -693,6 +726,9 @@ export function SessionTree({
         value={query}
         onChange={setQuery}
         inputRef={searchRef}
+        phone={phone}
+        groups={targets}
+        onSearchMode={onSearchMode}
         onLeave={() => {
           focusTree();
           if (searching) cursor.moveTo(0);
@@ -710,6 +746,7 @@ export function SessionTree({
         moves={moves}
         newSession={newSession}
         focusTree={focusTree}
+        phone={phone}
       />
       <SessionsCommands
         focused={focused}

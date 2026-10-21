@@ -16,18 +16,16 @@ import { toast } from "sonner";
 import { useSessionShares, useUpdateSessionShares } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionEveryoneAccess, SessionOwner, SessionShares } from "@/api/types";
+import {
+  ResponsiveOverlay,
+  ResponsiveOverlayContent,
+  ResponsiveOverlayTrigger,
+  useOverlayKind,
+} from "@/components/shared/responsive-overlay";
 import { userInitials } from "@/components/shared/user-chip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
@@ -48,6 +46,7 @@ import {
   setEveryone,
   setPerson,
 } from "@/lib/session-sharing";
+import { cn } from "@/lib/utils";
 import { PersonRow } from "./person-row";
 
 export interface ShareSessionButtonProps {
@@ -56,6 +55,8 @@ export interface ShareSessionButtonProps {
   owner: SessionOwner;
   /** An icon button with a "Share" tooltip (the sessions v2 header). */
   icon?: boolean;
+  /** No button: `open` and `onOpenChange` drive the dialog (the phone action sheet). */
+  hideTrigger?: boolean;
   /** Set both to open the dialog from another control (the People popover's "Share…"). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -63,12 +64,16 @@ export interface ShareSessionButtonProps {
   onCloseAutoFocus?: (event: Event) => void;
 }
 
-/** The Share button. Renders nothing until the server confirms it supports shares. */
+/**
+ * The Share button. Renders nothing until the server confirms it supports
+ * shares. On a phone the dialog is a bottom sheet (`ResponsiveOverlay`).
+ */
 export function ShareSessionButton({
   rootTaskId,
   title,
   owner,
   icon = false,
+  hideTrigger = false,
   open: openProp,
   onOpenChange,
   onCloseAutoFocus,
@@ -80,11 +85,11 @@ export function ShareSessionButton({
   // `null`: the API predates session sharing. `undefined`: still loading.
   if (!shares) return null;
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      {icon ? (
+    <ResponsiveOverlay desktop="dialog" open={open} onOpenChange={setOpen}>
+      {hideTrigger ? null : icon ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <DialogTrigger asChild>
+            <ResponsiveOverlayTrigger asChild>
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -93,21 +98,21 @@ export function ShareSessionButton({
               >
                 <Share2 className="size-3.5" />
               </Button>
-            </DialogTrigger>
+            </ResponsiveOverlayTrigger>
           </TooltipTrigger>
           <TooltipContent>Share</TooltipContent>
         </Tooltip>
       ) : (
-        <DialogTrigger asChild>
+        <ResponsiveOverlayTrigger asChild>
           <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs">
             <Share2 className="h-3.5 w-3.5" />
             Share
           </Button>
-        </DialogTrigger>
+        </ResponsiveOverlayTrigger>
       )}
       {/* One shrinkable column: a long session title truncates instead of
           widening the grid track past the dialog. */}
-      <DialogContent
+      <ResponsiveOverlayContent
         className="grid-cols-[minmax(0,1fr)] sm:max-w-md"
         onCloseAutoFocus={onCloseAutoFocus}
       >
@@ -118,8 +123,8 @@ export function ShareSessionButton({
           shares={shares}
           onDone={() => setOpen(false)}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveOverlayContent>
+    </ResponsiveOverlay>
   );
 }
 
@@ -186,6 +191,8 @@ function ShareSessionDialogBody({
   const { userId } = useCurrentUser();
   const { config } = useConfig();
   const { data: users } = useUsers();
+  // In a phone sheet the controls are 44 px.
+  const touch = useOverlayKind() === "drawer";
   const update = useUpdateSessionShares(rootTaskId);
   const apply = (next: SessionShares) => update.mutate(next);
 
@@ -226,7 +233,7 @@ function ShareSessionDialogBody({
         searchPlaceholder="Search people"
         emptyLabel="No one else to add."
         aria-label="Add people"
-        triggerClassName="w-full"
+        triggerClassName={cn("w-full", touch && "h-11")}
       />
 
       <section className="flex flex-col gap-1">
@@ -259,7 +266,7 @@ function ShareSessionDialogBody({
                 >
                   <SelectTrigger
                     size="sm"
-                    className="h-7 w-[7.5rem] text-xs"
+                    className={cn("h-7 w-[7.5rem] text-xs", touch && "data-[size=sm]:h-11")}
                     aria-label={`Access for ${name}`}
                   >
                     <SelectValue />
@@ -291,7 +298,10 @@ function ShareSessionDialogBody({
             >
               <SelectTrigger
                 size="sm"
-                className="h-7 w-fit border-transparent px-1.5 text-sm shadow-none hover:bg-muted"
+                className={cn(
+                  "h-7 w-fit border-transparent px-1.5 text-sm shadow-none hover:bg-muted",
+                  touch && "data-[size=sm]:h-11",
+                )}
                 aria-label="General access"
               >
                 <SelectValue />
@@ -314,11 +324,17 @@ function ShareSessionDialogBody({
       ) : null}
 
       <DialogFooter className="flex-row justify-between sm:justify-between">
-        <Button type="button" variant="outline" size="sm" onClick={copyLink} className="gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={copyLink}
+          className={cn("gap-1.5", touch && "h-11")}
+        >
           <Link2 className="h-3.5 w-3.5" />
           Copy link
         </Button>
-        <Button type="button" size="sm" onClick={onDone}>
+        <Button type="button" size="sm" onClick={onDone} className={cn(touch && "h-11")}>
           Done
         </Button>
       </DialogFooter>

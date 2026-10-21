@@ -81,6 +81,24 @@ function GroupCrumb({
   );
 }
 
+/**
+ * The open session as a list row, for the triage buttons and the meta line.
+ * The detail has no Later wake time: it comes from the snoozed rows.
+ */
+export function useSessionItem(detail: SessionDetailResponse): SessionListItem {
+  const { userId } = useCurrentUser();
+  const inLater = detail.readState === "later";
+  const snoozed = useInboxState({
+    userId: inLater ? userId : null,
+    status: "snoozed",
+    itemType: "to_read",
+  });
+  const wake = inLater
+    ? (snoozed.data?.find((row) => row.itemId === detail.root.id)?.snoozeUntil ?? null)
+    : null;
+  return useMemo(() => itemFromDetail(detail, wake), [detail, wake]);
+}
+
 export function SessionHeader({
   detail,
   showHandoffs,
@@ -110,18 +128,7 @@ export function SessionHeader({
   const pillRef = useRef<HTMLButtonElement>(null);
   // "Share…" in the People popover opened the dialog: its close goes back to the pill.
   const shareFromPill = useRef(false);
-
-  // The detail has no Later wake time: read it from the snoozed rows.
-  const inLater = detail.readState === "later";
-  const snoozed = useInboxState({
-    userId: inLater ? userId : null,
-    status: "snoozed",
-    itemType: "to_read",
-  });
-  const wake = inLater
-    ? (snoozed.data?.find((row) => row.itemId === detail.root.id)?.snoozeUntil ?? null)
-    : null;
-  const session = useMemo(() => itemFromDetail(detail, wake), [detail, wake]);
+  const session = useSessionItem(detail);
 
   const { owner, access } = detail;
   const sharedBy =

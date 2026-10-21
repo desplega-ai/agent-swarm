@@ -26,7 +26,7 @@ import { formatWakeShort } from "../sidebar/snooze-times";
 import { sessionWorkers } from "./people-popover";
 
 /** "Back Thu 09:00" for a session in Later, "In Done" for one in Done (UX review R9). */
-function TriageNote({ session }: { session: SessionListItem }) {
+export function TriageNote({ session }: { session: SessionListItem }) {
   let note: ReactNode = null;
   if (session.readState === "done") {
     note = (
@@ -50,6 +50,26 @@ function TriageNote({ session }: { session: SessionListItem }) {
   return note ? <span className="flex min-w-3 shrink items-center gap-1">{note}</span> : null;
 }
 
+/**
+ * What the meta lines show (the pane header and the phone detail screen):
+ * the status chip, "12 tasks", the cost once it loads, and whether the turn
+ * timeline has internal handoffs (the Handoffs toggle shows only then).
+ */
+export function useSessionMeta(detail: SessionDetailResponse) {
+  const { data: costs } = useSessionCosts({ taskId: detail.root.id, enabled: true });
+  const status = useMemo(
+    () => sessionChipStatus(deriveSessionStatus(detail.root, detail.chain).status),
+    [detail],
+  );
+  const handoffRows = useMemo(() => hasHandoffs(buildTurns(detail.chain).turns), [detail.chain]);
+  return {
+    status,
+    tasks: plural(detail.chain.length, "task"),
+    cost: costs ? formatCost(costs.reduce((sum, row) => sum + row.totalCostUsd, 0)) : null,
+    handoffRows,
+  };
+}
+
 export function SessionMetaLine({
   detail,
   session,
@@ -61,14 +81,8 @@ export function SessionMetaLine({
   showHandoffs: boolean;
   onShowHandoffs: (on: boolean) => void;
 }) {
-  const { data: costs } = useSessionCosts({ taskId: detail.root.id, enabled: true });
-  const status = useMemo(
-    () => sessionChipStatus(deriveSessionStatus(detail.root, detail.chain).status),
-    [detail],
-  );
+  const { status, tasks, cost, handoffRows } = useSessionMeta(detail);
   const workers = useMemo(() => sessionWorkers(detail).map((worker) => worker.id), [detail]);
-  // The toggle shows only when the turn timeline has internal handoffs to show.
-  const handoffRows = useMemo(() => hasHandoffs(buildTurns(detail.chain).turns), [detail.chain]);
   const handoffs = `Handoffs · ${showHandoffs ? "On" : "Off"}`;
 
   return (
@@ -84,13 +98,9 @@ export function SessionMetaLine({
             <SessionAgents agentIds={workers} />
           </span>
         ) : null}
-        <span className="shrink-0 font-mono tabular-nums @max-[37.5rem]/pane:hidden">
-          {plural(detail.chain.length, "task")}
-        </span>
-        {costs ? (
-          <span className="shrink-0 font-mono tabular-nums @max-[55rem]/pane:hidden">
-            {formatCost(costs.reduce((sum, cost) => sum + cost.totalCostUsd, 0))}
-          </span>
+        <span className="shrink-0 font-mono tabular-nums @max-[37.5rem]/pane:hidden">{tasks}</span>
+        {cost ? (
+          <span className="shrink-0 font-mono tabular-nums @max-[55rem]/pane:hidden">{cost}</span>
         ) : null}
         <span className="shrink-0 @max-[65rem]/pane:hidden">
           started {formatRelativeTime(detail.root.createdAt)}

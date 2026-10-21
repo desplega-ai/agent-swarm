@@ -3,8 +3,10 @@
  * of a section or a group (`?view=`). A `DataGrid` with the title, group,
  * people, activity, and time, `ListPager` server paging by 50, a
  * `SegmentedControl` filter (All, Unread, Running, Needs you), and a search
- * box scoped to the list (`ListFilterBar`). `MobileList` below `md`. A row
- * click, or Enter on a row, opens the session in a tab next to this one.
+ * box scoped to the list (`ListFilterBar`). Below `md` the phone group
+ * screen draws the rows (`phoneList`, `MobileList` rows with swipe and
+ * long-press), with 44 px controls. A row click, or Enter on a row, opens
+ * the session in a tab next to this one.
  *
  * The page, the filter, and the search live per connection, user, and list
  * for the page session (outside the component), so a trip to a session and
@@ -20,7 +22,7 @@ import type {
   RowClickedEvent,
 } from "ag-grid-community";
 import { Hash } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionListItem } from "@/api/types";
@@ -28,17 +30,16 @@ import { AvatarStack } from "@/components/comb/presence-avatars";
 import { DataGrid } from "@/components/shared/data-grid";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
-import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsPhone } from "@/hooks/use-mobile";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import { peerColor } from "@/lib/comb/presence";
 import { groupCrumb } from "@/lib/session-groups";
 import { sidebarListParams, userName } from "@/lib/sessions-v2";
-import { formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
+import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
 import { ActivityMark, activityOf, shortAgo } from "./sidebar/session-row";
 import { ReadMark, UNREAD_TITLE } from "./sidebar/tree-row";
 import { sectionTab } from "./tabs/tab-info";
@@ -67,26 +68,39 @@ function othersOf(session: SessionListItem, me: string | null) {
   return (session.people ?? []).filter((person) => person.id !== me);
 }
 
-export function GroupTab({ view, onOpen }: { view: string; onOpen: (rootTaskId: string) => void }) {
+/** The phone rows of the list: the page's sessions, while it loads, and the list's name. */
+export type PhoneGroupList = (
+  rows: SessionListItem[] | undefined,
+  state: { loading: boolean; label: string },
+) => ReactNode;
+
+interface GroupTabProps {
+  view: string;
+  onOpen: (rootTaskId: string) => void;
+  /** Replaces the outer padding (the phone screen). */
+  className?: string;
+  /** The rows below `md` (the phone group screen). */
+  phoneList?: PhoneGroupList;
+}
+
+export function GroupTab(props: GroupTabProps) {
   const { config } = useConfig();
   const { userId } = useCurrentUser();
   // A new connection, user, or list starts from its own kept state.
-  const listKey = `${config.apiUrl} ${userId ?? ""} ${view}`;
-  return <GroupList key={listKey} listKey={listKey} view={view} onOpen={onOpen} />;
+  const listKey = `${config.apiUrl} ${userId ?? ""} ${props.view}`;
+  return <GroupList key={listKey} listKey={listKey} {...props} />;
 }
 
 function GroupList({
   listKey,
   view,
   onOpen,
-}: {
-  listKey: string;
-  view: string;
-  onOpen: (rootTaskId: string) => void;
-}) {
+  className,
+  phoneList,
+}: GroupTabProps & { listKey: string }) {
   const { userId } = useCurrentUser();
   const me = userId ?? null;
-  const isMobile = useIsMobile();
+  const phone = useIsPhone();
   const { data: users } = useUsers();
   const nameOf = (id: string) => userName(users, id);
   const [state, setState] = useState(() => lists.get(listKey) ?? FIRST);
@@ -235,7 +249,7 @@ function GroupList({
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 px-5 pt-4 pb-3">
+    <div className={cn("flex min-h-0 flex-1 flex-col gap-3 px-5 pt-4 pb-3", className)}>
       <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
         <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate">{title}</span>
@@ -247,9 +261,13 @@ function GroupList({
         searchValue={text}
         onSearchChange={setText}
         searchPlaceholder={`Search ${section ? title : "this group"}`}
+        // A phone: a 44 px field with 16 px text (iOS does not zoom in).
+        searchClassName={phone ? "w-full [&_input]:h-11 [&_input]:text-base" : undefined}
       >
         <SegmentedControl<Filter>
           aria-label="Show"
+          // A phone: 44 px options (the frame adds its 2 px inset and 1 px border).
+          className={phone ? "h-12.5 [&_[role=radio]]:min-w-11" : undefined}
           value={filter}
           onValueChange={(next) => setState((prev) => ({ ...prev, filter: next, page: 0 }))}
           options={[
@@ -265,31 +283,8 @@ function GroupList({
           ]}
         />
       </ListFilterBar>
-      {isMobile ? (
-        <MobileList label={title} loading={list.isPending} emptyMessage="No sessions match.">
-          {(rows ?? []).map((session) => {
-            const unread = session.readState === "unread";
-            return (
-              <MobileListRow
-                key={session.root.id}
-                onClick={() => onOpen(session.root.id)}
-                // The read mark keeps its slot on every row, so the titles line up.
-                leading={<ReadMark unread={unread} className="mt-1.5 block" />}
-                title={
-                  <>
-                    {unread ? <span className="sr-only">Unread. </span> : null}
-                    {sessionDisplayTitle(session.root)}
-                  </>
-                }
-                status={<ActivityMark activity={activityOf(session)} />}
-                meta={[
-                  groupCrumb(session.groupKey, me, nameOf),
-                  formatRelativeTime(session.lastActivityAt),
-                ]}
-              />
-            );
-          })}
-        </MobileList>
+      {phone ? (
+        (phoneList?.(rows, { loading: list.isPending, label: title }) ?? null)
       ) : (
         <DataGrid
           rowData={rows}

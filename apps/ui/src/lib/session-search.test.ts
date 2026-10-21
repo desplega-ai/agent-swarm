@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  completeToken,
   matchingGroups,
   paletteSearchParams,
   parseSessionSearch,
@@ -8,7 +9,10 @@ import {
   type SearchGroup,
   type SearchPerson,
   splitMatches,
+  suggestGroups,
+  suggestPeople,
   toggleQuickFilter,
+  typingToken,
 } from "./session-search";
 
 const PEOPLE: SearchPerson[] = [
@@ -185,5 +189,61 @@ describe("status bar quick filters", () => {
   test("a toggle leaves other is: tokens and a waiting token as typed", () => {
     expect(toggleQuickFilter("is:soon feed in:", "unread")).toBe("is:soon feed in: is:unread");
     expect(toggleQuickFilter("is:later Feed is:unread", "unread")).toBe("is:later Feed");
+  });
+});
+
+describe("phone token suggestions", () => {
+  test("typingToken finds a with: or in: token at the end", () => {
+    expect(typingToken("with:")).toEqual({ kind: "with", value: "", start: 0 });
+    expect(typingToken("pricing with: Le")).toEqual({ kind: "with", value: "le", start: 8 });
+    expect(typingToken("in:pri")).toEqual({ kind: "in", value: "pri", start: 0 });
+    // A token that ends with a space is done; a free word is no token.
+    expect(typingToken("with:lena ")).toBeNull();
+    expect(typingToken("pricing")).toBeNull();
+    expect(typingToken("is:unread")).toBeNull();
+  });
+
+  test("completeToken replaces the token and leaves room for the next word", () => {
+    const text = "is:unread with: le";
+    const token = typingToken(text);
+    if (!token) throw new Error("no token");
+    expect(completeToken(text, token, "lena")).toBe("is:unread with:lena ");
+  });
+
+  test("suggestPeople matches a name word and keeps tokens apart", () => {
+    const people = [
+      { id: "aaaaaaaa-1", name: "Alex Demo" },
+      { id: "bbbbbbbb-2", name: "Morgan Demo" },
+      { id: "cccccccc-3", name: "Alex Stone" },
+    ];
+    expect(suggestPeople("mor", people).map((s) => s.value)).toEqual(["morgan"]);
+    expect(suggestPeople("demo", people).map((s) => s.label)).toEqual(["Alex Demo", "Morgan Demo"]);
+    // Two people named Alex: the token is the id prefix, which the search also reads.
+    expect(suggestPeople("alex", people).map((s) => s.value)).toEqual(["aaaaaaaa", "cccccccc"]);
+    expect(suggestPeople("", people)).toHaveLength(3);
+  });
+
+  test("suggestGroups matches the path and completes with the last name", () => {
+    const groups = [
+      { key: "shared/northwind/", label: "northwind" },
+      { key: "shared/northwind/pricing/", label: "northwind › pricing" },
+    ];
+    expect(suggestGroups("pri", groups)).toEqual([
+      { id: "shared/northwind/pricing/", label: "northwind › pricing", value: "pricing" },
+    ]);
+    expect(suggestGroups("north", groups).map((s) => s.value)).toEqual(["northwind", "pricing"]);
+  });
+
+  test("a completed token resolves to the suggested person and group", () => {
+    const people = [{ id: "bbbbbbbb-2", name: "Morgan Demo" }];
+    const groups = [{ key: "shared/northwind/pricing/", label: "northwind › pricing" }];
+    const result = resolveSessionSearch(parseSessionSearch("with:morgan in:pricing"), {
+      people,
+      groups,
+    });
+    expect(result).toEqual({
+      ok: true,
+      params: { withUserId: "bbbbbbbb-2", keyPrefix: "shared/northwind/pricing/" },
+    });
   });
 });

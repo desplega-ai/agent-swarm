@@ -64,8 +64,7 @@ export function WorkerStep({ step, agentName }: { step: Step; agentName: string 
   const earlier = step.tries.slice(0, -1);
   const head = (
     <>
-      {/* Still: only the folded line above turns (UX review R9). */}
-      <TaskStatusIcon status={last.status} className="size-3.5 animate-none" />
+      <TaskStatusIcon status={last.status} className="size-3.5" />
       <span className="shrink-0 font-semibold text-foreground">{agentName}</span>
       {step.taskType ? (
         <>

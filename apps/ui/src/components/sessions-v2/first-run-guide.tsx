@@ -12,21 +12,23 @@
  * dialog is open, so one modal shows at a time. The Keys button and `?`
  * (with Shift, so the key listener allows Shift for this one key) open the
  * keys step. Cmd+K has "Show the guide". Closing it gives the focus back.
+ *
+ * On a phone (`phone`, SPEC R8.5) it is a bottom sheet with 3 short cards
+ * for touch: the list, swipe and long-press, then search and the Legacy
+ * view. No tabs, no keys.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MOD, useKeyboardShortcuts } from "@/components/shared/questions/keyboard";
+import {
+  ResponsiveOverlay,
+  ResponsiveOverlayContent,
+} from "@/components/shared/responsive-overlay";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { useCurrentUser } from "@/contexts/current-user-context";
@@ -71,7 +73,7 @@ function RowsSample() {
       title: "Scrape the supplier price feed",
       unread: false,
       note: "Running",
-      mark: <TaskStatusIcon variant="active" className="size-3.5 animate-none" />,
+      mark: <TaskStatusIcon variant="active" className="size-3.5" />,
     },
     {
       title: "Move the swarm to the new server",
@@ -155,6 +157,23 @@ const STEPS = [
   },
 ];
 
+/** The phone cards: touch words, no tabs, no keys. */
+const PHONE_STEPS = [
+  {
+    title: "One list for every session",
+    body: "Inbox, Later, Done, and your groups, newest first. Tap a group to open it. A bold title with a dot is unread.",
+    sample: <RowsSample />,
+  },
+  {
+    title: "Swipe and long-press",
+    body: "Swipe a session left for Done, or right for Later. Long-press a session to select more. Then mark them Done, Later, or read. You can also move them.",
+  },
+  {
+    title: "Search and the Legacy view",
+    body: "Tap the search field for chips such as with: and is:unread. The ⋯ menu at the top opens the Legacy view and this guide.",
+  },
+];
+
 /** The keys step: the Keys button and `?` open it. */
 export const GUIDE_KEYS_STEP = STEPS.length - 1;
 
@@ -232,11 +251,15 @@ export function FirstRunGuide({
   state,
   onStep,
   onClose,
+  phone = false,
 }: {
   state: GuideState | null;
   onStep: (step: number) => void;
   onClose: () => void;
+  /** The phone cards in a bottom sheet. */
+  phone?: boolean;
 }) {
+  const steps = phone ? PHONE_STEPS : STEPS;
   // The last state stays while the dialog fades out.
   const shown = useLastValue(state);
   const nextRef = useRef<HTMLButtonElement>(null);
@@ -252,16 +275,16 @@ export function FirstRunGuide({
   } else if (!state && openedAs) setOpenedAs(null);
 
   if (!shown) return null;
-  const step = Math.min(shown.step, STEPS.length - 1);
-  const current = STEPS[step];
-  const last = step === STEPS.length - 1;
+  const step = Math.min(shown.step, steps.length - 1);
+  const current = steps[step];
+  const last = step === steps.length - 1;
   const close = () => {
     storeOff(off);
     onClose();
   };
   const go = (to: number) => {
     if (to < 0) return;
-    if (to >= STEPS.length) close();
+    if (to >= steps.length) close();
     else {
       onStep(to);
       nextRef.current?.focus();
@@ -269,19 +292,21 @@ export function FirstRunGuide({
   };
   // The arrow keys stop at the first and the last step: only Done and Skip close it.
   const arrow = (to: number) => {
-    if (to >= 0 && to < STEPS.length) go(to);
+    if (to >= 0 && to < steps.length) go(to);
   };
 
   return (
-    <Dialog
+    <ResponsiveOverlay
+      desktop="dialog"
       open={state !== null}
       onOpenChange={(open) => {
         if (!open) close();
       }}
     >
-      <DialogContent
+      <ResponsiveOverlayContent
         showCloseButton={false}
         className="gap-0 sm:max-w-[430px]"
+        drawerClassName="gap-0 pb-1"
         onOpenAutoFocus={(event) => {
           // The focus has not moved yet: remember where it was.
           returnTo.current = document.activeElement;
@@ -307,21 +332,26 @@ export function FirstRunGuide({
         <div aria-live="polite" aria-atomic="true">
           <p className="flex items-center gap-2.5 font-mono text-meta tracking-[0.12em] text-muted-foreground uppercase">
             <span aria-hidden className="flex gap-1">
-              {STEPS.map((item, i) => (
+              {steps.map((item, i) => (
                 <span
                   key={item.title}
                   className={cn("size-1.5 rounded-full bg-border", i === step && "bg-primary")}
                 />
               ))}
             </span>
-            Step {step + 1} of {STEPS.length}
+            Step {step + 1} of {steps.length}
           </p>
           <DialogTitle className="mt-2.5 text-base">{current.title}</DialogTitle>
           <DialogDescription className="mt-1.5 leading-relaxed">{current.body}</DialogDescription>
         </div>
         {current.sample ?? null}
-        <DialogFooter className="mt-5 flex-row items-center gap-1.5 sm:justify-start">
-          <div className="mr-auto flex items-center gap-2">
+        <DialogFooter
+          className={cn(
+            "mt-5 flex-row items-center gap-1.5 sm:justify-start",
+            phone && "flex-wrap [&_[data-slot=button]]:h-11",
+          )}
+        >
+          <div className={cn("mr-auto flex items-center gap-2", phone && "h-11 w-full")}>
             <Checkbox
               id={offId}
               checked={off}
@@ -331,7 +361,7 @@ export function FirstRunGuide({
               Don't show again
             </Label>
           </div>
-          <Button size="sm" variant="ghost" onClick={close}>
+          <Button size="sm" variant="ghost" onClick={close} className={cn(phone && "mr-auto")}>
             Skip
           </Button>
           <Button size="sm" variant="outline" disabled={step === 0} onClick={() => go(step - 1)}>
@@ -341,7 +371,7 @@ export function FirstRunGuide({
             {last ? "Done" : "Next"}
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveOverlayContent>
+    </ResponsiveOverlay>
   );
 }

@@ -112,7 +112,7 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
   };
 }
 
-/** A still mark (SPEC R9: tabs never spin). Needs you is a small amber dot, so the title keeps its width. */
+/** The activity mark: running turns (Taras, 2026-10-22). Needs you is a small amber dot, so the title keeps its width. */
 export function TabActivity({ activity }: { activity: Activity }) {
   if (activity === "needs") {
     return (
@@ -124,7 +124,7 @@ export function TabActivity({ activity }: { activity: Activity }) {
     );
   }
   if (activity === "running") {
-    return <TaskStatusIcon variant="active" label="Running" className="size-3.5 animate-none" />;
+    return <TaskStatusIcon variant="active" label="Running" className="size-3.5" />;
   }
   if (activity === "failed") {
     return <TaskStatusIcon status="failed" label="Failed" className="size-3.5" />;

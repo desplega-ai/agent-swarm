@@ -35,6 +35,11 @@ export interface SessionConversationProps {
   renderComposerActions?: TaskComposerProps["renderActions"];
   /** `turns`: the sessions v2 turn timeline. `legacy`: the task tree of the legacy view. */
   timeline?: "legacy" | "turns";
+  /**
+   * The phone composer: the one-line bar with 44 px buttons (`TaskComposer
+   * bar`), and classes for its dock (the safe-area inset).
+   */
+  composer?: { bar?: boolean; className?: string };
 }
 
 const SCROLLED_UP_FADE = {
@@ -47,6 +52,7 @@ export function SessionConversation({
   scrollClassName,
   renderComposerActions,
   timeline = "legacy",
+  composer: composerLayout,
 }: SessionConversationProps) {
   // Steering (≥1.122.1). Older servers 404 `/api/tasks/:id/steer`, so the
   // composer falls back to its pre-steering chained-task behaviour.
@@ -229,6 +235,8 @@ export function SessionConversation({
             canSteer={canSteer}
             placeholder="Continue the session…"
             renderActions={renderComposerActions}
+            bar={composerLayout?.bar}
+            className={composerLayout?.className}
             onValueChange={(next) => {
               composer.current.hasText = next.trim().length > 0;
               reportTyping();
