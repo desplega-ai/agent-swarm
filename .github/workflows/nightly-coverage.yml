@@ -26,8 +26,8 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Run root tests serially with coverage
-        run: bun --config=bunfig.coverage.toml test
+      - name: Run isolated root tests with coverage
+        run: bun scripts/run-root-coverage.ts
 
       - name: Build coverage summary
         if: ${{ !cancelled() && hashFiles('coverage/lcov.info') != '' }}
@@ -43,7 +43,7 @@ jobs:
           retention-days: 30
 
       - name: Store coverage baseline
-        if: ${{ !cancelled() && hashFiles('coverage/lcov.info') != '' }}
+        if: ${{ success() && github.ref == 'refs/heads/main' && hashFiles('coverage/lcov.info') != '' }}
         env:
           SWARM_API_BASE_URL: ${{ vars.SWARM_API_BASE_URL || 'https://api.desplega.agent-swarm.dev' }}
           SWARM_COVERAGE_API_KEY: ${{ secrets.SWARM_COVERAGE_API_KEY }}
