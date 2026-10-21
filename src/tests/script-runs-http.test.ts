@@ -11,6 +11,7 @@ import {
   getDbClient,
   getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
+  getPendingTaskForAgent,
   initDb,
   updateScriptRun,
 } from "../be/db";
@@ -20,6 +21,7 @@ import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { localProcessScriptExecutor } from "../script-workflows/executor";
 import { setScriptRunExecutor } from "../script-workflows/supervisor";
+import type { AgentTask } from "../types";
 import {
   clearVolatileSecretsForTesting,
   refreshSecretScrubberCache,
@@ -535,6 +537,88 @@ describe("/api/script-runs HTTP", () => {
       routing_reason: routingReason ?? "human_pinned",
       routing_source: routingReason ? "declared" : "engine_default",
     });
+  });
+
+  async function dispatchStepFor(
+    stepKey: string,
+    stepAgentId: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<{ response: Promise<TestResponse>; task: AgentTask }> {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id: runId } = (await created.json()) as { id: string };
+    const response = dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ stepKey, task: `do ${stepKey}`, agentId: stepAgentId, ...extra }),
+    });
+    const contextKey = `script-run:${runId}:${stepKey}`;
+    let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
+    for (let i = 0; i < 50 && !task; i++) {
+      await Bun.sleep(20);
+      task = await getLatestScriptRunStepTaskByContextKey(contextKey);
+    }
+    expect(task).not.toBeNull();
+    return { response, task: task! };
+  }
+
+  test("agent-task dispatch persists dependsOn and holds the task until the dependency completes", async () => {
+    const stepAgent = await createAgent({
+      name: "deps-step-worker",
+      isLead: false,
+      status: "idle",
+    });
+    const dependency = await createTaskExtended("upstream fix", { source: "mcp" });
+
+    const { response, task } = await dispatchStepFor("after-fix", stepAgent.id, {
+      dependsOn: [dependency.id],
+    });
+
+    expect(task.dependsOn).toEqual([dependency.id]);
+    expect(await getPendingTaskForAgent(stepAgent.id)).toBeNull();
+
+    await completeTask(dependency.id, "fixed");
+    expect((await getPendingTaskForAgent(stepAgent.id))?.id).toBe(task.id);
+
+    await completeTask(task.id, "done");
+    expect((await response).status).toBe(200);
+  });
+
+  test("agent-task dispatch without dependsOn is startable at once", async () => {
+    const stepAgent = await createAgent({
+      name: "no-deps-step-worker",
+      isLead: false,
+      status: "idle",
+    });
+
+    const { response, task } = await dispatchStepFor("no-deps", stepAgent.id);
+
+    expect(task.dependsOn).toEqual([]);
+    expect((await getPendingTaskForAgent(stepAgent.id))?.id).toBe(task.id);
+
+    await completeTask(task.id, "done");
+    expect((await response).status).toBe(200);
+  });
+
+  test("agent-task dispatch rejects a dependsOn entry that is not a task UUID", async () => {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id: runId } = (await created.json()) as { id: string };
+
+    const response = await dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ stepKey: "bad-deps", task: "x", dependsOn: ["not-a-uuid"] }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await getLatestScriptRunStepTaskByContextKey(`script-run:${runId}:bad-deps`)).toBeNull();
   });
 
   test("agent-task polling returns the step output when a newer completed follow-up shares its context key", async () => {

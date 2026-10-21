@@ -46586,6 +46586,13 @@
                     "minimum": 0,
                     "maximum": 100
                   },
+                  "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
                   "offerMode": {
                     "type": "boolean"
                   },

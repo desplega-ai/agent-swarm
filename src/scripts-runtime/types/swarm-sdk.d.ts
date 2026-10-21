@@ -35,6 +35,8 @@ declare module "swarm-sdk" {
     routingNote?: string;
     tags?: string[];
     priority?: number;
+    /** Task IDs that must complete before this task starts. */
+    dependsOn?: string[];
     offerMode?: boolean;
     dir?: string;
     vcsRepo?: string;

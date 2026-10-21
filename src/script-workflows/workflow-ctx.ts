@@ -36,6 +36,7 @@ type AgentTaskConfig = {
   routingNote?: string;
   tags?: string[];
   priority?: number;
+  dependsOn?: string[];
   offerMode?: boolean;
   dir?: string;
   vcsRepo?: string;
