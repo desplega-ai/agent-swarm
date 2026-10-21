@@ -18,7 +18,13 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { createForeachAttemptSteps, getChildWorkflowRunId } from "../be/db/workflow-runs";
-import type { WaitStateRow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
+import type {
+  WaitStateRow,
+  WorkflowDefinition,
+  WorkflowNode,
+  WorkflowRun,
+  WorkflowRunStep,
+} from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ApprovalSlackClient,
@@ -38,11 +44,13 @@ import { stepFailureMode } from "./foreach-body";
 import { startForeachDrive } from "./foreach-driver";
 import {
   FOREACH_TERMINAL_STEP_STATUSES,
+  type ForeachChildOutcome,
   parseSyntheticNodeId,
   resolveForeachParent,
+  settleForeachChild,
 } from "./foreach-join";
-import { getMaxWorkflowStepsPerRun } from "./limits";
 import { getSecretInputKeys } from "./input";
+import { getMaxWorkflowStepsPerRun } from "./limits";
 import { findWorkflowReadinessProblems, formatReadinessProblems } from "./readiness";
 import {
   checkpointPortStepAndResolveSuccessors,
@@ -188,17 +196,7 @@ async function resumeFromTaskCompletionUnguarded(
   registry: ExecutorRegistry,
 ): Promise<void> {
   const run = await getWorkflowRun(event.workflowRunId!);
-  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
-
-  const step = await getWorkflowRunStep(event.workflowRunStepId!);
-  if (!step || step.status !== "waiting") return;
-  if (await isStaleTaskEvent(step.id, event)) return;
-
-  const workflow = await getWorkflow(run.workflowId);
-  if (!workflow) return;
-
-  // Checkpoint: atomic step completion + context update
-  const ctx = (run.context ?? {}) as Record<string, unknown>;
+  if (!run) return;
 
   // JSON-parse structured output so downstream nodes can access nested fields
   let taskOutput: unknown = event.output;
@@ -213,6 +211,24 @@ async function resumeFromTaskCompletionUnguarded(
     }
   }
   const stepOutput = { taskId: event.taskId, taskOutput };
+
+  if (run.status !== "waiting" && run.status !== "running") {
+    await recordLateForeachOutcome(run, event.workflowRunStepId!, event, {
+      status: "completed",
+      output: stepOutput,
+    });
+    return;
+  }
+
+  const step = await getWorkflowRunStep(event.workflowRunStepId!);
+  if (!step || step.status !== "waiting") return;
+  if (await isStaleTaskEvent(step.id, event)) return;
+
+  const workflow = await getWorkflow(run.workflowId);
+  if (!workflow) return;
+
+  // Checkpoint: atomic step completion + context update
+  const ctx = (run.context ?? {}) as Record<string, unknown>;
 
   const routing = await completeTaskStepAndResolveSuccessors(
     workflow.definition,
@@ -309,7 +325,14 @@ async function handleTaskFailureUnguarded(
   options: { retryable: boolean },
 ): Promise<void> {
   const run = await getWorkflowRun(event.workflowRunId!);
-  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
+  if (!run) return;
+  if (run.status !== "waiting" && run.status !== "running") {
+    await recordLateForeachOutcome(run, event.workflowRunStepId!, event, {
+      status: "failed",
+      error: reason,
+    });
+    return;
+  }
 
   const step = await getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
@@ -379,6 +402,32 @@ async function handleTaskFailureUnguarded(
   } else {
     await finalizeOrWait(run.id);
   }
+}
+
+/**
+ * A fail-fast fan-out lets its in-flight items finish after the run failed.
+ * Record such a late outcome on the item row so the run's history (and a
+ * later retry) sees it; the run itself stays failed and nothing routes.
+ */
+async function recordLateForeachOutcome(
+  run: WorkflowRun,
+  stepId: string,
+  event: TaskEvent,
+  outcome: ForeachChildOutcome,
+): Promise<void> {
+  if (run.status !== "failed") return;
+  const step = await getWorkflowRunStep(stepId);
+  if (!step || step.status !== "waiting") return;
+  if (await isStaleTaskEvent(step.id, event)) return;
+  const workflow = await getWorkflow(run.workflowId);
+  if (!workflow || !resolveForeachParent(workflow.definition, step.nodeId)) return;
+  await settleForeachChild(
+    workflow.definition,
+    run.id,
+    step.id,
+    outcome,
+    (run.context ?? {}) as Record<string, unknown>,
+  );
 }
 
 /**
@@ -577,7 +626,9 @@ function foreachRetryCapError(
   if (added === 0) return null;
   const maxSteps = getMaxWorkflowStepsPerRun();
   const total = existingSteps + added;
-  const hasSuccessors = attempts.some((attempt) => getSuccessors(def, attempt.parent.id).length > 0);
+  const hasSuccessors = attempts.some(
+    (attempt) => getSuccessors(def, attempt.parent.id).length > 0,
+  );
   const breached = hasSuccessors ? total >= maxSteps : total > maxSteps;
   if (!breached) return null;
   return `foreach retry would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${existingSteps} existing + ${added} new attempts${hasSuccessors ? " leaves no room for the post-join walk" : " exceeds the per-run cap"}`;

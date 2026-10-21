@@ -75,6 +75,11 @@ export function isForeachChildOwned(stepId: string): boolean {
   return ownedChildren.has(stepId);
 }
 
+/** Drop in-process child ownership, as a restart would. Tests only. */
+export function _resetForeachOwnershipForTests(): void {
+  ownedChildren.clear();
+}
+
 /**
  * Park a foreach parent whose executor materialized its children, then drive
  * them. The run stays `running` while the drive starts the children; when the
