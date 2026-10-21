@@ -1,6 +1,7 @@
 import type { Attachment } from "chat";
 import { type AdditiveBuffer, createAdditiveBuffer } from "@/tasks/additive-buffer";
 import { trackBackground } from "./background";
+import type { ChatAddressedReason, ChatMessageFacts } from "./facts";
 import { flushChatThread } from "./inbound";
 import { stopTypingKeepalive } from "./typing";
 
@@ -14,6 +15,9 @@ export interface ChatBufferedMessage {
   userName?: string;
   botMentioned: boolean;
   isDirectMessage: boolean;
+  /** Why the message was taken; `none` when it is unaddressed. */
+  addressed: ChatAddressedReason;
+  facts: ChatMessageFacts;
   attachments: Attachment[];
 }
 

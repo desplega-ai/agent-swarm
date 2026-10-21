@@ -12,6 +12,7 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 import { workflowEventBus } from "@/workflows/event-bus";
 import { errorMessage } from "./logger";
 import { postChatMessage } from "./outbound";
+import { taskOutputChatFiles } from "./outbound-files";
 import { getChatInstance, getChatSdkHealth } from "./runtime";
 import { sweepExpired } from "./state";
 import { stopTypingKeepalive } from "./typing";
@@ -49,7 +50,8 @@ export function formatChatRelayText(task: AgentTask): string {
  *
  * Delivery is at-least-once: a chunk failure re-posts the earlier chunks on
  * retry, and a crash between the send and `markChatRelayDelivered` re-sends the
- * message.
+ * message. The task's output attachments go after the text; a file that cannot
+ * be sent gets a note in the thread and does not fail the delivery.
  *
  * Once `signal` aborts, no further row is claimed. A send already in flight is
  * not cancelled (`postChatMessage` takes no signal); its row keeps the claim
@@ -99,6 +101,7 @@ export async function processPendingChatRelays(
         threadId: target.threadId,
         text: formatChatRelayText(task),
         taskId: task.id,
+        files: await taskOutputChatFiles(task.id),
       });
       stopTypingKeepalive(target.threadId);
       await markChatRelayDelivered(task.id, now);

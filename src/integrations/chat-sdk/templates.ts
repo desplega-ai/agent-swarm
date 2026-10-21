@@ -14,3 +14,17 @@ registerTemplate({
   ],
   category: "system",
 });
+
+registerTemplate({
+  eventType: "chat.message.header",
+  header: "",
+  defaultBody: "[chat] {{chat_facts}}",
+  variables: [
+    {
+      name: "chat_facts",
+      description:
+        "Adapter, chat type and title, forum topic, sender, why the message was taken (addressed) and the replied-to snippet, joined with ' · '",
+    },
+  ],
+  category: "system",
+});

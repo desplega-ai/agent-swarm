@@ -2368,11 +2368,12 @@ Capability: `chat-sdk` — **disabled by default**; set `CHAT_SDK_ENABLED=true` 
 
 **Reply in the chat thread of this task**
 
-Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user or a short progress note on long work. Markdown is supported; long text is split into several messages.
+Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `text` | `string` | Yes | - | Markdown text to post to the thread. |
+| `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in the swarm agent-fs drive, such as thoughts/<agent-id>/report.pdf. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
 
 ### chat-post
 
@@ -2386,6 +2387,7 @@ Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Di
 | `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100. |
 | `channelId` | `string` | No | - | Full SDK channel id, such as slack:C123. Ignored when threadId is set. |
 | `text` | `string` | Yes | - | Markdown text to post. |
+| `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in the swarm agent-fs drive, such as thoughts/<agent-id>/report.pdf. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
 
 ### chat-open-dm
 

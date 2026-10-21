@@ -906,6 +906,12 @@ export const CreateTaskOptionsSchema = z.object({
    */
   inheritParentOutputSchema: z.boolean().optional(),
   /**
+   * When a `parentTaskId` is set and `requestedByUserId` is not, the child
+   * inherits the parent's requester by default. Set this to `false` when the
+   * child answers a different person (a chat message whose sender is unknown).
+   */
+  inheritParentRequester: z.boolean().optional(),
+  /**
    * Skip parent routing requirements only for a child with its own explicit
    * Lead-only control-plane authorization.
    */

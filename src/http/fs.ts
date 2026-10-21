@@ -6,8 +6,13 @@ import {
   ensureAgentFsCredentialsForAgent,
   inviteEmailToSharedOrg,
 } from "../be/seed/agent-fs-provision";
-import { MAX_TASK_ATTACHMENT_BYTES, recordTaskAttachmentUpload } from "../be/task-attachment-store";
-import { type FileObject, type FileScope, FilesError, normalizeFilesError } from "../fs/provider";
+import {
+  backingProviderId,
+  MAX_TASK_ATTACHMENT_BYTES,
+  recordTaskAttachmentUpload,
+  scopeFromAttachment,
+} from "../be/task-attachment-store";
+import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { can, type RbacResource } from "../rbac";
 import { type TaskAttachment, TaskAttachmentSchema } from "../types";
@@ -534,36 +539,6 @@ async function sendDelete(res: ServerResponse, attachment: TaskAttachment): Prom
   res.writeHead(204);
   res.end();
   return true;
-}
-
-// Resolve against the row's ACTUAL stored key + its own org/drive, rather than
-// reconstructing `tasks/<taskId>/<name>`. Attachments written to agent-fs via the
-// CLI live at arbitrary paths (`misc/…`, `smoke/…`); reconstruction mis-resolves
-// them, which previously caused downloads to 404 and deletes to orphan the real
-// file. New uploads have no stored key yet at scope-build time and keep the
-// forward-looking layout.
-function scopeFromAttachment(attachment: TaskAttachment): FileScope {
-  const storedKey = attachment.providerKey ?? attachment.path ?? "";
-  return {
-    taskId: attachment.taskId,
-    name: attachment.name,
-    key: storedKey.trim() ? storedKey : undefined,
-    orgId: attachment.orgId,
-    driveId: attachment.driveId,
-  };
-}
-
-// Which file-storage provider (if any) actually holds this attachment's bytes.
-// Only agent-fs objects and local-fs uploads are provider-backed; `shared-fs`
-// worker-volume pointers, `url`, and `page` attachments have no provider object,
-// so they must never be fetched or deleted through a provider (doing so would
-// mis-resolve and, on delete, orphan the real target). Note local-fs uploads are
-// recorded with kind "shared-fs" but an explicit local-fs providerId, so key off
-// both signals rather than kind alone.
-function backingProviderId(attachment: TaskAttachment): string | null {
-  if (attachment.kind === "agent-fs") return attachment.providerId ?? "agent-fs";
-  if (attachment.providerId === "local-fs") return "local-fs";
-  return null;
 }
 
 async function findAttachment(

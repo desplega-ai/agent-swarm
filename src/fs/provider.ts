@@ -117,10 +117,22 @@ export function normalizeStoredKey(key: string): string {
   if (!trimmed || trimmed.includes("\0")) {
     throw new FilesError("Provider", "Stored file key must be a non-empty path");
   }
-  if (trimmed.split("/").some((part) => part === "..")) {
+  if (trimmed.split("/").some(isParentSegment)) {
     throw new FilesError("Provider", "Stored file key must not contain parent path segments");
   }
   return trimmed;
+}
+
+// `..` itself, or a segment a URL decoder turns into `..` or a separator
+// (`%2e%2e`, `..%2f..`); normalizeName never produces either form.
+function isParentSegment(part: string): boolean {
+  if (part === "..") return true;
+  try {
+    const decoded = decodeURIComponent(part);
+    return decoded === ".." || decoded.includes("/");
+  } catch {
+    return false;
+  }
 }
 
 export function normalizeName(name: string): string {

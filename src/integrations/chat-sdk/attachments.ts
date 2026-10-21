@@ -29,7 +29,7 @@ import { errorMessage } from "./logger";
 /** How often a draft's lease is renewed while its uploads run; the sweep waits 5 minutes. */
 const DRAFT_LEASE_REFRESH_MS = 60_000;
 /** A file a user sent the bot, like one uploaded from the dashboard composer. */
-const SHARED_FILE_INTENT = "user-upload";
+export const SHARED_FILE_INTENT = "user-upload";
 
 const MB = 1024 * 1024;
 /**

@@ -63,9 +63,13 @@ export async function loadAdapter(
     case "telegram": {
       const { createTelegramAdapter } = await import("@chat-adapter/telegram");
       // Explicit `false` blocks the TELEGRAM_ALLOW_UNVERIFIED_WEBHOOKS env fallback.
-      return createTelegramAdapter({ ...base, allowUnverifiedWebhooks: false } as Parameters<
-        typeof createTelegramAdapter
-      >[0]);
+      // Explicit `true` makes a reply to the bot a mention whatever
+      // TELEGRAM_MENTION_ON_REPLY says.
+      return createTelegramAdapter({
+        ...base,
+        allowUnverifiedWebhooks: false,
+        mentionOnReply: true,
+      } as Parameters<typeof createTelegramAdapter>[0]);
     }
     case "slack": {
       const { createSlackAdapter } = await import("@chat-adapter/slack");
