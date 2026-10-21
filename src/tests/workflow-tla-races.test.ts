@@ -213,7 +213,7 @@ describe("TLA+ workflow counterexamples", () => {
     const stepB = await untilStatus(runId, "B", "waiting");
 
     // EF: B's task fails -> run failed.
-    await failStepAndRunIfWaiting(stepB!.id, runId, "task failed");
+    await failStepAndRunIfWaiting(def, stepB!.id, runId, "task failed");
     expect((await getWorkflowRun(runId))?.status).toBe("failed");
 
     // U1/U2: the user retries; findReadyNodes returns A because it is not completed.
@@ -240,7 +240,7 @@ describe("TLA+ workflow counterexamples", () => {
 
     // EF: B's task fails -> run failed. XCkWait(A): the checkpoint CAS sees a
     // failed run, so A's row stays `running` with its task out.
-    await failStepAndRunIfWaiting(stepB!.id, runId, "task failed");
+    await failStepAndRunIfWaiting(def, stepB!.id, runId, "task failed");
     holdA.release();
     await initial;
     expect((await stepsOf(runId, "A"))[0]?.status).toBe("running");

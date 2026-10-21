@@ -1,8 +1,23 @@
-import { getLatestStepForNode, getWorkflowRunStepsByRunId } from "../be/db";
-import type { WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
+import {
+  getDbClient,
+  getLatestStepForNode,
+  getWorkflowRun,
+  getWorkflowRunStep,
+  getWorkflowRunStepsByRunId,
+  updateWorkflowRun,
+  updateWorkflowRunStep,
+} from "../be/db";
+import type {
+  WorkflowDefinition,
+  WorkflowNode,
+  WorkflowRunStep,
+  WorkflowRunStepStatus,
+} from "../types";
 import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import type { ForeachOutput } from "./executors/foreach";
+import type { ExecutorRegistry } from "./executors/registry";
+import { startForeachDrive } from "./foreach-driver";
 
 export const FOREACH_TERMINAL_STEP_STATUSES = new Set([
   "completed",
@@ -29,7 +44,10 @@ export function parseSyntheticNodeId(nodeId: string): SyntheticNodeId | null {
   };
 }
 
-export function resolveForeachParent(def: WorkflowDefinition, nodeId: string): WorkflowNode | null {
+export function resolveForeachParent(
+  def: Pick<WorkflowDefinition, "nodes">,
+  nodeId: string,
+): WorkflowNode | null {
   const parsed = parseSyntheticNodeId(nodeId);
   if (!parsed) return null;
   const parent = def.nodes.find((node) => node.id === parsed.parentNodeId);
@@ -53,10 +71,9 @@ export async function joinForeach(
     throw new Error(`Step "${childStep.nodeId}" is not a foreach child`);
   }
 
-  const children = (await getWorkflowRunStepsByRunId(runId))
-    .filter((step) => resolveForeachParent(def, step.nodeId)?.id === parent.id)
-    .sort((a, b) => childIndex(a) - childIndex(b));
+  const children = latestForeachChildren(def, parent.id, await getWorkflowRunStepsByRunId(runId));
 
+  // `pending` (queued, not started) is non-terminal like running and waiting.
   if (children.some((step) => !FOREACH_TERMINAL_STEP_STATUSES.has(step.status))) {
     return { joined: false, parentNodeId: parent.id, successors: [] };
   }
@@ -81,8 +98,28 @@ export async function joinForeach(
   };
 }
 
+/**
+ * The latest step row per child node id of foreach `parentNodeId`, in item
+ * order. `steps` must be in insert order (as `getWorkflowRunStepsByRunId`
+ * returns them), so a later attempt row supersedes an earlier one.
+ */
+export function latestForeachChildren(
+  def: WorkflowDefinition,
+  parentNodeId: string,
+  steps: WorkflowRunStep[],
+): WorkflowRunStep[] {
+  const latest = new Map<string, WorkflowRunStep>();
+  for (const step of steps) {
+    if (resolveForeachParent(def, step.nodeId)?.id === parentNodeId) latest.set(step.nodeId, step);
+  }
+  return [...latest.values()].sort((a, b) => childIndex(a) - childIndex(b));
+}
+
 export function buildForeachAggregate(children: WorkflowRunStep[]): ForeachOutput {
-  const orderedChildren = [...children].sort((a, b) => childIndex(a) - childIndex(b));
+  // Only the latest row per child node id counts (insert order).
+  const latest = new Map<string, WorkflowRunStep>();
+  for (const step of children) latest.set(step.nodeId, step);
+  const orderedChildren = [...latest.values()].sort((a, b) => childIndex(a) - childIndex(b));
   const results: ForeachOutput["results"] = orderedChildren.map((step) => {
     const parsed = parseSyntheticNodeId(step.nodeId)!;
     const status = resultStatus(step);
@@ -114,4 +151,122 @@ function resultStatus(step: WorkflowRunStep): ForeachOutput["results"][number]["
   // metadata — a successful child whose OUTPUT merely begins with "[FAILED:"
   // (e.g. an agent quoting a log line) is user-controlled text, not a failure.
   return step.error ? "failed" : "completed";
+}
+
+/** The terminal outcome of one foreach item. */
+export interface ForeachChildOutcome {
+  status: "completed" | "failed" | "cancelled";
+  output?: unknown;
+  /**
+   * The failure reason. On a `completed` outcome it marks the legacy
+   * `onNodeFailure: "continue"` shape (completed with error), which the
+   * aggregate counts as failed.
+   */
+  error?: string;
+  /** Stored on the child row for display only: a body's ports do not route. */
+  nextPort?: string;
+}
+
+export interface ForeachSettleResult {
+  /** False when the child was not in an expected status, or the run is no longer live. */
+  claimed: boolean;
+  foreachChild: true;
+  /** True when this settlement closed the join and checkpointed the parent. */
+  joined: boolean;
+  /** The parent's successors to walk, when `joined`. */
+  successors: WorkflowNode[];
+  /** True when this settlement failed the run (a failed item under `onNodeFailure: "fail"`). */
+  runFailed: boolean;
+}
+
+/**
+ * The one place a foreach child reaches a terminal status. Every resume path
+ * (task, approval, wait, child run, and their failure paths) and the foreach
+ * driver's inline items settle through here.
+ *
+ * In one transaction:
+ * 1. Re-read the child; claim it only while it is in one of `from` (default
+ *    `waiting`, the parked status every resume path expects).
+ * 2. Write the terminal status, output, error and port.
+ * 3. A run that is no longer live (failed, cancelled) only records the
+ *    outcome: a late sibling must not revive a failed run or route its join.
+ * 4. A failed or cancelled item under `onNodeFailure: "fail"` (the default)
+ *    fails the run; in-flight siblings still record their outcomes. Under
+ *    `"continue"` it counts as failed in the aggregate and the join proceeds.
+ * 5. Otherwise run the join and set the run `running`.
+ *
+ * When the join stays open with a queued (`pending`) item and a `registry` is
+ * passed, a drive of the parent starts after commit, so the next item starts.
+ * Orphaned `running` items are the recovery sweep's.
+ */
+export async function settleForeachChild(
+  def: WorkflowDefinition,
+  runId: string,
+  childStepId: string,
+  outcome: ForeachChildOutcome,
+  ctx: Record<string, unknown>,
+  options: {
+    from?: readonly WorkflowRunStepStatus[];
+    registry?: ExecutorRegistry;
+    /** Run error when this outcome fails the run. Defaults to the outcome error. */
+    runError?: string;
+  } = {},
+): Promise<ForeachSettleResult> {
+  const from = options.from ?? ["waiting"];
+  return await getDbClient().transaction(async (): Promise<ForeachSettleResult> => {
+    const unclaimed: ForeachSettleResult = {
+      claimed: false,
+      foreachChild: true,
+      joined: false,
+      successors: [],
+      runFailed: false,
+    };
+    const current = await getWorkflowRunStep(childStepId);
+    if (!current || !from.includes(current.status)) return unclaimed;
+    const parent = resolveForeachParent(def, current.nodeId);
+    if (!parent) throw new Error(`Step "${current.nodeId}" is not a foreach child`);
+    const run = await getWorkflowRun(runId);
+    if (!run) return unclaimed;
+
+    const finishedAt = new Date().toISOString();
+    await updateWorkflowRunStep(childStepId, {
+      status: outcome.status,
+      ...(outcome.output !== undefined ? { output: outcome.output } : {}),
+      ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+      ...(outcome.nextPort ? { nextPort: outcome.nextPort } : {}),
+      finishedAt,
+    });
+
+    if (run.status !== "running" && run.status !== "waiting") return unclaimed;
+
+    if (outcome.status !== "completed" && (def.onNodeFailure ?? "fail") === "fail") {
+      const reason = options.runError ?? outcome.error ?? `foreach item ${current.nodeId} failed`;
+      await updateWorkflowRun(runId, { status: "failed", error: reason, finishedAt });
+      return { ...unclaimed, claimed: true, runFailed: true };
+    }
+
+    const join = await joinForeach(def, runId, current, ctx);
+    await updateWorkflowRun(runId, { status: "running" });
+    const registry = options.registry;
+    if (!join.joined && registry && (await hasQueuedChild(def, runId, parent.id))) {
+      getDbClient().afterCommit(() => startForeachDrive(runId, parent.id, registry));
+    }
+    return {
+      claimed: true,
+      foreachChild: true,
+      joined: join.joined,
+      successors: join.successors,
+      runFailed: false,
+    };
+  });
+}
+
+async function hasQueuedChild(
+  def: WorkflowDefinition,
+  runId: string,
+  parentNodeId: string,
+): Promise<boolean> {
+  return latestForeachChildren(def, parentNodeId, await getWorkflowRunStepsByRunId(runId)).some(
+    (child) => child.status === "pending",
+  );
 }

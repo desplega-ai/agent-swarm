@@ -18,7 +18,7 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { getChildWorkflowRunId } from "../be/db/workflow-runs";
-import type { WaitStateRow } from "../types";
+import type { WaitStateRow, WorkflowDefinition } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ApprovalSlackClient,
@@ -213,6 +213,9 @@ async function resumeFromTaskCompletionUnguarded(
     step,
     stepOutput,
     ctx,
+    undefined,
+    undefined,
+    registry,
   );
   // Another handler already routed this step — routing it twice would create
   // duplicate successor steps.
@@ -328,7 +331,7 @@ async function handleTaskFailureUnguarded(
   const onFailure = workflow.definition.onNodeFailure ?? "fail";
 
   if (onFailure === "fail") {
-    await markRunFailed(event, reason);
+    await markRunFailed(workflow.definition, event, reason, registry);
     return;
   }
 
@@ -345,6 +348,8 @@ async function handleTaskFailureUnguarded(
     stepOutput,
     ctx,
     reason,
+    undefined,
+    registry,
   );
   if (!routing.claimed) return;
 
@@ -386,8 +391,20 @@ async function isStaleTaskEvent(stepId: string, event: TaskEvent): Promise<boole
  * both route here and can also race a recovery sweep or a completion that
  * already claimed the step — only the first writer may fail the run.
  */
-async function markRunFailed(event: TaskEvent, reason: string): Promise<void> {
-  await failStepAndRunIfWaiting(event.workflowRunStepId!, event.workflowRunId!, reason);
+async function markRunFailed(
+  def: WorkflowDefinition,
+  event: TaskEvent,
+  reason: string,
+  registry: ExecutorRegistry,
+): Promise<void> {
+  await failStepAndRunIfWaiting(
+    def,
+    event.workflowRunStepId!,
+    event.workflowRunId!,
+    reason,
+    undefined,
+    { registry },
+  );
 }
 
 /**
@@ -646,6 +663,7 @@ async function resumeFromApprovalResolutionUnguarded(
     stepOutput,
     nextPort,
     ctx,
+    registry,
   );
   // Another handler (the recovery sweep) already routed this step — routing
   // it twice would create duplicate successor steps.
@@ -768,6 +786,7 @@ async function resumeClaimedWait(
     stepOutput,
     nextPort,
     ctx,
+    registry,
   );
   if (!routing.claimed) return;
 
@@ -822,22 +841,33 @@ export async function resumeFromChildRun(
     const workflow = await getWorkflow(run.workflowId);
     if (!workflow) return;
 
-    if ("error" in outcome) {
-      claimed = await failStepAndRunIfWaiting(step.id, run.id, outcome.error);
+    const ctx = (run.context ?? {}) as Record<string, unknown>;
+    // A foreach item's failure settles the item: under `onNodeFailure:
+    // "continue"` it can close the join, so it routes like a success.
+    const routing =
+      "error" in outcome
+        ? await failStepAndRunIfWaiting(
+            workflow.definition,
+            step.id,
+            run.id,
+            outcome.error,
+            undefined,
+            { ctx, registry },
+          )
+        : await checkpointPortStepAndResolveSuccessors(
+            workflow.definition,
+            run.id,
+            step.id,
+            step.nodeId,
+            outcome.output,
+            "success",
+            ctx,
+            registry,
+          );
+    if (!routing.claimed || routing.runFailed) {
+      claimed = routing.claimed;
       return;
     }
-
-    const ctx = (run.context ?? {}) as Record<string, unknown>;
-    const routing = await checkpointPortStepAndResolveSuccessors(
-      workflow.definition,
-      run.id,
-      step.id,
-      step.nodeId,
-      outcome.output,
-      "success",
-      ctx,
-    );
-    if (!routing.claimed) return;
     claimed = true;
 
     if (routing.successors.length > 0) {

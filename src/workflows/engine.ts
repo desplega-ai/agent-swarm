@@ -25,6 +25,7 @@ import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { loadCompletedStepRouting } from "./completed-step-routing";
+import { FOREACH_ITEMS_WAIT_FOR } from "./constants";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors, resolveValidationPort } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
@@ -34,15 +35,16 @@ import {
   systemOneRetryViolations,
   systemOneUnresolvedError,
 } from "./executors/system-one-decision";
+import { parkAndDriveForeach } from "./foreach-driver";
 import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
+import { resolveNodeTimeoutMs } from "./node-timeout";
 import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
 // Read dynamically, NOT captured at module load: `src/http/index.ts` imports
 // this module before `loadGlobalConfigsIntoEnv()` hydrates `swarm_config` into
 // `process.env`, so a module-level const would permanently ignore DB-saved
@@ -510,14 +512,19 @@ async function walkGraphOwned(
     const hasPendingRetries = finalSteps.some(
       (s) => s.status === "failed" && s.nextRetryAt != null,
     );
-    const failedSteps = finalSteps.filter((s) => s.status === "failed" && s.nextRetryAt == null);
+    // A foreach child's outcome is in its parent's aggregate; the parent step
+    // is authoritative for the run outcome.
+    const isForeachChild = (s: WorkflowRunStep) => resolveForeachParent(def, s.nodeId) !== null;
+    const failedSteps = finalSteps.filter(
+      (s) => s.status === "failed" && s.nextRetryAt == null && !isForeachChild(s),
+    );
     // Exclude entry/trigger nodes when checking for completed steps — a trigger
     // completing doesn't mean a meaningful branch succeeded. Without this filter,
     // a linear workflow (trigger → mustPass validator → action) would be marked
     // as partial-failure instead of failed when the validator fails.
     const entryNodeIds = new Set(findEntryNodes(def).map((n) => n.id));
     const hasCompletedSteps = finalSteps.some(
-      (s) => s.status === "completed" && !entryNodeIds.has(s.nodeId),
+      (s) => s.status === "completed" && !entryNodeIds.has(s.nodeId) && !isForeachChild(s),
     );
 
     if (hasWaitingSteps) {
@@ -880,18 +887,7 @@ async function runClaimedStep(
     inputCtx: interpolationCtx,
   };
 
-  // Inline script nodes historically expose their wall-clock budget as
-  // `config.timeout`, while the workflow watchdog reads `config.timeoutMs` for
-  // every other executor. Keep the outer watchdog aligned with the script
-  // executor so a script configured for (for example) 90s is not killed by the
-  // engine's 30s default first.
-  const configuredTimeoutMs =
-    typeof node.config?.timeoutMs === "number"
-      ? node.config.timeoutMs
-      : node.type === "script" && typeof node.config?.timeout === "number"
-        ? node.config.timeout
-        : undefined;
-  const timeoutMs = configuredTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = resolveNodeTimeoutMs(node);
 
   let result: Awaited<ReturnType<typeof executor.run>>;
   try {
@@ -949,6 +945,20 @@ async function runClaimedStep(
 
   // Check for async result
   if ("async" in result && (result as AsyncExecutorResult).async) {
+    if ((result as AsyncExecutorResult).waitFor === FOREACH_ITEMS_WAIT_FOR) {
+      // The foreach executor materialized its children; park the parent and
+      // start them. Instant bodies run here, each against its own budget, and
+      // can close the join before the drive returns.
+      const drive = await parkAndDriveForeach({
+        runId,
+        stepId,
+        parentNodeId: node.id,
+        ctx,
+        registry,
+      });
+      if (drive.joined) return { outcome: "completed", successors: drive.successors };
+      return { outcome: drive.parked ? "waiting" : "completed", successors: [] };
+    }
     const waiting = await checkpointStepWaiting(runId, stepId, ctx);
     // A child run that finished before the step parked had its event dropped.
     if (waiting && (result as AsyncExecutorResult).waitFor === "workflow.child.finished") {

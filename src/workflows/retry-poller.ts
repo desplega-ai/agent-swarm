@@ -10,16 +10,15 @@ import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { getSuccessors, resolveValidationPort } from "./definition";
 import {
-  buildNodeInterpolationCtx,
   failRunOnUnreadableReplay,
   holdWorkflowRun,
-  interpolateNodeConfig,
-  rehydrateCompletedStepOutputs,
   scriptBodyInterpolationError,
   walkGraph,
 } from "./engine";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
+import { FOREACH_ITEMS_WAIT_FOR, parkAndDriveForeach } from "./foreach-driver";
+import { rebuildNodeExecutionInput } from "./step-input";
 import { runStepValidation } from "./validation";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -63,27 +62,16 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           // win, or the step re-executes inside a cancelled run.
           if (!(await claimRetry(run.id, step.id))) continue;
 
-          const ctx = (run.context ?? {}) as Record<string, unknown>;
-          // A step can fail before ANY checkpoint persisted the walkGraph-hydrated
-          // context, so `run.id` may be absent here — mirror the hydration or the
-          // builtin resolves to "" on every retry.
-          if (!("run" in ctx)) ctx.run = { id: run.id };
-
-          // The persisted run context can lag behind completed step checkpoints.
-          // Reuse walkGraph's recovery path before resolving declared inputs so
-          // retries see the same upstream outputs as the original execution.
-          await rehydrateCompletedStepOutputs(workflow.definition, run.id, ctx, registry);
-
-          // Deep-interpolate config against the node's declared-inputs context —
-          // the raw run context has no `inputs` aliases, so interpolating against
-          // it directly resolves every {{alias}} to "" and (e.g.) a retried
-          // foreach with `over: "{{items}}"` burns all its retries on schema
-          // rejections without ever re-dispatching.
-          const inputCtx = buildNodeInterpolationCtx(node, ctx);
-          const { value: interpolatedValue, scriptBodyUnresolved } = interpolateNodeConfig(
-            node,
+          // Rebuild `run.id`, upstream outputs and the node's declared-inputs
+          // context the way the original execution saw them. Without the alias
+          // context a retried foreach with `over: "{{items}}"` burns all its
+          // retries on schema rejections without ever re-dispatching.
+          const {
+            ctx,
             inputCtx,
-          );
+            config: interpolatedConfig,
+            scriptBodyUnresolved,
+          } = await rebuildNodeExecutionInput(workflow.definition, run, node, registry);
           if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
             await checkpointStepFailure(
               run.id,
@@ -93,7 +81,6 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             );
             continue;
           }
-          const interpolatedConfig = interpolatedValue as Record<string, unknown>;
 
           // Get executor and re-run
           const executor = registry.get(node.type);
@@ -126,6 +113,34 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 step.retryCount,
                 retryPolicy,
               );
+            } else if (
+              "async" in result &&
+              (result as AsyncExecutorResult).async &&
+              (result as AsyncExecutorResult).waitFor === FOREACH_ITEMS_WAIT_FOR
+            ) {
+              // A retried foreach materialized its children: park it and start
+              // them, as executeStep does. An all-inline fan-out can close its
+              // join inside the drive; route the successors here then.
+              const drive = await parkAndDriveForeach({
+                runId: run.id,
+                stepId: step.id,
+                parentNodeId: node.id,
+                ctx,
+                registry,
+              });
+              if (!drive.joined) continue;
+              if (drive.successors.length > 0) {
+                await walkGraph(
+                  workflow.definition,
+                  run.id,
+                  ctx,
+                  drive.successors,
+                  registry,
+                  workflow.id,
+                );
+              } else {
+                await completeRunIfSettled(run.id, ctx);
+              }
             } else if ("async" in result && (result as AsyncExecutorResult).async) {
               // An async executor (agent-task, foreach) re-dispatched its work —
               // the step is waiting on task events again, exactly like the

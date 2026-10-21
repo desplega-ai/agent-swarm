@@ -80,8 +80,9 @@ Do not include patch bodies, diff hunks, raw `git log --stat` output, downloaded
 
 ## Foreach nodes
 
-`foreach` fans out one `agent-task` child per array item, waits for every child, then exposes one
-parent-owned aggregate to downstream nodes.
+`foreach` runs its `body` once per array item, waits for every item, then exposes one
+parent-owned aggregate to downstream nodes. The body can be any registered executor except
+`foreach`; `sub-workflow` runs one child workflow per item.
 
 ```yaml
 - id: reflect
@@ -101,12 +102,22 @@ parent-owned aggregate to downstream nodes.
 - `over` must resolve to an array. An exact interpolation token preserves the array value instead
   of JSON-stringifying it.
 - `itemKey` names a required non-empty string property whose value is unique across the array.
-- `body.type` is restricted to `agent-task` in v1. `body.config` accepts the normal agent-task
-  fields and is interpolated separately for each child with `item` and zero-based `index`.
+- `body.type` is any registered executor except `foreach` (nested fan-out is rejected, with the node
+  id in the error). `body.config` is that executor's normal config, checked against its schema at
+  authoring, and is interpolated separately for each child with `item` and zero-based `index`. A
+  `script` body keeps the script-source allowlist: pass the item through `args`.
+- Each child row carries the body's `nodeType`. Children are created `pending` in one transaction,
+  then the foreach driver (`src/workflows/foreach-driver.ts`) starts them. Instant bodies (`script`,
+  `swarm-script`, `raw-llm`, `notify`, ...) run one per item, each against its own watchdog budget,
+  not the parent's. Async bodies (`agent-task`, `sub-workflow`, `human-in-the-loop`, `wait`,
+  `system-one-decision` with `humanReview`) park, and their normal resume path settles the item
+  through `settleForeachChild` (`src/workflows/foreach-join.ts`).
+- A body's ports do not route. An approval `rejected`/`timeout` or a wait `timeout` still counts as a
+  completed item; its `nextPort` is stored on the child row for display.
 - Child steps have synthetic IDs `<foreachNodeId>#<itemKey>`. The parent remains waiting until all
   children are terminal; only the parent aggregate is written to workflow context.
 - Empty arrays complete synchronously and still route to the successor.
-- `concurrency` is rejected in v1. All children are materialized in one fan-out.
+- `concurrency` is rejected in v1. Every item starts at once.
 - A `foreach` node in a cycle is rejected in v1. Child steps are scoped to the run, so a later
   parent iteration cannot safely re-adopt them.
 
@@ -223,7 +234,7 @@ A `sub-workflow` node runs another workflow as a child run and waits for it.
   checks run when the node executes, not when the definition is saved.
 - Not yet supported (tracked in the sub-workflow issue): pinning the child's definition version
   (the child runs its live definition), cancelling the child when the parent is cancelled, a
-  per-node timeout, a `foreach` body that is a workflow, and showing the link in the dashboard.
+  per-node timeout, and showing the link in the dashboard.
 
 ## Agent-task steps cut by a deploy
 

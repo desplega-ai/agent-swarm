@@ -1,0 +1,96 @@
+import type { WorkflowDefinition, WorkflowNode } from "../types";
+import type { ExecutorRegistry } from "./executors/registry";
+import { resolveForeachParent } from "./foreach-join";
+
+/**
+ * Executor types a `foreach` body must not use, with the reason. Every other
+ * registered executor is a valid body.
+ */
+export const FOREACH_BODY_REJECTED: Readonly<Record<string, string>> = {
+  foreach: "nested fan-out is not supported: synthetic ids and the join resolve one level only",
+};
+
+/**
+ * Built-in executors accepted as a `foreach` body, by how one item completes:
+ * `inline` items are run and settled by the foreach driver; `parks` items wait
+ * on their own resume path (task, child run, approval, wait), which settles
+ * the item through `settleForeachChild`. A `system-one-decision` without
+ * `humanReview` returns inline.
+ *
+ * Every built-in executor must appear here or in FOREACH_BODY_REJECTED; the
+ * registry exhaustiveness test enforces that a new executor gets a decision.
+ */
+export const FOREACH_BODY_ACCEPTED: Readonly<Record<string, "inline" | "parks">> = {
+  script: "inline",
+  "swarm-script": "inline",
+  "raw-llm": "inline",
+  notify: "inline",
+  "property-match": "inline",
+  "code-match": "inline",
+  validate: "inline",
+  vcs: "inline",
+  "system-one-extraction": "inline",
+  "agent-task": "parks",
+  "sub-workflow": "parks",
+  "human-in-the-loop": "parks",
+  wait: "parks",
+  "system-one-decision": "parks",
+};
+
+/**
+ * True when `type` may be a foreach body: not rejected, and registered (or a
+ * known built-in when no registry is passed).
+ */
+export function isForeachBodyType(type: string, registry?: ExecutorRegistry): boolean {
+  if (Object.hasOwn(FOREACH_BODY_REJECTED, type)) return false;
+  return registry ? registry.has(type) : Object.hasOwn(FOREACH_BODY_ACCEPTED, type);
+}
+
+/**
+ * The validation error for a foreach body type, or null when it is allowed.
+ * Without a registry only the rejection list applies, so a custom executor
+ * registered at run time is not refused by a registry-less validation pass.
+ */
+export function foreachBodyTypeError(
+  nodeId: string,
+  type: string,
+  registry?: ExecutorRegistry,
+): string | null {
+  const reason = FOREACH_BODY_REJECTED[type];
+  if (reason !== undefined) {
+    return `Node "${nodeId}" foreach config.body.type "${type}" is not supported: ${reason} (a ${type} body inside foreach "${nodeId}" is rejected)`;
+  }
+  if (registry && !registry.has(type)) {
+    return `Node "${nodeId}" foreach config.body.type "${type}" is not a registered executor`;
+  }
+  return null;
+}
+
+/**
+ * The definition node a step row executes. A real node wins. A synthetic
+ * foreach child id (`<foreachId>#<itemKey>`) resolves to a node synthesized
+ * from the parent's body: the child's id, the body's type and config, and the
+ * parent's declared `inputs` (the body sees the parent's input context, and the
+ * script-body allowlist classifies those aliases by their source).
+ */
+export function resolveStepNode(
+  def: Pick<WorkflowDefinition, "nodes">,
+  nodeId: string,
+): WorkflowNode | null {
+  const node = def.nodes.find((candidate) => candidate.id === nodeId);
+  if (node) return node;
+  const parent = resolveForeachParent(def, nodeId);
+  if (!parent) return null;
+  const body = parent.config.body;
+  if (!isRecord(body) || typeof body.type !== "string") return null;
+  return {
+    id: nodeId,
+    type: body.type,
+    config: isRecord(body.config) ? body.config : {},
+    ...(parent.inputs ? { inputs: parent.inputs } : {}),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

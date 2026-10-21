@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Workflows: a `foreach` body can be any registered executor except `foreach`. A `sub-workflow` body runs one child workflow per item, an instant body (`script`, `swarm-script`, ...) runs once per item against its own timeout, and approval, wait and child-run items close the join through the same settle path. Each child step records the body's real node type, and the recovery sweep restarts queued or orphaned items (#2029).
 - SystemOne: `SYSTEM_ONE_DEFAULT_PROVIDER` (Settings → Configuration) picks the decision host for a `system-one-decision` node or `system-one-decide` call that names none, read at each run. Unset stays `typesafe`; setting `cloudflare` runs those nodes on Clef with no workflow edit, and the node card shows the effective provider and model (#2186).
 - Heartbeat: the built-in `heartbeat-jev-gate` runs on Clef (`provider: cloudflare`) with a replay-measured threshold of 0.2, and turns on by default with only `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` set. `auto` still prefers Jev, and both this gate and `slack-reply-gate` move on to the next provider when the server refuses OpenRouter behind an `OPENROUTER_BASE_URL` gateway (#2186).
 

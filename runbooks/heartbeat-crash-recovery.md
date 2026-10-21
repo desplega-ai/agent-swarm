@@ -63,6 +63,31 @@ untaken ports cannot start sibling branches or replay a completed downstream
 node. Steps without a selected port retain the live walker's default successor
 behavior. Waiting runs reconcile finished tasks, approvals, and durable waits.
 
+The last pass, `recoverForeachFanouts`, re-drives `foreach` fan-outs. It covers
+runs in `running` or `waiting` whose open foreach parent has a queued
+(`pending`) child, or a `running` child that no drive in this process owns. Every
+item settles through `settleForeachChild`, which writes the child and runs the
+join in one transaction. So a crash leaves a child queued, orphaned, or
+waiting, never half-joined.
+
+```
+# recoverIncompleteRuns, after the task / approval / wait / child-run passes:
+recoverForeachFanouts():
+  for each (run, foreachId) with a latest child row pending, or running and unowned,
+      where run.status in (running, waiting):
+    runForeachDrive(run, foreachId):    # holds the run, like a walk
+      claim: pending → running (up to the cap; unbounded today), plus unowned running rows
+      start each claimed child:
+        instant body → run it, settle completed/failed   # re-runs an orphan: at-least-once
+        async body   → executor dedupes on the child step id (task, child run,
+                       approval, wait), so a reconnect never duplicates; park waiting
+      joined → walk the parent's successors (or finalize)
+      else   → park the run waiting if nothing is running
+```
+
+A claimed child that never started (a sibling failed the run first) goes back to
+`pending`, so a run retry starts it.
+
 This ownership guard is process-local, not a distributed lease. It assumes one
 API workflow engine owns the database; multiple worker runtimes do not create
 multiple API engines. Separate API processes sharing a database would need
