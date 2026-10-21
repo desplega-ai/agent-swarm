@@ -1,11 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import {
-  appendDraftTaskText,
-  deleteTaskAttachment,
-  getTaskAttachments,
-  getTaskById,
-} from "../be/db";
+import { deleteTaskAttachment, getTaskAttachments, getTaskById } from "../be/db";
+import { appendDraftTaskText } from "../be/db/tasks/draft-text";
 import {
   ensureAgentFsCredentialsForAgent,
   inviteEmailToSharedOrg,
