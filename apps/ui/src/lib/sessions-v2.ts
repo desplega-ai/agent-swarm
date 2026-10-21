@@ -9,6 +9,12 @@
  */
 export const SESSIONS_V2_MIN_VERSION = "2.4.5";
 
+/**
+ * Where sessions toasts sit: bottom left, over the sidebar. Bottom right
+ * covers the composer's Send button (UX review R9).
+ */
+export const SESSIONS_TOAST_POSITION = "bottom-left" as const;
+
 /** The "New session" tab in `?tabs=`. On the path it is `/sessions` with no id. */
 export const NEW_SESSION_TAB = "new";
 
@@ -89,4 +95,36 @@ export function closeTab(
 /** The route of a tab. */
 export function tabPath(tab: string): string {
   return tab === NEW_SESSION_TAB ? "/sessions" : `/sessions/${encodeURIComponent(tab)}`;
+}
+
+/**
+ * Rows a sidebar list loads: 10 show, "Show 10 more" shows the next 10. The
+ * rest open in the group tab (`?view=`). Loading 20 at once also keeps the
+ * list full when Done or Later takes rows out of it.
+ */
+export const SIDEBAR_LIST_LIMIT = 20;
+/** Rows a sidebar list shows before "Show 10 more". */
+export const SIDEBAR_LIST_STEP = 10;
+
+/** The list filters of a sidebar container: a section, or a group key. */
+interface SidebarListFilter {
+  triage?: "inbox" | "later" | "done";
+  noGroup?: boolean;
+  groupKey?: string;
+}
+
+/**
+ * The `GET /api/sessions` params of a sidebar container. Every call sends
+ * `scope=tree`, so the list totals match the tree counts. The Later
+ * notifier reads the same Later list, so both share one cache entry.
+ */
+export function sidebarListParams(
+  container: string,
+): SidebarListFilter & { scope: "tree"; limit: number } {
+  const base = { scope: "tree" as const, limit: SIDEBAR_LIST_LIMIT };
+  if (container === "inbox" || container === "later" || container === "done") {
+    return { ...base, triage: container };
+  }
+  if (container === "nogroup") return { ...base, noGroup: true };
+  return { ...base, groupKey: container };
 }

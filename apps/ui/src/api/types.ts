@@ -809,6 +809,14 @@ export interface SessionListItem {
   peopleCount?: number;
   /** The newest chain output, cut to 200 characters. */
   preview?: string | null;
+  /** Active shares with their access level. `userId` null means everyone on the swarm. */
+  shares?: SessionShareSummary[];
+}
+
+export interface SessionShareSummary {
+  userId: string | null;
+  name: string | null;
+  access: "read" | "write";
 }
 
 /** A session's read state for the viewer (`inbox_item_state`, the D5 rule on the server). */
@@ -1022,6 +1030,10 @@ export interface SessionDetailResponse {
   owner?: SessionOwner | null;
   /** Pending approval requests in the chain. Missing means none. */
   approvals?: SessionApproval[];
+  /** The viewer's read state (the list's rule). Omitted with no picked user. */
+  readState?: SessionReadState;
+  /** Newest chain activity: the read cursor that "mark read" writes. With `readState`. */
+  lastActivityAt?: string;
 }
 
 /** What the caller may do in a session: `owner` and `write` can post, `read` can only view. */

@@ -422,7 +422,7 @@ The new shell renders on `/sessions` by default: a resizable sidebar frame, a pa
 - [x] The lockfile is in sync: `bun install --frozen-lockfile`
 - [x] The images still build with the new lock: `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .`
 - [x] The dashboard image builds and serves: `bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest`
-- [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
+- [x] Smoke passes: `bun run e2e:ui -- --grep @smoke` (clean worktree at 3d6fcb184: 33 passed, 17 skipped)
 
 #### Automated QA:
 - [x] With agent-browser on the seeded stack, `http://localhost:5274/sessions` renders the v2 shell, and the global nav is collapsed to icons.
@@ -476,20 +476,20 @@ The sidebar shows every section and group with server counts, paged rows, read s
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tree builder tests pass: `bun test apps/ui/src/lib/session-groups.test.ts`
-- [ ] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
+- [x] Tree builder tests pass: `bun test apps/ui/src/lib/session-groups.test.ts`
+- [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
 - [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
 
 #### Automated QA:
-- [ ] On the seeded stack, the sidebar counts match `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.inbox, (.groups[] | select(.key=="shared/northwind/pricing/"))'` for Inbox and that group.
-- [ ] Open an unread session: the row loses its dot and Inbox unread drops by 1. Open a session in Done: it stays in Done.
-- [ ] Hover a row: the hover card shows the full title and the preview line.
-- [ ] Press `e` on a row: it moves to Done and the next row takes the cursor. Press `l` and choose "In 1 hour": it moves to Later with the wake time.
-- [ ] "Show 10 more" adds 10 rows, then "View all N" sets `?view=` in the URL.
-- [ ] Screenshots at 1440x900 and 1280x800 in light and dark: `/tmp/sessions-v2-build/p4-*.png`.
+- [x] On the seeded stack, the sidebar counts match `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.inbox, (.groups[] | select(.key=="shared/northwind/pricing/"))'` for Inbox and that group.
+- [x] Open an unread session: the row loses its dot and Inbox unread drops by 1. Open a session in Done: it stays in Done.
+- [x] Hover a row: the hover card shows the full title and the preview line.
+- [x] Press `e` on a row: it moves to Done and the next row takes the cursor. Press `l` and choose "In 1 hour": it moves to Later with the wake time.
+- [x] "Show 10 more" adds 10 rows, then "View all N" sets `?view=` in the URL.
+- [x] Screenshots at 1440x900 and 1280x800 in light and dark: `/tmp/sessions-v2-build/p4-*.png`.
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
 
 **Implementation Note**: Opus agent. Commit `[phase 4] feat(ui): sessions tree sidebar and triage`.
 
@@ -900,6 +900,9 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Phase 3 scope addition (asked by Taras while he tested): the global nav got a collapse button in its header, a hover-to-expand logo when collapsed, and a more visible rail line. The rail hit area stays 16 px (8 px each side of the edge), because a 24 px rail took clicks from full-bleed content such as the v2 sidebar.
   - Phase 3 decisions: both session routes render one `SessionsPage` (two page components remounted the shell). `?legacy=1|0` stores the preference once and leaves the URL. `useCollapseNavWhile` restores the nav on unmount, with a hold count, and route-driven toggles do not animate. Until Phases 6 and 7, the v2 pane renders today's `SessionConversation` for the focused session, so old links keep working.
   - Phase 3: `bun run e2e:ui` must run in a clean worktree without `.env`. The repo `.env` loads real Slack tokens into the test API and breaks its boot. The local QA DB stores `SWARM_DEV_MODE=true`, because the API is 2.4.4 and `SESSIONS_V2_MIN_VERSION` is 2.4.5. The UI E2E test API needs the same for Phase 10 specs.
+  - Phase 4 additions (asked by Taras while he tested): the global nav rail shows the `col-resize` cursor (this reverses the older "no resize cursor" rule), and the collapsed nav scrolls vertically (stock shadcn clipped it).
+  - Phase 4 backend additions: `GET /api/sessions/{id}` returns `readState` and `lastActivityAt` for a user viewer (same SQL rule as the list), so read-on-open lives with the pane and works for deep links. List rows carry an optional `shares: [{userId, name, access}]` for the row label and hover card.
+  - Phase 4 decisions backed by UX-REVIEW-R9: 1 avatar plus "+N" on rows, the shared icon only when no other avatar shows, Undo toasts (5200 ms, bottom-left). "Pick a date and time" is a Dialog, not the mockup's inline field.
   - Phase 1: `approvals` on the session detail is omitted when empty. The client reads a missing field as `[]`. Bypass actors get no `readState`.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.

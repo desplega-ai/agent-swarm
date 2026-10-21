@@ -48772,6 +48772,38 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "shares": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "userId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "name": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "access": {
+                                  "type": "string",
+                                  "enum": [
+                                    "read",
+                                    "write"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "userId",
+                                "name",
+                                "access"
+                              ]
+                            }
                           }
                         },
                         "required": [
@@ -49484,6 +49516,18 @@
                           "title"
                         ]
                       }
+                    },
+                    "readState": {
+                      "type": "string",
+                      "enum": [
+                        "unread",
+                        "read",
+                        "later",
+                        "done"
+                      ]
+                    },
+                    "lastActivityAt": {
+                      "type": "string"
                     }
                   },
                   "required": [

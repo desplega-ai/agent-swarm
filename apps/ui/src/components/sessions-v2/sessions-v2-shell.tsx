@@ -3,10 +3,10 @@
  * collapses the global nav to icons while it is open, so the sidebar and the
  * panes keep their width (UX review R9).
  *
- * The sidebar tree comes in Phase 4. The pane shows the New session composer
- * on `/sessions` (it keeps the `?seed=` and `?prefill=` links working) and
- * today's conversation on `/sessions/:rootTaskId`, until Phases 5 to 7
- * replace them.
+ * The sidebar holds the session tree (Phase 4). The pane shows the New
+ * session composer on `/sessions` (it keeps the `?seed=` and `?prefill=`
+ * links working) and today's conversation on `/sessions/:rootTaskId`, until
+ * Phases 5 to 7 replace them.
  */
 
 import { History } from "lucide-react";
@@ -28,6 +28,7 @@ import { MAIN_BLEED } from "@/lib/main-gutter";
 import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { SessionPane } from "./pane/session-pane";
+import { SessionTree } from "./sidebar/session-tree";
 import { useSessionsUrlState } from "./use-sessions-url-state";
 
 const WIDTH_DEFAULT = 320;
@@ -160,7 +161,7 @@ export interface SessionsV2ShellProps {
 
 export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   useCollapseNavWhile(true);
-  const { focused } = useSessionsUrlState();
+  const { focused, openSession, focusTab, setView } = useSessionsUrlState();
   const [width, setWidth] = useSidebarWidth();
   const sidebarId = useId();
 
@@ -184,8 +185,15 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
             Legacy sessions
           </Button>
         </div>
-        {/* The tree lands here in Phase 4. */}
-        <div className="hidden min-h-0 flex-1 overflow-y-auto md:block" />
+        {/* The phone layout lands in Phase 9. */}
+        <div className="hidden min-h-0 flex-1 flex-col md:flex">
+          <SessionTree
+            focused={focused}
+            openSession={openSession}
+            newSession={() => focusTab(NEW_SESSION_TAB)}
+            setView={setView}
+          />
+        </div>
         <SidebarResizeHandle width={width} onResize={setWidth} sidebarId={sidebarId} />
       </nav>
 

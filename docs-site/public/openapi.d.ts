@@ -18865,6 +18865,12 @@ export interface paths {
                                 }[];
                                 peopleCount?: number;
                                 preview?: string | null;
+                                shares?: {
+                                    userId: string | null;
+                                    name: string | null;
+                                    /** @enum {string} */
+                                    access: "read" | "write";
+                                }[];
                             }[];
                             total: number;
                             limit: number;
@@ -19193,6 +19199,9 @@ export interface paths {
                                 sourceTaskId: string;
                                 title: string;
                             }[];
+                            /** @enum {string} */
+                            readState?: "unread" | "read" | "later" | "done";
+                            lastActivityAt?: string;
                         };
                     };
                 };

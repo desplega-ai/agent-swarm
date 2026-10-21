@@ -36,6 +36,8 @@ export interface SessionFilters {
   now?: string;
   /** Exclude ownerless roots for user viewers to match the tree's visibility. */
   tree?: boolean;
+  /** Match exactly this root (one session's summary, e.g. its read state). */
+  rootId?: string;
 }
 
 type SqlFragment = { sql: string; params: (string | number | null)[] };
@@ -82,6 +84,7 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     conditions.push(fragment.sql);
     params.push(...fragment.params);
   };
+  if (opts.rootId) add({ sql: "r.id = ?", params: [opts.rootId] });
   const sources = opts.source?.filter(Boolean) ?? [];
   if (sources.length)
     add({ sql: `r.source IN (${sources.map(() => "?").join(",")})`, params: sources });
@@ -192,6 +195,23 @@ export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
   };
 }
 
+/**
+ * One session's read state for a user, with the same rule and chain activity
+ * as the list rows. Null when the user cannot see the root.
+ */
+export async function getSessionReadState(
+  rootId: string,
+  userId: string,
+  now?: string,
+): Promise<{ readState: SessionReadState; lastActivityAt: string } | null> {
+  const query = sessionSummaryQuery({ rootId, viewer: { userId, scope: "all" }, now });
+  const row = await getDbClient().get<{ readState: SessionReadState; lastActivityAt: string }>(
+    `SELECT readState, lastActivityAt FROM (${query.sql})`,
+    query.params,
+  );
+  return row?.readState ? { readState: row.readState, lastActivityAt: row.lastActivityAt } : null;
+}
+
 /** Count roots directly unless a filter needs chain activity or participants. */
 export function sessionCountQuery(opts: SessionFilters = {}): SqlFragment {
   const chain = hasSessionChainFilter(opts);
@@ -213,6 +233,8 @@ export interface SessionRowFields {
   people?: { id: string; name: string }[];
   peopleCount?: number;
   preview?: string | null;
+  /** Active shares with their access. `userId` null means everyone on the swarm. */
+  shares?: { userId: string | null; name: string | null; access: "read" | "write" }[];
 }
 
 /** Two page-wide queries load people, shares and bounded output previews. */
@@ -239,8 +261,13 @@ export async function sessionPageFields(
       ORDER BY t.lastUpdatedAt DESC, t.createdAt DESC, t.id DESC`,
       ids,
     ),
-    getDbClient().query<{ root_id: string; id: string | null; name: string | null }>(
-      `SELECT sh.rootTaskId AS root_id, sh.userId AS id, u.name FROM session_shares sh
+    getDbClient().query<{
+      root_id: string;
+      id: string | null;
+      name: string | null;
+      access: "read" | "write";
+    }>(
+      `SELECT sh.rootTaskId AS root_id, sh.userId AS id, u.name, sh.access FROM session_shares sh
       LEFT JOIN users u ON u.id = sh.userId
       WHERE sh.revokedAt IS NULL AND sh.rootTaskId IN (${ids.map(() => "?").join(",")})
       ORDER BY sh.createdAt, sh.id`,
@@ -249,7 +276,7 @@ export async function sessionPageFields(
   ]);
   const people = new Map<string, Map<string, string>>();
   for (const root of roots) {
-    result.set(root.id, { shared: false, preview: null });
+    result.set(root.id, { shared: false, preview: null, shares: [] });
     people.set(root.id, new Map());
   }
   // Chain rows are newest first. Reserve the requester slot before adding other people.
@@ -263,7 +290,9 @@ export async function sessionPageFields(
     if (fields.preview === null && task.preview !== null) fields.preview = task.preview;
   }
   for (const share of shares) {
-    result.get(share.root_id)!.shared = true;
+    const fields = result.get(share.root_id)!;
+    fields.shared = true;
+    fields.shares!.push({ userId: share.id, name: share.name, access: share.access });
     if (share.id) people.get(share.root_id)!.set(share.id, share.name ?? share.id);
   }
   for (const [id, members] of people) {

@@ -13,7 +13,7 @@
  * older API servers (which 404 these endpoints) don't render the surface.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { sessionSharesMutationOptions } from "@/lib/session-shares-mutation";
@@ -60,17 +60,35 @@ export interface UseSessionsOptions {
  */
 export const SESSION_LIST_KEY = ["sessions", "list"] as const;
 
-export function useSessions(options?: UseSessionsOptions) {
+/** The list params in a session list query key: `[...SESSION_LIST_KEY, userId, params]`. */
+export type SessionListParams = Omit<UseSessionsOptions, "enabled"> & { limit: number };
+
+/**
+ * The query of one session list page. `useSessions` uses it, and so does a
+ * view that loads several lists at once (`useQueries`), so both share one
+ * cache entry per page.
+ */
+export function sessionsQueryOptions(userId: string | null, options?: UseSessionsOptions) {
   const { enabled = true, ...rest } = options ?? {};
-  const params = { ...rest, limit: rest.limit ?? 50 };
-  // Rows carry the viewer's read state, and `scope` and `triage` depend on
-  // the viewer, so a user switch must not show the last user's page.
-  const { userId } = useCurrentUser();
-  return useQuery({
-    queryKey: [...SESSION_LIST_KEY, userId ?? null, params],
+  const params: SessionListParams = { ...rest, limit: rest.limit ?? 50 };
+  return {
+    // Rows carry the viewer's read state, and `scope` and `triage` depend on
+    // the viewer, so a user switch must not show the last user's page.
+    queryKey: [...SESSION_LIST_KEY, userId, params] as const,
     queryFn: () => api.listSessions(params),
     enabled,
-  });
+  };
+}
+
+/** The list params of a session list query key (see `sessionsQueryOptions`). */
+export function sessionListParamsOf(key: QueryKey): SessionListParams | undefined {
+  const params = key[3];
+  return params && typeof params === "object" ? (params as SessionListParams) : undefined;
+}
+
+export function useSessions(options?: UseSessionsOptions) {
+  const { userId } = useCurrentUser();
+  return useQuery(sessionsQueryOptions(userId ?? null, options));
 }
 
 /** The HTTP status a failed session fetch carried (403: no access). */

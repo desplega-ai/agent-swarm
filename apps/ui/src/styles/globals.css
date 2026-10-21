@@ -346,10 +346,14 @@ summary {
  * anchors stay pointer natively, but its buttons (group labels, toggles,
  * menu buttons) keep the default arrow. The rail (the collapse/expand
  * border strip) is carved back out: it looks like inert chrome, so it
- * needs the pointer to signal it's clickable. */
+ * shows the resize arrows, the same cursor as the sessions v2 sidebar
+ * handle (Taras, 2026-10-21). A click toggles the sidebar. */
 [data-slot="sidebar-container"] button:not(:disabled, [data-slot="sidebar-rail"]),
 [data-slot="sidebar-container"] [role="button"] {
   cursor: default;
+}
+button[data-slot="sidebar-rail"] {
+  cursor: col-resize;
 }
 
 /* Hover linger, the Linear hover: enter instantly, release softly. A pure

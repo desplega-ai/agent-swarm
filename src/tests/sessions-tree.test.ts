@@ -326,8 +326,13 @@ test("people are distinct, requester first, capped at 8, with batched shares and
   expect(row.peopleCount).toBe(11);
   expect(row.people!.slice(1).every((p) => members.some((m) => m.id === p.id))).toBe(true);
   expect(row.shared).toBe(true);
+  expect(row.shares).toEqual([{ userId: other.id, name: "Other", access: "read" }]);
   expect(row.preview).toBe("p".repeat(200));
-  expect(rows.find((s) => s.root.id === empty.id)).toMatchObject({ shared: false, preview: null });
+  expect(rows.find((s) => s.root.id === empty.id)).toMatchObject({
+    shared: false,
+    shares: [],
+    preview: null,
+  });
 });
 
 test("tree visibility includes mine and shares, excludes ownerless, and preserves Done-only groups", async () => {
@@ -399,6 +404,43 @@ test("tree scope list totals match sections while default scope includes ownerle
     const response = await fetch(`${baseUrl}/api/sessions?scope=${scope}`);
     expect(((await response.json()) as { total: number }).total).toBe(0);
   }
+});
+
+test("session detail carries the viewer's read state with the list rule", async () => {
+  // The route reads the real clock, so the activity sits inside the 7-day window.
+  const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+  const root = await task("shared/a/", {}, new Date(Date.now() - 7_200_000).toISOString());
+  const child = await task("shared/a/", { parentTaskId: root.id }, hourAgo);
+  const headers = { "x-swarm-user-id": owner.id };
+  type Detail = { readState?: string; lastActivityAt?: string };
+  const detail = async (id: string, init?: RequestInit) =>
+    (await (await fetch(`${baseUrl}/api/sessions/${id}`, init)).json()) as Detail;
+  const listRow = async () => {
+    const res = await fetch(`${baseUrl}/api/sessions?scope=tree&limit=50`, { headers });
+    const body = (await res.json()) as {
+      sessions: { root: { id: string }; readState?: string; lastActivityAt: string }[];
+    };
+    return body.sessions.find((row) => row.root.id === root.id)!;
+  };
+
+  // Chain activity, not the root's own, decides it: the same row as the list.
+  const unread = await detail(root.id, { headers });
+  expect(unread).toMatchObject({ readState: "unread", lastActivityAt: hourAgo });
+  const row = await listRow();
+  expect({ readState: row.readState, lastActivityAt: row.lastActivityAt }).toEqual({
+    readState: unread.readState,
+    lastActivityAt: unread.lastActivityAt,
+  });
+
+  await state(root.id, "done", new Date().toISOString());
+  expect((await detail(root.id, { headers })).readState).toBe("done");
+  // A child id opens the same session, with the root's state.
+  expect((await detail(child.id, { headers })).readState).toBe("done");
+
+  // No picked user: no one to read for, so both fields stay out.
+  const bypass = await detail(root.id);
+  expect(bypass.readState).toBeUndefined();
+  expect(bypass.lastActivityAt).toBeUndefined();
 });
 
 test("limit clamps to 200 and count without chain filters does not recurse", async () => {

@@ -15,6 +15,7 @@ import {
   setEmbedConnection,
   updateConnection as updateStoredConnection,
 } from "@/lib/config";
+import { withoutConnectionParams } from "@/lib/connection-url-params";
 import { uiDeploymentConfig } from "@/lib/deployment-config";
 
 export interface PendingConnection {
@@ -78,14 +79,12 @@ function extractUrlParams(
   const email = params.get("email");
   const name = params.get("name");
 
-  const hasAny =
-    params.has("apiUrl") || params.has("apiKey") || params.has("email") || params.has("name");
-  if (hasAny) {
+  // The router read its location before this ran: `ConnectionParamsCleanup`
+  // in the root layout drops the same params from the router's copy too.
+  const stripped = withoutConnectionParams(window.location.search);
+  if (stripped !== null) {
     const url = new URL(window.location.href);
-    url.searchParams.delete("apiUrl");
-    url.searchParams.delete("apiKey");
-    url.searchParams.delete("email");
-    url.searchParams.delete("name");
+    url.search = stripped;
     window.history.replaceState({}, "", url.toString());
   }
 

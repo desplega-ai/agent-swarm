@@ -1,5 +1,5 @@
-import { Suspense } from "react";
-import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { Suspense, useEffect } from "react";
+import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { StatusProvider } from "@/app/status-context";
@@ -18,6 +18,8 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AgentFsProvider } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
+import { useLaterNotifier } from "@/hooks/use-later-notifier";
+import { CREDENTIAL_URL_PARAMS, withoutConnectionParams } from "@/lib/connection-url-params";
 import { MAIN_GUTTER } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
 import { AppFooter } from "./app-footer";
@@ -47,6 +49,33 @@ function IdentityGate() {
   if (locked) return null;
   if (state !== "needs-pick") return null;
   return <IdentityModal />;
+}
+
+/**
+ * `use-config` reads `?apiUrl=&apiKey=` once and strips them with
+ * `history.replaceState`, which React Router never sees. Its location still
+ * holds them, and any page that copies the search params (a session tab, a
+ * filter) would put the key back in the address bar. Drop them from the
+ * router's copy too.
+ */
+function ConnectionParamsCleanup() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const stripped = withoutConnectionParams(location.search, CREDENTIAL_URL_PARAMS);
+  useEffect(() => {
+    if (stripped === null) return;
+    void navigate(
+      { pathname: location.pathname, search: stripped, hash: location.hash },
+      { replace: true, state: location.state },
+    );
+  }, [stripped, navigate, location.pathname, location.hash, location.state]);
+  return null;
+}
+
+/** Sessions in Later wake in this browser on every dashboard page (plan A13). */
+function LaterNotifier() {
+  useLaterNotifier();
+  return null;
 }
 
 export function RootLayout() {
@@ -113,6 +142,8 @@ export function RootLayout() {
         </CommandMenuProvider>
         <OnboardingRedirect />
         <IdentityGate />
+        <ConnectionParamsCleanup />
+        <LaterNotifier />
         <NameConnectionModal />
         <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
         <LeadCredentialDialog key={config.apiUrl} />

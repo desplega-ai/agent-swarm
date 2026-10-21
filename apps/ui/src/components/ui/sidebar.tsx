@@ -278,9 +278,8 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onClick={toggleSidebar}
       title="Toggle Sidebar"
       className={cn(
-        // No resize cursor (stock shadcn ships w/e-resize): the rail is a
-        // click TOGGLE, not a drag handle: ↔ arrows promise resizing that
-        // doesn't exist (Taras). Normal cursor like the rest of the sidebar.
+        // Cursor: col-resize, set in globals.css (an un-layered rule there
+        // would beat a utility class here). A click toggles.
         // Hit area: 16px, 8px inside the edge and 8px outside. Keep it
         // narrow: the outside half lies over the page, and full-bleed pages
         // (the sessions v2 sidebar) put controls right at that edge, so a
@@ -365,7 +364,11 @@ function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(
-        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        // Collapsed (icon mode) still scrolls vertically: stock shadcn sets
+        // overflow-hidden, which cut off the lower nav icons on short
+        // windows. Only x is clipped (labels during the width transition),
+        // and the scrollbar is hidden so it does not shift the 48px rail.
+        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-x-hidden group-data-[collapsible=icon]:[scrollbar-width:none] group-data-[collapsible=icon]:[&::-webkit-scrollbar]:hidden",
         className,
       )}
       {...props}

@@ -1,0 +1,266 @@
+/**
+ * A container row in the sidebar: a section box (Inbox, Later, Done, No
+ * group), a group, or an owner under Shared with me (SPEC R4, R5). It shows
+ * its icon, its name, a chevron when it has subgroups (the one fold
+ * control), a "+" on hover or on the keyboard cursor, and the counts. The
+ * "+" sits next to the counts and never covers them.
+ */
+
+import {
+  AlarmClock,
+  Archive,
+  ChevronDown,
+  Hash,
+  Inbox,
+  Lock,
+  type LucideIcon,
+  Plus,
+  SquareDashed,
+} from "lucide-react";
+import { type MouseEvent, memo } from "react";
+import type { SessionSectionCounts } from "@/api/types";
+import { TaskStatusIcon } from "@/components/shared/task-status-icon";
+import { UserAvatar } from "@/components/shared/user-avatar";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { SessionSection } from "@/lib/sessions-v2";
+import { cn } from "@/lib/utils";
+import {
+  keepTreeFocus,
+  NeedsYouBadge,
+  NO_KEYBOARD_MOTION,
+  rowPropsEqual,
+  TipKey,
+  TreeRow,
+} from "./tree-row";
+import type { TreeRow as TreeRowModel } from "./tree-rows";
+
+const SECTION_META: Record<SessionSection, { label: string; icon: LucideIcon }> = {
+  inbox: { label: "Inbox", icon: Inbox },
+  later: { label: "Later", icon: AlarmClock },
+  done: { label: "Done", icon: Archive },
+  nogroup: { label: "No group", icon: SquareDashed },
+};
+
+/** "1 needs you · 2 running · 3 unread", for the counts tooltip. */
+function countsTip(counts: SessionSectionCounts): string {
+  return [
+    counts.needsYou > 0 && `${counts.needsYou} ${counts.needsYou === 1 ? "needs" : "need"} you`,
+    counts.running > 0 && `${counts.running} running`,
+    counts.unread > 0 && `${counts.unread} unread`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** The counts in words, for the tooltip and the row's accessible name. */
+function countsLabel(counts: SessionSectionCounts, plain?: boolean): string {
+  const tip = countsTip(counts);
+  if (tip || !plain || counts.total === 0) return tip;
+  return `${counts.total} ${counts.total === 1 ? "session" : "sessions"}`;
+}
+
+/**
+ * The counts of a container in the row words: a still running ring with its
+ * number, "1 needs you", "3 unread" (SPEC R4, R9). `plain` (Later, Done)
+ * shows the session total when nothing else shows. The row's name already
+ * says them, so they are hidden from screen readers here.
+ */
+function SessionCounts({ counts, plain }: { counts: SessionSectionCounts; plain?: boolean }) {
+  const tip = countsLabel(counts, plain);
+  if (!tip) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span aria-hidden className="ml-auto flex shrink-0 items-center gap-1">
+          {counts.running > 0 ? (
+            <span className="flex items-center gap-1 px-0.5 font-mono text-meta tabular-nums text-muted-foreground">
+              <TaskStatusIcon variant="active" className="size-3 animate-none" />
+              {counts.running}
+            </span>
+          ) : null}
+          {counts.needsYou > 0 ? (
+            <NeedsYouBadge>
+              {counts.needsYou} {counts.needsYou === 1 ? "needs" : "need"} you
+            </NeedsYouBadge>
+          ) : null}
+          {counts.unread > 0 ? (
+            <Badge
+              variant="outline"
+              className="h-[18px] rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums"
+            >
+              {counts.unread} unread
+            </Badge>
+          ) : null}
+          {plain && !countsTip(counts) ? (
+            <span className="px-0.5 font-mono text-meta tabular-nums text-muted-foreground">
+              {counts.total}
+            </span>
+          ) : null}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+type ContainerRow = Extract<TreeRowModel, { type: "box" | "group" | "owner" }>;
+
+interface GroupNodeProps {
+  row: ContainerRow;
+  domId: string;
+  cursor: boolean;
+  /** The keyboard cursor is on this row and keys drive the tree: show the "+". */
+  showActions: boolean;
+  ownerName?: string;
+  /** The id of this list's empty or loading line, so screen readers hear it with the row. */
+  describedBy?: string;
+  onRowClick: (rowKey: string, event: MouseEvent) => void;
+  onToggle: (rowKey: string) => void;
+  /** "+": a new session. Missing on rows that take none (Inbox, Later, Done, Shared with me). */
+  onNewSession?: () => void;
+}
+
+function RowIcon({ row, ownerName }: { row: ContainerRow; ownerName?: string }) {
+  if (row.type === "owner") {
+    return <UserAvatar id={row.ownerId} name={ownerName ?? row.ownerId} size="xs" />;
+  }
+  const Icon = row.type === "box" ? SECTION_META[row.id].icon : Hash;
+  return <Icon aria-hidden className="size-3.5 text-muted-foreground" />;
+}
+
+function rowName(row: ContainerRow, ownerName?: string): string {
+  if (row.type === "box") return SECTION_META[row.id].label;
+  if (row.type === "owner") return ownerName ?? row.ownerId;
+  // Another person's sessions with no group sit directly under the owner.
+  return row.node.name || "No group";
+}
+
+function GroupNodeView({
+  row,
+  domId,
+  cursor,
+  showActions,
+  ownerName,
+  describedBy,
+  onRowClick,
+  onToggle,
+  onNewSession,
+}: GroupNodeProps) {
+  const name = rowName(row, ownerName);
+  const hasChildren =
+    row.type === "owner" || (row.type === "group" && row.node.children.length > 0);
+  const counts = row.counts;
+  const plain = row.type === "box" && (row.id === "later" || row.id === "done");
+  const onlyYou = row.type === "group" && row.node.privateClash;
+  const foldTip = row.open ? "Hide subgroups" : "Show subgroups";
+  return (
+    <TreeRow
+      id={domId}
+      level={row.level}
+      cursor={cursor}
+      aria-expanded={row.open}
+      aria-label={[name, onlyYou && "Only you", counts && countsLabel(counts, plain)]
+        .filter(Boolean)
+        .join(", ")}
+      aria-describedby={describedBy}
+      onClick={(event) => onRowClick(row.key, event)}
+      className="h-7 text-data"
+    >
+      <span className="grid size-4 shrink-0 place-items-center">
+        <RowIcon row={row} ownerName={ownerName} />
+      </span>
+      <span
+        className={cn(
+          "min-w-0 truncate",
+          row.type === "box" ? "font-semibold" : "font-medium",
+          row.type === "group" && !row.node.name && "text-muted-foreground",
+        )}
+      >
+        {name}
+      </span>
+      {onlyYou ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex shrink-0 text-muted-foreground">
+              <Lock aria-hidden className="size-3" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Only you</TooltipContent>
+        </Tooltip>
+      ) : null}
+      {hasChildren ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={`${row.open ? "Hide" : "Show"} the subgroups of ${name}`}
+              aria-keyshortcuts={row.open ? "ArrowLeft" : "ArrowRight"}
+              onMouseDown={keepTreeFocus}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggle(row.key);
+              }}
+              className="-ml-0.5 grid size-[18px] shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <ChevronDown
+                aria-hidden
+                className={cn(
+                  "size-3.5 transition-transform duration-150 ease-snappy",
+                  NO_KEYBOARD_MOTION,
+                  !row.open && "-rotate-90",
+                )}
+              />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="flex items-center gap-1.5">
+            {foldTip}
+            <TipKey>{row.open ? "←" : "→"}</TipKey>
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+      <span className="min-w-0 flex-1" />
+      {onNewSession ? (
+        // No width of its own: the "+" lies over the end of the name, left of
+        // the counts, so the name keeps its room and the counts never move.
+        <span className="relative h-6 w-0 shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label="New session"
+                aria-keyshortcuts="c"
+                onMouseDown={keepTreeFocus}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onNewSession();
+                }}
+                className={cn(
+                  "absolute top-0 right-0 grid size-6 place-items-center rounded-sm bg-accent text-foreground hover:bg-muted",
+                  // In at once, out with the row's linger (UX review R9). No
+                  // fade at all while keys move the cursor.
+                  "transition-opacity delay-50 duration-200 ease-snappy group-hover/row:delay-0 group-hover/row:duration-0",
+                  NO_KEYBOARD_MOTION,
+                  showActions
+                    ? "opacity-100"
+                    : "pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100",
+                )}
+              >
+                <Plus aria-hidden className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="flex items-center gap-1.5">
+              New session
+              <TipKey>C</TipKey>
+            </TooltipContent>
+          </Tooltip>
+        </span>
+      ) : null}
+      {counts ? <SessionCounts counts={counts} plain={plain} /> : null}
+    </TreeRow>
+  );
+}
+
+export const GroupNode = memo(GroupNodeView, rowPropsEqual);

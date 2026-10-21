@@ -2,10 +2,16 @@ import { type QueryKey, useMutation, useQueryClient } from "@tanstack/react-quer
 import { useMemo } from "react";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
 import { api } from "../client";
-import type { InboxItemStatus, SessionListItem, SessionsListResponse } from "../types";
+import type {
+  InboxItemStatus,
+  SessionListItem,
+  SessionReadState,
+  SessionsListResponse,
+} from "../types";
 import { SESSION_TREE_KEY } from "./use-session-tree";
-import { SESSION_LIST_KEY } from "./use-sessions";
+import { SESSION_LIST_KEY, type SessionListParams, sessionListParamsOf } from "./use-sessions";
 
 /** The read cursor that marks a session unread. The my-swarm app writes the same value. */
 const UNREAD_CURSOR = "1970-01-01T00:00:00.000Z";
@@ -57,7 +63,9 @@ function writeFor(action: TriageAction, target: TriageTarget, now: string): Tria
  * read rule (D5) on the next fetch. Back to the Inbox shows as read: the
  * user just looked at the session.
  */
-function optimisticRow(action: TriageAction): Pick<SessionListItem, "readState" | "snoozeUntil"> {
+type RowPatch = { readState: SessionReadState; snoozeUntil: SessionListItem["snoozeUntil"] };
+
+function optimisticRow(action: TriageAction): RowPatch {
   switch (action.kind) {
     case "read":
     case "inbox":
@@ -71,22 +79,79 @@ function optimisticRow(action: TriageAction): Pick<SessionListItem, "readState" 
   }
 }
 
+/**
+ * Whether a list page still holds a row in `state`. Inbox, group, and No
+ * group lists hold Inbox sessions only (read or unread), as the server does.
+ * Later, Done, and Unread lists hold their own state. Any other list (the
+ * legacy view) holds every state.
+ */
+function listHolds(params: SessionListParams | undefined, state: SessionReadState): boolean {
+  switch (params?.triage) {
+    case "unread":
+      return state === "unread";
+    case "later":
+    case "done":
+      return state === params.triage;
+    case "inbox":
+      return state === "read" || state === "unread";
+  }
+  if (params?.groupKey || params?.keyPrefix || params?.noGroup) {
+    return state === "read" || state === "unread";
+  }
+  return true;
+}
+
 interface TriageVariables {
   targets: TriageTarget[];
   action: TriageAction;
 }
 
+/** What one write changed on one cached page, so a failure can undo just that. */
+interface PageChange {
+  key: QueryKey;
+  /** The rows before the patch, by root id. */
+  patched: Map<string, SessionListItem>;
+  /** The rows that left the page, at their old place (ascending). */
+  removed: Array<{ row: SessionListItem; index: number }>;
+}
+
 interface TriageContext {
-  snapshots: Array<[QueryKey, SessionsListResponse | undefined]>;
+  patch: RowPatch;
+  changes: PageChange[];
+}
+
+/**
+ * Undo one write on one page: a patched row goes back only while it still
+ * shows this write's value, and a removed row comes back only while it is
+ * still gone. A newer write to the same row (fast keys, the bulk bar) keeps
+ * its own state.
+ */
+function rollBack(
+  page: SessionsListResponse,
+  change: PageChange,
+  patch: RowPatch,
+): SessionsListResponse {
+  let sessions = page.sessions.map((row) => {
+    const before = change.patched.get(row.root.id);
+    const ours = row.readState === patch.readState && row.snoozeUntil === patch.snoozeUntil;
+    return before && ours ? before : row;
+  });
+  let restored = 0;
+  for (const { row, index } of change.removed) {
+    if (sessions.some((r) => r.root.id === row.root.id)) continue;
+    sessions = [...sessions.slice(0, index), row, ...sessions.slice(index)];
+    restored++;
+  }
+  return { ...page, sessions, total: page.total + restored };
 }
 
 /**
  * Read, unread, Done, Later, and back to the Inbox for one session or a
  * selection. One session writes `PATCH /api/inbox-state`; a selection writes
- * the bulk route. Rows in the cached list pages change at once and roll back
- * with a toast on failure. The tree is not recounted here (that would repeat
- * the server's read rule): the tree and the lists refetch when the last
- * write in flight settles.
+ * the bulk route. Rows in the cached list pages change at once (a row that
+ * leaves a list drops out of it) and roll back with a toast on failure. The
+ * tree is not recounted here (that would repeat the server's read rule):
+ * the tree and the lists refetch when the last write in flight settles.
  *
  * `canTriage` is false without a picked user (an operator key alone): there
  * is no user to write for, so hide the controls.
@@ -113,28 +178,48 @@ export function useSessionTriage() {
       }
     },
     onMutate: async ({ targets, action }) => {
+      // Only this user's pages: the rows carry this user's read state.
+      const listKey = [...SESSION_LIST_KEY, userId ?? null];
       // A poll that started before the write would bring the old state back.
-      await queryClient.cancelQueries({ queryKey: SESSION_LIST_KEY });
-      const snapshots = queryClient.getQueriesData<SessionsListResponse>({
-        queryKey: SESSION_LIST_KEY,
-      });
+      await queryClient.cancelQueries({ queryKey: listKey });
+      const pages = queryClient.getQueriesData<SessionsListResponse>({ queryKey: listKey });
       const ids = new Set(targets.map((target) => target.rootId));
       const patch = optimisticRow(action);
-      queryClient.setQueriesData<SessionsListResponse>({ queryKey: SESSION_LIST_KEY }, (page) =>
-        page
-          ? {
-              ...page,
-              sessions: page.sessions.map((row) =>
-                ids.has(row.root.id) ? { ...row, ...patch } : row,
-              ),
-            }
-          : page,
-      );
-      return { snapshots };
+      const changes: PageChange[] = [];
+      // A row that leaves its list (Done or Later out of the Inbox and the
+      // groups, back to the Inbox out of Later and Done) drops out at once,
+      // so the next row moves up. The other rows show the new state.
+      for (const [key, page] of pages) {
+        if (!page?.sessions.some((row) => ids.has(row.root.id))) continue;
+        const holds = listHolds(sessionListParamsOf(key), patch.readState);
+        const change: PageChange = { key, patched: new Map(), removed: [] };
+        const sessions: SessionListItem[] = [];
+        page.sessions.forEach((row, index) => {
+          if (!ids.has(row.root.id)) sessions.push(row);
+          else if (holds) {
+            change.patched.set(row.root.id, row);
+            sessions.push({ ...row, ...patch });
+          } else change.removed.push({ row, index });
+        });
+        changes.push(change);
+        queryClient.setQueryData<SessionsListResponse>(key, {
+          ...page,
+          sessions,
+          total: Math.max(0, page.total - change.removed.length),
+        });
+      }
+      return { patch, changes };
     },
     onError: (error, _variables, context) => {
-      for (const [key, data] of context?.snapshots ?? []) queryClient.setQueryData(key, data);
-      toast.error(error.message || "Couldn't update the session");
+      for (const change of context?.changes ?? []) {
+        queryClient.setQueryData<SessionsListResponse>(change.key, (page) =>
+          page ? rollBack(page, change, context!.patch) : page,
+        );
+      }
+      // Bottom left, over the sidebar: bottom right covers the composer's Send button.
+      toast.error(error.message || "Couldn't update the session", {
+        position: SESSIONS_TOAST_POSITION,
+      });
     },
     onSettled: () => {
       // Fast triage (keys, the bulk bar) overlaps writes. A refetch after an

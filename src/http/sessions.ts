@@ -26,7 +26,7 @@ import {
   moveSessionChains,
   type SessionKeyMove,
 } from "../be/db/session-moves";
-import { getSessionTree } from "../be/db/session-tree";
+import { getSessionReadState, getSessionTree } from "../be/db/session-tree";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   getSessionRoot,
@@ -129,6 +129,16 @@ const SessionListItemSchema = z.object({
   people: z.array(z.object({ id: z.string(), name: z.string() })).optional(),
   peopleCount: z.number().int().optional(),
   preview: z.string().nullable().optional(),
+  /** Active shares with their access level. `userId` null means everyone on the swarm. */
+  shares: z
+    .array(
+      z.object({
+        userId: z.string().nullable(),
+        name: z.string().nullable(),
+        access: z.enum(["read", "write"]),
+      }),
+    )
+    .optional(),
 });
 
 const SessionSectionCountsSchema = z.object({
@@ -683,6 +693,10 @@ const getSession = route({
         access: SessionAccessSchema,
         owner: SessionOwnerSchema.nullable(),
         approvals: z.array(SessionApprovalSchema).optional(),
+        /** The viewer's read state, with the list's rule. Omitted for callers that act for no user. */
+        readState: z.enum(["unread", "read", "later", "done"]).optional(),
+        /** Newest chain activity: the read cursor that "mark read" writes. With `readState`. */
+        lastActivityAt: z.string().optional(),
       }),
     },
     401: { description: "Unauthorized" },
@@ -1027,7 +1041,8 @@ export async function handleSessions(
       id: root.id,
       requestedByUserId: root.requestedByUserId ?? null,
     };
-    const access = await accessForRoot(await resolveSessionActor(req, myAgentId), sessionRoot);
+    const actor = await resolveSessionActor(req, myAgentId);
+    const access = await accessForRoot(actor, sessionRoot);
     if (access === "none") {
       jsonError(res, "You don't have access to this session. Ask the owner to share it.", 403);
       return true;
@@ -1044,10 +1059,15 @@ export async function handleSessions(
     const chain = await getRootTaskChain(parsed.params.rootTaskId);
     // Load steering, citations and pending approvals for the already loaded chain.
     const tasks = [root, ...chain];
-    const [steering, citations, approvals] = await Promise.all([
+    const [steering, citations, approvals, read] = await Promise.all([
       getTaskSteeringFieldsForTasks(tasks),
       getTaskCitationsForTasks(tasks.map((task) => task.id)),
       getPendingApprovalsForTasks(tasks.map((task) => task.id)),
+      // The viewer's read state, so a client marks a session read on open
+      // without the list row (the same rule as `GET /api/sessions`).
+      actor.kind === "user" && actor.userId
+        ? getSessionReadState(sessionRoot.id, actor.userId)
+        : Promise.resolve(null),
     ]);
     const decorate = (task: AgentTask) => ({
       ...task,
@@ -1060,6 +1080,7 @@ export async function handleSessions(
       access,
       owner,
       ...(approvals.length ? { approvals } : {}),
+      ...(read ?? {}),
     });
     return true;
   }

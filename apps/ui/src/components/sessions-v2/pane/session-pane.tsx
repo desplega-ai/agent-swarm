@@ -2,6 +2,7 @@ import { useSession } from "@/api/hooks/use-sessions";
 import { SessionConversation } from "@/components/sessions/session-conversation";
 import { SessionPresenceProvider } from "@/components/sessions/session-presence";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { useMarkReadOnOpen } from "./use-mark-read-on-open";
 
 /**
  * The focused session in the v2 pane: today's conversation (timeline, prompt
@@ -10,6 +11,7 @@ import { useLocalToggle } from "@/hooks/use-local-toggle";
  */
 export function SessionPane({ rootTaskId }: { rootTaskId: string }) {
   const { data: detail } = useSession(rootTaskId);
+  useMarkReadOnOpen(detail);
   // The legacy header's Handoffs toggle. Read here so a user who turned it on
   // sees the same timeline in both views. The v2 header (Phase 6) sets it.
   const [showInternalHandoffs] = useLocalToggle("sessions:show-internal-handoffs", false);

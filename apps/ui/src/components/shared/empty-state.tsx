@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 interface EmptyStateProps {
   icon: LucideIcon;
   title: string;
-  description?: string;
+  /** A short line under the title. It may hold a `Kbd`. */
+  description?: ReactNode;
   action?: ReactNode;
   /** Entity noun ("app", "workflow", …). When set, renders an "Ask the swarm"
    * shortcut that opens a new session with the composer pre-seeded to set up
@@ -20,6 +21,8 @@ interface EmptyStateProps {
    * height (flex parents) with a viewport-based floor (static parents) so the
    * indicator sits vertically centered instead of hugging the page header. */
   fullPage?: boolean;
+  /** A small empty state inside a list or a sidebar: a 16 px icon, small text, little padding. */
+  compact?: boolean;
   className?: string;
 }
 
@@ -30,6 +33,7 @@ export function EmptyState({
   action,
   entity,
   fullPage,
+  compact,
   className,
 }: EmptyStateProps) {
   // `?seed=` is the NewSessionView composer-prefill contract. `/sessions`
@@ -41,6 +45,22 @@ export function EmptyState({
     entity && sessionsGate.supported
       ? `/sessions?seed=${encodeURIComponent(`Hey, help me set up my first ${entity}`)}`
       : null;
+
+  if (compact) {
+    return (
+      <div
+        className={cn(
+          "flex flex-col items-center justify-center gap-1 px-3 py-3 text-center text-xs text-muted-foreground",
+          className,
+        )}
+      >
+        <Icon aria-hidden className="mb-0.5 size-4" />
+        <p className="font-medium text-foreground">{title}</p>
+        {description && <p>{description}</p>}
+        {action && <div className="mt-1">{action}</div>}
+      </div>
+    );
+  }
 
   return (
     <div

@@ -16,13 +16,14 @@ export function UserAvatar({
 }: {
   id: string;
   name: string;
-  size?: "sm" | "default";
+  /** `xs` (16 px) fits a 28 px sidebar row, like `AvatarStack size="xs"`. */
+  size?: "xs" | "sm" | "default";
   className?: string;
 }) {
   return (
     <Avatar size={size} role="img" aria-label={name} className={cn("shrink-0", className)}>
       <AvatarFallback
-        className="font-mono text-[10px] font-semibold"
+        className={cn("font-mono font-semibold", size !== "xs" && "text-[10px]")}
         style={{ backgroundColor: peerColorVar(peerColor(id)), color: PEER_FOREGROUND_VAR }}
       >
         {userInitials(name)}
