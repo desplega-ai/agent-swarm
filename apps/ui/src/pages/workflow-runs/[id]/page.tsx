@@ -48,6 +48,7 @@ export default function WorkflowRunDetailPage() {
 
   // Synthetic `foreach` children (`<parentNodeId>#<itemKey>`) collapse under their parent step so a
   // wide fan-out doesn't flood the panel. Order is preserved; an orphan child still renders flat.
+  // Every attempt row of a retried item lands in the group, which splits latest from earlier.
   const stepEntries = useMemo(() => {
     const entries: StepListEntry[] = [];
     const groups = new Map<
@@ -424,6 +425,7 @@ export default function WorkflowRunDetailPage() {
                     parent={entry.parent}
                     childSteps={entry.children}
                     workflowNodes={workflow?.definition.nodes}
+                    onNodeFailure={workflow?.definition.onNodeFailure}
                     selectedNodeId={selectedNodeId}
                     isOpen={openGroups[entry.parent.nodeId] ?? false}
                     onToggleOpen={() =>
