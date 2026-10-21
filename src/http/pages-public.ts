@@ -13,7 +13,7 @@
  *     302-redirect to the SPA `/pages/:id` route (the JSON renderer lives
  *     in the SPA, not the API — step-6/7).
  *   - `auth_mode === 'authed'`: returns 401. step-4 narrows this to also
- *     accept a valid `page_session` cookie.
+ *     accept a valid `page_session_<id>` cookie.
  *   - `auth_mode === 'password'`: returns 401. step-5 narrows this to also
  *     accept `?key=` query param + HTTP Basic.
  *
@@ -33,7 +33,7 @@ import {
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
 import { getNodeEnv } from "../utils/node-env";
-import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
+import { extractAndVerifyCookie, pageSessionSetCookies } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 
@@ -357,16 +357,15 @@ function buildCsp(): string {
 /**
  * Decide whether a page is reachable based on cookie alone. Public pages are
  * always reachable; authed AND password pages can ALSO pass via a valid
- * `page_session` cookie scoped to the same page id (the cookie is the proof
- * once the user has successfully unlocked once). For password pages, when
- * the cookie is absent/invalid the caller falls through to the `?key=` +
- * Basic-auth resolution path; for authed pages the caller surfaces 401.
+ * `page_session_<id>` cookie (or the legacy `page_session`) whose signed
+ * payload names this page (the cookie is the proof once the user has
+ * successfully unlocked once). For password pages, when the cookie is
+ * absent/invalid the caller falls through to the `?key=` + Basic-auth
+ * resolution path; for authed pages the caller surfaces 401.
  *
  * The caller passes the cookie payload (already verified by
- * `extractAndVerifyCookie`) — `null` when no cookie was sent or it failed
- * verification. Cross-page reuse (cookie for page A presented for page B)
- * surfaces as a distinct `403` so misconfigurations are debuggable, NOT a
- * generic 401.
+ * `extractAndVerifyCookie`, which ignores sessions for other pages) — `null`
+ * when no session for this page was sent or it failed verification.
  *
  * For password pages with no/bad cookie, returns `{ ok: false, status: 401,
  * needsPassword: true }` so the handler knows to try the password flow before
@@ -374,7 +373,7 @@ function buildCsp(): string {
  */
 type AccessResult =
   | { ok: true }
-  | { ok: false; status: 401 | 403; reason: string; needsPassword?: boolean };
+  | { ok: false; status: 401; reason: string; needsPassword?: boolean };
 
 function isAccessible(
   page: Page,
@@ -382,27 +381,9 @@ function isAccessible(
 ): AccessResult {
   if (page.authMode === "public") return { ok: true };
 
-  // Cookie-first path. A cookie scoped to a DIFFERENT page id is "stale" —
-  // for password mode we silently ignore it and fall through to the password
-  // flow so the user can recover via `?key=` / Basic without manual cookie
-  // clearing. For authed mode we surface 403 (the SPA's launch-retry path
-  // handles recovery; direct browser access to authed pages is rare).
-  if (cookiePayload) {
-    if (cookiePayload.pageId === page.id) return { ok: true };
-    if (page.authMode === "password") {
-      return {
-        ok: false,
-        status: 401,
-        reason: "password required",
-        needsPassword: true,
-      };
-    }
-    return {
-      ok: false,
-      status: 403,
-      reason: "page-session cookie scoped to a different page id",
-    };
-  }
+  // Cookie-first path. Sessions for other pages never reach here, so an open
+  // tab of page A no longer fails once page B is launched in the same browser.
+  if (cookiePayload?.pageId === page.id) return { ok: true };
 
   if (page.authMode === "authed") {
     return {
@@ -523,7 +504,7 @@ export async function handlePagesPublic(
   // Pull + verify the page-session cookie ONCE — `null` covers "no cookie",
   // "tampered signature", "expired", "malformed". The access decision below
   // discriminates per-authMode.
-  const cookiePayload = await extractAndVerifyCookie(req);
+  const cookiePayload = await extractAndVerifyCookie(req, page.id);
 
   const access = isAccessible(page, cookiePayload);
 
@@ -531,7 +512,7 @@ export async function handlePagesPublic(
   // password flow mints a fresh cookie inline. Empty string = no cookie to
   // attach. We thread this through the handler so the existing 200-response
   // paths below can opt-in without duplicating their branch logic.
-  let inlineSetCookie = "";
+  let inlineSetCookie: string[] = [];
 
   if (!access.ok) {
     // Password flow: cookie missing/invalid, try `?key=` then Basic.
@@ -547,7 +528,7 @@ export async function handlePagesPublic(
           matched = false;
         }
         if (matched) {
-          inlineSetCookie = await issuePageSessionCookie(page.id, {
+          inlineSetCookie = await pageSessionSetCookies(req, page.id, {
             dev: isLocalhostRequest(req),
           });
           // fall through to the regular 200 path below.
@@ -586,7 +567,7 @@ export async function handlePagesPublic(
     // that `respond()` writes via `res.writeHead()` — Node gives the latter
     // precedence, which is the value we want here anyway.
     res.setHeader("Cache-Control", "no-store");
-    if (inlineSetCookie) res.setHeader("Set-Cookie", inlineSetCookie);
+    if (inlineSetCookie.length > 0) res.setHeader("Set-Cookie", inlineSetCookie);
     publicPageJsonRoute.respond(res, 200, {
       id: page.id,
       version: 1, // edit-counter is API-internal; SPA reads via /api/pages/:id/versions
@@ -602,13 +583,13 @@ export async function handlePagesPublic(
 
   // SVG stays byte-for-byte intact, including when ?print=1 is supplied.
   if (page.contentType === "image/svg+xml") {
-    const headers: Record<string, string> = {
+    const headers: Record<string, string | string[]> = {
       "Content-Type": "image/svg+xml",
       "Cache-Control": page.authMode === "public" ? "public, max-age=1800" : "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     };
-    if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+    if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
     res.writeHead(200, headers);
     res.end(page.body);
     await bumpViewCount(page.id);
@@ -625,20 +606,22 @@ export async function handlePagesPublic(
   // `/p/:id` — render either HTML directly or 302→SPA for JSON.
   if (page.contentType === "application/json") {
     if (wantsPrint) {
-      const headers: Record<string, string> = {
+      const headers: Record<string, string | string[]> = {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
         "Content-Security-Policy": buildCsp(),
         "X-Content-Type-Options": "nosniff",
       };
-      if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+      if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
       res.writeHead(200, headers);
       res.end(printableJsonPageHtml(page));
       await bumpViewCount(page.id);
       return true;
     }
-    const headers: Record<string, string> = { Location: `${getAppBaseUrl()}/pages/${page.id}` };
-    if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+    const headers: Record<string, string | string[]> = {
+      Location: `${getAppBaseUrl()}/pages/${page.id}`,
+    };
+    if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
     res.writeHead(302, headers);
     res.end();
     // 302 redirects are intentionally NOT counted — they're a stop-over for
@@ -656,14 +639,14 @@ export async function handlePagesPublic(
     injectBrowserSdk(page.body, feedback ? feedbackKeyGuardScript() : "") +
     (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "") +
     (feedback ? feedbackOverlayScripts(page.id) : "");
-  const headers: Record<string, string> = {
+  const headers: Record<string, string | string[]> = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",
     "Content-Security-Policy": buildCsp(),
     // Defence-in-depth: prevent MIME sniffing and clickjacking outside the SPA.
     "X-Content-Type-Options": "nosniff",
   };
-  if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+  if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
   res.writeHead(200, headers);
   res.end(html);
   await bumpViewCount(page.id);

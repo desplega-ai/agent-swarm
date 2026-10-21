@@ -7313,7 +7313,7 @@ export interface paths {
         put?: never;
         /**
          * Upload a binary task file attachment
-         * @description Accepts a raw binary request body. Pass the display/path name as the `name` query parameter.
+         * @description Accepts a raw binary request body. Pass the display/path name as the `name` query parameter. An `audio/*` file uploaded to a `draft` task gets a `[File: …]` line and its transcript (or why there is none) appended to the task text before the response; a failed transcription never fails the upload.
          */
         post: {
             parameters: {
@@ -29999,6 +29999,7 @@ export interface operations {
                     routingNote?: string;
                     tags?: string[];
                     priority?: number;
+                    dependsOn?: string[];
                     offerMode?: boolean;
                     dir?: string;
                     vcsRepo?: string;

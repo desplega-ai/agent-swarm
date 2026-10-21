@@ -16,6 +16,7 @@ import {
   openAICompatibleProviders,
 } from "@desplega/model-catalog";
 import type { ProviderIconKey } from "./agent-runtime-models";
+import { TRANSCRIPTION_PRESENCE_KEYS, TRANSCRIPTION_PROVIDERS } from "./transcription-status";
 
 export type IntegrationFieldType = "text" | "password" | "textarea" | "select" | "boolean";
 
@@ -65,7 +66,8 @@ export type IntegrationSpecialFlow =
   | "codex-cli"
   | "claude-managed-cli"
   | "memory-embeddings"
-  | "chat-sdk";
+  | "chat-sdk"
+  | "transcription";
 
 /** Which agent role(s) the swarm needs to have a given skill installed on. */
 export type AgentRole = "lead" | "worker";
@@ -148,6 +150,11 @@ export interface IntegrationDef {
    * skill lives so the operator knows how to get it.
    */
   recommendedSkills?: RecommendedSkill[];
+  /**
+   * Env keys outside `fields` whose presence feeds this integration's status,
+   * such as another integration's API key it reuses.
+   */
+  presenceKeys?: readonly string[];
 }
 
 export function getIntegrationFields(def: IntegrationDef): IntegrationField[] {
@@ -991,6 +998,58 @@ export const INTEGRATIONS: IntegrationDef[] = [
         type: "text",
         placeholder: "text-embedding-3-small",
         helpText: "Embedding model id. On Azure, the embedding deployment name.",
+      },
+    ],
+  },
+
+  // ---------------------------------------------------------- Transcription
+  {
+    id: "transcription",
+    name: "Transcription",
+    description:
+      "Transcribe voice notes and audio files into task text with ElevenLabs, OpenAI or Groq.",
+    category: "llm",
+    iconKey: "mic",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/chat-sdk#voice-notes",
+    specialFlow: "transcription",
+    restartRequired: false,
+    presenceKeys: TRANSCRIPTION_PRESENCE_KEYS,
+    fields: [
+      {
+        key: "TRANSCRIPTION_PROVIDER",
+        label: "Provider",
+        type: "select",
+        placeholder: "Auto-detect",
+        options: TRANSCRIPTION_PROVIDERS.map((p) => ({ value: p.id, label: p.label })),
+        helpText:
+          "Unset: auto-detect from the keys above. Set: use this provider. Without an API key below, it uses that provider's own key. openai also covers self-hosted whisper servers.",
+      },
+      {
+        key: "TRANSCRIPTION_API_KEY",
+        label: "API key",
+        type: "password",
+        isSecret: true,
+        writeOnly: true,
+        helpText:
+          "Optional. Overrides the auto-detected key. Only the API server reads it: it is never exported to agents or scripts.",
+      },
+      {
+        key: "TRANSCRIPTION_BASE_URL",
+        label: "Base URL",
+        type: "text",
+        placeholder: "Provider default",
+        helpText:
+          "Applies only with the API key above; an auto-detected key always goes to its provider. Empty uses the provider's default: https://api.elevenlabs.io/v1, https://api.openai.com/v1 or https://api.groq.com/openai/v1.",
+        advanced: true,
+      },
+      {
+        key: "TRANSCRIPTION_MODEL",
+        label: "Model",
+        type: "text",
+        placeholder: "Provider default",
+        helpText:
+          "Empty uses the provider's default: scribe_v2 (ElevenLabs), whisper-1 (OpenAI) or whisper-large-v3-turbo (Groq).",
+        advanced: true,
       },
     ],
   },

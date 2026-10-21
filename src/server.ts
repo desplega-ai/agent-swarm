@@ -7,6 +7,7 @@ import { isSteeringEnabled } from "./be/steering";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
 import { isChatSdkEnabled } from "./integrations/chat-sdk/config";
+import { MCP_MAX_TOOL_INPUT_ELEMENTS } from "./mcp-limits";
 import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
 import { getSlackConfiguration } from "./slack/config";
@@ -450,6 +451,7 @@ export async function createServer(
       capabilities: {
         logging: {},
       },
+      maxToolInputElements: MCP_MAX_TOOL_INPUT_ELEMENTS,
     },
   );
 

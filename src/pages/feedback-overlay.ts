@@ -415,7 +415,7 @@ const FEEDBACK_OVERLAY_JS = `
     return fetch('/@swarm/api/pages/' + encodeURIComponent(pageId) + '/feedback', {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Swarm-Page-Id': pageId },
       body: JSON.stringify(payload),
     }).then(function (res) {
       return res.text().then(function (text) {

@@ -3573,7 +3573,7 @@ class ApiClient {
   /**
    * Fetch the current head metadata for a page from `GET /p/:id.json`. The
    * call uses `credentials: 'include'` so that a previously-minted
-   * `page_session` cookie (from `launchPage` or the password flow) travels
+   * `page_session_<id>` cookie (from `launchPage` or the password flow) travels
    * cross-origin. The bearer header is harmless for `public` pages and
    * required by nothing on this route — but we include it for parity with
    * the rest of the client and to avoid blank-creds edge cases in browser
@@ -3613,7 +3613,7 @@ class ApiClient {
   }
 
   /**
-   * Mint a `page_session` cookie via `POST /api/pages/:id/launch`. Requires
+   * Mint a `page_session_<id>` cookie via `POST /api/pages/:id/launch`. Requires
    * the API bearer (auth lives in the global gate) AND `credentials:
    * 'include'` so the browser commits the returned `Set-Cookie` header to
    * the API origin. The endpoint returns 204 on success.

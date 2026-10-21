@@ -9,7 +9,7 @@
  *   - For `text/html`:
  *     - public  → renders an absolute-URL `<iframe>` straight to `/p/:id`.
  *     - authed  → POSTs `/api/pages/:id/launch` first (mints the
- *                 `page_session` cookie) then renders the iframe.
+ *                 `page_session_<id>` cookie) then renders the iframe.
  *     - password → renders a password input. On submit, sets the iframe
  *                  `src` to `/p/:id?key=<password>` — the page route itself
  *                  validates and mints the cookie on load.
@@ -17,7 +17,7 @@
  *     placeholder so the route doesn't crash.
  *
  * Dev-mode cross-origin caveat: when the SPA is on `localhost:5274` and the
- * API is on `localhost:3013`, the `page_session` cookie is issued with
+ * API is on `localhost:3013`, the `page_session_<id>` cookie is issued with
  * `SameSite=Lax` (per `src/utils/page-session.ts` dev branch) which the
  * browser may NOT send on cross-site iframe requests. Production paths share
  * a parent domain so cookies flow naturally. Documented in step-6's manual

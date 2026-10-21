@@ -1,7 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getPage } from "../be/db";
 import { getApiKey } from "../utils/api-key";
-import { extractAndVerifyCookie, parseCookieHeader } from "../utils/page-session";
+import {
+  extractLegacyPageSession,
+  extractPageSession,
+  isCookieSafePageId,
+} from "../utils/page-session";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -11,7 +15,10 @@ import { jsonError } from "./utils";
  *
  * Flow:
  *   1. Browser hits `/@swarm/api/<rest>` from inside an iframe of `/p/:id`.
- *   2. We parse the `page_session` cookie, verify HMAC + expiry.
+ *   2. The browser SDK names its page in `X-Swarm-Page-Id` (else we read the
+ *      same-host `/p/<id>` Referer). We read that page's `page_session_<id>`
+ *      cookie (or the legacy `page_session`), verify HMAC + expiry, and
+ *      require the signed payload to name the same page.
  *   3. Look up the page and recover the signed viewer identity.
  *   4. Re-issue the request to the same API server's `/api/<rest>` with
  *      the operator bearer plus the original signed session token. The bearer NEVER
@@ -119,6 +126,48 @@ route({
 
 const PROXY_PREFIX = "/@swarm/api/";
 
+/** Request header the browser SDK uses to say which page's session to use. */
+export const PAGE_ID_REQUEST_HEADER = "x-swarm-page-id";
+
+const PAGE_PATH_RE = /^\/p\/([^/.]+)/;
+
+/**
+ * Which page the caller claims to be: the `X-Swarm-Page-Id` header, else the
+ * `/p/<id>` path of a same-host Referer (pages that call `fetch` directly
+ * instead of the SDK). This only selects which cookie to read. It grants
+ * nothing: the cookie's signed payload must still name this page, and the
+ * forwarded `X-Page-Id` comes from that payload. `undefined` means the caller
+ * named no page (a client predating per-page cookies). `null` means it named
+ * one that cannot be a page id.
+ * Exported for tests.
+ */
+export function requestedPageId(req: IncomingMessage): string | null | undefined {
+  const raw = req.headers[PAGE_ID_REQUEST_HEADER];
+  const fromHeader = Array.isArray(raw) ? raw[0] : raw;
+  if (fromHeader !== undefined) return isCookieSafePageId(fromHeader) ? fromHeader : null;
+
+  const referer = req.headers.referer;
+  if (!referer) return undefined;
+  let refererUrl: URL;
+  try {
+    refererUrl = new URL(referer);
+  } catch {
+    return undefined;
+  }
+  // A cross-site Referer must not pick a cookie: a custom header would force a
+  // CORS preflight, a Referer does not.
+  if (refererUrl.host !== req.headers.host) return undefined;
+  const match = PAGE_PATH_RE.exec(refererUrl.pathname);
+  if (!match) return undefined;
+  let fromReferer: string;
+  try {
+    fromReferer = decodeURIComponent(match[1]!);
+  } catch {
+    return undefined;
+  }
+  return isCookieSafePageId(fromReferer) ? fromReferer : undefined;
+}
+
 /**
  * Reject a proxied suffix that smells like path traversal or an attempt to
  * smuggle an extra path segment via percent-encoding (e.g. `%2e%2e`, `%2f`).
@@ -194,11 +243,18 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   }
 
   // ─── Cookie validation ────────────────────────────────────────────────────
-  const payload = await extractAndVerifyCookie(req);
-  if (!payload) {
+  const claimedPageId = requestedPageId(req);
+  const session =
+    claimedPageId === undefined
+      ? await extractLegacyPageSession(req)
+      : claimedPageId === null
+        ? null
+        : await extractPageSession(req, claimedPageId);
+  if (!session) {
     jsonError(res, "no page session", 401);
     return true;
   }
+  const { payload } = session;
 
   const page = await getPage(payload.pageId);
   if (!page) {
@@ -236,7 +292,7 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
     "X-Page-Id": page.id,
-    "X-Page-Session": parseCookieHeader(req.headers.cookie, "page_session") ?? "",
+    "X-Page-Session": session.token,
   };
   // The page owner is not the browser viewer. The receiving auth layer
   // verifies this original signed token before resolving any user identity.

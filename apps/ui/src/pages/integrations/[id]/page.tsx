@@ -16,6 +16,7 @@ import {
   Mail,
   MessageCircle,
   MessageSquare,
+  Mic,
   Plug,
   Route,
   Sparkles,
@@ -103,6 +104,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "key-round": KeyRound,
   "chart-line": ChartLine,
   cloud: Cloud,
+  mic: Mic,
 };
 
 function resolveIcon(iconKey: string): LucideIcon {
@@ -121,6 +123,7 @@ export default function IntegrationDetailPage() {
   const envPresenceKeys = useMemo(() => {
     if (!def) return [];
     const keys = getIntegrationFields(def).map((f) => f.key);
+    keys.push(...(def.presenceKeys ?? []));
     if (def.disableKey) keys.push(def.disableKey);
     return keys;
   }, [def]);

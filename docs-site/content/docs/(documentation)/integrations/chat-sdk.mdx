@@ -279,16 +279,26 @@ In a Telegram group or supergroup, the bot takes a message only when it is meant
 
 ## Voice notes
 
-Voice notes and other audio files are transcribed through OpenAI-compatible `/audio/transcriptions` (OpenAI, Groq, self-hosted whisper) or ElevenLabs `/speech-to-text`. Transcription is off until `TRANSCRIPTION_API_KEY` is set. Store it as a secret. Only the API server reads it: it is never exported to agent env or scripts, and the config API does not list it. Deepgram and AssemblyAI are not supported.
+Voice notes and other audio files are transcribed through ElevenLabs `/speech-to-text`, OpenAI `/audio/transcriptions`, or Groq's OpenAI-compatible endpoint. Self-hosted whisper servers work with `openai`. Deepgram and AssemblyAI are not supported. Configure it under **Settings → Integrations → Transcription**, which also shows the active provider and where its key came from.
+
+Transcription picks its key in this order:
+
+1. `TRANSCRIPTION_API_KEY`, with `TRANSCRIPTION_PROVIDER` (default `openai`). Store it as a secret. Only the API server reads it: it is never exported to agent env or scripts, and the config API does not list it.
+2. Without it, a provider key the API server already has. A set `TRANSCRIPTION_PROVIDER` uses only its own key. Otherwise the first one set wins: `ELEVENLABS_API_KEY`, then `OPENAI_API_KEY`, then `GROQ_API_KEY`.
+3. No key: transcription is off.
+
+The API server reads global config rows and its own deployment env. A provider key stored only at agent or repo scope is not seen.
 
 | Key | Default | What it does |
 |---|---|---|
-| `TRANSCRIPTION_API_KEY` | unset | Turns transcription on. The API key of the transcription service. |
-| `TRANSCRIPTION_PROVIDER` | `openai` | Request shape. `openai` sends `Authorization: Bearer` and `model`; `elevenlabs` sends `xi-api-key` and `model_id`. |
-| `TRANSCRIPTION_BASE_URL` | `https://api.openai.com/v1` (`https://api.elevenlabs.io/v1` for `elevenlabs`) | Base URL of the service. Groq (`https://api.groq.com/openai/v1`) and self-hosted whisper servers work with `openai`. |
-| `TRANSCRIPTION_MODEL` | `whisper-1` (`scribe_v2` for `elevenlabs`) | Model name sent to the service. |
+| `TRANSCRIPTION_API_KEY` | unset | Explicit key. Overrides the auto-detected provider key. |
+| `TRANSCRIPTION_PROVIDER` | auto-detect (`openai` with an explicit key) | `elevenlabs` sends `xi-api-key` and `model_id`; `openai` and `groq` send `Authorization: Bearer` and `model`. |
+| `TRANSCRIPTION_BASE_URL` | `https://api.elevenlabs.io/v1`, `https://api.openai.com/v1` or `https://api.groq.com/openai/v1` | Base URL of the service, for an explicit `TRANSCRIPTION_API_KEY` only. An auto-detected key always goes to its own provider. |
+| `TRANSCRIPTION_MODEL` | `scribe_v2`, `whisper-1` or `whisper-large-v3-turbo` | Model name sent to the service. |
 
 The task text then carries a `[Transcript of <file>]` block under the file line. Without a key, the task text gets one line saying no transcription provider is configured. A failed call is noted the same way, and the task is still created.
+
+The same keys transcribe audio shared with the [Slack bot](/docs/integrations/slack#attachment-handling) and audio attached in the dashboard's session composer, including clips recorded with its mic button (webm in Chrome and Firefox, m4a in Safari).
 
 ## Slash commands
 

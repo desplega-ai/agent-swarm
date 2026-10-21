@@ -334,9 +334,10 @@ describe("readApiUrlOverrides", () => {
 });
 
 describe("TRANSCRIPTION_PROVIDER validator", () => {
-  test("accepts the two supported providers and rejects anything else", () => {
+  test("accepts the three supported providers and rejects anything else", () => {
     expect(validateConfigValue("TRANSCRIPTION_PROVIDER", "openai")).toBeNull();
     expect(validateConfigValue("TRANSCRIPTION_PROVIDER", "elevenlabs")).toBeNull();
+    expect(validateConfigValue("TRANSCRIPTION_PROVIDER", "groq")).toBeNull();
     expect(validateConfigValue("TRANSCRIPTION_PROVIDER", "deepgram")).toMatch(
       /TRANSCRIPTION_PROVIDER/,
     );

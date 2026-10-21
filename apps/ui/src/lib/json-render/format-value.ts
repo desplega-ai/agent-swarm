@@ -6,6 +6,7 @@
  */
 import { formatDuration, formatSmartTime } from "@/lib/utils";
 import type { DetailListField, TableColumn } from "./catalog";
+import { jsonPreview } from "./json-preview";
 
 /** Every rendering kind a `Table` column or a `DetailList` field can declare. */
 export type ValueKind = NonNullable<TableColumn["kind"] | DetailListField["kind"]>;
@@ -35,10 +36,7 @@ export function formatValue(kind: ValueKind | undefined, value: unknown): string
     return Number.isNaN(Date.parse(text)) ? text : formatSmartTime(text);
   }
   if (kind === "boolean") return value ? "yes" : "no";
-  if (kind === "json") {
-    const text = JSON.stringify(value) ?? String(value);
-    return text.length > 120 ? `${text.slice(0, 120)}…` : text;
-  }
+  if (kind === "json") return jsonPreview(value);
   if (kind === "number" && typeof value === "number") return value.toLocaleString();
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);

@@ -3,7 +3,15 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { PageSessionPayload } from "../utils/page-session";
-import { parseCookieHeader, signPageSession, verifyPageSession } from "../utils/page-session";
+import {
+  extractPageSession,
+  issuePageSessionCookie,
+  MAX_PAGE_SESSION_COOKIES,
+  pageSessionSetCookies,
+  parseCookieHeader,
+  signPageSession,
+  verifyPageSession,
+} from "../utils/page-session";
 
 const ORIGINAL_SECRET = process.env.PAGE_SESSION_SECRET;
 const ORIGINAL_API_KEY = process.env.API_KEY;
@@ -264,5 +272,98 @@ describe("parseCookieHeader", () => {
   test("does NOT match a cookie whose name is a suffix of another", () => {
     // `xxpage_session=evil` must not be returned for name `page_session`.
     expect(parseCookieHeader("xxpage_session=evil; other=ok", "page_session")).toBeUndefined();
+  });
+});
+
+describe("per-page session cookies", () => {
+  const exp = () => Math.floor(Date.now() / 1000) + 3600;
+  const req = (cookie: string) => ({ headers: { cookie } });
+
+  test("issuance names the cookie after the page", async () => {
+    const header = await issuePageSessionCookie("pagea", { dev: true });
+    expect(header.startsWith("page_session_pagea=")).toBe(true);
+  });
+
+  test("each page reads its own cookie from a shared jar", async () => {
+    const a = await signPageSession({ pageId: "pagea", exp: exp() });
+    const b = await signPageSession({ pageId: "pageb", exp: exp() });
+    const jar = req(`page_session_pagea=${a}; page_session_pageb=${b}`);
+    expect((await extractPageSession(jar, "pagea"))?.token).toBe(a);
+    expect((await extractPageSession(jar, "pageb"))?.token).toBe(b);
+  });
+
+  test("the legacy page_session cookie is accepted only for the page it names", async () => {
+    const a = await signPageSession({ pageId: "pagea", exp: exp() });
+    expect((await extractPageSession(req(`page_session=${a}`), "pagea"))?.payload.pageId).toBe(
+      "pagea",
+    );
+    expect(await extractPageSession(req(`page_session=${a}`), "pageb")).toBeNull();
+  });
+
+  test("a token for another page under this page's name is ignored", async () => {
+    const a = await signPageSession({ pageId: "pagea", exp: exp() });
+    expect(await extractPageSession(req(`page_session_pageb=${a}`), "pageb")).toBeNull();
+  });
+
+  test("an id that is not cookie-name safe is refused", async () => {
+    const a = await signPageSession({ pageId: "a=b", exp: exp() });
+    expect(await extractPageSession(req(`page_session=${a}`), "a=b")).toBeNull();
+  });
+});
+
+describe("pageSessionSetCookies", () => {
+  const now = () => Math.floor(Date.now() / 1000);
+  const cookieFor = async (pageId: string, exp = now() + 3600) =>
+    `page_session_${pageId}=${await signPageSession({ pageId, exp })}`;
+  const evicted = (lines: string[]) =>
+    lines.slice(1).map((line) => {
+      expect(line).toContain("Max-Age=0");
+      return line.split("=")[0];
+    });
+
+  test("issues only the new session when the jar is under the cap", async () => {
+    const jar = await cookieFor("pagea");
+    const lines = await pageSessionSetCookies({ headers: { cookie: jar } }, "pageb", { dev: true });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.startsWith("page_session_pageb=")).toBe(true);
+  });
+
+  test("evicts the oldest sessions beyond the cap", async () => {
+    const ids = Array.from({ length: MAX_PAGE_SESSION_COOKIES + 4 }, (_, i) => `page${i}`);
+    // page0 expires soonest, so it is the oldest launch.
+    const jar = (await Promise.all(ids.map((id, i) => cookieFor(id, now() + 1000 + i)))).join("; ");
+    const lines = await pageSessionSetCookies({ headers: { cookie: jar } }, "fresh", { dev: true });
+    expect(evicted(lines).sort()).toEqual(
+      ["page0", "page1", "page2", "page3", "page4"].map((id) => `page_session_${id}`).sort(),
+    );
+  });
+
+  test("breaks same-second ties toward the cookie listed later", async () => {
+    const exp = now() + 3600;
+    const ids = Array.from({ length: MAX_PAGE_SESSION_COOKIES }, (_, i) => `tie${i}`);
+    const jar = (await Promise.all(ids.map((id) => cookieFor(id, exp)))).join("; ");
+    const lines = await pageSessionSetCookies({ headers: { cookie: jar } }, "fresh", { dev: true });
+    expect(evicted(lines)).toEqual(["page_session_tie0"]);
+  });
+
+  test("evicts expired, forged and misnamed sessions but keeps legacy and own cookies", async () => {
+    const jar = [
+      await cookieFor("expired", now() - 10),
+      `page_session_forged=${await forgeToken({ pageId: "forged", exp: now() + 3600 }, "x")}`,
+      `page_session_misnamed=${await signPageSession({ pageId: "other", exp: now() + 3600 })}`,
+      `page_session=${await signPageSession({ pageId: "legacy", exp: now() + 3600 })}`,
+      await cookieFor("fresh"),
+      await cookieFor("kept"),
+    ].join("; ");
+    const lines = await pageSessionSetCookies({ headers: { cookie: jar } }, "fresh", {
+      dev: false,
+    });
+    expect(evicted(lines).sort()).toEqual([
+      "page_session_expired",
+      "page_session_forged",
+      "page_session_misnamed",
+    ]);
+    // Prod eviction cookies carry the same SameSite=None; Secure attributes.
+    for (const line of lines) expect(line).toContain("SameSite=None; Secure");
   });
 });
