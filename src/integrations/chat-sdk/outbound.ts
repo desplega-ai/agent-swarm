@@ -236,9 +236,39 @@ export function unsentFilesSummary(unsent: UnsentChatFile[]): string {
   return unsent.length === 0 ? "" : ` ${formatUnsentFilesNote(unsent)}`;
 }
 
-/** The note posted after the files when some did not go out. */
+/** One line of untrusted text: control characters and line breaks become spaces. */
+function singleLine(text: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+  return text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim();
+}
+
+/** A zero-width space after `@` and `<!` keeps adapters from turning text into mentions. */
+function breakMentions(text: string): string {
+  return text.replace(/@/g, "@\u200b").replace(/<!/g, "<\u200b!");
+}
+
+/**
+ * A file name as a Markdown code span, so it renders literally: no emphasis,
+ * links, or mentions. The fence is one backtick longer than the longest run
+ * inside, and the padding keeps an edge backtick from joining the fence.
+ */
+function codeSpan(text: string): string {
+  const value = breakMentions(singleLine(text)) || "(unnamed)";
+  const longestRun = Math.max(0, ...(value.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  const pad = value.startsWith("`") || value.endsWith("`") ? " " : "";
+  return `${fence}${pad}${value}${pad}${fence}`;
+}
+
+/**
+ * The note posted after the files when some did not go out. File names come
+ * from senders and agents, so they render as code spans and cannot add
+ * formatting or mentions to the bot's message.
+ */
 export function formatUnsentFilesNote(unsent: UnsentChatFile[]): string {
-  const lines = unsent.map((file) => `- ${file.name}: ${file.reason}`);
+  const lines = unsent.map(
+    (file) => `- ${codeSpan(file.name)}: ${breakMentions(singleLine(file.reason))}`,
+  );
   const count = unsent.length === 1 ? "1 file" : `${unsent.length} files`;
   return [`Could not send ${count}:`, ...lines].join("\n");
 }

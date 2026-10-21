@@ -24,7 +24,7 @@ import {
 } from "../be/db";
 import { recordTaskAttachmentUpload } from "../be/task-attachment-store";
 import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
-import { telegramAttachmentType } from "../integrations/chat-sdk/outbound";
+import { formatUnsentFilesNote, telegramAttachmentType } from "../integrations/chat-sdk/outbound";
 import { processPendingChatRelays, stopChatRelayWatcher } from "../integrations/chat-sdk/relay";
 import { chatSdkContextKey } from "../tasks/context-key";
 import { registerChatPostTool } from "../tools/chat-post";
@@ -280,6 +280,30 @@ describe("telegramAttachmentType", () => {
   });
 });
 
+describe("formatUnsentFilesNote", () => {
+  test("file names render as literal code spans, with no formatting or mentions", () => {
+    const note = formatUnsentFilesNote([
+      { name: "**[click](https://evil.example)** <!channel> @here.pdf", reason: "too big" },
+      { name: "a`b``c.txt", reason: "refused" },
+      { name: "line\n\n# Heading\n- item.md", reason: "bad @everyone\nreason" },
+    ]);
+    const lines = note.split("\n");
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toBe("Could not send 3 files:");
+    expect(lines[1]).toBe(
+      "- `**[click](https://evil.example)** <\u200b!channel> @\u200bhere.pdf`: too big",
+    );
+    expect(lines[2]).toBe("- ```a`b``c.txt```: refused");
+    expect(lines[3]).toBe("- `line # Heading - item.md`: bad @\u200beveryone reason");
+  });
+
+  test("an edge backtick is padded away from the fence", () => {
+    expect(formatUnsentFilesNote([{ name: "`x`", reason: "r" }])).toBe(
+      "Could not send 1 file:\n- `` `x` ``: r",
+    );
+  });
+});
+
 describe("chat-reply agent-fs paths", () => {
   beforeEach(useApiAgentFsProvider);
   afterEach(useLocalFileProvider);
@@ -339,7 +363,7 @@ describe("chat-reply agent-fs paths", () => {
       expect.stringMatching(/^send(Rich)?Message$/),
       expect.stringMatching(/^send(Rich)?Message$/),
     ]);
-    expect(textOf(calls[1]!.body)).toContain("private.txt: could not be read");
+    expect(textOf(calls[1]!.body)).toContain("`private.txt`: could not be read");
     expect(JSON.stringify(calls)).not.toContain("not for the worker");
     expect(agentFsRequests.map((request) => request.auth)).toEqual([`Bearer ${WORKER_FS_KEY}`]);
   });
@@ -424,7 +448,7 @@ describe("chat-reply agent-fs paths", () => {
 
     // The stand-in put the key in its 500 body; the key reached it as the bearer.
     expect(agentFsRequests.map((request) => request.auth)).toEqual([`Bearer ${SHORT_FS_KEY}`]);
-    expect(note).toContain("broken.pdf: could not be read (storage failed using [REDACTED:");
+    expect(note).toContain("`broken.pdf`: could not be read (storage failed using [REDACTED:");
     expect(result).not.toContain(SHORT_FS_KEY);
     expect(note).not.toContain(SHORT_FS_KEY);
   });
@@ -445,7 +469,7 @@ describe("chat-reply agent-fs paths", () => {
     try {
       const { result, note } = await failedRead("thoughts/leaky/offline.pdf");
 
-      expect(note).toContain("offline.pdf: could not be read (connect failed using [REDACTED:");
+      expect(note).toContain("`offline.pdf`: could not be read (connect failed using [REDACTED:");
       expect(result).not.toContain(SHORT_FS_KEY);
       expect(note).not.toContain(SHORT_FS_KEY);
     } finally {
@@ -529,7 +553,7 @@ describe("chat-reply attachments", () => {
     const calls = callsTo(chatId);
     expect(calls.some((call) => call.method === "sendDocument")).toBe(false);
     expect(textOf(calls.at(-1)!.body)).toContain(
-      "dump.zip: 60.0 MB, over the 50.0 MB upload limit",
+      "`dump.zip`: 60.0 MB, over the 50.0 MB upload limit",
     );
   });
 
@@ -549,7 +573,7 @@ describe("chat-reply attachments", () => {
     const unsent = result.structuredContent.unsentFiles as Array<{ name: string; reason: string }>;
     expect(unsent.map((file) => file.name)).toEqual(["refused.pdf"]);
     expect(unsent[0]!.reason).toContain("refused by Telegram");
-    expect(textOf(callsTo(chatId).at(-1)!.body)).toContain("refused.pdf: refused by Telegram");
+    expect(textOf(callsTo(chatId).at(-1)!.body)).toContain("`refused.pdf`: refused by Telegram");
   });
 
   test("an unknown attachment id or a traversal path is refused before anything is sent", async () => {
