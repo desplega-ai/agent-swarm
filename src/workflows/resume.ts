@@ -33,7 +33,7 @@ import {
 import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
-import { getNextTargets, getSuccessors } from "./definition";
+import { getNextTargets } from "./definition";
 import { failRunOnUnreadableReplay, findReadyNodes, hasRunningStep, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
@@ -504,12 +504,6 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const failedNode =
     foreachParent ?? workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
   if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
-  // Fan-outs with failed or cancelled items get one new attempt row per such
-  // item; completed items are never rerun.
-  const attempts = foreachRetryAttempts(workflow.definition, latestSteps);
-  const attemptRows = attempts.flatMap((attempt) => attempt.rows);
-  const capError = foreachRetryCapError(workflow.definition, steps.length, attempts);
-  if (capError) throw new Error(`Retry not started, run left failed: ${capError}`);
   const hasStructuralPredecessor = workflow.definition.nodes.some(
     (node) => node.next && getNextTargets(node.next).includes(failedNode.id),
   );
@@ -521,9 +515,19 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   // (HTTP route + MCP tool) both pass the guard above, and a double reset
   // walks the same failed node twice.
   const ctx = (run.context ?? {}) as Record<string, unknown>;
-  const claimed = await getDbClient().transaction(async () => {
+  const attempts = await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
-    if (!current || current.status !== "failed") return false;
+    if (!current || current.status !== "failed") return null;
+    // Fan-outs with failed or cancelled items get one new attempt row per such
+    // item; completed items are never rerun. Selected from the rows as of this
+    // transaction: an in-flight sibling of a fail-fast fan-out can record its
+    // late failure while the readiness check above is awaited.
+    const currentSteps = await getWorkflowRunStepsByRunId(runId);
+    const attempts = foreachRetryAttempts(workflow.definition, [
+      ...latestStepPerNode(currentSteps).values(),
+    ]);
+    const capError = foreachRetryCapError(currentSteps.length, attempts);
+    if (capError) throw new Error(`Retry not started, run left failed: ${capError}`);
     // A foreach item retries as a new attempt row instead of a reset: a fresh
     // step id is a fresh invocation identity for every body type, and the
     // failed row stays as history.
@@ -533,11 +537,14 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
         error: shouldRetryFailedNode ? null : "Skipped on retry because its branch was not active",
       });
     }
-    await createForeachAttemptSteps(runId, attemptRows);
+    await createForeachAttemptSteps(
+      runId,
+      attempts.flatMap((attempt) => attempt.rows),
+    );
     await updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
-    return true;
+    return attempts;
   });
-  if (!claimed) throw new Error("Run is not in failed state");
+  if (!attempts) throw new Error("Run is not in failed state");
 
   // Resume from the failed node — use findReadyNodes for convergence safety.
   // findReadyNodes returns every node without a completed step, including a
@@ -613,25 +620,20 @@ function foreachRetryAttempts(
 }
 
 /**
- * Refuse a retry whose new attempt rows would breach WORKFLOW_MAX_STEPS_PER_RUN,
- * by the rule the foreach executor applies at materialization: a fan-out with
- * successors keeps one step of headroom for the post-join walk.
+ * Refuse a retry whose new attempt rows would breach WORKFLOW_MAX_STEPS_PER_RUN.
+ * The retry's own walk runs walkGraph's circuit breaker after the rows are
+ * inserted, and it trips at `>= max`, so the rows must leave one step of
+ * headroom even for a terminal fan-out.
  */
 function foreachRetryCapError(
-  def: WorkflowDefinition,
   existingSteps: number,
   attempts: ForeachRetryAttempts[],
 ): string | null {
   const added = attempts.reduce((sum, attempt) => sum + attempt.rows.length, 0);
   if (added === 0) return null;
   const maxSteps = getMaxWorkflowStepsPerRun();
-  const total = existingSteps + added;
-  const hasSuccessors = attempts.some(
-    (attempt) => getSuccessors(def, attempt.parent.id).length > 0,
-  );
-  const breached = hasSuccessors ? total >= maxSteps : total > maxSteps;
-  if (!breached) return null;
-  return `foreach retry would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${existingSteps} existing + ${added} new attempts${hasSuccessors ? " leaves no room for the post-join walk" : " exceeds the per-run cap"}`;
+  if (existingSteps + added < maxSteps) return null;
+  return `foreach retry would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${existingSteps} existing + ${added} new attempts leaves no room for the retry walk`;
 }
 
 /**

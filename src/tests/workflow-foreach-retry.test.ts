@@ -197,6 +197,105 @@ describe("foreach run retry with attempt rows", () => {
     expect(await children(runId)).toHaveLength(4);
   });
 
+  test("a retry landing exactly on the cap of a terminal fan-out is refused and inserts nothing", async () => {
+    const workflow = await makeWorkflow({
+      nodes: [
+        {
+          id: "fan",
+          type: "foreach",
+          config: {
+            over: [{ id: "a" }],
+            itemKey: "id",
+            body: { type: "agent-task", config: { agentId, template: "Item {{item.id}}" } },
+          },
+        },
+      ],
+    });
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+    await drainForeachDrives();
+    const [item] = await inFlightTasks(runId);
+    await failTask(item!.taskId, "first failure");
+    await waitForRun(runId, (r) => r.status === "failed");
+
+    // 1 parent + 1 item exist; one attempt makes 3, which the retry walk's
+    // circuit breaker refuses after the row is already in.
+    const previous = process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+    process.env.WORKFLOW_MAX_STEPS_PER_RUN = "3";
+    try {
+      await expect(retryFailedRun(runId, registry)).rejects.toThrow("WORKFLOW_MAX_STEPS_PER_RUN");
+    } finally {
+      if (previous === undefined) delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+      else process.env.WORKFLOW_MAX_STEPS_PER_RUN = previous;
+    }
+    expect((await getWorkflowRun(runId))?.status).toBe("failed");
+    expect((await children(runId)).map((step) => step.status)).toEqual(["failed"]);
+
+    // The failed attempt is still the latest row, so a retry under a higher cap works.
+    await retryFailedRun(runId, registry);
+    await drainForeachDrives();
+    const [replacement] = await inFlightTasks(runId);
+    await completeTask(replacement!.taskId, "ok");
+    await waitForRun(runId, (r) => r.status === "completed");
+  });
+
+  test("a sibling that fails while the retry checks readiness gets its own attempt", async () => {
+    const workflow = await makeWorkflow({
+      nodes: [
+        {
+          id: "fan",
+          type: "foreach",
+          config: {
+            over: [{ id: "a" }, { id: "b" }],
+            itemKey: "id",
+            failurePolicy: "fail-fast",
+            body: { type: "agent-task", config: { agentId, template: "Item {{item.id}}" } },
+          },
+        },
+      ],
+    });
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+    await drainForeachDrives();
+    const [first, second] = await inFlightTasks(runId);
+    await failTask(first!.taskId, "a failed");
+    await waitForRun(runId, (r) => r.status === "failed");
+
+    // Hold the retry inside its awaited readiness check while b fails late.
+    const foreach = registry.get("foreach");
+    const checkReadiness = foreach.checkReadiness;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    foreach.checkReadiness = async () => {
+      entered.resolve();
+      await release.promise;
+      return [];
+    };
+    const retry = retryFailedRun(runId, registry);
+    try {
+      await entered.promise;
+      await failTask(second!.taskId, "b failed during the retry's readiness check");
+      await waitForStep(second!.stepId, "failed");
+    } finally {
+      foreach.checkReadiness = checkReadiness;
+      release.resolve();
+      await retry;
+    }
+    await drainForeachDrives();
+
+    const steps = await children(runId);
+    expect(steps.filter((step) => step.nodeId === "fan#a")).toHaveLength(2);
+    expect(steps.filter((step) => step.nodeId === "fan#b")).toHaveLength(2);
+    for (const next of await inFlightTasks(runId)) {
+      await completeTask(next.taskId, `retry ${next.nodeId}`);
+    }
+    const run = await waitForRun(runId, (r) => r.status === "completed");
+    const aggregate = (run.context as Record<string, unknown>).fan as {
+      okCount: number;
+      failedCount: number;
+    };
+    expect(aggregate.okCount).toBe(2);
+    expect(aggregate.failedCount).toBe(0);
+  });
+
   test("a sub-workflow item retry starts a new child run and keeps the old one", async () => {
     const child = await makeWorkflow(buildWorkflow());
     const parent = await makeWorkflow({

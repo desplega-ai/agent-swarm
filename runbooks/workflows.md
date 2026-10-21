@@ -162,8 +162,10 @@ the workflow's `onNodeFailure`: `"continue"` means `collect-outcomes`, the defau
 `failed` or `cancelled`: same child node id and `nodeType`, a fresh step id, `input.attempt: n`, and
 idempotency key `<runId>:<childNodeId>:<n>`. The fresh step id is a fresh invocation identity for
 every body type: a new task, a new child run, a new approval or a new wait. Completed items are never
-rerun, and earlier attempt rows stay as history. A double retry inserts nothing twice. A retry whose
-new rows would breach `WORKFLOW_MAX_STEPS_PER_RUN` is refused and the run stays failed.
+rerun, and earlier attempt rows stay as history. A double retry inserts nothing twice. Items are
+picked when the retry commits, so a sibling that failed late is retried too. A retry whose new rows
+would reach `WORKFLOW_MAX_STEPS_PER_RUN` is refused before it inserts anything, and the run stays
+failed: the retry walk itself needs one step of headroom.
 
 A collect-outcomes run completes, so it is not retried. To rerun its failed items, add a follow-up
 wave over `{{w.results}}` filtered to `status != "completed"`, under a new node id.
