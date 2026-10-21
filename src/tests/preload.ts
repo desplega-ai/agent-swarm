@@ -22,6 +22,27 @@ import { startHangWatchdog } from "./hang-watchdog";
 
 startHangWatchdog();
 
+// Worker deployments configure Slack rendering, links, and organization defaults.
+// Start tests from the same unset defaults as CI; suites can still opt in by
+// setting their own values after the preload runs.
+for (const key of Object.keys(process.env)) {
+  if (
+    key.startsWith("SLACK_") ||
+    [
+      "COMB_ENABLED",
+      "APP_URL",
+      "AGENT_FS_API_URL",
+      "AGENT_FS_LIVE_URL",
+      "AGENT_FS_DEFAULT_ORG_ID",
+      "AGENT_FS_DEFAULT_DRIVE_ID",
+      "SWARM_ORG_NAME",
+      "SWARM_ORG_WEBSITE",
+    ].includes(key)
+  ) {
+    delete process.env[key];
+  }
+}
+
 // The API drain (src/be/api-drain.ts) is off unless API_DRAIN_MAX_MS is set,
 // but a shell can inherit it (a swarm worker container gets the deploy's value).
 // Test servers are stopped with SIGTERM and their fixtures leave in_progress rows
