@@ -1,13 +1,14 @@
 /**
- * Sessions v2 shell: a resizable sidebar frame next to the pane area. It
- * collapses the global nav to icons while it is open, so the sidebar and the
- * panes keep their width (UX review R9).
+ * Sessions v2 shell: a resizable sidebar frame next to the pane area, and the
+ * status bar under both. It collapses the global nav to icons while it is
+ * open, so the sidebar and the panes keep their width (UX review R9).
  *
  * The sidebar holds the search and the session tree (Phases 4 and 5). The
- * pane shows the New session tab on `/sessions` (the shipped composer with
- * a "Start in" picker; it keeps the `?seed=` and `?prefill=` links working)
- * and the session pane on `/sessions/:rootTaskId`: the header (Phase 6) over
- * today's conversation, until Phase 7 swaps in the turn timeline.
+ * pane area (Phase 8) holds the main pane with its tabs and one split pane.
+ * A tab shows the New session composer (it keeps the `?seed=` and
+ * `?prefill=` links working), the group tab (`?view=`), or a session: the
+ * header (Phase 6) over the turn timeline (Phase 7). The first-run guide
+ * and the "Open in split…" picker mount here too.
  */
 
 import { History } from "lucide-react";
@@ -21,16 +22,33 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
+import { useSession } from "@/api/hooks/use-sessions";
 import type { SessionListItem } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { MAIN_BLEED } from "@/lib/main-gutter";
-import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
+import { groupKeyOf } from "@/lib/session-groups";
+import {
+  GROUP_TAB,
+  isSessionTab,
+  NEW_SESSION_TAB,
+  SESSIONS_TOAST_POSITION,
+} from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
+import { FirstRunGuide, GUIDE_KEYS_STEP, useFirstRunGuide } from "./first-run-guide";
+import { GroupTab } from "./group-tab";
 import { NewSessionTab } from "./new-session-tab";
 import { SessionPane } from "./pane/session-pane";
+import { usePaneKeys } from "./pane/use-pane-keys";
 import { SessionTree, type SessionTreeHandle } from "./sidebar/session-tree";
+import { StatusBar } from "./status-bar";
+import { type PaneIndex, SplitPanes } from "./tabs/split-panes";
+import { SplitPicker } from "./tabs/split-picker";
+import { useMyGroups } from "./use-my-groups";
 import { useSessionsUrlState } from "./use-sessions-url-state";
 
 const WIDTH_DEFAULT = 320;
@@ -163,21 +181,27 @@ export interface SessionsV2ShellProps {
 
 export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   useCollapseNavWhile(true);
-  const { focused, openSession, focusTab, setView, q, setQuery } = useSessionsUrlState();
+  const url = useSessionsUrlState();
+  const { focused, tabs, split, view, q, setQuery, focusTab } = url;
   const [width, setWidth] = useSidebarWidth();
   const sidebarId = useId();
+  // The pane that holds the pane keys, Cmd+K's session, and sidebar clicks.
+  const [paneState, setActivePane] = useState<PaneIndex>(0);
+  const activePane: PaneIndex = split ? paneState : 0;
+  const current = activePane === 1 && split ? split : focused;
   // The group the New session tab starts in: the one it was opened from.
   const [startIn, setStartIn] = useState<string | null>(null);
   const newSession = useCallback(
     (group: string | null = null) => {
       setStartIn(group);
+      setActivePane(0);
       focusTab(NEW_SESSION_TAB);
     },
     [focusTab],
   );
   // The session whose header title is its rename field (Cmd+K "Rename
-  // session", the pencil). A switch to another session ends it.
-  const [renaming, setRenaming] = useState<string | null>(null);
+  // session", the pencil), in one pane. A switch to another session ends it.
+  const [renaming, setRenaming] = useState<{ id: string; pane: PaneIndex } | null>(null);
   // The tree's move dialog and group reveal, for the pane header.
   const treeRef = useRef<SessionTreeHandle>(null);
   const moveSessions = useCallback(
@@ -190,62 +214,188 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     [],
   );
 
-  return (
-    <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row", MAIN_BLEED)}>
-      <nav
-        id={sidebarId}
-        aria-label="Sessions"
-        style={{ "--sessions-sidebar-w": `${width}px` } as CSSProperties}
-        data-sessions-sidebar=""
-        className="group/nav relative flex shrink-0 flex-col border-b border-border bg-surface md:w-(--sessions-sidebar-w) md:border-r md:border-b-0"
-      >
-        {/* The bulk bar covers this header while sessions are selected: hide
-            it from the pointer, the keys, and screen readers then. */}
-        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle pr-2 pl-4 group-has-[[data-bulk-bar]]/nav:invisible max-md:border-b-0">
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">Sessions</h2>
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => onViewChange("legacy")}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <History />
-            Legacy sessions
-          </Button>
-        </div>
-        {/* The phone layout lands in Phase 9. */}
-        <div className="hidden min-h-0 flex-1 flex-col md:flex">
-          <SessionTree
-            focused={focused}
-            openSession={openSession}
-            newSession={newSession}
-            setView={setView}
-            query={q}
-            setQuery={setQuery}
-            onViewChange={onViewChange}
-            onRename={() => setRenaming(focused)}
-            ref={treeRef}
-          />
-        </div>
-        <SidebarResizeHandle width={width} onResize={setWidth} sidebarId={sidebarId} />
-      </nav>
+  /**
+   * Every open goes through here, so one session never mounts in two panes
+   * (two panes would poll it twice). The split session gets the focus in its
+   * pane. A plain open goes to the active pane, in its current tab (SPEC R2):
+   * in the split pane, a session that has a main tab gets the focus there.
+   * A new tab opens in the main pane. A background tab (a middle-click)
+   * keeps the focus and does not mark the session read (mockup
+   * `index.html:4802-4807`). `pane` names the pane for an open from inside
+   * it (the group tab).
+   */
+  const openSession = (
+    id: string,
+    options: { newTab?: boolean; background?: boolean; pane?: PaneIndex } = {},
+  ) => {
+    const position = SESSIONS_TOAST_POSITION;
+    if (options.background) {
+      const open = id === split || tabs.includes(id);
+      if (!open) url.openSession(id, { background: true });
+      toast(open ? "Already open in a tab." : "Opened in a new tab.", { position });
+    } else if (id === split) setActivePane(1);
+    else if (options.newTab || (options.pane ?? activePane) === 0) {
+      setActivePane(0);
+      url.openSession(id, { newTab: options.newTab });
+    } else if (tabs.includes(id)) {
+      setActivePane(0);
+      focusTab(id);
+    } else url.replaceSplit(id);
+  };
+  const openInSplit = (id: string) => {
+    const message = url.openInSplit(id);
+    if (message) toast(message, { position: SESSIONS_TOAST_POSITION });
+    else setActivePane(1);
+  };
+  const closeSplit = (keep: boolean) => {
+    setActivePane(0);
+    url.closeSplit(keep);
+  };
+  const [pickingSplit, setPickingSplit] = useState(false);
+  const guide = useFirstRunGuide();
 
-      <section aria-label="Open sessions" className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {focused === NEW_SESSION_TAB ? (
-          <NewSessionTab startIn={startIn} onStarted={(id) => openSession(id)} />
-        ) : (
-          // A new key per session: the composer draft and the scroll state
-          // never carry over to the next session.
-          <SessionPane
-            key={focused}
-            rootTaskId={focused}
-            renaming={renaming === focused}
-            onRenamingChange={(on) => setRenaming(on ? focused : null)}
-            onMove={moveSessions}
-            onRevealGroup={revealGroup}
+  // `v` and `c` away from the sidebar (UX review R9, mockup `paneKey`): the
+  // split picker, and a New session tab in the group of the focused pane's
+  // session (the rule `c` follows on a session row in the tree).
+  const { userId } = useCurrentUser();
+  const { targets, writeBlock } = useMyGroups(userId ?? null);
+  const currentDetail = useSession(isSessionTab(current) ? current : undefined, {
+    poll: "off",
+  }).data;
+  const startGroupOfPane = (): string | null => {
+    const key =
+      current === GROUP_TAB
+        ? view
+        : currentDetail?.root.key
+          ? groupKeyOf(currentDetail.root.key)
+          : null;
+    return key && targets.some((target) => target.key === key) && !writeBlock(key) ? key : null;
+  };
+  usePaneKeys({
+    split: () => setPickingSplit(true),
+    newSession: () => newSession(startGroupOfPane()),
+  });
+
+  const renderPane = (tab: string, pane: PaneIndex) => {
+    if (pane === 1) return renderSession(tab, 1);
+    // The New session tab stays mounted while it is open, so a click on a
+    // sidebar row or another tab never loses its draft.
+    const draft = tabs.includes(NEW_SESSION_TAB) ? (
+      <div className={tab === NEW_SESSION_TAB ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+        <NewSessionTab startIn={startIn} onStarted={url.replaceNewTab} />
+      </div>
+    ) : null;
+    const body =
+      tab === NEW_SESSION_TAB ? null : tab === GROUP_TAB && view ? (
+        // A row opens next to the group tab, in the main pane.
+        <GroupTab view={view} onOpen={(id) => openSession(id, { pane: 0 })} />
+      ) : (
+        renderSession(tab, 0)
+      );
+    return (
+      <>
+        {draft}
+        {body}
+      </>
+    );
+  };
+  const renderSession = (tab: string, pane: PaneIndex) => (
+    // A new key per session: the composer draft and the scroll state
+    // never carry over to the next session.
+    <SessionPane
+      key={tab}
+      rootTaskId={tab}
+      renaming={renaming?.id === tab && renaming.pane === pane}
+      onRenamingChange={(on) => setRenaming(on ? { id: tab, pane } : null)}
+      onMove={moveSessions}
+      onRevealGroup={revealGroup}
+      keysActive={activePane === pane}
+    />
+  );
+
+  return (
+    // The tab, pane, and status bar tooltips open after 300 ms, as in the sidebar and the header.
+    <TooltipProvider delayDuration={300} skipDelayDuration={300}>
+      <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", MAIN_BLEED)}>
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <nav
+            id={sidebarId}
+            aria-label="Sessions"
+            style={{ "--sessions-sidebar-w": `${width}px` } as CSSProperties}
+            data-sessions-sidebar=""
+            className="group/nav relative flex shrink-0 flex-col border-b border-border bg-surface md:w-(--sessions-sidebar-w) md:border-r md:border-b-0"
+          >
+            {/* The bulk bar covers this header while sessions are selected: hide
+              it from the pointer, the keys, and screen readers then. */}
+            <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle pr-2 pl-4 group-has-[[data-bulk-bar]]/nav:invisible max-md:border-b-0">
+              <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">Sessions</h2>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => onViewChange("legacy")}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <History />
+                Legacy sessions
+              </Button>
+            </div>
+            {/* The phone layout lands in Phase 9. */}
+            <div className="hidden min-h-0 flex-1 flex-col md:flex">
+              <SessionTree
+                focused={current}
+                openSession={openSession}
+                newSession={newSession}
+                setView={url.openView}
+                query={q}
+                setQuery={setQuery}
+                onViewChange={onViewChange}
+                onRename={() => setRenaming({ id: current, pane: activePane })}
+                paneCommands={{
+                  openInSplit,
+                  pickSplit: () => setPickingSplit(true),
+                  closeSplit: split ? () => closeSplit(true) : undefined,
+                  showGuide: () => guide.open(0),
+                }}
+                ref={treeRef}
+              />
+            </div>
+            <SidebarResizeHandle width={width} onResize={setWidth} sidebarId={sidebarId} />
+          </nav>
+
+          <SplitPanes
+            tabs={tabs}
+            focused={focused}
+            split={split}
+            view={view}
+            activePane={activePane}
+            onActivatePane={setActivePane}
+            onFocusTab={(tab) => {
+              setActivePane(0);
+              focusTab(tab);
+            }}
+            onCloseTab={url.closeTab}
+            onNewSession={() => newSession(null)}
+            onPickSplit={() => setPickingSplit(true)}
+            onCloseSplit={closeSplit}
+            onDropToSplit={openInSplit}
+            renderPane={renderPane}
           />
-        )}
-      </section>
-    </div>
+        </div>
+        <StatusBar
+          query={q}
+          onQueryChange={setQuery}
+          tabCount={tabs.length + (split ? 1 : 0)}
+          paneCount={split ? 2 : 1}
+          onKeys={() => guide.open(GUIDE_KEYS_STEP)}
+        />
+        <SplitPicker
+          open={pickingSplit}
+          tabs={tabs.filter((tab) => isSessionTab(tab) && tab !== split)}
+          onOpenChange={setPickingSplit}
+          onPick={openInSplit}
+        />
+        <FirstRunGuide state={guide.state} onStep={guide.setStep} onClose={guide.close} />
+      </div>
+    </TooltipProvider>
   );
 }

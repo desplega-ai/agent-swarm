@@ -6,7 +6,7 @@
 import type { SessionStatusFilter, SessionTriageFilter } from "../api/types";
 
 /** The `is:` values the search knows. */
-export const SEARCH_IS = ["unread", "running", "later", "done"] as const;
+export const SEARCH_IS = ["unread", "running", "needs", "later", "done"] as const;
 export type SearchIs = (typeof SEARCH_IS)[number];
 
 type TokenKind = "with" | "in" | "is";
@@ -101,7 +101,7 @@ export type SessionSearchResult =
 const PARTIAL_HINT: Record<TokenKind, string> = {
   with: "Type a name, like with:lena.",
   in: "Type a group, like in:pricing.",
-  is: "Type unread, running, later, or done.",
+  is: "Type unread, running, needs, later, or done.",
 };
 
 /** A person whose name (or one word of it) starts with `value`. A full-name match wins. */
@@ -147,7 +147,7 @@ export function resolveSessionSearch(
   if (parsed.bad.length > 0) {
     return {
       ok: false,
-      message: `${parsed.bad[0]} is not a filter. Try is:unread, is:running, is:later, or is:done.`,
+      message: `${parsed.bad[0]} is not a filter. Try is:unread, is:running, is:needs, is:later, or is:done.`,
     };
   }
   const nothingElse =
@@ -168,12 +168,19 @@ export function resolveSessionSearch(
     if (!group) return { ok: false, message: `No group matches in:${parsed.in[0]}.` };
     params.keyPrefix = group.key;
   }
-  const triage = [...new Set(parsed.is.filter((value) => value !== "running"))];
+  const triage = [
+    ...new Set(parsed.is.filter((value) => value !== "running" && value !== "needs")),
+  ];
   if (triage.length > 1) {
     return { ok: false, message: "A session is in one of unread, later, or done. Pick one." };
   }
   if (triage[0]) params.triage = triage[0] as SessionTriageFilter;
+  // The server takes one status: `is:needs` ("Needs you") or `is:running`.
+  if (parsed.is.includes("running") && parsed.is.includes("needs")) {
+    return { ok: false, message: "Search for running or needs, not both." };
+  }
   if (parsed.is.includes("running")) params.status = "running";
+  if (parsed.is.includes("needs")) params.status = "needs";
   return { ok: true, params };
 }
 
@@ -223,4 +230,34 @@ export function splitMatches(text: string, words: readonly string[]): TextPiece[
     .split(pattern)
     .map((piece, i) => ({ text: piece, match: i % 2 === 1 }))
     .filter((piece) => piece.text !== "");
+}
+
+/** The status bar filters (plan Phase 8): each one is an `is:` token in the sidebar search. */
+export type QuickFilter = Extract<SearchIs, "running" | "needs" | "unread">;
+
+/** Whether the sidebar search holds the quick filter's token. */
+export function quickFilterOn(query: string, filter: QuickFilter): boolean {
+  return parseSessionSearch(query).is.includes(filter);
+}
+
+/** The quick filters, so one replaces another (the status bar shows one at a time). */
+const QUICK_FILTERS: readonly QuickFilter[] = ["running", "needs", "unread"];
+
+/** A token that is exactly a quick filter (`is:unread`, any case). */
+function quickTokenOf(token: string): QuickFilter | null {
+  const match = /^is:(.+)$/i.exec(token);
+  const value = match?.[1].toLowerCase();
+  return QUICK_FILTERS.find((filter) => filter === value) ?? null;
+}
+
+/**
+ * The search with a quick filter turned on or off. Only quick filter tokens
+ * change: on drops the other quick filters and adds `is:<filter>` at the
+ * end, off drops `is:<filter>`. Everything else stays as typed, in order.
+ */
+export function toggleQuickFilter(query: string, filter: QuickFilter): string {
+  const tokens = query.trim().split(/\s+/).filter(Boolean);
+  const on = tokens.some((token) => quickTokenOf(token) === filter);
+  const kept = tokens.filter((token) => quickTokenOf(token) === null);
+  return (on ? kept : [...kept, `is:${filter}`]).join(" ");
 }

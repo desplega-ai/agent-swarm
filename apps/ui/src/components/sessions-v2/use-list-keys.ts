@@ -1,7 +1,7 @@
 import { type KeyboardEvent, useCallback, useLayoutEffect, useRef } from "react";
 
-/** What a list key does. `v` (split) lands in Phase 8. */
-type ListKey =
+/** What a list key does. */
+export type ListKey =
   | "next"
   | "prev"
   | "first"
@@ -14,6 +14,7 @@ type ListKey =
   | "later"
   | "read"
   | "newTab"
+  | "split"
   | "nextUnread"
   | "newSession"
   | "menu"
@@ -22,20 +23,31 @@ type ListKey =
 
 type ListKeyHandlers = Partial<Record<ListKey, () => void>>;
 
+/**
+ * The letter keys of a list and their names, in the order the guide lists
+ * them. Keys with the same name share one line there (J and K: Move).
+ * `cap` is the keycap the guide shows in place of the letter (Enter opens).
+ */
+export const LETTER_KEYS: readonly { key: string; action: ListKey; label: string; cap?: string }[] =
+  [
+    { key: "j", action: "next", label: "Move" },
+    { key: "k", action: "prev", label: "Move" },
+    { key: "o", action: "open", label: "Open", cap: "↵" },
+    { key: "e", action: "done", label: "Done" },
+    { key: "l", action: "later", label: "Later" },
+    { key: "x", action: "select", label: "Select" },
+    { key: "m", action: "move", label: "Move to group" },
+    { key: "u", action: "read", label: "Read or unread" },
+    { key: "c", action: "newSession", label: "New session" },
+    { key: "t", action: "newTab", label: "New tab" },
+    { key: "v", action: "split", label: "Split" },
+    { key: "n", action: "nextUnread", label: "Next unread" },
+  ];
+
 /** Letter keys work in both cases (the keycaps show uppercase, SPEC R9). */
-const LETTERS: Record<string, ListKey> = {
-  j: "next",
-  k: "prev",
-  o: "open",
-  x: "select",
-  e: "done",
-  l: "later",
-  u: "read",
-  m: "move",
-  t: "newTab",
-  n: "nextUnread",
-  c: "newSession",
-};
+const LETTERS: Record<string, ListKey> = Object.fromEntries(
+  LETTER_KEYS.map(({ key, action }) => [key, action]),
+);
 
 const KEYS: Record<string, ListKey> = {
   ArrowDown: "next",
@@ -103,7 +115,7 @@ export function listKeyOf(event: ListKeyEvent): ListKey | null {
 
 /**
  * The keydown handler of a keyboard list (`j`/`k`, arrows, Home, End, Enter
- * or `o`, `x`, `e`, `l`, `u`, `m`, `t`, `n`, `c`, the menu key, Escape). It runs on
+ * or `o`, `x`, `e`, `l`, `u`, `m`, `t`, `v`, `n`, `c`, the menu key, Escape). It runs on
  * the list element, so the keys work only while the list has focus. A key
  * with no handler passes through.
  */

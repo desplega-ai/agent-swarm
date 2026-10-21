@@ -18,7 +18,7 @@ const whatOf = (sessions: SessionListItem[]) =>
   sessions.length === 1 ? "Session" : `${sessions.length} sessions`;
 
 /** The triage part of the row menu: what the sidebar and the pane header share. */
-type TriageActions = Omit<RowMenuActions, "open" | "openNewTab">;
+type TriageActions = Omit<RowMenuActions, "open" | "openNewTab" | "openInSplit">;
 
 /**
  * Triage from the sidebar (the row menu, the keys) and the pane header:

@@ -100,7 +100,8 @@ function SessionsCommands(props: Parameters<typeof useSessionsCommands>[0]) {
 interface SessionTreeProps {
   /** The session in the focused pane, or the New session tab. */
   focused: string;
-  openSession: (id: string, options?: { newTab?: boolean }) => void;
+  /** `newTab` opens a tab in front, `background` adds one behind (a middle-click). */
+  openSession: (id: string, options?: { newTab?: boolean; background?: boolean }) => void;
   /** Open the New session tab, starting in `group` (null: No group). */
   newSession: (group?: string | null) => void;
   /** "View all N": open the list in the group tab (`?view=`). */
@@ -112,8 +113,19 @@ interface SessionTreeProps {
   onViewChange: (view: SessionsViewMode) => void;
   /** Cmd+K "Rename session": the pane header's title turns into its rename field. */
   onRename: () => void;
+  /** The split and the guide: `v`, "Open in split" in the row menu, and their Cmd+K commands. */
+  paneCommands: PaneCommands;
   /** The tree's move dialog and group reveal, for the pane header. */
   ref: Ref<SessionTreeHandle>;
+}
+
+/** What the tree asks of the pane area (plan Phase 8). */
+export interface PaneCommands {
+  openInSplit: (id: string) => void;
+  pickSplit: () => void;
+  /** Only while a split is open. */
+  closeSplit?: () => void;
+  showGuide: () => void;
 }
 
 /** What the pane header asks of the tree. */
@@ -133,6 +145,7 @@ export function SessionTree({
   setQuery,
   onViewChange,
   onRename,
+  paneCommands,
   ref,
 }: SessionTreeProps) {
   const { userId } = useCurrentUser();
@@ -187,6 +200,7 @@ export function SessionTree({
     ...triage.actions,
     open: (session) => openSession(session.root.id),
     openNewTab: (session) => openSession(session.root.id, { newTab: true }),
+    openInSplit: (session) => paneCommands.openInSplit(session.root.id),
   };
   const moves = useTreeMoves({
     me,
@@ -337,6 +351,9 @@ export function SessionTree({
     newTab: () => {
       if (cursorSession) openSession(cursorSession.root.id, { newTab: true });
     },
+    split: () => {
+      if (cursorSession) paneCommands.openInSplit(cursorSession.root.id);
+    },
     nextUnread: () => {
       cursor.enterKeyMode();
       goNextUnread();
@@ -410,7 +427,7 @@ export function SessionTree({
     const row = rowsByKey.get(key);
     if (event.button !== 1 || row?.type !== "session") return;
     event.preventDefault();
-    openSession(row.session.root.id, { newTab: true });
+    openSession(row.session.root.id, { background: true });
   });
   const onRowContextMenu = useStableHandler((key: string, event: MouseEvent) => {
     const row = rowsByKey.get(key);
@@ -456,6 +473,9 @@ export function SessionTree({
       menuAtRow(row?.key ?? null, "later", session, [session]);
     },
     legacy: () => onViewChange("legacy"),
+    pickSplit: paneCommands.pickSplit,
+    closeSplit: paneCommands.closeSplit,
+    showGuide: paneCommands.showGuide,
   };
 
   /** The id of the empty or loading line that describes a row or a section. */

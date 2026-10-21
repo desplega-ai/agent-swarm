@@ -646,7 +646,7 @@ The session pane body matches SPEC Round 8 to 10. It has a turn timeline with fo
 - [x] Turn tests pass: `bun test apps/ui/src/lib/session-turns.test.ts`
 - [x] Panel tests pass: `bun test apps/ui/src/components/session-panel/session-panel.test.tsx`
 - [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
-- [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
+- [x] Smoke passes: `bun run e2e:ui -- --grep @smoke` (clean worktree at f1e5924cd)
 
 #### Automated QA:
 - [x] Open a seeded session with workers. The worker line shows the right agent count and duration, and expanding it shows the steps and holds the scroll.
@@ -706,17 +706,17 @@ Users can work in several tabs and one split, see live counts in a status bar, o
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
+- [x] UI gates pass: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
 - [ ] Smoke passes: `bun run e2e:ui -- --grep @smoke`
 
 #### Automated QA:
-- [ ] Open 13 tabs at 1280 px. The active tab stays visible, clicking an overflowed tab keeps the scroll, and "All tabs" lists all 13.
-- [ ] Open the 120-character seeded session in a tab. `scrollWidth <= clientWidth` holds on the tab title (`agent-browser eval`), and the close button stays visible.
-- [ ] `v` opens the split. Dragging a tab to the right edge also opens it. Reloading keeps `?split=`. Closing a pane returns to one.
-- [ ] The status bar "Unread" toggle filters the sidebar.
-- [ ] "View all" opens the group tab. The pager moves to page 2 and the segmented filter changes the rows.
-- [ ] A fresh profile shows the guide once. `?guide=0` hides it.
-- [ ] Record tabs and split: `agent-browser record start /tmp/sessions-v2-build/p8-tabs.mp4 --cursor`, then `agent-browser record stop`.
+- [x] Open 13 tabs at 1280 px. The active tab stays visible, clicking an overflowed tab keeps the scroll, and "All tabs" lists all 13.
+- [x] Open the 120-character seeded session in a tab. `scrollWidth <= clientWidth` holds on the tab title (`agent-browser eval`), and the close button stays visible.
+- [x] `v` opens the split. Dragging a tab to the right edge also opens it. Reloading keeps `?split=`. Closing a pane returns to one.
+- [x] The status bar "Unread" toggle filters the sidebar.
+- [x] "View all" opens the group tab. The pager moves to page 2 and the segmented filter changes the rows. (Checked as Morgan: Alex's Inbox holds exactly 50.)
+- [x] A fresh profile shows the guide once. `?guide=0` hides it.
+- [x] Record tabs and split: `agent-browser record start /tmp/sessions-v2-build/p8-tabs.mp4 --cursor`, then `agent-browser record stop`.
 
 #### Manual Verification:
 - [ ] None.
@@ -911,6 +911,8 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Phase 7 turn model (decided in review, autopilot, following mockup sB1): `buildTurns` returns `{turns, rest}`. A turn opens at the root or at a person message: a `ui` task (with or without a requester), or a `slack` or `chat` task. A task-page Retry (a `ui` copy of its parent with the same prompt, type, and agent) is another try, not a message. A lead `deferred` wake-up splits a turn into parts. Each part shows its reply, its latest completed lead answer, and its own worker line, so a span never includes a wait. Lead notes in between stay under Handoffs. A lead task still running after the latest answer renders as a live line under it. Approvals render in their own part.
   - Phase 7 fallback (Implementation Note): a root that no person wrote (schedule, workflow, api, mcp) has no person bubble. It renders as the legacy `TaskCard`, and its workers fold under it as usual. Tasks with no path to the root go to `rest` and render as `TaskCard` in chain order. A late follow-up of turn N stays in turn N (turns group by ancestry, not time).
   - Phase 7 QA: the QA API loaded the repo `.env`, so one task completion wrote a memory with a real OpenAI embedding. The QA API now boots with the LLM and embedding keys blank, and QA tasks carry the `auto-generated` tag. `scripts/seed.ts` gained `seedTurnSessions` (fixed ids, runs last, existing rows unchanged) for workers, retries, an approval, handoffs, and a schedule root.
+  - Phase 8 decisions: the group tab is the token `view` in `?tabs=`, `?view=` names its list, and one group tab is open at a time. A New session tab focused while the group tab is open uses `/sessions/new`. A click never replaces a New session tab or the group tab. The split holds one session (`?split=<id>`), and a session never shows in both panes: an open goes to the pane that already has it. Opening another session in the split sends the old one back to the main tabs. Status bar toggles are `is:` tokens in the sidebar search (new token `is:needs`), and the counts add Inbox, Later, and Done so each count equals its list. Middle-click opens a background tab with "Opened in a new tab." and does not mark read. `v` and `c` work outside the tree. `?guide=0` skips the guide for one load only, and the guide waits for "Who are you?". Tab state follows the server's latest-task rule. Only the conversation polls an open session; background tabs poll every 30 s.
+  - Phase 10 notes from Phase 8: UI E2E specs must set localStorage `agent-swarm-sessions-v2-guide=off` (or pass `?guide=0` on every load), or the guide blocks clicks. The pane header status chip uses the Phase 6 rule (any live task shows RUNNING) and can disagree with the tab and row on chains with tied `lastUpdatedAt` (seen on 06ba3a2b).
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
 - **UX-REVIEW-R9 status**: (table filled in during Phase 10).

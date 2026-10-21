@@ -2,8 +2,14 @@ import { useKeyboardShortcuts } from "@/components/shared/questions/keyboard";
 import type { ShortcutKeyEvent } from "@/lib/approval-shortcuts";
 import { listKeyOf } from "../use-list-keys";
 
-/** The keys the pane takes from the sidebar list: Done, Later, Mark read or unread, and Move. */
-export type PaneKey = "done" | "later" | "read" | "move";
+/**
+ * The keys that work away from the sidebar list (UX review R9, mockup
+ * `paneKey`): Done, Later, Mark read or unread, and Move on the focused
+ * pane's session, plus `v` (the split picker) and `c` (a New session tab).
+ */
+export type PaneKey = "done" | "later" | "read" | "move" | "split" | "newSession";
+
+const PANE_KEYS = new Set<string>(["done", "later", "read", "move", "split", "newSession"]);
 
 /**
  * A pane key, or null. The list key rules apply (no modifiers, no repeats,
@@ -30,19 +36,25 @@ function matchPaneKey(
     target,
     currentTarget: null,
   });
-  return key === "done" || key === "later" || key === "read" || key === "move" ? key : null;
+  return key && PANE_KEYS.has(key) ? (key as PaneKey) : null;
 }
 
 /**
- * `e`, `l`, `u`, and `m` on the session in the pane while the focus is
- * outside the sessions sidebar (UX review R9: the header tooltips name
- * these keys). A key with no handler passes through.
+ * The pane keys while the focus is outside the sessions sidebar (UX review
+ * R9: the tooltips name these keys). A key with no handler passes through:
+ * the header handles `e`, `l`, `u`, `m`, and the shell handles `v` and `c`.
+ * With a split, only the active pane's header listens (`enabled`), so a key
+ * acts on one session.
  */
-export function usePaneKeys(handlers: Partial<Record<PaneKey, () => void>>) {
-  useKeyboardShortcuts(matchPaneKey, (key) => {
-    const run = handlers[key];
-    if (!run) return false;
-    run();
-    return true;
-  });
+export function usePaneKeys(handlers: Partial<Record<PaneKey, () => void>>, enabled = true) {
+  useKeyboardShortcuts(
+    matchPaneKey,
+    (key) => {
+      const run = handlers[key];
+      if (!run) return false;
+      run();
+      return true;
+    },
+    enabled,
+  );
 }

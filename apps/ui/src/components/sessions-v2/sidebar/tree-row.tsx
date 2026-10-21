@@ -62,6 +62,22 @@ export function TipKey({ children }: { children: string }) {
  * "Needs you" in the row words (SPEC R4): sentence case on the amber tint,
  * not a status tag. Rows show "Needs you", counts "2 need you".
  */
+/**
+ * The read mark (SPEC R4): a 6 px dot while unread. A read session keeps the
+ * empty slot, so titles line up. Decorative: say "Unread" in the accessible name.
+ */
+export function ReadMark({ unread, className }: { unread: boolean; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("size-1.5 shrink-0 rounded-full", unread && "bg-foreground", className)}
+    />
+  );
+}
+
+/** The title of an unread session: bold, in the full foreground color (SPEC R4). */
+export const UNREAD_TITLE = "font-semibold text-foreground";
+
 export function NeedsYouBadge({ children }: { children: ReactNode }) {
   return (
     <Badge

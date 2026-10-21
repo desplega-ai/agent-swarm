@@ -89,6 +89,7 @@ export function SessionHeader({
   onRenamingChange,
   onMove,
   onRevealGroup,
+  keysActive = true,
 }: {
   detail: SessionDetailResponse;
   showHandoffs: boolean;
@@ -100,6 +101,8 @@ export function SessionHeader({
   onMove: (sessions: SessionListItem[], returnFocus: () => void) => void;
   /** Shows a group in the sidebar tree (null: No group). */
   onRevealGroup: (groupKey: string | null) => void;
+  /** The triage keys act on this header (the active pane of a split). */
+  keysActive?: boolean;
 }) {
   const { userId } = useCurrentUser();
   const me = userId ?? null;
@@ -158,7 +161,7 @@ export function SessionHeader({
                   : undefined
               }
             />
-            <TriageButtons session={session} onMove={onMove} />
+            <TriageButtons session={session} onMove={onMove} keysActive={keysActive} />
             {shareOwner && shares.data ? (
               <>
                 <Separator

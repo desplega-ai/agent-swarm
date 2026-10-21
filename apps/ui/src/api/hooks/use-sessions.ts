@@ -102,12 +102,24 @@ export function sessionDetailKey(rootTaskId: string | undefined, userId: string 
   return ["session", rootTaskId, userId];
 }
 
-export function useSession(rootTaskId: string | undefined) {
+/** A tab in the background polls its session this often (sessions v2 tab strip). */
+const BACKGROUND_SESSION_POLL_MS = 30_000;
+
+/**
+ * How a `useSession` caller polls. `pane` (the default): 4s while a task is
+ * active, else 10s. `background`: every 30s, for a tab that needs only its
+ * title and state. `off`: no timer of its own, for a reader of a session
+ * that a pane or a tab already polls (each observer runs its own timer).
+ */
+export type SessionPoll = "pane" | "background" | "off";
+
+export function useSession(rootTaskId: string | undefined, options?: { poll?: SessionPoll }) {
   // The detail carries the viewer's access and read state, so it is cached
   // per dashboard user: after a switch of user, the pane shows that user's
   // access and read state, never the cached one of the previous user.
   // Read-on-open keys its once-per-open mark by user too.
   const { userId } = useCurrentUser();
+  const poll = options?.poll ?? "pane";
   return useQuery({
     queryKey: sessionDetailKey(rootTaskId, userId ?? null),
     queryFn: () => api.getSession(rootTaskId!),
@@ -116,7 +128,12 @@ export function useSession(rootTaskId: string | undefined) {
     retry: (failureCount, error) => sessionErrorStatus(error) !== 403 && failureCount < 3,
     // Replaces the app-wide 10s default: 4s while any task is active so live
     // progress keeps up, back to 10s once the chain settles (never stops).
-    refetchInterval: (query) => sessionRefetchInterval(query.state.data),
+    refetchInterval: (query) =>
+      poll === "off"
+        ? false
+        : poll === "background"
+          ? BACKGROUND_SESSION_POLL_MS
+          : sessionRefetchInterval(query.state.data),
   });
 }
 

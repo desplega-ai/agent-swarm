@@ -13,11 +13,12 @@ import type { SessionListItem } from "@/api/types";
 
 /**
  * dnd-kit's default text tells screen readers to drag with the space bar
- * and announces row ids. Neither fits: there is no keyboard drag (`m` moves),
- * and the toast says what moved.
+ * and announces item ids. Neither fits the sessions drags: each has a
+ * keyboard path instead (`m` moves rows, `v` splits), and the result says
+ * what changed.
  */
 const silent = () => undefined;
-const ROW_DRAG_ACCESSIBILITY = {
+export const SILENT_DRAG_ACCESSIBILITY = {
   screenReaderInstructions: { draggable: "" },
   announcements: {
     onDragStart: silent,
@@ -26,6 +27,11 @@ const ROW_DRAG_ACCESSIBILITY = {
     onDragCancel: silent,
   } satisfies Announcements,
 };
+
+/** The mouse starts a drag after 5 px, so a click still clicks. There is no keyboard sensor. */
+export function useMouseDragSensors() {
+  return useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }));
+}
 
 interface RowDragData {
   session: SessionListItem;
@@ -72,7 +78,7 @@ export function useRowDrag({
   dragTargets: (session: SessionListItem) => SessionListItem[];
   onDrop: (sessions: SessionListItem[], groupKey: string | null) => void;
 }) {
-  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useMouseDragSensors();
   const [dragging, setDragging] = useState<SessionListItem[] | null>(null);
 
   const onDragStart = (event: DragStartEvent) => {
@@ -86,7 +92,7 @@ export function useRowDrag({
   };
   return {
     sensors,
-    accessibility: ROW_DRAG_ACCESSIBILITY,
+    accessibility: SILENT_DRAG_ACCESSIBILITY,
     dragging,
     onDragStart,
     onDragEnd,

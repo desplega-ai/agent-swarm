@@ -18,6 +18,7 @@ export function SessionPane({
   onRenamingChange,
   onMove,
   onRevealGroup,
+  keysActive = true,
 }: {
   rootTaskId: string;
   /** The header title is the rename field. */
@@ -27,8 +28,11 @@ export function SessionPane({
   onMove: (sessions: SessionListItem[], returnFocus: () => void) => void;
   /** Shows a group in the sidebar tree (null: No group). */
   onRevealGroup: (groupKey: string | null) => void;
+  /** The pane keys (`e`, `l`, `u`, `m`) act here: the active pane of a split. */
+  keysActive?: boolean;
 }) {
-  const { data: detail, isLoading, error } = useSession(rootTaskId);
+  // The conversation below polls this session: the header reads the same cache with no timer.
+  const { data: detail, isLoading, error } = useSession(rootTaskId, { poll: "off" });
   useMarkReadOnOpen(detail);
   // The legacy header's toggle too, so both views show the same timeline.
   const [showInternalHandoffs, setShowInternalHandoffs] = useLocalToggle(
@@ -50,6 +54,7 @@ export function SessionPane({
             onRenamingChange={onRenamingChange}
             onMove={onMove}
             onRevealGroup={onRevealGroup}
+            keysActive={keysActive}
           />
         ) : isLoading ? (
           <SessionHeaderSkeleton />

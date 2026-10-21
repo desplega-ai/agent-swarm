@@ -96,7 +96,8 @@ export function SidebarSearch({
         hint={<Kbd aria-hidden>/</Kbd>}
       />
       <p id={helpId} className="sr-only">
-        Filters: with:name, in:group, is:unread, is:running, is:later, is:done. Escape clears.
+        Filters: with:name, in:group, is:unread, is:running, is:needs, is:later, is:done. Escape
+        clears.
       </p>
     </search>
   );

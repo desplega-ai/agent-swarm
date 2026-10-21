@@ -22,13 +22,21 @@ import { sessionChipStatus } from "@/lib/session-status";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime, parseUTCDate, sessionDisplayTitle } from "@/lib/utils";
 import { formatWakeShort, wakePhrase } from "./snooze-times";
-import { keepTreeFocus, NeedsYouBadge, rowPropsEqual, TipKey, TreeRow } from "./tree-row";
+import {
+  keepTreeFocus,
+  NeedsYouBadge,
+  ReadMark,
+  rowPropsEqual,
+  TipKey,
+  TreeRow,
+  UNREAD_TITLE,
+} from "./tree-row";
 import { useRowDraggable } from "./use-row-drag";
 
-type Activity = "needs" | "running" | "failed" | null;
+export type Activity = "needs" | "running" | "failed" | null;
 
 /** The activity slot: Needs you, else running (the server's rule: the latest status is not terminal), else failed. */
-function activityOf(session: SessionListItem): Activity {
+export function activityOf(session: SessionListItem): Activity {
   if (session.needsYou) return "needs";
   if (!TERMINAL_STATUSES.has(session.latestStatus)) return "running";
   if (session.latestStatus === "failed") return "failed";
@@ -36,7 +44,7 @@ function activityOf(session: SessionListItem): Activity {
 }
 
 /** A still mark for the activity (SPEC R9: rows never spin). */
-function ActivityMark({ activity }: { activity: Activity }) {
+export function ActivityMark({ activity }: { activity: Activity }) {
   if (activity === "needs") return <NeedsYouBadge>Needs you</NeedsYouBadge>;
   if (activity === "running") {
     return <TaskStatusIcon variant="active" label="Running" className="size-3.5 animate-none" />;
@@ -48,7 +56,7 @@ function ActivityMark({ activity }: { activity: Activity }) {
 }
 
 /** "now", "4m", "2h", "3d", "Oct 2": the time column of a row. */
-function shortAgo(iso: string, now: number): string {
+export function shortAgo(iso: string, now: number): string {
   const date = parseUTCDate(iso);
   const minutes = Math.floor((now - date.getTime()) / 60_000);
   if (minutes < 1) return "now";
@@ -288,10 +296,10 @@ function SessionRowView({
               </TooltipContent>
             </Tooltip>
             {unread ? (
-              <span
-                aria-hidden
+              <ReadMark
+                unread
                 className={cn(
-                  "col-start-1 row-start-1 size-1.5 rounded-full bg-foreground",
+                  "col-start-1 row-start-1",
                   showCheckbox || selected ? "hidden" : "group-hover/row:hidden",
                 )}
               />
@@ -300,7 +308,7 @@ function SessionRowView({
           <span
             className={cn(
               "min-w-[45%] flex-1 truncate",
-              unread ? "font-semibold text-foreground" : "text-muted-foreground",
+              unread ? UNREAD_TITLE : "text-muted-foreground",
               open && "text-foreground",
             )}
           >

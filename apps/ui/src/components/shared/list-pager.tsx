@@ -84,21 +84,24 @@ export function ListPager({
         {formatPagerRange(page, pageSize, total) ?? emptyLabel}
       </span>
       <div className="ml-auto flex items-center gap-1.5 @md:gap-2">
-        <div className="flex items-center gap-1.5">
-          <span className="hidden text-xs @md:inline">Rows</span>
-          <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
-            <SelectTrigger className="h-8 w-[72px]" aria-label="Rows per page">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {pageSizeOptions.map((size) => (
-                <SelectItem key={size} value={String(size)}>
-                  {size}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* One page size gives the reader nothing to pick: no select. */}
+        {pageSizeOptions.length > 1 ? (
+          <div className="flex items-center gap-1.5">
+            <span className="hidden text-xs @md:inline">Rows</span>
+            <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
+              <SelectTrigger className="h-8 w-[72px]" aria-label="Rows per page">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {pageSizeOptions.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
         <Button
           variant="outline"
           size="icon"

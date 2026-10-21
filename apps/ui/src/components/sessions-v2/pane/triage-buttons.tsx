@@ -78,10 +78,13 @@ function HeaderButton({
 export function TriageButtons({
   session,
   onMove,
+  keysActive = true,
 }: {
   session: SessionListItem;
   /** Opens the sidebar's move dialog. `returnFocus` runs when it closes. */
   onMove: (sessions: SessionListItem[], returnFocus: () => void) => void;
+  /** The pane keys act here (the active pane of a split). */
+  keysActive?: boolean;
 }) {
   // The focus comes back to the Later button after its menu or the date
   // dialog, and to Move after the move dialog (also for the keys).
@@ -102,7 +105,7 @@ export function TriageButtons({
   const done = () => (inDone ? actions.backToInbox(targets) : actions.done(targets));
   const later = () => (inLater ? actions.backToInbox(targets) : setLaterOpen(true));
   const move = () => actions.move(targets);
-  usePaneKeys(canTriage ? { read: toggleRead, done, later, move } : { move });
+  usePaneKeys(canTriage ? { read: toggleRead, done, later, move } : { move }, keysActive);
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset groups form fields; these are action buttons

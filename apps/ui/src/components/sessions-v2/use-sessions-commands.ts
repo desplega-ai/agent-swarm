@@ -3,6 +3,8 @@ import {
   AlarmClock,
   Archive,
   ArrowDownToDot,
+  CircleHelp,
+  Columns2,
   FolderInput,
   History,
   Inbox,
@@ -24,8 +26,12 @@ import {
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { searchableGroups } from "@/lib/session-groups";
-import { paletteSearchParams, parseSessionSearch } from "@/lib/session-search";
-import { itemFromDetail, NEW_SESSION_TAB, userName } from "@/lib/sessions-v2";
+import {
+  paletteSearchParams,
+  parseSessionSearch,
+  type SessionSearchParams,
+} from "@/lib/session-search";
+import { isSessionTab, itemFromDetail, userName } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
 import type { RowMenuActions } from "./sidebar/row-menu";
 import type { TreeRow } from "./sidebar/tree-rows";
@@ -34,6 +40,40 @@ import { useMyGroups } from "./use-my-groups";
 /** Jump to: this many sessions with an empty palette, and this many from the server for text. */
 const JUMP_IDLE = 5;
 const JUMP_SEARCH = 8;
+
+/**
+ * The sessions the server finds for some text, with the sidebar search
+ * tokens (`with:lena is:unread`). `idle` is what to ask for with no text
+ * (keep it a stable object); without it, no text asks for nothing. The
+ * last matches stay while the next ones load, so the list holds still.
+ */
+export function useServerSessionSearch(
+  text: string,
+  { limit, idle }: { limit: number; idle?: SessionSearchParams },
+) {
+  const { userId } = useCurrentUser();
+  const me = userId ?? null;
+  const wantsPeople = parseSessionSearch(text).with.length > 0;
+  const users = useUsers({ enabled: wantsPeople });
+  const { groups } = useMyGroups(me);
+  const params = useMemo(() => {
+    if (!text.trim() && idle) return idle;
+    const people = users.data ?? [];
+    const nameOf = (id: string) => userName(people, id);
+    const searchGroups = groups ? searchableGroups(groups, me, nameOf) : [];
+    return paletteSearchParams(text, { people, groups: searchGroups });
+  }, [text, idle, users.data, groups, me]);
+  const found = useQuery({
+    ...sessionsQueryOptions(me, { ...params, scope: "tree", limit, enabled: params !== null }),
+    placeholderData: (previous) => previous,
+  });
+  return {
+    params,
+    sessions: params ? (found.data?.sessions ?? []) : [],
+    /** The sessions on hand answer earlier text: the server has not answered this text yet. */
+    stale: params !== null && (found.isPlaceholderData || found.isPending),
+  };
+}
 
 /** What the commands do in the sidebar. The commands pass the focused session. */
 export interface SessionsCommandsApi {
@@ -51,6 +91,12 @@ export interface SessionsCommandsApi {
   /** Open the Later choices for the session, at its row. */
   later: (session: SessionListItem) => void;
   legacy: () => void;
+  /** "Open in split…": pick a session for the split pane. */
+  pickSplit: () => void;
+  /** "Close the split": only while a split is open. */
+  closeSplit?: () => void;
+  /** "Show the guide". */
+  showGuide: () => void;
 }
 
 /** Each session once: the loaded rows of the tree, in row order. */
@@ -71,9 +117,9 @@ function byAttention(a: SessionListItem, b: SessionListItem): number {
  * Phase 5). Jump to: with an empty palette, the 5 sessions that need you
  * most from the loaded lists; with text, the server's 8 best matches, so
  * the palette finds every session, not only the loaded rows (brainstorm
- * decision 15). Then the actions on the focused session, and the switch
- * to the Legacy view. "Open in split", "Close the split", and "Show the
- * guide" land in Phase 8.
+ * decision 15). Then the actions on the focused session, "Open in split…",
+ * "Close the split", "Show the guide" (Phase 8), and the switch to the
+ * Legacy view.
  *
  * It owns the one registration of the group id `sessions` in the v2 view
  * (the legacy page registers its own only in the legacy view).
@@ -100,31 +146,12 @@ export function useSessionsCommands({
     latest.current = api;
   });
 
-  const { userId } = useCurrentUser();
-  const me = userId ?? null;
   const search = useCommandMenuSearch();
   const text = useDebouncedValue(search.trim(), 200);
   // The palette text takes the sidebar search tokens (`with:lena is:unread`).
-  const wantsPeople = parseSessionSearch(text).with.length > 0;
-  const users = useUsers({ enabled: wantsPeople });
-  const { groups } = useMyGroups(me);
-  const params = useMemo(() => {
-    const people = users.data ?? [];
-    const nameOf = (id: string) => userName(people, id);
-    const searchGroups = groups ? searchableGroups(groups, me, nameOf) : [];
-    return paletteSearchParams(text, { people, groups: searchGroups });
-  }, [text, users.data, groups, me]);
-  const jump = useQuery({
-    ...sessionsQueryOptions(me, {
-      ...params,
-      scope: "tree",
-      limit: JUMP_SEARCH,
-      enabled: params !== null,
-    }),
-    // Keep the last matches while the next ones load, so the list holds still.
-    placeholderData: (previous) => previous,
-  });
-  const detail = useSession(focused === NEW_SESSION_TAB ? undefined : focused).data;
+  const jump = useServerSessionSearch(text, { limit: JUMP_SEARCH });
+  // The pane polls the focused session: this reader adds no timer.
+  const detail = useSession(isSessionTab(focused) ? focused : undefined, { poll: "off" }).data;
 
   const loaded = useMemo(() => sessionsOf(treeRows), [treeRows]);
   const target = useMemo(() => {
@@ -135,14 +162,15 @@ export function useSessionsCommands({
   }, [rows, loaded, focused, detail]);
   const canRename = detail !== undefined && detail.access !== "read";
   const jumpSessions = useMemo(() => {
-    if (search.trim()) return params ? (jump.data?.sessions ?? []) : [];
+    if (search.trim()) return jump.sessions;
     return loaded
       .filter((session) => session.readState !== "done" && session.readState !== "later")
       .filter((session) => session.root.id !== focused)
       .sort(byAttention)
       .slice(0, JUMP_IDLE);
-  }, [search, params, jump.data, loaded, focused]);
+  }, [search, jump.sessions, loaded, focused]);
 
+  const splitOpen = api.closeSplit !== undefined;
   const items = useMemo((): CommandMenuItem[] => {
     const run = (pick: (a: SessionsCommandsApi) => void) => () => pick(latest.current);
     const actions: CommandMenuItem[] = [
@@ -235,6 +263,31 @@ export function useSessionsCommands({
       }
     }
     actions.push({
+      id: "split",
+      label: "Open in split…",
+      icon: Columns2,
+      shortcut: "V",
+      keywords: ["pane", "side by side"],
+      onSelect: run((a) => a.pickSplit()),
+    });
+    if (splitOpen) {
+      actions.push({
+        id: "close-split",
+        label: "Close the split",
+        icon: Columns2,
+        keywords: ["pane"],
+        onSelect: run((a) => a.closeSplit?.()),
+      });
+    }
+    actions.push({
+      id: "guide",
+      label: "Show the guide",
+      icon: CircleHelp,
+      shortcut: "?",
+      keywords: ["help", "keys", "shortcuts"],
+      onSelect: run((a) => a.showGuide()),
+    });
+    actions.push({
       id: "legacy",
       label: "Legacy sessions",
       icon: History,
@@ -251,7 +304,7 @@ export function useSessionsCommands({
       }),
     );
     return [...actions, ...jumps];
-  }, [target, canRename, canTriage, jumpSessions, search]);
+  }, [target, canRename, canTriage, jumpSessions, search, splitOpen]);
 
   useCommandMenuGroup("sessions", "Sessions", items);
 }

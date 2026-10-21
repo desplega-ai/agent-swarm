@@ -3,7 +3,7 @@
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import type { SessionDetailResponse, SessionListItem } from "../api/types";
+import type { AgentTask, SessionDetailResponse, SessionListItem } from "../api/types";
 import { groupKeyOf } from "./session-groups";
 
 /**
@@ -21,6 +21,17 @@ export const SESSIONS_TOAST_POSITION = "bottom-left" as const;
 
 /** The "New session" tab in `?tabs=`. On the path it is `/sessions` with no id. */
 export const NEW_SESSION_TAB = "new";
+
+/**
+ * The group tab in `?tabs=` (Phase 8): the full list that `?view=` names.
+ * There is one group tab. It is focused on `/sessions` while `?view=` is set.
+ */
+export const GROUP_TAB = "view";
+
+/** A tab that holds a session (not the New session tab or the group tab). */
+export function isSessionTab(tab: string): boolean {
+  return tab !== NEW_SESSION_TAB && tab !== GROUP_TAB;
+}
 
 /** The flat sidebar sections that `?view=` can open. A group key opens a group. */
 export const SESSION_SECTIONS = ["inbox", "later", "done", "nogroup"] as const;
@@ -61,7 +72,9 @@ export function parseView(value: string | null): string | null {
 /**
  * The tab list after opening `id`. An open tab keeps its place. Otherwise
  * `newTab` adds it after the focused tab, and a plain open replaces the
- * focused tab (a click opens in the current tab).
+ * focused tab (a click opens in the current tab). The New session tab and
+ * the group tab are never replaced: a session opens next to them (mockup
+ * `index.html:2337-2338`), so a draft and a list survive a click.
  */
 export function openTab(
   tabs: string[],
@@ -73,9 +86,95 @@ export function openTab(
   const at = tabs.indexOf(focused);
   if (at < 0) return [...tabs, id];
   const next = [...tabs];
-  if (options.newTab) next.splice(at + 1, 0, id);
+  if (options.newTab || !isSessionTab(focused)) next.splice(at + 1, 0, id);
   else next[at] = id;
   return next;
+}
+
+/** The tab list with `from` turned into `to` (Send turns the New session tab into its session). */
+export function replaceTab(tabs: string[], from: string, to: string): string[] {
+  if (!tabs.includes(from)) return openTab(tabs, from, to);
+  return tabs.filter((tab) => tab !== to).map((tab) => (tab === from ? to : tab));
+}
+
+/**
+ * The tabs and the split of a URL. A group tab with no list in `?view=` is
+ * gone. The split session never shows in the main pane too: a split that
+ * names the focused tab is no split, and a tab that is the split leaves the
+ * list. So one session never mounts in two panes.
+ */
+export function urlTabs(
+  tabsParam: string | null,
+  { focused, view, split }: { focused: string; view: string | null; split: string | null },
+): { tabs: string[]; split: string | null } {
+  const shownSplit = split && isSessionTab(split) && split !== focused ? split : null;
+  const listed = parseTabs(tabsParam).filter(
+    (tab) => (tab !== GROUP_TAB || view !== null) && tab !== shownSplit,
+  );
+  return { tabs: tabsWithFocus(listed, focused), split: shownSplit };
+}
+
+/** The tab list with the group tab: it keeps its place, or comes in after the focused tab. */
+export function withGroupTab(tabs: string[], focused: string): string[] {
+  if (tabs.includes(GROUP_TAB)) return tabs;
+  const at = tabs.indexOf(focused);
+  return [...tabs.slice(0, at + 1), GROUP_TAB, ...tabs.slice(at + 1)];
+}
+
+/** `closeTab`, plus the list of the group tab: closing that tab clears `?view=`. */
+export function closeUrlTab(
+  tabs: string[],
+  focused: string,
+  view: string | null,
+  tab: string,
+): { tabs: string[]; focused: string; view: string | null } {
+  return { ...closeTab(tabs, focused, tab), view: tab === GROUP_TAB ? null : view };
+}
+
+/** Where the split stands after "Open in split" (one split, two panes, SPEC R2.9). */
+export type SplitResult =
+  | { tabs: string[]; focused: string; split: string }
+  /** It cannot split: the session is the only tab. `message` says why. */
+  | { message: string };
+
+/**
+ * Open `id` in the split pane. A tab of the main pane moves there (it needs
+ * a second tab first). A session that was in the split before goes back to
+ * the main pane, at the place of the moved tab or after the focused tab, so
+ * nothing open is lost.
+ */
+export function splitTo(
+  tabs: string[],
+  focused: string,
+  split: string | null,
+  id: string,
+): SplitResult {
+  if (id === split) return { tabs, focused, split };
+  let next = tabs;
+  let nextFocused = focused;
+  let at = tabs.indexOf(focused) + 1;
+  if (tabs.includes(id)) {
+    // The only tab swaps with the split session. With no split, there is nothing to swap.
+    if (tabs.length === 1 && !split) return { message: "Open a second session first. Then split." };
+    if (tabs.length === 1 && split) return { tabs: [split], focused: split, split: id };
+    at = tabs.indexOf(id);
+    ({ tabs: next, focused: nextFocused } = closeTab(tabs, focused, id));
+  }
+  if (split && !next.includes(split)) {
+    next = [...next];
+    next.splice(Math.min(at, next.length), 0, split);
+  }
+  return { tabs: next, focused: nextFocused, split: id };
+}
+
+/**
+ * The tab list after the split closes. `keep` (Cmd+K "Close the split")
+ * moves its session back to the main pane as the last tab. Closing its tab
+ * drops it.
+ */
+export function closeSplit(tabs: string[], split: string | null, keep: boolean): string[] {
+  if (!keep || !split || tabs.includes(split)) return tabs;
+  return [...tabs, split];
 }
 
 /**
@@ -96,9 +195,21 @@ export function closeTab(
   return { tabs: next, focused: next[Math.min(at, next.length - 1)] };
 }
 
-/** The route of a tab. */
-export function tabPath(tab: string): string {
-  return tab === NEW_SESSION_TAB ? "/sessions" : `/sessions/${encodeURIComponent(tab)}`;
+/**
+ * The route of a tab. The New session tab and the group tab both live on
+ * `/sessions` with no id, and the group tab wins there while `?view=` is
+ * set. So the New session tab moves to `/sessions/new` while a group tab
+ * is open (`groupTabOpen`).
+ */
+export function tabPath(tab: string, groupTabOpen = false): string {
+  if (tab === GROUP_TAB) return "/sessions";
+  if (tab === NEW_SESSION_TAB) return groupTabOpen ? `/sessions/${NEW_SESSION_TAB}` : "/sessions";
+  return `/sessions/${encodeURIComponent(tab)}`;
+}
+
+/** The focused tab of a URL: the route's id, else the group tab while `?view=` is set, else New session. */
+export function focusedTab(rootTaskId: string | undefined, view: string | null): string {
+  return rootTaskId ?? (view ? GROUP_TAB : NEW_SESSION_TAB);
 }
 
 /**
@@ -147,6 +258,34 @@ export function userName(
 }
 
 /**
+ * The task the server reads `latestStatus` from (`src/be/db/session-tree.ts`):
+ * the one with the latest `lastUpdatedAt`. On a tie the first one in the
+ * server's walk wins: SQLite keeps the first row with the maximum, and the
+ * recursive walk is breadth first from the root. Children follow their
+ * order in the chain (`createdAt`, then insertion), the closest the client
+ * has to the server's index order.
+ */
+export function latestTask(detail: Pick<SessionDetailResponse, "root" | "chain">): AgentTask {
+  const children = new Map<string, AgentTask[]>();
+  for (const task of detail.chain) {
+    if (!task.parentTaskId || task.id === detail.root.id) continue;
+    const siblings = children.get(task.parentTaskId) ?? [];
+    siblings.push(task);
+    children.set(task.parentTaskId, siblings);
+  }
+  const root = detail.chain.find((task) => task.id === detail.root.id) ?? detail.root;
+  const queue = [root];
+  let best = root;
+  for (let i = 0; i < queue.length; i++) {
+    const task = queue[i];
+    // Strictly later: a tie keeps the earlier task in the walk.
+    if (task.lastUpdatedAt > best.lastUpdatedAt) best = task;
+    queue.push(...(children.get(task.id) ?? []));
+  }
+  return best;
+}
+
+/**
  * A list row for a session from its detail: the focused session when no
  * loaded list holds it (Cmd+K), and the pane header. The detail has no
  * Later wake time: pass it when known, so Undo can snooze again.
@@ -155,13 +294,17 @@ export function itemFromDetail(
   detail: SessionDetailResponse,
   snoozeUntil: string | null = null,
 ): SessionListItem {
-  const last = detail.chain.at(-1) ?? detail.root;
+  const last = latestTask(detail);
   return {
     root: detail.root,
     chainTaskCount: detail.chain.length,
     lastActivityAt: detail.lastActivityAt ?? last.lastUpdatedAt,
     latestStatus: last.status,
     readState: detail.readState,
+    // The list's rule (D6): unread and failed, or an approval that waits.
+    needsYou:
+      (detail.approvals?.length ?? 0) > 0 ||
+      (detail.readState === "unread" && last.status === "failed"),
     snoozeUntil,
     groupKey: detail.root.key ? groupKeyOf(detail.root.key) : undefined,
   };

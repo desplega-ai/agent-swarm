@@ -3,13 +3,14 @@
  * `l` opens its Later part alone (sessions already in Later go straight
  * back to the Inbox, with no menu). It opens at a point (`PointMenu`, plan
  * Phase 4). "Move to group…" opens the move dialog (Phase 5). "Open in
- * split" lands with the split (Phase 8).
+ * split" opens the row in the split pane (Phase 8).
  */
 
 import {
   AlarmClock,
   AppWindow,
   Archive,
+  Columns2,
   CornerDownLeft,
   FolderInput,
   Inbox,
@@ -42,6 +43,7 @@ export interface RowMenuState {
 export interface RowMenuActions {
   open: (session: SessionListItem) => void;
   openNewTab: (session: SessionListItem) => void;
+  openInSplit: (session: SessionListItem) => void;
   toggleRead: (targets: SessionListItem[]) => void;
   done: (targets: SessionListItem[]) => void;
   later: (targets: SessionListItem[], at: string) => void;
@@ -105,6 +107,11 @@ function RowMenuItems({
             <AppWindow />
             Open in new tab
             <MenuKey>T</MenuKey>
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => actions.openInSplit(session)}>
+            <Columns2 />
+            Open in split
+            <MenuKey>V</MenuKey>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {canTriage ? (

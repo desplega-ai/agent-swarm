@@ -3,10 +3,12 @@ import {
   matchingGroups,
   paletteSearchParams,
   parseSessionSearch,
+  quickFilterOn,
   resolveSessionSearch,
   type SearchGroup,
   type SearchPerson,
   splitMatches,
+  toggleQuickFilter,
 } from "./session-search";
 
 const PEOPLE: SearchPerson[] = [
@@ -93,6 +95,8 @@ describe("resolveSessionSearch", () => {
     expect(resolve("is:later")).toEqual({ ok: true, params: { triage: "later" } });
     expect(resolve("is:done")).toEqual({ ok: true, params: { triage: "done" } });
     expect(resolve("is:running")).toEqual({ ok: true, params: { status: "running" } });
+    expect(resolve("is:needs")).toEqual({ ok: true, params: { status: "needs" } });
+    expect(resolve("is:needs is:running")).toMatchObject({ ok: false });
     expect(resolve("with:alex is:unread is:running")).toEqual({
       ok: true,
       params: { withUserId: "u-alex", triage: "unread", status: "running" },
@@ -111,7 +115,8 @@ describe("resolveSessionSearch", () => {
     });
     expect(resolve("is:soon")).toEqual({
       ok: false,
-      message: "is:soon is not a filter. Try is:unread, is:running, is:later, or is:done.",
+      message:
+        "is:soon is not a filter. Try is:unread, is:running, is:needs, is:later, or is:done.",
     });
     expect(resolve("with:")).toEqual({ ok: false, message: "Type a name, like with:lena." });
   });
@@ -163,5 +168,22 @@ describe("splitMatches", () => {
   });
   test("no words: one plain piece", () => {
     expect(splitMatches("Hi there", [])).toEqual([{ text: "Hi there", match: false }]);
+  });
+});
+
+describe("status bar quick filters", () => {
+  test("a toggle adds its token, replaces another quick filter, and keeps the rest", () => {
+    expect(toggleQuickFilter("", "unread")).toBe("is:unread");
+    expect(toggleQuickFilter("pricing with:Lena is:running", "unread")).toBe(
+      "pricing with:Lena is:unread",
+    );
+    expect(toggleQuickFilter("pricing IS:Unread", "unread")).toBe("pricing");
+    expect(quickFilterOn("pricing is:unread", "unread")).toBe(true);
+    expect(quickFilterOn("pricing", "unread")).toBe(false);
+  });
+
+  test("a toggle leaves other is: tokens and a waiting token as typed", () => {
+    expect(toggleQuickFilter("is:soon feed in:", "unread")).toBe("is:soon feed in: is:unread");
+    expect(toggleQuickFilter("is:later Feed is:unread", "unread")).toBe("is:later Feed");
   });
 });
