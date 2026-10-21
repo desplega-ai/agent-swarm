@@ -9,7 +9,7 @@ import {
 } from "./script-common";
 
 export const SCRIPT_DELETE_DESCRIPTION =
-  "Remove a swarm-shared script from the catalog. Versions table preserves history.";
+  "Permanently remove a swarm-shared script and all its versions from the catalog. This cannot be undone.";
 
 export const registerScriptDeleteTool = (server: McpServer) => {
   createToolRegistrar(server)(
