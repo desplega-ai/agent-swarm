@@ -151,6 +151,12 @@ export async function driveForeach(
       parentInput ??= await loadParentInput(def, run, parentNode, registry, workflow.id, options);
       const { ctx, items, itemKeyField, meta } = parentInput;
       for (const child of claimed) {
+        // An earlier body in this batch can run for a long time. A cancel (of
+        // the run or this child) that landed meanwhile must stop the rest of
+        // the batch before it reaches an executor.
+        const liveness = await childLiveness(runId, child.id);
+        if (liveness === "run-ended") return notJoined();
+        if (liveness === "child-ended") continue;
         started.add(child.id);
         const outcome = await startChild({
           def,
@@ -292,6 +298,17 @@ export async function drainForeachDrives(): Promise<void> {
 async function getRenderedWorkflow(workflowId: string): Promise<Workflow | null> {
   const workflow = await getWorkflow(workflowId);
   return workflow ? renderAutomationTokens(workflow, workflow.params ?? {}) : null;
+}
+
+/** Whether a claimed child may still start: its run is live and its row is still claimed. */
+async function childLiveness(
+  runId: string,
+  stepId: string,
+): Promise<"live" | "run-ended" | "child-ended"> {
+  const run = await getWorkflowRun(runId);
+  if (!run || (run.status !== "running" && run.status !== "waiting")) return "run-ended";
+  const step = await getWorkflowRunStep(stepId);
+  return step?.status === "running" ? "live" : "child-ended";
 }
 
 async function requeueChild(stepId: string): Promise<void> {

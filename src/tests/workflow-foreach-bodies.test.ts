@@ -33,7 +33,11 @@ import {
 } from "../workflows/foreach-body";
 import { drainForeachDrives } from "../workflows/foreach-driver";
 import { recoverIncompleteRuns } from "../workflows/recovery";
-import { resumeWaitState, setupWorkflowResumeListener } from "../workflows/resume";
+import {
+  cancelWorkflowRun,
+  resumeWaitState,
+  setupWorkflowResumeListener,
+} from "../workflows/resume";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 
 const TEST_DB_PATH = "./test-workflow-foreach-bodies.sqlite";
@@ -59,6 +63,31 @@ class EchoExecutor extends BaseExecutor<z.ZodObject, z.ZodObject> {
   }
 }
 registry.register(new EchoExecutor(deps));
+
+/** An instant node whose first call blocks until `release()`; records each call. */
+class GatedExecutor extends BaseExecutor<z.ZodObject, z.ZodObject> {
+  readonly type = "test-gated";
+  readonly mode = "instant" as const;
+  readonly configSchema = z.object({ value: z.string() });
+  readonly outputSchema = z.object({ value: z.string() });
+  calls: Array<{ runId: string; stepId: string }> = [];
+  release: () => void = () => {};
+  private readonly gate = new Promise<void>((resolve) => {
+    this.release = resolve;
+  });
+
+  protected async execute(
+    config: { value: string },
+    _context: Readonly<Record<string, unknown>>,
+    meta: { runId: string; stepId: string },
+  ): Promise<ExecutorResult<{ value: string }>> {
+    this.calls.push({ runId: meta.runId, stepId: meta.stepId });
+    if (this.calls.length === 1) await this.gate;
+    return { status: "success", output: { value: config.value } };
+  }
+}
+const gated = new GatedExecutor(deps);
+registry.register(gated);
 
 /** Stands in for `swarm-script` (which needs the scripts runtime) and records each call. */
 class RecordingSwarmScriptExecutor extends BaseExecutor<z.ZodObject, z.ZodObject> {
@@ -386,6 +415,29 @@ describe("foreach with any executor body", () => {
       ),
     );
     expect(prompts).toEqual(["Hello hi Ada", "Hello hi Babbage", "Hello hi Curie"]);
+  });
+
+  test("a cancel during an instant body stops the rest of the batch", async () => {
+    const workflow = await makeWorkflow(
+      foreachOver({ type: "test-gated", config: { value: "x" } }),
+    );
+    const walk = startWorkflowExecution(workflow, { items: ITEMS }, registry);
+    const deadline = Date.now() + 2_000;
+    while (gated.calls.length === 0 && Date.now() < deadline) await Bun.sleep(5);
+    const runId = gated.calls[0]!.runId;
+
+    await cancelWorkflowRun(runId);
+    gated.release();
+    await walk;
+    await drainForeachDrives();
+
+    expect(gated.calls.map((call) => call.stepId)).toEqual([(await childSteps(runId))[0]!.id]);
+    expect((await childSteps(runId)).map((step) => step.status)).toEqual([
+      "cancelled",
+      "cancelled",
+      "cancelled",
+    ]);
+    expect((await getWorkflowRun(runId))?.status).toBe("cancelled");
   });
 });
 
