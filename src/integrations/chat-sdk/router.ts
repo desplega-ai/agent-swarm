@@ -83,12 +83,31 @@ export async function deleteChatChannelMapping(
   return deleteKv(CHAT_CHANNELS_NAMESPACE, chatChannelKey(adapter, channelId));
 }
 
+/** True when the text carries a `swarm#<uuid>` or `swarm#all` routing token. */
+export function hasRoutingToken(text: string): boolean {
+  return /swarm#(?:[a-f0-9-]{36}|all)/i.test(text);
+}
+
 /** Remove `swarm#<uuid>` and `swarm#all` routing tokens from task text. */
 export function stripRoutingTokens(text: string): string {
   return text
     .replace(/swarm#[a-f0-9-]{36}/gi, "")
     .replace(/swarm#all/gi, "")
     .trim();
+}
+
+const DEFAULT_OWNER_WINDOW_MINUTES = 15;
+
+/**
+ * Start of the thread-owner window: a thread keeps its owner while the
+ * owner's task is open and for `CHAT_SDK_OWNER_WINDOW_MIN` (default 15,
+ * 0 = only while open) after it ends. Read per call, so a change applies at once.
+ */
+export function chatOwnerWindowStart(now: number = Date.now()): string {
+  const raw = process.env.CHAT_SDK_OWNER_WINDOW_MIN?.trim();
+  const value = raw ? Number(raw) : Number.NaN;
+  const minutes = Number.isFinite(value) && value >= 0 ? value : DEFAULT_OWNER_WINDOW_MINUTES;
+  return new Date(now - minutes * 60_000).toISOString();
 }
 
 async function leadMatch(reachable: Agent[], matchedText: string): Promise<ChatAgentMatch> {
@@ -99,7 +118,8 @@ async function leadMatch(reachable: Agent[], matchedText: string): Promise<ChatA
 /**
  * Port of `src/slack/router.ts` for Chat SDK threads. Order: `swarm#<uuid>`,
  * `swarm#all`, KV channel mapping (agent, or workflow for a mention or DM), the
- * thread owner (lead when the owner is offline), the lead for a mention or DM.
+ * thread owner (inside its window in a Telegram group; lead when the owner is
+ * offline), the lead for a mention or DM.
  * Returns null when the message is not addressed to the swarm.
  */
 export async function routeChatMessage(
@@ -148,7 +168,13 @@ export async function routeChatMessage(
     );
   }
 
-  const owner = await getAgentWorkingOnContextKey(chatSdkContextKey(ctx.threadId), "chat");
+  // Only a Telegram group expires its owner: one shared conversation, where a
+  // stale owner would catch the next topic. DMs and threads keep theirs.
+  const owner = await getAgentWorkingOnContextKey(
+    chatSdkContextKey(ctx.threadId),
+    "chat",
+    ctx.adapter === "telegram" && !ctx.isDirectMessage ? chatOwnerWindowStart() : undefined,
+  );
   if (owner && (await isAgentReachable(owner))) {
     return {
       kind: "agents",

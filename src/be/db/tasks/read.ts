@@ -18,6 +18,7 @@ import {
   parseModelTier,
   ReasoningEffortSchema,
   RoutingAffinitySchema,
+  TERMINAL_TASK_STATUSES,
 } from "../../../types";
 import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
@@ -1688,14 +1689,26 @@ export async function getLatestLeadTaskInThread(
 export async function getAgentWorkingOnContextKey(
   contextKey: string,
   source?: string,
+  /** ISO time: when set, only tasks still open or finished at or after it count. */
+  endedSince?: string,
 ): Promise<Agent | null> {
   const taskRow = await getDbClient().get<AgentTaskRow>(
     `SELECT agentId FROM agent_tasks
        WHERE contextKey = ?
        AND (? IS NULL OR source = ?)
+       AND (? IS NULL
+            OR status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
+            OR finishedAt >= ?)
        ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
-    [contextKey, source ?? null, source ?? null],
+    [
+      contextKey,
+      source ?? null,
+      source ?? null,
+      endedSince ?? null,
+      ...TERMINAL_TASK_STATUSES,
+      endedSince ?? null,
+    ],
   );
 
   if (taskRow?.agentId) return getAgentById(taskRow.agentId);

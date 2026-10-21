@@ -42,7 +42,7 @@ export const ELEMENT_KEYS = new Set([
   "repeat",
   "watch",
 ]);
-const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs", "Chips"]);
+const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "NumberInput", "Tabs", "Chips"]);
 
 /**
  * Props that hold a plain action chain (an array of `{ action, params }`),

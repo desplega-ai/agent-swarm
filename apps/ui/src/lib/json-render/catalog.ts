@@ -172,6 +172,14 @@ const stackProps = z.object({
    * only; `none` turns it off.
    */
   motion: z.enum(["rise", "fade", "none"]).optional(),
+  /**
+   * Grow to fill the remaining space of a `fill`-aware parent (another
+   * `fill` Stack/Split) instead of sizing to content, and let its own
+   * children do the same. Chain `fill` from the page root down to every
+   * container on the path to a scrolling leaf to build a viewport-height
+   * layout with no page scroll.
+   */
+  fill: z.boolean().optional(),
 });
 
 /** Grid tracks are capped at 6 — beyond that a page is a table, not a layout. */
@@ -204,6 +212,9 @@ const splitProps = z.object({
   collapseBelow: z.enum(["sm", "md", "lg"]).optional(),
   reverse: z.boolean().optional(),
   padding: spacing.optional(),
+  /** Same `fill` contract as `Stack.fill` — grow to fill a `fill`-aware
+   * parent's remaining space; both panes stretch to the full row height. */
+  fill: z.boolean().optional(),
 });
 
 const dividerProps = z.object({
@@ -251,6 +262,15 @@ const chipsProps = z.object({
   label: z.string().optional(),
 });
 
+const numberInputProps = z.object({
+  /** State id — the parsed number lands at `/ui/<id>/value`: `null` when empty; non-numeric text leaves it untouched. */
+  id: z.string(),
+  label: z.string().optional(),
+  placeholder: z.string().optional(),
+  min: z.number().optional(),
+  max: z.number().optional(),
+});
+
 const selectOptionSchema = z.union([
   z.string(),
   z.object({
@@ -275,6 +295,10 @@ const selectProps = z.object({
   multiple: z.boolean().optional(),
   /** Placeholder of the filter field when the list is searchable. */
   searchPlaceholder: z.string().optional(),
+  /** Seeds `/ui/<id>/value` the first time it's read (before any user
+   * interaction). Ignored once the path has any other value, including `null`.
+   * With `multiple` the seed is a one-entry array. */
+  defaultValue: z.string().optional(),
 });
 
 const markdownProps = z.object({
@@ -813,7 +837,7 @@ export const swarmCatalogSpec = {
       props: stackProps,
       slots: ["default"],
       description:
-        "THE primary layout primitive \u2014 a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. For rows, set `collapseBelow` (sm|md|lg) so the row stacks vertically on narrow viewports \u2014 filter bars should always set it. `motion` (rise|fade|none, default rise) is the entrance of the direct children on first paint: a 200ms fade plus a 4px rise, staggered 30ms; it never replays on data polls, nested Stacks inherit the parent's entrance, and reduced-motion viewers get a short fade. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages.",
+        "THE primary layout primitive \u2014 a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. For rows, set `collapseBelow` (sm|md|lg) so the row stacks vertically on narrow viewports \u2014 filter bars should always set it. `motion` (rise|fade|none, default rise) is the entrance of the direct children on first paint: a 200ms fade plus a 4px rise, staggered 30ms; it never replays on data polls, nested Stacks inherit the parent's entrance, and reduced-motion viewers get a short fade. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages. `fill: true` makes this Stack grow to fill the remaining height of a `fill`-aware parent instead of sizing to content — chain it from the page root down to a scrolling leaf to build a viewport-height layout with no page scroll; a non-`fill` sibling keeps its natural height and the `fill` sibling absorbs whatever is left.",
     },
     Grid: {
       props: gridProps,
@@ -825,7 +849,7 @@ export const swarmCatalogSpec = {
       props: splitProps,
       slots: ["default"],
       description:
-        "Two-pane layout. POSITIONAL children: the FIRST child is the left pane, the SECOND is the right pane, and any further children stack inside the right pane. `ratio` sizes them (1-1|1-2|2-1|1-3|3-1, default 2-1 = wide left). Below `collapseBelow` (sm|md|lg, default md) the panes stack vertically; `reverse` only flips that stacked order (right pane first on narrow screens).",
+        "Two-pane layout. POSITIONAL children: the FIRST child is the left pane, the SECOND is the right pane, and any further children stack inside the right pane. `ratio` sizes them (1-1|1-2|2-1|1-3|3-1, default 2-1 = wide left). Below `collapseBelow` (sm|md|lg, default md) the panes stack vertically; `reverse` only flips that stacked order (right pane first on narrow screens). `fill: true` makes this Split grow to fill the remaining height of a `fill`-aware parent (same contract as `Stack.fill`) — both panes stretch to the full row height, so nesting a `fill` Split inside one pane of another `fill` Split is the standard way to build a 3+ column viewport-height layout (ratio is only ever 2 panes).",
     },
     Divider: {
       props: dividerProps,
@@ -870,7 +894,12 @@ export const swarmCatalogSpec = {
     Select: {
       props: selectProps,
       description:
-        'Dropdown filter/picker. `options` are plain strings or `{ value, label?, icon?, hint? }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button. `searchable` adds a type-to-filter field (on by default past 8 options; `searchPlaceholder` sets its hint). `multiple` picks several: the value is a string array (empty = nothing picked), which a Table filter reads as "cell is one of".',
+        'Dropdown filter/picker. `options` are plain strings or `{ value, label?, icon?, hint? }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button. `searchable` adds a type-to-filter field (on by default past 8 options; `searchPlaceholder` sets its hint). `multiple` picks several: the value is a string array (empty = nothing picked), which a Table filter reads as "cell is one of". `defaultValue` seeds `/ui/<id>/value` the first time it is read, before any interaction (a one-entry array with `multiple`).',
+    },
+    NumberInput: {
+      props: numberInputProps,
+      description:
+        "Labelled numeric text field (decimal keyboard on touch devices, no debounce). Writes the parsed number into state at `/ui/<id>/value` on every change, or `null` when the field is empty; non-numeric text (a bare '-' mid-edit, letters) leaves the stored value untouched until it parses. `min`/`max` clamp the stored value, and the visible text snaps to that clamped value when the field loses focus.",
     },
     Button: {
       props: buttonProps,

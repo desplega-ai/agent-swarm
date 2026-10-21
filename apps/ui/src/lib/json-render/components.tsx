@@ -184,6 +184,7 @@ import type {
 } from "./catalog";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
+import { parseNumberInputValue } from "./number-input-value";
 import { useJsonRenderThemeAttr } from "./theme-scope";
 import { usePageShortcut } from "./use-page-shortcut";
 
@@ -547,6 +548,7 @@ type SplitProps = InferComponentProps<typeof swarmCatalog, "Split">;
 type TabsComponentProps = InferComponentProps<typeof swarmCatalog, "Tabs">;
 type SearchInputProps = InferComponentProps<typeof swarmCatalog, "SearchInput">;
 type SelectFilterProps = InferComponentProps<typeof swarmCatalog, "Select">;
+type NumberInputProps = InferComponentProps<typeof swarmCatalog, "NumberInput">;
 
 /** `collapseBelow` → the breakpoint the row un-stacks at (full class names). */
 const stackRowFromClass: Record<"sm" | "md" | "lg", string> = {
@@ -585,6 +587,14 @@ function StackComponent({ props, children }: { props: StackProps; children: Reac
         props.wrap ? "flex-wrap" : undefined,
         props.padding ? paddingClass[props.padding] : undefined,
         stackMotionClass[props.motion ?? "rise"],
+        // Grow to fill a `fill`-aware parent's remaining space instead of
+        // sizing to content — `min-h-0` lets it shrink so a scrolling leaf
+        // further down the tree gets a real height to scroll within instead
+        // of pushing the page. `overflow-y-auto` is the backstop for
+        // non-`fill` children whose combined natural height still exceeds
+        // that: THIS Stack scrolls on its own instead of leaking into a shared
+        // ancestor scroll container that would drag unrelated columns along.
+        props.fill ? "min-h-0 flex-1 overflow-y-auto" : undefined,
       )}
     >
       {children}
@@ -647,24 +657,33 @@ function SplitComponent({ props, children }: { props: SplitProps; children: Reac
         splitTrackClass[breakpoint][tracks],
         gap,
         props.padding ? paddingClass[props.padding] : undefined,
+        // Grow to fill a `fill`-aware parent; CSS grid's default stretch
+        // then sizes the single row to that height and both pane divs (grid
+        // items, `align-items: stretch` by default) match it automatically.
+        props.fill ? "min-h-0 flex-1" : undefined,
       )}
     >
       <div
         className={cn(
-          "flex min-w-0 flex-col",
+          "flex min-w-0 min-h-0 flex-col",
           gap,
           splitSpanClass[breakpoint][firstSpan],
           reverse ? cn("order-2", splitOrderResetClass[breakpoint]) : undefined,
+          // Same per-pane scroll backstop as `Stack.fill` — a pane whose
+          // content overflows the row height scrolls on its own rather than
+          // dragging the other pane along via a shared ancestor scrollbar.
+          props.fill ? "overflow-y-auto" : undefined,
         )}
       >
         {panes[0] ?? null}
       </div>
       <div
         className={cn(
-          "flex min-w-0 flex-col",
+          "flex min-w-0 min-h-0 flex-col",
           gap,
           splitSpanClass[breakpoint][secondSpan],
           reverse ? cn("order-1", splitOrderResetClass[breakpoint]) : undefined,
+          props.fill ? "overflow-y-auto" : undefined,
         )}
       >
         {/* Everything past the first child belongs to the second pane. */}
@@ -843,6 +862,66 @@ function SearchInputComponent({ props }: { props: SearchInputProps }) {
   );
 }
 
+function NumberInputComponent({ props }: { props: NumberInputProps }) {
+  const { state, get, set } = useStateStore();
+  const path = `/ui/${props.id}/value`;
+  const inputId = `ui-${props.id}`;
+
+  const [text, setText] = useState(() => {
+    const initial = get(path);
+    return typeof initial === "number" ? String(initial) : "";
+  });
+
+  const setRef = useRef(set);
+  setRef.current = set;
+  // Last value THIS component pushed — mirrors SearchInput's echo guard so an
+  // external write (not our own commit) can still override the local mirror.
+  const pushedRef = useRef<number | null>(parseNumberInputValue(text) ?? null);
+
+  const stored = getByPath(state, path);
+  useEffect(() => {
+    const next = typeof stored === "number" ? stored : null;
+    if (next === pushedRef.current) return;
+    pushedRef.current = next;
+    setText(next === null ? "" : String(next));
+  }, [stored]);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {props.label ? <Label htmlFor={inputId}>{props.label}</Label> : null}
+      <Input
+        id={inputId}
+        // A text field, not `type="number"`: the browser sanitizes a number
+        // input to "" while the text is a non-numeric edit ("5" → select-all →
+        // "-", or "1" → "1e"), which would write `null` to the store mid-edit
+        // and briefly drop a bound Table's filter. Plain text hands us the raw
+        // characters, so `parseNumberInputValue` can leave the store untouched.
+        type="text"
+        inputMode="decimal"
+        placeholder={props.placeholder}
+        aria-label={props.label ?? props.placeholder ?? "Number"}
+        value={text}
+        onChange={(event) => {
+          const raw = event.target.value;
+          setText(raw);
+          const next = parseNumberInputValue(raw, props.min, props.max);
+          // `undefined` is non-numeric text (a bare "-" mid-edit, letters):
+          // leave the store untouched instead of clobbering it.
+          if (next === undefined) return;
+          pushedRef.current = next;
+          setRef.current(path, next);
+        }}
+        onBlur={() => {
+          // Snap the visible text to the clamped stored value on leaving the
+          // field; empty or non-numeric text stays as typed.
+          const settled = parseNumberInputValue(text, props.min, props.max);
+          if (typeof settled === "number") setText(String(settled));
+        }}
+      />
+    </div>
+  );
+}
+
 type NormalizedSelectOption = { value: string; label: string; icon?: string; hint?: string };
 
 function normalizeSelectOptions(options: SelectOption[]): NormalizedSelectOption[] {
@@ -884,14 +963,17 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   const hasValue = multiple ? values.length > 0 : value !== "";
 
   // Seed `/ui/<id>/value` so a bound `filters` entry resolves to `null` / `[]`
-  // (= filter disabled) instead of `undefined` before the first interaction.
+  // (= filter disabled) instead of `undefined` before the first interaction —
+  // or to `defaultValue` when the usage wants a preselected option.
   const getRef = useRef(get);
   getRef.current = get;
   const setRef = useRef(set);
   setRef.current = set;
   useEffect(() => {
-    if (getRef.current(path) === undefined) setRef.current(path, multiple ? [] : null);
-  }, [path, multiple]);
+    if (getRef.current(path) !== undefined) return;
+    const seed = props.defaultValue;
+    setRef.current(path, multiple ? (seed ? [seed] : []) : (seed ?? null));
+  }, [path, multiple, props.defaultValue]);
 
   // A standalone Select (no `label`) has no accessible name — fall back to the
   // placeholder, mirroring `SearchBox`'s ariaLabel chain.
@@ -2904,6 +2986,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Tabs: ({ props, children }) => <TabsComponent props={props}>{children}</TabsComponent>,
   SearchInput: ({ props }) => <SearchInputComponent props={props} />,
   Select: ({ props }) => <SelectFilterComponent props={props} />,
+  NumberInput: ({ props }) => <NumberInputComponent props={props} />,
   Markdown: ({ props }) => (
     <div className="prose-doc min-w-0 text-foreground">
       <Streamdown>{props.content}</Streamdown>

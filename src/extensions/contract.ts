@@ -193,8 +193,15 @@ export interface ChatRouteEvent {
   userName?: string;
   /** The buffered messages, joined. */
   text: string;
+  /** True for an @mention and for a reply to one of the bot's messages. */
   botMentioned: boolean;
   isDirectMessage: boolean;
+  /** Platform chat type, such as Telegram `private`, `group`, `supergroup` or `channel`. */
+  chatType?: string;
+  /** Set for a Telegram supergroup with topics. */
+  isForum?: boolean;
+  /** A buffered message replies to one of the bot's own messages. */
+  replyToBot: boolean;
   /** Set when earlier swarm tasks exist in this thread. */
   threadContext?: { adapter: string; threadId: string };
 }
