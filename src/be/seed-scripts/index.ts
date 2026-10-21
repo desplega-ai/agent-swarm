@@ -116,9 +116,9 @@ export const SEED_SCRIPTS: SeedScript[] = [
   {
     name: "heartbeat-jev-gate",
     description:
-      "Heartbeat checklist gate backed by Jev (TypeSafe or OpenRouter decisions API): scores a compact swarm state and returns {quiet, reason, summary} for HEARTBEAT_CHECKLIST_GATE_SCRIPT.",
+      "Heartbeat checklist gate backed by a SystemOne decision model (Jev on TypeSafe or OpenRouter, Clef on Cloudflare Workers AI): scores a compact swarm state and returns {quiet, reason, summary} for HEARTBEAT_CHECKLIST_GATE_SCRIPT.",
     intent:
-      "Skip quiet Lead heartbeat checklist ticks with a cheap Jev decision; with no Jev credential it asks a human once, then stays a no-op until a key is added.",
+      "Skip quiet Lead heartbeat checklist ticks with a cheap Jev or Clef decision; with no credential it asks a human once, then stays a no-op until a key is added.",
     source: asText(heartbeatJevGateSrc),
   },
   {

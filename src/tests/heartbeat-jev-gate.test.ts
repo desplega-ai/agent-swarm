@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import * as db from "../be/db";
 import {
   closeDb,
   createAgent,
@@ -8,9 +9,16 @@ import {
   getApprovalRequestById,
   initDb,
   startTask,
+  upsertSwarmConfig,
 } from "../be/db";
 import gate from "../be/seed-scripts/catalog/heartbeat-jev-gate";
 import { registerRequestHumanInputTool } from "../tools/request-human-input";
+import { registerSystemOneDecideTool } from "../tools/system-one-decide";
+import type { ExecutorDependencies } from "../workflows/executors/base";
+import {
+  SystemOneDecisionConfigSchema,
+  SystemOneDecisionExecutor,
+} from "../workflows/executors/system-one-decision";
 
 const LEAD = "11111111-2222-4333-8444-555555555555";
 const NOW = Date.parse("2026-10-15T14:00:00.000Z");
@@ -176,6 +184,51 @@ const jevFails = (message: string) => async () => ({
   status: 200,
   data: { success: false, message },
 });
+const CF_ACCOUNT = "0123456789abcdef0123456789abcdef";
+
+/**
+ * Stands in for `ctx.swarm.systemOne_decide` with the real executor behind it, as
+ * the tool runs it: Workers AI answers in its REST envelope, and the executor
+ * unwraps it. `urls` records where each request went.
+ */
+function clefDecide(p: number) {
+  const urls: string[] = [];
+  const executor = new SystemOneDecisionExecutor({ db } as unknown as ExecutorDependencies, {
+    env: {},
+    getApiKey: async (id) => (id === "cloudflare" ? "cf-example-token" : null),
+    getServerUrl: async (id) => (id === "cloudflare" ? CF_ACCOUNT : null),
+    fetch: (async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return Response.json({
+        result: {
+          model: "clef",
+          answers: { act: { type: "noul", noul: p } },
+          usage: { input_tokens: 739, output_tokens: 0 },
+        },
+        success: true,
+        errors: [],
+        messages: [],
+      });
+    }) as typeof fetch,
+  });
+  const decide = async (args: Record<string, any>) => {
+    const returns = Object.fromEntries(
+      Object.entries(args.questions).map(([id, q]: [string, any]) => [id, { type: q.type }]),
+    );
+    const decided = await executor.decide(
+      SystemOneDecisionConfigSchema.parse({ ...args, returns }),
+    );
+    return {
+      success: true,
+      status: 200,
+      data: decided.ok
+        ? { success: true, ...decided.output }
+        : { success: false, message: decided.error },
+    };
+  };
+  return { urls, decide };
+}
+
 const run = (ctx: unknown, args: Record<string, unknown> = {}) =>
   gate({ leadAgentId: LEAD, ...args }, ctx) as Promise<any>;
 
@@ -677,6 +730,101 @@ describe("heartbeat-jev-gate with a provider", () => {
   });
 });
 
+describe("heartbeat-jev-gate on Clef", () => {
+  const cloudflareOnly = { CLOUDFLARE_API_TOKEN: "x", CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT };
+
+  test("runs on Clef when only the Cloudflare token and account id are set", async () => {
+    const clef = clefDecide(0.15);
+    const { ctx, calls } = fakeCtx({ configs: cloudflareOnly, jev: clef.decide });
+    const verdict = await run(ctx);
+    // 0.15 is quiet only under Clef's own measured threshold, not Jev's 0.5 neighbourhood.
+    expect(verdict).toEqual({
+      quiet: true,
+      reason: "clef p(needs action)=0.150 < 0.2 via cloudflare",
+    });
+    expect(calls.decides[0]).toMatchObject({ provider: "cloudflare", model: "clef" });
+    expect(clef.urls).toEqual([
+      `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/ai/run/@cf/cloudflare/clef`,
+    ]);
+    expect(calls.prompts).toHaveLength(0);
+  });
+
+  test("at or above 0.2 Clef wakes the Lead, and the summary names Clef", async () => {
+    const { ctx } = fakeCtx({ configs: cloudflareOnly, jev: clefDecide(0.25).decide });
+    const verdict = await run(ctx);
+    expect(verdict.quiet).toBe(false);
+    expect(verdict.reason).toBe("clef p(needs action)=0.250 >= 0.2 via cloudflare");
+    expect(verdict.summary).toStartWith(
+      "Clef p(needs action) = 0.250 (threshold 0.2, cloudflare).",
+    );
+  });
+
+  test("CLOUDFLARE_API_KEY is accepted in place of CLOUDFLARE_API_TOKEN", async () => {
+    const { ctx } = fakeCtx({
+      configs: { CLOUDFLARE_API_KEY: "x", CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT },
+      jev: clefDecide(0.1).decide,
+    });
+    expect((await run(ctx)).reason).toContain("via cloudflare");
+  });
+
+  test("auto prefers Jev when a Jev key is also set", async () => {
+    const { ctx, calls } = fakeCtx({
+      configs: { ...cloudflareOnly, OPENROUTER_API_KEY: "x" },
+      jev: jevSays(0.1),
+    });
+    expect((await run(ctx)).reason).toContain("via openrouter");
+    expect(calls.decides[0]!.provider).toBe("openrouter");
+  });
+
+  test("an explicit cloudflare provider wins over a Jev key", async () => {
+    const { ctx, calls } = fakeCtx({
+      configs: {
+        ...cloudflareOnly,
+        TYPESAFE_API_KEY: "x",
+        HEARTBEAT_JEV_GATE_PROVIDER: "cloudflare",
+      },
+      jev: clefDecide(0.1).decide,
+    });
+    expect((await run(ctx)).reason).toContain("via cloudflare");
+    expect(calls.decides[0]!.provider).toBe("cloudflare");
+  });
+
+  test("an unknown provider value falls back to auto, even an Object prototype name", async () => {
+    for (const pref of ["constructor", "toString", "jev"]) {
+      const { ctx } = fakeCtx({
+        configs: { TYPESAFE_API_KEY: "x", HEARTBEAT_JEV_GATE_PROVIDER: pref },
+        jev: jevSays(0.1),
+      });
+      expect((await run(ctx)).reason).toContain("via typesafe");
+    }
+  });
+
+  test("a configured threshold applies to Clef too", async () => {
+    const { ctx } = fakeCtx({
+      configs: { ...cloudflareOnly, HEARTBEAT_JEV_GATE_THRESHOLD: "0.5" },
+      jev: clefDecide(0.3).decide,
+    });
+    const verdict = await run(ctx, { dryRun: true });
+    expect(verdict.quiet).toBe(true);
+    expect(verdict.threshold).toBe(0.5);
+  });
+
+  test("a token without an account id is not a usable provider", async () => {
+    const { ctx, calls } = fakeCtx({ configs: { CLOUDFLARE_API_TOKEN: "x" } });
+    const verdict = await run(ctx, { dryRun: true });
+    expect(verdict.reason).toStartWith("jev-gate inactive:");
+    expect(calls.decides).toHaveLength(0);
+  });
+
+  test("a Clef error throws with the provider named, so the heartbeat fails open", async () => {
+    const { ctx } = fakeCtx({
+      configs: cloudflareOnly,
+      jev: jevFails("CLOUDFLARE_API_TOKEN was rejected by Cloudflare Workers AI (HTTP 401)."),
+    });
+    await expect(run(ctx)).rejects.toThrow("clef cloudflare: CLOUDFLARE_API_TOKEN was rejected");
+  });
+});
+
 describe("heartbeat-jev-gate without a provider", () => {
   const inactive = (verdict: any) => {
     expect(verdict.quiet).toBe(false);
@@ -697,6 +845,8 @@ describe("heartbeat-jev-gate without a provider", () => {
     expect(prompt.questions[0].type).toBe("approval");
     expect(prompt.questions[0].description).toContain("TYPESAFE_API_KEY");
     expect(prompt.questions[0].description).toContain("OPENROUTER_API_KEY");
+    expect(prompt.questions[0].description).toContain("CLOUDFLARE_API_TOKEN");
+    expect(prompt.questions[0].description).toContain("CLOUDFLARE_ACCOUNT_ID");
     expect(prompt.questions[0].description).toContain("$0.00004");
     expect(kv.get("setup")).toMatchObject({ status: "asked", requestId: "req-1" });
 
@@ -755,10 +905,101 @@ describe("heartbeat-jev-gate without a provider", () => {
     const verdict = await run(ctx, { dryRun: true });
     inactive(verdict);
     expect(verdict.dryRun).toBe(true);
-    expect(verdict.prompt.title).toContain("Jev");
+    expect(verdict.prompt.title).toContain("decision model");
     expect(verdict.state.agents).toBe("- Online: 6 (4 idle, 2 busy), Offline: 5");
     expect(calls.prompts).toHaveLength(0);
     expect(calls.kvSets).toBe(0);
+  });
+});
+
+describe("heartbeat-jev-gate on the real system-one-decide tool", () => {
+  let agentId: string;
+  let prevBase: string | undefined;
+  const realFetch = globalThis.fetch;
+  beforeAll(async () => {
+    initDb(":memory:");
+    agentId = (await createAgent({ name: "jev-gate-decide", isLead: true, status: "idle" })).id;
+    await upsertSwarmConfig({ scope: "global", key: "CLOUDFLARE_ACCOUNT_ID", value: CF_ACCOUNT });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLOUDFLARE_API_TOKEN",
+      value: "cf-example-token",
+      isSecret: true,
+    });
+    prevBase = process.env.OPENROUTER_BASE_URL;
+  });
+  afterAll(() => {
+    globalThis.fetch = realFetch;
+    if (prevBase === undefined) delete process.env.OPENROUTER_BASE_URL;
+    else process.env.OPENROUTER_BASE_URL = prevBase;
+    closeDb();
+  });
+
+  /** `ctx.swarm.systemOne_decide` as the MCP bridge serves it, backed by the registered tool. */
+  const viaTool = () => {
+    const server = new McpServer({ name: "jev-gate-decide", version: "1" });
+    registerSystemOneDecideTool(server);
+    const tool = (server as any)._registeredTools["system-one-decide"];
+    return async (args: Record<string, any>) => {
+      const result = await tool.handler(args, {
+        sessionId: "script",
+        requestInfo: { headers: { "x-agent-id": agentId } },
+      });
+      return { success: true, status: 200, data: result.structuredContent };
+    };
+  };
+
+  test("auto skips OpenRouter behind a gateway, which the server refuses, and runs on Clef", async () => {
+    process.env.OPENROUTER_BASE_URL = "https://llm-gateway.example.com/v1";
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return Response.json({
+        result: {
+          model: "clef",
+          answers: { act: { type: "noul", noul: 0.1 } },
+          usage: { input_tokens: 739, output_tokens: 0 },
+        },
+        success: true,
+        errors: [],
+        messages: [],
+      });
+    }) as typeof fetch;
+    const { ctx, calls } = fakeCtx({
+      configs: {
+        OPENROUTER_API_KEY: "x",
+        CLOUDFLARE_API_TOKEN: "x",
+        CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT,
+      },
+      jev: viaTool(),
+    });
+
+    const verdict = await run(ctx, { dryRun: true });
+    expect(verdict).toMatchObject({ quiet: true, provider: "cloudflare", threshold: 0.2 });
+    expect(verdict.skipped).toEqual([
+      expect.stringContaining("openrouter: OPENROUTER_BASE_URL points at a gateway"),
+    ]);
+    expect(calls.decides.map((d) => d.provider)).toEqual(["openrouter", "cloudflare"]);
+    expect(urls).toEqual([
+      `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/ai/run/@cf/cloudflare/clef`,
+    ]);
+  });
+
+  test("an explicit openrouter choice behind a gateway still throws", async () => {
+    process.env.OPENROUTER_BASE_URL = "https://llm-gateway.example.com/v1";
+    const { ctx, calls } = fakeCtx({
+      configs: {
+        OPENROUTER_API_KEY: "x",
+        CLOUDFLARE_API_TOKEN: "x",
+        CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT,
+        HEARTBEAT_JEV_GATE_PROVIDER: "openrouter",
+      },
+      jev: viaTool(),
+    });
+    await expect(run(ctx)).rejects.toThrow(
+      "jev openrouter: OPENROUTER_BASE_URL points at a gateway",
+    );
+    expect(calls.decides).toHaveLength(1);
   });
 });
 

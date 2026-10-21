@@ -12,8 +12,10 @@ import {
 } from "../constants";
 import { isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
 import { recencyDecay } from "../reranker";
+import { MAX_CANDIDATE_FETCH } from "../search-candidates";
 import type {
   MemoryCandidate,
+  MemoryDocumentRef,
   MemoryEditInput,
   MemoryEditResult,
   MemoryHealth,
@@ -28,6 +30,16 @@ import type {
 } from "../types";
 
 const VECTOR_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
+
+/**
+ * Rows one hybrid or FTS arm fetches for a `limit`-row search: 4x overfetch up
+ * to 100, never fewer than `limit`. A fixed 100 ceiling returned the same rows
+ * for every wider limit, so searchMemoryCandidates read it as exhaustion while
+ * other documents sat behind 100 chunks of one task.
+ */
+function armFetchLimit(limit: number): number {
+  return Math.min(Math.max(Math.min(limit * 4, 100), limit), MAX_CANDIDATE_FETCH);
+}
 
 // memory_fts.memory_id is UNINDEXED (FTS5 cannot index it), so a CORRELATED
 // lookup against it is a full table scan per outer row. The old backfill used
@@ -512,6 +524,32 @@ export class SqliteMemoryStore implements MemoryStore {
     return results;
   }
 
+  async replaceDocument(
+    document: MemoryDocumentRef,
+    inputs: MemoryInput[],
+  ): Promise<AgentMemory[]> {
+    const results: AgentMemory[] = [];
+    await getDbClient().transaction(async (tx) => {
+      // Only this owner's rows of this source, in this scope, under this key.
+      // Another source holding the key is left alone and the insert fails.
+      const rows = await tx.query<{ id: string }>(
+        `SELECT id FROM agent_memory
+          WHERE key = ? AND scope = ? AND COALESCE(agentId, '') = COALESCE(?, '') AND source = ?`,
+        [document.key, document.scope, document.agentId ?? null, document.source],
+      );
+      const ids = rows.map((row) => row.id);
+      if (ids.length > 0) {
+        await this.purgeByIds(ids);
+        const placeholders = ids.map(() => "?").join(",");
+        await tx.run(`DELETE FROM agent_memory WHERE id IN (${placeholders})`, ids);
+      }
+      for (const input of inputs) {
+        results.push(await this.store(input));
+      }
+    });
+    return results;
+  }
+
   async get(id: string): Promise<AgentMemory | null> {
     const db = getDbClient();
     const row = await db.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [id]);
@@ -624,7 +662,7 @@ export class SqliteMemoryStore implements MemoryStore {
       keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
-    const overfetchLimit = Math.min(Math.max(options.limit * 4, options.limit), 100);
+    const overfetchLimit = armFetchLimit(options.limit);
     const vectorCandidates = await this.searchWithVec(queryEmbedding, agentId, {
       ...options,
       limit: overfetchLimit,
@@ -725,7 +763,7 @@ export class SqliteMemoryStore implements MemoryStore {
     }
 
     try {
-      const sqlLimit = Math.min(Math.max(limit * 4, limit), 100);
+      const sqlLimit = armFetchLimit(limit);
       const rows = await getDbClient().query<AgentMemoryRow & { rank: number }>(
         `SELECT m.*, bm25(memory_fts) AS rank
          FROM memory_fts
@@ -1254,29 +1292,37 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void> {
-    const db = getDbClient();
     const buffer = serializeEmbedding(embedding);
-    await db.run("UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?", [
-      buffer,
-      model,
-      id,
-    ]);
+    // One transaction: a delete or replaceDocument queued behind this write
+    // cannot land between the row UPDATE and the vec insert and orphan it.
+    await getDbClient().transaction(async (tx) => {
+      const updated = await tx.run(
+        "UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?",
+        [buffer, model, id],
+      );
+      // The row was deleted (or replaced) while its embedding was in flight:
+      // a vec row now would point at nothing.
+      if (updated.changes === 0) return;
 
-    if (this.vecInitialized && this.getVecTableSchema()) {
-      const vecBuffer = this.toVecBuffer(embedding);
-      if (!vecBuffer) {
-        console.warn(
-          `[memory-vec] update skipped memory_id=${id} reason=invalid_dimensions dimensions=${embedding.length} expected=${EMBEDDING_DIMENSIONS}`,
-        );
-        return;
+      if (this.vecInitialized && this.getVecTableSchema()) {
+        const vecBuffer = this.toVecBuffer(embedding);
+        if (!vecBuffer) {
+          console.warn(
+            `[memory-vec] update skipped memory_id=${id} reason=invalid_dimensions dimensions=${embedding.length} expected=${EMBEDDING_DIMENSIONS}`,
+          );
+          return;
+        }
+        try {
+          await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+          await tx.run("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)", [
+            id,
+            vecBuffer,
+          ]);
+        } catch (err) {
+          console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
+        }
       }
-      try {
-        await db.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
-        await db.run("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)", [id, vecBuffer]);
-      } catch (err) {
-        console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
-      }
-    }
+    });
   }
 
   async rewriteForScrub(

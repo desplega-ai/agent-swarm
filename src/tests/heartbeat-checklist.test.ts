@@ -532,6 +532,39 @@ describe("Heartbeat Checklist", () => {
         expect(calls.map((call) => call.scriptName)).toEqual(["heartbeat-jev-gate"]);
       });
 
+      test("unset script with a Cloudflare token and account id runs heartbeat-jev-gate", async () => {
+        await setGlobal("CLOUDFLARE_API_TOKEN", "cf-test-token");
+        await setGlobal("CLOUDFLARE_ACCOUNT_ID", "0123456789abcdef0123456789abcdef");
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls.map((call) => call.scriptName)).toEqual(["heartbeat-jev-gate"]);
+      });
+
+      test("CLOUDFLARE_API_KEY counts as the Cloudflare token", async () => {
+        await setGlobal("CLOUDFLARE_API_KEY", "cf-test-key");
+        await setGlobal("CLOUDFLARE_ACCOUNT_ID", "0123456789abcdef0123456789abcdef");
+        process.env.HEARTBEAT_JEV_GATE_PROVIDER = "cloudflare";
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls.map((call) => call.scriptName)).toEqual(["heartbeat-jev-gate"]);
+      });
+
+      test("a Cloudflare token without an account id leaves the gate off", async () => {
+        await setGlobal("CLOUDFLARE_API_TOKEN", "cf-test-token");
+        useGate({ quiet: true });
+        await seedLead();
+
+        await checkHeartbeatChecklist();
+
+        expect(calls).toHaveLength(0);
+      });
+
       test("unset script and no Jev key: gate stays off", async () => {
         await setGlobal("ANTHROPIC_API_KEY", "unrelated");
         useGate({ quiet: true });

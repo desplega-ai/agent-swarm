@@ -20,6 +20,12 @@ export interface EmbeddingProvider {
 export interface MemoryStore {
   store(input: MemoryInput): Promise<AgentMemory>;
   storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]>;
+  /**
+   * In one transaction, delete every row of `document` (same key, scope,
+   * owner and source) and insert `inputs`. Rows of other owners, scopes or
+   * sources are never touched.
+   */
+  replaceDocument(document: MemoryDocumentRef, inputs: MemoryInput[]): Promise<AgentMemory[]>;
   get(id: string): Promise<AgentMemory | null>;
   peek(id: string): Promise<AgentMemory | null>;
   search(
@@ -77,6 +83,14 @@ export interface MemoryInput {
   contextKey?: string | null;
   intent?: string | null;
   key?: string | null;
+}
+
+/** The rows of one keyed document: every chunk shares these four fields. */
+export interface MemoryDocumentRef {
+  key: string;
+  scope: AgentMemoryScope;
+  agentId: string | null;
+  source: AgentMemorySource;
 }
 
 export interface MemoryCandidate extends AgentMemory {

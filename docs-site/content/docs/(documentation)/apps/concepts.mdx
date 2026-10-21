@@ -29,7 +29,7 @@ An App can declare up to 20 named actions:
 - **`script`** runs a saved script with definition defaults plus invocation input.
 - **`sync`** refreshes all or a selected subset of the App's external sources.
 
-Pages invoke these through `app.action`. Built-in interface actions also create, update, or delete rows; refresh queries; and navigate between App pages.
+Pages invoke these through `app.action`. A `task` action also accepts an optional `parentTaskId`, which chains the new task under an existing one. The caller needs the same parent access as `POST /api/tasks`, and `script` or `sync` actions reject the field. Built-in interface actions also create, update, or delete rows; refresh queries; and navigate between App pages.
 
 Script actions receive `caller` as a reserved, server-stamped argument. The server overwrites `caller` from definition defaults and request input.
 

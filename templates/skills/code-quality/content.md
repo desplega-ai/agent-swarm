@@ -22,6 +22,7 @@ The task's `vcsProvider` field or the remote URL tells you the provider.
 3. Git hooks stay on. `--no-verify` and any other bypass flag are out.
 4. `main` and `master` are never force-pushed.
 5. One logical change per PR. Conventional commit titles when the repo uses them.
+6. Review-fix round: fix the failure class, not the reported instance. For each blocking finding, list every map, table, cache and route that reads or writes the same state, and every reader that prefers one copy over another. Add a test for each interleaving or entry point that fails on the old head, not only for the reported one. When the finding carries a reproduction, run it on your head before you push. When `pr-review-fix-loop` is installed, load it for the round.
 
 ## After you open a PR
 
@@ -55,7 +56,7 @@ The Repository Guidelines carry `allowMerge` and `mergeChecks`.
 5. Tests. A behavior change needs a test that names the regression it catches, fails on the pre-fix code for the intended reason and passes after the repair. Apply the test rules in the repo's `REVIEW.md`.
 6. Apply the "Review Guidance" entries from the Repository Guidelines.
 7. Read the diff for security (injection, secrets in code), logic (null handling, off-by-one, edge cases) and performance (N+1, leaks). Run the test suite and the type check locally when you can.
-8. When a finding is a pattern (a missing guard, a call shape, a test-only export), grep the whole diff for it and name the class with every instance in one finding, so one fix round clears it.
+8. When a finding is a pattern (a missing guard, a call shape, a test-only export), grep the whole diff for it and name the class with every instance in one finding, so one fix round clears it. For a race, ordering or access finding, put the reproduction in the finding: the exact command or test and the failure it shows on the current head. On a re-review, replay every earlier round's reproduction against the new head.
 9. Optimistic UI mutations (toggles, favorites, pins). Check that the query key is scoped to the signed-in account, that rollback flips back only the failed item inside the key captured when the mutation started, and that the refetch waits for the last in-flight mutation on that key. Ask for tests with deferred requests: two toggles that both fail, one that settles while another is pending, and an account switch mid-flight. Run them against the old head too: they must fail there.
 10. A resolved thread is not a fixed finding. Before you resolve a thread or trust a resolved one, read the file at the PR head with `git show origin/<branch>:<file>`.
 11. A bot acknowledgment carries no change request. Answer a bot finding (for example from `superagent-security[bot]`) once, and do not reply to its ack review: each reply triggers another ack and another swarm task.

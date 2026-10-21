@@ -460,3 +460,34 @@ other config that holds has the same distinct-state count. `src/tests/workflow-t
 | `Probe-input-await.cfg` | CX6 found | 480 | 12 |
 | `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,204 / 13,005 | 20 / - |
 | `Probe-child-run.cfg` / control | holds / CX12 found | 13,564 / 207,856 | - / 34 |
+
+## Sync with #2290 (`main` @ `136c08d31`)
+
+#2290 adds a `system-one-extraction` node type. In `engine.ts` it only widens the two System One
+pre-dispatch guards (`systemOneRetryViolations`, `strictUnresolved`) from `system-one-decision`
+to both System One node types, and keeps the extraction `fields` / `images` config typed during
+interpolation. The guards still fail the step with no retry before `executor.run`, which `XFail`
+already covers; the model does not distinguish node types, and the extraction executor is a
+synchronous executor covered by `XRun` / `XCkOk` / `XFail`. The `.tla` and `.cfg` files are
+unchanged. ACTIONS.md is re-pinned to `136c08d31`, with stale `db.ts` lines corrected.
+
+Re-run with tla2tools 2.19, BFS, `-workers auto`. Every config gives the same verdict as on
+`746b6bb81`, and every config that holds has the same distinct-state count. Distinct states at a
+violation vary with worker scheduling. `src/tests/workflow-tla-races.test.ts` +
+`src/tests/workflow-sub-workflow.test.ts`: 21 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 23,057 | 25 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 21,610 | 20 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 451 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 3,963 / 2,703 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,449 / 2,448 / 30,259 / 7,807 / 461 / 1,093 | 22 / 18 / 28 / 29 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,094 | - / 20 |
+| `Probe-task-retry.cfg` | CX12 found | 1,220,960 | 34 |
+| `Probe-cancel-finalize.cfg` | CX13 found | 711 | 17 |
+| `Probe-input-await.cfg` | CX6 found | 553 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,391 / 13,005 | 18 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 13,564 / 464,894 | - / 34 |
+| `Probe-child-run.cfg` converging variant | holds | 107,448 | - |

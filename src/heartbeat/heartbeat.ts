@@ -248,14 +248,15 @@ function isBootTriageAlways(): boolean {
 const HEARTBEAT_CHECKLIST_GATE_TIMEOUT_MS = 60_000;
 let checklistGateTimeoutMs = HEARTBEAT_CHECKLIST_GATE_TIMEOUT_MS;
 
-/** Seeded gate used when `HEARTBEAT_CHECKLIST_GATE_SCRIPT` is unset and Jev has a key. */
+/** Seeded gate used when `HEARTBEAT_CHECKLIST_GATE_SCRIPT` is unset and a gate provider has a key. */
 const DEFAULT_CHECKLIST_GATE_SCRIPT = "heartbeat-jev-gate";
 
 /**
  * Name of a global-scope script that decides whether a checklist tick needs
  * the Lead. An empty value or `off` turns the gate off. Unset falls back to
- * the seeded Jev gate, but only when Jev has a usable global key: without
- * one the script would open a setup approval request on the first tick.
+ * the seeded gate, but only when one of its providers has a usable global
+ * key: without one the script would open a setup approval request on the
+ * first tick.
  */
 async function heartbeatChecklistGateScript(): Promise<string | null> {
   const raw = process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT;
@@ -268,21 +269,40 @@ async function heartbeatChecklistGateScript(): Promise<string | null> {
 
 /**
  * Mirrors the provider pick in `heartbeat-jev-gate`: a global TypeSafe or
- * OpenRouter key, honoring `HEARTBEAT_JEV_GATE_PROVIDER`. An OpenRouter key
- * behind an `OPENROUTER_BASE_URL` gateway does not count, because the
- * decisions call refuses it and every tick would be an `error` verdict.
+ * OpenRouter key, or a Cloudflare token plus account id, honoring
+ * `HEARTBEAT_JEV_GATE_PROVIDER`. An OpenRouter key behind an
+ * `OPENROUTER_BASE_URL` gateway does not count, because the decisions call
+ * refuses it and every tick would be an `error` verdict.
  */
 async function hasJevGateKey(): Promise<boolean> {
   const pref = process.env.HEARTBEAT_JEV_GATE_PROVIDER?.trim().toLowerCase() || "auto";
-  const keys: string[] = [];
-  if (pref !== "openrouter") keys.push("TYPESAFE_API_KEY");
-  if (pref !== "typesafe" && getOpenRouterBaseUrl() === DEFAULT_OPENROUTER_BASE_URL) {
-    keys.push("OPENROUTER_API_KEY");
+  const auto = pref !== "typesafe" && pref !== "openrouter" && pref !== "cloudflare";
+  // Each entry is one provider: every key group must have a set value.
+  const providers: string[][][] = [];
+  if (auto || pref === "typesafe") providers.push([["TYPESAFE_API_KEY"]]);
+  if ((auto || pref === "openrouter") && getOpenRouterBaseUrl() === DEFAULT_OPENROUTER_BASE_URL) {
+    providers.push([["OPENROUTER_API_KEY"]]);
   }
-  try {
+  if (auto || pref === "cloudflare") {
+    providers.push([["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY"], ["CLOUDFLARE_ACCOUNT_ID"]]);
+  }
+  const anySet = async (keys: string[]) => {
     for (const key of keys) {
       const rows = await getSwarmConfigs({ scope: "global", key });
       if (rows.some((row) => row.value.trim() !== "")) return true;
+    }
+    return false;
+  };
+  try {
+    for (const groups of providers) {
+      let usable = true;
+      for (const group of groups) {
+        if (!(await anySet(group))) {
+          usable = false;
+          break;
+        }
+      }
+      if (usable) return true;
     }
   } catch {
     // An unreadable secret row leaves the gate off; the checklist still runs.

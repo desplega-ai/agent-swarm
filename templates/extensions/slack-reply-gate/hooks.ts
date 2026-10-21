@@ -6,8 +6,9 @@ import { z } from "zod";
  *
  * Every human message in a Slack thread the swarm takes part in is buffered and
  * flushed into a Lead task ("[Thread follow-up — N message(s) buffered]"), even
- * "lol", ":joy:" or two people bantering. This hook asks TypeSafe Jev whether
- * Lead should answer, and drops the wake-up when the answer is no.
+ * "lol", ":joy:" or two people bantering. This hook asks a SystemOne decision
+ * model (Jev or Clef) whether Lead should answer, and drops the wake-up when the
+ * answer is no.
  *
  * Hook: `pre.task.create`, origin "slack", description carrying the
  * thread-buffer header. `pre.slack.route` cannot be used: the buffered thread
@@ -15,17 +16,20 @@ import { z } from "zod";
  * re-target a message, never drop it.
  *
  * Rules:
- *   - A message that @mentions Lead passes without a Jev call.
- *   - Otherwise one Jev `choice` question classifies the message into a reason;
+ *   - A message that @mentions Lead passes without a decision call.
+ *   - Otherwise one `choice` question classifies the message into a reason;
  *     reply=false only for reaction_only | banter_between_others |
  *     not_addressed_to_lead, and only when the summed probability of those
  *     three labels is >= minConfidence (a banter/reaction split is still a skip).
  *   - Fails OPEN on every error, timeout or missing key.
  *
- * Transport (config.provider): Jev is served by TypeSafe directly and by
- * OpenRouter's Decisions endpoint. Both take the same {model, state, questions}
- * body and return the same `answers` shape. `auto` uses TYPESAFE_API_KEY when
- * set, else OPENROUTER_API_KEY.
+ * Provider (config.provider): the decision is made server-side by the
+ * `system-one-decide` tool (`ctx.swarm.systemOne_decide`), the same path as a
+ * `system-one-decision` workflow node, so every SystemOne host works and no key
+ * enters this hook. `auto` picks the first host with a configured credential:
+ * typesafe (Jev, TYPESAFE_API_KEY), openrouter (Jev, OPENROUTER_API_KEY), then
+ * cloudflare (Clef, CLOUDFLARE_API_TOKEN or CLOUDFLARE_API_KEY, plus
+ * CLOUDFLARE_ACCOUNT_ID). laya and openai are explicit choices only.
  *
  * modes (config.mode):
  *   off     -> never evaluate
@@ -48,17 +52,19 @@ import { z } from "zod";
 export const config = z.object({
   mode: z.enum(["off", "shadow", "enforce"]).default("shadow"),
   timeoutMs: z.number().int().positive().default(3000),
-  provider: z.enum(["auto", "typesafe", "openrouter"]).default("auto"),
-  /** Jev model on the TypeSafe transport. */
+  provider: z
+    .enum(["auto", "typesafe", "openrouter", "cloudflare", "laya", "openai"])
+    .default("auto"),
+  /** Jev model on TypeSafe. */
   model: z.string().default("jev-latest"),
-  /** Jev model on the OpenRouter transport. */
+  /** Jev model on OpenRouter. */
   openrouterModel: z.string().default("typesafe/jev-1.13"),
+  /** Clef model on Cloudflare Workers AI: clef or clef-flash. */
+  cloudflareModel: z.string().default("clef"),
   minConfidence: z.number().min(0).max(1).default(0.55),
   contextMessages: z.number().int().min(0).max(20).default(6),
   leadAliases: z.array(z.string()).default(["lead"]),
   botSlackUserIds: z.array(z.string()).default([]),
-  /** Explicit TypeSafe key; otherwise TYPESAFE_API_KEY from the API process env. */
-  apiKey: z.string().optional(),
   /**
    * Reaction for a dropped message in enforce mode. "" only removes the bot's
    * acceptance reaction(s) and adds nothing.
@@ -71,13 +77,13 @@ type Cfg = z.infer<typeof config>;
 type Swarm = ApiCtx["swarm"];
 
 const NS = "ext:slack-reply-gate";
-const TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
-const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 const HEADER_LINE_RE = /(?:^|\n)\[Thread follow-up — \d+ message\(s\) buffered\]\n/g;
 const CTX_OPEN = "<thread_context>";
 const CTX_CLOSE = "</thread_context>";
 // The dispatcher cancels a handler after 5 s; leave room for the KV writes.
 const MAX_TIMEOUT_MS = 4000;
+// The smallest time budget system-one-decide accepts.
+const MIN_DECIDE_TIMEOUT_MS = 1000;
 
 export const REASONS = {
   direct_ask:
@@ -179,14 +185,14 @@ const usable = (v: string): boolean => Boolean(v) && !v.startsWith("[REDACTED");
 const envOf = (name: string): string => String(process.env[name] ?? "");
 
 /**
- * Resolve a secret: explicit value, then the API process env. The API process loads
- * global swarm_config rows into process.env at boot and on config reload.
+ * Resolve a secret from the API process env. The API process loads global
+ * swarm_config rows into process.env at boot and on config reload.
  * ctx.swarm.config_get cannot serve it: the SDK scrubs secrets to "[REDACTED:<name>]".
  */
-const secret = (name: string, explicit?: string): string => {
+const secret = (name: string): string => {
   const cached = secretCache.get(name);
   if (cached && Date.now() - cached.at < KEY_TTL_MS) return cached.value;
-  const value = [String(explicit ?? ""), envOf(name)].find(usable) ?? "";
+  const value = usable(envOf(name)) ? envOf(name) : "";
   if (usable(value)) secretCache.set(name, { value, at: Date.now() });
   return value;
 };
@@ -196,45 +202,50 @@ export const resetKeyCache = (): void => {
   secretCache.clear();
 };
 
-export type JevTransport = {
-  provider: "typesafe" | "openrouter";
-  endpoint: string;
-  key: string;
-  model: string;
-};
+export type ProviderId = Exclude<Cfg["provider"], "auto">;
+
+/** Where the decision is made. No model means the provider's own default. */
+export type DecisionTarget = { provider: ProviderId; model?: string };
+
+/** What `auto` needs per provider: every group must have one usable value. */
+const AUTO_CREDENTIALS: ReadonlyArray<[ProviderId, string[][]]> = [
+  ["typesafe", [["TYPESAFE_API_KEY"]]],
+  ["openrouter", [["OPENROUTER_API_KEY"]]],
+  ["cloudflare", [["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY"], ["CLOUDFLARE_ACCOUNT_ID"]]],
+];
+
+const modelFor = (provider: ProviderId, cfg: Cfg): string | undefined =>
+  provider === "typesafe"
+    ? cfg.model
+    : provider === "openrouter"
+      ? cfg.openrouterModel
+      : provider === "cloudflare"
+        ? cfg.cloudflareModel
+        : undefined;
 
 /**
- * Pick the Jev transport. `auto` prefers TypeSafe and falls back to OpenRouter.
- * Throws when the chosen provider has no usable key; the handler fails open.
+ * The decision providers to try, in order. An explicit one is used as is: the
+ * server checks its credential. `auto` lists every provider in `AUTO_CREDENTIALS`
+ * whose credential is set and throws when none is; the handler then fails open.
  */
-export const resolveTransport = (cfg: Cfg): JevTransport => {
-  const typesafe = (): JevTransport | null => {
-    const key = secret("TYPESAFE_API_KEY", cfg.apiKey);
-    return usable(key)
-      ? { provider: "typesafe", endpoint: TYPESAFE_ENDPOINT, key, model: cfg.model }
-      : null;
-  };
-  const openrouter = (): JevTransport | null => {
-    const key = secret("OPENROUTER_API_KEY");
-    return usable(key)
-      ? { provider: "openrouter", endpoint: OPENROUTER_ENDPOINT, key, model: cfg.openrouterModel }
-      : null;
-  };
-  const transport =
-    cfg.provider === "typesafe"
-      ? typesafe()
-      : cfg.provider === "openrouter"
-        ? openrouter()
-        : (typesafe() ?? openrouter());
-  if (transport) return transport;
+export const resolveProviders = (cfg: Cfg): DecisionTarget[] => {
+  if (cfg.provider !== "auto") {
+    return [{ provider: cfg.provider, model: modelFor(cfg.provider, cfg) }];
+  }
+  const targets = AUTO_CREDENTIALS.filter(([, groups]) =>
+    groups.every((keys) => keys.some((key) => usable(secret(key)))),
+  ).map(([provider]) => ({ provider, model: modelFor(provider, cfg) }));
+  if (targets.length > 0) return targets;
   throw new Error(
-    cfg.provider === "typesafe"
-      ? "no TYPESAFE_API_KEY"
-      : cfg.provider === "openrouter"
-        ? "no OPENROUTER_API_KEY"
-        : "no TYPESAFE_API_KEY or OPENROUTER_API_KEY",
+    "no TYPESAFE_API_KEY, OPENROUTER_API_KEY, or CLOUDFLARE_API_TOKEN with CLOUDFLARE_ACCOUNT_ID",
   );
 };
+
+/** The first provider `resolveProviders` would try. */
+export const resolveProvider = (cfg: Cfg): DecisionTarget => resolveProviders(cfg)[0]!;
+
+/** The server refused the provider for a deployment setting and sent nothing. */
+export class ProviderUnavailableError extends Error {}
 
 const SLACK_API = "https://slack.com/api";
 // The engine's acceptance reactions (src/slack/reaction-shortcode.ts), by config key.
@@ -323,7 +334,7 @@ export const settleMutes = async (): Promise<void> => {
   await Promise.allSettled([...pendingMutes]);
 };
 
-export type JevVerdict = {
+export type Verdict = {
   reason: string;
   confidence: number | null;
   probabilities: Record<string, number> | null;
@@ -331,56 +342,73 @@ export type JevVerdict = {
 };
 
 /**
- * One Jev call: classify the newest message into a reason. Throws on any failure.
- * TypeSafe and OpenRouter share the request body and the `answers` response shape.
+ * One decision: classify the newest message into a reason. Throws on any failure.
+ * The server makes the call (`system-one-decide`), so every provider returns the
+ * same `answers` shape. The time budget is enforced here and on the server.
  */
-export const askJev = async (
+export const askModel = async (
+  swarm: Swarm,
   input: {
     messages: string[];
     context: string[];
     sender: string;
     leadNames: readonly string[];
   },
-  transport: JevTransport,
+  target: DecisionTarget,
   cfg: Cfg,
   outer?: AbortSignal,
-): Promise<JevVerdict> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.min(cfg.timeoutMs, MAX_TIMEOUT_MS));
-  const onOuterAbort = () => controller.abort();
-  outer?.addEventListener("abort", onOuterAbort);
+): Promise<Verdict> => {
+  const budgetMs = Math.min(cfg.timeoutMs, MAX_TIMEOUT_MS);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onOuterAbort: (() => void) | undefined;
+  const stop = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${budgetMs}ms`)), budgetMs);
+    onOuterAbort = () => reject(new Error("aborted"));
+    outer?.addEventListener("abort", onOuterAbort);
+  });
   const t0 = Date.now();
   try {
-    const res = await fetch(transport.endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${transport.key}`,
+    const call = swarm.systemOne_decide({
+      provider: target.provider,
+      ...(target.model ? { model: target.model } : {}),
+      state: {
+        role: "Decide whether Lead, the coordinating AI agent of a team's agent swarm, should answer a new Slack message in a thread it takes part in. Lead is woken by every message in the thread, including ones not meant for it. Answering noise wastes everyone's time; missing a real ask is worse.",
+        lead_names: [...input.leadNames],
+        recent_thread_messages: input.context,
+        new_message: input.messages.join("\n---\n"),
+        new_message_sender: input.sender,
       },
-      body: JSON.stringify({
-        state: {
-          role: "Decide whether Lead, the coordinating AI agent of a team's agent swarm, should answer a new Slack message in a thread it takes part in. Lead is woken by every message in the thread, including ones not meant for it. Answering noise wastes everyone's time; missing a real ask is worse.",
-          lead_names: input.leadNames,
-          recent_thread_messages: input.context,
-          new_message: input.messages.join("\n---\n"),
-          new_message_sender: input.sender,
+      questions: {
+        reason: {
+          type: "choice",
+          instructions:
+            "Which label best describes new_message from Lead's point of view? Use recent_thread_messages to tell who it is talking to. Lines starting with [Agent] are swarm bots.",
+          criteria: REASONS,
         },
-        model: transport.model,
-        questions: {
-          reason: {
-            type: "choice",
-            instructions:
-              "Which label best describes new_message from Lead's point of view? Use recent_thread_messages to tell who it is talking to. Lines starting with [Agent] are swarm bots.",
-            criteria: REASONS,
-          },
-        },
-      }),
-      signal: controller.signal,
+      },
+      timeoutMs: Math.max(budgetMs, MIN_DECIDE_TIMEOUT_MS),
+      maxRetries: 0,
     });
-    if (!res.ok) throw new Error(`${transport.provider} ${res.status}`);
-    const body = (await res.json()) as {
+    // After a timeout nobody awaits the call; its late failure must not go unhandled.
+    call.catch(() => {});
+    const res = (await Promise.race([call, stop])) as {
+      success?: boolean;
+      status?: number;
+      data?: unknown;
+    } | null;
+    const body = (res?.data ?? res) as {
+      success?: boolean;
+      message?: unknown;
+      error?: unknown;
+      providerUnavailable?: unknown;
       answers?: { reason?: { choice?: unknown; confidence?: unknown; probabilities?: unknown } };
     } | null;
+    if (res?.success === false || body?.success === false) {
+      const why = `${target.provider}: ${String(body?.message ?? body?.error ?? `HTTP ${res?.status}`).slice(0, 200)}`;
+      throw body?.providerUnavailable === true
+        ? new ProviderUnavailableError(why)
+        : new Error(why);
+    }
     const answer = body?.answers?.reason;
     const reason = typeof answer?.choice === "string" ? answer.choice : "";
     if (!(reason in REASONS)) throw new Error(`unexpected choice: ${String(reason).slice(0, 60)}`);
@@ -392,12 +420,34 @@ export const askJev = async (
     return { reason, confidence, probabilities, latencyMs: Date.now() - t0 };
   } finally {
     clearTimeout(timer);
-    outer?.removeEventListener("abort", onOuterAbort);
+    if (onOuterAbort) outer?.removeEventListener("abort", onOuterAbort);
   }
 };
 
+/**
+ * `askModel` on each target in turn, moving on only when the server refused the
+ * provider for a deployment setting (no request was sent). Any other failure, or
+ * a refusal of the last target, throws.
+ */
+export const askFirstAvailable = async (
+  swarm: Swarm,
+  input: Parameters<typeof askModel>[1],
+  targets: readonly DecisionTarget[],
+  cfg: Cfg,
+  outer?: AbortSignal,
+): Promise<{ verdict: Verdict; target: DecisionTarget }> => {
+  for (const [i, target] of targets.entries()) {
+    try {
+      return { verdict: await askModel(swarm, input, target, cfg, outer), target };
+    } catch (err) {
+      if (!(err instanceof ProviderUnavailableError) || i === targets.length - 1) throw err;
+    }
+  }
+  throw new Error("no decision provider");
+};
+
 /** Probability that the message needs no reply: the summed mass of the skip labels. */
-export const skipProbability = (verdict: JevVerdict): number | null => {
+export const skipProbability = (verdict: Verdict): number | null => {
   if (verdict.probabilities) {
     let sum = 0;
     for (const [label, p] of Object.entries(verdict.probabilities)) {
@@ -408,9 +458,9 @@ export const skipProbability = (verdict: JevVerdict): number | null => {
   return verdict.confidence;
 };
 
-/** Map a Jev verdict to the typed decision. An unsure skip verdict replies. */
+/** Map a verdict to the typed decision. An unsure skip verdict replies. */
 export const decide = (
-  verdict: JevVerdict,
+  verdict: Verdict,
   minConfidence: number,
 ): { reply: boolean; reason: Reason; skipP: number | null; lowConfidence: boolean } => {
   const reason = verdict.reason as Reason;
@@ -507,7 +557,7 @@ const extension: SwarmExtension = (api) => {
         return;
       }
 
-      const transport = resolveTransport(cfg);
+      const targets = resolveProviders(cfg);
 
       const sender =
         opts.slackUserId && cfg.botSlackUserIds.includes(opts.slackUserId)
@@ -516,14 +566,15 @@ const extension: SwarmExtension = (api) => {
             ? "human (known teammate)"
             : "unknown (not a known teammate; may be a bot or an external person)";
 
-      const verdict = await askJev(
+      const { verdict, target } = await askFirstAvailable(
+        ctx.swarm,
         {
           messages,
           context: context.slice(-cfg.contextMessages).map((m) => m.slice(0, 500)),
           sender,
           leadNames: cfg.leadAliases,
         },
-        transport,
+        targets,
         cfg,
         ctx.signal,
       );
@@ -542,7 +593,7 @@ const extension: SwarmExtension = (api) => {
           skipP: decision.skipP,
           lowConfidence: decision.lowConfidence,
           latencyMs: verdict.latencyMs,
-          provider: transport.provider,
+          provider: target.provider,
           sender,
           preview,
         },

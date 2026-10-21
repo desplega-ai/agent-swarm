@@ -16,7 +16,7 @@
  */
 
 import { getSessionLogsByTaskId } from "@/be/db";
-import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
+import { indexMemoryContent, taskCompletionMemoryKey } from "@/be/memory/index-content";
 import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
 import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { shouldPersistTaskCompletionMemory } from "@/memory/automatic-task-gate";
@@ -55,21 +55,22 @@ export async function runTaskTerminalEffects(args: {
         // Skip indexing if there's truly no content
         if (taskContent.length < 30) return;
 
-        const store = getMemoryStore();
-        const provider = getEmbeddingProvider();
-
-        const memory = await store.store({
+        // Same path as memory-store: chunk, store, and embed each chunk, so a
+        // long output never meets the embedding model's input cap. The per-task
+        // key makes the chunks one document, like a keyed manual memory, and a
+        // repeat write for the task replaces that document atomically.
+        const key = taskCompletionMemoryKey(taskId);
+        await indexMemoryContent({
           agentId: agentId ?? null,
           content: taskContent,
           name: `Task: ${safeTask.slice(0, 80)}`,
           scope: "agent",
           source: "task_completion",
           sourceTaskId: taskId,
+          key,
+          intent: "task completion memory",
+          replaceExisting: true,
         });
-        const embedding = await provider.embed(taskContent);
-        if (embedding) {
-          await store.updateEmbedding(memory.id, embedding, provider.name);
-        }
 
         // Auto-promote high-value completions to swarm memory (P3)
         const shouldShareWithSwarm =
@@ -80,24 +81,27 @@ export async function runTaskTerminalEffects(args: {
 
         if (shouldShareWithSwarm) {
           try {
-            const swarmMemory = await store.store({
+            await indexMemoryContent({
               agentId: agentId ?? null,
-              scope: "swarm",
-              name: `Shared: ${safeTask.slice(0, 80)}`,
               content: `Task completed by agent ${agentId}:\n\n${taskContent}`,
+              name: `Shared: ${safeTask.slice(0, 80)}`,
+              scope: "swarm",
               source: "task_completion",
               sourceTaskId: taskId,
+              key,
+              intent: "task completion memory",
+              replaceExisting: true,
             });
-            const swarmEmbedding = await provider.embed(taskContent);
-            if (swarmEmbedding) {
-              await store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
-            }
           } catch {
             // Non-blocking — swarm memory promotion failure is not critical
           }
         }
-      } catch {
+      } catch (err) {
         // Non-blocking — task completion memory failure should not affect task status
+        console.error(
+          "[task-terminal-effects] task completion memory write failed:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
       }
     })().catch((err) =>
       console.error(
