@@ -217,6 +217,7 @@ import {
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { emitChildRunFinished, wakeParentsOfDeletedRuns } from "./db/workflow-runs";
+import { isInTransaction } from "./db-client";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -1740,6 +1741,96 @@ async function currentAssetKey(entityType: AssetEntityType, id: string): Promise
   }
 }
 
+export class AssetKeyMovesBlockedError extends Error {
+  constructor() {
+    super(
+      "Asset namespace moves are blocked until structural errors, unknown personal users, or provider mapping drift are repaired.",
+    );
+    this.name = "AssetKeyMovesBlockedError";
+  }
+}
+
+export async function assertAssetKeyMovesAllowed(): Promise<void> {
+  // auditAssetKeys stays sync (shared with the boot audit); run it inside a
+  // client transaction so this request-path read cannot observe another
+  // request's uncommitted writes on the shared connection.
+  const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()), {
+    readOnly: true,
+  });
+  if (!audit.ok) {
+    throw new AssetKeyMovesBlockedError();
+  }
+}
+
+/** Move only authorized task ids. The caller owns the transaction and audit gate. */
+export async function moveTaskChainKeyInTx(
+  rootId: string,
+  taskIds: readonly string[],
+  key: string,
+  changedBy?: string,
+): Promise<string[] | false> {
+  if (!isInTransaction()) {
+    throw new Error("moveTaskChainKeyInTx requires an active transaction");
+  }
+  const client = getDbClient();
+  const now = new Date().toISOString();
+  const root = await getTaskById(rootId);
+  if (!root) return false;
+  const tasks = [root];
+  for (const id of taskIds) {
+    const task = id === root.id ? null : await getTaskById(id);
+    if (task) tasks.push(task);
+  }
+  const movedTaskIds: string[] = [];
+  for (const task of tasks) {
+    if (task.key === key) continue;
+    // A file shared with another task keeps the namespace of the task whose attachment
+    // sources its mapping. Mappings with no attachment source follow any attaching task.
+    const mappedFiles = await client.query<{ id: string; key: string }>(
+      `SELECT DISTINCT m.id, m."key" AS key
+       FROM asset_key_mappings m
+       JOIN task_attachments a
+         ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
+        AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
+        AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
+        AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
+       WHERE a.task_id = ?
+         AND (m.source_entity_type IS NOT 'task-attachment'
+           OR m.source_entity_id IN (SELECT id FROM task_attachments WHERE task_id = ?))`,
+      [task.id, task.id],
+    );
+    // The namespace is metadata, and lastUpdatedAt tracks task activity, as in updateTaskTitle.
+    await client.run('UPDATE agent_tasks SET "key" = ?, updated_by = ? WHERE id = ?', [
+      key,
+      changedBy ?? null,
+      task.id,
+    ]);
+    for (const mapping of mappedFiles) {
+      if (mapping.key === key) continue;
+      await client.run(
+        'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
+        [key, now, changedBy ?? null, mapping.id],
+      );
+      await insertAssetKeyHistory({
+        entityType: "file",
+        entityId: mapping.id,
+        previousKey: mapping.key,
+        newKey: key,
+        changedBy,
+      });
+    }
+    await insertAssetKeyHistory({
+      entityType: "task",
+      entityId: task.id,
+      previousKey: task.key,
+      newKey: key,
+      changedBy,
+    });
+    movedTaskIds.push(task.id);
+  }
+  return movedTaskIds;
+}
+
 export async function moveAssetKey(input: {
   entityType: AssetEntityType;
   id: string;
@@ -1749,17 +1840,7 @@ export async function moveAssetKey(input: {
   descendantTaskIds?: readonly string[];
 }): Promise<false | { movedTaskIds?: string[] }> {
   const key = normalizeAssetKey(input.key);
-  // auditAssetKeys stays sync (shared with the boot audit); run it inside a
-  // client transaction so this request-path read cannot observe another
-  // request's uncommitted writes on the shared connection.
-  const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()), {
-    readOnly: true,
-  });
-  if (!audit.ok) {
-    throw new Error(
-      "Asset namespace moves are blocked until structural errors, unknown personal users, or provider mapping drift are repaired.",
-    );
-  }
+  await assertAssetKeyMovesAllowed();
   const previousKey = await currentAssetKey(input.entityType, input.id);
   if (!previousKey) return false;
   if (previousKey === key && input.entityType !== "task") return {};
@@ -1776,60 +1857,13 @@ export async function moveAssetKey(input: {
   return getDbClient().transaction(async (tx) => {
     switch (input.entityType) {
       case "task": {
-        const root = await getTaskById(input.id);
-        if (!root) return false;
-        const tasks = [root];
-        for (const id of input.descendantTaskIds ?? []) {
-          const task = id === root.id ? null : await getTaskById(id);
-          if (task) tasks.push(task);
-        }
-        const movedTaskIds: string[] = [];
-        for (const task of tasks) {
-          if (task.key === key) continue;
-          // A file shared with another task keeps the namespace of the task whose attachment
-          // sources its mapping. Mappings with no attachment source follow any attaching task.
-          const mappedFiles = await tx.query<{ id: string; key: string }>(
-            `SELECT DISTINCT m.id, m."key" AS key
-             FROM asset_key_mappings m
-             JOIN task_attachments a
-               ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
-              AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
-              AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
-              AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-             WHERE a.task_id = ?
-               AND (m.source_entity_type IS NOT 'task-attachment'
-                 OR m.source_entity_id IN (SELECT id FROM task_attachments WHERE task_id = ?))`,
-            [task.id, task.id],
-          );
-          // The namespace is metadata, and lastUpdatedAt tracks task activity, as in updateTaskTitle.
-          await tx.run('UPDATE agent_tasks SET "key" = ?, updated_by = ? WHERE id = ?', [
-            key,
-            input.changedBy ?? null,
-            task.id,
-          ]);
-          for (const mapping of mappedFiles) {
-            if (mapping.key === key) continue;
-            await tx.run(
-              'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
-              [key, now, input.changedBy ?? null, mapping.id],
-            );
-            await insertAssetKeyHistory({
-              entityType: "file",
-              entityId: mapping.id,
-              previousKey: mapping.key,
-              newKey: key,
-              changedBy: input.changedBy,
-            });
-          }
-          await insertAssetKeyHistory({
-            entityType: "task",
-            entityId: task.id,
-            previousKey: task.key,
-            newKey: key,
-            changedBy: input.changedBy,
-          });
-          movedTaskIds.push(task.id);
-        }
+        const movedTaskIds = await moveTaskChainKeyInTx(
+          input.id,
+          input.descendantTaskIds ?? [],
+          key,
+          input.changedBy,
+        );
+        if (movedTaskIds === false) return false;
         return { movedTaskIds };
       }
       case "workflow":

@@ -6,7 +6,7 @@ tags: [plan, ui, sessions, grouping, power-users]
 status: in-progress
 autonomy: autopilot
 commit_per_phase: true
-git_base: 4128284ed
+git_base: c0711aa2f
 branch: feat/sessions-v2
 ---
 
@@ -354,24 +354,24 @@ Branch `feat/sessions-v2` from `main` exists, with one commit that adds the brai
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Move tests pass: `bun run test:root -- src/tests/sessions-move.test.ts src/tests/asset-key-api.test.ts src/tests/asset-key-invariants.test.ts src/tests/session-route-posture.test.ts`
-- [ ] Types pass: `bun run tsc:check:tsc`
-- [ ] Lint passes: `bun run lint && bun run lint:slop`
-- [ ] OpenAPI is fresh: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
-- [ ] Route gates pass: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bash scripts/check-rbac-boundary.sh`
-- [ ] DB seams pass: `bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh`
+- [x] Move tests pass: `bun run test:root -- src/tests/sessions-move.test.ts src/tests/asset-key-api.test.ts src/tests/asset-key-invariants.test.ts src/tests/session-route-posture.test.ts`
+- [x] Types pass: `bun run tsc:check:tsc`
+- [x] Lint passes: `bun run lint && bun run lint:slop`
+- [x] OpenAPI is fresh: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
+- [x] Route gates pass: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bash scripts/check-rbac-boundary.sh`
+- [x] DB seams pass: `bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
-- [ ] On the seeded stack, move 2 sessions: `curl -s -X POST -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" -H "Content-Type: application/json" http://localhost:3013/api/session-moves -d '{"rootTaskIds":["<id1>","<id2>"],"groupKey":"shared/qa/moved/"}' | jq`
-- [ ] The tree shows `shared/qa/moved/` with total 2: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.groups[] | select(.key=="shared/qa/moved/")'`
-- [ ] Rename the group: `curl -s -X POST -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" -H "Content-Type: application/json" http://localhost:3013/api/session-moves/prefix -d '{"from":"shared/qa/moved/","to":"shared/qa/renamed/"}' | jq`
-- [ ] Delete it: `curl -s -X POST -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" -H "Content-Type: application/json" http://localhost:3013/api/session-moves/prefix -d '{"from":"shared/qa/renamed/","to":null}' | jq`
-- [ ] Both sessions are in No group: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" "http://localhost:3013/api/sessions?noGroup=true&limit=200" | jq '[.sessions[].root.id] | index("<id1>"), index("<id2>")'` prints two numbers.
-- [ ] The old route refuses a read-only sharee (D16): share a seeded session at `read` with a second user, then `curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <secondUserId>" -H "Content-Type: application/json" http://localhost:3013/api/assets/task/<rootId>/key -d '{"key":"shared/qa/blocked/","cascade":true}'` prints `403`.
-- [ ] A namespace root is refused: `curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" -H "Content-Type: application/json" http://localhost:3013/api/session-moves/prefix -d '{"from":"shared/","to":"shared/x/"}'` prints `400`.
+- [x] On the seeded stack, move 2 sessions: `curl -s -X POST -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" -H "Content-Type: application/json" http://localhost:3013/api/session-moves -d '{"rootTaskIds":["<id1>","<id2>"],"groupKey":"shared/qa/moved/"}' | jq`
+- [x] The tree shows `shared/qa/moved/` with total 2: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" http://localhost:3013/api/session-tree | jq '.groups[] | select(.key=="shared/qa/moved/")'`
+- [x] Rename the group: `curl -s -X POST -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" -H "Content-Type: application/json" http://localhost:3013/api/session-moves/prefix -d '{"from":"shared/qa/moved/","to":"shared/qa/renamed/"}' | jq`
+- [x] Delete it: `curl -s -X POST -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" -H "Content-Type: application/json" http://localhost:3013/api/session-moves/prefix -d '{"from":"shared/qa/renamed/","to":null}' | jq`
+- [x] Both sessions are in No group: `curl -s -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" "http://localhost:3013/api/sessions?noGroup=true&limit=200" | jq '[.sessions[].root.id] | index("<id1>"), index("<id2>")'` prints two numbers.
+- [x] The old route refuses a read-only sharee (D16): share a seeded session at `read` with a second user, then `curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <secondUserId>" -H "Content-Type: application/json" http://localhost:3013/api/assets/task/<rootId>/key -d '{"key":"shared/qa/blocked/","cascade":true}'` prints `403`.
+- [x] A namespace root is refused: `curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer 123123" -H "x-swarm-user-id: <userId>" -H "Content-Type: application/json" http://localhost:3013/api/session-moves/prefix -d '{"from":"shared/","to":"shared/x/"}'` prints `400`.
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
 
 **Implementation Note**: Codex `gpt-6.1-sol` at `high`. Claude reviews the permission pre-check and the transaction boundaries. Commit `[phase 2] feat(sessions): bulk and prefix moves, close the old move route`. Mention the D16 behavior change in the PR body under Heads-up: the my-swarm app uses this route, and owners are not affected.
 
@@ -895,6 +895,8 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
 - **Derail notes**:
   - Phase 1 performance numbers (20,000 roots, 30,000 children, one user, median of 3 runs, no index hints): tree 90 ms, Inbox page 92 ms plus count 64 ms, Later page 19 ms plus count 12 ms, Done page 27 ms plus count 19 ms, `groupKey` page 5 ms plus count 3 ms, full sidebar poll 331 ms. All targets pass. The spec reviewer measured one noisy run at 640 to 670 ms for the full poll. The Inbox list and its count each walk the full chain CTE, so watch that one if the poll grows.
   - Phase 1 review added `scope=tree` to `GET /api/sessions`. The default scope `all` keeps ownerless roots (Legacy behavior). The tree and `scope=tree` lists exclude them for user viewers. A bypass actor with `scope=tree` sees every root.
+  - Phase 2 review (assumed, autopilot): a user's prefix move moves only roots that user requested. Roots with no requester in the range are not moved and not listed (the tree hides them). Without this, `sessionAccessForRoot` gives every user `owner` on an ownerless root, so a rename swept up agent-created roots, even under another user's `personal/` prefix. Bulk moves by id keep the old route's rule.
+  - Known limit (not changed): `resolveHttpAuditUserId` ignores `x-swarm-user-id`. So an operator-key dashboard user (API key plus a picked user) gets 403 when a move or a new session targets `personal/<self>/`. User tokens (`aswt_`) work. Every key-writing route behaves this way today. The UI shows the server error. Follow-up for Taras.
   - Phase 1: `approvals` on the session detail is omitted when empty. The client reads a missing field as `[]`. Bypass actors get no `readState`.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
