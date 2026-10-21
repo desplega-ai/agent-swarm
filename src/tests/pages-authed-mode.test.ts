@@ -27,7 +27,7 @@ import { closeDb, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { handlePagesPublic } from "../http/pages-public";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import { signPageSession } from "../utils/page-session";
+import { MAX_PAGE_SESSION_COOKIES, signPageSession } from "../utils/page-session";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pages-authed-mode.sqlite";
@@ -167,6 +167,56 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
       const res = await fetch(`${BASE}/p/${id}`, { headers: { Cookie: cookie } });
       expect(res.status).toBe(200);
     }
+  });
+
+  test("90 launches from one browser keep the Cookie header bounded", async () => {
+    // A browser jar: Set-Cookie with Max-Age=0 deletes, anything else upserts.
+    const jar = new Map<string, string>();
+    const cookieHeader = () => [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+    const ids: string[] = [];
+    for (let i = 0; i < 90; i++) {
+      const id = await createAuthedPage(`overflow-${i}`);
+      ids.push(id);
+      const launch = await fetch(`${BASE}/api/pages/${id}/launch`, {
+        method: "POST",
+        headers: { "X-Agent-ID": agentId, Cookie: cookieHeader() },
+      });
+      expect(launch.status).toBe(204);
+      for (const line of launch.headers.getSetCookie()) {
+        const [pair] = line.split(";");
+        const eq = pair!.indexOf("=");
+        const name = pair!.slice(0, eq);
+        if (/Max-Age=0(;|$)/.test(line)) jar.delete(name);
+        else jar.set(name, pair!.slice(eq + 1));
+      }
+    }
+
+    expect(jar.size).toBe(MAX_PAGE_SESSION_COOKIES);
+    expect(cookieHeader().length).toBeLessThan(8 * 1024);
+    // The newest launches keep their sessions; the oldest were evicted.
+    for (const id of ids.slice(-MAX_PAGE_SESSION_COOKIES)) {
+      const res = await fetch(`${BASE}/p/${id}`, { headers: { Cookie: cookieHeader() } });
+      expect(res.status).toBe(200);
+    }
+    expect(jar.has(`page_session_${ids[0]}`)).toBe(false);
+
+    // Control: the same sessions, operator-shaped as the dashboard mints them,
+    // overflow the 16 KB header limit when nothing evicts them.
+    const unbounded = (
+      await Promise.all(
+        ids.map(async (id) => {
+          const token = await signPageSession({
+            pageId: id,
+            exp: Math.floor(Date.now() / 1000) + 3600,
+            name: "guest-0123abcd",
+            op: true,
+          });
+          return `page_session_${id}=${token}`;
+        }),
+      )
+    ).join("; ");
+    const overflow = await fetch(`${BASE}/p/${ids.at(-1)}`, { headers: { Cookie: unbounded } });
+    expect(overflow.status).toBe(431);
   });
 
   test("/p/:id.json with cookie → 200 + JSON metadata", async () => {

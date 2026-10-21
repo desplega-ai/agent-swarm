@@ -33,7 +33,7 @@ import {
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
 import { getNodeEnv } from "../utils/node-env";
-import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
+import { extractAndVerifyCookie, pageSessionSetCookies } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 
@@ -512,7 +512,7 @@ export async function handlePagesPublic(
   // password flow mints a fresh cookie inline. Empty string = no cookie to
   // attach. We thread this through the handler so the existing 200-response
   // paths below can opt-in without duplicating their branch logic.
-  let inlineSetCookie = "";
+  let inlineSetCookie: string[] = [];
 
   if (!access.ok) {
     // Password flow: cookie missing/invalid, try `?key=` then Basic.
@@ -528,7 +528,7 @@ export async function handlePagesPublic(
           matched = false;
         }
         if (matched) {
-          inlineSetCookie = await issuePageSessionCookie(page.id, {
+          inlineSetCookie = await pageSessionSetCookies(req, page.id, {
             dev: isLocalhostRequest(req),
           });
           // fall through to the regular 200 path below.
@@ -567,7 +567,7 @@ export async function handlePagesPublic(
     // that `respond()` writes via `res.writeHead()` — Node gives the latter
     // precedence, which is the value we want here anyway.
     res.setHeader("Cache-Control", "no-store");
-    if (inlineSetCookie) res.setHeader("Set-Cookie", inlineSetCookie);
+    if (inlineSetCookie.length > 0) res.setHeader("Set-Cookie", inlineSetCookie);
     publicPageJsonRoute.respond(res, 200, {
       id: page.id,
       version: 1, // edit-counter is API-internal; SPA reads via /api/pages/:id/versions
@@ -583,13 +583,13 @@ export async function handlePagesPublic(
 
   // SVG stays byte-for-byte intact, including when ?print=1 is supplied.
   if (page.contentType === "image/svg+xml") {
-    const headers: Record<string, string> = {
+    const headers: Record<string, string | string[]> = {
       "Content-Type": "image/svg+xml",
       "Cache-Control": page.authMode === "public" ? "public, max-age=1800" : "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     };
-    if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+    if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
     res.writeHead(200, headers);
     res.end(page.body);
     await bumpViewCount(page.id);
@@ -606,20 +606,22 @@ export async function handlePagesPublic(
   // `/p/:id` — render either HTML directly or 302→SPA for JSON.
   if (page.contentType === "application/json") {
     if (wantsPrint) {
-      const headers: Record<string, string> = {
+      const headers: Record<string, string | string[]> = {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
         "Content-Security-Policy": buildCsp(),
         "X-Content-Type-Options": "nosniff",
       };
-      if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+      if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
       res.writeHead(200, headers);
       res.end(printableJsonPageHtml(page));
       await bumpViewCount(page.id);
       return true;
     }
-    const headers: Record<string, string> = { Location: `${getAppBaseUrl()}/pages/${page.id}` };
-    if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+    const headers: Record<string, string | string[]> = {
+      Location: `${getAppBaseUrl()}/pages/${page.id}`,
+    };
+    if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
     res.writeHead(302, headers);
     res.end();
     // 302 redirects are intentionally NOT counted — they're a stop-over for
@@ -637,14 +639,14 @@ export async function handlePagesPublic(
     injectBrowserSdk(page.body, feedback ? feedbackKeyGuardScript() : "") +
     (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "") +
     (feedback ? feedbackOverlayScripts(page.id) : "");
-  const headers: Record<string, string> = {
+  const headers: Record<string, string | string[]> = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",
     "Content-Security-Policy": buildCsp(),
     // Defence-in-depth: prevent MIME sniffing and clickjacking outside the SPA.
     "X-Content-Type-Options": "nosniff",
   };
-  if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+  if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
   res.writeHead(200, headers);
   res.end(html);
   await bumpViewCount(page.id);

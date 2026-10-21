@@ -345,8 +345,8 @@ const PAGE_SESSION_TTL_SECONDS = 3600;
  * - `dev=false` → `SameSite=None; Secure` (cross-site iframe embedding in prod).
  *
  * The cookie is named `page_session_<pageId>`, so launching page B leaves
- * page A's session intact. `Max-Age` is the only bound on how many accumulate:
- * a browser holds one per page launched within the last hour.
+ * page A's session intact. Responses should go through `pageSessionSetCookies`,
+ * which also bounds how many of these a browser keeps.
  *
  * The caller is responsible for setting `Set-Cookie` on the response — this
  * helper only builds the string. TTL is 1 hour; renewed on every issuance.
@@ -363,17 +363,66 @@ export async function issuePageSessionCookie(
     ...(opts.name ? { name: opts.name } : {}),
     ...(opts.op ? { op: true as const } : {}),
   });
-  const attrs = [
-    `${pageSessionCookieName(pageId)}=${token}`,
-    "HttpOnly",
-    "Path=/",
-    `Max-Age=${PAGE_SESSION_TTL_SECONDS}`,
-  ];
-  if (opts.dev) {
+  return buildCookie(pageSessionCookieName(pageId), token, PAGE_SESSION_TTL_SECONDS, opts.dev);
+}
+
+function buildCookie(name: string, value: string, maxAge: number, dev: boolean): string {
+  const attrs = [`${name}=${value}`, "HttpOnly", "Path=/", `Max-Age=${maxAge}`];
+  if (dev) {
     attrs.push("SameSite=Lax");
   } else {
     attrs.push("SameSite=None");
     attrs.push("Secure");
   }
   return attrs.join("; ");
+}
+
+/**
+ * Most per-page session cookies one browser keeps, counting the one being
+ * issued. Each is ~220 bytes on the wire, and `Path=/` sends all of them on
+ * every request to this host, so an unbounded jar grows past the server's
+ * 16 KB header limit (431 on every route, `/health` included) after ~75
+ * launches within the hour. 20 keeps the jar near 4.5 KB.
+ */
+export const MAX_PAGE_SESSION_COOKIES = 20;
+
+const PAGE_SESSION_COOKIE_RE = new RegExp(
+  `(?:^|;\\s*)(${LEGACY_PAGE_SESSION_COOKIE}_[A-Za-z0-9_-]{1,64})=([^;]*)`,
+  "g",
+);
+
+/**
+ * `Set-Cookie` values for a launch of `pageId`: the new session, plus an
+ * expiring cookie for every other per-page session in the request's jar that
+ * is invalid or expired, or falls outside the `MAX_PAGE_SESSION_COOKIES - 1`
+ * newest. The browser then holds at most `MAX_PAGE_SESSION_COOKIES` of them.
+ * An evicted page's open tab loses its session, the same as after expiry.
+ */
+export async function pageSessionSetCookies(
+  req: CookieRequest,
+  pageId: string,
+  opts: { dev: boolean; uid?: string; name?: string; op?: true },
+): Promise<string[]> {
+  const issued = await issuePageSessionCookie(pageId, opts);
+  const header = Array.isArray(req.headers.cookie)
+    ? req.headers.cookie.join("; ")
+    : (req.headers.cookie ?? "");
+  const keep: { name: string; exp: number; order: number }[] = [];
+  const evict = new Set<string>();
+  const seen = new Set([pageSessionCookieName(pageId)]);
+  for (const [, name, token] of header.matchAll(PAGE_SESSION_COOKIE_RE)) {
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const payload = await verifyPageSession(token);
+    if (payload && name === pageSessionCookieName(payload.pageId)) {
+      keep.push({ name, exp: payload.exp, order: keep.length });
+    } else {
+      evict.add(name);
+    }
+  }
+  // `exp` has one-second granularity. Browsers list older cookies first, so a
+  // later position breaks ties toward the more recent launch.
+  keep.sort((a, b) => b.exp - a.exp || b.order - a.order);
+  for (const { name } of keep.slice(MAX_PAGE_SESSION_COOKIES - 1)) evict.add(name);
+  return [issued, ...[...evict].map((name) => buildCookie(name, "", 0, opts.dev))];
 }
