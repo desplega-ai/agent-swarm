@@ -48,6 +48,7 @@ import {
   terminateProcessGroup,
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { recoverLegacyCodexAgentsMd } from "./codex-agents-md";
 import {
   CodexAppServer,
   type CodexAppServerNotification,
@@ -1936,6 +1937,8 @@ export async function createInProcessCodexSession(
     threadFactory?: CodexThreadFactory;
   } = {},
 ): Promise<CodexSession> {
+  await recoverLegacyCodexAgentsMd(config.cwd);
+
   // Resolve the model once and thread it through. Claude shortnames map
   // to Codex equivalents; everything else passes through verbatim — the
   // CLI is the source of truth for valid model identifiers.

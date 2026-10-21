@@ -7,8 +7,16 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   AgentMessageItem,
@@ -1269,6 +1277,96 @@ describe("CodexAdapter.canResume", () => {
 });
 
 describe("Codex session instructions", () => {
+  for (const kind of [
+    "file",
+    "in-tree link",
+    "out-of-tree link",
+    "dangling link",
+    "missing link",
+  ]) {
+    // Windows requires symlink privileges; CI exercises the link cases on Linux.
+    test.skipIf(kind !== "file" && process.platform === "win32")(
+      `recovers a crashed legacy session before starting Codex (${kind})`,
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codex-legacy-instructions-"));
+        const cwd = join(dir, "repo");
+        mkdirSync(cwd);
+        const agentsMd = join(cwd, "AGENTS.md");
+        const claudeMd = join(cwd, "CLAUDE.md");
+        const original = "# Repo rules\n";
+        const edited = `${original}- Keep the agent's edit\n`;
+        const outside = join(dir, "outside.md");
+        const linkTarget =
+          kind === "out-of-tree link"
+            ? "../outside.md"
+            : kind === "dangling link"
+              ? "missing.md"
+              : "CLAUDE.md";
+        const realCwd = realpathSync(cwd);
+        const stateDir = join(homedir(), ".cache", "agent-swarm", "codex-agents-md");
+        const key = new Bun.CryptoHasher("sha256").update(realCwd).digest("hex");
+        const recordPath = join(stateDir, `${key}.json`);
+        try {
+          await Bun.write(claudeMd, original);
+          await Bun.write(outside, "OUTSIDE\n");
+          if (kind !== "missing link") {
+            await Bun.write(
+              agentsMd,
+              `<swarm_system_prompt>\nSTALE\n</swarm_system_prompt>\n${edited}`,
+            );
+          }
+          if (kind !== "file") {
+            mkdirSync(stateDir, { recursive: true });
+            await Bun.write(recordPath, JSON.stringify({ cwd: realCwd, linkTarget }));
+          }
+          const fake = makeFakeAppServer(async (method, params, emit) => {
+            if (method === "thread/start") {
+              expect(params).toMatchObject({ developerInstructions: "new session instructions" });
+              expect(await Bun.file(recordPath).exists()).toBe(false);
+              if (kind === "file") {
+                expect(lstatSync(agentsMd).isFile()).toBe(true);
+                expect(await Bun.file(agentsMd).text()).toBe(edited);
+              } else {
+                expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
+                expect(readlinkSync(agentsMd)).toBe(linkTarget);
+              }
+              expect(await Bun.file(claudeMd).text()).toBe(
+                kind === "in-tree link" ? edited : original,
+              );
+              expect(await Bun.file(outside).text()).toBe("OUTSIDE\n");
+              return { thread: { id: "legacy-thread" } };
+            }
+            if (method === "turn/start") {
+              queueMicrotask(() => {
+                emit("turn/completed", {
+                  threadId: "legacy-thread",
+                  turn: { id: "legacy-turn", status: "completed", error: null },
+                });
+              });
+              return { turn: { id: "legacy-turn" } };
+            }
+            throw new Error(`Unexpected method: ${method}`);
+          });
+          const session = await new CodexAdapter({
+            bypassSubprocess: true,
+            appServerFactory: () => fake.client as never,
+          }).createSession(
+            testConfig({
+              cwd,
+              systemPrompt: "new session instructions",
+              logFile: join(dir, "session.log"),
+              taskId: "",
+            }),
+          );
+          await session.waitForCompletion();
+        } finally {
+          rmSync(recordPath, { force: true });
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+
   for (const kind of ["file", "missing", "symlink"]) {
     // Windows requires symlink privileges; CI exercises this case on Linux.
     test.skipIf(kind === "symlink" && process.platform === "win32")(
