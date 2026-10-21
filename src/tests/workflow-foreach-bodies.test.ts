@@ -247,6 +247,30 @@ describe("foreach with any executor body", () => {
     expect(((run.context as Record<string, unknown>).fan as { okCount: number }).okCount).toBe(3);
   });
 
+  spawnTest(
+    "a parent alias named item or index cannot smuggle item data into script source",
+    async () => {
+      // `item` and `index` are per-item values. An alias with those names on the
+      // parent must not make them look like an allowed (`workflow`) source.
+      const definition = foreachOver({
+        type: "script",
+        config: { runtime: "bash", script: "echo {{item.name}} {{index}}", timeout: 5_000 },
+      });
+      definition.nodes[0]!.inputs = { item: "workflow.id", index: "workflow.id" };
+      const workflow = await makeWorkflow({ ...definition, onNodeFailure: "continue" });
+      const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry);
+      await waitForRun(runId, (r) => r.status === "completed" || r.status === "failed");
+
+      const children = await childSteps(runId);
+      expect(children.map((step) => step.status)).toEqual(["failed", "failed", "failed"]);
+      for (const child of children)
+        expect(child.error).toContain("Script body interpolation failed");
+      expect(JSON.stringify(children.map((child) => child.output ?? null))).not.toMatch(
+        /Ada|Babbage|Curie/,
+      );
+    },
+  );
+
   test("a swarm-script body runs once per item with per-item args", async () => {
     const original = registry.get("swarm-script");
     registry.register(swarmScript);

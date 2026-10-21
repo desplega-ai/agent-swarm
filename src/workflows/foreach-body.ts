@@ -83,13 +83,23 @@ export function resolveStepNode(
   if (!parent) return null;
   const body = parent.config.body;
   if (!isRecord(body) || typeof body.type !== "string") return null;
+  // `item` and `index` are bound per item, so a parent alias with either name
+  // is dropped: it would otherwise classify item data by the alias's source
+  // and let it past the script-body allowlist.
+  const inputs = parent.inputs
+    ? Object.fromEntries(
+        Object.entries(parent.inputs).filter(([alias]) => !FOREACH_ITEM_BINDINGS.has(alias)),
+      )
+    : undefined;
   return {
     id: nodeId,
     type: body.type,
     config: isRecord(body.config) ? body.config : {},
-    ...(parent.inputs ? { inputs: parent.inputs } : {}),
+    ...(inputs ? { inputs } : {}),
   };
 }
+
+const FOREACH_ITEM_BINDINGS = new Set(["item", "index"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
