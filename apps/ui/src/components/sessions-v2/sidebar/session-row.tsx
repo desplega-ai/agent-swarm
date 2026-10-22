@@ -214,8 +214,11 @@ interface SessionRowProps {
   onRowClick: (rowKey: string, event: MouseEvent) => void;
   onRowAuxClick: (rowKey: string, event: MouseEvent) => void;
   onRowContextMenu: (rowKey: string, event: MouseEvent) => void;
-  /** The checkbox: select or unselect this row (the tree also puts its cursor and focus here). */
-  onToggleSelect: (rowKey: string) => void;
+  /**
+   * The checkbox: select or unselect this row (the tree also puts its cursor
+   * and focus here). `range`: Shift+click, select up to this row.
+   */
+  onToggleSelect: (rowKey: string, range?: boolean) => void;
   /** The keyboard card closed itself (Escape). */
   onPeekClose: () => void;
 }
@@ -293,7 +296,13 @@ function SessionRowView({
                   aria-hidden
                   checked={selected}
                   onCheckedChange={() => onToggleSelect(rowKey)}
-                  onClick={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    // Shift: a range. preventDefault skips the plain toggle.
+                    if (!event.shiftKey) return;
+                    event.preventDefault();
+                    onToggleSelect(rowKey, true);
+                  }}
                   onMouseDown={keepTreeFocus}
                   className={cn(
                     "col-start-1 row-start-1",

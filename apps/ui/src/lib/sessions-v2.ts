@@ -99,15 +99,16 @@ export function replaceTab(tabs: string[], from: string, to: string): string[] {
 
 /**
  * The tabs and the split of a URL. A group tab with no list in `?view=` is
- * gone. The split session never shows in the main pane too: a split that
- * names the focused tab is no split, and a tab that is the split leaves the
- * list. So one session never mounts in two panes.
+ * gone. The split holds a session or the New session tab. It never shows in
+ * the main pane too: a split that names the focused tab is no split, and a
+ * tab that is the split leaves the list. So one session (or one New session
+ * draft) never mounts in two panes.
  */
 export function urlTabs(
   tabsParam: string | null,
   { focused, view, split }: { focused: string; view: string | null; split: string | null },
 ): { tabs: string[]; split: string | null } {
-  const shownSplit = split && isSessionTab(split) && split !== focused ? split : null;
+  const shownSplit = split && split !== GROUP_TAB && split !== focused ? split : null;
   const listed = parseTabs(tabsParam).filter(
     (tab) => (tab !== GROUP_TAB || view !== null) && tab !== shownSplit,
   );

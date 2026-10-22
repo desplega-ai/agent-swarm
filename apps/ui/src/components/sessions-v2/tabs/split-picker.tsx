@@ -1,12 +1,12 @@
 /**
  * "Open in split…" (plan Phase 8, SPEC R2.9): pick the session for the
- * split pane. The open tabs come first. Then the server's matches for the
- * typed text, with the sidebar search tokens (`with:lena`), or the newest
- * Inbox sessions while the field is empty. One cmdk list in a Dialog, on
- * the dialog timing, like the move dialog.
+ * split pane. "New session" comes first, then the open tabs, then the
+ * server's matches for the typed text, with the sidebar search tokens
+ * (`with:lena`), or the newest Inbox sessions while the field is empty. One
+ * cmdk list in a Dialog, on the dialog timing, like the move dialog.
  */
 
-import { AppWindow, Columns2, MessageSquare } from "lucide-react";
+import { AppWindow, Columns2, MessageSquare, Plus } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import {
   Command,
@@ -19,6 +19,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type { SessionSearchParams } from "@/lib/session-search";
+import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
 import { focusQuietly } from "../pane/quiet-focus";
 import { useServerSessionSearch } from "../use-sessions-commands";
@@ -49,6 +50,7 @@ export function SplitPicker({
   /** The session tabs that can move to the split. */
   tabs: string[];
   onOpenChange: (open: boolean) => void;
+  /** A session id, or `NEW_SESSION_TAB` for a New session in the split. */
   onPick: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -112,6 +114,12 @@ export function SplitPicker({
             {searching || others.length > 0 ? null : (
               <CommandEmpty>No session matches.</CommandEmpty>
             )}
+            <CommandGroup>
+              <CommandItem value="new session" onSelect={() => pick(NEW_SESSION_TAB)}>
+                <Plus aria-hidden />
+                <span>New session</span>
+              </CommandItem>
+            </CommandGroup>
             {tabs.length > 0 ? (
               <CommandGroup heading="Open tabs">
                 {tabs.map((tab) => (

@@ -191,13 +191,20 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   const current = activePane === 1 && split ? split : focused;
   // The group the New session tab starts in: the one it was opened from.
   const [startIn, setStartIn] = useState<string | null>(null);
+  // Its draft text lives here: the tab remounts when it moves to or from the split.
+  const newSessionDraft = useState("");
+  // One New session draft: while the split holds it, "+" and `c` focus it there.
   const newSession = useCallback(
     (group: string | null = null) => {
       setStartIn(group);
+      if (split === NEW_SESSION_TAB) {
+        setActivePane(1);
+        return;
+      }
       setActivePane(0);
       focusTab(NEW_SESSION_TAB);
     },
-    [focusTab],
+    [focusTab, split],
   );
   // The session whose header title is its rename field (Cmd+K "Rename
   // session", the pencil), in one pane. A switch to another session ends it.
@@ -219,7 +226,8 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
    * (two panes would poll it twice). The split session gets the focus in its
    * pane. A plain open goes to the active pane, in its current tab (SPEC R2):
    * in the split pane, a session that has a main tab gets the focus there.
-   * A new tab opens in the main pane. A background tab (a middle-click)
+   * A new tab opens in the main pane, and so does any open while the split
+   * holds the New session tab (its draft stays). A background tab (a middle-click)
    * keeps the focus and does not mark the session read (mockup
    * `index.html:4802-4807`). `pane` names the pane for an open from inside
    * it (the group tab).
@@ -234,7 +242,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
       if (!open) url.openSession(id, { background: true });
       toast(open ? "Already open in a tab." : "Opened in a new tab.", { position });
     } else if (id === split) setActivePane(1);
-    else if (options.newTab || (options.pane ?? activePane) === 0) {
+    else if (options.newTab || (options.pane ?? activePane) === 0 || split === NEW_SESSION_TAB) {
       setActivePane(0);
       url.openSession(id, { newTab: options.newTab });
     } else if (tabs.includes(id)) {
@@ -271,18 +279,45 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
           : null;
     return key && targets.some((target) => target.key === key) && !writeBlock(key) ? key : null;
   };
+  // A new New session tab in the split starts in the group of the pane's
+  // session, as `c` does. A moved one keeps its group.
+  const pickSplit = (id: string) => {
+    const fresh = id === NEW_SESSION_TAB && split !== id && !tabs.includes(id);
+    const group = startGroupOfPane();
+    const message = url.openInSplit(id);
+    if (message) {
+      toast(message, { position: SESSIONS_TOAST_POSITION });
+      return;
+    }
+    setActivePane(1);
+    if (fresh) setStartIn(group);
+  };
   usePaneKeys({
     split: () => setPickingSplit(true),
     newSession: () => newSession(startGroupOfPane()),
   });
 
   const renderPane = (tab: string, pane: PaneIndex) => {
-    if (pane === 1) return renderSession(tab, 1);
+    if (pane === 1) {
+      return tab === NEW_SESSION_TAB ? (
+        <NewSessionTab
+          startIn={startIn}
+          onStarted={url.replaceSplit}
+          draftState={newSessionDraft}
+        />
+      ) : (
+        renderSession(tab, 1)
+      );
+    }
     // The New session tab stays mounted while it is open, so a click on a
     // sidebar row or another tab never loses its draft.
     const draft = tabs.includes(NEW_SESSION_TAB) ? (
       <div className={tab === NEW_SESSION_TAB ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <NewSessionTab startIn={startIn} onStarted={url.replaceNewTab} />
+        <NewSessionTab
+          startIn={startIn}
+          onStarted={url.replaceNewTab}
+          draftState={newSessionDraft}
+        />
       </div>
     ) : null;
     const body =
@@ -392,7 +427,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
           open={pickingSplit}
           tabs={tabs.filter((tab) => isSessionTab(tab) && tab !== split)}
           onOpenChange={setPickingSplit}
-          onPick={openInSplit}
+          onPick={pickSplit}
         />
         <FirstRunGuide state={guide.state} onStep={guide.setStep} onClose={guide.close} />
       </div>

@@ -112,6 +112,7 @@ You can move a session that you started, or a session that someone shared with y
 ### Select many sessions
 
 - Click the checkbox that shows when you hover a row, press `x`, or Cmd+click (Ctrl+click) a row.
+- Shift+click a row or its checkbox to select a range: every session from the row that you selected last (or the open session) to that row. The range adds to the selection.
 - While sessions are selected, the bulk bar covers the sidebar header. It shows the count and **Done**, **Later**, **Mark read**, **Move**, and **Clear**.
 - The keys `e`, `l`, `u`, and `m` act on the selection. The row menu of a selected row also acts on the selection.
 - Escape clears the selection.
@@ -240,8 +241,10 @@ With the mouse, a right-click opens the row menu, and a middle-click opens the s
 The split shows a second session next to the main pane. Open it with one of these:
 
 - `v` on a sidebar row, or **Open in split** in the row menu.
-- The split button in the tab strip, `v` outside the sidebar, or Cmd+K **Open in split…**. They open a picker: the open tabs first, then the search results for the text that you type.
+- The split button in the tab strip, `v` outside the sidebar, or Cmd+K **Open in split…**. They open a picker: **New session** first, then the open tabs, then the search results for the text that you type.
 - Drag a session tab to the right edge of the pane.
+
+**New session** in the picker opens a New session tab in the split. It starts in the group of the session in the active pane. When you send, the split shows the new session. There is one New session tab: while the split has it, **+** and `c` go to it, and a click on a sidebar row opens in the main pane. Its text stays when it moves between the panes. Attached files do not.
 
 A session shows in one pane only. When you open a different session in the split, the previous one goes back to the main tabs. You cannot split the only open tab. Open a second session first.
 

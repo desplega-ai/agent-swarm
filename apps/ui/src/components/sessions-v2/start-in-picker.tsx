@@ -61,11 +61,13 @@ export function StartInPicker({
           variant="ghost"
           aria-label={`Start in ${label}`}
           className={cn(
-            "max-w-64 min-w-0 gap-1 text-muted-foreground hover:text-foreground",
+            // It shrinks before the mic, attach, and send buttons: the group name truncates.
+            "max-w-64 min-w-0 shrink gap-1 text-muted-foreground hover:text-foreground",
             touch && "h-11 text-sm",
           )}
         >
-          <span>Start in</span>
+          {/* A phone bar is narrow: the label says "Start in" there. */}
+          {touch ? null : <span>Start in</span>}
           <Icon aria-hidden />
           <span className="min-w-0 truncate font-medium text-foreground">{label}</span>
           <ChevronDown aria-hidden />

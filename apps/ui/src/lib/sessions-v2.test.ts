@@ -98,11 +98,38 @@ describe("sessions v2 URL state", () => {
       urlTabs(tabs, { focused, view, split });
     expect(at("a,b", "a", "b")).toEqual({ tabs: ["a"], split: "b" });
     expect(at("a,b", "a", "a")).toEqual({ tabs: ["a", "b"], split: null });
-    expect(at("a", "a", NEW_SESSION_TAB)).toEqual({ tabs: ["a"], split: null });
     expect(at(`a,${GROUP_TAB}`, "a", null)).toEqual({ tabs: ["a"], split: null });
+    expect(urlTabs("a", { focused: "a", view: "inbox", split: GROUP_TAB })).toEqual({
+      tabs: ["a"],
+      split: null,
+    });
     expect(urlTabs(`a,${GROUP_TAB}`, { focused: "a", view: "inbox", split: null })).toEqual({
       tabs: ["a", GROUP_TAB],
       split: null,
+    });
+  });
+
+  test("the split can hold the New session tab, and only one New session shows", () => {
+    const at = (tabs: string | null, focused: string, split: string | null) =>
+      urlTabs(tabs, { focused, view: null, split });
+    expect(at("a", "a", NEW_SESSION_TAB)).toEqual({ tabs: ["a"], split: NEW_SESSION_TAB });
+    expect(at(`a,${NEW_SESSION_TAB}`, "a", NEW_SESSION_TAB)).toEqual({
+      tabs: ["a"],
+      split: NEW_SESSION_TAB,
+    });
+    expect(at(null, NEW_SESSION_TAB, NEW_SESSION_TAB)).toEqual({
+      tabs: [NEW_SESSION_TAB],
+      split: null,
+    });
+    expect(splitTo(["a"], "a", null, NEW_SESSION_TAB)).toEqual({
+      tabs: ["a"],
+      focused: "a",
+      split: NEW_SESSION_TAB,
+    });
+    expect(splitTo(["a", NEW_SESSION_TAB], NEW_SESSION_TAB, null, NEW_SESSION_TAB)).toEqual({
+      tabs: ["a"],
+      focused: "a",
+      split: NEW_SESSION_TAB,
     });
   });
 

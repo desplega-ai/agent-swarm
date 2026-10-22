@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import type { AgentTask } from "@/api/types";
 import { SuggestionChips } from "@/components/shared/suggestion-chips";
+import { RecordAudioButton, useAudioRecorder } from "./audio-recorder";
 import { ComposerDock } from "./composer-dock";
 import { useStartSession } from "./use-start-session";
 
@@ -24,6 +25,7 @@ export function NewSessionView({
   onStarted,
   startIn,
   touch,
+  draftState,
 }: {
   /** The group the session starts in (sessions v2). Omit for no group. */
   startKey?: string;
@@ -33,12 +35,17 @@ export function NewSessionView({
   startIn?: ReactNode;
   /** The phone screen: 44 px composer buttons. */
   touch?: boolean;
+  /** The draft text, held by the caller (see `useStartSession`). */
+  draftState?: [string, (value: string) => void];
 } = {}) {
   const navigate = useNavigate();
-  const { userId, setDraft, isPending, composerProps } = useStartSession({
+  const { userId, setDraft, isPending, addAttachment, composerProps } = useStartSession({
     key: startKey,
     onStarted: onStarted ?? ((created) => void navigate(`/sessions/${created.id}`)),
+    draftState,
   });
+  // A clip is an attachment: its upload puts the transcript in the root task.
+  const recorder = useAudioRecorder(addAttachment);
   const [searchParams, setSearchParams] = useSearchParams();
   const prefillTemplateId = searchParams.get("prefill");
   const seedText = searchParams.get("seed");
@@ -93,6 +100,9 @@ export function NewSessionView({
           userId ? "What's the goal?" : "Pick an identity in the sidebar before starting a session."
         }
         sendLabel="Start session"
+        extraActions={
+          <RecordAudioButton recorder={recorder} disabled={!userId || isPending} bar={touch} />
+        }
         touch={touch}
         autoFocus
       />

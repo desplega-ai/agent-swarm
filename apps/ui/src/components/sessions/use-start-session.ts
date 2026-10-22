@@ -9,7 +9,7 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { SESSION_TREE_KEY } from "@/api/hooks/use-session-tree";
@@ -19,7 +19,7 @@ import {
   formatComposeAttachmentUploadError,
   uploadComposeAttachments,
 } from "./compose-attachment-upload";
-import type { ComposerDockProps } from "./composer-dock";
+import { type ComposerDockProps, partitionAttachmentFiles } from "./composer-dock";
 
 export interface StartSessionOptions {
   /** Called once the root task exists and its attachments settled. */
@@ -33,6 +33,11 @@ export interface StartSessionOptions {
   key?: string;
   /** Turns what the user typed into the task text, e.g. to append page context. */
   buildTask?: (typed: string) => string;
+  /**
+   * The draft text, held by the caller so it outlives this composer (the
+   * sessions v2 New session tab moves between panes). Default: local state.
+   */
+  draftState?: [string, (value: string) => void];
 }
 
 export type StartSessionComposerProps = Pick<
@@ -50,17 +55,26 @@ export type StartSessionComposerProps = Pick<
   | "attachmentErrorMessage"
 >;
 
-export function useStartSession({ onStarted, contextKey, key, buildTask }: StartSessionOptions): {
+export function useStartSession({
+  onStarted,
+  contextKey,
+  key,
+  buildTask,
+  draftState,
+}: StartSessionOptions): {
   userId: string | null;
   draft: string;
   setDraft: (value: string) => void;
   isPending: boolean;
+  /** Adds one file (a clip from the mic button) after the dock's type and size checks. */
+  addAttachment: (file: File) => void;
   /** Spread onto <ComposerDock>; add the surface's placeholder and labels. */
   composerProps: StartSessionComposerProps;
 } {
   const queryClient = useQueryClient();
   const { userId } = useCurrentUser();
-  const [draft, setDraft] = useState("");
+  const localDraft = useState("");
+  const [draft, setDraft] = draftState ?? localDraft;
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [uploadedCount, setUploadedCount] = useState(0);
@@ -125,6 +139,14 @@ export function useStartSession({ onStarted, contextKey, key, buildTask }: Start
     });
   };
 
+  // The toast matches the follow-up composer's clip handling in TaskComposer.
+  const addAttachment = useCallback((file: File) => {
+    const { valid, error } = partitionAttachmentFiles([file]);
+    setAttachmentError(error);
+    if (valid.length > 0) setAttachments((current) => [...current, ...valid]);
+    if (error) toast.error(error);
+  }, []);
+
   const pendingLabel =
     create.isPending && attachments.length > 0
       ? uploadedCount > 0
@@ -137,6 +159,7 @@ export function useStartSession({ onStarted, contextKey, key, buildTask }: Start
     draft,
     setDraft,
     isPending: create.isPending,
+    addAttachment,
     composerProps: {
       value: draft,
       onChange: setDraft,

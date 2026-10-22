@@ -16,12 +16,15 @@ export function NewSessionTab({
   startIn,
   onStarted,
   touch = false,
+  draftState,
 }: {
   /** The group the tab was opened from, or null for No group. */
   startIn: string | null;
   onStarted: (rootTaskId: string) => void;
   /** The phone New session screen: 44 px controls. */
   touch?: boolean;
+  /** The draft text, kept by the shell while the tab moves between panes. */
+  draftState?: [string, (value: string) => void];
 }) {
   const { userId } = useCurrentUser();
   const me = userId ?? null;
@@ -43,6 +46,7 @@ export function NewSessionTab({
       startKey={group ?? undefined}
       onStarted={(created) => onStarted(created.id)}
       touch={touch}
+      draftState={draftState}
       startIn={
         <StartInPicker
           touch={touch}

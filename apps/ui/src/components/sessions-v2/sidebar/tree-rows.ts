@@ -120,6 +120,22 @@ export function foldId(row: TreeRow): string | null {
   return null;
 }
 
+/**
+ * A Shift+click range: the session ids of the rows from `fromKey` to `toKey`,
+ * both included, in row order. Group, list, and state rows in between are
+ * skipped. With no `fromKey` row, only `toKey`'s session.
+ */
+export function sessionRange(rows: TreeRow[], fromKey: string | null, toKey: string): string[] {
+  const at = (key: string | null) => (key === null ? -1 : rows.findIndex((row) => row.key === key));
+  const end = at(toKey);
+  if (end < 0) return [];
+  const start = at(fromKey);
+  const [low, high] = start < 0 ? [end, end] : [Math.min(start, end), Math.max(start, end)];
+  return rows
+    .slice(low, high + 1)
+    .flatMap((row) => (row.type === "session" ? [row.session.root.id] : []));
+}
+
 /** Open until folded: the Inbox, Later (the mockup default), and other people's groups. */
 export function openByDefault(id: string, me: string | null): boolean {
   if (id === "inbox" || id === "later") return true;

@@ -7,7 +7,14 @@ import type {
   SessionTreeResponse,
 } from "../../../api/types";
 import { buildSessionGroupTree } from "../../../lib/session-groups";
-import { buildTreeRows, foldIds, isNavRow, type ListState, openByDefault } from "./tree-rows";
+import {
+  buildTreeRows,
+  foldIds,
+  isNavRow,
+  type ListState,
+  openByDefault,
+  sessionRange,
+} from "./tree-rows";
 
 const ME = "me-1";
 const counts = (total: number, extra: Partial<SessionSectionCounts> = {}) => ({
@@ -237,5 +244,33 @@ describe("buildTreeRows", () => {
         "shared/a/b/",
       ].sort(),
     );
+  });
+});
+
+describe("sessionRange", () => {
+  const { rows } = build(tree([], { inbox: counts(3), noGroup: counts(2) }), {
+    open: { nogroup: true },
+    lists: {
+      inbox: { data: page(3), failed: false },
+      nogroup: {
+        data: { sessions: [session("n0"), session("n1")], total: 2, limit: 20, offset: 0 },
+        failed: false,
+      },
+    },
+  });
+
+  test("selects the sessions between two rows, in row order, either way", () => {
+    expect(sessionRange(rows, "s:inbox:s0", "s:inbox:s2")).toEqual(["s0", "s1", "s2"]);
+    expect(sessionRange(rows, "s:inbox:s2", "s:inbox:s0")).toEqual(["s0", "s1", "s2"]);
+  });
+
+  test("skips the section and state rows between two sections", () => {
+    expect(sessionRange(rows, "s:inbox:s1", "s:nogroup:n1")).toEqual(["s1", "s2", "n0", "n1"]);
+  });
+
+  test("with no start row, only the clicked session; an unknown clicked row selects nothing", () => {
+    expect(sessionRange(rows, null, "s:inbox:s1")).toEqual(["s1"]);
+    expect(sessionRange(rows, "s:gone", "s:inbox:s1")).toEqual(["s1"]);
+    expect(sessionRange(rows, "s:inbox:s0", "s:gone")).toEqual([]);
   });
 });

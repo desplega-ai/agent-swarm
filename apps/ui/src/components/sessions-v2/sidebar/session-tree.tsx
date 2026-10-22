@@ -362,7 +362,7 @@ export function SessionTree({
     newSession: () => newSession(startGroupOf(cursorRow)),
     move: () => openMove(keyTargets()),
     select: () => {
-      if (cursorSession) selection.toggle(cursorSession.root.id);
+      if (cursorSession && cursorRow) selection.toggle(cursorSession.root.id, cursorRow.key);
     },
     menu: () => {
       if (!cursorRow) return;
@@ -406,19 +406,27 @@ export function SessionTree({
   const onRowClick = useStableHandler((key: string, event: MouseEvent) => {
     const row = rowsByKey.get(key);
     if (!row) return;
+    const from = cursorRow?.key ?? null;
     cursor.place(key);
+    if (row.type === "session" && event.shiftKey) {
+      selection.selectRange(key, from);
+      return;
+    }
     if (row.type === "session" && (event.metaKey || event.ctrlKey)) {
-      selection.toggle(row.session.root.id);
+      selection.toggle(row.session.root.id, key);
       return;
     }
     activate(row);
   });
-  const onToggleSelect = useStableHandler((key: string) => {
+  /** `range`: a Shift+click on the checkbox. */
+  const onToggleSelect = useStableHandler((key: string, range = false) => {
     const row = rowsByKey.get(key);
     if (row?.type !== "session") return;
+    const from = cursorRow?.key ?? null;
     cursor.place(key);
     focusTree();
-    selection.toggle(row.session.root.id);
+    if (range) selection.selectRange(key, from);
+    else selection.toggle(row.session.root.id, key);
   });
   const onRowAuxClick = useStableHandler((key: string, event: MouseEvent) => {
     const row = rowsByKey.get(key);

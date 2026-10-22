@@ -2,8 +2,8 @@
  * The pane area (plan Phase 8, SPEC R2.9): the main pane with its tabs, and
  * one split pane beside it. The split opens with `v`, the row menu, Cmd+K,
  * the Columns2 button, or by dragging a session tab to the right edge
- * (mockup `index.html:2406`). The split pane holds one session tab. Its
- * close button returns to one pane.
+ * (as in the mockup). The split pane holds one session tab or the New
+ * session tab. Its close button returns to one pane.
  *
  * The active pane holds the pane keys and the amber bar on its focused tab.
  * A press or a focus inside a pane makes it active.
