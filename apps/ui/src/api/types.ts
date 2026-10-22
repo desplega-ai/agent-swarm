@@ -23,6 +23,7 @@ export type AgentTaskSource =
   | "ui"
   | "github"
   | "gitlab"
+  | "bitbucket"
   | "agentmail"
   | "system"
   | "schedule"
@@ -3809,6 +3810,7 @@ export type OnboardingIntegrationMethod =
   | "slack"
   | "github"
   | "gitlab"
+  | "bitbucket"
   | "linear_oauth"
   | "jira_oauth";
 
@@ -3845,6 +3847,7 @@ export interface OnboardingSignals {
     slack: boolean;
     github: boolean;
     gitlab: boolean;
+    bitbucket: boolean;
     linear: boolean;
     jira: boolean;
   };

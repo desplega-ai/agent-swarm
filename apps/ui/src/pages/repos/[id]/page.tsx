@@ -227,8 +227,9 @@ function GuidelinesSection({ guidelines }: { guidelines: RepoGuidelines }) {
   );
 }
 
-function detectProvider(url: string): "github" | "gitlab" | null {
+function detectProvider(url: string): "github" | "gitlab" | "bitbucket" | null {
   if (url.includes("gitlab.com") || url.includes("gitlab.")) return "gitlab";
+  if (url.includes("bitbucket.org")) return "bitbucket";
   if (url.includes("github.com")) return "github";
   return null;
 }

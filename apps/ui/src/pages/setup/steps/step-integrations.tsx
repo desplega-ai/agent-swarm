@@ -27,7 +27,7 @@ import {
   type SetupIntegration,
   type SetupIntegrationId,
 } from "./integrations/catalog";
-import { GitHubPane, GitLabPane } from "./integrations/git-panes";
+import { BitbucketPane, GitHubPane, GitLabPane } from "./integrations/git-panes";
 import { JiraPane, LinearPane } from "./integrations/oauth-panes";
 import { SlackPane } from "./integrations/slack-pane";
 import type { PaneProps } from "./integrations/use-config-form";
@@ -255,6 +255,8 @@ function IntegrationPane({
       return <GitHubPane {...paneProps} />;
     case "gitlab":
       return <GitLabPane {...paneProps} />;
+    case "bitbucket":
+      return <BitbucketPane {...paneProps} />;
     case "linear":
       return <LinearPane {...paneProps} oauthError={oauthError} />;
     case "jira":

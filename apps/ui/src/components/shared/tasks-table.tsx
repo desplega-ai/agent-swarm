@@ -38,6 +38,7 @@ import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, User } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { BitbucketMark } from "@/components/shared/bitbucket-mark";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
@@ -127,6 +128,7 @@ const SOURCE_ICON: Record<string, IconCmp> = {
   ui: Layout,
   github: Github,
   gitlab: Gitlab,
+  bitbucket: BitbucketMark,
   agentmail: Mail,
   system: Settings2,
   schedule: Calendar,
@@ -349,6 +351,8 @@ const TASK_TYPE_META: Record<string, { label: string; icon: IconCmp }> = {
   "agentmail-message": { label: "AgentMail message", icon: Mail },
   "agentmail-reply": { label: "AgentMail reply", icon: Mail },
   "azure-devops-work-item": { label: "Azure Boards work item", icon: Globe },
+  "bitbucket-comment": { label: "Bitbucket comment", icon: BitbucketMark },
+  "bitbucket-pr": { label: "Bitbucket PR", icon: GitPullRequest },
   "github-comment": { label: "GitHub comment", icon: Github },
   "github-issue": { label: "GitHub issue", icon: Github },
   "github-pr": { label: "GitHub PR", icon: GitPullRequest },

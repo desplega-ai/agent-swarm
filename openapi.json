@@ -29808,6 +29808,7 @@
                                     "slack",
                                     "github",
                                     "gitlab",
+                                    "bitbucket",
                                     "linear_oauth",
                                     "jira_oauth",
                                     null
@@ -29996,6 +29997,9 @@
                             "gitlab": {
                               "type": "boolean"
                             },
+                            "bitbucket": {
+                              "type": "boolean"
+                            },
                             "linear": {
                               "type": "boolean"
                             },
@@ -30007,6 +30011,7 @@
                             "slack",
                             "github",
                             "gitlab",
+                            "bitbucket",
                             "linear",
                             "jira"
                           ]
@@ -30257,6 +30262,7 @@
                           "slack",
                           "github",
                           "gitlab",
+                          "bitbucket",
                           "linear_oauth",
                           "jira_oauth"
                         ]
@@ -30802,6 +30808,7 @@
                                     "slack",
                                     "github",
                                     "gitlab",
+                                    "bitbucket",
                                     "linear_oauth",
                                     "jira_oauth",
                                     null
@@ -30990,6 +30997,9 @@
                             "gitlab": {
                               "type": "boolean"
                             },
+                            "bitbucket": {
+                              "type": "boolean"
+                            },
                             "linear": {
                               "type": "boolean"
                             },
@@ -31001,6 +31011,7 @@
                             "slack",
                             "github",
                             "gitlab",
+                            "bitbucket",
                             "linear",
                             "jira"
                           ]

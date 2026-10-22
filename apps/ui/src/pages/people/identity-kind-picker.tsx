@@ -14,7 +14,7 @@ import { getIntegrationLabel, IntegrationIcon } from "./integration-icons";
 
 /**
  * Identity-kind picker — preset chips for the four auto-link sources
- * (Slack/GitHub/Linear/GitLab) plus an "Other…" affordance that surfaces a
+ * (Slack/GitHub/Linear/GitLab/Bitbucket) plus an "Other…" affordance that surfaces a
  * free-text input. The free-text branch is allowed at the storage layer
  * (`user_external_ids.kind` has no CHECK constraint) but won't appear in the
  * Unmapped triage queue (UNMAPPED_KINDS in src/http/users.ts is hard-coded).
@@ -23,7 +23,7 @@ import { getIntegrationLabel, IntegrationIcon } from "./integration-icons";
  * surprised when a `discord` identity never shows up in the triage list.
  */
 
-export const PRESET_KINDS = ["slack", "github", "linear", "gitlab"] as const;
+export const PRESET_KINDS = ["slack", "github", "linear", "gitlab", "bitbucket"] as const;
 export type PresetKind = (typeof PRESET_KINDS)[number];
 
 export function isPresetKind(kind: string): kind is PresetKind {
@@ -45,8 +45,8 @@ export function CustomKindWarning({ className }: { className?: string }) {
     >
       <TriangleAlert className="h-3.5 w-3.5 mt-px shrink-0" />
       <span>
-        Custom kinds won't appear in the Unmapped triage queue — Slack, GitHub, Linear and GitLab
-        webhooks are the only auto-link sources today.
+        Custom kinds won't appear in the Unmapped triage queue — Slack, GitHub, Linear, GitLab and
+        Bitbucket webhooks are the only auto-link sources today.
       </span>
     </div>
   );

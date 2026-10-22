@@ -12025,7 +12025,7 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
+                                        method: "slack" | "github" | "gitlab" | "bitbucket" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -12058,6 +12058,7 @@ export interface paths {
                                     slack: boolean;
                                     github: boolean;
                                     gitlab: boolean;
+                                    bitbucket: boolean;
                                     linear: boolean;
                                     jira: boolean;
                                 };
@@ -12124,7 +12125,7 @@ export interface paths {
                         /** @enum {string} */
                         step: "integrations";
                         /** @enum {string} */
-                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth";
+                        method: "slack" | "github" | "gitlab" | "bitbucket" | "linear_oauth" | "jira_oauth";
                     } | {
                         /** @enum {string} */
                         action: "skip";
@@ -12235,7 +12236,7 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
+                                        method: "slack" | "github" | "gitlab" | "bitbucket" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -12268,6 +12269,7 @@ export interface paths {
                                     slack: boolean;
                                     github: boolean;
                                     gitlab: boolean;
+                                    bitbucket: boolean;
                                     linear: boolean;
                                     jira: boolean;
                                 };

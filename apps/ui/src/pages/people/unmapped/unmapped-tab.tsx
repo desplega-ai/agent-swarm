@@ -26,7 +26,7 @@ import { IntegrationIcon } from "../integration-icons";
 import { LinkToExistingDialog } from "./link-to-existing-dialog";
 import { ResolveCreateDialog } from "./resolve-create-dialog";
 
-const KIND_FILTERS = ["all", "slack", "linear", "github", "gitlab"] as const;
+const KIND_FILTERS = ["all", "slack", "linear", "github", "gitlab", "bitbucket"] as const;
 type KindFilter = (typeof KIND_FILTERS)[number];
 
 const KIND_LABEL: Record<KindFilter, string> = {
@@ -35,6 +35,7 @@ const KIND_LABEL: Record<KindFilter, string> = {
   linear: "Linear",
   github: "GitHub",
   gitlab: "GitLab",
+  bitbucket: "Bitbucket",
 };
 
 function coerceKind(value: string): KindFilter {

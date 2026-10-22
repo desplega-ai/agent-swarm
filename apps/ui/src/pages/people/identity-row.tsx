@@ -115,6 +115,8 @@ function placeholderFor(kind: string): string {
       return "uuid";
     case "gitlab":
       return "123";
+    case "bitbucket":
+      return "557058:uuid (account_id)";
     default:
       return "external id";
   }
