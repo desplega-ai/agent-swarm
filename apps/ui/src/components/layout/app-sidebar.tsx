@@ -28,7 +28,7 @@ import { SettingsIcon } from "@/components/icons/settings";
 import { UsersIcon } from "@/components/icons/users";
 import { WorkflowIcon } from "@/components/icons/workflow";
 import { UserSwitcher } from "@/components/identity/user-switcher";
-import { BetaTag } from "@/components/shared/beta-tag";
+import { BetaTag, NewTag } from "@/components/shared/beta-tag";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
@@ -52,6 +52,7 @@ import { navRequirementMet } from "@/lib/agent-fs/state";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
+import { SESSIONS_V2_MIN_VERSION } from "@/lib/sessions-v2";
 import { cn, formatCompactNumber } from "@/lib/utils";
 import { CombSidebarPins } from "./comb-sidebar-pins";
 import { SwarmSwitcher } from "./swarm-switcher";
@@ -79,6 +80,11 @@ interface NavItem {
    * keeps its plain icon + tooltip.
    */
   beta?: { tooltip: string };
+  /**
+   * New or rebuilt surface: renders a "NEW" tag chip next to the label once
+   * the API reaches `minVersion`. Expanded sidebar only, like `beta`.
+   */
+  newTag?: { tooltip: string; minVersion: string };
   /**
    * Runtime switch: the item renders only when the named feature is on.
    * `comb` reads `/status` `agent_fs.comb.enabled` (COMB_ENABLED + agent-fs).
@@ -124,6 +130,10 @@ const navGroups: NavGroup[] = [
         path: "/sessions",
         icon: MessageSquareIcon,
         gate: { minVersion: "1.76.0" },
+        newTag: {
+          tooltip: "The new sessions view: groups, triage, tabs, and a split",
+          minVersion: SESSIONS_V2_MIN_VERSION,
+        },
       },
       {
         title: "Pages",
@@ -215,12 +225,15 @@ function NavIconLink({
   end,
   tooltip,
   showBeta,
+  showNew,
 }: {
   item: NavItem;
   isActive: boolean;
   end?: boolean;
   tooltip?: string;
   showBeta?: boolean;
+  /** The item's `newTag`: its API version gate passed. */
+  showNew?: boolean;
 }) {
   const iconRef = useRef<AnimatedIconHandle>(null);
   return (
@@ -234,6 +247,7 @@ function NavIconLink({
         <item.icon ref={iconRef} size={16} className="shrink-0" />
         <span>{item.title}</span>
         {showBeta && item.beta && <BetaTag tooltip={item.beta.tooltip} className="ml-auto" />}
+        {showNew && item.newTag && <NewTag tooltip={item.newTag.tooltip} className="ml-auto" />}
       </NavLink>
     </SidebarMenuButton>
   );
@@ -478,6 +492,7 @@ export function AppSidebar() {
     "1.79.0": useFeatureGate("1.79.0"), // Pages
     "1.80.0": useFeatureGate("1.80.0"), // People
     "1.82.0": useFeatureGate("1.82.0"), // Live nav-item counts
+    [SESSIONS_V2_MIN_VERSION]: useFeatureGate(SESSIONS_V2_MIN_VERSION), // Sessions "NEW" tag
   };
   const isGated = (item: NavItem) =>
     !!item.gate && gates[item.gate.minVersion]?.supported === false;
@@ -561,6 +576,9 @@ export function AppSidebar() {
                               isActive={isActive}
                               end={item.path === "/"}
                               showBeta
+                              showNew={
+                                !!item.newTag && gates[item.newTag.minVersion]?.supported === true
+                              }
                             />
                             {/* Live count: auto-hidden when icon-collapsed. */}
                             {badge != null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
