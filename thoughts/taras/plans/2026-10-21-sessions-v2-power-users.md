@@ -3,7 +3,7 @@ date: 2026-10-21
 author: Taras
 topic: "Sessions v2: power-user sessions view (tree, triage, turn timeline, tabs, mobile)"
 tags: [plan, ui, sessions, grouping, power-users]
-status: in-progress
+status: completed
 autonomy: autopilot
 commit_per_phase: true
 git_base: c0711aa2f
@@ -813,20 +813,20 @@ The UX review checklist is closed, the UI E2E suite covers the new view, the doc
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Full gate: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun run tsc:check && bun run test:root -- --parallel=4`
-- [ ] Black-box E2E: `bun run e2e`
-- [ ] UI E2E: `bun run e2e:ui && bun run e2e:ui:tsc && bunx biome check packages/ui-e2e`
-- [ ] UI gates: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun check -b && bun run check:tokens`
-- [ ] Route and DB gates: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bun run check:dep-graph`
-- [ ] Repo gates: `bash scripts/check-audit-columns.sh && bun scripts/check-text-columns.ts && bun run check:bun-version && bash scripts/check-test-spawn-sync.sh && bash scripts/gitleaks.sh`
-- [ ] No raw route matching: `! grep -rn 'matchRoute(' src/http/ --include='*.ts' | grep -v 'route-def.ts' | grep -v 'utils.ts'`
-- [ ] Images build (the lock changed in Phase 3): `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile . && bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest`
-- [ ] OpenAPI is fresh: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
-- [ ] PR body passes: `bun scripts/check-pr-body.ts --title "feat(ui): sessions v2 with groups, triage, tabs, and a phone layout" --body-file /tmp/pr-body.md`
+- [x] Full gate: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun run tsc:check && bun run test:root -- --parallel=4` (clean worktree: all pass except `quickjs executor > caps the binary bodies`, which fails the same way on clean main on macOS)
+- [x] Black-box E2E: `bun run e2e`
+- [x] UI E2E: `bun run e2e:ui && bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` (90 passed, 0 flaky with `--retries=0`)
+- [x] UI gates: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b && bun check -b && bun run check:tokens`
+- [x] Route and DB gates: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bun run check:dep-graph`
+- [x] Repo gates: `bash scripts/check-audit-columns.sh && bun scripts/check-text-columns.ts && bun run check:bun-version && bash scripts/check-test-spawn-sync.sh && bash scripts/gitleaks.sh`
+- [x] No raw route matching: `! grep -rn 'matchRoute(' src/http/ --include='*.ts' | grep -v 'route-def.ts' | grep -v 'utils.ts'`
+- [x] Images build (the lock changed in Phase 3): `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile . && bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest`
+- [x] OpenAPI is fresh: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
+- [x] PR body passes: `bun scripts/check-pr-body.ts --title "feat(ui): sessions v2 with groups, triage, tabs, and a phone layout" --body-file /tmp/pr-body.md`
 
 #### Automated QA:
-- [ ] One full agent-browser walk on the seeded stack at 1440, 1280 (split), and 390 px, in light and dark, with zero console errors.
-- [ ] The new spec passes 3 times in a row on both projects: `bun run e2e:ui -- --no-build --repeat-each=3 specs/sessions-v2.spec.ts`
+- [x] One full agent-browser walk on the seeded stack at 1440, 1280 (split), and 390 px, in light and dark, with zero console errors. (28 pages, 0 console errors, no sideways scroll)
+- [x] The new spec passes 3 times in a row on both projects: `bun run e2e:ui -- --no-build --repeat-each=3 specs/sessions-v2.spec.ts` (18 passed with `--retries=0`)
 
 #### Manual Verification:
 - [ ] Taras reviews the PR and the recordings.
