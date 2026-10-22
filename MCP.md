@@ -141,11 +141,6 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [skill-publish](#skill-publish)
 - [Pages Tools](#pages-tools)
   - [app-get](#app-get)
-  - [app-history](#app-history)
-  - [app-diff](#app-diff)
-  - [app-list](#app-list)
-  - [app-patch](#app-patch)
-  - [app-query](#app-query)
   - [app-rows-list](#app-rows-list)
   - [app-row-get](#app-row-get)
   - [app-row-create](#app-row-create)
@@ -154,6 +149,11 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [app-row-delete](#app-row-delete)
   - [app-rows-delete](#app-rows-delete)
   - [app-action-run](#app-action-run)
+  - [app-history](#app-history)
+  - [app-diff](#app-diff)
+  - [app-list](#app-list)
+  - [app-patch](#app-patch)
+  - [app-query](#app-query)
   - [app-rollback](#app-rollback)
   - [app-sync](#app-sync)
   - [app-upsert](#app-upsert)
@@ -606,7 +606,7 @@ Add or update hand-verified facts for one model (e.g. a launch models.dev has no
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, nan, helmcode. |
+| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, ${openAICompatibleProviderIds().join(", ")}. |
 | `modelId` | `string` | Yes | - | Model id as models.dev keys it (e.g. claude-opus-5-5). |
 | `name` | `string` | No | - | Display name. |
 | `releaseDate` | `string` | No | - | Release date, YYYY-MM-DD. |
@@ -1742,6 +1742,106 @@ Get an app by ID, including its models, named queries, actions, and json-render 
 |-----------|------|----------|---------|-------------|
 | `appId` | `string` | Yes | - | App ID to retrieve. |
 
+### app-rows-list
+
+**App Rows List**
+
+List app rows with equality filters, sorting, and a limit.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `model` | `unknown` | Yes | - | - |
+| `equals` | `object` | No | - | - |
+| `sort` | `string` | No | - | - |
+| `limit` | `number` | No | - | - |
+
+### app-row-get
+
+**App Row Get**
+
+Get an app row.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `model` | `unknown` | Yes | - | - |
+| `rowId` | `string` | Yes | - | - |
+
+### app-row-create
+
+**App Row Create**
+
+Create an app row.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `model` | `unknown` | Yes | - | - |
+| `values` | `object` | Yes | - | - |
+
+### app-rows-create
+
+**App Rows Create**
+
+Create up to 500 app rows within 10 MiB.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `model` | `unknown` | Yes | - | - |
+| `rows` | `array` | Yes | - | - |
+
+### app-row-patch
+
+**App Row Patch**
+
+Patch an app row.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `model` | `unknown` | Yes | - | - |
+| `rowId` | `string` | Yes | - | - |
+| `values` | `object` | Yes | - | - |
+
+### app-row-delete
+
+**App Row Delete**
+
+Delete an app row.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `model` | `unknown` | Yes | - | - |
+| `rowId` | `string` | Yes | - | - |
+
+### app-rows-delete
+
+**App Rows Delete**
+
+Delete matching app rows. Supply at least one equality filter.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `model` | `unknown` | Yes | - | - |
+| `equals` | `object` | Yes | - | - |
+| `limit` | `number` | No | - | - |
+
+### app-action-run
+
+**Run an app action**
+
+Run a declared app action as an agent. Scripts and extensions cannot invoke this tool.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `action` | `unknown` | Yes | - | - |
+| `input` | `object` | No | - | - |
+
 ### app-history
 
 **App history**
@@ -1799,65 +1899,6 @@ Run one declared named app query with optional $param values and return its rows
 | `appId` | `string` | Yes | - | App ID containing the named query. |
 | `query` | `string` | Yes | - | Declared query name. |
 | `params` | `object` | No | - | Values for any $param filters declared by the named query. |
-
-### App row tools
-
-All row tools require `appId` and `model` and enforce `app.use` for the calling agent.
-Results appear under `data`. Rows contain `{ id, createdAt, updatedAt, createdBy, updatedBy, ...columns }`.
-Writes record `agent:<agentId>` as the writer and use the REST value validation rules.
-Source projections and join keys remain read-only. Row inputs must fit within 1 MiB.
-The seven tools also exist in the script SDK with underscore names.
-
-### app-rows-list
-
-List rows with typed equality filters, sorting, and a limit. Returns `{ rows, total }`.
-
-Parameters: `equals?: Record<string, string | number | boolean>`, `sort?: "<column>:asc" | "<column>:desc"`, `limit?: number` (1 to 1000, default 200). Filters accept declared and system columns with strict equality.
-
-### app-row-get
-
-Read a row by `rowId`. Returns `{ row }`.
-
-Parameters: `rowId: string`.
-
-### app-row-create
-
-Create a row from `values`. Returns `{ row }`.
-
-Parameters: `values: object`.
-
-### app-rows-create
-
-Create 1 to 500 rows from a `rows: values[]` array, within 10 MiB. Returns `{ rows }`.
-
-Parameters: `rows: object[]` (1 to 500 rows, 10 MiB total).
-
-### app-row-patch
-
-Patch a row by `rowId` with `values`. Returns `{ row }`.
-
-Parameters: `rowId: string`, `values: object`.
-
-### app-row-delete
-
-Delete a row by `rowId`. Returns `{ ok: true }`.
-
-Parameters: `rowId: string`.
-
-### app-rows-delete
-
-Delete matching rows with a non-empty `equals` filter. Returns `{ deleted }`.
-
-Parameters: `equals: Record<string, string | number | boolean>` (non-empty), `limit?: number` (1 to 1000, default 1000).
-
-### app-action-run
-
-Run a declared script, task, or sync action with `{ appId, action, input? }`. Agents can invoke it through MCP only.
-
-Parameters: `appId: string`, `action: string`, `input?: object`. Requires `app.use` and an agent identity.
-
-`app-action-run` returns the REST action body under `data`. Script actions run as their owner and receive the verified agent as `caller`.
-Scripts and extensions cannot invoke actions. The action tool has no script SDK method.
 
 ### app-rollback
 
@@ -2373,7 +2414,7 @@ Post a message to the Telegram, Slack, Discord or Teams thread your current task
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `text` | `string` | Yes | - | Markdown text to post to the thread. |
-| `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in the swarm agent-fs drive, such as thoughts/<agent-id>/report.pdf. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
+| `attachments` | `unknown` | Yes | - | - |
 
 ### chat-post
 
@@ -2387,7 +2428,7 @@ Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Di
 | `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100. |
 | `channelId` | `string` | No | - | Full SDK channel id, such as slack:C123. Ignored when threadId is set. |
 | `text` | `string` | Yes | - | Markdown text to post. |
-| `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in the swarm agent-fs drive, such as thoughts/<agent-id>/report.pdf. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
+| `attachments` | `unknown` | Yes | - | - |
 
 ### chat-open-dm
 
