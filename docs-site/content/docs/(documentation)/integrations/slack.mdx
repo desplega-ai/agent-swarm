@@ -337,6 +337,7 @@ Files a user shares with the bot (images, voice memos, documents) become task at
 1. The API server downloads each file from Slack with the bot token (requires the `files:read` scope).
 2. It stores the file through the active file provider (agent-fs, or the local provider) as a task attachment — the same kind of attachment a file uploaded from the dashboard creates. The worker's task prompt includes a ready-to-run command to fetch it.
 3. The task is created in `draft` and becomes claimable only once its attachments are stored, so an agent never starts before the file exists.
+4. An audio file or a Slack voice clip is transcribed into the task description under its metadata line, as a `[Transcript of <file>]` block, when a transcription key is available: `TRANSCRIPTION_API_KEY`, or an ElevenLabs, OpenAI or Groq key the swarm already has (see [Voice notes](/docs/integrations/chat-sdk#voice-notes)). Without a key, the line says no transcription provider is configured. A failed call is noted the same way, and the task is still created.
 
 Each file also appears in the task description as a metadata line (filename, MIME type, size, Slack file ID). When a file can't be attached, the bot replies in the thread naming the file and the reason. A file that is larger than the 50 MB attachment limit or fails to download is also marked `(not attached: <reason>)` on its metadata line. A storage error happens after the description is written, so that file is reported only in the thread reply, and the task has no attachment for it.
 

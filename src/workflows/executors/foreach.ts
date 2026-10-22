@@ -1,19 +1,22 @@
 import { z } from "zod";
+import { createForeachChildSteps } from "../../be/db/workflow-runs";
 import type { ExecutorMeta } from "../../types";
-import { deepInterpolate } from "../../utils/template";
+import { FOREACH_ITEMS_WAIT_FOR } from "../constants";
 import { getSuccessors } from "../definition";
+import { foreachBodyTypeError } from "../foreach-body";
 import {
   buildForeachAggregate,
   FOREACH_TERMINAL_STEP_STATUSES,
   parseSyntheticNodeId,
 } from "../foreach-join";
 import { getMaxWorkflowStepsPerRun } from "../limits";
-import { AgentTaskExecutor } from "./agent-task";
 import type { AsyncExecutorResult, ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 
+// Any registered executor except `foreach` (see foreach-body.ts); the guard in
+// execute() and definition validation enforce the policy.
 const ForeachBodySchema = z.object({
-  type: z.literal("agent-task"),
+  type: z.string().min(1),
   config: z.record(z.string(), z.unknown()),
 });
 
@@ -21,7 +24,12 @@ export const ForeachConfigSchema = z.object({
   over: z.array(z.record(z.string(), z.unknown())),
   itemKey: z.string().min(1),
   body: ForeachBodySchema,
-  concurrency: z.never().optional(),
+  /** Items in flight at once (`running` or `waiting` children). Unbounded when absent. */
+  concurrency: z.number().int().min(1).optional(),
+  /** Defaults from the workflow `onNodeFailure` (see effectiveFailurePolicy). */
+  // Literal, not FOREACH_FAILURE_POLICIES: foreach-body.ts sits in an import
+  // cycle with this module and would be read before it initializes.
+  failurePolicy: z.enum(["fail-fast", "collect-outcomes"]).optional(),
 });
 
 const ForeachResultSchema = z.object({
@@ -34,6 +42,8 @@ export const ForeachOutputSchema = z.object({
   results: z.array(ForeachResultSchema),
   okCount: z.number().int().nonnegative(),
   failedCount: z.number().int().nonnegative(),
+  /** Items cancelled before they finished (fail-fast queued items, cancelled bodies). Counted in failedCount too. */
+  cancelledCount: z.number().int().nonnegative().optional(),
 });
 
 export type ForeachOutput = z.infer<typeof ForeachOutputSchema>;
@@ -49,7 +59,7 @@ export class ForeachExecutor extends BaseExecutor<
 
   protected async execute(
     config: z.infer<typeof ForeachConfigSchema>,
-    context: Readonly<Record<string, unknown>>,
+    _context: Readonly<Record<string, unknown>>,
     meta: ExecutorMeta,
   ): Promise<ExecutorResult<ForeachOutput>> {
     if (config.over.length === 0) {
@@ -77,16 +87,19 @@ export class ForeachExecutor extends BaseExecutor<
       seenItemKeys.add(itemKey);
     }
 
-    const agentTaskExecutor = new AgentTaskExecutor(this.deps);
+    const bodyTypeError = foreachBodyTypeError(meta.nodeId, config.body.type);
+    if (bodyTypeError) return { status: "failed", error: bodyTypeError };
+
     const runSteps = await this.deps.db.getWorkflowRunStepsByRunId(meta.runId);
-    const childStepsByNodeId = new Map(
+    const existingChildNodeIds = new Set(
       runSteps
         .filter((step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId)
-        .map((step) => [step.nodeId, step]),
+        .map((step) => step.nodeId),
     );
-    const childCountToCreate = items.filter(
-      ({ itemKey }) => !childStepsByNodeId.has(`${meta.nodeId}#${itemKey}`),
-    ).length;
+    const missingItems = items.filter(
+      ({ itemKey }) => !existingChildNodeIds.has(`${meta.nodeId}#${itemKey}`),
+    );
+    const childCountToCreate = missingItems.length;
     const maxSteps = getMaxWorkflowStepsPerRun();
     // walkGraph's circuit breaker rejects any post-join walk once allSteps.length
     // >= maxSteps, so a fan-out with a successor that lands exactly on the cap would
@@ -107,79 +120,26 @@ export class ForeachExecutor extends BaseExecutor<
       };
     }
 
-    // Materialize EVERY child step row before dispatching ANY child task. A task
-    // dispatched for an early child can complete (and trigger joinForeach) while
-    // later children are still being set up — the join must always see the full
-    // child set, with not-yet-dispatched children in a non-terminal state.
-    for (const { index, itemKey } of items) {
-      const childNodeId = `${meta.nodeId}#${itemKey}`;
-      if (childStepsByNodeId.has(childNodeId)) continue;
-      const childStepId = crypto.randomUUID();
-      const childStep = await this.deps.db.createWorkflowRunStep({
-        id: childStepId,
-        runId: meta.runId,
-        nodeId: childNodeId,
-        nodeType: "agent-task",
-        input: { itemKey, index },
-      });
-      await this.deps.db.updateWorkflowRunStep(childStepId, {
-        idempotencyKey: `${meta.runId}:${childNodeId}:0`,
-      });
-      childStepsByNodeId.set(childNodeId, childStep);
-    }
-
-    for (const { item, index, itemKey } of items) {
-      const childNodeId = `${meta.nodeId}#${itemKey}`;
-      const childStep = childStepsByNodeId.get(childNodeId)!;
-
-      // Re-walks must not regress terminal children or disturb their aggregate
-      // inputs. Retry resets only the failed child to pending before arriving here.
-      if (FOREACH_TERMINAL_STEP_STATUSES.has(childStep.status)) continue;
-
-      // The deferred per-item pass interpolates against the node's declared-inputs
-      // context (meta.inputCtx) plus item/index — NOT the full run context — so
-      // body.config obeys the same explicit-dataflow boundary as normal node
-      // config instead of silently reading undeclared upstream outputs.
-      const bodyCtx = { ...(meta.inputCtx ?? context), item, index };
-      const childInterpolation = deepInterpolate(config.body.config, bodyCtx);
-      if (childInterpolation.unresolved.length > 0) {
-        console.warn(
-          `[workflow] Step ${childNodeId}: unresolved interpolation tokens: ${childInterpolation.unresolved.join(", ")}`,
-        );
-        await this.deps.db.updateWorkflowRunStep(childStep.id, {
-          diagnostics: JSON.stringify({ unresolvedTokens: childInterpolation.unresolved }),
-        });
-      }
-
-      const linkedTask = await this.deps.db.getTaskByWorkflowRunStepId(childStep.id);
-      if (linkedTask?.status === "failed" || linkedTask?.status === "cancelled") {
-        // A retry needs a fresh task. Detaching the stale terminal task keeps the
-        // executor's one-task-per-step de-duplication deterministic and scoped.
-        await this.deps.db.detachTaskFromWorkflowRunStep(linkedTask.id);
-      }
-
-      const childResult = await agentTaskExecutor.run({
-        config: childInterpolation.value as Record<string, unknown>,
-        context,
-        meta: {
-          ...meta,
-          stepId: childStep.id,
+    // Materialize EVERY child row, queued (`pending`), in one transaction and
+    // before any child starts. An early child can complete (and trigger the
+    // join) while later children are still being set up, so the join must
+    // always see the full child set. The item value is not persisted: the
+    // driver looks it up by key in the re-interpolated `over`, which keeps
+    // resolved secrets out of step rows.
+    await createForeachChildSteps(
+      meta.runId,
+      meta.nodeId,
+      missingItems.map(({ index, itemKey }) => {
+        const childNodeId = `${meta.nodeId}#${itemKey}`;
+        return {
+          id: crypto.randomUUID(),
           nodeId: childNodeId,
-        },
-      });
-      if (childResult.status !== "success") {
-        throw new Error(childResult.error ?? `foreach child "${itemKey}" failed to start`);
-      }
-      if ("async" in childResult) {
-        await this.deps.db.updateWorkflowRunStep(childStep.id, { status: "waiting" });
-      } else {
-        await this.deps.db.updateWorkflowRunStep(childStep.id, {
-          status: "completed",
-          output: normalizeExistingTaskOutput(childResult.output),
-          finishedAt: new Date().toISOString(),
-        });
-      }
-    }
+          nodeType: config.body.type,
+          input: { itemKey, index, attempt: 0 },
+          idempotencyKey: `${meta.runId}:${childNodeId}:0`,
+        };
+      }),
+    );
 
     const childSteps = (await this.deps.db.getWorkflowRunStepsByRunId(meta.runId)).filter(
       (step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId,
@@ -188,26 +148,12 @@ export class ForeachExecutor extends BaseExecutor<
       return { status: "success", output: buildForeachAggregate(childSteps) };
     }
 
+    // The engine parks the parent and the foreach driver starts the children.
     return {
       status: "success",
       async: true,
-      waitFor: "task.completed",
+      waitFor: FOREACH_ITEMS_WAIT_FOR,
       correlationId: meta.stepId,
     } as AsyncExecutorResult<ForeachOutput>;
   }
-}
-
-function normalizeExistingTaskOutput(output: unknown): unknown {
-  if (typeof output !== "object" || output === null) return output;
-  const record = output as Record<string, unknown>;
-  if (typeof record.taskOutput !== "string") return output;
-  try {
-    const parsed = JSON.parse(record.taskOutput);
-    if (typeof parsed === "object" && parsed !== null) {
-      return { ...record, taskOutput: parsed };
-    }
-  } catch {
-    // Non-structured task output remains a string.
-  }
-  return output;
 }

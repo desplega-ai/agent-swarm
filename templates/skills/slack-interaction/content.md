@@ -37,6 +37,11 @@ The task carries `slackChannelId` and `slackThreadTs` in its metadata. A follow-
 
 Files attached to your task already come with download commands in the task message. Use those before `slack-download-file`. `slack-read` on your task also attaches the files in the thread and gives each one a `fetchCommand`. Don't look for Slack files under `/app/shared` or `/workspace/shared/downloads`: those paths are the API server's disk.
 
+## Message limits
+
+- Text sent without `blocks` is split into sections under Slack's 3,000-character section limit for you. With explicit `blocks`, keep each section's text at or under 3,000 characters yourself.
+- Truncate user text by code point (`Array.from(s).slice(0, n).join("")`), never with `s.slice(0, n)`: cutting an emoji in half leaves a lone UTF-16 surrogate, and Slack rejects the blocks with `invalid_blocks_format`.
+
 ## Unknown user
 
 A task without `requestedByUserId` came from a Slack user the swarm does not know. Register them with `manage-user`, using the Slack user ID and display name from the task metadata, then continue. When you learn a requester's stable preferences (language, tone, verbosity), the lead stores them in the user's `comms` field with `manage-user`.

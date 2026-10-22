@@ -336,7 +336,7 @@ describe("page-session CORS over HTTP", () => {
           const cookie = response.headers.get("set-cookie")!.split(";")[0]!;
           for (const path of [`/p/${pageId}.json`, `/@swarm/api/pages/${pageId}`]) {
             const page = await fetch(`${base}${path}`, {
-              headers: { Origin: origin, Cookie: cookie },
+              headers: { Origin: origin, Cookie: cookie, "X-Swarm-Page-Id": pageId },
             });
             expect(page.status).toBe(200);
             expect(page.headers.get("access-control-allow-origin")).toBe(

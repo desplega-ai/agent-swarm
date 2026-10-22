@@ -359,7 +359,7 @@ const copilotTargetProfile: AcpTargetProfile = {
   },
 };
 
-/** Qwen Code's `--auth-type` choices (0.25.3). `qwen-oauth` needs a browser, so it is left out. */
+/** Qwen Code's `--auth-type` choices (0.26.0). `qwen-oauth` needs a browser, so it is left out. */
 const QWEN_AUTH_TYPES = ["openai", "openai-responses", "anthropic", "gemini", "vertex-ai"] as const;
 
 // Qwen Code is a Gemini CLI fork: QWEN_SYSTEM_MD replaces its built-in prompt

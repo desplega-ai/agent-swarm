@@ -20,4 +20,6 @@ export interface SeedManifest {
   };
   session: { id: string };
   memory: { name: string };
+  /** Seeded only when the seed has DB access (a local SUT). */
+  workflowRuns?: { foreach: string };
 }

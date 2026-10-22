@@ -11,6 +11,12 @@ import {
   systemOneStaticShapeViolations,
 } from "./executors/system-one-decision";
 import { systemOneExtractionStaticShapeViolations } from "./executors/system-one-extraction";
+import {
+  FOREACH_FAILURE_POLICIES,
+  type ForeachFailurePolicy,
+  foreachBodyTypeError,
+  isForeachBodyType,
+} from "./foreach-body";
 
 /** Extract all target node IDs from a node's `next` field */
 export function getNextTargets(next: string | string[] | Record<string, string>): string[] {
@@ -220,7 +226,7 @@ export function validateDefinition(
       ...systemOneRetryViolations(node),
     );
     if (node.type === "foreach") {
-      validateForeachNode(node, errors);
+      validateForeachNode(node, errors, registry);
       // A legacy `#` id may stay editable as a NORMAL node, but never as a foreach
       // parent: its children would be `a#b#item`, and parseSyntheticNodeId splits on
       // the FIRST `#`, so the join would resolve them to parent "a" and never close.
@@ -312,20 +318,25 @@ export function validateDefinition(
 
       reportStaticConfigIssues(node, registry.get(node.type).configSchema, node.config, errors);
 
-      // A foreach body is executed by the agent-task executor per item — hold its
-      // static config to the same schema a top-level agent-task node gets, so an
-      // invalid field (priority: 101, tags: "x") fails at authoring instead of
+      // A foreach body is executed by its own executor per item — hold its
+      // static config to the same schema a top-level node of that type gets, so
+      // an invalid field (priority: 101, tags: "x") fails at authoring instead of
       // after the fan-out materialized. Interpolated fields defer as usual.
-      if (node.type === "foreach" && registry.has("agent-task")) {
-        const body = node.config.body;
-        const bodyConfig =
-          typeof body === "object" && body !== null && !Array.isArray(body)
-            ? (body as Record<string, unknown>).config
-            : undefined;
+      const body = node.type === "foreach" ? node.config.body : undefined;
+      const bodyRecord =
+        typeof body === "object" && body !== null && !Array.isArray(body)
+          ? (body as Record<string, unknown>)
+          : undefined;
+      if (
+        bodyRecord &&
+        typeof bodyRecord.type === "string" &&
+        isForeachBodyType(bodyRecord.type, registry)
+      ) {
+        const bodyConfig = bodyRecord.config;
         if (typeof bodyConfig === "object" && bodyConfig !== null && !Array.isArray(bodyConfig)) {
           reportStaticConfigIssues(
             node,
-            registry.get("agent-task").configSchema,
+            registry.get(bodyRecord.type).configSchema,
             bodyConfig,
             errors,
             "config.body.config",
@@ -401,10 +412,27 @@ function reportStaticConfigIssues(
   }
 }
 
-function validateForeachNode(node: WorkflowNode, errors: string[]): void {
+function validateForeachNode(
+  node: WorkflowNode,
+  errors: string[],
+  registry?: ExecutorRegistry,
+): void {
   const config = node.config;
-  if (Object.hasOwn(config, "concurrency")) {
-    errors.push(`Node "${node.id}" foreach concurrency is not supported in v1`);
+  if (
+    config.concurrency !== undefined &&
+    !(Number.isInteger(config.concurrency) && (config.concurrency as number) >= 1)
+  ) {
+    errors.push(
+      `Node "${node.id}" foreach config.concurrency must be an integer of 1 or more, got ${JSON.stringify(config.concurrency)}`,
+    );
+  }
+  if (
+    config.failurePolicy !== undefined &&
+    !FOREACH_FAILURE_POLICIES.includes(config.failurePolicy as ForeachFailurePolicy)
+  ) {
+    errors.push(
+      `Node "${node.id}" foreach config.failurePolicy must be one of ${FOREACH_FAILURE_POLICIES.map((p) => `"${p}"`).join(", ")}, got ${JSON.stringify(config.failurePolicy)}`,
+    );
   }
 
   // The asynchronous join (joinForeach) checkpoints the aggregate and routes
@@ -436,8 +464,11 @@ function validateForeachNode(node: WorkflowNode, errors: string[]): void {
     return;
   }
   const bodyRecord = body as Record<string, unknown>;
-  if (bodyRecord.type !== "agent-task") {
-    errors.push(`Node "${node.id}" foreach config.body.type must be "agent-task" in v1`);
+  if (typeof bodyRecord.type !== "string" || bodyRecord.type.length === 0) {
+    errors.push(`Node "${node.id}" foreach config.body.type must be a non-empty string`);
+  } else {
+    const typeError = foreachBodyTypeError(node.id, bodyRecord.type, registry);
+    if (typeError) errors.push(typeError);
   }
   if (
     typeof bodyRecord.config !== "object" ||
@@ -448,7 +479,7 @@ function validateForeachNode(node: WorkflowNode, errors: string[]): void {
     return;
   }
   const bodyConfig = bodyRecord.config as Record<string, unknown>;
-  if (typeof bodyConfig.template !== "string") {
+  if (bodyRecord.type === "agent-task" && typeof bodyConfig.template !== "string") {
     errors.push(`Node "${node.id}" foreach agent-task body.config.template must be a string`);
   }
 }

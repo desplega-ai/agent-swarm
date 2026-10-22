@@ -79,8 +79,6 @@ const allowedUserIds = (process.env.SLACK_ALLOWED_USER_IDS || "")
   .map((id) => id.trim())
   .filter(Boolean);
 
-const filteringEnabled = allowedEmailDomains.length > 0 || allowedUserIds.length > 0;
-
 /**
  * Configuration for user filtering.
  */
@@ -88,6 +86,8 @@ export interface UserFilterConfig {
   allowedEmailDomains: string[];
   allowedUserIds: string[];
 }
+
+const envUserFilterConfig: UserFilterConfig = { allowedEmailDomains, allowedUserIds };
 
 /**
  * Core logic for checking if a user is allowed based on email and/or user ID.
@@ -137,40 +137,31 @@ export function checkUserAccess(
 /**
  * Check if a user is allowed to interact with the swarm.
  * Returns true if filtering is disabled, user is in whitelist, or user's email domain is allowed.
+ * The allow/deny decision is `checkUserAccess`; this wrapper only adds the lazy email lookup
+ * and the deny logs. The config comes from the SLACK_ALLOWED_* env vars, read at module load.
  */
 export async function isUserAllowed(client: WebClient, userId: string): Promise<boolean> {
-  // If no filtering configured, allow all users (backwards compatible)
-  if (!filteringEnabled) {
-    return true;
-  }
-
-  // Check user ID whitelist first (fast path)
-  if (allowedUserIds.includes(userId)) {
-    return true;
-  }
-
-  // No email domains configured and not in user whitelist
-  if (allowedEmailDomains.length === 0) {
-    return false;
+  const config = envUserFilterConfig;
+  // Decide without an email first: filtering off and allowlisted IDs pass, and with no
+  // email domains configured an unlisted ID is denied. Only domain checks need a lookup.
+  const allowedWithoutEmail = checkUserAccess(userId, null, config);
+  if (allowedWithoutEmail || config.allowedEmailDomains.length === 0) {
+    return allowedWithoutEmail;
   }
 
   // Check email domain — uses kv-backed enrichment (24h TTL, only success cached).
   const email = await enrichSlackUserEmail(client, userId);
+  const allowed = checkUserAccess(userId, email, config);
 
-  if (!email) {
-    console.log(`[Slack] User ${userId} has no email, denying access`);
-    return false;
-  }
-
-  const domain = email.split("@")[1]?.toLowerCase();
-  if (!domain) {
-    console.log(`[Slack] User ${userId} has invalid email format, denying access`);
-    return false;
-  }
-
-  const allowed = allowedEmailDomains.includes(domain);
   if (!allowed) {
-    console.log(`[Slack] User ${userId} email domain "${domain}" not in allowed list`);
+    const domain = email?.split("@")[1]?.toLowerCase();
+    if (!email) {
+      console.log(`[Slack] User ${userId} has no email, denying access`);
+    } else if (!domain) {
+      console.log(`[Slack] User ${userId} has invalid email format, denying access`);
+    } else {
+      console.log(`[Slack] User ${userId} email domain "${domain}" not in allowed list`);
+    }
   }
   return allowed;
 }
@@ -702,8 +693,8 @@ export function registerMessageHandler(app: App): void {
         return ignoreSlackInbound("rate_limited");
       }
 
-      await using inbound = await fetchSlackFiles(client, msg.files);
-      const taskText = buildEffectiveText(msg.text, inbound.files, inbound.failed);
+      await using inbound = await fetchSlackFiles(client, msg.files, { transcribe: true });
+      const taskText = buildEffectiveText(msg.text, inbound.files, inbound.failed, inbound.notes);
       const taskDescription = isImplicitMention
         ? taskText
         : extractTaskFromMessage(taskText, botUserId);
@@ -778,9 +769,9 @@ export function registerMessageHandler(app: App): void {
     }
 
     // Extract task description (the text plus a `[File: …]` line per attachment)
-    await using inbound = await fetchSlackFiles(client, msg.files);
+    await using inbound = await fetchSlackFiles(client, msg.files, { transcribe: true });
     const taskDescription = extractTaskFromMessage(
-      buildEffectiveText(msg.text, inbound.files, inbound.failed),
+      buildEffectiveText(msg.text, inbound.files, inbound.failed, inbound.notes),
       botUserId,
     );
     if (!taskDescription) {

@@ -12,7 +12,8 @@ The channel is off by default. A configuration change saved on the dashboard app
 ## What it does
 
 - **Inbound on mention or DM.** A bot mention or a direct message creates a task with `source: "chat"`. By default the Lead gets it.
-- **Thread follow-ups.** A reply in the same thread steers the running task, or becomes a follow-up task.
+- **Thread follow-ups.** A reply in the same thread steers the running task, or becomes a follow-up task. In a Telegram group, only messages meant for the bot count: see [Telegram groups](#telegram-groups).
+- **Who and where.** Each task records the person who asked (`requestedByUserId`) and starts with a `[chat]` line: the chat, the sender and why the bot took the message.
 - **Results back in the thread.** When a task ends, the swarm posts its output to the thread it came from.
 - **Attachments.** Files sent with a message become task attachments.
 - **Tools and a skill.** Agents use the `chat-*` MCP tools and the built-in `chat-sdk` skill.
@@ -35,6 +36,7 @@ The channel reads these keys from the environment or from global swarm config:
 | `CHAT_SDK_ENABLED` | `true` to start the channel. Default `false`. A saved change applies within a few seconds. |
 | `CHAT_SDK_ADAPTERS` | JSON object. Each key is an adapter name (`telegram`, `slack`, `discord`, `teams`), each value is the adapter config. A saved change applies within a few seconds. |
 | `CHAT_SDK_BUFFER_MS` | How long a thread collects messages before it creates one task. Default `10000` (10 s), 1 to 600000. No restart needed. |
+| `CHAT_SDK_OWNER_WINDOW_MIN` | How long after a task ends a Telegram group keeps the same owner. DMs and other adapters' threads keep theirs. Default `15`, 0 to 1440. `0` keeps the owner only while the task is open. No restart needed. |
 | `CHAT_SDK_API_URL_OVERRIDES` | Environment only, for development and tests. JSON of platform API base URLs by adapter name, for example `{"telegram":"http://127.0.0.1:8081"}`. Never set it in production. |
 
 ### Secrets by reference
@@ -112,7 +114,7 @@ For local development without a public URL, set `mode` to `polling`. The adapter
 | `allowedUserIds` | no | Telegram user ids allowed to use the bot. Everyone is allowed when empty. |
 | `userName` | no | The bot username for mention detection. Default: the name from `getMe`. |
 
-In a group with BotFather privacy mode on (the default), Telegram sends the bot only commands and messages that mention it. To let the bot see every group message, send `/setprivacy` to BotFather, turn privacy off, then remove the bot from the group and add it again.
+In a group with BotFather privacy mode on (the default), Telegram sends the bot only commands meant for it, replies to its messages and messages that mention it. A plain follow-up from the requester never arrives: reply to the bot or mention it. To let the bot see every group message, send `/setprivacy` to BotFather, turn privacy off, then remove the bot from the group and add it again.
 
 ### Slack
 
@@ -259,17 +261,44 @@ A Teams thread id contains the service URL of the conversation, and the adapter 
 ## How it works
 
 1. **Buffer.** A mention or a DM opens a thread buffer. More messages in the same thread join it for `CHAT_SDK_BUFFER_MS` (10 s by default). A message that starts with `!now` flushes the buffer at once. One flush creates one task.
-2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent, or a workflow when the message mentions the bot or is a DM, so a plain reply in a subscribed thread never starts a second run), the agent that owns the thread, and then the Lead. A `pre.chat.route` extension can change the target.
-3. **Task.** The task gets `source: "chat"` and a context key `task:chat-sdk:{adapter}:{encoded thread id}`. Later tasks in the same thread share the key. The task text includes the recent thread messages.
+2. **Route.** The router picks a target in this order: a `swarm#<agentId>` token in the text, `swarm#all` (every reachable agent), a channel mapping from `register-chat-channel` (an agent, or a workflow when the message mentions the bot or is a DM, so a plain reply in a subscribed thread never starts a second run), the agent that owns the thread (in a Telegram group, only while its task is open and for `CHAT_SDK_OWNER_WINDOW_MIN` after it ends), and then the Lead for a mention or DM. A `pre.chat.route` extension can change the target.
+3. **Task.** The task gets `source: "chat"` and a context key `task:chat-sdk:{adapter}:{encoded thread id}`. Later tasks in the same thread share the key. The task text starts with a header such as `[chat] telegram · supergroup "Life" · from: Taras (@tarasyarema) · addressed: reply-to-bot`, then the recent thread messages. `addressed` is `dm`, `mention`, `reply-to-bot`, `requester-follow-up` or `none`. The sender is resolved through the user registry as the `<adapter>` identity kind with the platform user id (for Telegram, `telegram` and `from.id`). A known sender becomes the task's `requestedByUserId`, so times and per-user preferences apply. An unknown sender appears in the People page **Unmapped** tab; link it there.
 4. **Steer or follow up.** When the Lead's task for the thread is in progress, a new plain reply steers that task, and the bot posts a short acknowledgement. Otherwise the reply waits in the buffer and becomes a follow-up task that depends on the previous one.
-5. **Attachments.** Files are downloaded once per flush and attached to each new task. Files larger than 50 MB are skipped, and the task text says so.
+5. **Attachments.** Files are downloaded once per flush and attached to each new task. A file over the inbound cap (20 MB on Telegram, the most a bot can download; 50 MB elsewhere) is skipped: the task text says so, and the bot replies in the thread naming the file. Audio files and voice notes are transcribed into the task text when transcription is configured (see [Voice notes](#voice-notes)), and the audio stays attached.
 6. **Relay.** When a task ends (completed, failed or cancelled), a database trigger records a relay obligation. A watcher posts the task output to the thread and marks the row delivered. Lead follow-up tasks on the same thread are relayed too, so delegated results reach the user. When a Lead task is resumed after a shutdown or a crash, the resume task relays the final answer. A worker task, or its resume, does not relay: its result reaches the thread through the Lead follow-up. A failed post retries with backoff, up to 10 minutes between tries. After 24 hours the swarm stops and records the last error. Delivery is at least once: a crash between the post and the record can send a message twice.
 7. **Typing.** The bot shows the typing indicator from the first buffered message until it posts the reply. The indicator stops when the flush creates no task, and it stops after 15 minutes at most.
 8. **Shutdown.** On API shutdown the channel stops inside one 10 s budget. First, webhooks answer `503` and refuse new work. Then the relay watcher stops claiming rows. Next, in-flight handlers finish and every waiting thread buffer becomes its task. Then the swarm waits for a relay post that is still in flight. Last, the adapters shut down. Each step gets only the time that is left. A step that runs out of time is abandoned and logged as `Shutdown budget spent, abandoned: ...`.
    - **Relay post.** An abandoned post keeps its claimed row, which stays pending. After the restart, the row is sent again after the normal backoff (up to 10 minutes), within the 24 hour limit. If the platform did accept the abandoned post, the user can see the message twice.
    - **Buffered messages.** Thread buffers exist only in API memory, not in the Chat SDK tables. The platform already got its webhook acknowledgement, so it does not send those messages again. If the flush runs out of time, the threads not yet turned into tasks are lost, and the log line says so.
 
-Long output is split into several messages at the platform limit.
+Long output is split into several messages at the platform limit. The relay also sends the files an agent attached to the task (with `store-progress` or an upload), after the text. Files the user sent the bot are not echoed back.
+
+### Telegram groups
+
+In a Telegram group or supergroup, the bot takes a message only when it is meant for the bot: it mentions the bot, it replies to one of the bot's messages, or its sender asked for the thread's task and the owner window is open. Everything else is side chatter. It neither steers the running task nor creates a task. A `swarm#<agentId>` or `swarm#all` token, or an agent channel mapping, still routes any message. A reply to the bot counts as a mention whatever `TELEGRAM_MENTION_ON_REPLY` says. DMs and other adapters' threads are unchanged.
+
+## Voice notes
+
+Voice notes and other audio files are transcribed through ElevenLabs `/speech-to-text`, OpenAI `/audio/transcriptions`, or Groq's OpenAI-compatible endpoint. Self-hosted whisper servers work with `openai`. Deepgram and AssemblyAI are not supported. Configure it under **Settings → Integrations → Transcription**, which also shows the active provider and where its key came from.
+
+Transcription picks its key in this order:
+
+1. `TRANSCRIPTION_API_KEY`, with `TRANSCRIPTION_PROVIDER` (default `openai`). Store it as a secret. Only the API server reads it: it is never exported to agent env or scripts, and the config API does not list it.
+2. Without it, a provider key the API server already has. A set `TRANSCRIPTION_PROVIDER` uses only its own key. Otherwise the first one set wins: `ELEVENLABS_API_KEY`, then `OPENAI_API_KEY`, then `GROQ_API_KEY`.
+3. No key: transcription is off.
+
+The API server reads global config rows and its own deployment env. A provider key stored only at agent or repo scope is not seen.
+
+| Key | Default | What it does |
+|---|---|---|
+| `TRANSCRIPTION_API_KEY` | unset | Explicit key. Overrides the auto-detected provider key. |
+| `TRANSCRIPTION_PROVIDER` | auto-detect (`openai` with an explicit key) | `elevenlabs` sends `xi-api-key` and `model_id`; `openai` and `groq` send `Authorization: Bearer` and `model`. |
+| `TRANSCRIPTION_BASE_URL` | `https://api.elevenlabs.io/v1`, `https://api.openai.com/v1` or `https://api.groq.com/openai/v1` | Base URL of the service, for an explicit `TRANSCRIPTION_API_KEY` only. An auto-detected key always goes to its own provider. |
+| `TRANSCRIPTION_MODEL` | `scribe_v2`, `whisper-1` or `whisper-large-v3-turbo` | Model name sent to the service. |
+
+The task text then carries a `[Transcript of <file>]` block under the file line. Without a key, the task text gets one line saying no transcription provider is configured. A failed call is noted the same way, and the task is still created.
+
+The same keys transcribe audio shared with the [Slack bot](/docs/integrations/slack#attachment-handling) and audio attached in the dashboard's session composer, including clips recorded with its mic button (webm in Chrome and Firefox, m4a in Safari).
 
 ## Slash commands
 
@@ -292,12 +321,14 @@ Agents get these tools when the channel is on (capability `chat-sdk`). The param
 
 | Tool | What it does |
 |---|---|
-| `chat-reply` | Post to the thread of the current chat task. Use it for a question or a progress note. The final output posts by itself. |
+| `chat-reply` | Post to the thread of the current chat task. Use it for a question, a progress note, or to send files. The final output posts by itself. |
 | `chat-post` | Lead only. Post to any thread or channel id (for example `telegram:12345`). |
 | `chat-read-thread` | Read the recent messages of a thread, oldest first. Every agent can read the thread of its current task. Other threads are lead only. |
 | `chat-open-dm` | Lead only. Open or find the direct-message thread with a user. |
 | `register-chat-channel` | Lead only. Route a channel to a fixed agent or workflow. |
 | `unregister-chat-channel` | Lead only. Remove that mapping. |
+
+`chat-reply` and `chat-post` take an optional `attachments` list of up to 10 entries: an attachment id of the current task, or a path in the swarm agent-fs drive (the local file store when agent-fs is not configured). The files go out after the text. Telegram sends JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. Two to ten files of one kind go as one media group. Slack, Discord and Teams get the files as uploads on one message.
 
 A worker gets thread access only through a chat task that it is assigned or created. `send-task` and `POST /api/tasks` refuse a `parentTaskId` that a non-lead agent neither owns nor created, so a child task cannot inherit a foreign thread.
 
@@ -320,6 +351,8 @@ Payloads and examples: [Extensions guide](/docs/guides/extensions).
 | Slack | 4000 characters | Platform history. |
 | Discord | 2000 characters | Platform history. |
 | Teams | 20000 characters | Microsoft Graph, needs the `Chat.Read.*` permission. |
+
+Outbound files are capped per file: Telegram 50 MB (an image over 10 MB goes as a document), Discord 10 MB, Slack and Teams 50 MB (the swarm reads a file into memory before it sends it). A file over the cap, a file that cannot be read, or a file the platform refuses is not sent. The thread then gets a `Could not send ...` note that names the file and the reason, and the tool result lists it in `unsentFiles`.
 
 Platform notes:
 

@@ -7313,7 +7313,7 @@ export interface paths {
         put?: never;
         /**
          * Upload a binary task file attachment
-         * @description Accepts a raw binary request body. Pass the display/path name as the `name` query parameter.
+         * @description Accepts a raw binary request body. Pass the display/path name as the `name` query parameter. An `audio/*` file uploaded to a `draft` task gets a `[File: …]` line and its transcript (or why there is none) appended to the task text before the response; a failed transcription never fails the upload.
          */
         post: {
             parameters: {
@@ -20137,6 +20137,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{id}/skills/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get an agent's installed skills together with their bundled files
+         * @description Single-request boot payload: every installed-and-enabled skill with the full content of its bundled files, plus the same signature the cheap probe returns. Lets a worker sync its local skill tree without an N+1 file fan-out.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Agent skills bundle */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            skills: (components["schemas"]["Skill"] & {
+                                isActive: boolean;
+                                installedAt: string;
+                                files: components["schemas"]["SkillFile"][];
+                            })[];
+                            total: number;
+                            signature: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/slack/inbound/diagnostics": {
         parameters: {
             query?: never;
@@ -30059,6 +30108,7 @@ export interface operations {
                     routingNote?: string;
                     tags?: string[];
                     priority?: number;
+                    dependsOn?: string[];
                     offerMode?: boolean;
                     dir?: string;
                     vcsRepo?: string;

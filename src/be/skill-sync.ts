@@ -10,6 +10,7 @@
  */
 
 import { homedir } from "node:os";
+import type { SkillFile, SkillWithInstallInfo } from "../types";
 import {
   type SkillFsEntry,
   type SkillHarnessTarget,
@@ -71,8 +72,7 @@ export interface SkillsSignature {
  * uninstall, toggle, or skill-update mutates at least one of them. Output is
  * deterministic and contains no timestamps beyond per-row mutation fields.
  */
-export async function computeAgentSkillsSignature(agentId: string): Promise<SkillsSignature> {
-  const skills = await getAgentSkills(agentId);
+export function computeSkillsSignature(skills: readonly SkillWithInstallInfo[]): SkillsSignature {
   const sorted = [...skills].sort((a, b) => a.id.localeCompare(b.id));
   const canonical = JSON.stringify(
     sorted.map((s) => [
@@ -88,4 +88,45 @@ export async function computeAgentSkillsSignature(agentId: string): Promise<Skil
   );
   const hash = new Bun.CryptoHasher("sha256").update(canonical).digest("hex");
   return { hash, count: sorted.length };
+}
+
+/**
+ * Fetch the agent's skills and sign them.
+ *
+ * Callers that already hold the rows (the bundle endpoint) must use
+ * `computeSkillsSignature` on those exact rows instead of calling this: a
+ * second read can observe a newer edit and pair a fresh hash with stale
+ * payload bytes, which makes later signature probes skip the refresh forever.
+ */
+export async function computeAgentSkillsSignature(agentId: string): Promise<SkillsSignature> {
+  return computeSkillsSignature(await getAgentSkills(agentId));
+}
+
+export interface SkillsBundle {
+  skills: (SkillWithInstallInfo & { files: SkillFile[] })[];
+  total: number;
+  signature: string;
+}
+
+/**
+ * Build the worker boot payload: every installed skill plus its bundled files,
+ * signed over the rows this same call returned.
+ *
+ * The readers are injected so the ordering the fix depends on is testable: the
+ * signature is taken before the first `readFiles`, so an edit that lands while
+ * the files are being read cannot pair stale bytes with a newer hash.
+ */
+export async function buildSkillsBundle(
+  readSkills: () => Promise<SkillWithInstallInfo[]>,
+  readFiles: (skillId: string) => Promise<SkillFile[]>,
+): Promise<SkillsBundle> {
+  const skills = await readSkills();
+  const signature = computeSkillsSignature(skills).hash;
+  const entries = await Promise.all(
+    skills.map(async (skill) => ({
+      ...skill,
+      files: skill.isComplex ? await readFiles(skill.id) : [],
+    })),
+  );
+  return { skills: entries, total: entries.length, signature };
 }

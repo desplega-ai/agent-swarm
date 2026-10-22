@@ -80,8 +80,9 @@ Do not include patch bodies, diff hunks, raw `git log --stat` output, downloaded
 
 ## Foreach nodes
 
-`foreach` fans out one `agent-task` child per array item, waits for every child, then exposes one
-parent-owned aggregate to downstream nodes.
+`foreach` runs its `body` once per array item, waits for every item, then exposes one
+parent-owned aggregate to downstream nodes. The body can be any registered executor except
+`foreach`; `sub-workflow` runs one child workflow per item.
 
 ```yaml
 - id: reflect
@@ -101,12 +102,27 @@ parent-owned aggregate to downstream nodes.
 - `over` must resolve to an array. An exact interpolation token preserves the array value instead
   of JSON-stringifying it.
 - `itemKey` names a required non-empty string property whose value is unique across the array.
-- `body.type` is restricted to `agent-task` in v1. `body.config` accepts the normal agent-task
-  fields and is interpolated separately for each child with `item` and zero-based `index`.
+- `body.type` is any registered executor except `foreach` (nested fan-out is rejected, with the node
+  id in the error). `body.config` is that executor's normal config, checked against its schema at
+  authoring, and is interpolated separately for each child with `item` and zero-based `index`. A
+  `script` body keeps the script-source allowlist: pass the item through `args`.
+- Each child row carries the body's `nodeType`. Children are created `pending` in one transaction,
+  then the foreach driver (`src/workflows/foreach-driver.ts`) starts them. Instant bodies (`script`,
+  `swarm-script`, `raw-llm`, `notify`, ...) run one per item, each against its own watchdog budget,
+  not the parent's. Async bodies (`agent-task`, `sub-workflow`, `human-in-the-loop`, `wait`,
+  `system-one-decision` with `humanReview`) park, and their normal resume path settles the item
+  through `settleForeachChild` (`src/workflows/foreach-join.ts`).
+- A body's ports do not route. An approval `rejected`/`timeout` or a wait `timeout` still counts as a
+  completed item; its `nextPort` is stored on the child row for display.
 - Child steps have synthetic IDs `<foreachNodeId>#<itemKey>`. The parent remains waiting until all
   children are terminal; only the parent aggregate is written to workflow context.
 - Empty arrays complete synchronously and still route to the successor.
-- `concurrency` is rejected in v1. All children are materialized in one fan-out.
+- `concurrency` (an integer, 1 or more) caps how many items are in flight. Without it every item
+  starts at once. The child rows are the state: `pending` is queued, `running` or `waiting` is in
+  flight, and only the latest attempt row per item counts. Every item settlement starts the next
+  queued item, and the recovery sweep backs that up after a restart. The in-flight count and the
+  claim share one `BEGIN IMMEDIATE` transaction, so concurrent drives never exceed the cap.
+- `failurePolicy` is `fail-fast` or `collect-outcomes` (see below).
 - A `foreach` node in a cycle is rejected in v1. Child steps are scoped to the run, so a later
   parent iteration cannot safely re-adopt them.
 
@@ -122,10 +138,83 @@ The parent output shape is:
 }
 ```
 
-The workflow-level `onNodeFailure` policy applies to foreach children. The default `fail` stops the
-run on the first failed/cancelled child. With `onNodeFailure: "continue"`, the child contributes a
-`failed` result whose output contains the existing `[FAILED: <reason>]` marker; the remaining
-children finish and the parent closes the join.
+Only an item that completed without an error counts in `okCount`. Failed, cancelled and skipped
+items count in `failedCount`; `cancelledCount` is added when any item was cancelled.
+
+### Failure policies
+
+`config.failurePolicy` decides what a failed or cancelled item does. Without it, the policy follows
+the workflow's `onNodeFailure`: `"continue"` means `collect-outcomes`, the default `"fail"` means
+`fail-fast`. Existing definitions behave as before.
+
+- **fail-fast**: the first failed or cancelled item cancels every queued item (`error: "not started:
+  fail-fast after item <key> failed"`) and fails the run. Items already in flight finish and record
+  their outcome on their row; they never revive the run. The parent step stays open, so a run retry
+  resumes the fan-out.
+- **collect-outcomes**: every item reaches a terminal state, the parent completes with its
+  `failedCount`, and successors route. A failed agent-task item contributes a `failed` result whose
+  output carries the `[FAILED: <reason>]` marker. Item failures do not count against the run's
+  outcome; the parent step is authoritative.
+
+### Retry with preserved siblings
+
+`retry-workflow-run` on a failed fan-out adds a new attempt row for each item whose latest row is
+`failed` or `cancelled`: same child node id and `nodeType`, a fresh step id, `input.attempt: n`, and
+idempotency key `<runId>:<childNodeId>:<n>`. The fresh step id is a fresh invocation identity for
+every body type: a new task, a new child run, a new approval or a new wait. Completed items are never
+rerun, and earlier attempt rows stay as history. A double retry inserts nothing twice. Items are
+picked when the retry commits, so a sibling that failed late is retried too. A retry whose new rows
+would reach `WORKFLOW_MAX_STEPS_PER_RUN` is refused before it inserts anything, and the run stays
+failed: the retry walk itself needs one step of headroom.
+
+A collect-outcomes run completes, so it is not retried. To rerun its failed items, add a follow-up
+wave over `{{w.results}}` filtered to `status != "completed"`, under a new node id.
+
+### Dependency waves
+
+Each wave is its own `foreach` node, so its item keys are independent. A script between waves
+builds the next wave's items from earlier results. The running definition is never patched.
+
+```yaml
+- id: plan
+  type: swarm-script
+  config: { scriptName: plan-waves }   # result: { wave1: [...], wave2: [{ id, dependsOn }] }
+  next: wave1
+- id: wave1
+  type: foreach
+  inputs: { p: "plan" }
+  config:
+    over: "{{p.result.wave1}}"
+    itemKey: id
+    concurrency: 3
+    failurePolicy: fail-fast
+    body:
+      type: sub-workflow
+      config: { workflowId: "<build workflow id>", inputs: { spec: "{{item}}" } }
+  next: prep2
+- id: prep2
+  type: swarm-script
+  inputs: { p: "plan", w1: "wave1" }
+  config:
+    scriptName: prep-wave2           # returns wave2 jobs with `deps` from w1.results[].output
+    args: { wave1: "{{w1}}", wave2: "{{p.result.wave2}}" }
+  next: wave2
+- id: wave2
+  type: foreach
+  inputs: { prep: "prep2" }
+  config:
+    over: "{{prep.result}}"
+    itemKey: id
+    concurrency: 3
+    body:
+      type: sub-workflow
+      config:
+        workflowId: "<build workflow id>"
+        inputs: { spec: "{{item}}", deps: "{{item.deps}}" }
+```
+
+A sub-workflow passes a non-string input value to the child as JSON text, so the child parses
+`trigger.spec`. `src/tests/workflow-foreach-retry.test.ts` runs this definition end to end.
 
 ## Human-in-the-loop nodes
 
@@ -222,8 +311,9 @@ A `sub-workflow` node runs another workflow as a child run and waits for it.
   ancestor runs, and nesting stops at 16 levels below the root run (`MAX_SUB_WORKFLOW_DEPTH`). The
   checks run when the node executes, not when the definition is saved.
 - Not yet supported (tracked in the sub-workflow issue): pinning the child's definition version
-  (the child runs its live definition), cancelling the child when the parent is cancelled, a
-  per-node timeout, a `foreach` body that is a workflow, and showing the link in the dashboard.
+  (the child runs its live definition), cancelling the child when the parent is cancelled, and a
+  per-node timeout. As a `foreach` body, a run retry gives the failed item a new child run (see
+  [Retry with preserved siblings](#retry-with-preserved-siblings)).
 
 ## Agent-task steps cut by a deploy
 
@@ -237,7 +327,9 @@ A deploy drain or heartbeat remediation fails an in-flight workflow-step task wi
   external side effects that must not run twice.
 - A second cut exhausts the implicit retry and follows `onNodeFailure`.
 - Foreach children (`<foreachId>#<key>`) are not covered: the retry poller resolves the node by
-  exact id (`src/workflows/retry-poller.ts`) and cannot re-dispatch a child step.
+  exact id (`src/workflows/retry-poller.ts`) and cannot re-dispatch a child step. Automatic per-item
+  retry is a follow-up to #2029; until then, a cut item follows its fan-out's failure policy, and a
+  fail-fast run is resumed with `retry-workflow-run`, which reruns only the failed items.
 
 ## Script node types
 
@@ -306,14 +398,14 @@ Jev is weak at counting. For a hybrid, count in a `script` and pass the number t
 
 ## SystemOne Decision nodes
 
-A `system-one-decision` node (display name "SystemOne Decision") makes typed decisions with a decisions model, through TypeSafe directly, through OpenRouter, or through a laya server (see Providers). The model is a config field and defaults to Jev; the node name is not tied to one model. It answers at once, and waits only when `humanReview` sends an answer to a person (see Human review). One call sends one `state` and a map of questions, and the node returns one validated answer per question.
+A `system-one-decision` node (display name "SystemOne Decision") makes typed decisions with a SystemOne decisions model. Jev (through TypeSafe or OpenRouter) and Clef (on Cloudflare Workers AI) are peers; laya and OpenAI are also hosts (see Providers). The node name is not tied to one model. It answers at once, and waits only when `humanReview` sends an answer to a person (see Human review). One call sends one `state` and a map of questions, and the node returns one validated answer per question.
 
 ```yaml
 - id: qualify
   type: system-one-decision
   inputs: { lead: "trigger.lead" }
   config:
-    provider: typesafe # the default; or openrouter, or laya
+    provider: typesafe # or openrouter, cloudflare, laya, openai; unset = SYSTEM_ONE_DEFAULT_PROVIDER
     model: jev-1.13.0
     state: "{{lead}}"
     questions:
@@ -338,7 +430,7 @@ A `system-one-decision` node (display name "SystemOne Decision") makes typed dec
 
 ### `system-one-decision` config
 
-- `provider`: `typesafe` (default), `openrouter`, `laya`, `openai`, or `cloudflare`. A literal, not a `{{token}}`, because it decides which settings are checked before the run starts. See Providers.
+- `provider`: `typesafe`, `openrouter`, `laya`, `openai`, or `cloudflare`. Unset means the `SYSTEM_ONE_DEFAULT_PROVIDER` global config value, read at run time (`typesafe` when that is unset too). A literal, not a `{{token}}`, because it decides which settings are checked before the run starts. See Providers.
 - `state` (required): text, a string array, or a JSON object. An exact `{{token}}` keeps the upstream JSON type; mixed text is interpolated as a string. Resolved content is never interpolated again.
 - `questions` (required): a map of question id to a `noul`, `choice`, or `score` question. Ids match `[A-Za-z_][A-Za-z0-9_-]*`. Ids and types are static. Only `state` and the descriptions may use `{{tokens}}`.
   - `noul`: `instructions`, optional `criteria: { true?, false? }`. The answer is a probability that the claim is true.
@@ -374,7 +466,7 @@ Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` m
 
 | `provider` | Host | Key (global secret) | Default `model` |
 |---|---|---|---|
-| `typesafe` (default) | `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | `jev-latest` |
+| `typesafe` | `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | `jev-latest` |
 | `openrouter` | `https://openrouter.ai/api/alpha/decisions` | `OPENROUTER_API_KEY` | `~typesafe/jev-latest` |
 | `laya` | `<LAYA_URL>/v1/systemone` (`LAYA_URL` is a global config value) | `LAYA_API_KEY` | none: no `model` is sent |
 | `openai` | `https://api.openai.com/v1/decisions` (beta) | `OPENAI_DECISIONS_API_KEY` | `gpt-6-luna` |
@@ -382,7 +474,9 @@ Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` m
 
 Every node gets the same output, so `returns`, the output shape, and the validation rules are the same on each provider. `typesafe`, `openrouter`, `laya`, and `cloudflare` take the SystemOne request as is; `openai` speaks its own Decisions format, and a per-provider `wire` translates it both ways (see Other backends: OpenAI). Confidence differs per host (see Human review). The list lives in `SYSTEM_ONE_PROVIDERS` (`src/workflows/executors/system-one-providers.ts`); adding a host is one entry there, plus a `wire` when it does not speak SystemOne. `openrouter` reads its key through `resolveWorkflowLlmConfig`, the resolver `raw-llm` uses, and never falls through to `OPENAI_API_KEY`.
 
-There is no fallback between providers. A node that names none uses `typesafe`, and it does not move to `openrouter` when the TypeSafe key is missing: the two accounts bill separately and use different model ids, and the key the preflight names must be the key the node uses. Switch by setting `provider`.
+A node that names no provider uses `SYSTEM_ONE_DEFAULT_PROVIDER` (Settings → Configuration, Workflows group; any decide host id, `typesafe` when unset). The executor, the readiness check, and the `system-one-decide` tool resolve it at each run (the stored global row first, then the environment), so switching the swarm to Clef is one setting and no workflow edit. The dashboard node card shows the effective provider and model. A node that names a provider ignores the setting. Because the default is resolved at run, a defaulted node's model allowlist and question limit are checked when it runs, not at save.
+
+There is no fallback between providers. A node does not move to another provider when its key is missing: accounts bill separately and use different model ids, and the key the preflight names must be the key the node uses. Switch by setting `provider` or the default.
 
 Use the decisions endpoint only. OpenRouter's `typesafe/jev-router` is a router that forwards a chat request to another model (a live call was served by `openai/gpt-6-luna`), and `~typesafe/jev-latest` rejects chat/completions with "is a decisions model". `openrouter` refuses to run when `OPENROUTER_BASE_URL` points at a gateway, because the key may be a gateway token and the decisions API is not a chat route.
 
@@ -492,7 +586,7 @@ A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes 
 - **Reachability.** `LAYA_URL` must be reachable from the swarm's API server, not from the workers. It must be `https`, except for `localhost`.
 - **The key.** Set the same value as `LAYA_API_KEY` in the laya server's environment and as the swarm's global secret. laya-server accepts unauthenticated calls when its `LAYA_API_KEY` is unset, but the swarm always requires the secret.
 - **Sizing.** laya-js's docs size one fp32 checkpoint at about 3 GB of RAM, and the Kubernetes example requests 1 CPU with a 3 GiB limit. Its own evals measured the Docker image peaking at 7.0 GB RSS under load (laya-js PR #12, Phase 10); a fix is in progress. Until it lands, give the container about 8 GB, not 3 GiB.
-- **No laya server?** Keep the default `typesafe` provider, which needs only `TYPESAFE_API_KEY`.
+- **No laya server?** Use `typesafe` (only `TYPESAFE_API_KEY`) or `cloudflare` (`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`).
 
 ### Other backends: OpenAI
 
@@ -511,7 +605,7 @@ A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes 
 - **The key is `OPENAI_DECISIONS_API_KEY`, never `OPENAI_API_KEY`.** A global `OPENAI_API_KEY` row reaches every worker's environment and can change harness auth, and the key needs Decisions beta access. A swarm with only `OPENAI_API_KEY` fails preflight with `OPENAI_DECISIONS_API_KEY is not configured`.
 - `confidence` is OpenAI's own field, not the top probability (the guide's choice example has top probability 0.95 and confidence 0.93), so a band tuned on Jev does not carry over.
 
-### Other backends: Cloudflare Clef
+### Cloudflare Clef
 
 `cloudflare` runs Clef (27B) or Clef-flash (9B) on Workers AI. Clef takes the SystemOne request unchanged; the response arrives in Cloudflare's `{ result, success, errors, messages }` envelope, which the node unwraps.
 
@@ -533,6 +627,7 @@ A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes 
 - At most 64 questions per node, checked at save. Choice and score limits match the node's own (255 options, 10 levels). The context window is 65,536 tokens; Cloudflare truncates longer state.
 - `success: false` fails the step with Cloudflare's error code. HTTP errors read the code from `errors[0].code`. The `cf-ray` header is the `requestId`.
 - Pricing: Clef $0.24 and Clef-flash $0.09 per 1M input tokens.
+- Calibration does not carry over from Jev. On the heartbeat gate's replay of 229 checklist ticks, Clef needed a threshold of 0.2 where Jev used 0.5 to miss no tick the Lead acted on (57 quiet ticks against Jev's 100). Re-tune any threshold or `humanReview` band before moving a workflow from Jev to Clef.
 
 ### Thresholds, retries, and credentials
 

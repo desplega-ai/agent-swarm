@@ -177,6 +177,27 @@ agent-swarm rbac bootstrap
 The command accepts exactly the `bootstrap` subcommand. Anything else prints
 help and exits non-zero.
 
+### worker-token
+
+Manage the agent-bound token a worker runs on in place of the shared swarm API key. The token acts only as its agent, so a worker no longer authenticates as the operator. Run it with your operator swarm API key. `create` and `rotate` print the new token to stdout once; all other messages go to stderr.
+
+```bash
+API_KEY=$(agent-swarm worker-token create --name worker-1)
+agent-swarm worker-token rotate --agent-id <id> --grace-sec 600
+agent-swarm worker-token revoke --agent-id <id>
+```
+
+| Option | Description |
+|--------|-------------|
+| `--agent-id <id>` | Agent the token is bound to |
+| `--name <name>` | Agent name. `create` makes the agent when no agent has this name |
+| `--ttl-days <n>` | Token lifetime (`create`, `rotate`). Default: no expiry |
+| `--grace-sec <n>` | How long the old token keeps working after `rotate` (default `300`) |
+| `--api-url <url>` | Swarm API URL (default: `MCP_BASE_URL` or `http://localhost:3013`) |
+| `--api-key <key>` | Operator swarm API key (default: `AGENT_SWARM_API_KEY` or `API_KEY`, falling back to `123123`) |
+
+Pass exactly one of `--agent-id` or `--name`. Set the printed token as the worker's `API_KEY`, with `AGENT_ID` set to the bound agent. Revoking or rotating the token also expires the child task tokens it minted.
+
 ### claude-managed-setup
 
 Bootstrap [Anthropic Managed Agents](/docs/guides/harness-configuration#claude-managed-agents) for the swarm: create the cloud Environment, upload `plugin/commands/*.md` skills, create the managed Agent, and persist the resulting `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` to `swarm_config` so deployed workers can restore them at boot. Prompts interactively for `ANTHROPIC_API_KEY` when not set in env. Idempotent — re-run with `--force` to recreate. Run from your laptop, **not** inside a worker container.

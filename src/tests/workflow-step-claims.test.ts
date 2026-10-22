@@ -74,23 +74,23 @@ describe("failStepAndRunIfWaiting", () => {
     // The live task.failed handler and the recovery sweep both saw `waiting`
     // before their awaits; only the transactional re-read may win.
     const [a, b] = await Promise.all([
-      failStepAndRunIfWaiting(stepId, runId, "live event"),
-      failStepAndRunIfWaiting(stepId, runId, "recovery sweep"),
+      failStepAndRunIfWaiting(def, stepId, runId, "live event"),
+      failStepAndRunIfWaiting(def, stepId, runId, "recovery sweep"),
     ]);
-    expect([a, b].filter(Boolean).length).toBe(1);
+    expect([a.claimed, b.claimed].filter(Boolean).length).toBe(1);
     const step = await getWorkflowRunStep(stepId);
     const run = await getWorkflowRun(runId);
     expect(step?.status).toBe("failed");
     expect(run?.status).toBe("failed");
     // The loser must not have overwritten the winner's reason.
-    expect(step?.error).toBe(a ? "live event" : "recovery sweep");
+    expect(step?.error).toBe(a.claimed ? "live event" : "recovery sweep");
   });
 
   test("does not stomp a step another handler already routed", async () => {
     const { runId, stepId } = await createWaitingStep();
     await updateWorkflowRunStep(stepId, { status: "completed" });
     await updateWorkflowRun(runId, { status: "running" });
-    expect(await failStepAndRunIfWaiting(stepId, runId, "stale sweep")).toBe(false);
+    expect((await failStepAndRunIfWaiting(def, stepId, runId, "stale sweep")).claimed).toBe(false);
     expect((await getWorkflowRunStep(stepId))?.status).toBe("completed");
     expect((await getWorkflowRun(runId))?.status).toBe("running");
   });
@@ -145,7 +145,7 @@ describe("checkpointPortStepAndResolveSuccessors", () => {
     );
     expect(routing.claimed).toBe(true);
     expect(routing.successors.map((n) => n.id)).toEqual(["after-reject"]);
-    expect(await failStepAndRunIfWaiting(stepId, runId, "late failure")).toBe(false);
+    expect((await failStepAndRunIfWaiting(def, stepId, runId, "late failure")).claimed).toBe(false);
     expect((await getWorkflowRunStep(stepId))?.status).toBe("completed");
     expect((await getWorkflowRun(runId))?.status).toBe("running");
   });

@@ -2,8 +2,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { CHAT_SDK_ADAPTER_NAMES } from "@/integrations/chat-sdk/config";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
-import { adapterOfChatId, postChatMessage } from "@/integrations/chat-sdk/outbound";
-import { canUseChatVerb } from "@/tools/chat-access";
+import {
+  adapterOfChatId,
+  postChatMessage,
+  unsentFilesSummary,
+} from "@/integrations/chat-sdk/outbound";
+import { resolveChatAttachmentRefs } from "@/integrations/chat-sdk/outbound-files";
+import { canUseChatVerb, chatAttachmentsSchema } from "@/tools/chat-access";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerChatPostTool = (server: McpServer) => {
@@ -27,6 +32,7 @@ export const registerChatPostTool = (server: McpServer) => {
           .optional()
           .describe("Full SDK channel id, such as slack:C123. Ignored when threadId is set."),
         text: z.string().min(1).max(20_000).describe("Markdown text to post."),
+        attachments: chatAttachmentsSchema,
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -34,9 +40,12 @@ export const registerChatPostTool = (server: McpServer) => {
         adapter: z.string().optional(),
         threadId: z.string().optional(),
         channelId: z.string().optional(),
+        unsentFiles: z
+          .array(z.looseObject({ name: z.string().optional(), reason: z.string().optional() }))
+          .optional(),
       }),
     },
-    async ({ adapter, threadId, channelId, text }, requestInfo) => {
+    async ({ adapter, threadId, channelId, text, attachments }, requestInfo) => {
       const data = { yourAgentId: requestInfo.agentId };
       const target = threadId ?? channelId;
       if (!target) return toolErr("Give a threadId or a channelId.", { data });
@@ -49,22 +58,33 @@ export const registerChatPostTool = (server: McpServer) => {
           { data },
         );
       }
+      const resolved = await resolveChatAttachmentRefs(
+        attachments ?? [],
+        requestInfo.sourceTaskId,
+        requestInfo.agentId,
+      );
+      if ("error" in resolved) return toolErr(resolved.error, { data });
       try {
         const sent = await postChatMessage({
           adapter,
           ...(threadId ? { threadId } : { channelId }),
           text,
           taskId: requestInfo.sourceTaskId,
+          files: resolved.files,
         });
-        return toolOk(`Posted to ${adapter} ${threadId ? "thread" : "channel"} ${target}.`, {
-          data: {
-            ...data,
-            messageId: sent.messageIds.at(-1),
-            adapter: sent.adapter,
-            threadId: sent.threadId,
-            channelId: sent.channelId,
+        return toolOk(
+          `Posted to ${adapter} ${threadId ? "thread" : "channel"} ${target}.${unsentFilesSummary(sent.unsentFiles)}`,
+          {
+            data: {
+              ...data,
+              messageId: sent.messageIds.at(-1),
+              adapter: sent.adapter,
+              threadId: sent.threadId,
+              channelId: sent.channelId,
+              unsentFiles: sent.unsentFiles,
+            },
           },
-        });
+        );
       } catch (error) {
         const message = errorMessage(error);
         return toolErr(`Could not post: ${message}`, { data });

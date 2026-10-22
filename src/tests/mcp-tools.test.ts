@@ -52,7 +52,7 @@ describe("script MCP tools", () => {
       "script-upsert":
         'Typecheck and persist a TypeScript script to the swarm catalog under your agent scope (or global if you\'re a lead). Import `ScriptContext` from "swarm-sdk" for a real context type. Other agents and workflow nodes will be able to find and run it. For local-only scripts, use code-mode `save`.',
       "script-delete":
-        "Remove a swarm-shared script from the catalog. Versions table preserves history.",
+        "Permanently remove a swarm-shared script and all its versions from the catalog. This cannot be undone.",
       "script-query-types":
         // Updated for the frozen SwarmToolResult contract refactor: `name` is
         // now optional — omit it to get the swarm-wide type surface instead

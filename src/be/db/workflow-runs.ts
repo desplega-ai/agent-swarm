@@ -1,5 +1,6 @@
 import type { WorkflowRunStatus } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
+import { scrubJsonValue } from "../scrub-json";
 import { getDbClient } from "./runtime";
 
 // Parent/child links between workflow runs (migration 203): a `sub-workflow`
@@ -113,5 +114,100 @@ function emitAfterCommit(childRunId: string, parentStepId: string): void {
           scrubSecrets(err instanceof Error ? err.message : String(err)),
         ),
       );
+  });
+}
+
+/**
+ * Insert a foreach parent's missing child step rows as `pending` (queued), all
+ * in one transaction, so a crash never leaves a partial child set and the join
+ * always sees every item. Children that already exist (any row for the child
+ * node id) are skipped inside the transaction, which makes a concurrent
+ * re-execution of the same parent insert nothing twice. Returns how many rows
+ * this call inserted.
+ */
+export async function createForeachChildSteps(
+  runId: string,
+  parentNodeId: string,
+  rows: Array<{
+    id: string;
+    nodeId: string;
+    nodeType: string;
+    input: unknown;
+    idempotencyKey: string;
+  }>,
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const prefix = `${parentNodeId}#`;
+  return getDbClient().transaction(async (tx) => {
+    const existing = await tx.query<{ nodeId: string }>(
+      "SELECT DISTINCT nodeId FROM workflow_run_steps WHERE runId = ? AND substr(nodeId, 1, ?) = ?",
+      [runId, prefix.length, prefix],
+    );
+    const existingNodeIds = new Set(existing.map((row) => row.nodeId));
+    const now = new Date().toISOString();
+    let created = 0;
+    for (const row of rows) {
+      if (existingNodeIds.has(row.nodeId)) continue;
+      await tx.run(
+        `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input, idempotencyKey)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
+        [
+          row.id,
+          runId,
+          row.nodeId,
+          row.nodeType,
+          now,
+          scrubJsonValue(row.input),
+          row.idempotencyKey,
+        ],
+      );
+      existingNodeIds.add(row.nodeId);
+      created++;
+    }
+    return created;
+  });
+}
+
+/**
+ * Insert a new `pending` attempt row for each foreach item being retried. Each
+ * row reuses its item's child node id and gets a fresh step id, so the body
+ * starts a new invocation (a new task, child run, approval or wait) while the
+ * earlier attempt rows stay as history. `attempt` is the number of rows the
+ * item already has, and the idempotency key `<runId>:<childNodeId>:<attempt>`
+ * is UNIQUE, so a duplicated retry of the same attempt inserts nothing.
+ * Call it inside the retry's transaction. Returns how many rows it inserted.
+ */
+export async function createForeachAttemptSteps(
+  runId: string,
+  rows: Array<{ nodeId: string; nodeType: string; itemKey: string; index: number }>,
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  return getDbClient().transaction(async (tx) => {
+    const now = new Date().toISOString();
+    let created = 0;
+    for (const row of rows) {
+      const count = await tx.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
+        [runId, row.nodeId],
+      );
+      const attempt = count?.n ?? 0;
+      const inserted = await tx.get<{ id: string }>(
+        `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input, idempotencyKey)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+           ON CONFLICT(idempotencyKey) DO NOTHING
+           RETURNING id`,
+        [
+          crypto.randomUUID(),
+          runId,
+          row.nodeId,
+          row.nodeType,
+          now,
+          scrubJsonValue({ itemKey: row.itemKey, index: row.index, attempt }),
+          `${runId}:${row.nodeId}:${attempt}`,
+        ],
+      );
+      if (inserted) created++;
+    }
+    return created;
   });
 }

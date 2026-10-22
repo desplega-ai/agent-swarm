@@ -63,6 +63,46 @@ untaken ports cannot start sibling branches or replay a completed downstream
 node. Steps without a selected port retain the live walker's default successor
 behavior. Waiting runs reconcile finished tasks, approvals, and durable waits.
 
+The last pass, `recoverForeachFanouts`, re-drives `foreach` fan-outs. It covers
+runs in `running` or `waiting` whose open foreach parent has a queued
+(`pending`) child, or a `running` child that no drive in this process owns. Every
+item settles through `settleForeachChild`, which writes the child and runs the
+join in one transaction. So a crash leaves a child queued, orphaned, or
+waiting, never half-joined.
+
+```
+# recoverIncompleteRuns, after the task / approval / wait / child-run passes:
+recoverForeachFanouts():
+  for each (run, foreachId) with a latest child row pending, or running and unowned,
+      where run.status in (running, waiting):
+    runForeachDrive(run, foreachId):    # holds the run, like a walk
+      claim, in one BEGIN IMMEDIATE transaction over latest attempt rows:
+        inFlight = running + waiting children
+        pending → running while inFlight < config.concurrency (unbounded when absent)
+        plus unowned running rows (already counted in inFlight)
+      start each claimed child:
+        instant body → run it, settle completed/failed   # re-runs an orphan: at-least-once
+        async body   → executor dedupes on the child step id (task, child run,
+                       approval, wait), so a reconnect never duplicates; park waiting
+      joined → walk the parent's successors (or finalize)
+      else   → park the run waiting if nothing is running
+```
+
+A claimed child that never started goes back to `pending`, so a run retry starts
+it. Under fail-fast, a failed item cancels every `pending` sibling instead, and
+in-flight siblings finish and record their outcome without reviving the run. Two
+recovery sweeps in a row never start more items than the cap: the cap counts the
+child rows, not in-process state.
+
+| Crash point | State left | Reconnect |
+|---|---|---|
+| During materialization | No child rows (one transaction) | The re-walk re-executes the parent and inserts the full set |
+| After claim, before start | Child `running`, no invocation | The sweep re-drives it; the executor dedupes on the child step id |
+| During execution (async) | Child `waiting` | The task, approval, wait and child-run passes settle it through `settleForeachChild` |
+| During execution (instant) | Child `running`, no owner | The sweep re-runs it once: at-least-once, like a top-level instant node |
+| During collection | Settle and join committed together | The join is idempotent (parent already `completed`); a missed drive is caught by the sweep |
+| During a run retry | One transaction adds every attempt row and resets the run | A second retry finds the run not `failed` and stops |
+
 This ownership guard is process-local, not a distributed lease. It assumes one
 API workflow engine owns the database; multiple worker runtimes do not create
 multiple API engines. Separate API processes sharing a database would need
@@ -826,7 +866,7 @@ flowchart TD
   D -- no --> X[return]
   D -- yes --> G{HEARTBEAT_CHECKLIST_GATE_SCRIPT?}
   G -- "empty or off" --> C[create checklist task]
-  G -- unset --> K{global Jev key?<br/>TYPESAFE_API_KEY or OPENROUTER_API_KEY}
+  G -- unset --> K{global gate credential?<br/>TYPESAFE_API_KEY, OPENROUTER_API_KEY,<br/>or Cloudflare token + account id}
   K -- no --> C
   K -- yes --> RJ[script = heartbeat-jev-gate]
   RJ --> R
@@ -844,10 +884,11 @@ Pseudocode (current):
 # checkHeartbeatChecklist, after the lead / HEARTBEAT.md / dedup checks:
 raw = HEARTBEAT_CHECKLIST_GATE_SCRIPT
 if raw is set:      script = raw.trim(); empty or "off" (any case) = gate off, no tag
-else if jevKey():   script = "heartbeat-jev-gate"   # default on, shadow unless MODE says enforce
+else if gateKey():  script = "heartbeat-jev-gate"   # default on, shadow unless MODE says enforce
 else:               script = none
-# jevKey(): a non-empty global swarm_config row for TYPESAFE_API_KEY, or for OPENROUTER_API_KEY
-# while OPENROUTER_BASE_URL is the openrouter.ai default; HEARTBEAT_JEV_GATE_PROVIDER narrows
+# gateKey(): a non-empty global swarm_config row for TYPESAFE_API_KEY; or for OPENROUTER_API_KEY
+# while OPENROUTER_BASE_URL is the openrouter.ai default; or for CLOUDFLARE_API_TOKEN (or
+# CLOUDFLARE_API_KEY) together with CLOUDFLARE_ACCOUNT_ID. HEARTBEAT_JEV_GATE_PROVIDER narrows
 # the candidates the same way the script does. A read error = no key.
 mode   = HEARTBEAT_CHECKLIST_GATE_MODE == "enforce" ? enforce : shadow   # anything else = shadow
 if script:
@@ -944,7 +985,7 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | `getUnassignedTaskIdsForAgent` eligibility-scan hard cap (rows/call) | 500 | `ELIGIBILITY_SCAN_CAP` |
 | `HEARTBEAT.md` checklist tick (restart required; `0` = recurring tick off, boot triage still runs) | 30 min | `HEARTBEAT_CHECKLIST_INTERVAL_MS` |
 | Checklist tick + boot triage kill switch (restart required; `true`/`1` = off, `false`/`0` = on) | off | `HEARTBEAT_CHECKLIST_DISABLE` |
-| Checklist gate script (§5b; global scope; empty or `off` = gate off; unset = `heartbeat-jev-gate` when a global Jev key exists) | unset | `HEARTBEAT_CHECKLIST_GATE_SCRIPT` |
+| Checklist gate script (§5b; global scope; empty or `off` = gate off; unset = `heartbeat-jev-gate` when a global Jev or Clef credential exists) | unset | `HEARTBEAT_CHECKLIST_GATE_SCRIPT` |
 | Checklist gate mode (§5b; `shadow` tags only, `enforce` skips quiet ticks) | `shadow` | `HEARTBEAT_CHECKLIST_GATE_MODE` |
 
 ---

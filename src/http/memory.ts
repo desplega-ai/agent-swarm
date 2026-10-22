@@ -35,6 +35,7 @@ import {
 } from "../be/memory/raters/types";
 import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
+import { searchMemoryCandidates } from "../be/memory/search-candidates";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { buildRecallQuery } from "../memory/recall-query";
@@ -916,14 +917,19 @@ export async function handleMemory(
       const queryEmbedding = await provider.embed(query);
 
       const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
-      const candidates = await store.search(queryEmbedding ?? new Float32Array(0), myAgentId, {
-        scope,
-        limit: candidateLimit,
-        source,
-        isLead: false,
-        queryText: query,
-        keyPrefix,
-      });
+      const candidates = await searchMemoryCandidates(
+        store,
+        queryEmbedding ?? new Float32Array(0),
+        myAgentId,
+        {
+          scope,
+          limit: candidateLimit,
+          source,
+          isLead: false,
+          queryText: query,
+          keyPrefix,
+        },
+      );
       // Default-on 1-hop memory_link neighbor expansion (disable with
       // MEMORY_GRAPH_EXPANSION=0|false).
       const expanded = await expandCandidatesWithGraph(candidates, myAgentId, {
@@ -1039,13 +1045,18 @@ export async function handleMemory(
           4096,
           Math.max(offset + pageLimit, pageLimit) * CANDIDATE_SET_MULTIPLIER,
         );
-        let candidates = await store.search(queryEmbedding ?? new Float32Array(0), viewer.agentId, {
-          scope,
-          limit: candidateLimit,
-          isLead: viewer.seesAll,
-          source,
-          queryText: query.trim(),
-        });
+        let candidates = await searchMemoryCandidates(
+          store,
+          queryEmbedding ?? new Float32Array(0),
+          viewer.agentId,
+          {
+            scope,
+            limit: candidateLimit,
+            isLead: viewer.seesAll,
+            source,
+            queryText: query.trim(),
+          },
+        );
         if (agentId) {
           candidates = candidates.filter((c) => c.agentId === agentId);
         }

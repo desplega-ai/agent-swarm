@@ -32,6 +32,10 @@ beforeAll(async () => {
     embedInputs.push(text);
     return null;
   });
+  spyOn(getEmbeddingProvider(), "embedBatch").mockImplementation(async (texts: string[]) => {
+    embedInputs.push(...texts);
+    return texts.map(() => null);
+  });
   await createAgent({ name: "scrub-lead", isLead: true, status: "idle", capabilities: [] });
   worker = await createAgent({
     name: "scrub-worker",
@@ -185,7 +189,8 @@ describe("runTaskTerminalEffects scrubs completion memory and the Lead follow-up
     );
     expect(versions.length).toBeGreaterThan(0);
     for (const v of versions) expectRedacted(v.content);
-    expect(embedInputs.length).toBeGreaterThan(0);
+    // Embedding runs in the background after the rows land.
+    await waitFor(async () => embedInputs.length >= 2 || null);
     for (const input of embedInputs) expectRedacted(input);
 
     const followUp = await getDbClient().get<{ task: string }>(

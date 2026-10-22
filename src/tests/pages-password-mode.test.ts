@@ -47,7 +47,7 @@ function createTestServer(): Server {
 
 function extractCookieValue(setCookie: string | null): string {
   expect(setCookie).toBeTruthy();
-  const match = /page_session=([^;]+)/.exec(setCookie!);
+  const match = /page_session_[A-Za-z0-9_-]+=([^;]+)/.exec(setCookie!);
   expect(match).toBeTruthy();
   return match![1]!;
 }
@@ -140,7 +140,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")?.toLowerCase()).toContain("text/html");
     const cookieHeader = res.headers.get("set-cookie");
-    expect(cookieHeader).toContain("page_session=");
+    expect(cookieHeader).toContain("page_session_");
     const text = await res.text();
     expect(text).toContain("<h1>open sesame</h1>");
     // BROWSER_SDK_JS sentinel.
@@ -158,7 +158,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
       headers: { Authorization: `Basic ${basic}` },
     });
     expect(res.status).toBe(200);
-    expect(res.headers.get("set-cookie")).toContain("page_session=");
+    expect(res.headers.get("set-cookie")).toContain("page_session_");
     const text = await res.text();
     expect(text).toContain("<h1>via basic</h1>");
   });
@@ -222,7 +222,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
     const id = await createPasswordPage("json-key", "swordfish");
     const res = await fetch(`${BASE}/p/${id}.json?key=swordfish`);
     expect(res.status).toBe(200);
-    expect(res.headers.get("set-cookie")).toContain("page_session=");
+    expect(res.headers.get("set-cookie")).toContain("page_session_");
   });
 
   test("cross-page cookie reuse → 401 + password prompt (cookie is silently ignored for password mode)", async () => {
@@ -252,7 +252,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
       headers: { Cookie: `page_session=${cookieForA}` },
     });
     expect(recover.status).toBe(200);
-    expect(recover.headers.get("set-cookie")).toContain("page_session=");
+    expect(recover.headers.get("set-cookie")).toContain("page_session_");
   });
 
   test("malformed Basic header (no colon) → 401 (no crash)", async () => {

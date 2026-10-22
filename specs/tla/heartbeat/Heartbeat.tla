@@ -219,7 +219,7 @@ Complete(w, t) ==
 
 \* The runner aborts any task the server holds as terminal (#1820,
 \* reconcileActiveTasks, runner.ts:5197): cancelled on every poll via
-\* /cancelled-tasks (core.ts:673), failed/superseded on a 30 s status read.
+\* /cancelled-tasks (core.ts:675), failed/superseded on a 30 s status read.
 \* The 30 s interval and the 10 s abort grace are abstracted away.
 AbortTerminal(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] \in Terminal

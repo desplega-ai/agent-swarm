@@ -374,7 +374,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "HEARTBEAT_CHECKLIST_GATE_SCRIPT",
         label: "Checklist gate script",
         description:
-          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Unset runs the built-in heartbeat-jev-gate when a global TYPESAFE_API_KEY or OPENROUTER_API_KEY is set. Set off to turn the gate off.",
+          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Unset runs the built-in heartbeat-jev-gate when a global TYPESAFE_API_KEY or OPENROUTER_API_KEY is set, or CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY) with CLOUDFLARE_ACCOUNT_ID. Set off to turn the gate off.",
         kind: "string",
         defaultValue: "",
         placeholder: "heartbeat-jev-gate",
@@ -1253,6 +1253,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/chat-sdk`,
       },
       {
+        key: "CHAT_SDK_OWNER_WINDOW_MIN",
+        label: "Chat SDK owner window",
+        description:
+          "Telegram groups only: how long after a chat task ends the group still routes follow-ups to the same agent, and the requester's plain messages still count. 0 keeps it only while the task is open. DMs and other adapters' threads keep their owner.",
+        kind: "number",
+        unit: "min",
+        defaultValue: "15",
+        placeholder: "15",
+        docsUrl: `${DOCS}integrations/chat-sdk`,
+      },
+      {
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         description:
@@ -1461,6 +1472,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "10000",
         placeholder: "10000",
         restartRequired: true,
+      },
+      {
+        key: "SYSTEM_ONE_DEFAULT_PROVIDER",
+        label: "Default SystemOne provider",
+        description:
+          "Decision host for a system-one-decision node or system-one-decide call that names no provider: typesafe or openrouter (Jev), cloudflare (Clef), laya, or openai. A node that names its provider keeps it. Each host needs its own credential on the Secrets page; cloudflare also needs CLOUDFLARE_ACCOUNT_ID. Applies to the next decision, with no workflow edit.",
+        kind: "enum",
+        options: ["typesafe", "openrouter", "cloudflare", "laya", "openai"],
+        defaultValue: "typesafe",
+        docsUrl: `${DOCS}concepts/workflows`,
       },
       {
         key: "SCRIPT_EXECUTOR",

@@ -34,6 +34,9 @@ type StubState = {
   };
   calls: { signature: number; list: number; sync: number };
   skillFilesStatus: number;
+  /** 404 by default so the legacy list path stays covered; bundle tests opt in. */
+  bundleStatus: number;
+  bundleCalls: number;
 };
 
 const FAKE_HOME = join(tmpdir(), `runner-refresh-test-${process.pid}`);
@@ -67,6 +70,8 @@ const state: StubState = {
     signature: "hash-v1",
   },
   calls: { signature: 0, list: 0, sync: 0 },
+  bundleStatus: 404,
+  bundleCalls: 0,
 };
 
 let server: ReturnType<typeof Bun.serve> | null = null;
@@ -89,6 +94,22 @@ describe("refreshSkillsIfChanged", () => {
             hash: state.signatureHash,
             count: state.skillsBody.skills.length,
             generatedAt: new Date().toISOString(),
+          });
+        }
+        if (url.pathname.endsWith("/skills/bundle")) {
+          state.bundleCalls++;
+          if (state.bundleStatus !== 200) {
+            return new Response("not found", { status: state.bundleStatus });
+          }
+          return Response.json({
+            skills: state.skillsBody.skills.map((skill) => ({
+              ...skill,
+              files: skill.isComplex
+                ? [{ path: "refs/notes.md", content: "bundled note", isBinary: false }]
+                : [],
+            })),
+            total: state.skillsBody.skills.length,
+            signature: state.skillsBody.signature,
           });
         }
         if (url.pathname.match(/\/api\/agents\/[^/]+\/skills$/)) {
@@ -335,6 +356,43 @@ describe("refreshSkillsIfChanged", () => {
     expect(lastHash.current).toBe("hash-v4");
     expect(state.calls.sync).toBe(0);
     rmSync(cleanHome, { recursive: true, force: true });
+  });
+
+  test("bundle endpoint replaces the list call and the per-file fan-out", async () => {
+    state.calls = { signature: 0, list: 0, sync: 0 };
+    state.bundleCalls = 0;
+    state.bundleStatus = 200;
+    state.signatureHash = "hash-bundle";
+    state.skillsBody.signature = "hash-bundle";
+    state.skillsBody.skills = [
+      {
+        id: "skill-complex",
+        name: "complex-skill",
+        description: "has bundled files",
+        content: "---\nname: complex-skill\n---\n\nComplex body.",
+        isComplex: true,
+        isActive: true,
+        isEnabled: true,
+      },
+    ];
+
+    const home = join(FAKE_HOME, "bundle-home");
+    mkdirSync(home, { recursive: true });
+    const lastHash = { current: null as string | null };
+    const result = await refreshWithHome(makeCtx(), lastHash, home);
+
+    expect(result.changed).toBe(true);
+    expect(lastHash.current).toBe("hash-bundle");
+    // One signature probe + one bundle call. No list call, no manifest and no
+    // per-file fetches.
+    expect(state.bundleCalls).toBe(1);
+    expect(state.calls).toEqual({ signature: 1, list: 0, sync: 0 });
+    expect(
+      readFileSync(join(home, ".claude", "skills", "complex-skill", "refs", "notes.md"), "utf-8"),
+    ).toBe("bundled note");
+
+    state.bundleStatus = 404;
+    rmSync(home, { recursive: true, force: true });
   });
 
   test("list fetch failure after signature drift leaves pre-existing skills on disk and does not advance hash", async () => {

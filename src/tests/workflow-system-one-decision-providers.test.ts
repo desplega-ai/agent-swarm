@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
+import { SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS, validateConfigValue } from "../be/swarm-config-guard";
 import type { WorkflowNode } from "../types";
 import { validateDefinition } from "../workflows/definition";
 import { InProcessEventBus } from "../workflows/event-bus";
@@ -11,6 +12,7 @@ import {
   SystemOneDecisionExecutor,
   type SystemOneDecisionExecutorOptions,
 } from "../workflows/executors/system-one-decision";
+import { SYSTEM_ONE_PROVIDER_IDS } from "../workflows/executors/system-one-providers";
 import { interpolate } from "../workflows/template";
 
 const TEST_DB_PATH = "./test-workflow-system-one-decision-providers.sqlite";
@@ -50,7 +52,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await getDbClient().run(
-    "DELETE FROM swarm_config WHERE key IN ('OPENAI_API_KEY', 'OPENAI_DECISIONS_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN')",
+    "DELETE FROM swarm_config WHERE key IN ('OPENAI_API_KEY', 'OPENAI_DECISIONS_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'SYSTEM_ONE_DEFAULT_PROVIDER')",
   );
 });
 
@@ -705,6 +707,101 @@ describe("system-one-decision openai provider", () => {
     });
     expect((await run(executor, config({ provider: "openai" }))).status).toBe("success");
     expect(calls).toHaveLength(1);
+  });
+});
+
+// ─── Default provider ───────────────────────────────────────
+
+describe("system-one-decision default provider", () => {
+  const TYPESAFE_KEY = "typesafe-example-test-key-0123456789";
+  const jevBody = () =>
+    jsonResponse({
+      model: "jev",
+      answers: systemOneAnswers,
+      usage: { input_tokens: 1, output_tokens: 0 },
+    });
+  const setDefault = (value: string) =>
+    upsertSwarmConfig({ scope: "global", key: "SYSTEM_ONE_DEFAULT_PROVIDER", value });
+  const withTypesafeKey = {
+    getApiKey: async (id: string) =>
+      id === "typesafe" ? TYPESAFE_KEY : id === "cloudflare" ? CF_TOKEN : null,
+  };
+
+  test("unset, a node with no provider still calls typesafe", async () => {
+    const { executor, calls } = makeExecutor([jevBody()], withTypesafeKey);
+    const result = await run(executor, config());
+    expect(result.status).toBe("success");
+    expect(calls[0]?.url).toBe("https://api.typesafe.ai/v1/systemone");
+    expect(calls[0]?.body.model).toBe("jev-latest");
+    // The schema leaves the provider unset; the executor resolves it per run.
+    expect(SystemOneDecisionConfigSchema.parse(config()).provider).toBeUndefined();
+  });
+
+  test("set to cloudflare, a node with no provider calls Clef with no workflow edit", async () => {
+    await setDefault("cloudflare");
+    const { executor, calls } = makeExecutor([jsonResponse(clefEnvelope())], withTypesafeKey);
+    const result = await run(executor, config());
+    expect(result.status).toBe("success");
+    expect(calls[0]?.url).toBe(`${CF_BASE}/clef`);
+    expect((calls[0]?.init.headers as Record<string, string>).authorization).toBe(
+      `Bearer ${CF_TOKEN}`,
+    );
+    expect(result.output).toMatchObject({ model: "clef", answers: systemOneAnswers as never });
+  });
+
+  test("a node that names its provider keeps it", async () => {
+    await setDefault("cloudflare");
+    const { executor, calls } = makeExecutor([jevBody()], withTypesafeKey);
+    expect((await run(executor, config({ provider: "typesafe" }))).status).toBe("success");
+    expect(calls[0]?.url).toBe("https://api.typesafe.ai/v1/systemone");
+  });
+
+  test("readiness checks the default provider's credentials", async () => {
+    await setDefault("cloudflare");
+    const { executor } = makeExecutor([], { getApiKey: async () => null });
+    const problems = await executor.checkReadiness([{ id: "a", config: config() }]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]?.nodeIds).toEqual(["a"]);
+    expect(problems[0]?.message).toContain("CLOUDFLARE_API_TOKEN is not configured");
+  });
+
+  test("the environment is read when no row is stored; a stored row wins", async () => {
+    const env = { SYSTEM_ONE_DEFAULT_PROVIDER: "cloudflare" };
+    const fromEnv = makeExecutor([jsonResponse(clefEnvelope())], { ...withTypesafeKey, env });
+    expect((await run(fromEnv.executor, config())).status).toBe("success");
+    expect(fromEnv.calls[0]?.url).toBe(`${CF_BASE}/clef`);
+
+    await setDefault("typesafe");
+    const stored = makeExecutor([jevBody()], { ...withTypesafeKey, env });
+    expect((await run(stored.executor, config())).status).toBe("success");
+    expect(stored.calls[0]?.url).toBe("https://api.typesafe.ai/v1/systemone");
+  });
+
+  test("a defaulted provider's limits are checked at run, and nothing is sent", async () => {
+    await setDefault("cloudflare");
+    const qs: Record<string, unknown> = {};
+    const rs: Record<string, unknown> = {};
+    for (let i = 0; i < 65; i++) {
+      qs[`q${i}`] = { type: "noul", instructions: `Question ${i}?` };
+      rs[`q${i}`] = { type: "noul" };
+    }
+    const { executor, calls } = makeExecutor([jsonResponse(clefEnvelope())]);
+    const result = await run(executor, config({ questions: qs, returns: rs }));
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("at most 64 questions per node; this node has 65");
+    expect(calls).toHaveLength(0);
+  });
+
+  test("the config guard accepts exactly the decide hosts", () => {
+    expect([...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS].sort()).toEqual(
+      [...SYSTEM_ONE_PROVIDER_IDS].sort(),
+    );
+    for (const id of SYSTEM_ONE_PROVIDER_IDS) {
+      expect(validateConfigValue("SYSTEM_ONE_DEFAULT_PROVIDER", id)).toBeNull();
+    }
+    expect(validateConfigValue("SYSTEM_ONE_DEFAULT_PROVIDER", "jev")).toContain(
+      "Invalid SYSTEM_ONE_DEFAULT_PROVIDER value",
+    );
   });
 });
 

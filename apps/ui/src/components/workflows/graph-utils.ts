@@ -73,25 +73,27 @@ export function toReactFlowGraph(
 ): { nodes: Node<FlowNodeData>[]; edges: Edge[] } {
   // Steps that own a node keep latest-wins semantics (a loop node re-executes, and the graph shows
   // the current iteration). Synthetic `foreach` children (`<parentNodeId>#<itemKey>`) have no node
-  // of their own, so they aggregate by precedence onto their parent node instead.
+  // of their own, so they aggregate by precedence onto their parent node instead. A retried item
+  // has one row per attempt under the same child id; only its latest attempt counts.
   const statusMap = new Map<string, WorkflowRunStepStatus>();
   if (steps) {
     const foreachIds = foreachParentIds(definition.nodes);
-    const childStatuses = new Map<string, WorkflowRunStepStatus[]>();
+    const childStatuses = new Map<string, Map<string, WorkflowRunStepStatus>>();
     for (const step of steps) {
       const { parentNodeId, itemKey } = parseSyntheticStepId(step.nodeId, foreachIds);
       if (itemKey === null) {
         statusMap.set(step.nodeId, step.status);
         continue;
       }
-      const statuses = childStatuses.get(parentNodeId);
-      if (statuses) {
-        statuses.push(effectiveChildStatus(step));
+      const items = childStatuses.get(parentNodeId);
+      if (items) {
+        items.set(step.nodeId, effectiveChildStatus(step));
       } else {
-        childStatuses.set(parentNodeId, [effectiveChildStatus(step)]);
+        childStatuses.set(parentNodeId, new Map([[step.nodeId, effectiveChildStatus(step)]]));
       }
     }
-    for (const [nodeId, statuses] of childStatuses) {
+    for (const [nodeId, items] of childStatuses) {
+      const statuses = [...items.values()];
       // A parent-level failure (the fan-out or the join itself) outranks the children's aggregate.
       const own = statusMap.get(nodeId);
       const withOwn = own === "failed" || own === "cancelled" ? [own, ...statuses] : statuses;

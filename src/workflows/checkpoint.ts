@@ -83,11 +83,16 @@ export async function checkpointStepFailure(
 
 /**
  * Checkpoint a step entering waiting state (async executor).
+ *
+ * `keepRunStatus` parks the step and persists the context but leaves the run
+ * `running`: a foreach parent parks before its driver starts the children, and
+ * the run must not read as `waiting` until they are dispatched.
  */
 export async function checkpointStepWaiting(
   runId: string,
   stepId: string,
   ctx: Record<string, unknown>,
+  options: { keepRunStatus?: boolean } = {},
 ): Promise<boolean> {
   return getDbClient().transaction(async () => {
     const step = await getDbClient().get<{ id: string }>(
@@ -103,7 +108,10 @@ export async function checkpointStepWaiting(
     );
     if (!step) return false;
 
-    await updateWorkflowRun(runId, { status: "waiting", context: ctx });
+    await updateWorkflowRun(
+      runId,
+      options.keepRunStatus ? { context: ctx } : { status: "waiting", context: ctx },
+    );
     return true;
   });
 }

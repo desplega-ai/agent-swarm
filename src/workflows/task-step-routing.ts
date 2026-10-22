@@ -17,13 +17,39 @@ import {
 } from "../types";
 import { checkpointStep, checkpointStepFailure } from "./checkpoint";
 import { getSuccessors } from "./definition";
-import { joinForeach, resolveForeachParent } from "./foreach-join";
+import type { ExecutorRegistry } from "./executors/registry";
+import { type ForeachSettleResult, resolveForeachParent, settleForeachChild } from "./foreach-join";
 
-export interface PortStepRoutingResult {
-  /** False when the step was already claimed or its run is terminal. */
+export interface TaskStepRoutingResult {
+  /**
+   * False when another handler already moved the step out of `waiting` — the
+   * caller must not route successors again. The same task terminal event can
+   * reach two resume paths (the DB-emitted bus event and a direct emit, or a
+   * recovery sweep racing a live event); only the first one may route.
+   */
   claimed: boolean;
+  foreachChild: boolean;
+  joined: boolean;
   successors: WorkflowNode[];
+  /** True when this call failed the run: nothing may route or re-park it. */
+  runFailed: boolean;
 }
+
+const UNCLAIMED: TaskStepRoutingResult = {
+  claimed: false,
+  foreachChild: false,
+  joined: false,
+  successors: [],
+  runFailed: false,
+};
+
+/**
+ * Port-routed resume result. `claimed` is false when the step was already
+ * claimed or its run is terminal. A foreach child (`foreachChild`) routes
+ * nothing unless its settlement closed the join (`joined`), in which case
+ * `successors` are the parent's.
+ */
+export type PortStepRoutingResult = TaskStepRoutingResult;
 
 /**
  * True while `taskId` is still the task bound to `stepId`. A retry detaches
@@ -37,24 +63,41 @@ async function isTaskBoundToStep(taskId: string, stepId: string): Promise<boolea
 }
 
 /**
- * Atomically fail a waiting step and its run. Returns false when another
- * handler already moved the step out of `waiting` — the same task terminal
- * event can reach both the live bus listener and a recovery sweep, and a
- * blind write here would stomp a run another handler is already advancing.
- * With `ownerTaskId`, also returns false when that task is no longer the one
- * bound to the step (a stale snapshot of a step that was since redriven).
+ * Atomically fail a waiting step and its run. Returns `claimed: false` when
+ * another handler already moved the step out of `waiting` — the same task
+ * terminal event can reach both the live bus listener and a recovery sweep,
+ * and a blind write here would stomp a run another handler is already
+ * advancing. With `ownerTaskId`, also unclaimed when that task is no longer
+ * the one bound to the step (a stale snapshot of a step that was since
+ * redriven).
+ *
+ * A synthetic foreach child settles `failed` through `settleForeachChild`
+ * instead: under `onNodeFailure: "fail"` that fails the run as before; under
+ * `"continue"` the item counts as failed and the join may close, so the
+ * caller walks `successors` when `joined`.
  */
 export async function failStepAndRunIfWaiting(
+  def: WorkflowDefinition,
   stepId: string,
   runId: string,
   reason: string,
   ownerTaskId?: string,
-): Promise<boolean> {
+  options: { ctx?: Record<string, unknown>; registry?: ExecutorRegistry } = {},
+): Promise<TaskStepRoutingResult> {
   const now = new Date().toISOString();
-  return await getDbClient().transaction(async () => {
+  return await getDbClient().transaction(async (): Promise<TaskStepRoutingResult> => {
     const current = await getWorkflowRunStep(stepId);
-    if (!current || current.status !== "waiting") return false;
-    if (ownerTaskId && !(await isTaskBoundToStep(ownerTaskId, stepId))) return false;
+    if (!current || current.status !== "waiting") return UNCLAIMED;
+    if (ownerTaskId && !(await isTaskBoundToStep(ownerTaskId, stepId))) return UNCLAIMED;
+    if (resolveForeachParent(def, current.nodeId)) {
+      const ctx =
+        options.ctx ?? (((await getWorkflowRun(runId))?.context ?? {}) as Record<string, unknown>);
+      return toRoutingResult(
+        await settleForeachChild(def, runId, stepId, { status: "failed", error: reason }, ctx, {
+          registry: options.registry,
+        }),
+      );
+    }
     await updateWorkflowRunStep(stepId, {
       status: "failed",
       error: reason,
@@ -65,8 +108,18 @@ export async function failStepAndRunIfWaiting(
       error: reason,
       finishedAt: now,
     });
-    return true;
+    return { claimed: true, foreachChild: false, joined: false, successors: [], runFailed: true };
   });
+}
+
+function toRoutingResult(settle: ForeachSettleResult): TaskStepRoutingResult {
+  return {
+    claimed: settle.claimed,
+    foreachChild: true,
+    joined: settle.joined,
+    successors: settle.successors,
+    runFailed: settle.runFailed,
+  };
 }
 
 /**
@@ -84,17 +137,41 @@ export async function checkpointPortStepAndResolveSuccessors(
   output: unknown,
   nextPort: string,
   ctx: Record<string, unknown>,
+  registry?: ExecutorRegistry,
 ): Promise<PortStepRoutingResult> {
   return await getDbClient().transaction(async (): Promise<PortStepRoutingResult> => {
     const current = await getWorkflowRunStep(stepId);
-    if (!current || current.status !== "waiting") return { claimed: false, successors: [] };
+    if (!current || current.status !== "waiting") return UNCLAIMED;
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "waiting" && run.status !== "running")) {
-      return { claimed: false, successors: [] };
+      return UNCLAIMED;
+    }
+    // A foreach child's port (approval rejected/timeout, wait event/timeout)
+    // is stored for display and still counts as a completed item: the body's
+    // ports do not route, the item's consumer reads the output.
+    if (resolveForeachParent(def, nodeId)) {
+      return toRoutingResult(
+        await settleForeachChild(
+          def,
+          runId,
+          stepId,
+          { status: "completed", output, nextPort },
+          ctx,
+          {
+            registry,
+          },
+        ),
+      );
     }
     await checkpointStep(runId, stepId, nodeId, { output, nextPort }, ctx);
     await updateWorkflowRun(runId, { status: "running" });
-    return { claimed: true, successors: getSuccessors(def, nodeId, nextPort) };
+    return {
+      claimed: true,
+      foreachChild: false,
+      joined: true,
+      successors: getSuccessors(def, nodeId, nextPort),
+      runFailed: false,
+    };
   });
 }
 
@@ -179,26 +256,6 @@ async function isSupersedeCut(taskId: string, reason: string): Promise<boolean> 
   return task?.failureReason === SUPERSEDED_WORKFLOW_TASK_REASON;
 }
 
-export interface TaskStepRoutingResult {
-  /**
-   * False when another handler already moved the step out of `waiting` — the
-   * caller must not route successors again. The same task terminal event can
-   * reach two resume paths (the DB-emitted bus event and a direct emit, or a
-   * recovery sweep racing a live event); only the first one may route.
-   */
-  claimed: boolean;
-  foreachChild: boolean;
-  joined: boolean;
-  successors: WorkflowNode[];
-}
-
-const UNCLAIMED: TaskStepRoutingResult = {
-  claimed: false,
-  foreachChild: false,
-  joined: false,
-  successors: [],
-};
-
 /**
  * Persist an agent-task result and resolve its next nodes. Synthetic foreach
  * children never checkpoint into workflow context; only their parent join does.
@@ -211,6 +268,7 @@ export async function completeTaskStepAndResolveSuccessors(
   ctx: Record<string, unknown>,
   failureReason?: string,
   ownerTaskId?: string,
+  registry?: ExecutorRegistry,
 ): Promise<TaskStepRoutingResult> {
   // The task step, optional foreach join checkpoint, workflow context, and
   // running status must commit together. A crash after this transaction is
@@ -223,25 +281,24 @@ export async function completeTaskStepAndResolveSuccessors(
     // A stale snapshot of a step since redriven to a fresh task must not route it.
     if (ownerTaskId && !(await isTaskBoundToStep(ownerTaskId, step.id))) return UNCLAIMED;
 
-    const foreachParent = resolveForeachParent(def, step.nodeId);
-    if (foreachParent) {
-      await updateWorkflowRunStep(step.id, {
-        status: "completed",
-        output,
-        // onNodeFailure:"continue" completions persist the failure reason as
-        // explicit metadata — the join classifies children on THIS, not on
-        // whether user-controlled output text happens to start with "[FAILED:".
-        ...(failureReason !== undefined ? { error: failureReason } : {}),
-        finishedAt: new Date().toISOString(),
-      });
-      const join = await joinForeach(def, runId, step, ctx);
-      await updateWorkflowRun(runId, { status: "running" });
-      return {
-        claimed: true,
-        foreachChild: true,
-        joined: join.joined,
-        successors: join.successors,
-      };
+    if (resolveForeachParent(def, step.nodeId)) {
+      // onNodeFailure:"continue" completions persist the failure reason as
+      // explicit metadata — the join classifies children on THIS, not on
+      // whether user-controlled output text happens to start with "[FAILED:".
+      return toRoutingResult(
+        await settleForeachChild(
+          def,
+          runId,
+          step.id,
+          {
+            status: "completed",
+            output,
+            ...(failureReason !== undefined ? { error: failureReason } : {}),
+          },
+          ctx,
+          { registry },
+        ),
+      );
     }
 
     await checkpointStep(runId, step.id, step.nodeId, { output }, ctx);
@@ -251,6 +308,7 @@ export async function completeTaskStepAndResolveSuccessors(
       foreachChild: false,
       joined: true,
       successors: getSuccessors(def, step.nodeId),
+      runFailed: false,
     };
   });
 }

@@ -1,6 +1,7 @@
 import type { WorkflowDefinition } from "../types";
 import type { ApprovalOutcome, ResolvedApproval } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
+import { resolveStepNode } from "./foreach-body";
 
 /**
  * Step output and output port for a step whose approval request resolved.
@@ -18,7 +19,9 @@ export function shapeApprovalResolution(
   parkedOutput: unknown,
   approval: ResolvedApproval,
 ): ApprovalOutcome {
-  const node = definition.nodes.find((candidate) => candidate.id === nodeId);
+  // A foreach child resolves to its body node, so a system-one-decision body
+  // keeps its own shaping.
+  const node = resolveStepNode(definition, nodeId);
   if (node && registry.has(node.type)) {
     const shaped = registry.get(node.type).resolveApproval(parkedOutput, approval);
     if (shaped) return shaped;

@@ -3,7 +3,7 @@ import type { SeedManifest } from "../boot/manifest";
 export interface Route {
   path: string;
   name: string;
-  needs?: "agent" | "task" | "page";
+  needs?: "agent" | "task" | "page" | "workflowRun";
   skip?: string;
   tag?: "@local";
 }
@@ -73,18 +73,21 @@ export const routes: Route[] = [
     name: "connections-oauth-apps-id",
     skip: "no seed entity yet",
   },
-  { path: "/workflow-runs/:id", name: "workflow-runs-id", skip: "no seed entity yet" },
+  { path: "/workflow-runs/:id", name: "workflow-runs-id", needs: "workflowRun" },
   { path: "/script-runs/:id", name: "script-runs-id", skip: "no seed entity yet" },
   { path: "/usage/metrics/:id", name: "usage-metrics-id", skip: "no seed entity yet" },
 ];
 
-export function resolveRoute(route: Route, seed: SeedManifest): string {
+/** The route with its id filled from the seed, or null when the seed has no such entity. */
+export function resolveRoute(route: Route, seed: SeedManifest): string | null {
   if (!route.needs) return route.path;
   const id =
     route.needs === "agent"
       ? seed.agents.workerA
       : route.needs === "task"
         ? seed.tasks.inProgress
-        : seed.pages.public.id;
-  return route.path.replace(/:[^/]+/, id);
+        : route.needs === "workflowRun"
+          ? seed.workflowRuns?.foreach
+          : seed.pages.public.id;
+  return id ? route.path.replace(/:[^/]+/, id) : null;
 }

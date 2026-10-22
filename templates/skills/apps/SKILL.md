@@ -475,7 +475,7 @@ Param `kind` is `string` by default, or `number` / `boolean`; `required` default
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, Card, Section, and Drawer). `watch` maps state paths to an action step or chain.
 
-## Component catalog (all 33)
+## Component catalog (all 34)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -485,9 +485,9 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 
 | Component | Required props | Optional props / values |
 |---|---|---|
-| `Stack` | none | Primary layout; `direction: "column", "row"`, `gap`, `padding: "none", "xs", "sm", "md", "lg", "xl"`; `align: "start", "center", "end", "stretch"`, `justify: "start", "center", "end", "between"`, `wrap`; `motion: "rise"` (default), `"fade"`, or `"none"` (see Motion below); has the `default` child slot. |
+| `Stack` | none | Primary layout; `direction: "column", "row"`, `gap`, `padding: "none", "xs", "sm", "md", "lg", "xl"`; `align: "start", "center", "end", "stretch"`, `justify: "start", "center", "end", "between"`, `wrap`; `motion: "rise"` (default), `"fade"`, or `"none"` (see Motion below); `fill` (grow to fill a `fill`-aware parent; see Layout below); has the `default` child slot. |
 | `Grid` | none | Responsive `columns`: integer 1 through 6, or `{ base, sm, md, lg }` counts 1 through 6; `gap` uses the Stack spacing values; has the `default` child slot. |
-| `Split` | none | `ratio: "1-1", "1-2", "2-1", "1-3", "3-1"`, `gap`, `collapseBelow: "sm", "md", "lg"`, `reverse`; has the positional `default` child slot. |
+| `Split` | none | `ratio: "1-1", "1-2", "2-1", "1-3", "3-1"`, `gap`, `collapseBelow: "sm", "md", "lg"`, `reverse`, `fill` (same contract as Stack); has the positional `default` child slot. |
 | `Divider` | none | `label`; no children. |
 | `Tabs` | `id`, `tabs` | `tabs` entries are `{ key, label?, icon?, count? }` (`count` is a number shown as a small pill); `defaultTab`; `variant: "line"` (default) or `"segmented"` (a compact segmented control, same state and warm panels); has the positional `default` child slot. |
 | `Container` | none | Legacy layout primitive; prefer Stack. `direction: "row", "column"`, `gap: "none", "sm", "md", "lg"`; has the `default` child slot. |
@@ -496,7 +496,8 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Text` | `content` | `tone: "default" or "muted"`. |
 | `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. |
 | `SearchInput` | `id` | `placeholder`, `label`, `shortcut` (one key, usually `"/"`: shows a keycap and focuses the field); writes debounced text to `/ui/<id>/value`; no children. |
-| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`; writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
+| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
+| `NumberInput` | `id` | `label`, `placeholder`, `min`, `max`; a text field with a decimal keyboard that writes the parsed number to `/ui/<id>/value` on every change (no debounce), or null when the field is empty; non-numeric text (a bare `-` mid-edit, letters) leaves the stored value untouched; `min`/`max` clamp the stored value and the visible text snaps to it when the field loses focus; no children. |
 | `Chips` | `id`, `options` | Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`; `multiple`; `label` (group name for screen readers). Writes a string or null to `/ui/<id>/value`, or a string array with `multiple`; pressing the selected chip clears it. |
 | `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` swaps the label for a spinner while that custom action's `/actions/<name>/status` is `"running"` (presses are ignored), then shows a check and `successLabel` for about 1.5s when it turns `"ok"`; `icon`, `iconPosition: "start" or "end"`; `size: "sm", "default", or "lg"`; `shortcut` (one key, shown as a keycap, presses the button); `hint` (tooltip); dispatch with element-level `on.press`. |
 | `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). |
@@ -515,17 +516,20 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
 | `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below); has the `default` child slot. |
 | `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`, `loading` (bind `/queries/<name>/loading` for skeleton fields while loading); renders one record without edit controls; see below for field kinds. |
+| `CardGrid` | `titleKey` | `data`, `loading`, `error`, `emptyMessage`, `imageKey`, `fields`, `columns`, `onClick`; one card per row for record browsers; see below. |
 | `Kanban` | `columnField`, `columns`, `titleField` | `data`, `loading`, `cardFields`, `idField` (default `id`), `onMove`, `onCardClick`; see below. |
 | `Calendar` | `startField`, `titleField` | `data`, `loading`, `endField`, `idField`, `onSelect`; read-only month grid; see below. |
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
+| `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
 
 Table details:
 
-- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", max?: number, onChange?: chain }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, `link`, or `json`; `string` and `enum` render as text, and `json` renders a truncated single-line `JSON.stringify` preview. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
+- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", max?: number, format?: "<template>", onChange?: chain }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, `link`, or `json`; `string` and `enum` render as text, and `json` renders a truncated single-line `JSON.stringify` preview. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
   - `status`: lifecycle values (`pending`, `in_progress`, `running`, `completed`, `failed`, `cancelled`, `paused`, `reviewing`, ...) render the dashboard status chip with its icon; other values use `tones` like `badge`.
   - `user` / `agent`: avatar plus name. `relative` (and `date`): smart time, exact time on hover. `duration`: milliseconds as `1m 23s`. `progress`: a bar against `max` (default 100). `copy`: the value plus a copy button. `link`: an http(s) URL opening in a new tab (other values render as text).
   - `switch`: a toggle. `onChange` runs with `$row` = the row with this column already set to the new value, e.g. `[{ "action": "app.mutate", "params": { "model": "m", "op": "update", "rowId": { "$row": "id" }, "values": { "enabled": { "$row": "enabled" } } } }]`. Without `onChange` the switch is read-only.
   - Numbers, durations and progress right-align by default. `truncate: "middle"` keeps both ends of ids and paths. `icon` shows in the header; `tooltip` names a row field shown on hover.
+  - `format`: a `{{field}}` template that combines several row fields into one cell, e.g. `"{{name}} ({{status}})"`. Placeholder names match `[\w.]+` (letters, digits, `_` and `.`; no hyphens or spaces). Each placeholder reads that row field as-is (a dotted name such as `{{owner.name}}` is a literal column name, not a nested path); a missing or null field becomes an empty string and an object or array becomes a JSON preview cut to 120 characters. The whole cell is capped at 500 characters. A templated column ignores `kind`, shows the same text in the phone list, and sorts by the composed text. `search` and `filters` still read the column's `key`.
 - `onRowClick`: action chain with `$row` / `$rowIndex`, run when a row is clicked (or Enter on a focused cell). Pair it with `app.navigate` that sets a Drawer param, and bind `selectedId` to `{ "$state": "/route/params/<param>" }` so the open row stays highlighted. `rowId` names the id field (default `id`).
 - Phones (below 768px): the table renders as a card list. `mobileFields: { title, subtitle?, meta?: string or string[], status? }` picks the columns; by default the first text column is the title and the first `status`/`badge` column the chip. `mobile: "scroll"` keeps the grid; it is the default when the table has `rowActions` but no `onRowClick`.
 - `emptyState: { icon?, title, body? }` replaces the plain empty message. A search or filter that hides every row shows its own "No rows match" state.
@@ -550,6 +554,12 @@ ContributionGraph details:
 
 - Buckets `data` rows by the calendar day of `dateField` over the trailing `days`. Each row counts 1, or adds its numeric `countField` when set.
 
+Tree details:
+
+- `nodes` is a doc-shaped value: `{ root: string | string[], elements: { <key>: { type, children?: string[] } } }`, the json-render flat element map. Usually bind it to a json column: `{ "$state": "/queries/<name>/data/0/<column>" }`. A malformed or absent value renders an empty state; a `children` key missing from `elements` shows as `key — ?`. Outlines are cut at 2,000 rows with a notice; branches deeper than 32 levels keep a disabled chevron.
+- Each row shows `key — type`. Clicking a row writes its key to `/ui/<id>/value`, and the row bound to that path renders selected; read the selection with `{ "$state": "/ui/<id>/value" }`. The Tree never writes `null`: when the selected key leaves the doc (a refetch, an edit) the stored key stays and no row renders selected. Selection and collapse are keyed by node key, so a key reachable through two parents selects and collapses in both places.
+- Rows scroll inside `maxHeight` (default `480px`). Set `fill: true` inside a `fill` Stack or Split pane to grow to that height instead and scroll within it (ignores `maxHeight`).
+
 Form details:
 
 - `fields[]`: `{ name, label?, kind?, options?: string[], placeholder?, required? }`; `kind` is `string`, `text`, `number`, `boolean`, `date`, or `enum`, and enum fields need `options`.
@@ -569,6 +579,16 @@ Motion details:
 
 - Every `Stack` fades its direct children in and lifts them 4px over 200ms on first paint, staggered 30ms (capped at the 10th child). It never replays on the 5s data poll. A Stack nested inside another one does not add its own entrance. `motion: "fade"` drops the lift; `motion: "none"` turns it off. Viewers with reduced motion get a 150ms fade.
 
+CardGrid details — the visual counterpart to Table for record browsers (projects, documents, media):
+
+- `titleKey` (required) picks the row field shown as the card title (an object value shows a JSON preview; titles are capped at 500 characters).
+- `imageKey` (optional) picks a row field holding an absolute http(s) image URL and adds an image tile to every card. When it is set, a non-URL value, a missing value, or a failed load shows a placeholder tile. Omit it for text-only cards with no tile.
+- `fields[]`: `{ key, kind?, tones? }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge` (with `tones`), or `json` (no `label`, no `format`). A field with no `kind` whose value is an object renders like `json`. They render as an unlabeled `·`-joined meta line under the title, e.g. a `date` field for "created" and a `text` field for the author.
+- `columns`: same responsive shorthand as `Grid.columns` (default `{ "base": 1, "sm": 2, "md": 3 }`).
+- `onClick`: an action chain with `$row` / `$rowIndex`, run when a card is clicked or activated with Enter or Space. Commonly `app.navigate` into a detail page, the CardGrid equivalent of Table's `onRowClick`.
+- Bind `data` / `loading` / `error` to a named query like Table. Loading shows skeleton cards, an error shows a callout, and no rows shows `emptyMessage`.
+- It renders 200 cards at a time with a Show more button below the grid that reveals the next 200.
+
 Shortcut details:
 
 - `Button.shortcut` and `SearchInput.shortcut` are one key. Letters and digits match without Shift; symbols such as `/` and `?` match as typed. They do nothing while focus is in a text field, while Ctrl, Cmd, or Alt is held, or while a dialog or menu is open (unless the control is inside it, such as a Button in an open Drawer).
@@ -577,9 +597,11 @@ Shortcut details:
 
 Use `Stack` as the primary page and section layout; `Container` is the legacy two-prop primitive retained for existing pages. Stack supports vertical or horizontal flow, shared spacing, alignment, justification, wrapping, and padding; row Stacks (filter bars, button rows) should set `collapseBelow: "sm"|"md"|"lg"` so they stack vertically on phones. Use `Grid` for responsive card or metric strips: a bare column count is responsive shorthand (1 column on phones, 2 from `sm`, the count from `md` up), or pin breakpoints explicitly with `{ "base": 1, "md": 2, "lg": 3 }`. `Grid` and `Split` also accept `padding` on the shared spacing scale.
 
+`Stack` and `Split` size to their content by default, so a page scrolls as a whole. Set `fill: true` to make one grow to fill the remaining height of a `fill`-aware parent (another `fill` Stack or Split) instead; chain it from the page root down through every container on the path to the element that should scroll, and that element scrolls within whatever height is left while the page itself does not. A non-`fill` sibling (a toolbar, a header) keeps its natural height and the `fill` sibling absorbs the rest. A `fill` Split stretches both panes to the full row height, so nesting a `fill` Split inside one pane of another `fill` Split is the way to build a three-or-more column viewport-height layout (`ratio` is only ever two panes).
+
 `Split` and `Tabs` children are positional. For Split, `children[0]` is the first pane, `children[1]` is the second, and extra children append inside the second pane. Below `collapseBelow`, panes stack; `reverse` changes only that narrow-layout stacking order. For Tabs, `children[i]` is the body for `tabs[i]`; keep both arrays in the same order and with the same count. Inactive tab children stay mounted but hidden, so Tables keep polling. Use `Divider` to separate sections and `Markdown` for richer explanatory content.
 
-SearchInput, Select, and Chips are client-side controls: each needs a literal `id` and writes state under `/ui/<id>/value`; Tabs writes its active key to `/ui/<id>/tab`. Bind those values into a Table's `search` and `filters` props. This filters already-polled rows locally; it does not alter or re-run the named query.
+SearchInput, Select, NumberInput, Chips, and Tree are client-side controls: each needs a literal `id` and writes state under `/ui/<id>/value` (Tree writes the clicked node key); Tabs writes its active key to `/ui/<id>/tab`. Bind those values into a Table's `search` and `filters` props. This filters already-polled rows locally; it does not alter or re-run the named query.
 
 ```json
 {

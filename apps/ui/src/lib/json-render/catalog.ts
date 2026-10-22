@@ -172,10 +172,29 @@ const stackProps = z.object({
    * only; `none` turns it off.
    */
   motion: z.enum(["rise", "fade", "none"]).optional(),
+  /**
+   * Grow to fill the remaining space of a `fill`-aware parent (another
+   * `fill` Stack/Split) instead of sizing to content, and let its own
+   * children do the same. Chain `fill` from the page root down to every
+   * container on the path to a scrolling leaf to build a viewport-height
+   * layout with no page scroll.
+   */
+  fill: z.boolean().optional(),
 });
 
 /** Grid tracks are capped at 6 — beyond that a page is a table, not a layout. */
 const gridColumnCount = z.number().int().min(1).max(6);
+
+/** Responsive column shorthand shared by `Grid.columns` and `CardGrid.columns`. */
+const gridColumnsSchema = z.union([
+  gridColumnCount,
+  z.object({
+    base: gridColumnCount.optional(),
+    sm: gridColumnCount.optional(),
+    md: gridColumnCount.optional(),
+    lg: gridColumnCount.optional(),
+  }),
+]);
 
 const gridProps = z.object({
   /**
@@ -183,17 +202,7 @@ const gridProps = z.object({
    * the declared count from `md` up. The object form pins breakpoints
    * explicitly.
    */
-  columns: z
-    .union([
-      gridColumnCount,
-      z.object({
-        base: gridColumnCount.optional(),
-        sm: gridColumnCount.optional(),
-        md: gridColumnCount.optional(),
-        lg: gridColumnCount.optional(),
-      }),
-    ])
-    .optional(),
+  columns: gridColumnsSchema.optional(),
   gap: spacing.optional(),
   padding: spacing.optional(),
 });
@@ -204,6 +213,9 @@ const splitProps = z.object({
   collapseBelow: z.enum(["sm", "md", "lg"]).optional(),
   reverse: z.boolean().optional(),
   padding: spacing.optional(),
+  /** Same `fill` contract as `Stack.fill` — grow to fill a `fill`-aware
+   * parent's remaining space; both panes stretch to the full row height. */
+  fill: z.boolean().optional(),
 });
 
 const dividerProps = z.object({
@@ -251,6 +263,15 @@ const chipsProps = z.object({
   label: z.string().optional(),
 });
 
+const numberInputProps = z.object({
+  /** State id — the parsed number lands at `/ui/<id>/value`: `null` when empty; non-numeric text leaves it untouched. */
+  id: z.string(),
+  label: z.string().optional(),
+  placeholder: z.string().optional(),
+  min: z.number().optional(),
+  max: z.number().optional(),
+});
+
 const selectOptionSchema = z.union([
   z.string(),
   z.object({
@@ -275,6 +296,28 @@ const selectProps = z.object({
   multiple: z.boolean().optional(),
   /** Placeholder of the filter field when the list is searchable. */
   searchPlaceholder: z.string().optional(),
+  /** Seeds `/ui/<id>/value` the first time it's read (before any user
+   * interaction). Ignored once the path has any other value, including `null`.
+   * With `multiple` the seed is a one-entry array. */
+  defaultValue: z.string().optional(),
+});
+
+const treeProps = z.object({
+  /** State id — the selected node key lands at `/ui/<id>/value`. */
+  id: z.string(),
+  nodes: z
+    .unknown()
+    .describe(
+      "json-render flat element map: { root: string | string[], elements: Record<key,{type,children?}> } — usually a {$state} binding to a query row's json column",
+    ),
+  label: z.string().optional(),
+  maxHeight: z
+    .string()
+    .optional()
+    .describe("CSS max-height for the scrollable row list, e.g. '480px' (default '480px')"),
+  /** Grow to fill a `fill`-aware parent instead of the fixed `maxHeight` box —
+   * the row list scrolls inside whatever height the parent gives it. */
+  fill: z.boolean().optional(),
 });
 
 const markdownProps = z.object({
@@ -487,6 +530,16 @@ const tableColumnSchema = z.object({
   width: z.number().optional(),
   /** Pin the column to an edge so it survives horizontal scroll (id, actions). */
   pinned: z.enum(["left", "right"]).optional(),
+  /**
+   * Combine several row fields into one cell via `{{field}}` placeholders
+   * (e.g. `"{{name}} · v{{version}}"`; names match `[\w.]+`, no hyphens or
+   * spaces). Overrides `key`-based rendering when set: `key` still anchors
+   * the column identity (header fallback, `search`, `filters`), but the
+   * displayed text — on desktop and in the phone list — comes from the
+   * template, with missing fields substituted as empty strings. `kind` is
+   * ignored on a templated column.
+   */
+  format: z.string().optional(),
   /** Cell alignment. Numbers, durations and progress default to `end`. */
   align: z.enum(["start", "end"]).optional(),
   /** `middle` keeps both ends of long ids and paths visible. Defaults to `end`. */
@@ -771,6 +824,43 @@ const contributionGraphProps = z.object({
   days: z.number().int().min(7).max(730).optional(),
 });
 
+const cardGridFieldSchema = z.object({
+  /** Property key in the bound row object. Meta fields render unlabeled, so there is no `label` prop. */
+  key: z.string(),
+  /**
+   * One of `text`, `string`, `enum`, `number`, `boolean`, `date` (smart
+   * relative time), `badge` (status pill) or `json` (truncated single-line
+   * preview). Without a kind, an object/array value renders like `json`.
+   */
+  kind: z.enum(["text", "string", "number", "boolean", "date", "badge", "enum", "json"]).optional(),
+  /** For `kind: "badge"` — value → badge tone. Falls back to `neutral`. */
+  tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+});
+
+const cardGridProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data" }`. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** Row field rendered as the card title. */
+  titleKey: z.string(),
+  /**
+   * Row field holding an absolute http(s) image URL. Omit it for cards with
+   * no image tile; when set, any other per-row value or a failed load
+   * renders a placeholder tile.
+   */
+  imageKey: z.string().optional(),
+  /** Secondary metadata rendered under the title (e.g. created date, author), joined inline with `·`. */
+  fields: z.array(cardGridFieldSchema).optional(),
+  /** Same responsive shorthand as `Grid.columns` (default `{ base: 1, sm: 2, md: 3 }`). */
+  columns: gridColumnsSchema.optional(),
+  /** Action chain run when a card is clicked. Params may reference `$row` / `$rowIndex`. */
+  onClick: actionChainSchema.optional(),
+  /** Usually `{ "$state": "/queries/<name>/loading" }`. */
+  loading: z.boolean().optional(),
+  /** Usually `{ "$state": "/queries/<name>/error" }`. */
+  error: z.string().nullish(),
+  emptyMessage: z.string().optional(),
+});
+
 const elementRefProps = z.object({
   app: z.string().optional(),
   element: z.string(),
@@ -790,6 +880,7 @@ export type GridColumns = z.infer<typeof gridProps>["columns"];
 export type TabsTab = z.infer<typeof tabsTabSchema>;
 export type SelectOption = z.infer<typeof selectOptionSchema>;
 export type DetailListField = z.infer<typeof detailListFieldSchema>;
+export type CardGridField = z.infer<typeof cardGridFieldSchema>;
 export type DrawerProps = z.infer<typeof drawerProps>;
 export type KanbanColumn = z.infer<typeof kanbanColumnSchema>;
 export type ChipOption = z.infer<typeof chipOptionSchema>;
@@ -813,7 +904,7 @@ export const swarmCatalogSpec = {
       props: stackProps,
       slots: ["default"],
       description:
-        "THE primary layout primitive \u2014 a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. For rows, set `collapseBelow` (sm|md|lg) so the row stacks vertically on narrow viewports \u2014 filter bars should always set it. `motion` (rise|fade|none, default rise) is the entrance of the direct children on first paint: a 200ms fade plus a 4px rise, staggered 30ms; it never replays on data polls, nested Stacks inherit the parent's entrance, and reduced-motion viewers get a short fade. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages.",
+        "THE primary layout primitive \u2014 a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. For rows, set `collapseBelow` (sm|md|lg) so the row stacks vertically on narrow viewports \u2014 filter bars should always set it. `motion` (rise|fade|none, default rise) is the entrance of the direct children on first paint: a 200ms fade plus a 4px rise, staggered 30ms; it never replays on data polls, nested Stacks inherit the parent's entrance, and reduced-motion viewers get a short fade. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages. `fill: true` makes this Stack grow to fill the remaining height of a `fill`-aware parent instead of sizing to content — chain it from the page root down to a scrolling leaf to build a viewport-height layout with no page scroll; a non-`fill` sibling keeps its natural height and the `fill` sibling absorbs whatever is left.",
     },
     Grid: {
       props: gridProps,
@@ -825,7 +916,7 @@ export const swarmCatalogSpec = {
       props: splitProps,
       slots: ["default"],
       description:
-        "Two-pane layout. POSITIONAL children: the FIRST child is the left pane, the SECOND is the right pane, and any further children stack inside the right pane. `ratio` sizes them (1-1|1-2|2-1|1-3|3-1, default 2-1 = wide left). Below `collapseBelow` (sm|md|lg, default md) the panes stack vertically; `reverse` only flips that stacked order (right pane first on narrow screens).",
+        "Two-pane layout. POSITIONAL children: the FIRST child is the left pane, the SECOND is the right pane, and any further children stack inside the right pane. `ratio` sizes them (1-1|1-2|2-1|1-3|3-1, default 2-1 = wide left). Below `collapseBelow` (sm|md|lg, default md) the panes stack vertically; `reverse` only flips that stacked order (right pane first on narrow screens). `fill: true` makes this Split grow to fill the remaining height of a `fill`-aware parent (same contract as `Stack.fill`) — both panes stretch to the full row height, so nesting a `fill` Split inside one pane of another `fill` Split is the standard way to build a 3+ column viewport-height layout (ratio is only ever 2 panes).",
     },
     Divider: {
       props: dividerProps,
@@ -870,7 +961,12 @@ export const swarmCatalogSpec = {
     Select: {
       props: selectProps,
       description:
-        'Dropdown filter/picker. `options` are plain strings or `{ value, label?, icon?, hint? }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button. `searchable` adds a type-to-filter field (on by default past 8 options; `searchPlaceholder` sets its hint). `multiple` picks several: the value is a string array (empty = nothing picked), which a Table filter reads as "cell is one of".',
+        'Dropdown filter/picker. `options` are plain strings or `{ value, label?, icon?, hint? }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button. `searchable` adds a type-to-filter field (on by default past 8 options; `searchPlaceholder` sets its hint). `multiple` picks several: the value is a string array (empty = nothing picked), which a Table filter reads as "cell is one of". `defaultValue` seeds `/ui/<id>/value` the first time it is read, before any interaction (a one-entry array with `multiple`).',
+    },
+    NumberInput: {
+      props: numberInputProps,
+      description:
+        "Labelled numeric text field (decimal keyboard on touch devices, no debounce). Writes the parsed number into state at `/ui/<id>/value` on every change, or `null` when the field is empty; non-numeric text (a bare '-' mid-edit, letters) leaves the stored value untouched until it parses. `min`/`max` clamp the stored value, and the visible text snaps to that clamped value when the field loses focus.",
     },
     Button: {
       props: buttonProps,
@@ -946,7 +1042,7 @@ export const swarmCatalogSpec = {
     Table: {
       props: tableProps,
       description:
-        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` (runs the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (http(s) URL, opens in a new tab), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon` and `tooltip` (a row field shown on hover). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu).',
+        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` (runs the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (http(s) URL, opens in a new tab), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon` and `tooltip` (a row field shown on hover), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu).',
     },
     Form: {
       props: formProps,
@@ -964,6 +1060,11 @@ export const swarmCatalogSpec = {
       description:
         'Read-only label/value detail view for ONE record. Bind `data` to a single row \u2014 usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `code` (monospace block) and `json` (collapsible JSON tree). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
     },
+    CardGrid: {
+      props: cardGridProps,
+      description:
+        "Responsive grid of data-bound cards, one per row \u2014 the visual counterpart to `Table` for record browsers (projects, documents, media). Bind `data`/`loading`/`error` to a named query like Table. `titleKey` picks the row field shown as the card title. `imageKey` picks a row field holding an absolute http(s) image URL and adds an image tile to every card (a non-URL value or a failed load shows a placeholder); omit it for text-only cards. `fields` render as an unlabeled `\u00b7`-joined meta line under the title; each field's `kind` is one of `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge` (with `tones`) or `json`. `onClick` is an action chain (params may use `$row` / `$rowIndex`) dispatched on card click or Enter/Space, commonly `app.navigate` into a detail page. `columns` is the same responsive shorthand as `Grid.columns` (default `{ base: 1, sm: 2, md: 3 }`). Renders 200 cards at a time with a Show more button.",
+    },
     Kanban: {
       props: kanbanProps,
       description:
@@ -978,6 +1079,11 @@ export const swarmCatalogSpec = {
       props: contributionGraphProps,
       description:
         "GitHub-style activity heatmap over the trailing `days` (default 365). Buckets rows by the calendar day of `dateField` (default `date`); each row counts 1, or sums `countField` when set. Read-only.",
+    },
+    Tree: {
+      props: treeProps,
+      description:
+        'Collapsible tree view of a json-render flat element map. Bind `nodes` to a doc-shaped value (`{ root: string | string[], elements: Record<key,{type,children?}> }`) — usually `{ "$state": "/queries/<name>/data/0/<jsonColumn>" }`. Each row shows `key — type`; clicking one writes the node key to `/ui/<id>/value`, and the row bound to that path renders selected. A malformed or absent `nodes` value renders an empty state. Rows scroll inside a fixed-height viewport — `maxHeight` overrides the default `480px` — or set `fill: true` to grow inside a `fill`-aware parent and scroll within whatever height that gives it instead (ignores `maxHeight`). Outlines are cut at 2,000 rows with a notice; branches deeper than 32 levels keep a disabled chevron.',
     },
     ElementRef: {
       props: elementRefProps,

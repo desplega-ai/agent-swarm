@@ -80,6 +80,7 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/workflow-e2e.test.ts \
     src/tests/workflow-engine-v2.test.ts \
     src/tests/workflow-executors.test.ts \
+    src/tests/workflow-foreach-bodies.test.ts \
     src/tests/workflow-swarm-script.test.ts
 elif [[ "$probe_status" -ne 0 ]]; then
   echo "[pre-push-tests] sandbox spawn probe failed unexpectedly with exit $probe_status" >&2

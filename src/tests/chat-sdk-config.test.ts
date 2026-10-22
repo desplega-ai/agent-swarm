@@ -332,3 +332,14 @@ describe("readApiUrlOverrides", () => {
     expect(readApiUrlOverrides()).toEqual({});
   });
 });
+
+describe("TRANSCRIPTION_PROVIDER validator", () => {
+  test("accepts the three supported providers and rejects anything else", () => {
+    expect(validateConfigValue("TRANSCRIPTION_PROVIDER", "openai")).toBeNull();
+    expect(validateConfigValue("TRANSCRIPTION_PROVIDER", "elevenlabs")).toBeNull();
+    expect(validateConfigValue("TRANSCRIPTION_PROVIDER", "groq")).toBeNull();
+    expect(validateConfigValue("TRANSCRIPTION_PROVIDER", "deepgram")).toMatch(
+      /TRANSCRIPTION_PROVIDER/,
+    );
+  });
+});

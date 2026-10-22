@@ -45,9 +45,13 @@ Write plain, short markdown: bold, italic, inline code, code blocks, bullet list
 
 The swarm splits longer text into several messages at line breaks. Long answers are hard to read in chat, so keep the answer short and put long material in an artifact or page, then post the link.
 
-## Attachments arrive as task attachments
+## Attachments
 
-Files and images the user sends in the thread are stored as attachments of the task. The task text names them. Download them with the `download-task-attachment` skill. You cannot send files back to the thread in this version. Share a link instead.
+Files and images the user sends in the thread are stored as attachments of the task. The task text names them. Download them with the `download-task-attachment` skill. Voice notes and audio files come with a `[Transcript of <file>]` block in the task text when the swarm has transcription configured; answer from the transcript and download the audio only when you need it. A file over the inbound limit (20 MB on Telegram) never reaches you: the task text says so and the user was already told.
+
+To send files back, pass `attachments` to `chat-reply` (or `chat-post`): up to 10 attachment ids of your task, or agent-fs paths such as `thoughts/<agent-id>/report.pdf`. The files go out after the text. On Telegram, JPEG and PNG show as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. When a task's final output is relayed to the thread, the files attached to that task go with it, so do not send them twice.
+
+The upload limit is 50 MB per file on Telegram and 10 MB on Discord. A larger file is not sent: the thread gets a note naming it, and the tool result lists it in `unsentFiles`. Share a link for big files.
 
 ## `chat-read-thread` limits per platform
 

@@ -6,7 +6,7 @@
  *
  * Each task owns a fresh thread inside an isolated session subprocess.
  * Native resume remains disabled. Follow-up tasks use the context preamble.
- * The adapter resolves skills, maintains AGENTS.md, and reports swarm events.
+ * The adapter resolves skills, supplies session instructions, and reports swarm events.
  *
  * Per-session configuration travels in `thread/start` over stdin. This keeps
  * MCP credentials out of process arguments. The configuration overrides the
@@ -48,7 +48,7 @@ import {
   terminateProcessGroup,
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
+import { recoverLegacyCodexAgentsMd } from "./codex-agents-md";
 import {
   CodexAppServer,
   type CodexAppServerNotification,
@@ -951,7 +951,6 @@ export interface SummarizeSessionForCodexDeps {
 export class CodexSession implements ProviderSession {
   private readonly thread: CodexThread;
   private readonly config: ProviderSessionConfig;
-  private readonly agentsMdHandle: CodexAgentsMdHandle;
   private readonly resolvedModel: string;
   private readonly contextWindow: number;
   private readonly skillsDir: string;
@@ -991,7 +990,7 @@ export class CodexSession implements ProviderSession {
   /**
    * Result captured by `settle` but held back from `resolveCompletion` until
    * `runSession`'s `finally` block has fully cleaned up (log writer flush,
-   * AGENTS.md cleanup, session summary). Without this, callers awaiting
+   * app-server close, session summary). Without this, callers awaiting
    * `waitForCompletion` would race the cleanup. Phase 3 added the session
    * summary path which materially relies on this ordering for testability.
    */
@@ -1000,7 +999,6 @@ export class CodexSession implements ProviderSession {
   constructor(
     thread: CodexThread,
     config: ProviderSessionConfig,
-    agentsMdHandle: CodexAgentsMdHandle,
     resolvedModel: string,
     initialEvents: ProviderEvent[] = [],
     skillsDir?: string,
@@ -1008,7 +1006,6 @@ export class CodexSession implements ProviderSession {
   ) {
     this.thread = thread;
     this.config = config;
-    this.agentsMdHandle = agentsMdHandle;
     this.resolvedModel = resolvedModel;
     this.contextWindow = getCodexContextWindow(resolvedModel);
     // `CODEX_SKILLS_DIR` lets tests / non-Docker installs point at a custom
@@ -1739,7 +1736,7 @@ export class CodexSession implements ProviderSession {
     } finally {
       // Session-end summarization. Pure addition for codex — no behavior to
       // preserve. Wrapped in its own try/catch so summary failure must NOT
-      // block the existing log/AGENTS.md cleanup below. `SKIP_SESSION_SUMMARY` is
+      // block the existing log/transport cleanup below. `SKIP_SESSION_SUMMARY` is
       // read with `isSessionSummarySkipped`, the same as the claude Stop hook + pi/opencode.
       //
       // Skip the summary entirely when the session was aborted. The transcript
@@ -1778,7 +1775,6 @@ export class CodexSession implements ProviderSession {
       } catch {
         // Ignore log writer cleanup failures.
       }
-      await this.agentsMdHandle.cleanup();
 
       // Resolve `waitForCompletion()` only AFTER all cleanup has finished so
       // downstream observers (tests + the runner's `.then(...)` chain) don't
@@ -1941,123 +1937,114 @@ export async function createInProcessCodexSession(
     threadFactory?: CodexThreadFactory;
   } = {},
 ): Promise<CodexSession> {
-  // Codex ingests per-session instructions via AGENTS.md in the cwd. Write
-  // (or refresh) the managed block before we spin up the thread.
-  const agentsMdHandle = await writeCodexAgentsMd(config.cwd, config.systemPrompt);
+  await recoverLegacyCodexAgentsMd(config.cwd);
 
-  try {
-    // Resolve the model once and thread it through. Claude shortnames map
-    // to Codex equivalents; everything else passes through verbatim — the
-    // CLI is the source of truth for valid model identifiers.
-    const resolvedModel = resolveCodexModel(config.model);
+  // Resolve the model once and thread it through. Claude shortnames map
+  // to Codex equivalents; everything else passes through verbatim — the
+  // CLI is the source of truth for valid model identifiers.
+  const resolvedModel = resolveCodexModel(config.model);
 
-    // Buffer warnings emitted during config-building so they're not lost
-    // before `CodexSession.onEvent` attaches a listener. The buffer is
-    // replayed into the session's event stream right after construction
-    // via the `initialEvents` constructor parameter.
-    const preSessionEvents: ProviderEvent[] = [];
-    const bufferedEmit = (event: ProviderEvent) => {
-      preSessionEvents.push(event);
-    };
+  // Buffer warnings emitted during config-building so they're not lost
+  // before `CodexSession.onEvent` attaches a listener. The buffer is
+  // replayed into the session's event stream right after construction
+  // via the `initialEvents` constructor parameter.
+  const preSessionEvents: ProviderEvent[] = [];
+  const bufferedEmit = (event: ProviderEvent) => {
+    preSessionEvents.push(event);
+  };
 
-    const mergedConfig = await buildCodexConfig(config, resolvedModel, bufferedEmit);
+  const mergedConfig = await buildCodexConfig(config, resolvedModel, bufferedEmit);
 
-    // Auth resolution. `codex_oauth` (in the swarm config store) wins over
-    // `OPENAI_API_KEY` so users can keep an OpenAI key set for embeddings
-    // without it shadowing their ChatGPT login. The entrypoint already runs
-    // this same precedence at boot — this block handles local dev (where
-    // the entrypoint didn't run) and any case where auth.json is stale.
-    const authMode = await resolveCodexAuthMode(config, bufferedEmit);
+  // Auth resolution. `codex_oauth` (in the swarm config store) wins over
+  // `OPENAI_API_KEY` so users can keep an OpenAI key set for embeddings
+  // without it shadowing their ChatGPT login. The entrypoint already runs
+  // this same precedence at boot — this block handles local dev (where
+  // the entrypoint didn't run) and any case where auth.json is stale.
+  const authMode = await resolveCodexAuthMode(config, bufferedEmit);
 
-    // The app-server receives an explicit environment. Construct a
-    // minimal env explicitly so the spawned Codex CLI can find its binary
-    // (PATH) and HOME (for ~/.codex/auth.json). `OPENAI_API_KEY` is only
-    // forwarded when auth.json is NOT in chatgpt mode — otherwise it would
-    // override the OAuth login at the Codex CLI layer.
-    const env: Record<string, string> = {
-      PATH: process.env.PATH ?? "",
-      HOME: process.env.HOME ?? "",
-      ...(authMode !== "chatgpt" && process.env.OPENAI_API_KEY
-        ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
-        : {}),
-      ...(process.env.NODE_EXTRA_CA_CERTS
-        ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
-        : {}),
-      CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
-      ...(config.env ?? {}),
-      // Gated cross-service OTel linking: when SWARM_ENABLE_HARNESS_OTEL (or
-      // the deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias) is on, inject
-      // TRACEPARENT from the active worker span so Codex's spans nest under
-      // our worker.session trace. Codex's Rust OTEL SDK reads W3C trace
-      // context from the env via the default tracecontext propagator.
-      // Returns {} (no-op) when off; spread last so the computed value wins.
-      ...buildOtelTraceparentEnv(config.env ?? process.env),
-      SWARM_CODEX_APP_SERVER: "1",
-    };
-    if (authMode === "chatgpt") delete env.OPENAI_API_KEY;
+  // The app-server receives an explicit environment. Construct a
+  // minimal env explicitly so the spawned Codex CLI can find its binary
+  // (PATH) and HOME (for ~/.codex/auth.json). `OPENAI_API_KEY` is only
+  // forwarded when auth.json is NOT in chatgpt mode — otherwise it would
+  // override the OAuth login at the Codex CLI layer.
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    HOME: process.env.HOME ?? "",
+    ...(authMode !== "chatgpt" && process.env.OPENAI_API_KEY
+      ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
+      : {}),
+    ...(process.env.NODE_EXTRA_CA_CERTS
+      ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
+      : {}),
+    CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
+    ...(config.env ?? {}),
+    // Gated cross-service OTel linking: when SWARM_ENABLE_HARNESS_OTEL (or
+    // the deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias) is on, inject
+    // TRACEPARENT from the active worker span so Codex's spans nest under
+    // our worker.session trace. Codex's Rust OTEL SDK reads W3C trace
+    // context from the env via the default tracecontext propagator.
+    // Returns {} (no-op) when off; spread last so the computed value wins.
+    ...buildOtelTraceparentEnv(config.env ?? process.env),
+    SWARM_CODEX_APP_SERVER: "1",
+  };
+  if (authMode === "chatgpt") delete env.OPENAI_API_KEY;
 
-    const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
+  const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
 
-    // Native resume is deprecated. Follow-up continuity is delivered via the
-    // context preamble (see src/commands/context-preamble.ts). Any stray
-    // resumeSessionId is logged and ignored — we always start a fresh thread.
-    if (config.resumeSessionId) {
-      console.warn(
-        "[codex-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
-      );
-    }
-    let thread: CodexThread;
-    let liveSession: CodexSession | undefined;
-    if (opts.threadFactory) {
-      thread = await opts.threadFactory({
-        config,
-        resolvedModel,
-        env,
-        codexConfig: mergedConfig,
-      });
-    } else {
-      const appServerFactory = opts.appServerFactory ?? ((options) => new CodexAppServer(options));
-      const client = appServerFactory({
-        ...(codexPathOverride ? { codexPath: codexPathOverride } : {}),
-        env,
-        onStderr: (line) => {
-          if (liveSession) liveSession.emitTransportStderr(line);
-          else bufferedEmit({ type: "raw_stderr", content: `${line}\n` });
-        },
-      });
-      try {
-        const response = await client.request<{ thread: { id: string } }>("thread/start", {
-          model: resolvedModel,
-          cwd: config.cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          config: mergedConfig,
-          ephemeral: true,
-        });
-        thread = new AppServerCodexThread(client, response.thread.id);
-      } catch (error) {
-        await client.close();
-        throw error;
-      }
-    }
-
-    const session = new CodexSession(
-      thread,
-      config,
-      agentsMdHandle,
-      resolvedModel,
-      preSessionEvents,
-      opts.skillsDir,
-      opts.summarizeDeps ?? {},
+  // Native resume is deprecated. Follow-up continuity is delivered via the
+  // context preamble (see src/commands/context-preamble.ts). Any stray
+  // resumeSessionId is logged and ignored — we always start a fresh thread.
+  if (config.resumeSessionId) {
+    console.warn(
+      "[codex-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
     );
-    liveSession = session;
-    return session;
-  } catch (err) {
-    // If we failed to construct the thread, clean up the managed AGENTS.md
-    // block so we don't leak state on the filesystem.
-    await agentsMdHandle.cleanup();
-    throw err;
   }
+  let thread: CodexThread;
+  let liveSession: CodexSession | undefined;
+  if (opts.threadFactory) {
+    thread = await opts.threadFactory({
+      config,
+      resolvedModel,
+      env,
+      codexConfig: mergedConfig,
+    });
+  } else {
+    const appServerFactory = opts.appServerFactory ?? ((options) => new CodexAppServer(options));
+    const client = appServerFactory({
+      ...(codexPathOverride ? { codexPath: codexPathOverride } : {}),
+      env,
+      onStderr: (line) => {
+        if (liveSession) liveSession.emitTransportStderr(line);
+        else bufferedEmit({ type: "raw_stderr", content: `${line}\n` });
+      },
+    });
+    try {
+      const response = await client.request<{ thread: { id: string } }>("thread/start", {
+        model: resolvedModel,
+        cwd: config.cwd,
+        developerInstructions: config.systemPrompt,
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        config: mergedConfig,
+        ephemeral: true,
+      });
+      thread = new AppServerCodexThread(client, response.thread.id);
+    } catch (error) {
+      await client.close();
+      throw error;
+    }
+  }
+
+  const session = new CodexSession(
+    thread,
+    config,
+    resolvedModel,
+    preSessionEvents,
+    opts.skillsDir,
+    opts.summarizeDeps ?? {},
+  );
+  liveSession = session;
+  return session;
 }
 
 /**

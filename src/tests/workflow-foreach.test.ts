@@ -386,16 +386,20 @@ describe("workflow foreach", () => {
     await waitFor(async () => (await getWorkflowRun(runId))?.status === "failed");
 
     await expect(retryFailedRun(runId, registry)).resolves.toBeUndefined();
-    const replacementTask = await getTaskByWorkflowRunStepId(child.id);
+    // The retry is a new attempt row for the same item; the failed row stays.
+    const retried = (await latestChild(runId, child.nodeId))!;
+    expect(retried.id).not.toBe(child.id);
+    const replacementTask = await getTaskByWorkflowRunStepId(retried.id);
     expect(replacementTask).not.toBeNull();
     expect(replacementTask?.id).not.toBe(originalTask.id);
     expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
-    await completeChild(runId, child.id, "retried", bus);
+    await completeChild(runId, retried.id, "retried", bus);
     await waitFor(async () => (await getWorkflowRun(runId))?.status === "completed");
     expect((await stepByNodeId(runId, "after"))?.status).toBe("completed");
     expect(((await getContext(runId)).reflect as { okCount: number }).okCount).toBe(1);
-    expect((await stepById(runId, child.id))?.error).toBeUndefined();
+    expect((await stepById(runId, retried.id))?.error).toBeUndefined();
+    expect((await stepById(runId, child.id))?.status).toBe("failed");
     expect((await getWorkflowRun(runId))?.error).toBeUndefined();
   });
 
@@ -433,10 +437,11 @@ describe("workflow foreach", () => {
     });
     await Bun.sleep(20);
 
+    const retried = (await latestChild(runId, child.nodeId))!;
     expect((await getWorkflowRun(runId))?.status).toBe("waiting");
-    expect((await stepById(runId, child.id))?.status).toBe("waiting");
+    expect((await stepById(runId, retried.id))?.status).toBe("waiting");
 
-    await completeChild(runId, child.id, "real retry output", bus);
+    await completeChild(runId, retried.id, "real retry output", bus);
     await waitFor(async () => (await getWorkflowRun(runId))?.status === "completed");
     const aggregate = (await getContext(runId)).reflect as {
       results: Array<{ output: { taskOutput: string } }>;
@@ -915,7 +920,7 @@ describe("workflow foreach", () => {
     expect(deferred.valid).toBe(true);
   });
 
-  test("definition validation rejects reserved hashes and foreach concurrency", () => {
+  test("definition validation rejects reserved hashes and validates foreach concurrency", () => {
     const hashResult = validateDefinition({
       nodes: [{ id: "reflect#bad", type: "record", config: { message: "bad" } }],
     });
@@ -947,24 +952,35 @@ describe("workflow foreach", () => {
       newHashId.errors.some((error) => error.includes('Node "fresh#node" contains reserved')),
     ).toBe(true);
 
-    const concurrencyResult = validateDefinition({
-      nodes: [
-        {
-          id: "reflect",
-          type: "foreach",
-          config: {
-            over: [],
-            itemKey: "id",
-            concurrency: 2,
-            body: { type: "agent-task", config: { template: "Reflect" } },
+    const withConcurrency = (concurrency: unknown) =>
+      validateDefinition({
+        nodes: [
+          {
+            id: "reflect",
+            type: "foreach",
+            config: {
+              over: [],
+              itemKey: "id",
+              concurrency,
+              body: { type: "agent-task", config: { template: "Reflect" } },
+            },
           },
-        },
-      ],
-    });
-    expect(concurrencyResult.valid).toBe(false);
-    expect(concurrencyResult.errors.some((error) => error.includes("not supported in v1"))).toBe(
-      true,
-    );
+        ],
+      });
+    for (const accepted of [1, 2, 50]) {
+      expect(withConcurrency(accepted).valid).toBe(true);
+    }
+    for (const rejected of [0, -1, 1.5, "2"]) {
+      const result = withConcurrency(rejected);
+      expect(result.valid).toBe(false);
+      expect(
+        result.errors.some((error) =>
+          error.includes(
+            'Node "reflect" foreach config.concurrency must be an integer of 1 or more',
+          ),
+        ),
+      ).toBe(true);
+    }
   });
 
   test("definition validation rejects foreach inside a cycle through a port edge", () => {
@@ -1053,6 +1069,11 @@ async function foreachChildren(runId: string) {
   return (await getWorkflowRunStepsByRunId(runId)).filter((step) =>
     step.nodeId.startsWith("reflect#"),
   );
+}
+
+/** The latest attempt row of a foreach item. */
+async function latestChild(runId: string, nodeId: string) {
+  return (await getWorkflowRunStepsByRunId(runId)).filter((step) => step.nodeId === nodeId).at(-1);
 }
 
 async function stepByNodeId(runId: string, nodeId: string) {

@@ -1,0 +1,257 @@
+{
+  "name": "pr-review",
+  "description": "PR review: diff -> Clairic extracts the PR claims -> Jev tags every hunk -> category batches, Jev judges each in parallel against the claims and repo rules -> one cheap agent reviews only flagged batches -> per-PR report. Read-only.",
+  "triggerSchema": {
+    "type": "object",
+    "required": [
+      "repo",
+      "pr"
+    ],
+    "properties": {
+      "repo": {
+        "type": "string"
+      },
+      "pr": {
+        "type": "number"
+      }
+    }
+  },
+  "triggers": [],
+  "definition": {
+    "nodes": [
+      {
+        "id": "fetch",
+        "type": "swarm-script",
+        "label": "Fetch diff (PR, commit or range), split into hunks",
+        "config": {
+          "scriptName": "pr-review-fetch-diff",
+          "args": {
+            "repo": "{{trigger.repo}}",
+            "pr": "{{trigger.pr}}",
+            "sha": "{{trigger.sha}}",
+            "base": "{{trigger.base}}"
+          },
+          "timeoutMs": 60000
+        },
+        "next": [
+          "claims",
+          "context",
+          "tag"
+        ]
+      },
+      {
+        "id": "claims",
+        "type": "system-one-extraction",
+        "label": "Clairic: extract the PR's claims",
+        "config": {
+          "provider": "cloudflare",
+          "state": "{{desc}}",
+          "timeoutMs": 60000,
+          "maxRetries": 1,
+          "fields": {
+            "intent": {
+              "type": "text",
+              "instructions": "What the pull request says it changes"
+            },
+            "claimed_risk": {
+              "type": "text",
+              "instructions": "Risk level the author states for this change, and why"
+            },
+            "breaking": {
+              "type": "text",
+              "instructions": "Breaking changes, migrations or required config changes the author mentions"
+            },
+            "touched_areas": {
+              "type": "list",
+              "items": "text",
+              "instructions": "Files, modules or areas the author says the change touches"
+            }
+          }
+        },
+        "next": "decide",
+        "inputs": {
+          "desc": "fetch.result.claimsState"
+        }
+      },
+      {
+        "id": "context",
+        "type": "swarm-script",
+        "label": "Gather context: repo rules, CI, code-maat, related files (Jev ranks)",
+        "config": {
+          "scriptName": "pr-review-context",
+          "args": {
+            "repo": "{{trigger.repo}}",
+            "pr": "{{f.pr}}",
+            "sha": "{{f.review.sha}}",
+            "files": "{{f.files}}"
+          },
+          "timeoutMs": 90000
+        },
+        "next": "decide",
+        "inputs": {
+          "f": "fetch.result"
+        }
+      },
+      {
+        "id": "tag",
+        "type": "swarm-script",
+        "label": "Jev: tag each hunk (parallel)",
+        "config": {
+          "scriptName": "pr-review-tag-units",
+          "args": {
+            "units": "{{f.units}}"
+          },
+          "timeoutMs": 120000
+        },
+        "next": "decide",
+        "inputs": {
+          "f": "fetch.result"
+        }
+      },
+      {
+        "id": "decide",
+        "type": "swarm-script",
+        "label": "Jev: judge N batches vs claims + repo rules (parallel)",
+        "config": {
+          "scriptName": "pr-review-batches",
+          "args": {
+            "pr": "{{f.pr}}",
+            "units": "{{f.units}}",
+            "tags": "{{t.answers}}",
+            "claims": "{{c}}",
+            "maxAgentBatches": 2,
+            "rules": "{{x.guidelines.rules}}"
+          },
+          "timeoutMs": 120000
+        },
+        "next": "review",
+        "inputs": {
+          "f": "fetch.result",
+          "t": "tag.result",
+          "c": "claims.answers",
+          "x": "context.result"
+        }
+      },
+      {
+        "id": "review",
+        "type": "foreach",
+        "label": "Agent review on flagged batches only",
+        "config": {
+          "over": "{{d.flagged}}",
+          "itemKey": "key",
+          "body": {
+            "type": "agent-task",
+            "config": {
+              "agentId": "<REVIEWER_AGENT_ID>",
+              "routingReason": "skill",
+              "routingNote": "Cheap read-only diff review on codex smol model for the PR review demo",
+              "model": "gpt-5.6-luna",
+              "tags": [
+                "pr-review-demo"
+              ],
+              "outputSchema": {
+                "type": "object",
+                "required": [
+                  "verdict",
+                  "findings"
+                ],
+                "properties": {
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "comment",
+                      "block"
+                    ]
+                  },
+                  "findings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "file",
+                        "severity",
+                        "comment"
+                      ],
+                      "properties": {
+                        "file": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "severity": {
+                          "type": "string",
+                          "enum": [
+                            "nit",
+                            "warn",
+                            "bug"
+                          ]
+                        },
+                        "comment": {
+                          "type": "string"
+                        },
+                        "patch": {
+                          "type": "string"
+                        },
+                        "line": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "template": "Read-only code review of ONE batch of a pull request diff. Do not clone, check out, open files or run commands: review only the diff and context below, then finish. Keep it under 2 minutes.\nPost a one-line store-progress update (status in_progress) as you go: when you start reading, and once per finding you confirm, e.g. \"Checking the exposure filter in src/http/config.ts\".\n\nPR: {{f.pr.title}} ({{f.pr.url}})\nBatch: {{item.label}} | files: {{item.files}}\nWhy a cheap classifier flagged it: {{item.why}}\n\nContext gathered before you (CI, repo rules, related files):\n{{x.promptBlock}}\n\nDiff (units are tagged [hN]):\n```diff\n{{item.diff}}\n```\n\nDecide whether the flag is real. Report at most 3 findings, each one concrete (a bug, a breaking change, a security gap, a missing test, a broken repo rule). No style nits unless nothing else. Follow the repo's verdict proportionality rule. CI status is reported separately on the review: never raise red, pending or failing CI as a finding, and never let it set your verdict. Judge only the code in the diff. verdict: ok = flag was a false alarm, comment = worth a review comment, block = must fix before merge.\n\nFor each finding, propose the fix as `patch`: a minimal unified diff against the new file (lines starting with ---/+++ then @@ hunks, at most 25 lines), or an empty string when the fix is not a local edit. Set `line` to the new-file line the finding is about when you know it.\n\nComplete with store-progress, output set to this JSON only:\n{\"verdict\":\"ok|comment|block\",\"findings\":[{\"file\":\"path\",\"unit\":\"h3\",\"line\":42,\"severity\":\"nit|warn|bug\",\"comment\":\"one or two sentences\",\"patch\":\"--- a/path\\n+++ b/path\\n@@ -40,3 +40,3 @@\\n ...\"}]}"
+            }
+          }
+        },
+        "next": "report",
+        "inputs": {
+          "d": "decide.result",
+          "f": "fetch.result",
+          "x": "context.result"
+        }
+      },
+      {
+        "id": "report",
+        "type": "swarm-script",
+        "label": "Per-PR report",
+        "config": {
+          "scriptName": "pr-review-report",
+          "args": {
+            "fetched": {
+              "pr": "{{f.pr}}",
+              "granularity": "{{f.granularity}}",
+              "unitCount": "{{f.unitCount}}",
+              "omittedUnits": "{{f.omittedUnits}}",
+              "review": "{{f.review}}",
+              "files": "{{f.files}}"
+            },
+            "tagging": {
+              "perUnit": "{{t.perUnit}}",
+              "errors": "{{t.errors}}",
+              "jevCalls": "{{t.jevCalls}}",
+              "jevWallMs": "{{t.jevWallMs}}",
+              "jevCostUsd": "{{t.jevCostUsd}}"
+            },
+            "decisions": "{{d}}",
+            "reviews": "{{r}}",
+            "context": "{{x}}",
+            "claimsUsage": "{{cu}}"
+          },
+          "timeoutMs": 30000
+        },
+        "inputs": {
+          "f": "fetch.result",
+          "t": "tag.result",
+          "d": "decide.result",
+          "r": "review",
+          "x": "context.result",
+          "cu": "claims.usage"
+        }
+      }
+    ],
+    "onNodeFailure": "continue"
+  }
+}

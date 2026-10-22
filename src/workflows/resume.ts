@@ -17,8 +17,14 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import { getChildWorkflowRunId } from "../be/db/workflow-runs";
-import type { WaitStateRow } from "../types";
+import { createForeachAttemptSteps, getChildWorkflowRunId } from "../be/db/workflow-runs";
+import type {
+  WaitStateRow,
+  WorkflowDefinition,
+  WorkflowNode,
+  WorkflowRun,
+  WorkflowRunStep,
+} from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ApprovalSlackClient,
@@ -34,8 +40,17 @@ import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 import { childRunOutcome } from "./executors/sub-workflow";
 import { computeNextPort } from "./executors/wait";
-import { resolveForeachParent } from "./foreach-join";
+import { stepFailureMode } from "./foreach-body";
+import { startForeachDrive } from "./foreach-driver";
+import {
+  FOREACH_TERMINAL_STEP_STATUSES,
+  type ForeachChildOutcome,
+  parseSyntheticNodeId,
+  resolveForeachParent,
+  settleForeachChild,
+} from "./foreach-join";
 import { getSecretInputKeys } from "./input";
+import { getMaxWorkflowStepsPerRun } from "./limits";
 import { findWorkflowReadinessProblems, formatReadinessProblems } from "./readiness";
 import {
   checkpointPortStepAndResolveSuccessors,
@@ -181,17 +196,7 @@ async function resumeFromTaskCompletionUnguarded(
   registry: ExecutorRegistry,
 ): Promise<void> {
   const run = await getWorkflowRun(event.workflowRunId!);
-  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
-
-  const step = await getWorkflowRunStep(event.workflowRunStepId!);
-  if (!step || step.status !== "waiting") return;
-  if (await isStaleTaskEvent(step.id, event)) return;
-
-  const workflow = await getWorkflow(run.workflowId);
-  if (!workflow) return;
-
-  // Checkpoint: atomic step completion + context update
-  const ctx = (run.context ?? {}) as Record<string, unknown>;
+  if (!run) return;
 
   // JSON-parse structured output so downstream nodes can access nested fields
   let taskOutput: unknown = event.output;
@@ -207,12 +212,33 @@ async function resumeFromTaskCompletionUnguarded(
   }
   const stepOutput = { taskId: event.taskId, taskOutput };
 
+  if (run.status !== "waiting" && run.status !== "running") {
+    await recordLateForeachOutcome(run, event.workflowRunStepId!, event, {
+      status: "completed",
+      output: stepOutput,
+    });
+    return;
+  }
+
+  const step = await getWorkflowRunStep(event.workflowRunStepId!);
+  if (!step || step.status !== "waiting") return;
+  if (await isStaleTaskEvent(step.id, event)) return;
+
+  const workflow = await getWorkflow(run.workflowId);
+  if (!workflow) return;
+
+  // Checkpoint: atomic step completion + context update
+  const ctx = (run.context ?? {}) as Record<string, unknown>;
+
   const routing = await completeTaskStepAndResolveSuccessors(
     workflow.definition,
     run.id,
     step,
     stepOutput,
     ctx,
+    undefined,
+    undefined,
+    registry,
   );
   // Another handler already routed this step — routing it twice would create
   // duplicate successor steps.
@@ -299,7 +325,14 @@ async function handleTaskFailureUnguarded(
   options: { retryable: boolean },
 ): Promise<void> {
   const run = await getWorkflowRun(event.workflowRunId!);
-  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
+  if (!run) return;
+  if (run.status !== "waiting" && run.status !== "running") {
+    await recordLateForeachOutcome(run, event.workflowRunStepId!, event, {
+      status: "failed",
+      error: reason,
+    });
+    return;
+  }
 
   const step = await getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
@@ -325,10 +358,12 @@ async function handleTaskFailureUnguarded(
     if (retry === "not-claimed") return;
   }
 
-  const onFailure = workflow.definition.onNodeFailure ?? "fail";
+  // A foreach item follows its fan-out's failure policy (fail-fast or
+  // collect-outcomes); any other step follows the workflow's onNodeFailure.
+  const onFailure = stepFailureMode(workflow.definition, step.nodeId);
 
   if (onFailure === "fail") {
-    await markRunFailed(event, reason);
+    await markRunFailed(workflow.definition, event, reason, registry);
     return;
   }
 
@@ -345,6 +380,8 @@ async function handleTaskFailureUnguarded(
     stepOutput,
     ctx,
     reason,
+    undefined,
+    registry,
   );
   if (!routing.claimed) return;
 
@@ -368,6 +405,32 @@ async function handleTaskFailureUnguarded(
 }
 
 /**
+ * A fail-fast fan-out lets its in-flight items finish after the run failed.
+ * Record such a late outcome on the item row so the run's history (and a
+ * later retry) sees it; the run itself stays failed and nothing routes.
+ */
+async function recordLateForeachOutcome(
+  run: WorkflowRun,
+  stepId: string,
+  event: TaskEvent,
+  outcome: ForeachChildOutcome,
+): Promise<void> {
+  if (run.status !== "failed") return;
+  const step = await getWorkflowRunStep(stepId);
+  if (!step || step.status !== "waiting") return;
+  if (await isStaleTaskEvent(step.id, event)) return;
+  const workflow = await getWorkflow(run.workflowId);
+  if (!workflow || !resolveForeachParent(workflow.definition, step.nodeId)) return;
+  await settleForeachChild(
+    workflow.definition,
+    run.id,
+    step.id,
+    outcome,
+    (run.context ?? {}) as Record<string, unknown>,
+  );
+}
+
+/**
  * A retried step has a NEW task bound to it. Task lifecycle events are emitted
  * from several places (the db mutators' after-commit emits, test/manual emits,
  * crash-recovery echoes) and can arrive on a later tick — after the step was
@@ -386,8 +449,20 @@ async function isStaleTaskEvent(stepId: string, event: TaskEvent): Promise<boole
  * both route here and can also race a recovery sweep or a completion that
  * already claimed the step — only the first writer may fail the run.
  */
-async function markRunFailed(event: TaskEvent, reason: string): Promise<void> {
-  await failStepAndRunIfWaiting(event.workflowRunStepId!, event.workflowRunId!, reason);
+async function markRunFailed(
+  def: WorkflowDefinition,
+  event: TaskEvent,
+  reason: string,
+  registry: ExecutorRegistry,
+): Promise<void> {
+  await failStepAndRunIfWaiting(
+    def,
+    event.workflowRunStepId!,
+    event.workflowRunId!,
+    reason,
+    undefined,
+    { registry },
+  );
 }
 
 /**
@@ -400,9 +475,11 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const workflow = await getWorkflow(run.workflowId);
   if (!workflow) throw new Error("Workflow not found");
 
-  // Find the failed step
+  // Find the failed step. Only the latest row per node id counts: a foreach
+  // item keeps its earlier attempt rows as history.
   const steps = await getWorkflowRunStepsByRunId(runId);
-  const failedStep = steps.find((s) => s.status === "failed");
+  const latestSteps = [...latestStepPerNode(steps).values()];
+  const failedStep = latestSteps.find((s) => s.status === "failed");
   if (!failedStep) throw new Error("No failed step found");
 
   const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
@@ -438,17 +515,36 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   // (HTTP route + MCP tool) both pass the guard above, and a double reset
   // walks the same failed node twice.
   const ctx = (run.context ?? {}) as Record<string, unknown>;
-  const claimed = await getDbClient().transaction(async () => {
+  const attempts = await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
-    if (!current || current.status !== "failed") return false;
-    await updateWorkflowRunStep(failedStep.id, {
-      status: shouldRetryFailedNode ? "pending" : "cancelled",
-      error: shouldRetryFailedNode ? null : "Skipped on retry because its branch was not active",
-    });
+    if (!current || current.status !== "failed") return null;
+    // Fan-outs with failed or cancelled items get one new attempt row per such
+    // item; completed items are never rerun. Selected from the rows as of this
+    // transaction: an in-flight sibling of a fail-fast fan-out can record its
+    // late failure while the readiness check above is awaited.
+    const currentSteps = await getWorkflowRunStepsByRunId(runId);
+    const attempts = foreachRetryAttempts(workflow.definition, [
+      ...latestStepPerNode(currentSteps).values(),
+    ]);
+    const capError = foreachRetryCapError(currentSteps.length, attempts);
+    if (capError) throw new Error(`Retry not started, run left failed: ${capError}`);
+    // A foreach item retries as a new attempt row instead of a reset: a fresh
+    // step id is a fresh invocation identity for every body type, and the
+    // failed row stays as history.
+    if (!foreachParent) {
+      await updateWorkflowRunStep(failedStep.id, {
+        status: shouldRetryFailedNode ? "pending" : "cancelled",
+        error: shouldRetryFailedNode ? null : "Skipped on retry because its branch was not active",
+      });
+    }
+    await createForeachAttemptSteps(
+      runId,
+      attempts.flatMap((attempt) => attempt.rows),
+    );
     await updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
-    return true;
+    return attempts;
   });
-  if (!claimed) throw new Error("Run is not in failed state");
+  if (!attempts) throw new Error("Run is not in failed state");
 
   // Resume from the failed node — use findReadyNodes for convergence safety.
   // findReadyNodes returns every node without a completed step, including a
@@ -469,6 +565,75 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
       : [failedNode, ...readyNodes];
   const secretKeys = getSecretInputKeys(workflow.input);
   await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id, secretKeys);
+  // Another fan-out with new attempts is not on the walk (its parent step is
+  // still waiting): drive it directly.
+  for (const attempt of attempts) {
+    if (attempt.parent.id !== failedNode.id) {
+      startForeachDrive(runId, attempt.parent.id, registry);
+    }
+  }
+}
+
+/** The latest row per node id, in insert order of each node's first row. */
+function latestStepPerNode(steps: WorkflowRunStep[]): Map<string, WorkflowRunStep> {
+  const latest = new Map<string, WorkflowRunStep>();
+  for (const step of steps) latest.set(step.nodeId, step);
+  return latest;
+}
+
+interface ForeachRetryAttempts {
+  parent: WorkflowNode;
+  rows: Array<{ nodeId: string; nodeType: string; itemKey: string; index: number }>;
+}
+
+/**
+ * The new attempt rows a run retry adds: one per foreach item whose latest
+ * row is `failed` or `cancelled`, for every fan-out whose parent step is still
+ * open (a closed join already routed its successors).
+ */
+function foreachRetryAttempts(
+  def: WorkflowDefinition,
+  latestSteps: WorkflowRunStep[],
+): ForeachRetryAttempts[] {
+  const byParent = new Map<string, ForeachRetryAttempts>();
+  const latestByNode = new Map(latestSteps.map((step) => [step.nodeId, step]));
+  for (const step of latestSteps) {
+    if (step.status !== "failed" && step.status !== "cancelled") continue;
+    const parent = resolveForeachParent(def, step.nodeId);
+    if (!parent) continue;
+    const parentStep = latestByNode.get(parent.id);
+    if (!parentStep || FOREACH_TERMINAL_STEP_STATUSES.has(parentStep.status)) continue;
+    const input = (step.input ?? {}) as Record<string, unknown>;
+    const entry = byParent.get(parent.id) ?? { parent, rows: [] };
+    entry.rows.push({
+      nodeId: step.nodeId,
+      nodeType: step.nodeType,
+      itemKey:
+        typeof input.itemKey === "string"
+          ? input.itemKey
+          : (parseSyntheticNodeId(step.nodeId)?.itemKey ?? ""),
+      index: typeof input.index === "number" ? input.index : 0,
+    });
+    byParent.set(parent.id, entry);
+  }
+  return [...byParent.values()];
+}
+
+/**
+ * Refuse a retry whose new attempt rows would breach WORKFLOW_MAX_STEPS_PER_RUN.
+ * The retry's own walk runs walkGraph's circuit breaker after the rows are
+ * inserted, and it trips at `>= max`, so the rows must leave one step of
+ * headroom even for a terminal fan-out.
+ */
+function foreachRetryCapError(
+  existingSteps: number,
+  attempts: ForeachRetryAttempts[],
+): string | null {
+  const added = attempts.reduce((sum, attempt) => sum + attempt.rows.length, 0);
+  if (added === 0) return null;
+  const maxSteps = getMaxWorkflowStepsPerRun();
+  if (existingSteps + added < maxSteps) return null;
+  return `foreach retry would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${existingSteps} existing + ${added} new attempts leaves no room for the retry walk`;
 }
 
 /**
@@ -646,6 +811,7 @@ async function resumeFromApprovalResolutionUnguarded(
     stepOutput,
     nextPort,
     ctx,
+    registry,
   );
   // Another handler (the recovery sweep) already routed this step — routing
   // it twice would create duplicate successor steps.
@@ -768,6 +934,7 @@ async function resumeClaimedWait(
     stepOutput,
     nextPort,
     ctx,
+    registry,
   );
   if (!routing.claimed) return;
 
@@ -822,22 +989,33 @@ export async function resumeFromChildRun(
     const workflow = await getWorkflow(run.workflowId);
     if (!workflow) return;
 
-    if ("error" in outcome) {
-      claimed = await failStepAndRunIfWaiting(step.id, run.id, outcome.error);
+    const ctx = (run.context ?? {}) as Record<string, unknown>;
+    // A foreach item's failure settles the item: under `onNodeFailure:
+    // "continue"` it can close the join, so it routes like a success.
+    const routing =
+      "error" in outcome
+        ? await failStepAndRunIfWaiting(
+            workflow.definition,
+            step.id,
+            run.id,
+            outcome.error,
+            undefined,
+            { ctx, registry },
+          )
+        : await checkpointPortStepAndResolveSuccessors(
+            workflow.definition,
+            run.id,
+            step.id,
+            step.nodeId,
+            outcome.output,
+            "success",
+            ctx,
+            registry,
+          );
+    if (!routing.claimed || routing.runFailed) {
+      claimed = routing.claimed;
       return;
     }
-
-    const ctx = (run.context ?? {}) as Record<string, unknown>;
-    const routing = await checkpointPortStepAndResolveSuccessors(
-      workflow.definition,
-      run.id,
-      step.id,
-      step.nodeId,
-      outcome.output,
-      "success",
-      ctx,
-    );
-    if (!routing.claimed) return;
     claimed = true;
 
     if (routing.successors.length > 0) {

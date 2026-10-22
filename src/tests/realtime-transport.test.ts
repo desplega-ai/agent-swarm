@@ -75,9 +75,11 @@ async function createPage(
 async function launchPage(pageId: string, agentId: string): Promise<string> {
   const response = await api("POST", `/api/pages/${pageId}/launch`, { agentId });
   expect(response.status).toBe(204);
-  const cookie = response.headers.get("set-cookie")?.match(/page_session=([^;]+)/)?.[1];
+  const cookie = response.headers
+    .get("set-cookie")
+    ?.match(/page_session_[A-Za-z0-9_-]+=([^;]+)/)?.[1];
   expect(cookie).toBeTruthy();
-  return `page_session=${cookie}`;
+  return `page_session_${pageId}=${cookie}`;
 }
 
 async function createUserToken(name: string): Promise<{ id: string; token: string }> {
@@ -107,17 +109,21 @@ async function launchPageAsUser(pageId: string, token: string): Promise<string> 
     headers: { Authorization: `Bearer ${token}` },
   });
   expect(response.status).toBe(204);
-  const cookie = response.headers.get("set-cookie")?.match(/page_session=([^;]+)/)?.[1];
+  const cookie = response.headers
+    .get("set-cookie")
+    ?.match(/page_session_[A-Za-z0-9_-]+=([^;]+)/)?.[1];
   expect(cookie).toBeTruthy();
-  return `page_session=${cookie}`;
+  return `page_session_${pageId}=${cookie}`;
 }
 
 async function unlockPasswordPage(pageId: string, password: string): Promise<string> {
   const response = await fetch(`${baseUrl}/p/${pageId}?key=${encodeURIComponent(password)}`);
   expect(response.status).toBe(200);
-  const cookie = response.headers.get("set-cookie")?.match(/page_session=([^;]+)/)?.[1];
+  const cookie = response.headers
+    .get("set-cookie")
+    ?.match(/page_session_[A-Za-z0-9_-]+=([^;]+)/)?.[1];
   expect(cookie).toBeTruthy();
-  return `page_session=${cookie}`;
+  return `page_session_${pageId}=${cookie}`;
 }
 
 function openSocket(
@@ -443,7 +449,7 @@ describe("realtime transport", () => {
     const passwordPage = await createPage(agentId, "password", "secret");
     expect(await socketAccepted({ Origin: baseUrl }, pageSocketUrl(passwordPage))).toBe(false);
     const passwordCookie = await unlockPasswordPage(passwordPage, "secret");
-    expect(passwordCookie).toContain("page_session=");
+    expect(passwordCookie).toContain("page_session_");
   });
 
   test("persists room state across an API restart and cascades page deletion", async () => {

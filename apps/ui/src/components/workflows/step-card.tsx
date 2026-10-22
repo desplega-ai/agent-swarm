@@ -23,6 +23,8 @@ export interface StepCardProps {
   onToggleExpand: () => void;
   /** Rendered inside a `foreach` group — the parent label is already on the group header. */
   inGroup?: boolean;
+  /** A foreach item's earlier attempt rows, oldest first. `step` is the latest attempt. */
+  earlierAttempts?: WorkflowRunStep[];
 }
 
 /** Format a byte count as a human-readable string (B, KB, MB). */
@@ -52,7 +54,19 @@ function parseDiagnostics(raw: string | undefined): { unresolvedTokens?: string[
 }
 
 export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
-  ({ step, workflowNodes, isSelected, isExpanded, onClick, onToggleExpand, inGroup }, ref) => {
+  (
+    {
+      step,
+      workflowNodes,
+      isSelected,
+      isExpanded,
+      onClick,
+      onToggleExpand,
+      inGroup,
+      earlierAttempts = [],
+    },
+    ref,
+  ) => {
     // `foreach` children carry synthetic `<parentNodeId>#<itemKey>` ids — the definition only holds
     // the parent node, so label and config always resolve against the parent.
     const { parentNodeId, itemKey } = parseSyntheticStepId(
@@ -71,15 +85,15 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
     // matching the graph's classification and the group's ok/failed chip.
     const displayStatus = itemKey ? effectiveChildStatus(step) : step.status;
 
-    // Foreach children carry their zero-based iteration in step.input — badge them as
-    // `foreach #<iteration>` instead of the (always agent-task) executor type.
+    // Foreach children carry their zero-based iteration in step.input — badge them with the
+    // body's executor type plus the iteration: `<nodeType> · #<iteration>`.
     const iteration =
       itemKey && typeof step.input === "object" && step.input !== null
         ? (step.input as Record<string, unknown>).index
         : undefined;
     const typeBadge =
       itemKey != null
-        ? `foreach ${typeof iteration === "number" ? `#${iteration}` : "item"}`
+        ? `${step.nodeType} · ${typeof iteration === "number" ? `#${iteration}` : "item"}`
         : step.nodeType;
 
     return (
@@ -142,6 +156,16 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
           )}
 
           <StatusBadge status={displayStatus} className="shrink-0" />
+
+          {earlierAttempts.length > 0 && (
+            <Badge
+              variant="outline"
+              size="tag"
+              className="shrink-0 border-status-active/30 text-status-active-strong"
+            >
+              attempt {earlierAttempts.length + 1}
+            </Badge>
+          )}
 
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
             {duration && (
@@ -234,6 +258,10 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
 
             {/* Output — smart rendering by nodeType */}
             <StepOutput step={step} node={node} />
+
+            {earlierAttempts.length > 0 && (
+              <AttemptHistory attempts={earlierAttempts} node={node} />
+            )}
           </div>
         )}
       </div>
@@ -933,6 +961,68 @@ export function SubWorkflowOutput({ step }: { step: WorkflowRunStep }) {
       )}
 
       <RawJsonToggle data={output} />
+    </div>
+  );
+}
+
+// --- Foreach attempt history ---
+
+/**
+ * A foreach item's earlier attempts behind a disclosure, oldest first: each with its status,
+ * error, finished time and the same task or child-run output as the latest attempt.
+ */
+export function AttemptHistory({
+  attempts,
+  node,
+  defaultOpen = false,
+}: {
+  attempts: WorkflowRunStep[];
+  node?: WorkflowNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="space-y-1.5">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
+        className="flex items-center gap-1 text-xs text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Earlier attempts ({attempts.length})
+      </button>
+      {open && (
+        <div className="space-y-1.5">
+          {attempts.map((attempt, i) => (
+            <div
+              key={attempt.id}
+              className="rounded-md border border-border/50 px-3 py-2 space-y-2"
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-medium">attempt {i + 1}</span>
+                <StatusBadge status={effectiveChildStatus(attempt)} />
+                {attempt.finishedAt && (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {formatSmartTime(attempt.finishedAt)}
+                  </span>
+                )}
+              </div>
+              {attempt.error && (
+                <Alert variant="destructive" className="py-2">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  <AlertDescription className="text-xs font-mono whitespace-pre-wrap">
+                    {attempt.error}
+                  </AlertDescription>
+                </Alert>
+              )}
+              <StepOutput step={attempt} node={node} />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

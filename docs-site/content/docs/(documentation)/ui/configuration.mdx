@@ -76,9 +76,9 @@ The sweep reads the value on every call, so a saved change needs no restart.
 | Harness & tools | `CLAUDE_TRUST_PRESEED`, `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`, `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `SWARM_ENABLED_TOOLS`, `OPENROUTER_BASE_URL`, `OPENROUTER_APP_ATTRIBUTION`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
 | Model tiers | `MODEL_TIER_<PROVIDER>_<TIER>` for every provider with a tier mapping |
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS`, `APPS_JSON_COLUMN_MAX_BYTES` |
-| Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `AGENT_FS_PUBLIC_URL`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_STATUS_ICON_COMPLETED` |
+| Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `CHAT_SDK_OWNER_WINDOW_MIN`, `AGENT_FS_PUBLIC_URL`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_STATUS_ICON_COMPLETED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults) |
-| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `ANONYMIZED_TELEMETRY` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_ORG_TEAM_SIZE`, `SWARM_ORG_USE_CASE`, `SWARM_ORG_ACQUISITION_SOURCE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `DASHBOARD_URL`, the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`), and the public ranking opt-in (`PUBLIC_RANKING_ENABLED`) |
 
@@ -123,9 +123,10 @@ Controller credentials belong on the controller host. They are absent from the c
 `HEARTBEAT_CHECKLIST_GATE_SCRIPT` names a global-scope script that runs as the Lead before
 each recurring heartbeat checklist task. It returns `{ quiet: boolean, reason?: string, summary?: string }`.
 
-- Unset (the default): the built-in `heartbeat-jev-gate` runs when a global Jev key is set (see
-  [Jev gate](#jev-gate)). With no key, the gate stays off.
-- Set to `off` or to an empty value: the gate is off, even when a Jev key is set.
+- Unset (the default): the built-in `heartbeat-jev-gate` runs when a global credential for one
+  of its providers is set (see [Built-in decision gate](#built-in-decision-gate)). With none,
+  the gate stays off.
+- Set to `off` or to an empty value: the gate is off, even when a credential is set.
 - Set to a script name: that script runs.
 
 `HEARTBEAT_CHECKLIST_GATE_MODE` decides what the verdict does:
@@ -141,36 +142,48 @@ and execution. A timeout, a failure, or a result without a boolean `quiet` is an
 verdict, and the checklist task is created in both modes. Both keys apply on the next tick
 without a restart. Config writes reject modes other than `shadow` and `enforce`.
 
-### Jev gate
+### Built-in decision gate
 
-The built-in `heartbeat-jev-gate` script is a ready gate. It runs by default, in `shadow` mode,
-once a global `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set and
+The built-in `heartbeat-jev-gate` script is a ready gate. It asks a SystemOne decision model,
+Jev or Clef, whether the Lead needs to act. The script keeps its original name, and its config
+keys keep the `HEARTBEAT_JEV_GATE_` prefix, so existing `HEARTBEAT_CHECKLIST_GATE_SCRIPT` values
+still work. It runs by default, in `shadow` mode, once a provider credential below is set and
 `HEARTBEAT_CHECKLIST_GATE_SCRIPT` is unset. An OpenRouter key does not turn it on while
-`OPENROUTER_BASE_URL` points at a gateway, and `HEARTBEAT_JEV_GATE_PROVIDER` limits which key
-counts. `enforce` stays opt-in. Each tick it builds a compact
+`OPENROUTER_BASE_URL` points at a gateway, and `HEARTBEAT_JEV_GATE_PROVIDER` limits which
+provider counts. `enforce` stays opt-in. Each tick it builds a compact
 state of about 1,500 characters (current time, new failures since the previous checklist,
 tracked HEARTBEAT items due today or past their `DELETE` date, the previous checklist result,
-task counts, agent status) and asks Jev, TypeSafe's decision model, whether the Lead needs to
-act. It reports a quiet tick when Jev's probability is below the threshold, and puts the
-probability and provider in `reason`. On a wake verdict, `summary` lists the failures and
-tracked items behind it. One decision costs about $0.00004.
+task counts, agent status) and asks the model whether the Lead needs to act. It reports a
+quiet tick when the model's probability is below the threshold, and puts the probability and
+provider in `reason`. On a wake verdict, `summary` lists the failures and tracked items behind
+it.
 
-Jev needs one of two global secrets, set on the Secrets page; a key set only in the API's
-environment is not detected. The key never enters the script: it calls the
-`system-one-decide` tool, and the API server reads the key and sends the request, the same way a
-`system-one-decision` workflow node does.
+| Provider | Model | Credential | Default threshold |
+| --- | --- | --- | --- |
+| `typesafe` | Jev | `TYPESAFE_API_KEY` | `0.5` |
+| `openrouter` | Jev | `OPENROUTER_API_KEY` | `0.5` |
+| `cloudflare` | Clef | `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) plus the `CLOUDFLARE_ACCOUNT_ID` config value | `0.2` |
 
-- `TYPESAFE_API_KEY`: TypeSafe's decisions API at `api.typesafe.ai`.
-- `OPENROUTER_API_KEY`: OpenRouter's decisions API at `openrouter.ai`. Refused when the
-  effective `OPENROUTER_BASE_URL` (stored or in the API's environment) points at a gateway, since
-  the key may then be a gateway token. The tick then reports an `error` verdict and the checklist
-  runs.
+`auto` tries them in that order, so Clef runs when it is the only provider configured, when
+`HEARTBEAT_JEV_GATE_PROVIDER` is `cloudflare`, or when the server refuses OpenRouter because
+`OPENROUTER_BASE_URL` points at a gateway. Each threshold comes from a replay of the same
+229 recorded checklist ticks: the highest value that kept every tick where the Lead acted.
+Jev at `0.5` would have skipped 100 ticks. Clef at `0.2` would have skipped 57, and above
+about `0.21` it starts to miss ticks the Lead acted on. One Jev decision costs about
+$0.00004.
 
-When you name `heartbeat-jev-gate` explicitly and neither key exists, the first tick creates
-one approval request asking a person to add a key or decline, and links it in the heartbeat log's gate `reason`. No Slack message is sent. Until a
-key exists, every tick returns `{ quiet: false, reason: "jev-gate inactive: <state>" }` with no
+Credentials are global values on the Secrets page; a key set only in the API's environment is
+not detected. The key never enters the script: it calls the `system-one-decide` tool, and the
+API server reads the key and sends the request, the same way a `system-one-decision` workflow
+node does. `OPENROUTER_API_KEY` is refused when the effective `OPENROUTER_BASE_URL` (stored or
+in the API's environment) points at a gateway, since the key may then be a gateway token. The
+tick then reports an `error` verdict and the checklist runs.
+
+When you name `heartbeat-jev-gate` explicitly and no provider is configured, the first tick creates
+one approval request asking a person to add a credential or decline, and links it in the heartbeat log's gate `reason`. The request lists each provider's credential. No Slack message is sent. Until a
+credential exists, every tick returns `{ quiet: false, reason: "jev-gate inactive: <state>" }` with no
 `summary`, so the checklist runs as if the gate were off. Ticks never prompt again after that
-first request, whether it is pending, approved, rejected, or expired. Adding a key turns the
+first request, whether it is pending, approved, rejected, or expired. Adding a credential turns the
 gate on at the next tick with no further step. The setup state lives in KV namespace
 `heartbeat-jev-gate`, key `setup`. Delete it to ask again.
 
@@ -178,12 +191,24 @@ Optional global config values tune the script:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `HEARTBEAT_JEV_GATE_THRESHOLD` | `0.5` | Quiet when p(needs action) is below this |
-| `HEARTBEAT_JEV_GATE_PROVIDER` | `auto` | `typesafe`, `openrouter`, or `auto` (TypeSafe first) |
+| `HEARTBEAT_JEV_GATE_THRESHOLD` | the provider's | Quiet when p(needs action) is below this, for every provider |
+| `HEARTBEAT_JEV_GATE_PROVIDER` | `auto` | `typesafe`, `openrouter`, `cloudflare`, or `auto` (that order) |
 | `HEARTBEAT_JEV_GATE_TIMEZONE` | `UTC` | IANA zone for the state's time and due dates |
 
 Run `script-run` on `heartbeat-jev-gate` with `{ "dryRun": true }` to see the verdict, the
 compact state, and the setup prompt, without creating a prompt or writing KV.
+
+## Default SystemOne provider
+
+The **Workflows & scheduler** group includes `SYSTEM_ONE_DEFAULT_PROVIDER`: the decision host
+for a `system-one-decision` node, or a `system-one-decide` call, that names no `provider`. Jev
+(`typesafe` or `openrouter`) and Clef (`cloudflare`) are peers here, and `laya` and `openai`
+are accepted too. Unset means `typesafe`, so existing workflows do not change. The value is read
+at each decision, so switching it needs no workflow edit and no restart. A node that names its
+provider keeps it, and the dashboard shows each node's effective provider and model, for
+example `cloudflare · clef`. Each host still needs its own credential: see
+[SystemOne Decision](/docs/concepts/workflows#systemone-decision). Config writes reject
+any other value.
 
 ## Script executor
 
@@ -355,6 +380,10 @@ already created on this install.
 `CHAT_SDK_ENABLED` (boolean, default `false`, applies on save) starts the [Chat SDK channel](/docs/integrations/chat-sdk) for the adapters defined in `CHAT_SDK_ADAPTERS`. Edit `CHAT_SDK_ADAPTERS` (JSON, applies on save) on the Chat SDK card under **Settings → Integrations**, not on this page.
 
 `CHAT_SDK_BUFFER_MS` (number, default `10000`, 1 to 600000) is how long the channel waits for more messages in a thread before it creates one task from them. A message that starts with `!now` creates the task at once. A new value applies when no thread is waiting.
+
+`CHAT_SDK_OWNER_WINDOW_MIN` (number, default `15`, 0 to 1440) applies to Telegram groups only. It is how long after a chat task ends the group keeps the same owner, and the requester's plain messages count only inside this window; everyone else has to mention the bot or reply to it. `0` keeps the owner only while the task is open. DMs and other adapters' threads keep their owner with no time limit. A new value applies to the next message.
+
+Voice-note transcription is configured on the **Transcription** card under **Settings → Integrations**, not on this page. See [Voice notes](/docs/integrations/chat-sdk#voice-notes).
 
 ## Comb (beta)
 

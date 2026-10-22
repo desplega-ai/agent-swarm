@@ -68,7 +68,11 @@ const RESERVED_KEYS = new Set([
 // the agent-fs bootstrap admin key would let a compromised worker administer the
 // shared org. The API materializes these into its own process.env at boot via
 // getInjectableGlobalConfigs, so no HTTP consumer legitimately needs them.
-const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY", "SLACK_SIGNING_SECRET"]);
+const API_ONLY_CONFIG_KEYS = new Set([
+  "API_AGENT_FS_API_KEY",
+  "SLACK_SIGNING_SECRET",
+  "TRANSCRIPTION_API_KEY",
+]);
 
 export function isApiOnlyConfigKey(key: string): boolean {
   return API_ONLY_CONFIG_KEYS.has(key);
@@ -159,6 +163,20 @@ export const APPS_JSON_COLUMN_MAX_BYTES_BOUNDS = { min: 1_024, max: 16_777_216 }
  * takes over, so every accepted value still changes when a slot refreshes.
  */
 export const CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS_BOUNDS = { min: 1, max: 216 } as const;
+
+/**
+ * Decision hosts `SYSTEM_ONE_DEFAULT_PROVIDER` may name: `SYSTEM_ONE_PROVIDER_IDS`
+ * in `src/workflows/executors/system-one-providers.ts`, listed here because that
+ * module's credential readers would pull the LLM stack into every `db.ts` import.
+ * A test keeps the two lists equal.
+ */
+export const SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS = [
+  "typesafe",
+  "openrouter",
+  "laya",
+  "openai",
+  "cloudflare",
+] as const;
 
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
@@ -399,6 +417,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   },
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
+  ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
   SCRIPT_EGRESS_ALLOWLIST: (value) =>
@@ -407,6 +426,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
+  ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
   CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {
@@ -582,6 +602,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // default in thread-buffer.ts; above 10 minutes a
   // reply waits longer than any operator expects.
   ...boundedIntegerValidators(["CHAT_SDK_BUFFER_MS"], 1, 600_000),
+  // Minutes a Chat SDK thread keeps its owner after the owner's task ends.
+  // 0 keeps it only while the task is open; a day is the longest useful window.
+  ...boundedIntegerValidators(["CHAT_SDK_OWNER_WINDOW_MIN"], 0, 1440),
   // Below ~100 tokens the preamble can't fit a useful summary; above 20000
   // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
   // the cap exists to prevent (see context-preamble.ts).

@@ -169,4 +169,54 @@ describe("/api/skills/:id/files", () => {
     });
     expect(del.status).toBe(403);
   });
+
+  test("bundle returns the agent's skills with file contents and the signature", async () => {
+    const swarmSkill = await createSkill({
+      name: `bundle-skill-${crypto.randomUUID()}`,
+      description: "Bundle skill",
+      content: "---\nname: bundle-skill\ndescription: Bundle skill\n---\n\nBody.",
+      type: "personal",
+      scope: "swarm",
+      isComplex: true,
+    });
+    const post = await dispatch(`/api/skills/${swarmSkill.id}/files`, {
+      method: "POST",
+      body: JSON.stringify({
+        files: [{ path: "refs/notes.md", content: "bundled note", mimeType: "text/markdown" }],
+      }),
+    });
+    expect(post.status).toBe(200);
+
+    const bundle = await dispatch(`/api/agents/some-agent/skills/bundle`);
+    expect(bundle.status).toBe(200);
+    const body = (await bundle.json()) as {
+      skills: Array<{
+        id: string;
+        files: Array<{ path: string; content: string; isBinary: boolean }>;
+      }>;
+      total: number;
+      signature: string;
+    };
+
+    const bundled = body.skills.find((skill) => skill.id === swarmSkill.id);
+    expect(bundled?.files).toEqual([
+      expect.objectContaining({ path: "refs/notes.md", content: "bundled note", isBinary: false }),
+    ]);
+    expect(body.total).toBe(body.skills.length);
+
+    // The bundle signs the rows it returns: the cheap probe must agree, or a
+    // worker that wrote this payload would skip every later refresh.
+    const probe = await dispatch(`/api/agents/some-agent/skills/signature`);
+    const probeBody = (await probe.json()) as { hash: string };
+    expect(body.signature).toBe(probeBody.hash);
+
+    const updated = await dispatch(`/api/skills/${swarmSkill.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ description: "Bundle skill, edited" }),
+    });
+    expect(updated.status).toBe(200);
+    const afterEdit = await dispatch(`/api/agents/some-agent/skills/bundle`);
+    const afterEditBody = (await afterEdit.json()) as { signature: string };
+    expect(afterEditBody.signature).not.toBe(body.signature);
+  });
 });

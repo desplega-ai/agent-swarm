@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import type { WorkflowNode, WorkflowRunStep } from "@/api/types";
+import type { WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "@/api/types";
 import { ProgressRing } from "@/components/shared/task-status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ export interface ForeachStepGroupProps {
   parent: WorkflowRunStep;
   childSteps: WorkflowRunStep[];
   workflowNodes?: WorkflowNode[];
+  onNodeFailure?: WorkflowDefinition["onNodeFailure"];
   selectedNodeId: string | null;
   isOpen: boolean;
   onToggleOpen: () => void;
@@ -23,23 +24,69 @@ export interface ForeachStepGroupProps {
   registerStepRef: (nodeId: string, el: HTMLDivElement | null) => void;
 }
 
-/** Aggregate counts across a `foreach`'s children, using the same failure semantics as the graph. */
+/** One foreach item: its latest attempt row plus the earlier attempts, oldest first. */
+export interface ForeachItemAttempts {
+  latest: WorkflowRunStep;
+  earlier: WorkflowRunStep[];
+}
+
+function inputNumber(step: WorkflowRunStep, field: "index" | "attempt"): number | undefined {
+  if (typeof step.input !== "object" || step.input === null) return undefined;
+  const value = (step.input as Record<string, unknown>)[field];
+  return typeof value === "number" ? value : undefined;
+}
+
+/**
+ * Group a foreach's child rows by item. A run retry adds a new attempt row for each failed or
+ * cancelled item under the same synthetic node id, so the latest attempt is the item's outcome and
+ * the earlier rows are history. Attempts sort by `input.attempt` (row order for legacy rows without
+ * it); items sort by `input.index`, as the server's join does.
+ */
+export function groupForeachAttempts(childSteps: WorkflowRunStep[]): ForeachItemAttempts[] {
+  const byItem = new Map<string, WorkflowRunStep[]>();
+  for (const step of childSteps) {
+    const rows = byItem.get(step.nodeId);
+    if (rows) rows.push(step);
+    else byItem.set(step.nodeId, [step]);
+  }
+  const items = [...byItem.values()].map((rows) => {
+    const ordered = rows
+      .map((step, order) => ({ step, order, attempt: inputNumber(step, "attempt") ?? order }))
+      .sort((a, b) => a.attempt - b.attempt || a.order - b.order)
+      .map(({ step }) => step);
+    return { latest: ordered[ordered.length - 1]!, earlier: ordered.slice(0, -1) };
+  });
+  const index = (item: ForeachItemAttempts) =>
+    inputNumber(item.latest, "index") ?? Number.MAX_SAFE_INTEGER;
+  return items.sort((a, b) => index(a) - index(b));
+}
+
+/**
+ * Aggregate counts across a `foreach`'s items, latest attempt only, using the same failure
+ * semantics as the graph. `queued` items have not started (`pending`); `running` items are in
+ * flight (`running` or `waiting`), which is what the concurrency cap bounds.
+ */
 export function foreachChildSummary(childSteps: WorkflowRunStep[]): {
   total: number;
   ok: number;
   failed: number;
+  queued: number;
+  running: number;
   hasPending: boolean;
 } {
   let ok = 0;
   let failed = 0;
-  let hasPending = false;
-  for (const step of childSteps) {
-    const status = effectiveChildStatus(step);
+  let queued = 0;
+  let running = 0;
+  const items = groupForeachAttempts(childSteps);
+  for (const { latest } of items) {
+    const status = effectiveChildStatus(latest);
     if (status === "completed") ok++;
     else if (status === "failed") failed++;
-    if (status === "pending" || status === "running" || status === "waiting") hasPending = true;
+    else if (status === "pending") queued++;
+    else if (status === "running" || status === "waiting") running++;
   }
-  return { total: childSteps.length, ok, failed, hasPending };
+  return { total: items.length, ok, failed, queued, running, hasPending: queued + running > 0 };
 }
 
 /** Whether a group starts open: anything failed or still in flight deserves attention. */
@@ -49,13 +96,35 @@ export function foreachDefaultOpen(childSteps: WorkflowRunStep[]): boolean {
 }
 
 /**
+ * How a failed or cancelled item affects the fan-out. Mirrors the server's
+ * `effectiveFailurePolicy`: `config.failurePolicy` wins, otherwise the workflow's `onNodeFailure`
+ * decides (`"continue"` collects outcomes, the default `"fail"` is fail-fast).
+ */
+export function foreachFailurePolicy(
+  node: WorkflowNode | undefined,
+  onNodeFailure: WorkflowDefinition["onNodeFailure"],
+): "fail-fast" | "collect-outcomes" {
+  const configured = node?.config.failurePolicy;
+  if (configured === "fail-fast" || configured === "collect-outcomes") return configured;
+  return onNodeFailure === "continue" ? "collect-outcomes" : "fail-fast";
+}
+
+/** The fan-out's concurrency cap, or undefined when unbounded (the default). */
+export function foreachConcurrencyCap(node: WorkflowNode | undefined): number | undefined {
+  const cap = node?.config.concurrency;
+  return typeof cap === "number" && Number.isInteger(cap) && cap >= 1 ? cap : undefined;
+}
+
+/**
  * A `foreach` parent step plus its synthetic children, rendered as a nested accordion: the parent
- * card keeps its own details chevron (level 2) while the caret row below toggles the children list.
+ * card keeps its own details chevron (level 2) while the caret row below toggles the items list.
+ * Each item renders its latest attempt; earlier attempts sit behind a disclosure in its card.
  */
 export function ForeachStepGroup({
   parent,
   childSteps,
   workflowNodes,
+  onNodeFailure,
   selectedNodeId,
   isOpen,
   onToggleOpen,
@@ -65,9 +134,13 @@ export function ForeachStepGroup({
   registerStepRef,
 }: ForeachStepGroupProps) {
   const [showAll, setShowAll] = useState(false);
+  const items = groupForeachAttempts(childSteps);
   const summary = foreachChildSummary(childSteps);
-  const visibleChildren = showAll ? childSteps : childSteps.slice(0, CHILD_PAGE_SIZE);
-  const hiddenCount = childSteps.length - visibleChildren.length;
+  const node = workflowNodes?.find((n) => n.id === parent.nodeId);
+  const policy = foreachFailurePolicy(node, onNodeFailure);
+  const cap = foreachConcurrencyCap(node);
+  const visibleItems = showAll ? items : items.slice(0, CHILD_PAGE_SIZE);
+  const hiddenCount = items.length - visibleItems.length;
 
   return (
     <div className="space-y-1.5">
@@ -85,7 +158,7 @@ export function ForeachStepGroup({
         <button
           type="button"
           onClick={onToggleOpen}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
           title={isOpen ? "Hide items" : "Show items"}
         >
           {isOpen ? (
@@ -106,21 +179,36 @@ export function ForeachStepGroup({
           {summary.failed > 0 && (
             <span className="text-status-error-strong">&middot; {summary.failed} failed</span>
           )}
+          {summary.queued > 0 && <span>&middot; {summary.queued} queued</span>}
+          {/* In flight against the cap; an unbounded fan-out (the default) has no cap to show. */}
+          {cap !== undefined && summary.hasPending && (
+            <span>
+              &middot; {summary.running} running / {cap}
+            </span>
+          )}
+          <Badge
+            variant="outline"
+            size="tag"
+            title="What a failed or cancelled item does to the rest of the fan-out"
+          >
+            {policy}
+          </Badge>
         </button>
 
         {isOpen && (
           <div className="pl-3 border-l border-border/50 space-y-1.5">
-            {visibleChildren.map((step) => (
+            {visibleItems.map(({ latest, earlier }) => (
               <StepCard
-                key={step.id}
-                step={step}
+                key={latest.id}
+                step={latest}
+                earlierAttempts={earlier}
                 workflowNodes={workflowNodes}
-                isSelected={selectedNodeId === step.nodeId || selectedNodeId === parent.nodeId}
-                isExpanded={expandedStepIds.has(step.nodeId)}
-                onClick={() => onStepClick(step.nodeId)}
-                onToggleExpand={() => onToggleStepExpand(step.nodeId)}
+                isSelected={selectedNodeId === latest.nodeId || selectedNodeId === parent.nodeId}
+                isExpanded={expandedStepIds.has(latest.nodeId)}
+                onClick={() => onStepClick(latest.nodeId)}
+                onToggleExpand={() => onToggleStepExpand(latest.nodeId)}
                 inGroup
-                ref={(el) => registerStepRef(step.nodeId, el)}
+                ref={(el) => registerStepRef(latest.nodeId, el)}
               />
             ))}
             {hiddenCount > 0 && (
@@ -130,7 +218,7 @@ export function ForeachStepGroup({
                 className="h-6 px-1.5 text-xs text-muted-foreground"
                 onClick={() => setShowAll(true)}
               >
-                Show all {childSteps.length} items
+                Show all {items.length} items
               </Button>
             )}
           </div>

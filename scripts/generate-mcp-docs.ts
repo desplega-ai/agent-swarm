@@ -8,8 +8,9 @@
  * Run with: bun run docs:mcp
  */
 
-import { Glob } from "bun";
 import path from "node:path";
+import { openAICompatibleProviderIds } from "@desplega/model-catalog";
+import { Glob } from "bun";
 
 const TOOLS_DIR = path.join(import.meta.dir, "../src/tools");
 const TYPES_FILE = path.join(import.meta.dir, "../src/types.ts");
@@ -137,9 +138,18 @@ const CAPABILITY_ENABLE_HINTS: Record<string, string> = {
  * createServer() is gated by `if (hasCapability("<cap>"))`; whether the
  * capability is on by default comes from the DEFAULT_CAPABILITIES array.
  */
-async function discoverCategories(): Promise<ToolCategory[]> {
+async function discoverCategories(fileToolsMap: Map<string, string[]>): Promise<ToolCategory[]> {
   const serverContent = await Bun.file(SERVER_FILE).text();
   const defaults = parseDefaultCapabilities(serverContent);
+  const registrarFiles = new Map<string, string>();
+  for (const imported of serverContent.matchAll(
+    /import\s*\{([^}]+)\}\s*from\s*["']\.\/tools\/([^"']+)["']/g,
+  )) {
+    for (const specifier of imported[1]!.split(",")) {
+      const [name, alias] = specifier.trim().split(/\s+as\s+/);
+      if (name?.startsWith("register")) registrarFiles.set(alias ?? name, imported[2]!);
+    }
+  }
   const categories: ToolCategory[] = [];
 
   const ifRe = /if\s*\(hasCapability\(["']([\w-]+)["']\)\)\s*\{/g;
@@ -161,12 +171,16 @@ async function discoverCategories(): Promise<ToolCategory[]> {
     const block = serverContent.slice(bodyStart, i - 1);
 
     // Both singular (`registerFooTool`) and plural (`registerFooTools`)
-    // registrars are captured; plural ones name a tool FILE that registers
-    // several tools and are expanded against the parsed files in
-    // generateDocs (e.g. registerScriptRunsTools → script-runs.ts's tools).
+    // registrars are captured and resolved through their imported tool file.
+    // Barrel imports that have no parsed tool file use the legacy name fallback.
     const tools: string[] = [];
     for (const call of block.matchAll(/register(\w+?)Tools?\(server\)/g)) {
-      tools.push(camelToKebab(call[1]!));
+      const fallback = camelToKebab(call[1]!);
+      const file = registrarFiles.get(call[0].slice(0, -"(server)".length));
+      const registered = file ? fileToolsMap.get(file) : undefined;
+      // A file can export several individual registrars as well as one group
+      // registrar. Select the individual tool when its name matches.
+      tools.push(...(registered?.includes(fallback) ? [fallback] : (registered ?? [fallback])));
     }
     if (tools.length === 0) continue;
 
@@ -180,7 +194,7 @@ async function discoverCategories(): Promise<ToolCategory[]> {
       name: capName,
       title: CATEGORY_TITLE_OVERRIDES[capName] ?? formatCategoryTitle(capName),
       description: commentAbove(serverContent, match.index),
-      tools,
+      tools: [...new Set(tools)],
       enabledByDefault: defaults.has(capName),
     });
   }
@@ -216,9 +230,8 @@ async function discoverToolFiles(): Promise<string[]> {
  * captured in full instead of being truncated at the first inner quote.
  *
  * Backslash escapes are decoded for common cases (`\n`, `\t`, `\r`, `\\`,
- * matching the opening quote) — anything else passes through as-is. Template
- * literals are treated as plain strings (no `${}` interpolation handling)
- * because no MCP tool description uses interpolation today.
+ * matching the opening quote) — anything else passes through as-is. Known
+ * provider-id interpolation is resolved without evaluating arbitrary source.
  */
 function parseStringLiteralChain(
   source: string,
@@ -271,7 +284,13 @@ function parseStringLiteralChain(
   }
 
   if (!parsedAtLeastOne) return null;
-  return { value: result, endIdx: i };
+  return {
+    value: result.replace(
+      /\$\{openAICompatibleProviderIds\(\)\.join\(["'], ["']\)\}/g,
+      openAICompatibleProviderIds().join(", "),
+    ),
+    endIdx: i,
+  };
 }
 
 /**
@@ -303,15 +322,36 @@ function resolveStringConstant(constName: string, content: string): string {
 async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
   const filePath = path.join(TOOLS_DIR, `${toolFileName}.ts`);
   const content = await Bun.file(filePath).text();
-  const registrations = [...content.matchAll(/(?:createToolRegistrar\(server\)|register)\(\s*["']([^"']+)["']/g)];
+  const registrations = [
+    ...content.matchAll(/(?:createToolRegistrar\(server\)|register)\(\s*["']([^"']+)["']/g),
+  ];
   if (registrations.length === 0) return [];
+
+  // Read shared tool-schema declarations as source, without importing their
+  // runtime dependencies (which can initialize the database or integrations).
+  let schemaContent = content;
+  for (const imported of content.matchAll(
+    /import\s*\{([^}]+)\}\s*from\s*["'](@\/tools\/[^"']+)["']/g,
+  )) {
+    const shared = await Bun.file(
+      path.join(TOOLS_DIR, `${imported[2]!.slice("@/tools/".length)}.ts`),
+    ).text();
+    for (const name of imported[1]!.split(",").map((part) => part.trim())) {
+      if (!/^\w+$/.test(name)) continue;
+      const declaration = new RegExp(`const\\s+${name}\\s*=\\s*z\\s*\\.[^;]+;`).exec(shared);
+      if (declaration) schemaContent += `\n${declaration[0]}`;
+    }
+  }
 
   const infos: ToolInfo[] = [];
   for (let idx = 0; idx < registrations.length; idx++) {
     const match = registrations[idx]!;
     const name = match[1]!;
     const start = match.index ?? 0;
-    const end = idx + 1 < registrations.length ? (registrations[idx + 1]!.index ?? content.length) : content.length;
+    const end =
+      idx + 1 < registrations.length
+        ? (registrations[idx + 1]!.index ?? content.length)
+        : content.length;
     const snippet = content.slice(start, end);
 
     const titleMatch = snippet.match(/title:\s*["']([^"']+)["']/);
@@ -328,7 +368,35 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
       break;
     }
 
-    const fields = parseSchemaFields(snippet, content);
+    // Helper calls pass description and raw input shape as their second and
+    // third arguments, rather than a registrar options object.
+    let fields = parseSchemaFields(snippet, schemaContent);
+    if (!description && match[0].startsWith("register(")) {
+      const descriptionStart = snippet.indexOf(",", match[0].length);
+      const positional = parseStringLiteralChain(snippet, descriptionStart + 1);
+      if (positional) {
+        description = positional.value.replace(/\s+/g, " ").trim();
+        const shapeStart = snippet.indexOf(",", positional.endIdx) + 1;
+        fields = parseSchemaFields(
+          `inputSchema: z.object(${snippet.slice(shapeStart)}`,
+          schemaContent,
+        );
+        // Resolve a helper's shared literal shape, e.g. {...base, ...shape}.
+        const shared = content.match(
+          /inputSchema:\s*z\.object\(\{\s*\.\.\.(\w+),\s*\.\.\.shape\s*\}/,
+        );
+        const sharedDecl =
+          shared && new RegExp(`const\\s+${shared[1]}\\s*=\\s*(?=\\{)`).exec(content);
+        if (sharedDecl) {
+          fields.unshift(
+            ...parseSchemaFields(
+              `inputSchema: z.object(${content.slice(sharedDecl.index + sharedDecl[0].length)}`,
+              content,
+            ),
+          );
+        }
+      }
+    }
     const schemaSource =
       fields.length === 0 && /inputSchema:\s*(?!z\b)[A-Za-z_$][\w$]*/.test(snippet)
         ? toolFileName
@@ -445,11 +513,21 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
   // Match field name and type chain. Allow whitespace/newlines between `z` and
   // the first `.method(...)` so multi-line zod chains (e.g. `z\n  .string()`)
   // are parsed too.
-  const fieldMatch = withoutLeadingComments.match(/^\s*(\w+):\s*([\s\S]+)/);
+  const fieldMatch = withoutLeadingComments.match(/^\s*(\w+)(?::\s*([\s\S]+)|\s*,?\s*$)/);
   if (!fieldMatch) return null;
 
   const [, name, rawTypeChain] = fieldMatch;
-  const typeChain = rawTypeChain!.trim().replace(/^z\s*\.\s*/, "");
+  let expression = rawTypeChain?.trim().replace(/,$/, "") ?? name!;
+  // Resolve local zod constants used in helper shapes, including shorthand
+  // properties ({ rowId }) and chained references (limit.optional()).
+  const reference = /^([A-Za-z_$][\w$]*)(?=\.|$)/.exec(expression);
+  if (reference && reference[1] !== "z") {
+    const declaration = new RegExp(`const\\s+${reference[1]}\\s*=\\s*(z\\s*\\.[^;]+);`).exec(
+      fullContent,
+    );
+    if (declaration) expression = declaration[1]! + expression.slice(reference[1]!.length);
+  }
+  const typeChain = expression.replace(/^z\s*\.\s*/, "");
 
   // Determine type
   let type = "unknown";
@@ -457,8 +535,12 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
   if (typeChain.startsWith("string")) type = "string";
   else if (typeChain.startsWith("number")) type = "number";
   else if (typeChain.startsWith("boolean")) type = "boolean";
-  else if (typeChain.startsWith("array")) type = "array";
-  else if (typeChain.startsWith("uuid")) type = "uuid";
+  else if (typeChain.startsWith("array")) {
+    type =
+      reference && reference[1] !== "z" && /^array\(z\.string\(/.test(typeChain)
+        ? "string[]"
+        : "array";
+  } else if (typeChain.startsWith("uuid")) type = "uuid";
   else if (typeChain.startsWith("object")) type = "object";
   else if (typeChain.startsWith("record")) type = "object";
   else if (typeChain.startsWith("providerSchema")) type = "string";
@@ -607,40 +689,27 @@ function generateToolMarkdown(tool: ToolInfo): string {
  * Main generation function
  */
 async function generateDocs() {
-  console.log("Discovering tool categories from server.ts...");
-  const categories = await discoverCategories();
-
   console.log("Discovering tool files...");
   const allToolFiles = await discoverToolFiles();
 
   console.log(`Found ${allToolFiles.length} tool files`);
-  console.log(`Found ${categories.length} categories:`);
-  for (const cat of categories) {
-    console.log(`  - ${cat.name}: ${cat.tools.length} tools`);
-  }
-
-  // Parse all tool files. fileToolsMap keys on the file's base name so plural
-  // registrar entries (registerScriptRunsTools → "script-runs") can be
-  // expanded to the tools that file actually registers.
+  // Key by the tools-relative import path, including subdirectories, so
+  // registrar imports can be expanded to the tools their file registers.
   const toolInfoMap = new Map<string, ToolInfo>();
   const fileToolsMap = new Map<string, string[]>();
   for (const fileName of allToolFiles) {
     const infos = await parseToolFile(fileName);
-    const baseName = fileName.split("/").pop()!;
     for (const info of infos) {
       toolInfoMap.set(info.name, info);
-      fileToolsMap.set(baseName, [...(fileToolsMap.get(baseName) ?? []), info.name]);
+      fileToolsMap.set(fileName, [...(fileToolsMap.get(fileName) ?? []), info.name]);
     }
   }
 
-  const toolExists = (name: string): boolean =>
-    toolInfoMap.has(name) || toolInfoMap.has(name.replace(/-/g, "_"));
-
-  // Expand plural-registrar placeholders into their file's tools.
-  for (const category of categories) {
-    category.tools = category.tools.flatMap((t) =>
-      toolExists(t) ? [t] : (fileToolsMap.get(t) ?? [t]),
-    );
+  console.log("Discovering tool categories from server.ts...");
+  const categories = await discoverCategories(fileToolsMap);
+  console.log(`Found ${categories.length} categories:`);
+  for (const cat of categories) {
+    console.log(`  - ${cat.name}: ${cat.tools.length} tools`);
   }
 
   console.log(`Parsed ${toolInfoMap.size} tools`);

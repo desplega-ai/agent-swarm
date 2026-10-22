@@ -9,7 +9,9 @@
  * row. The task is created in `draft` while its uploads run, with its lease
  * renewed, so no worker can claim it before its attachments exist. Every file
  * also stays in the task text as a `[File: ...]` line. Only a fetch failure is
- * flagged there; upload and record failures are logged.
+ * flagged there; upload and record failures are logged. Audio files (voice
+ * notes) get their transcript in the task text when transcription is
+ * configured, and keep the audio attached.
  */
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,12 +23,28 @@ import { providerPath } from "@/fs/provider";
 import { getFileStorageProvider } from "@/fs/registry";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import type { AgentTask, CreateTaskOptions } from "@/types";
+import { transcribeAudioNotes } from "@/utils/transcription";
 import { errorMessage } from "./logger";
 
 /** How often a draft's lease is renewed while its uploads run; the sweep waits 5 minutes. */
 const DRAFT_LEASE_REFRESH_MS = 60_000;
 /** A file a user sent the bot, like one uploaded from the dashboard composer. */
-const SHARED_FILE_INTENT = "user-upload";
+export const SHARED_FILE_INTENT = "user-upload";
+
+const MB = 1024 * 1024;
+/**
+ * Per-file inbound cap by adapter. A Telegram bot can download at most 20 MB
+ * through `getFile`; a larger file fails at Telegram before our own cap.
+ * Other adapters use the task attachment cap.
+ */
+const CHAT_INBOUND_FILE_LIMITS: Record<string, number> = { telegram: 20 * MB };
+
+export function chatInboundFileLimit(adapter: string): number {
+  return Math.min(
+    CHAT_INBOUND_FILE_LIMITS[adapter] ?? MAX_TASK_ATTACHMENT_BYTES,
+    MAX_TASK_ATTACHMENT_BYTES,
+  );
+}
 
 /**
  * One attachment of a buffered chat message. `id` is `<messageId>-<n>` with
@@ -43,7 +61,8 @@ export interface ChatFile {
   attachment: Attachment;
 }
 
-export type ChatFileFailure = { file: ChatFile; reason: string };
+/** `tooLarge` marks a file over the inbound cap; the user gets a reply naming it. */
+export type ChatFileFailure = { file: ChatFile; reason: string; tooLarge?: boolean };
 
 export type FetchedChatFile = { file: ChatFile; path: string; sizeBytes: number; sha256: string };
 
@@ -55,7 +74,7 @@ export type InboundChatFiles = {
   [Symbol.asyncDispose](): Promise<void>;
 };
 
-function formatFileSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -81,18 +100,69 @@ export function toChatFiles(
 
 /**
  * `[File: <name> (<mime>, <size>) id=<id>]` per file, followed by
- * `(not attached: <reason>)` when the file never reached the task.
+ * `(not attached: <reason>)` when the file never reached the task, and by the
+ * file's note (a voice-note transcript) on the next line.
  */
-export function buildChatAttachmentText(files: ChatFile[], failed: ChatFileFailure[] = []): string {
+export function buildChatAttachmentText(
+  files: ChatFile[],
+  failed: ChatFileFailure[] = [],
+  notes: Map<string, string> = new Map(),
+): string {
   const reasons = new Map(failed.map((f) => [f.file.id, f.reason]));
   return files
     .map((f) => {
       const size = typeof f.size === "number" ? formatFileSize(f.size) : "unknown size";
       const line = `[File: ${f.name} (${f.mimeType ?? "unknown type"}, ${size}) id=${f.id}]`;
       const reason = reasons.get(f.id);
-      return reason ? `${line} (not attached: ${reason})` : line;
+      const note = notes.get(f.id);
+      return [reason ? `${line} (not attached: ${reason})` : line, note].filter(Boolean).join("\n");
     })
     .join("\n");
+}
+
+/**
+ * A sender-chosen file name as an inline code span, so the bot's reply shows it
+ * as literal text and never renders a link, image or heading from it. Backslash
+ * escapes are not enough: the Chat SDK parser still autolinks bare URLs.
+ */
+function markdownLiteral(value: string): string {
+  const text = value.replace(/[\r\n]+/g, " ");
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  // CommonMark strips one space from each end of a padded span.
+  const pad = /^[` ]|[` ]$/.test(text) ? " " : "";
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
+/** The reply posted to the thread when files were over the inbound cap. */
+export function formatTooLargeReply(failed: ChatFileFailure[]): string {
+  const lines = failed.map((f) => `- ${markdownLiteral(f.file.name)}: ${f.reason}`);
+  return [
+    `Too large to read, so the swarm did not get ${failed.length === 1 ? "this file" : "these files"}:`,
+    ...lines,
+    "Send a smaller file or a link.",
+  ].join("\n");
+}
+
+/**
+ * Transcribe every fetched audio file. Returns one task-text note per file:
+ * the transcript, the failure, or (when no provider is configured) a line
+ * saying so. Never throws.
+ */
+export async function transcribeChatAudio(
+  fetched: FetchedChatFile[],
+): Promise<Map<string, string>> {
+  return transcribeAudioNotes(
+    fetched
+      .filter(({ file }) => file.attachment.type === "audio")
+      .map(({ file, path }) => ({
+        key: file.id,
+        name: file.name,
+        data: Bun.file(path),
+        mimeType: file.mimeType,
+      })),
+    "[chat-sdk]",
+  );
 }
 
 async function readAttachment(attachment: Attachment): Promise<Uint8Array> {
@@ -119,17 +189,25 @@ export async function fetchChatFiles(files: ChatFile[]): Promise<InboundChatFile
   };
   if (files.length === 0) return result;
 
-  const limit = `larger than the ${MAX_TASK_ATTACHMENT_BYTES / (1024 * 1024)} MB limit`;
+  const tooLarge = (file: ChatFile, size: number): ChatFileFailure => {
+    const limit = chatInboundFileLimit(file.adapter);
+    const platform = file.adapter.charAt(0).toUpperCase() + file.adapter.slice(1);
+    return {
+      file,
+      reason: `too large (${formatFileSize(size)}, the limit for files sent to the ${platform} bot is ${formatFileSize(limit)})`,
+      tooLarge: true,
+    };
+  };
   dir = await mkdtemp(join(tmpdir(), "chat-files-"));
   for (const [index, file] of files.entries()) {
-    if (typeof file.size === "number" && file.size > MAX_TASK_ATTACHMENT_BYTES) {
-      result.failed.push({ file, reason: limit });
+    if (typeof file.size === "number" && file.size > chatInboundFileLimit(file.adapter)) {
+      result.failed.push(tooLarge(file, file.size));
       continue;
     }
     try {
       const bytes = await readAttachment(file.attachment);
-      if (bytes.byteLength > MAX_TASK_ATTACHMENT_BYTES) {
-        result.failed.push({ file, reason: limit });
+      if (bytes.byteLength > chatInboundFileLimit(file.adapter)) {
+        result.failed.push(tooLarge(file, bytes.byteLength));
         continue;
       }
       const path = join(dir, String(index));

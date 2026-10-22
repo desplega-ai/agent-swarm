@@ -18,8 +18,8 @@ import {
 } from "./human-in-the-loop";
 import { SYSTEM_ONE_EXTRACTION_NODE_TYPE } from "./system-one-extraction";
 import {
+  resolveSystemOneDefaultProvider,
   resolveSystemOneTarget,
-  SYSTEM_ONE_DEFAULT_PROVIDER,
   SYSTEM_ONE_PROVIDER_IDS,
   SYSTEM_ONE_PROVIDERS,
   type SystemOneProvider,
@@ -164,7 +164,11 @@ export type SystemOneHumanReview = z.infer<typeof HumanReviewSchema>;
 
 export const SystemOneDecisionConfigSchema = z
   .strictObject({
-    provider: z.enum(SYSTEM_ONE_PROVIDER_IDS).default(SYSTEM_ONE_DEFAULT_PROVIDER),
+    /**
+     * Decision host. Unset means the `SYSTEM_ONE_DEFAULT_PROVIDER` global config
+     * value, read at run time (`typesafe` when that is unset too).
+     */
+    provider: z.enum(SYSTEM_ONE_PROVIDER_IDS).optional(),
     /** Provider-specific model id. Unset means the provider's default. */
     model: z.string().min(1).optional(),
     state: SystemOneStateSchema,
@@ -235,7 +239,9 @@ export const SystemOneDecisionConfigSchema = z
       }
     }
     // Provider limits. A {{token}} model is skipped at save and checked again at run,
-    // where the interpolated config is parsed by this same schema.
+    // where the interpolated config is parsed by this same schema. With no provider
+    // the default is read at run time, so `decide` checks the limits there.
+    if (config.provider === undefined) return;
     const modelProblem = systemOneModelProblem(
       config.provider,
       config.model ?? (SYSTEM_ONE_PROVIDERS[config.provider] as SystemOneProvider).defaultModel,
@@ -847,6 +853,11 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     return { db: this.deps.db, env: this.options.env ?? process.env };
   }
 
+  /** The provider a config without `provider` uses, read now so a settings change applies at once. */
+  private defaultProvider(): Promise<SystemOneProviderId> {
+    return resolveSystemOneDefaultProvider(this.providerContext());
+  }
+
   private resolveTarget(id: SystemOneProviderId, model?: string) {
     return resolveSystemOneTarget(id, this.providerContext(), {
       apiKey: this.options.getApiKey,
@@ -863,9 +874,10 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     nodes: readonly ExecutorReadinessNode[],
   ): Promise<ExecutorReadinessProblem[]> {
     const nodeIdsByProvider = new Map<SystemOneProviderId, string[]>();
+    const defaultId = await this.defaultProvider();
     for (const node of nodes) {
       // An unknown provider is a config error the schema reports; it names no credential.
-      const id = systemOneProviderOf(node.config);
+      const id = systemOneProviderOf(node.config, defaultId);
       if (id) nodeIdsByProvider.set(id, [...(nodeIdsByProvider.get(id) ?? []), node.id]);
     }
     const problems: ExecutorReadinessProblem[] = [];
@@ -903,16 +915,25 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
    */
   async decide(
     config: SystemOneDecisionConfig,
-  ): Promise<{ ok: true; output: SystemOneDecisionOutput } | { ok: false; error: string }> {
-    const providerId = config.provider;
+  ): Promise<
+    | { ok: true; output: SystemOneDecisionOutput }
+    | { ok: false; error: string; deploymentRefused?: true }
+  > {
+    const providerId = config.provider ?? (await this.defaultProvider());
     const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[providerId];
 
     // A provider with no default sends no `model` when the node sets none.
     const model = config.model ?? provider.defaultModel;
     const modelProblem = systemOneModelProblem(providerId, model);
     if (modelProblem) return { ok: false, error: modelProblem };
+    // Checked at save only for a named provider; a defaulted one is checked here.
+    const limitProblem = systemOneQuestionLimitProblem(
+      providerId,
+      Object.keys(config.questions).length,
+    );
+    if (limitProblem) return { ok: false, error: limitProblem };
     const target = await this.resolveTarget(providerId, model);
-    if (!target.ok) return { ok: false, error: target.error };
+    if (!target.ok) return target;
     const { apiKey, endpoint, keyName } = target;
 
     const wire = provider.wire ?? SYSTEM_ONE_WIRE;

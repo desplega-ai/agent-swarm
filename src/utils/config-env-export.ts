@@ -8,7 +8,8 @@
  * binding instead.
  *
  * Keys below are read only by the API server (integration signing secrets, app
- * private keys, OAuth client secrets, the API's own agent-fs key). They can
+ * private keys, OAuth client secrets, the API's own agent-fs and
+ * speech-to-text keys). They can
  * never be exported: the config API rejects `exportToEnv: true` for them and
  * every reader treats a stored true as false.
  */
@@ -25,6 +26,7 @@ export const ENV_EXPORT_RESTRICTED_KEYS: ReadonlySet<string> = new Set([
   "AZURE_DEVOPS_WEBHOOK_SECRET",
   "AGENTMAIL_WEBHOOK_SECRET",
   "API_AGENT_FS_API_KEY",
+  "TRANSCRIPTION_API_KEY",
 ]);
 
 /**

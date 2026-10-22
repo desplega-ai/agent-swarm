@@ -24,6 +24,8 @@ import {
   walkGraph,
 } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
+import { stepFailureMode } from "./foreach-body";
+import { isForeachChildOwned, runForeachDrive } from "./foreach-driver";
 import { getSecretInputKeys } from "./input";
 import {
   finalizeOrWait,
@@ -70,6 +72,9 @@ export async function recoverIncompleteRuns(registry: ExecutorRegistry): Promise
       console.error(`[workflows] Failed to resume sub-workflow step ${parentStepId}:`, err);
     }
   }
+
+  // --- Case 6: foreach fan-outs with queued or orphaned items ---
+  recovered += await recoverForeachFanouts(registry);
 
   if (recovered > 0) {
     console.log(`[workflows] Recovered ${recovered} incomplete run(s)`);
@@ -211,20 +216,22 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         if (retry === "scheduled") recovered++;
         if (retry !== "not-eligible") continue;
       }
-      if (!taskCompleted && (workflow.definition.onNodeFailure ?? "fail") === "fail") {
+      if (!taskCompleted && stepFailureMode(workflow.definition, stuck.nodeId) === "fail") {
         // Preserve the fail-fast recovery policy for failed/cancelled tasks.
         // Claimed: this sweep runs on every heartbeat, so the live task.failed
         // bus event may already have routed this step — a blind write here
         // would kill a run that is already advancing.
         const reason =
           stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
-        const claimed = await failStepAndRunIfWaiting(
+        const failed = await failStepAndRunIfWaiting(
+          workflow.definition,
           stuck.stepId,
           stuck.runId,
           reason,
           stuck.taskId,
+          { registry },
         );
-        if (!claimed) continue;
+        if (!failed.claimed) continue;
         recovered++;
         continue;
       }
@@ -248,6 +255,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         ctx,
         taskCompleted ? undefined : reason,
         stuck.taskId,
+        registry,
       );
       if (!routing.claimed) continue;
       if (routing.foreachChild && !routing.joined) {
@@ -351,6 +359,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
           stepOutput,
           nextPort,
           ctx,
+          registry,
         );
       });
       if (!routing?.claimed) continue;
@@ -410,6 +419,62 @@ async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
     }
   }
 
+  return recovered;
+}
+
+/**
+ * Re-drive foreach fan-outs of live runs whose parent is still open and that
+ * have a queued (`pending`) item, or a `running` item no drive in this process
+ * owns. Catches a crash after a settlement committed and before the next
+ * drive, and items a crash left between their claim and their settlement. An
+ * orphaned instant item runs again (at-least-once, like a top-level instant
+ * node); an async item reconnects, because its executor dedupes on the child
+ * step id.
+ */
+async function recoverForeachFanouts(registry: ExecutorRegistry): Promise<number> {
+  const rows = await getDbClient().query<{
+    runId: string;
+    workflowId: string;
+    stepId: string;
+    nodeId: string;
+    status: string;
+  }>(
+    `SELECT s.runId AS runId, r.workflowId AS workflowId, s.id AS stepId, s.nodeId AS nodeId, s.status AS status
+       FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+      WHERE r.status IN ('running', 'waiting')
+        AND s.status IN ('pending', 'running')
+        AND instr(s.nodeId, '#') > 1`,
+  );
+  const fanouts = new Map<string, { runId: string; workflowId: string; parentNodeId: string }>();
+  for (const row of rows) {
+    if (row.status === "running" && isForeachChildOwned(row.stepId)) continue;
+    const parentNodeId = row.nodeId.slice(0, row.nodeId.indexOf("#"));
+    fanouts.set(`${row.runId}\u0000${parentNodeId}`, {
+      runId: row.runId,
+      workflowId: row.workflowId,
+      parentNodeId,
+    });
+  }
+
+  let recovered = 0;
+  for (const fanout of fanouts.values()) {
+    try {
+      // The drive re-checks the run, the parent step and each child's latest
+      // row, so a stale snapshot row claims nothing.
+      const workflow = await getWorkflow(fanout.workflowId);
+      const parent = workflow?.definition.nodes.find((node) => node.id === fanout.parentNodeId);
+      if (parent?.type !== "foreach") continue;
+      const drive = await runForeachDrive(fanout.runId, fanout.parentNodeId, registry);
+      if (drive.claimed > 0) recovered++;
+    } catch (err) {
+      if (await failRunOnUnreadableReplay(fanout.runId, err)) continue;
+      console.error(
+        `[workflows] Failed to re-drive foreach ${fanout.parentNodeId} of run ${fanout.runId}:`,
+        err,
+      );
+    }
+  }
   return recovered;
 }
 

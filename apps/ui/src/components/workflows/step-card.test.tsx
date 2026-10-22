@@ -30,9 +30,14 @@ mock.module("@/api/hooks/use-approval-requests", () =>
   require("../../api/hooks/use-approval-requests"),
 );
 mock.module("@/lib/config", () => require("../../lib/config"));
-const { HitlOutput, SubWorkflowOutput, SystemOneExtractionOutput, SystemOneOutput } = await import(
-  "./step-card"
-);
+const {
+  AttemptHistory,
+  HitlOutput,
+  StepCard,
+  SubWorkflowOutput,
+  SystemOneExtractionOutput,
+  SystemOneOutput,
+} = await import("./step-card");
 
 function step(status: string): WorkflowRunStep {
   return {
@@ -250,5 +255,60 @@ describe("SystemOneExtractionOutput", () => {
     expect(html).toContain("best guess $52.10");
     expect(html).toContain("236 · median 213 (p10 122 – p90 370)");
     expect(html).toContain("655 in");
+  });
+});
+
+describe("foreach attempt history", () => {
+  const failedAttempt: WorkflowRunStep = {
+    id: "attempt-0",
+    runId: "run-1",
+    nodeId: "fan#beta",
+    nodeType: "agent-task",
+    status: "failed",
+    error: "e2e: first attempt failed",
+    input: { itemKey: "beta", index: 1, attempt: 0 },
+    output: { taskId: "00000000-0000-4000-8000-0000000000aa" },
+    startedAt: "2026-10-21T10:00:00.000Z",
+    finishedAt: "2026-10-21T10:05:00.000Z",
+  };
+
+  test("the disclosure starts closed and names the attempt count", () => {
+    const html = renderWithQuery(<AttemptHistory attempts={[failedAttempt]} />);
+    expect(html).toContain("Earlier attempts (1)");
+    expect(html).not.toContain("e2e: first attempt failed");
+  });
+
+  test("an open disclosure lists each attempt with status, error and task link", () => {
+    const html = renderWithQuery(<AttemptHistory attempts={[failedAttempt]} defaultOpen />);
+    expect(html).toContain("attempt 1");
+    expect(html).toContain("FAILED");
+    expect(html).toContain("e2e: first attempt failed");
+    expect(html).toContain("/tasks/00000000-0000-4000-8000-0000000000aa");
+  });
+
+  test("an item card badges its body type and index, and its latest attempt number", () => {
+    const latest: WorkflowRunStep = {
+      ...failedAttempt,
+      id: "attempt-1",
+      nodeType: "sub-workflow",
+      status: "running",
+      error: undefined,
+      input: { itemKey: "beta", index: 1, attempt: 1 },
+    };
+    const html = renderWithQuery(
+      <StepCard
+        step={latest}
+        earlierAttempts={[failedAttempt]}
+        workflowNodes={[{ id: "fan", type: "foreach", config: {} }]}
+        isSelected={false}
+        isExpanded={false}
+        onClick={() => {}}
+        onToggleExpand={() => {}}
+        inGroup
+      />,
+    );
+    expect(html).toContain("sub-workflow · #1");
+    expect(html).not.toContain("foreach #1");
+    expect(html).toContain("attempt 2");
   });
 });

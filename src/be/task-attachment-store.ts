@@ -68,3 +68,33 @@ export async function recordTaskAttachmentUpload(
     throw error;
   }
 }
+
+// Resolve against the row's ACTUAL stored key + its own org/drive, rather than
+// reconstructing `tasks/<taskId>/<name>`. Attachments written to agent-fs via the
+// CLI live at arbitrary paths (`misc/…`, `smoke/…`); reconstruction mis-resolves
+// them, which previously caused downloads to 404 and deletes to orphan the real
+// file. New uploads have no stored key yet at scope-build time and keep the
+// forward-looking layout.
+export function scopeFromAttachment(attachment: TaskAttachment): FileScope {
+  const storedKey = attachment.providerKey ?? attachment.path ?? "";
+  return {
+    taskId: attachment.taskId,
+    name: attachment.name,
+    key: storedKey.trim() ? storedKey : undefined,
+    orgId: attachment.orgId,
+    driveId: attachment.driveId,
+  };
+}
+
+// Which file-storage provider (if any) actually holds this attachment's bytes.
+// Only agent-fs objects and local-fs uploads are provider-backed; `shared-fs`
+// worker-volume pointers, `url`, and `page` attachments have no provider object,
+// so they must never be fetched or deleted through a provider (doing so would
+// mis-resolve and, on delete, orphan the real target). Note local-fs uploads are
+// recorded with kind "shared-fs" but an explicit local-fs providerId, so key off
+// both signals rather than kind alone.
+export function backingProviderId(attachment: TaskAttachment): string | null {
+  if (attachment.kind === "agent-fs") return attachment.providerId ?? "agent-fs";
+  if (attachment.providerId === "local-fs") return "local-fs";
+  return null;
+}

@@ -340,8 +340,14 @@ describe("bounded codemode", () => {
         undefined,
         fakeCtx().ctx,
       );
-      expect(Date.now() - started).toBeLessThan(5_000);
-      expect(textOf(result)).toContain("Codemode worker limit reached");
+      const elapsed = Date.now() - started;
+      expect(elapsed).toBeGreaterThanOrEqual(250);
+      expect(elapsed).toBeLessThan(5_000);
+      // pi 1.4 queues the script for a worker; our deadline ends the wait.
+      expect(textOf(result)).toContain(
+        "Script aborted: Codemode script exceeded its 300 ms deadline",
+      );
+      expect(textOf(result)).toContain("The script did not start.");
     } finally {
       holders.abort(new Error("test done"));
       await Promise.all(holding);

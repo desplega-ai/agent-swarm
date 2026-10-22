@@ -1,6 +1,6 @@
 # slack-reply-gate
 
-Lead is woken by every human message in a Slack thread the swarm takes part in, including "lol", an emoji, or two people chatting with each other. This extension asks Jev, [TypeSafe](https://typesafe.ai)'s decision model, whether Lead should answer a new thread message, and drops the wake-up when it should not.
+Lead is woken by every human message in a Slack thread the swarm takes part in, including "lol", an emoji, or two people chatting with each other. This extension asks a SystemOne decision model, Jev ([TypeSafe](https://typesafe.ai)) or Clef (Cloudflare Workers AI), whether Lead should answer a new thread message, and drops the wake-up when it should not.
 
 Install config:
 
@@ -15,8 +15,8 @@ Start in `shadow`, read the decisions in KV for a few days, then switch to `enfo
 | `mode` | Effect |
 |---|---|
 | `off` | Never evaluates. |
-| `shadow` (default) | Asks Jev and records the verdict. Never blocks. |
-| `enforce` | Asks Jev, records the verdict, and blocks the Lead task when the answer is no. The message gets :mute: instead: no Lead task, no reply, no outcome card. |
+| `shadow` (default) | Asks the model and records the verdict. Never blocks. |
+| `enforce` | Asks the model, records the verdict, and blocks the Lead task when the answer is no. The message gets :mute: instead: no Lead task, no reply, no outcome card. |
 
 ## What it gates
 
@@ -26,28 +26,30 @@ The header counts only at the start of the description or right after the closin
 
 ## Decision
 
-1. A follow-up with downloaded files (status `draft`) passes without a Jev call.
-2. **@mention pass-through.** A new message that @mentions Lead passes without a Jev call. A mention is the bot mention the engine rewrites to `<@U…> (that's you)`, a resolved `<@U…|lead>`, or a literal `@lead` (any name in `leadAliases`). Only the new messages are scanned, never the thread context, so an old mention earlier in the thread does not pass later banter.
-3. Otherwise one Jev call (one `choice` question, see [Jev transport](#jev-transport)) with the new message(s), the sender kind, and the last `contextMessages` thread messages. Labels: `direct_ask`, `followup_to_lead`, `instruction_to_lead`, `reaction_only`, `banter_between_others`, `not_addressed_to_lead`, `other`.
+1. A follow-up with downloaded files (status `draft`) passes without a decision call.
+2. **@mention pass-through.** A new message that @mentions Lead passes without a decision call. A mention is the bot mention the engine rewrites to `<@U…> (that's you)`, a resolved `<@U…|lead>`, or a literal `@lead` (any name in `leadAliases`). Only the new messages are scanned, never the thread context, so an old mention earlier in the thread does not pass later banter.
+3. Otherwise one decision call (one `choice` question, see [Provider](#provider)) with the new message(s), the sender kind, and the last `contextMessages` thread messages. Labels: `direct_ask`, `followup_to_lead`, `instruction_to_lead`, `reaction_only`, `banter_between_others`, `not_addressed_to_lead`, `other`.
 4. The answer is no only when the top label is `reaction_only`, `banter_between_others`, or `not_addressed_to_lead`, and the summed probability of those three labels is at least `minConfidence`. A split between two skip labels is still a skip. An unsure verdict replies.
 
 Several buffered messages are judged together. One mention in any of them passes the batch.
 
-## Jev transport
+## Provider
 
-Jev is reachable two ways. Both take the same request and return the same answer, so the decision is identical whichever one runs.
+The decision is made on the API server by the `system-one-decide` tool (`ctx.swarm.systemOne_decide`), the same path a `system-one-decision` workflow node takes. The server reads the provider's credential, sends the request, and validates the answer, so every SystemOne host works and no key enters the hook.
 
-| `provider` | Endpoint | Key | Model |
-|---|---|---|---|
-| `typesafe` | `POST https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` (or `apiKey`) | `model`, default `jev-latest` |
-| `openrouter` | `POST https://openrouter.ai/api/alpha/decisions` | `OPENROUTER_API_KEY` | `openrouterModel`, default `typesafe/jev-1.13` |
-| `auto` (default) | TypeSafe when its key is set, else OpenRouter | | |
+| `provider` | Model | Credential |
+|---|---|---|
+| `typesafe` | Jev, `model` (default `jev-latest`) | `TYPESAFE_API_KEY` |
+| `openrouter` | Jev, `openrouterModel` (default `typesafe/jev-1.13`) | `OPENROUTER_API_KEY` |
+| `cloudflare` | Clef, `cloudflareModel` (default `clef`, or `clef-flash`) | `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` |
+| `laya`, `openai` | The host's default model | See the workflows guide |
+| `auto` (default) | The first of typesafe, openrouter, cloudflare whose credential is set. A provider the server refuses for a deployment setting (openrouter when `OPENROUTER_BASE_URL` points at a gateway) is skipped for the next one | |
 
-Under `auto`, `TYPESAFE_API_KEY` wins when both keys are set. With neither key, every message fails open and the KV row names both secrets. Each decision row records the `provider` that answered.
+With no credential for `auto`, every message fails open and the KV row names the secrets. Each decision row records the `provider` that answered. `minConfidence` was tuned on Jev; check Clef's verdicts in `shadow` before you enforce on it.
 
 ## Fail open
 
-Every error lets the task through: a missing key, a TypeSafe HTTP error, a network error, a timeout, a malformed answer, or an unknown label. The handler never throws, so an outage cannot auto-disable the extension. Each failure is recorded as `fail-open` in KV and logged as a warning.
+Every error lets the task through: a missing key, a provider error relayed by the server, a network error, a timeout, a malformed answer, or an unknown label. The handler never throws, so an outage cannot auto-disable the extension. Each failure is recorded as `fail-open` in KV and logged as a warning.
 
 ## :mute: on drop (enforce)
 
@@ -63,23 +65,23 @@ The block returns first and the Slack calls run after it. A slow or failing Slac
 | Key | Default | Notes |
 |---|---|---|
 | `mode` | `shadow` | `off`, `shadow`, or `enforce` |
-| `timeoutMs` | `3000` | Jev call timeout, capped at 4000 (the dispatcher cancels a handler at 5 s) |
-| `provider` | `auto` | `auto`, `typesafe`, or `openrouter`. See [Jev transport](#jev-transport) |
+| `timeoutMs` | `3000` | Decision call timeout, capped at 4000 (the dispatcher cancels a handler at 5 s) |
+| `provider` | `auto` | `auto`, `typesafe`, `openrouter`, `cloudflare`, `laya`, or `openai`. See [Provider](#provider) |
 | `model` | `jev-latest` | Jev model on TypeSafe |
 | `openrouterModel` | `typesafe/jev-1.13` | Jev model on OpenRouter |
+| `cloudflareModel` | `clef` | Clef model on Cloudflare Workers AI |
 | `minConfidence` | `0.55` | Minimum summed skip probability to skip |
-| `contextMessages` | `6` | Thread messages sent to Jev, 0 to 20 |
+| `contextMessages` | `6` | Thread messages sent to the model, 0 to 20 |
 | `leadAliases` | `["lead"]` | A literal `@alias` in a new message counts as a mention |
-| `botSlackUserIds` | `[]` | Slack user ids labelled `bot` as the sender for Jev |
-| `apiKey` | unset | Explicit TypeSafe key. Prefer the `TYPESAFE_API_KEY` secret below |
+| `botSlackUserIds` | `[]` | Slack user ids labelled `bot` as the sender for the model |
 | `muteReaction` | `mute` | Reaction for a dropped message; `""` only removes the acceptance reaction(s) |
 | `slackTimeoutMs` | `5000` | Timeout per Slack call |
 
 ## Required secrets
 
-All are read from the API process environment at call time. Set them as global `swarm_config` secrets: the API process loads global rows into `process.env` at boot and on config reload.
+Set them as global `swarm_config` values. The server reads the provider credential from the global row when it makes the decision. `auto` and the Slack token read the API process environment, which loads global rows at boot and on config reload.
 
-- `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`: one is required for any evaluation. Under `auto`, TypeSafe wins when both are set. Without either, every message fails open.
+- One provider credential from the [Provider](#provider) table is required for any evaluation. Without one, every message fails open. The `apiKey` config field of earlier versions is gone: the hook never holds a key, so store it as the global `TYPESAFE_API_KEY` secret.
 - `SLACK_BOT_TOKEN`: the Slack app's bot token. A swarm with Slack connected already has it. Without it, `enforce` still drops the message but cannot touch its reactions, and logs a `mute-error`.
 
 No key is written to config, KV, logs, or a description.
