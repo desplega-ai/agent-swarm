@@ -346,10 +346,14 @@ summary {
  * anchors stay pointer natively, but its buttons (group labels, toggles,
  * menu buttons) keep the default arrow. The rail (the collapse/expand
  * border strip) is carved back out: it looks like inert chrome, so it
- * needs the pointer to signal it's clickable. */
+ * shows the resize arrows, the same cursor as the sessions v2 sidebar
+ * handle (Taras, 2026-10-21). A click toggles the sidebar. */
 [data-slot="sidebar-container"] button:not(:disabled, [data-slot="sidebar-rail"]),
 [data-slot="sidebar-container"] [role="button"] {
   cursor: default;
+}
+button[data-slot="sidebar-rail"] {
+  cursor: col-resize;
 }
 
 /* Hover linger, the Linear hover: enter instantly, release softly. A pure
@@ -422,6 +426,33 @@ summary {
   transition-delay: 0s;
 }
 
+/* vaul Drawer (components/ui/drawer.tsx): the large-surface timing, 400ms
+ * open and 250ms close. vaul's own curve is ease-swift, so only the
+ * durations change. vaul injects un-layered CSS at runtime, so these rules
+ * add selectors to outrank it instead of relying on source order. A drag
+ * release that snaps back keeps vaul's own inline transition. */
+[data-vaul-drawer][data-vaul-drawer-direction][data-state="open"],
+[data-vaul-overlay][data-vaul-snap-points][data-state="open"] {
+  animation-duration: 400ms;
+}
+
+[data-vaul-drawer][data-vaul-drawer-direction][data-state="closed"],
+[data-vaul-overlay][data-vaul-snap-points][data-state="closed"] {
+  animation-duration: 250ms;
+}
+
+/* Reduced motion keeps the fade and drops the slide (vaul ships the
+ * fadeIn and fadeOut keyframes). */
+@media (prefers-reduced-motion: reduce) {
+  [data-vaul-drawer][data-vaul-snap-points][data-vaul-drawer-direction][data-state="open"][data-slot] {
+    animation-name: fadeIn;
+  }
+
+  [data-vaul-drawer][data-vaul-snap-points][data-vaul-drawer-direction][data-state="closed"][data-slot] {
+    animation-name: fadeOut;
+  }
+}
+
 /* Theme switch, set by use-theme.ts for the one frame the dark class or
  * preset flips, so the new palette lands at once instead of smearing through
  * each control's own color transition. */
@@ -430,6 +461,16 @@ summary {
 .theme-switching *::before,
 .theme-switching *::after {
   transition: none !important;
+}
+
+/* Nav toggled by a route or a panel, set by use-collapse-nav-while.ts for
+ * two frames: route changes get no animation (DESIGN.md § Motion). A click
+ * on the nav buttons or Cmd+B keeps the 200ms rail transition. Un-layered,
+ * so it outranks the sidebar's layered transition utilities. */
+.nav-instant [data-slot="sidebar-gap"],
+.nav-instant [data-slot="sidebar-container"],
+.nav-instant [data-slot="sidebar-container"] * {
+  transition: none;
 }
 
 /* Scrollbar */
@@ -449,6 +490,21 @@ summary {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-muted-foreground);
+}
+
+/* A styled scrollbar takes 8 px when it shows, so the content jumps when a
+ * list starts to overflow. Vertical scroll containers keep the gutter, so
+ * nothing moves. Left out: horizontal-only strips (`overflow-x-auto`), where
+ * the gutter would be an empty strip, and boxes that switch to
+ * `overflow-hidden` (a hidden box reserves the gutter too). In the base layer,
+ * so a `[scrollbar-gutter:…]` utility wins. */
+@layer base {
+  :where(.overflow-auto, .overflow-y-auto, .overflow-scroll, .overflow-y-scroll):not(
+      [class*="overflow-hidden"],
+      [class*="overflow-y-hidden"]
+    ) {
+    scrollbar-gutter: stable;
+  }
 }
 
 /* Shimmer text, used by the inline "chain of thought" indicator on
@@ -742,6 +798,14 @@ summary {
 }
 .prose-chat h3 {
   font-size: 0.95em;
+}
+
+/* Phones (below md) read a swarm reply in the sessions timeline at 16 px
+ * (UX review R9). Desktop and other prose keep 0.85rem. */
+@media (width < 48rem) {
+  [data-slot="swarm-reply"] .prose-chat {
+    font-size: 1rem;
+  }
 }
 
 /* Session log prose, tighter than chat */

@@ -394,7 +394,7 @@ export async function handlePullRequestCommented(
   );
 
   // Check if there's already an active task for this PR
-  const existingTask = await findTaskByVcs(repo, pr.pullRequestId);
+  const existingTask = await findTaskByVcs(repo, pr.pullRequestId, "azure-devops");
   const existingTaskNote = existingTask
     ? `\n\n_Note: There's an active task (${existingTask.id}) for this PR #${pr.pullRequestId}._`
     : "";

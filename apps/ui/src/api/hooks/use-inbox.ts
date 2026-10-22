@@ -235,7 +235,7 @@ export function useToReadInbox(): ToReadInboxResult {
 
   const items = useMemo<ToReadInboxItem[]>(() => {
     const hidden = buildHiddenSet(stateQ.data, now);
-    const sessions = sessionsQ.data ?? [];
+    const sessions = sessionsQ.data?.sessions ?? [];
     const cutoff = now - SEVEN_DAYS_MS;
     const out: ToReadInboxItem[] = [];
     for (const s of sessions) {

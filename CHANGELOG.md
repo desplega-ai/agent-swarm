@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-22
+
+### Added
+- Bitbucket Cloud: `POST /api/bitbucket/webhook` verifies the `X-Hub-Signature` HMAC and turns a bot mention or review request on a pull request into a lead task; a merge or decline cancels it. Workers clone and push through a `bitbucket.org` credential helper and link the PRs they open. Configure with `BITBUCKET_WEBHOOK_SECRET` and `BITBUCKET_TOKEN`; Data Center, Issues and reactions are not supported (#2339).
+
+### Changed
+- pi: the pins move to 1.4.0, which queues codemode scripts for a free worker instead of refusing them, so the adapter drops its retry-on-refusal loop. Only agents with `PI_CODEMODE=true` are affected (#2334).
+- Worker image bumps claude-code to 2.1.308, `@anthropic-ai/sdk` to ^1.1.0 (claude-managed), opencode to 2.1.3, copilot to 1.0.102, grok to 1.0.67, plus qwen, kiro, amp and `@agentclientprotocol/sdk` (#2333, #2341).
+- Slack: the user allowlist gate delegates to `checkUserAccess`, so the production gate and its tested implementation cannot drift. Behavior is unchanged (#2328).
+- Docs: self-host docs point to `docker-compose.example.yml` as the reference deployment with its full agent roster (#2340), dreaming-v2 seed skill patches for `work-on-task` and `slack-interaction` (#2332), and the `heartbeat` and `workflows` TLA+ specs synced with main (#2335).
+
+### Fixed
+- MCP docs: generated `MCP.md` keeps the seven app-row tools it used to drop (#2331).
+- Tests: the shared preload clears inherited worker settings (Slack rendering, links, organization defaults), so root tests no longer depend on the container they run in (#2327).
+- CI: nightly coverage runs each test file in its own Bun process and merges the LCOV output (#2326).
+
 ## [2.4.6] - 2026-10-22
 
 ### Added

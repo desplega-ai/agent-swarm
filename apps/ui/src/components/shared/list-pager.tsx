@@ -20,6 +20,8 @@ export interface ListPagerProps {
   onPageSizeChange: (pageSize: number) => void;
   /** Shown instead of the range when there are no rows, e.g. "0 tasks". */
   emptyLabel?: string;
+  /** 44 px previous / next buttons (a phone screen). Desktop keeps 32 px. */
+  touch?: boolean;
   className?: string;
 }
 
@@ -65,6 +67,7 @@ export function ListPager({
   onPageChange,
   onPageSizeChange,
   emptyLabel = "0 rows",
+  touch = false,
   className,
 }: ListPagerProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -84,25 +87,28 @@ export function ListPager({
         {formatPagerRange(page, pageSize, total) ?? emptyLabel}
       </span>
       <div className="ml-auto flex items-center gap-1.5 @md:gap-2">
-        <div className="flex items-center gap-1.5">
-          <span className="hidden text-xs @md:inline">Rows</span>
-          <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
-            <SelectTrigger className="h-8 w-[72px]" aria-label="Rows per page">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {pageSizeOptions.map((size) => (
-                <SelectItem key={size} value={String(size)}>
-                  {size}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* One page size gives the reader nothing to pick: no select. */}
+        {pageSizeOptions.length > 1 ? (
+          <div className="flex items-center gap-1.5">
+            <span className="hidden text-xs @md:inline">Rows</span>
+            <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
+              <SelectTrigger className="h-8 w-[72px]" aria-label="Rows per page">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {pageSizeOptions.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
         <Button
           variant="outline"
           size="icon"
-          className="hit-area h-8 w-8"
+          className={cn("hit-area", touch ? "size-11" : "h-8 w-8")}
           disabled={page === 0}
           onClick={() => onPageChange(Math.max(0, page - 1))}
           aria-label="Previous page"
@@ -120,7 +126,7 @@ export function ListPager({
         <Button
           variant="outline"
           size="icon"
-          className="hit-area h-8 w-8"
+          className={cn("hit-area", touch ? "size-11" : "h-8 w-8")}
           disabled={page >= totalPages - 1}
           onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
           aria-label="Next page"

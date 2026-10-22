@@ -62,6 +62,8 @@ export const KEY_RULES = {
   github: { prefixes: ["ghp_", "github_pat_", "gho_", "ghu_", "ghs_"], minLength: 40 },
   // Self-managed GitLab can change the prefix.
   gitlab: { prefixes: ["glpat-"], minLength: 26 },
+  // Atlassian API tokens start ATATT, workspace access tokens ATCTT.
+  bitbucket: { prefixes: ["ATATT", "ATCTT"], minLength: 40 },
   // Service user keys and personal tokens use different prefixes.
   devin: { prefixes: ["cog_", "apk_"], minLength: 30 },
   vercel: { prefixes: ["vck_"], minLength: 30 },

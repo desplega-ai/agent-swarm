@@ -58,6 +58,7 @@ async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> 
       slack: integrations.slack === "configured",
       github: Boolean(process.env.GITHUB_TOKEN?.trim()) || integrations.github === "verified",
       gitlab: Boolean(process.env.GITLAB_TOKEN?.trim()),
+      bitbucket: Boolean(process.env.BITBUCKET_TOKEN?.trim()),
       linear: integrations.linear === "verified",
       jira: integrations.jira === "verified",
     },

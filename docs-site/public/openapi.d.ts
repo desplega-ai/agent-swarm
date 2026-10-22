@@ -12025,7 +12025,7 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
+                                        method: "slack" | "github" | "gitlab" | "bitbucket" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -12058,6 +12058,7 @@ export interface paths {
                                     slack: boolean;
                                     github: boolean;
                                     gitlab: boolean;
+                                    bitbucket: boolean;
                                     linear: boolean;
                                     jira: boolean;
                                 };
@@ -12124,7 +12125,7 @@ export interface paths {
                         /** @enum {string} */
                         step: "integrations";
                         /** @enum {string} */
-                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth";
+                        method: "slack" | "github" | "gitlab" | "bitbucket" | "linear_oauth" | "jira_oauth";
                     } | {
                         /** @enum {string} */
                         action: "skip";
@@ -12235,7 +12236,7 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
+                                        method: "slack" | "github" | "gitlab" | "bitbucket" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -12268,6 +12269,7 @@ export interface paths {
                                     slack: boolean;
                                     github: boolean;
                                     gitlab: boolean;
+                                    bitbucket: boolean;
                                     linear: boolean;
                                     jira: boolean;
                                 };
@@ -12596,7 +12598,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -12691,7 +12693,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -13528,7 +13530,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -14063,7 +14065,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        vcsProvider: "github" | "gitlab" | "azure-devops";
+                        vcsProvider: "github" | "gitlab" | "azure-devops" | "bitbucket";
                         vcsRepo: string;
                         vcsNumber: number;
                         /** Format: uri */
@@ -18779,8 +18781,15 @@ export interface paths {
                     q?: string;
                     requestedByUserId?: string;
                     contextKeyPrefix?: string;
+                    keyPrefix?: string;
+                    groupKey?: string;
+                    noGroup?: "true" | "false";
+                    triage?: "inbox" | "later" | "done" | "unread";
+                    status?: "running" | "failed" | "needs";
+                    withUserId?: string;
                     fields?: "full" | "slim";
-                    scope?: "mine" | "shared";
+                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. */
+                    scope?: "mine" | "shared" | "tree";
                 };
                 header?: never;
                 path?: never;
@@ -18811,7 +18820,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -18846,6 +18855,24 @@ export interface paths {
                                 lastActivityAt: string;
                                 /** @enum {string} */
                                 latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                /** @enum {string} */
+                                readState?: "unread" | "read" | "later" | "done";
+                                snoozeUntil?: string | null;
+                                needsYou?: boolean;
+                                groupKey?: string;
+                                shared?: boolean;
+                                people?: {
+                                    id: string;
+                                    name: string;
+                                }[];
+                                peopleCount?: number;
+                                preview?: string | null;
+                                shares?: {
+                                    userId: string | null;
+                                    name: string | null;
+                                    /** @enum {string} */
+                                    access: "read" | "write";
+                                }[];
                             }[];
                             total: number;
                             limit: number;
@@ -18866,6 +18893,240 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session-tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get session groups and triage counts */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Visible groups and section counts */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            groups: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                                key: string;
+                                lastActivityAt: string;
+                            }[];
+                            inbox: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
+                            later: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
+                            done: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
+                            noGroup: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session-moves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Move sessions into a group or reset their keys */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        rootTaskIds: string[];
+                        /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                        groupKey: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Moved and skipped sessions */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            moved: string[];
+                            skipped: {
+                                rootTaskId: string;
+                                reason: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid namespace or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Personal destination not authorized */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Moves blocked until audit warnings are repaired */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session-moves/prefix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rename or delete a session group */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                        from: string;
+                        /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                        to: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Moved and skipped sessions and remaining movable roots */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            moved: string[];
+                            skipped: {
+                                rootTaskId: string;
+                                reason: string;
+                            }[];
+                            remaining: number;
+                        };
+                    };
+                };
+                /** @description Invalid namespace or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Personal destination not authorized */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Moves blocked until audit warnings are repaired */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -18933,6 +19194,16 @@ export interface paths {
                             /** @enum {string} */
                             access: "owner" | "write" | "read";
                             owner: components["schemas"]["SessionOwner"];
+                            approvals?: {
+                                id: string;
+                                /** @enum {string} */
+                                status: "pending";
+                                sourceTaskId: string;
+                                title: string;
+                            }[];
+                            /** @enum {string} */
+                            readState?: "unread" | "read" | "later" | "done";
+                            lastActivityAt?: string;
                         };
                     };
                 };
@@ -23994,6 +24265,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/bitbucket/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle Bitbucket Cloud webhook events */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Event processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            created: boolean;
+                            taskId?: string;
+                            skipped?: boolean;
+                            reason?: string;
+                            extension?: {
+                                id: string;
+                                name: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid signature */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 1 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Bitbucket integration not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agentmail/webhook": {
         parameters: {
             query?: never;
@@ -25729,7 +26072,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -25772,7 +26115,7 @@ export interface components {
             slackProgressMessageTs?: string;
             slackTreeRootMessageTs?: string;
             /** @enum {string} */
-            vcsProvider?: "github" | "gitlab" | "azure-devops";
+            vcsProvider?: "github" | "gitlab" | "azure-devops" | "bitbucket";
             vcsRepo?: string;
             vcsEventType?: string;
             vcsNumber?: number;

@@ -12,6 +12,8 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { initAgentMail, isAgentMailEnabled, resetAgentMail } from "../agentmail/app";
+import { validateConfigValue } from "../be/swarm-config-guard";
+import { isBitbucketEnabled, resetBitbucket } from "../bitbucket/auth";
 import { initGitHub, isGitHubEnabled, resetGitHub } from "../github/app";
 import { isJiraEnabled, resetJira } from "../jira/app";
 import { isLinearEnabled, resetLinear } from "../linear/app";
@@ -28,6 +30,8 @@ const ENV_KEYS = [
   "LINEAR_ENABLED",
   "AGENTMAIL_DISABLE",
   "AGENTMAIL_WEBHOOK_SECRET",
+  "BITBUCKET_DISABLE",
+  "BITBUCKET_WEBHOOK_SECRET",
 ] as const;
 const originalEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
@@ -45,6 +49,7 @@ afterEach(() => {
   resetAgentMail();
   resetJira();
   resetLinear();
+  resetBitbucket();
   for (const key of ENV_KEYS) {
     const value = originalEnv.get(key);
     if (value === undefined) delete process.env[key];
@@ -182,6 +187,37 @@ describe("AgentMail AGENTMAIL_DISABLE", () => {
     process.env.AGENTMAIL_DISABLE = "TRUE";
     resetAgentMail();
     expect(initAgentMail()).toBe(false);
+  });
+});
+
+describe("Bitbucket BITBUCKET_DISABLE", () => {
+  test("every truthy spelling disables the integration", () => {
+    process.env.BITBUCKET_WEBHOOK_SECRET = "secret";
+    for (const spelling of TRUTHY_SPELLINGS) {
+      process.env.BITBUCKET_DISABLE = spelling;
+      expect(isBitbucketEnabled()).toBe(false);
+    }
+  });
+
+  test("non-disabling values keep the integration enabled", () => {
+    process.env.BITBUCKET_WEBHOOK_SECRET = "secret";
+    for (const value of NON_DISABLING) {
+      if (value === undefined) delete process.env.BITBUCKET_DISABLE;
+      else process.env.BITBUCKET_DISABLE = value;
+      expect(isBitbucketEnabled()).toBe(true);
+    }
+  });
+
+  test("stays disabled without a webhook secret", () => {
+    expect(isBitbucketEnabled()).toBe(false);
+  });
+
+  test("the config guard validates BITBUCKET_DISABLE as a boolean like GITLAB_DISABLE", () => {
+    for (const key of ["BITBUCKET_DISABLE", "GITLAB_DISABLE"]) {
+      expect(validateConfigValue(key, "true")).toBeNull();
+      expect(validateConfigValue(key, "false")).toBeNull();
+      expect(validateConfigValue(key, "maybe")).not.toBeNull();
+    }
   });
 });
 

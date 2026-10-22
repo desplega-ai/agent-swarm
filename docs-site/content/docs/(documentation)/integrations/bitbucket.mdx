@@ -1,0 +1,168 @@
+---
+title: Bitbucket Integration
+description: Connect Bitbucket Cloud so a bot mention or review request on a pull request creates a swarm task, and workers clone, push, and open pull requests with git and the Bitbucket REST API
+---
+
+Agent Swarm supports Bitbucket Cloud alongside GitHub, GitLab, and Azure DevOps. Webhooks turn bot mentions and review requests on pull requests into swarm tasks. Workers reach Bitbucket with `git` and `curl` against the REST API, both authenticated with one token.
+
+This version covers **Bitbucket Cloud** only (`bitbucket.org`, `api.bitbucket.org/2.0`). Bitbucket Data Center and Server are not supported.
+
+## 1. Create a bot account and its token
+
+The recommended setup is a scoped **Atlassian API token on a dedicated service-account user**, for example `agent-swarm-bot`. It works on every Bitbucket plan, and humans can @mention it like a teammate. Its pushes, pull requests, and comments carry its own name.
+
+1. Create an Atlassian account for the bot and add it to your Bitbucket workspace.
+2. Give it **write** access to each repository the swarm works in.
+3. Signed in as that user, create an API token with scopes at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens). Pick the **Bitbucket** app and these scopes:
+
+| Scope | Used for |
+|-------|----------|
+| `read:repository:bitbucket` | Clone and fetch |
+| `write:repository:bitbucket` | Push branches |
+| `read:pullrequest:bitbucket` | Read pull requests and comments |
+| `write:pullrequest:bitbucket` | Open pull requests and post comments |
+| `read:user:bitbucket` | Resolve the bot's own `account_id` through `GET /2.0/user` |
+
+<Callout type="info">
+The scope names come from Atlassian's documentation. If token creation shows different names, pick the closest repository, pull request, and account read/write scopes.
+</Callout>
+
+**Alternative: a workspace access token** (Bitbucket Premium). A workspace admin creates it under **Workspace settings > Access tokens**, with the same repository and pull request permissions. It may not resolve through `GET /2.0/user` and probably cannot be @mentioned. If you use one, set `BITBUCKET_BOT_ACCOUNT_ID` explicitly and rely on `BITBUCKET_BOT_NAME` or the reviewer trigger.
+
+**App passwords are not supported.** Atlassian removed them.
+
+As with GitHub and GitLab, anyone who can comment on a pull request in a connected repository can trigger the swarm with a mention. Give the bot access only to repositories where you accept that.
+
+## 2. Configure the swarm
+
+Set these as swarm config values (secret where marked) or as environment variables on the API server and the workers. In the dashboard, the **Integrations** page and the setup wizard's integrations step both have a Bitbucket entry that stores them:
+
+```bash
+# Required: enables the webhook endpoint (secret)
+BITBUCKET_WEBHOOK_SECRET=a-long-random-string
+
+# Required for REST calls and worker git access (secret)
+BITBUCKET_TOKEN=ATATT3x...
+
+# Optional: the bot's Atlassian account_id (default: resolved via GET /2.0/user)
+# Required with a workspace access token.
+BITBUCKET_BOT_ACCOUNT_ID=557058:00000000-0000-0000-0000-000000000000
+
+# Optional: name for plain-text @mentions (default: agent-swarm-bot)
+BITBUCKET_BOT_NAME=agent-swarm-bot
+
+# Optional: git commit identity for Bitbucket repos
+BITBUCKET_EMAIL=agent-swarm-bot@your-company.com
+BITBUCKET_NAME=Agent Swarm Bot
+
+# Optional: turn the integration off on the API and the workers
+BITBUCKET_DISABLE=true
+```
+
+On the API server, `BITBUCKET_TOKEN` is used for REST calls and to look up the bot identity. On workers, it backs git clone and push and the REST calls that link a pull request to its task. Workers read swarm config at boot, so restart them after you add the token.
+
+## 3. Add the webhook
+
+In the repository, go to **Repository settings > Webhooks > Add webhook**. For every repository in a workspace, use **Workspace settings > Webhooks** instead.
+
+- **URL**: `https://your-server.com/api/bitbucket/webhook`
+- **Secret**: the value of `BITBUCKET_WEBHOOK_SECRET`
+- **Status**: Active
+- **Triggers**: choose from a full list of triggers, and under **Pull Request** select:
+  - **Created**
+  - **Comment created**
+  - **Merged**
+  - **Declined**
+
+Bitbucket signs each delivery with `X-Hub-Signature: sha256=<hex>`, an HMAC-SHA256 of the raw body keyed with the secret. The swarm verifies it against `BITBUCKET_WEBHOOK_SECRET`. Deliveries are deduplicated on their `X-Request-UUID` and on a 60-second content key, so a retry creates no second task.
+
+## Supported events
+
+| Event key | Condition | What happens |
+|-----------|-----------|-------------|
+| `pullrequest:created` | Bot @mentioned in the description | Creates a `bitbucket-pr` task for the lead agent |
+| `pullrequest:created` | Bot listed as a reviewer | Creates a `bitbucket-pr` review task for the lead agent. A PR that both mentions and lists the bot gets one task |
+| `pullrequest:comment_created` | Bot @mentioned in a general or inline comment | Creates a `bitbucket-comment` task with the comment as context. Inline comments include the file and line. If the PR has an active task, the new task is its child |
+| `pullrequest:fulfilled` | PR merged | Cancels the PR's active task |
+| `pullrequest:rejected` | PR declined | Cancels the PR's active task |
+
+The swarm ignores events caused by the bot itself. Every other event key is acknowledged and ignored.
+
+Mentions work in two forms. Bitbucket stores a mention picked from the autocomplete as `@{<account_id>}` in the comment's raw text, which matches the bot's account id. A typed `@agent-swarm-bot` matches `BITBUCKET_BOT_NAME`.
+
+The task prompts come from the `bitbucket.pull_request.opened`, `bitbucket.pull_request.review_requested`, and `bitbucket.comment.mentioned` templates, which you can customize like any other prompt template.
+
+<Callout type="warn">
+The bot is the account that owns `BITBUCKET_TOKEN`, unless you set `BITBUCKET_BOT_ACCOUNT_ID`. The swarm ignores PRs and comments from that account. If you mint the token under your own account, as is common in a test setup, your own mentions never trigger the swarm. Test from another account.
+</Callout>
+
+### Tasks and people
+
+Tasks from Bitbucket carry `source: "bitbucket"`, `vcsProvider: "bitbucket"`, and `vcsRepo: "<workspace>/<repo_slug>"`. Their context key is `task:trackers:bitbucket:<repoUuid>:pr:<id>`, which groups every task for one pull request.
+
+The sender of each event is mapped to a swarm user by Atlassian `account_id` (identity kind `bitbucket`). Senders with no linked swarm user show up under **People > Unmapped**, where you can link them.
+
+## Workers
+
+At boot, `docker-entrypoint.sh`:
+
+- adds a git credential helper scoped to `https://bitbucket.org` that answers with username `x-token-auth` and reads `BITBUCKET_TOKEN` from the environment, so the token is never written to disk;
+- auto-clones registered Bitbucket repositories with plain `git clone`;
+- sets the git identity from `BITBUCKET_EMAIL` / `BITBUCKET_NAME`, only when `GITHUB_TOKEN`, `GITLAB_TOKEN`, and `AZURE_DEVOPS_TOKEN` are all unset.
+
+When a worker opens a pull request on a Bitbucket repository, the runner finds it through the REST API (Bearer `BITBUCKET_TOKEN`) and links it to the task.
+
+There is no Bitbucket CLI in the worker image. Tasks created from Bitbucket events include `curl` recipes against `api.bitbucket.org`:
+
+| Operation | GitHub (`gh`) | Bitbucket |
+|---|---|---|
+| Clone | `gh repo clone` | `git clone https://bitbucket.org/<workspace>/<repo_slug>.git` |
+| Create PR | `gh pr create` | `POST /2.0/repositories/<workspace>/<repo_slug>/pullrequests` |
+| View PR | `gh pr view` | `GET /2.0/repositories/<workspace>/<repo_slug>/pullrequests/<id>` |
+| Comment on PR | `gh pr comment` | `POST /2.0/repositories/<workspace>/<repo_slug>/pullrequests/<id>/comments` |
+
+For example, to comment on a pull request:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $BITBUCKET_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"content":{"raw":"Done, see the latest push."}}' \
+  "https://api.bitbucket.org/2.0/repositories/<workspace>/<repo_slug>/pullrequests/<id>/comments"
+```
+
+## Workflow triggers
+
+Bitbucket events can trigger [workflows](/docs/concepts/workflows):
+
+- `bitbucket.pull_request.created`
+- `bitbucket.pull_request.commented`
+- `bitbucket.pull_request.merged`
+- `bitbucket.pull_request.declined`
+
+Each carries `repo`, `number`, `action` and `user_login`, plus `title` and `body` where the event has them.
+
+## Known gaps
+
+- **No acknowledgement reaction.** Bitbucket Cloud has no reactions API, so the swarm does not mark a comment as seen the way it does on GitHub.
+- **No Issues.** Atlassian removed the Bitbucket Issue Tracker API.
+- **No Bitbucket CLI** in the worker image. Workers use `git` and `curl`.
+- **No dashboard card** yet. Configure the integration with swarm config or environment variables.
+- **Review and CI-failure triggers** (changes requested, failed commit status) come later.
+- **Cloud only.** Data Center and Server are not supported.
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---------|-------|
+| Deliveries fail with `401` | The webhook secret does not match `BITBUCKET_WEBHOOK_SECRET`, or the webhook has no secret, so Bitbucket sends no `X-Hub-Signature`. |
+| Deliveries fail with `503` | `BITBUCKET_WEBHOOK_SECRET` is not set on the API server, or `BITBUCKET_DISABLE=true`. |
+| A mention creates no task | The author is the bot account, usually the token owner. Mention from another account. With a workspace access token, set `BITBUCKET_BOT_ACCOUNT_ID` or mention `@<BITBUCKET_BOT_NAME>`. |
+| Workers cannot clone a private repository | `BITBUCKET_TOKEN` is missing on the worker, lacks the repository scopes, or the bot has no access to the repository. |
+
+## Related
+
+- [GitLab Integration](/docs/integrations/gitlab) and [Azure DevOps Integration](/docs/integrations/azure-devops): the integrations this one is modeled on
+- [Environment Variables](/docs/reference/environment-variables): Bitbucket configuration variables
+- [Workflows](/docs/concepts/workflows): automate actions on Bitbucket events
+- [Task Lifecycle](/docs/concepts/task-lifecycle): how webhook events become tasks

@@ -247,8 +247,9 @@ describe("migration 215", () => {
   ];
   // Restricted after migration 215 shipped. Row readers force the flag off
   // (effectiveExportToEnv), so an older stored true never reaches an agent.
+  const RESTRICTED_AFTER_215 = new Set(["TRANSCRIPTION_API_KEY", "BITBUCKET_WEBHOOK_SECRET"]);
   const RESTRICTED_AT_215 = [...ENV_EXPORT_RESTRICTED_KEYS].filter(
-    (key) => key !== "TRANSCRIPTION_API_KEY",
+    (key) => !RESTRICTED_AFTER_215.has(key),
   );
 
   test("backfills true and turns off only the deny list", () => {

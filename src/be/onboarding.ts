@@ -58,6 +58,7 @@ export const OnboardingIntegrationMethodSchema = z.enum([
   "slack",
   "github",
   "gitlab",
+  "bitbucket",
   "linear_oauth",
   "jira_oauth",
 ]);
@@ -139,6 +140,7 @@ export const OnboardingSignalsSchema = z.object({
     slack: z.boolean(),
     github: z.boolean(),
     gitlab: z.boolean(),
+    bitbucket: z.boolean(),
     linear: z.boolean(),
     jira: z.boolean(),
   }),
@@ -480,6 +482,7 @@ function inferIntegrationMethod(
   if (signals.integrations.slack) return "slack";
   if (signals.integrations.github) return "github";
   if (signals.integrations.gitlab) return "gitlab";
+  if (signals.integrations.bitbucket) return "bitbucket";
   if (signals.integrations.linear) return "linear_oauth";
   if (signals.integrations.jira) return "jira_oauth";
   return null;

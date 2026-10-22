@@ -1,17 +1,36 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
+  ASSET_KEY_MAX_LENGTH,
+  defaultAssetKey,
+  normalizeAssetKey,
+  parseAssetKey,
+} from "../assets/key";
+import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
+import { resolveHttpAuditUserId } from "../be/audit-user";
+import {
+  AssetKeyMovesBlockedError,
+  assertAssetKeyMovesAllowed,
   countSessions,
   createAgent,
   getAgentById,
   getDbClient,
+  getPendingApprovalsForTasks,
   getRootTaskChain,
   getTaskById,
   listRecentSessions,
 } from "../be/db";
+import {
+  listPrefixRoots,
+  listSharedPrefixRoots,
+  moveSessionChains,
+  type SessionKeyMove,
+} from "../be/db/session-moves";
+import { getSessionReadState, getSessionTree } from "../be/db/session-tree";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   getSessionRoot,
+  hasSessionAccess,
   listActiveSessionShares,
   type SessionAccess,
   sessionAccessForRoot,
@@ -38,6 +57,7 @@ import {
   type AgentTask,
   AgentTaskSchema,
   AgentTaskStatusSchema,
+  AssetKeySchema,
   SessionAccessSchema,
   SessionOwnerSchema,
   SessionSharesSchema,
@@ -46,9 +66,10 @@ import {
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { canMutateTaskNamespace } from "./assets";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
-import { resolveSessionActor, type SessionActor } from "./session-access";
+import { resolveSessionActor, type SessionActor, sessionAccessFor } from "./session-access";
 import { jsonError } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -100,6 +121,61 @@ const SessionListItemSchema = z.object({
   chainTaskCount: z.number().int(),
   lastActivityAt: z.string(),
   latestStatus: AgentTaskStatusSchema,
+  readState: z.enum(["unread", "read", "later", "done"]).optional(),
+  snoozeUntil: z.string().nullable().optional(),
+  needsYou: z.boolean().optional(),
+  groupKey: z.string().optional(),
+  shared: z.boolean().optional(),
+  people: z.array(z.object({ id: z.string(), name: z.string() })).optional(),
+  peopleCount: z.number().int().optional(),
+  preview: z.string().nullable().optional(),
+  /** Active shares with their access level. `userId` null means everyone on the swarm. */
+  shares: z
+    .array(
+      z.object({
+        userId: z.string().nullable(),
+        name: z.string().nullable(),
+        access: z.enum(["read", "write"]),
+      }),
+    )
+    .optional(),
+});
+
+const SessionSectionCountsSchema = z.object({
+  total: z.number().int(),
+  unread: z.number().int(),
+  running: z.number().int(),
+  needsYou: z.number().int(),
+});
+const SessionTreeGroupSchema = SessionSectionCountsSchema.extend({
+  key: z.string(),
+  lastActivityAt: z.string(),
+});
+const SessionTreeResponseSchema = z.object({
+  groups: z.array(SessionTreeGroupSchema),
+  inbox: SessionSectionCountsSchema,
+  later: SessionSectionCountsSchema,
+  done: SessionSectionCountsSchema,
+  noGroup: SessionSectionCountsSchema,
+});
+
+const SessionApprovalSchema = z.object({
+  id: z.string(),
+  status: z.literal("pending"),
+  sourceTaskId: z.string(),
+  title: z.string(),
+});
+
+const SessionKeyFilterSchema = z.string().transform((value, ctx) => {
+  try {
+    return normalizeAssetKey(value);
+  } catch (error) {
+    ctx.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "Invalid asset key",
+    });
+    return z.NEVER;
+  }
 });
 
 /**
@@ -431,6 +507,21 @@ const listSessions = route({
      * key plus a trailing `:` (e.g. `task:ui:workflow:abc:`).
      */
     contextKeyPrefix: z.string().min(1).optional(),
+    /** Literal asset key prefix, including nested groups. */
+    keyPrefix: SessionKeyFilterSchema.optional(),
+    /** Exact asset group, including direct resource leaves. */
+    groupKey: SessionKeyFilterSchema.optional(),
+    /** Shared and viewer-personal namespace roots and direct resource leaves. */
+    noGroup: z
+      .enum(["true", "false"])
+      .transform((v) => v === "true")
+      .optional(),
+    /** Chain-wide read state or Inbox section. */
+    triage: z.enum(["inbox", "later", "done", "unread"]).optional(),
+    /** Latest chain status or pending human attention. */
+    status: z.enum(["running", "failed", "needs"]).optional(),
+    /** Requester anywhere in the chain or active share recipient. */
+    withUserId: z.string().min(1).optional(),
     /** `full` restores the legacy shape (full root `AgentTask`); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
     /**
@@ -438,9 +529,16 @@ const listSessions = route({
      * with an active share to the caller or to everyone. Omit for every
      * session the caller can open. Callers that act for no user (agents, the
      * operator key with no picked dashboard user) see every session, and
-     * an empty list for either scope.
+     * an empty list for mine or shared.
+     * tree: Sessions that GET /api/session-tree counts: mine plus shared with me,
+     * no ownerless roots. A bypass actor sees every root.
      */
-    scope: z.enum(["mine", "shared"]).optional(),
+    scope: z
+      .enum(["mine", "shared", "tree"])
+      .optional()
+      .describe(
+        "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope.",
+      ),
   }),
   responses: {
     200: {
@@ -456,6 +554,126 @@ const listSessions = route({
   },
   auth: { apiKey: true },
 });
+
+const sessionTree = route({
+  method: "get",
+  path: "/api/session-tree",
+  pattern: ["api", "session-tree"],
+  summary: "Get session groups and triage counts",
+  tags: ["Sessions"],
+  responses: {
+    200: { description: "Visible groups and section counts", schema: SessionTreeResponseSchema },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+});
+
+const SESSION_MOVE_LIMIT = 200;
+const SESSION_MOVE_OWNER_ONLY = "Only the session owner can move this group";
+const SESSION_MOVE_UNAVAILABLE = "Session not found or not accessible";
+
+const SessionMoveResultSchema = z.object({
+  moved: z.array(z.string()),
+  skipped: z.array(z.object({ rootTaskId: z.string(), reason: z.string() })),
+});
+const sessionMoveRbac = {
+  ungated:
+    "per-session access, per-task task.fs.mutate, and asset-key write checks in the handler, as PATCH /api/assets/task/{id}/key",
+};
+const sessionMoveResponses = {
+  400: { description: "Invalid namespace or request" },
+  403: { description: "Personal destination not authorized" },
+  409: { description: "Moves blocked until audit warnings are repaired" },
+};
+
+const moveSessions = route({
+  method: "post",
+  path: "/api/session-moves",
+  pattern: ["api", "session-moves"],
+  summary: "Move sessions into a group or reset their keys",
+  tags: ["Sessions"],
+  session: { none: "The handler checks each root and reports denied roots as skipped" },
+  body: z.object({
+    rootTaskIds: z.array(z.string().min(1)).min(1).max(SESSION_MOVE_LIMIT),
+    groupKey: AssetKeySchema.nullable(),
+  }),
+  responses: {
+    200: { description: "Moved and skipped sessions", schema: SessionMoveResultSchema },
+    ...sessionMoveResponses,
+  },
+  auth: { apiKey: true },
+  rbac: sessionMoveRbac,
+});
+
+const moveSessionPrefix = route({
+  method: "post",
+  path: "/api/session-moves/prefix",
+  pattern: ["api", "session-moves", "prefix"],
+  summary: "Rename or delete a session group",
+  tags: ["Sessions"],
+  body: z.object({ from: AssetKeySchema, to: AssetKeySchema.nullable() }),
+  responses: {
+    200: {
+      description: "Moved and skipped sessions and remaining movable roots",
+      schema: SessionMoveResultSchema.extend({ remaining: z.number().int().min(0) }),
+    },
+    ...sessionMoveResponses,
+  },
+  auth: { apiKey: true },
+  rbac: sessionMoveRbac,
+});
+
+async function withSessionMove(
+  req: IncomingMessage,
+  res: ServerResponse,
+  myAgentId: string | undefined,
+  destination: string | null,
+  run: (context: { actor: SessionActor; changedBy?: string; key: string | null }) => Promise<void>,
+): Promise<void> {
+  try {
+    const changedBy = await resolveHttpAuditUserId(req, myAgentId);
+    const actor = await resolveSessionActor(req, myAgentId);
+    const key = destination === null ? null : await authorizeAssetKeyWrite(destination, changedBy);
+    await assertAssetKeyMovesAllowed();
+    await run({ actor, changedBy: changedBy ?? undefined, key });
+  } catch (error) {
+    if (error instanceof AssetKeyAuthorizationError) {
+      jsonError(res, error.message, error.statusCode);
+    } else if (error instanceof AssetKeyMovesBlockedError) {
+      jsonError(res, error.message, 409);
+    } else {
+      throw error;
+    }
+  }
+}
+
+async function checkSessionMove(
+  rootTaskId: string,
+  actor: SessionActor,
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  options: { ownerOnly?: boolean } = {},
+): Promise<{ reason: string } | { taskIds: string[] }> {
+  const root = await getTaskById(rootTaskId);
+  if (!root) return { reason: SESSION_MOVE_UNAVAILABLE };
+  if (options.ownerOnly) {
+    if (actor.kind === "user" && (!actor.userId || root.requestedByUserId !== actor.userId)) {
+      return { reason: SESSION_MOVE_OWNER_ONLY };
+    }
+  } else {
+    const access = await sessionAccessFor(actor, root.id);
+    if (access === "none") return { reason: SESSION_MOVE_UNAVAILABLE };
+    if (!hasSessionAccess(access, "write")) return { reason: "Session write access required" };
+  }
+  if (root.parentTaskId) return { reason: "Task is not a session root" };
+  const tasks = await getRootTaskChain(root.id);
+  for (const task of tasks) {
+    if (!(await canMutateTaskNamespace(task, myAgentId, req))) {
+      return { reason: "Not authorized to move this task namespace" };
+    }
+  }
+  return { taskIds: tasks.map((task) => task.id) };
+}
 
 const getSession = route({
   method: "get",
@@ -474,6 +692,11 @@ const getSession = route({
         chain: z.array(TaskWithSteeringSchema),
         access: SessionAccessSchema,
         owner: SessionOwnerSchema.nullable(),
+        approvals: z.array(SessionApprovalSchema).optional(),
+        /** The viewer's read state, with the list's rule. Omitted for callers that act for no user. */
+        readState: z.enum(["unread", "read", "later", "done"]).optional(),
+        /** Newest chain activity: the read cursor that "mark read" writes. With `readState`. */
+        lastActivityAt: z.string().optional(),
       }),
     },
     401: { description: "Unauthorized" },
@@ -641,12 +864,13 @@ export async function handleSessions(
           .filter(Boolean)
       : undefined;
     const actor = await resolveSessionActor(req, myAgentId);
-    if (actor.kind === "bypass" && parsed.query.scope) {
+    const limit = Math.min(200, Math.max(0, parsed.query.limit ?? 25));
+    if (actor.kind === "bypass" && parsed.query.scope && parsed.query.scope !== "tree") {
       // No user to own or receive a share.
       listSessions.respond(res, 200, {
         sessions: [],
         total: 0,
-        limit: parsed.query.limit ?? 25,
+        limit,
         offset: parsed.query.offset ?? 0,
       });
       return true;
@@ -656,13 +880,26 @@ export async function handleSessions(
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
       contextKeyPrefix: parsed.query.contextKeyPrefix,
+      keyPrefix: parsed.query.keyPrefix,
+      groupKey: parsed.query.groupKey,
+      noGroup: parsed.query.noGroup,
+      triage: parsed.query.triage,
+      status: parsed.query.status,
+      withUserId: parsed.query.withUserId,
+      now: new Date().toISOString(),
+      tree: parsed.query.scope === "tree",
       ...(actor.kind === "user"
-        ? { viewer: { userId: actor.userId, scope: parsed.query.scope ?? "all" } as const }
+        ? {
+            viewer: {
+              userId: actor.userId,
+              scope: parsed.query.scope === "tree" ? "all" : (parsed.query.scope ?? "all"),
+            } as const,
+          }
         : {}),
     };
     const baseOpts = {
       ...filterOpts,
-      limit: parsed.query.limit,
+      limit,
       offset: parsed.query.offset,
     };
     // List responses default to slim (root is a task summary); `?fields=full` restores it.
@@ -676,9 +913,118 @@ export async function handleSessions(
     listSessions.respond(res, 200, {
       sessions,
       total,
-      limit: parsed.query.limit ?? 25,
+      limit,
       offset: parsed.query.offset ?? 0,
     });
+    return true;
+  }
+
+  if (sessionTree.match(req.method, pathSegments)) {
+    const parsed = await sessionTree.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    sessionTree.respond(res, 200, await getSessionTree(await resolveSessionActor(req, myAgentId)));
+    return true;
+  }
+
+  if (moveSessions.match(req.method, pathSegments)) {
+    const parsed = await moveSessions.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    await withSessionMove(
+      req,
+      res,
+      myAgentId,
+      parsed.body.groupKey,
+      async ({ actor, changedBy, key }) => {
+        const skipped: { rootTaskId: string; reason: string }[] = [];
+        const moves: SessionKeyMove[] = [];
+        for (const rootId of new Set(parsed.body.rootTaskIds)) {
+          const checked = await checkSessionMove(rootId, actor, req, myAgentId);
+          if ("reason" in checked) {
+            skipped.push({ rootTaskId: rootId, reason: checked.reason });
+          } else {
+            moves.push({
+              rootId,
+              taskIds: checked.taskIds,
+              key: key ?? defaultAssetKey("task", rootId),
+            });
+          }
+        }
+        const moved = await moveSessionChains({ moves, changedBy });
+        moveSessions.respond(res, 200, { moved, skipped });
+      },
+    );
+    return true;
+  }
+
+  if (moveSessionPrefix.match(req.method, pathSegments)) {
+    const parsed = await moveSessionPrefix.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const from = normalizeAssetKey(parsed.body.from);
+    if (parseAssetKey(from).relativeSegments.length === 0) {
+      jsonError(res, "Cannot move a namespace root", 400);
+      return true;
+    }
+    await withSessionMove(
+      req,
+      res,
+      myAgentId,
+      parsed.body.to,
+      async ({ actor, changedBy, key }) => {
+        if (key?.startsWith(from)) {
+          jsonError(res, "Destination must be outside the source prefix", 400);
+          return;
+        }
+        const skipped =
+          actor.kind === "user"
+            ? (await listSharedPrefixRoots({ from, userId: actor.userId })).map((root) => ({
+                rootTaskId: root.id,
+                reason: SESSION_MOVE_OWNER_ONLY,
+              }))
+            : [];
+        const moves: SessionKeyMove[] = [];
+        let remaining = 0;
+        // Scan before moving so offsets stay stable. Only owned roots need chain authorization.
+        for (let offset = 0; ; offset += SESSION_MOVE_LIMIT) {
+          const roots = await listPrefixRoots({
+            from,
+            userId: actor.kind === "user" ? actor.userId : undefined,
+            limit: SESSION_MOVE_LIMIT,
+            offset,
+          });
+          for (const root of roots) {
+            const nextKey =
+              key === null ? defaultAssetKey("task", root.id) : key + root.key.slice(from.length);
+            if (nextKey.startsWith(from)) {
+              skipped.push({
+                rootTaskId: root.id,
+                reason: "The new key stays inside the source group",
+              });
+              continue;
+            }
+            if (nextKey.length > ASSET_KEY_MAX_LENGTH) {
+              skipped.push({
+                rootTaskId: root.id,
+                reason: `Asset key cannot exceed ${ASSET_KEY_MAX_LENGTH} characters`,
+              });
+              continue;
+            }
+            const checked = await checkSessionMove(root.id, actor, req, myAgentId, {
+              ownerOnly: true,
+            });
+            if ("reason" in checked) {
+              skipped.push({ rootTaskId: root.id, reason: checked.reason });
+            } else if (moves.length < SESSION_MOVE_LIMIT) {
+              moves.push({ rootId: root.id, taskIds: checked.taskIds, key: nextKey });
+            } else {
+              remaining++;
+            }
+          }
+          if (roots.length < SESSION_MOVE_LIMIT) break;
+        }
+        const moved = await moveSessionChains({ moves, changedBy });
+        moveSessionPrefix.respond(res, 200, { moved, skipped, remaining });
+      },
+    );
     return true;
   }
 
@@ -695,7 +1041,8 @@ export async function handleSessions(
       id: root.id,
       requestedByUserId: root.requestedByUserId ?? null,
     };
-    const access = await accessForRoot(await resolveSessionActor(req, myAgentId), sessionRoot);
+    const actor = await resolveSessionActor(req, myAgentId);
+    const access = await accessForRoot(actor, sessionRoot);
     if (access === "none") {
       jsonError(res, "You don't have access to this session. Ask the owner to share it.", 403);
       return true;
@@ -710,12 +1057,17 @@ export async function handleSessions(
         }
       : null;
     const chain = await getRootTaskChain(parsed.params.rootTaskId);
-    // Fixed query count regardless of chain length: one agents lookup and one
-    // citations lookup for the whole chain (chunked past 500 ids).
+    // Load steering, citations and pending approvals for the already loaded chain.
     const tasks = [root, ...chain];
-    const [steering, citations] = await Promise.all([
+    const [steering, citations, approvals, read] = await Promise.all([
       getTaskSteeringFieldsForTasks(tasks),
       getTaskCitationsForTasks(tasks.map((task) => task.id)),
+      getPendingApprovalsForTasks(tasks.map((task) => task.id)),
+      // The viewer's read state, so a client marks a session read on open
+      // without the list row (the same rule as `GET /api/sessions`).
+      actor.kind === "user" && actor.userId
+        ? getSessionReadState(sessionRoot.id, actor.userId)
+        : Promise.resolve(null),
     ]);
     const decorate = (task: AgentTask) => ({
       ...task,
@@ -727,6 +1079,8 @@ export async function handleSessions(
       chain: chain.map(decorate),
       access,
       owner,
+      ...(approvals.length ? { approvals } : {}),
+      ...(read ?? {}),
     });
     return true;
   }

@@ -85,10 +85,12 @@ The plugin's [privacy](https://www.agent-swarm.dev/privacy) and
 [terms](https://www.agent-swarm.dev/terms) links describe the Agent Swarm website and
 Cloud service. The self-hosted software remains covered by the [MIT License](./LICENSE).
 
-Or self-host with the one-shot installer. It checks Docker and Compose v2, installs Bun when missing, runs `agent-swarm onboard --yes`, and prints the dashboard `/setup` link:
+Or self-host. [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) is the reference deployment: deploy every agent in it by default (1 lead and 11 workers on the official templates), and remove agents only when you have a reason to.
+
+The one-shot installer checks Docker and Compose v2, installs Bun when missing, runs `agent-swarm onboard --yes`, and prints the dashboard `/setup` link. It defaults to the single-agent `solo` preset, so pass `--preset full` for every official template (it runs one coder where the example runs two):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full
 ```
 
 Or use the examples directly:

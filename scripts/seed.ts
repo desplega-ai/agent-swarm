@@ -598,10 +598,178 @@ function seedMessages(
   console.log(`  ✓ Seeded ${total} messages across ${channels.length} channels`);
 }
 
+function seedSessionUsers(db: Database): string[] {
+  const stmt = db.prepare(`INSERT OR IGNORE INTO users
+    (id, name, email, status, createdAt, lastUpdatedAt) VALUES (?, ?, ?, 'active', ?, ?)`);
+  return ["Alex", "Morgan", "Sam"].map((name, i) => {
+    const id = seedId("user", i);
+    stmt.run(id, `${name} Demo`, `${name.toLowerCase()}@example.com`, daysAgo(30), now());
+    return id;
+  });
+}
+
+function seedSessionState(db: Database, userIds: string[], tasks: { id: string }[]): void {
+  const seededIds = new Set(tasks.map((task) => task.id));
+  const roots = db
+    .query<{ id: string; requestedByUserId: string | null; lastUpdatedAt: string }, []>(
+      "SELECT id, requestedByUserId, lastUpdatedAt FROM agent_tasks WHERE parentTaskId IS NULL ORDER BY createdAt DESC",
+    )
+    .all()
+    .filter((root) => seededIds.has(root.id));
+  const state = db.prepare(`INSERT OR IGNORE INTO inbox_item_state
+    (id, userId, itemType, itemId, status, snoozeUntil, lastReadAt, createdAt, lastUpdatedAt)
+    VALUES (?, ?, 'to_read', ?, ?, ?, ?, ?, ?)`);
+  for (const userId of userIds) {
+    const owned = roots.filter((r) => r.requestedByUserId === userId);
+    for (const [i, root] of owned.slice(0, 3).entries()) {
+      const status = ["done", "snoozed", "open"][i];
+      state.run(
+        seedId("inbox", root.id),
+        userId,
+        root.id,
+        status,
+        status === "snoozed" ? new Date(Date.now() + 3600000).toISOString() : null,
+        status === "open" ? now() : null,
+        now(),
+        now(),
+      );
+    }
+  }
+  const root = roots.find((root) => root.requestedByUserId);
+  if (root) {
+    const sharee = userIds.find((id) => id !== root.requestedByUserId)!;
+    db.prepare(`INSERT OR IGNORE INTO session_shares
+      (id, rootTaskId, userId, access, createdAt, created_by, updated_by)
+      VALUES (?, ?, ?, 'read', ?, ?, ?)`).run(
+      seedId("share", root.id),
+      root.id,
+      sharee,
+      now(),
+      root.requestedByUserId,
+      root.requestedByUserId,
+    );
+    // Long titles exercise session title truncation during QA.
+    db.prepare("UPDATE agent_tasks SET title = ? WHERE id = ?").run(
+      `Session ${"x".repeat(112)}`,
+      root.id,
+    );
+  }
+}
+
+/**
+ * Two sessions in the swarm's real turn shape, for the sessions v2 turn
+ * timeline (fixed ids, no faker, so the random seed above stays the same):
+ * a person writes, the lead replies, workers run (one fails and retries,
+ * one is superseded and resumed), each worker wakes the lead with a `system`
+ * follow-up, the lead waits on a `deferred` wake-up, and the last answer asks
+ * for an approval. The second session is one a schedule started, then a
+ * person replied, and a worker still waits in the queue.
+ */
+function seedTurnSessions(
+  db: Database,
+  agents: { id: string; isLead: boolean }[],
+  userIds: string[],
+): void {
+  const lead = agents.find((agent) => agent.isLead);
+  const [scout, forge] = agents.filter((agent) => !agent.isLead);
+  const [alex, morgan] = userIds;
+  if (!lead || !scout || !forge || !alex || !morgan) return;
+  const ago = (minutes: number) => secondsAgo(minutes * 60);
+  const insert = db.prepare(`INSERT OR IGNORE INTO agent_tasks
+    (id, agentId, task, status, source, taskType, parentTaskId, createdAt, lastUpdatedAt,
+     finishedAt, output, failureReason, "key", requestedByUserId, title)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  type Row = {
+    n: number;
+    agent: string | null;
+    task: string;
+    status: string;
+    source: string;
+    type?: string;
+    parent?: number;
+    start: number;
+    end?: number;
+    output?: string;
+    failure?: string;
+    user?: string;
+    title?: string;
+  };
+  const write = (key: string, rows: Row[]) => {
+    for (const row of rows) {
+      const finished = row.end === undefined ? null : ago(row.end);
+      insert.run(
+        seedId("turn-task", row.n),
+        row.agent,
+        row.task,
+        row.status,
+        row.source,
+        row.type ?? null,
+        row.parent === undefined ? null : seedId("turn-task", row.parent),
+        ago(row.start),
+        finished ?? ago(row.start),
+        finished,
+        row.output ?? null,
+        row.failure ?? null,
+        key,
+        row.user ?? null,
+        row.title ?? null,
+      );
+    }
+  };
+  const followUp = "Worker task completed, review needed.";
+
+  write("shared/northwind/pricing/", [
+    { n: 1, agent: lead.id, task: "Rewrite the pricing page for Q4. Three tiers, an annual discount, and a comparison table.", status: "completed", source: "ui", start: 180, end: 179, output: "Plan: research the competitor tiers and draft the copy in parallel. Starting both now.", user: alex, title: "Q4 pricing page rewrite" },
+    { n: 2, agent: scout.id, task: "Research competitor pricing tiers.", status: "completed", source: "mcp", type: "research", parent: 1, start: 178, end: 170, output: "Compared 6 competitors. 5 of 6 show annual pricing first. The median annual discount is 17%." },
+    { n: 3, agent: forge.id, task: "Draft the Q4 pricing copy.", status: "failed", source: "mcp", type: "content", parent: 1, start: 178, end: 175, failure: "Could not open the brand guide (permission denied on the shared drive)." },
+    { n: 4, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 3, start: 175, end: 175, output: "The draft failed on the brand guide. Sending it back to the Writer with the cached copy." },
+    { n: 5, agent: forge.id, task: "Draft the Q4 pricing copy with the cached brand guide.", status: "completed", source: "mcp", type: "content", parent: 4, start: 174, end: 161, output: "Draft v1: three tiers (Starter, Team, Scale), a feature table with 14 rows, and an FAQ with 6 questions." },
+    { n: 6, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 2, start: 170, end: 169, output: "Researcher finished. I merged the findings into the plan." },
+    { n: 7, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 5, start: 160, end: 159, output: "Draft v1 is ready. Annual pricing shows first, with a 17% discount. Morgan, can you review the copy?" },
+    { n: 8, agent: lead.id, task: "The Scale tier reads like enterprise. Can we call it Business and move SSO to Business only?", status: "completed", source: "ui", parent: 7, start: 120, end: 119, output: "Renaming Scale to Business and moving SSO. I will check with finance first, so I scheduled a wake-up.", user: morgan },
+    { n: 9, agent: lead.id, task: "Wake-up: check whether the finance numbers are final.", status: "completed", source: "schedule", type: "deferred", parent: 8, start: 90, end: 89, output: "Finance confirmed the numbers. Team goes from 29 to 32 per seat. Sending the change to the Writer." },
+    { n: 10, agent: forge.id, task: "Rename Scale to Business, move SSO, and set Team to 32 per seat.", status: "superseded", source: "mcp", type: "content", parent: 9, start: 88, end: 80 },
+    { n: 11, agent: forge.id, task: "Rename Scale to Business, move SSO, and set Team to 32 per seat.", status: "completed", source: "system", type: "resume", parent: 10, start: 80, end: 72, output: "Draft v2: Business tier, SSO only on Business, Team at 32 per seat." },
+    { n: 12, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 11, start: 71, end: 70, output: "Draft v2 is ready. Publishing needs an approval." },
+  ]);
+  write("shared/infra/", [
+    { n: 20, agent: lead.id, task: "Weekly dependency audit: list outdated packages and open security advisories.", status: "completed", source: "schedule", type: "scheduled", start: 300, end: 299, output: "Sending the audit to the Researcher.", user: alex, title: "Weekly dependency audit" },
+    { n: 21, agent: scout.id, task: "Audit the dependencies.", status: "completed", source: "mcp", type: "research", parent: 20, start: 299, end: 291, output: "2 minor bumps (zod, hono). No open advisories." },
+    { n: 22, agent: lead.id, task: followUp, status: "completed", source: "system", type: "follow-up", parent: 21, start: 290, end: 290, output: "The audit is clean: 2 minor bumps and no advisories." },
+    { n: 23, agent: lead.id, task: "Open a PR for the two bumps.", status: "completed", source: "ui", parent: 22, start: 200, end: 199, output: "Opening the PR. Sending the bumps to the Coder.", user: alex },
+    { n: 24, agent: forge.id, task: "Bump zod and hono, run the tests, and open a PR.", status: "pending", source: "mcp", type: "implementation", parent: 23, start: 199 },
+  ]);
+
+  db.prepare(`INSERT OR IGNORE INTO session_shares
+    (id, rootTaskId, userId, access, createdAt, created_by, updated_by)
+    VALUES (?, ?, ?, 'write', ?, ?, ?)`).run(
+    seedId("turn-share", 1),
+    seedId("turn-task", 1),
+    morgan,
+    now(),
+    alex,
+    alex,
+  );
+  // REPLACE: a re-seed brings the approval back to pending.
+  db.prepare(`INSERT OR REPLACE INTO approval_requests
+    (id, title, questions, sourceTaskId, approvers, status, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
+    seedId("turn-approval", 1),
+    "Publish the new pricing page?",
+    JSON.stringify([{ id: "publish", type: "approval", label: "Publish the new Q4 pricing page?" }]),
+    seedId("turn-task", 12),
+    JSON.stringify({ users: [alex], policy: "any" }),
+    ago(70),
+    ago(70),
+  );
+  console.log("  ✓ Seeded 2 turn-shaped sessions");
+}
+
 function seedTasks(
   db: Database,
   config: SeedConfig,
   agents: { id: string }[],
+  userIds: string[],
 ): { id: string; agentId: string | null }[] {
   const count = config.tasks.count;
 
@@ -611,9 +779,10 @@ function seedTasks(
       priority, dependsOn, createdAt, lastUpdatedAt, finishedAt,
       failureReason, output, progress,
       model, dir, parentTaskId, claudeSessionId,
-      vcsProvider, vcsRepo, vcsNumber, vcsEventType, vcsUrl, vcsAuthor
+      vcsProvider, vcsRepo, vcsNumber, vcsEventType, vcsUrl, vcsAuthor,
+      "key", requestedByUserId
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const logStmt = db.prepare(`
@@ -621,7 +790,14 @@ function seedTasks(
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
-  const seededTasks: { id: string; agentId: string | null; createdAt: string }[] = [];
+  const seededTasks: {
+    id: string;
+    agentId: string | null;
+    createdAt: string;
+    key: string;
+    requestedByUserId: string | null;
+  }[] = [];
+  const groups = ["shared/northwind/pricing/", "shared/northwind/ios/", "shared/infra/"];
 
   for (let i = 0; i < count; i++) {
     const template = generateTaskDescription();
@@ -632,22 +808,21 @@ function seedTasks(
     const priority = faker.number.int({ min: 20, max: 80 });
     // Second-resolution start, and a finish derived from it. Drawing the two
     // independently (as this used to) produced tasks that finished before they
-    // started, and multi-day bars on any duration-aware view. Starts are spread
-    // over 3 days so an 8h default window still lands on real activity.
+    // started, and multi-day bars on any duration-aware view. Most starts use
+    // three days; half the roots later use 30 days for older session activity.
     // A task still marked in_progress started recently — anything else is a
     // stalled run, not the common case, and would draw a days-long live bar.
-    const startedSecondsAgo =
+    let startedSecondsAgo =
       statusInfo.status === "in_progress"
         ? faker.number.int({ min: 30, max: 90 * 60 })
         : faker.number.int({ min: 30, max: 3 * 24 * 60 * 60 });
-    const createdAt = secondsAgo(startedSecondsAgo);
+    let createdAt = secondsAgo(startedSecondsAgo);
     const runSeconds = Math.min(sampleRunSeconds(), startedSecondsAgo);
-    const finishedAt = statusInfo.needsFinish ? secondsAgo(startedSecondsAgo - runSeconds) : null;
+    let finishedAt = statusInfo.needsFinish ? secondsAgo(startedSecondsAgo - runSeconds) : null;
     // Only a live task has been touched "now"; a queued one was last touched
     // when it was created. Views that infer an end time from lastUpdatedAt
     // otherwise stretch every pending task from its creation to the present.
-    const lastUpdatedAt =
-      finishedAt ?? (statusInfo.status === "in_progress" ? now() : createdAt);
+    let lastUpdatedAt = finishedAt ?? (statusInfo.status === "in_progress" ? now() : createdAt);
 
     let failureReason: string | null = null;
     let output: string | null = null;
@@ -661,7 +836,7 @@ function seedTasks(
       progress = `Working on ${faker.hacker.ingverb()} — ~${faker.number.int({ min: 10, max: 90 })}% done`;
     }
 
-    const source = faker.helpers.arrayElement(["mcp", "slack", "api"]);
+    let source = faker.helpers.arrayElement(["mcp", "slack", "api"]);
 
     // ~60% of tasks get a model
     const model = faker.datatype.boolean(0.6)
@@ -687,6 +862,27 @@ function seedTasks(
       parentCandidates.length >= 3 && faker.datatype.boolean(0.35)
         ? parentCandidates[faker.number.int({ min: 0, max: parentCandidates.length - 1 })].id
         : null;
+
+    const parent = seededTasks.find((t) => t.id === parentTaskId);
+    const grouped = i % 5 < 3;
+    const requestedByUserId = parent
+      ? parent.requestedByUserId
+      : grouped || i % 2 === 0
+        ? userIds[i % userIds.length]!
+        : null;
+    const group = groups[i % 4] ?? `personal/${requestedByUserId}/notes/`;
+    const key = parent?.key ?? (grouped ? group : `shared/task:${id}/`);
+    if (!parentTaskId) {
+      if (requestedByUserId) source = "ui";
+      if (i % 2 === 0 && statusInfo.status !== "in_progress") {
+        startedSecondsAgo = faker.number.int({ min: 30, max: 30 * 24 * 60 * 60 });
+        createdAt = secondsAgo(startedSecondsAgo);
+        finishedAt = statusInfo.needsFinish
+          ? secondsAgo(startedSecondsAgo - Math.min(runSeconds, startedSecondsAgo))
+          : null;
+        lastUpdatedAt = finishedAt ?? createdAt;
+      }
+    }
 
     // ~25% of in_progress/completed tasks get a claudeSessionId
     const claudeSessionId =
@@ -750,10 +946,12 @@ function seedTasks(
       vcsEventType,
       vcsUrl,
       vcsAuthor,
+      key,
+      requestedByUserId,
     );
 
     logStmt.run(seedId("log", `task:${i}`), "task_created", creator.id, id, statusInfo.status, createdAt);
-    seededTasks.push({ id, agentId: agent?.id ?? null, createdAt });
+    seededTasks.push({ id, agentId: agent?.id ?? null, createdAt, key, requestedByUserId });
   }
 
   console.log(`  ✓ Seeded ${count} tasks`);
@@ -1757,7 +1955,9 @@ async function main(): Promise<void> {
   const agents = seedAgents(db, config);
   const channels = seedChannels(db, config, agents);
   seedMessages(db, config, agents, channels);
-  const tasks = seedTasks(db, config, agents);
+  const userIds = seedSessionUsers(db);
+  const tasks = seedTasks(db, config, agents, userIds);
+  seedSessionState(db, userIds, tasks);
   seedSessionLogs(db, config, tasks);
   seedContextSnapshots(db, config, tasks);
   seedWorkflows(db, config);
@@ -1765,6 +1965,8 @@ async function main(): Promise<void> {
   seedMemories(db, config, agents);
   seedServices(db, config, agents);
   seedMcpServers(db, config, agents);
+  // Last, and without faker: the random seed above stays the same.
+  seedTurnSessions(db, agents, userIds);
 
   db.close();
 

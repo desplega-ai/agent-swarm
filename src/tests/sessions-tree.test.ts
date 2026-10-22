@@ -1,0 +1,493 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { createServer, type Server } from "node:http";
+import { keyPrefixRange, sessionGroupKey } from "../assets/key";
+import {
+  closeDb,
+  countSessions,
+  createTaskExtended,
+  createUser,
+  getDbClient,
+  initDb,
+  listRecentSessions,
+  upsertInboxState,
+} from "../be/db";
+import { getSessionTree, type SessionFilters } from "../be/db/session-tree";
+import { setSessionShares } from "../be/session-shares";
+import { handleSessions } from "../http/sessions";
+import { getPathSegments, parseQueryParams } from "../http/utils";
+import { beginRequestAuthScope, setRequestAuth } from "../utils/request-auth-context";
+import { listenOnFreePort } from "./test-net";
+
+const NOW = "2026-10-21T12:00:00.000Z";
+const RECENT = "2026-10-20T12:00:00.000Z";
+const OLD = "2026-10-01T12:00:00.000Z";
+let owner: { id: string };
+let other: { id: string };
+let server: Server;
+let baseUrl: string;
+const actor = () => ({ kind: "user", userId: owner.id }) as const;
+const filters = (extra: SessionFilters & { limit?: number } = {}) => ({
+  viewer: { userId: owner.id, scope: "mine" } as const,
+  now: NOW,
+  ...extra,
+});
+
+beforeAll(async () => {
+  initDb(":memory:");
+  owner = await createUser({ name: "Owner" });
+  other = await createUser({ name: "Other" });
+  server = createServer(async (req, res) => {
+    try {
+      beginRequestAuthScope();
+      setRequestAuth(req, { kind: "operator", fingerprint: "sessions-tree-test" });
+      if (
+        await handleSessions(
+          req,
+          res,
+          getPathSegments(req.url ?? ""),
+          parseQueryParams(req.url ?? ""),
+        )
+      )
+        return;
+      res.writeHead(404).end();
+    } catch (error) {
+      res.writeHead(500).end(String(error));
+    }
+  });
+  baseUrl = `http://127.0.0.1:${await listenOnFreePort(server)}`;
+});
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM approval_requests");
+  await getDbClient().run("DELETE FROM inbox_item_state");
+  await getDbClient().run("DELETE FROM session_shares");
+  await getDbClient().run("DELETE FROM agent_tasks");
+});
+afterAll(async () => {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  closeDb();
+});
+
+async function task(
+  key = "shared/a/",
+  extra: Parameters<typeof createTaskExtended>[1] = {},
+  activity = RECENT,
+) {
+  const root = await createTaskExtended("Session test", {
+    key,
+    requestedByUserId: owner.id,
+    ...extra,
+  });
+  await getDbClient().run(
+    "UPDATE agent_tasks SET lastUpdatedAt = ?, status = 'completed' WHERE id = ?",
+    [activity, root.id],
+  );
+  return root;
+}
+async function state(
+  id: string,
+  status: "open" | "done" | "snoozed" | "dismissed",
+  lastUpdatedAt = NOW,
+  extra: { lastReadAt?: string; snoozeUntil?: string } = {},
+) {
+  await upsertInboxState({ userId: owner.id, itemType: "to_read", itemId: id, status, ...extra });
+  await getDbClient().run("UPDATE inbox_item_state SET lastUpdatedAt = ? WHERE itemId = ?", [
+    lastUpdatedAt,
+    id,
+  ]);
+}
+async function share(
+  root: { id: string; requestedByUserId?: string },
+  users = [{ userId: owner.id, access: "read" as const }],
+) {
+  await setSessionShares(
+    { id: root.id, requestedByUserId: root.requestedByUserId ?? null },
+    { everyone: "none", users },
+    other.id,
+  );
+}
+async function pending(taskId: string, status = "pending") {
+  const id = crypto.randomUUID();
+  await getDbClient().run(
+    `INSERT INTO approval_requests (id, sourceTaskId, title, questions, approvers, status)
+    VALUES (?, ?, 'Approve deploy', '[]', '{}', ?)`,
+    [id, taskId, status],
+  );
+  return id;
+}
+async function ids(extra: SessionFilters) {
+  return (await listRecentSessions(filters(extra))).map((s) => s.root.id).sort();
+}
+
+describe("session groups and prefix bounds", () => {
+  test("leaf helpers preserve group names and namespace roots", () => {
+    expect(keyPrefixRange("shared/a/")).toEqual({ lo: "shared/a/", hi: "shared/a0" });
+    for (const kind of ["task", "thread", "schedule", "workflow"]) {
+      expect(sessionGroupKey(`shared/a/${kind}:abc/`)).toBe("shared/a/");
+    }
+    for (const key of [
+      "shared/release:v2/",
+      "shared/mytask:abc/",
+      "shared/a/",
+      `personal/${owner.id}/`,
+    ]) {
+      expect(sessionGroupKey(key)).toBe(key);
+    }
+  });
+  test("non-BMP group keys agree between the tree count and the exact-group list", async () => {
+    const group = "shared/🚀/";
+    const leaf = await task(`${group}task:a/`);
+    const root = await task(group);
+    await task(`${group}b/`);
+    expect(await ids({ groupKey: group })).toEqual([leaf.id, root.id].sort());
+    const headers = { "x-swarm-user-id": owner.id };
+    const tree = (await (
+      await fetch(`${baseUrl}/api/session-tree`, { headers })
+    ).json()) as Awaited<ReturnType<typeof getSessionTree>>;
+    const total = tree.groups.find((g) => g.key === group)!.total;
+    const response = await fetch(
+      `${baseUrl}/api/sessions?scope=tree&groupKey=${encodeURIComponent(group)}`,
+      { headers },
+    );
+    const body = (await response.json()) as { total: number; sessions: unknown[] };
+    expect(total).toBe(2);
+    expect(body.total).toBe(total);
+    expect(body.sessions).toHaveLength(total);
+  });
+  test("exact group differs from prefix and the planner avoids a root table scan", async () => {
+    const a = await task();
+    const leaf = await task("shared/a/task:abc/");
+    const nested = await task("shared/a/b/");
+    await task("shared/ab/");
+    expect(await ids({ groupKey: "shared/a/" })).toEqual([a.id, leaf.id].sort());
+    expect(await ids({ keyPrefix: "shared/a/" })).toEqual([a.id, leaf.id, nested.id].sort());
+    expect(await countSessions(filters({ groupKey: "shared/a/" }))).toBe(2);
+    const client = getDbClient();
+    const query = spyOn(client, "query");
+    let call: (typeof query.mock.calls)[number];
+    try {
+      await listRecentSessions(filters({ groupKey: "shared/a/" }));
+      call = query.mock.calls[0]!;
+    } finally {
+      query.mockRestore();
+    }
+    const [sql, params] = call;
+    const plan = await client.query<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, params);
+    expect(plan.some((p) => p.detail.startsWith("SEARCH r USING INDEX"))).toBe(true);
+    expect(plan.some((p) => p.detail === "SCAN r")).toBe(false);
+    expect(sql).not.toContain("INDEXED BY");
+    expect(sql).not.toContain('"key" LIKE');
+  });
+  test("No group includes shared and my personal namespace, including leaves", async () => {
+    const a = await task("shared/");
+    const b = await task(`personal/${owner.id}/thread:abc/`);
+    await task(`personal/${other.id}/`);
+    await task("shared/release:v2/");
+    expect(await ids({ noGroup: true })).toEqual([a.id, b.id].sort());
+  });
+});
+
+describe("chain-wide read state", () => {
+  test("every CASE branch uses the fixed clock and chain activity", async () => {
+    const cases = [
+      { activity: RECENT, expected: "unread" },
+      { activity: OLD, expected: "read" },
+      { activity: "2026-10-14T12:00:00.000Z", expected: "read" },
+      { status: "dismissed", updated: OLD, expected: "done" },
+      { status: "done", updated: NOW, expected: "done" },
+      { status: "done", updated: OLD, expected: "unread" },
+      { status: "snoozed", snoozeUntil: "2026-10-22T12:00:00.000Z", expected: "later" },
+      { status: "snoozed", snoozeUntil: NOW, expected: "unread" },
+      { status: "snoozed", expected: "unread" },
+      { status: "open", updated: OLD, expected: "unread" },
+      { status: "open", updated: NOW, expected: "read" },
+      { status: "open", updated: NOW, lastReadAt: OLD, expected: "unread" },
+      { status: "open", updated: OLD, lastReadAt: RECENT, expected: "read" },
+    ] as const;
+    for (const fixture of cases) {
+      const root = await task("shared/a/", {}, "activity" in fixture ? fixture.activity : RECENT);
+      if ("status" in fixture)
+        await state(root.id, fixture.status, "updated" in fixture ? fixture.updated : NOW, {
+          ...("lastReadAt" in fixture ? { lastReadAt: fixture.lastReadAt } : {}),
+          ...("snoozeUntil" in fixture ? { snoozeUntil: fixture.snoozeUntil } : {}),
+        });
+      const row = (await listRecentSessions(filters({ limit: 100 }))).find(
+        (s) => s.root.id === root.id,
+      )!;
+      expect({ id: root.id, state: row.readState }).toEqual({
+        id: root.id,
+        state: fixture.expected,
+      });
+    }
+    const root = await task("shared/a/", {}, OLD);
+    await task("shared/a/", { parentTaskId: root.id }, RECENT);
+    expect(
+      (await listRecentSessions(filters({ limit: 100 }))).find((s) => s.root.id === root.id)
+        ?.readState,
+    ).toBe("unread");
+    const tree = await getSessionTree(actor(), NOW);
+    const rows = await listRecentSessions(filters({ limit: 100 }));
+    expect(tree.inbox.unread).toBe(rows.filter((s) => s.readState === "unread").length);
+    expect(tree.later.total).toBe(rows.filter((s) => s.readState === "later").length);
+    expect(tree.done.total).toBe(rows.filter((s) => s.readState === "done").length);
+  });
+  test("Later and Done leave group, prefix, No group and Inbox lists", async () => {
+    const read = await task("shared/");
+    const later = await task("shared/");
+    const laterFirst = await task("shared/");
+    const done = await task("shared/");
+    await state(later.id, "snoozed", NOW, { snoozeUntil: "2026-10-23T12:00:00.000Z" });
+    await state(laterFirst.id, "snoozed", NOW, { snoozeUntil: "2026-10-22T12:00:00.000Z" });
+    await state(done.id, "done");
+    for (const extra of [
+      { noGroup: true },
+      { groupKey: "shared/" },
+      { keyPrefix: "shared/" },
+      { triage: "inbox" as const },
+    ]) {
+      expect(await ids(extra)).toEqual([read.id]);
+      expect(await countSessions(filters(extra))).toBe(1);
+    }
+    expect((await listRecentSessions(filters({ triage: "later" }))).map((s) => s.root.id)).toEqual([
+      laterFirst.id,
+      later.id,
+    ]);
+    expect(await ids({ triage: "done" })).toEqual([done.id]);
+    const tree = await getSessionTree(actor(), NOW);
+    expect(tree.noGroup.total).toBe(1);
+    expect(tree.inbox.total).toBe(1);
+  });
+});
+
+test("needs attention uses the latest failed status and pending approvals anywhere in the chain", async () => {
+  const failed = await task();
+  const child = await task("shared/a/", { parentTaskId: failed.id }, NOW);
+  await getDbClient().run("UPDATE agent_tasks SET status = 'failed' WHERE id = ?", [child.id]);
+  const readFailed = await task();
+  await getDbClient().run("UPDATE agent_tasks SET status = 'failed' WHERE id = ?", [readFailed.id]);
+  await state(readFailed.id, "open", NOW, { lastReadAt: NOW });
+  const approved = await task();
+  const approvalChild = await task("shared/a/", { parentTaskId: approved.id }, NOW);
+  const approvalId = await pending(approvalChild.id);
+  const resolved = await task();
+  await pending(resolved.id, "approved");
+  expect(await ids({ status: "needs" })).toEqual([failed.id, approved.id].sort());
+  expect(await ids({ status: "failed" })).toEqual([failed.id, readFailed.id].sort());
+  expect(await countSessions(filters({ status: "needs" }))).toBe(2);
+  const response = await fetch(`${baseUrl}/api/sessions/${approved.id}`);
+  expect(((await response.json()) as { approvals: unknown[] }).approvals).toEqual([
+    { id: approvalId, status: "pending", sourceTaskId: approvalChild.id, title: "Approve deploy" },
+  ]);
+  expect((await getSessionTree(actor(), NOW)).inbox.needsYou).toBe(2);
+});
+
+test("running and person filters examine descendants after aggregation", async () => {
+  const roots = [];
+  for (const status of ["pending", "in_progress"]) {
+    const root = await task();
+    const child = await task(
+      "shared/a/",
+      { parentTaskId: root.id, requestedByUserId: other.id },
+      NOW,
+    );
+    await getDbClient().run("UPDATE agent_tasks SET status = ? WHERE id = ?", [status, child.id]);
+    roots.push(root.id);
+  }
+  await task();
+  expect(await ids({ status: "running" })).toEqual(roots.sort());
+  expect(await ids({ withUserId: other.id })).toEqual(roots.sort());
+  const shared = await task();
+  await share(shared, [{ userId: other.id, access: "read" }]);
+  expect(await ids({ withUserId: other.id })).toEqual([...roots, shared.id].sort());
+  expect(await countSessions(filters({ withUserId: other.id }))).toBe(3);
+});
+
+test("people are distinct, requester first, capped at 8, with batched shares and previews", async () => {
+  const root = await task();
+  const members: { id: string }[] = [];
+  for (let i = 0; i < 9; i++) {
+    const user = await createUser({ name: `Member ${i}` });
+    members.push(user);
+    await task("shared/a/", { parentTaskId: root.id, requestedByUserId: user.id }, RECENT);
+  }
+  await share(root, [{ userId: other.id, access: "read" }]);
+  const output = await task("shared/a/", { parentTaskId: root.id }, NOW);
+  await getDbClient().run("UPDATE agent_tasks SET output = ? WHERE id = ?", [
+    "p".repeat(250),
+    output.id,
+  ]);
+  const review = await task(
+    "shared/a/",
+    { parentTaskId: root.id, source: "system", taskType: "follow-up" },
+    "2026-10-22T00:00:00.000Z",
+  );
+  await getDbClient().run("UPDATE agent_tasks SET output = 'auto review' WHERE id = ?", [
+    review.id,
+  ]);
+  const empty = await task("shared/b/");
+  for (const value of ["", "   "]) {
+    const blank = await task("shared/a/", { parentTaskId: root.id }, "2026-10-23T00:00:00.000Z");
+    await getDbClient().run("UPDATE agent_tasks SET output = ? WHERE id = ?", [value, blank.id]);
+  }
+  await getDbClient().run("UPDATE agent_tasks SET output = '   ' WHERE id = ?", [empty.id]);
+  const query = spyOn(getDbClient(), "query");
+  let rows: Awaited<ReturnType<typeof listRecentSessions>>;
+  let calls: number;
+  try {
+    rows = await listRecentSessions(filters());
+    calls = query.mock.calls.length;
+  } finally {
+    query.mockRestore();
+  }
+  expect(calls).toBe(3);
+  const row = rows.find((s) => s.root.id === root.id)!;
+  expect(row.people).toHaveLength(8);
+  expect(row.people![0]).toEqual({ id: owner.id, name: "Owner" });
+  expect(row.peopleCount).toBe(11);
+  expect(row.people!.slice(1).every((p) => members.some((m) => m.id === p.id))).toBe(true);
+  expect(row.shared).toBe(true);
+  expect(row.shares).toEqual([{ userId: other.id, name: "Other", access: "read" }]);
+  expect(row.preview).toBe("p".repeat(200));
+  expect(rows.find((s) => s.root.id === empty.id)).toMatchObject({
+    shared: false,
+    shares: [],
+    preview: null,
+  });
+});
+
+test("tree visibility includes mine and shares, excludes ownerless, and preserves Done-only groups", async () => {
+  const mine = await task("shared/a/");
+  const shared = await task(`personal/${other.id}/notes/`, { requestedByUserId: other.id });
+  await share(shared);
+  await task("shared/private/", { requestedByUserId: other.id });
+  await task("shared/ownerless/", { requestedByUserId: undefined });
+  const done = await task("shared/finished/");
+  await state(done.id, "done");
+  const tree = await getSessionTree(actor(), NOW);
+  expect(tree.groups.map((g) => g.key).sort()).toEqual(
+    ["shared/a/", `personal/${other.id}/notes/`, "shared/finished/"].sort(),
+  );
+  expect(tree.groups.find((g) => g.key === "shared/finished/")?.total).toBe(0);
+  expect(tree.inbox.total).toBe(2);
+  for (const group of tree.groups) {
+    expect(group.total).toBe(
+      await countSessions(
+        filters({ viewer: { userId: owner.id, scope: "all" }, groupKey: group.key }),
+      ),
+    );
+  }
+  expect((await getSessionTree({ kind: "bypass" }, NOW)).inbox.total).toBe(5);
+  const bypassRows = await listRecentSessions();
+  expect(bypassRows).toHaveLength(5);
+  expect(bypassRows.every((r) => r.readState === undefined)).toBe(true);
+  const route = await fetch(`${baseUrl}/api/session-tree`, {
+    headers: { "x-swarm-user-id": owner.id },
+  });
+  expect(route.status).toBe(200);
+  expect(((await route.json()) as Awaited<ReturnType<typeof getSessionTree>>).inbox.total).toBe(2);
+  expect(await ids({ triage: "inbox" })).toEqual([mine.id]);
+});
+
+test("tree scope list totals match sections while default scope includes ownerless roots", async () => {
+  await task("shared/a/");
+  await task("shared/");
+  const later = await task("shared/a/");
+  await task("shared/a/", { requestedByUserId: undefined });
+  await task("shared/", { requestedByUserId: undefined });
+  const ownerlessLater = await task("shared/a/", { requestedByUserId: undefined });
+  const snoozeUntil = new Date(Date.now() + 86400000).toISOString();
+  for (const root of [later, ownerlessLater]) {
+    await state(root.id, "snoozed", NOW, { snoozeUntil });
+  }
+  const headers = { "x-swarm-user-id": owner.id };
+  const response = await fetch(`${baseUrl}/api/session-tree`, { headers });
+  const tree = (await response.json()) as Awaited<ReturnType<typeof getSessionTree>>;
+  const comparisons = [
+    ["triage=inbox", tree.inbox.total, 2],
+    ["noGroup=true", tree.noGroup.total, 1],
+    ["groupKey=shared/a/", tree.groups.find((g) => g.key === "shared/a/")!.total, 1],
+    ["triage=later", tree.later.total, 1],
+  ] as const;
+  for (const [params, expected, ownerless] of comparisons) {
+    const scoped = await fetch(`${baseUrl}/api/sessions?scope=tree&${params}`, { headers });
+    const body = (await scoped.json()) as { total: number; sessions: unknown[] };
+    expect(body.total).toBe(expected);
+    expect(body.sessions).toHaveLength(expected);
+    const legacy = await fetch(`${baseUrl}/api/sessions?${params}`, { headers });
+    expect(((await legacy.json()) as { total: number }).total).toBe(expected + ownerless);
+  }
+  const bypass = await fetch(`${baseUrl}/api/sessions?scope=tree`);
+  const body = (await bypass.json()) as { total: number; sessions: { readState?: string }[] };
+  expect(body.total).toBe(6);
+  expect(body.sessions.every((row) => row.readState === undefined)).toBe(true);
+  for (const scope of ["mine", "shared"]) {
+    const response = await fetch(`${baseUrl}/api/sessions?scope=${scope}`);
+    expect(((await response.json()) as { total: number }).total).toBe(0);
+  }
+});
+
+test("session detail carries the viewer's read state with the list rule", async () => {
+  // The route reads the real clock, so the activity sits inside the 7-day window.
+  const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+  const root = await task("shared/a/", {}, new Date(Date.now() - 7_200_000).toISOString());
+  const child = await task("shared/a/", { parentTaskId: root.id }, hourAgo);
+  const headers = { "x-swarm-user-id": owner.id };
+  type Detail = { readState?: string; lastActivityAt?: string };
+  const detail = async (id: string, init?: RequestInit) =>
+    (await (await fetch(`${baseUrl}/api/sessions/${id}`, init)).json()) as Detail;
+  const listRow = async () => {
+    const res = await fetch(`${baseUrl}/api/sessions?scope=tree&limit=50`, { headers });
+    const body = (await res.json()) as {
+      sessions: { root: { id: string }; readState?: string; lastActivityAt: string }[];
+    };
+    return body.sessions.find((row) => row.root.id === root.id)!;
+  };
+
+  // Chain activity, not the root's own, decides it: the same row as the list.
+  const unread = await detail(root.id, { headers });
+  expect(unread).toMatchObject({ readState: "unread", lastActivityAt: hourAgo });
+  const row = await listRow();
+  expect({ readState: row.readState, lastActivityAt: row.lastActivityAt }).toEqual({
+    readState: unread.readState,
+    lastActivityAt: unread.lastActivityAt,
+  });
+
+  await state(root.id, "done", new Date().toISOString());
+  expect((await detail(root.id, { headers })).readState).toBe("done");
+  // A child id opens the same session, with the root's state.
+  expect((await detail(child.id, { headers })).readState).toBe("done");
+
+  // No picked user: no one to read for, so both fields stay out.
+  const bypass = await detail(root.id);
+  expect(bypass.readState).toBeUndefined();
+  expect(bypass.lastActivityAt).toBeUndefined();
+});
+
+test("limit clamps to 200 and count without chain filters does not recurse", async () => {
+  await getDbClient().transaction(async () => {
+    for (let i = 0; i < 205; i++)
+      await getDbClient().run(
+        `INSERT INTO agent_tasks
+      (id, task, status, "key", requestedByUserId, createdAt, lastUpdatedAt)
+      VALUES (?, 'Paging', 'completed', 'shared/a/', ?, ?, ?)`,
+        [crypto.randomUUID(), owner.id, RECENT, RECENT],
+      );
+  });
+  const query = spyOn(getDbClient(), "get");
+  let total: number;
+  let sql: string;
+  try {
+    total = await countSessions(filters());
+    sql = query.mock.calls[0]![0];
+  } finally {
+    query.mockRestore();
+  }
+  expect(total).toBe(205);
+  expect(sql).not.toContain("RECURSIVE");
+  const res = await fetch(`${baseUrl}/api/sessions?limit=500`);
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { limit: number; sessions: unknown[]; total: number };
+  expect(body.limit).toBe(200);
+  expect(body.sessions).toHaveLength(200);
+  expect(body.total).toBe(205);
+});

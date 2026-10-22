@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import pkg from "../../package.json";
-import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
+import { defaultAssetKey, normalizeAssetKey, sessionGroupKey } from "../assets/key";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -195,7 +195,19 @@ import {
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { getDb, getDbClient } from "./db/runtime";
-import { type SessionViewer, sessionViewerCondition } from "./db/session-visibility";
+import {
+  assertAssetKeyMovesAllowed,
+  configureSessionMoveDependencies,
+  moveTaskChainKeyInTx,
+} from "./db/session-moves";
+import {
+  type SessionFilters,
+  type SessionReadState,
+  type SessionRowFields,
+  sessionCountQuery,
+  sessionPageFields,
+  sessionSummaryQuery,
+} from "./db/session-tree";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -269,6 +281,7 @@ export { recordKeySeatMismatch } from "./db/api-keys";
 export {
   type ApprovalRequestSummary,
   type ApprovalVote,
+  getPendingApprovalsForTasks,
   getPendingApprovalVoteState,
   listApprovalRequestSummaries,
   recordApprovalVotes,
@@ -281,6 +294,11 @@ export {
   getLatestContextVersion,
 } from "./db/context-versions";
 export { getScriptRunExecutionArgs } from "./db/script-runs";
+export {
+  AssetKeyMovesBlockedError,
+  assertAssetKeyMovesAllowed,
+  moveTaskChainKeyInTx,
+} from "./db/session-moves";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -300,6 +318,7 @@ export {
 export {
   type ExistingTrackerContextWork,
   type ExistingTrackerContextWorkReason,
+  findActiveTasksByVcs,
   findCompletedTaskInThread,
   findExistingLinearTrackerContextWork,
   findRecentCancelledTaskInThread,
@@ -387,6 +406,11 @@ configureTaskWriteDependencies({
   cascadeFailDependents: (...args) => cascadeFailDependents(...args),
 });
 
+configureSessionMoveDependencies({
+  auditAssetKeys: () => auditAssetKeys(getDb()),
+  insertAssetKeyHistory: (...args) => insertAssetKeyHistory(...args),
+});
+
 configureTaskReadDependencies({
   checkDependencies: (taskId) => checkDependencies(taskId),
   assetKeyPrefixPattern: (input) => assetKeyPrefixPattern(input),
@@ -400,7 +424,7 @@ type TaskTelemetryContext = {
 };
 
 /** LIKE pattern matching strings that start with `prefix` literally (use with `ESCAPE '\\'`). */
-function literalPrefixPattern(prefix: string): string {
+export function literalPrefixPattern(prefix: string): string {
   return `${prefix.replace(/[\\%_]/g, "\\$&")}%`;
 }
 
@@ -1060,7 +1084,7 @@ export async function setSlackMessageTracking(
 export async function updateTaskVcs(
   taskId: string,
   vcs: {
-    vcsProvider: "github" | "gitlab" | "azure-devops";
+    vcsProvider: "github" | "gitlab" | "azure-devops" | "bitbucket";
     vcsRepo: string;
     vcsNumber: number;
     vcsUrl: string;
@@ -1742,17 +1766,7 @@ export async function moveAssetKey(input: {
   descendantTaskIds?: readonly string[];
 }): Promise<false | { movedTaskIds?: string[] }> {
   const key = normalizeAssetKey(input.key);
-  // auditAssetKeys stays sync (shared with the boot audit); run it inside a
-  // client transaction so this request-path read cannot observe another
-  // request's uncommitted writes on the shared connection.
-  const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()), {
-    readOnly: true,
-  });
-  if (!audit.ok) {
-    throw new Error(
-      "Asset namespace moves are blocked until structural errors, unknown personal users, or provider mapping drift are repaired.",
-    );
-  }
+  await assertAssetKeyMovesAllowed();
   const previousKey = await currentAssetKey(input.entityType, input.id);
   if (!previousKey) return false;
   if (previousKey === key && input.entityType !== "task") return {};
@@ -1769,60 +1783,13 @@ export async function moveAssetKey(input: {
   return getDbClient().transaction(async (tx) => {
     switch (input.entityType) {
       case "task": {
-        const root = await getTaskById(input.id);
-        if (!root) return false;
-        const tasks = [root];
-        for (const id of input.descendantTaskIds ?? []) {
-          const task = id === root.id ? null : await getTaskById(id);
-          if (task) tasks.push(task);
-        }
-        const movedTaskIds: string[] = [];
-        for (const task of tasks) {
-          if (task.key === key) continue;
-          // A file shared with another task keeps the namespace of the task whose attachment
-          // sources its mapping. Mappings with no attachment source follow any attaching task.
-          const mappedFiles = await tx.query<{ id: string; key: string }>(
-            `SELECT DISTINCT m.id, m."key" AS key
-             FROM asset_key_mappings m
-             JOIN task_attachments a
-               ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
-              AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
-              AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
-              AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-             WHERE a.task_id = ?
-               AND (m.source_entity_type IS NOT 'task-attachment'
-                 OR m.source_entity_id IN (SELECT id FROM task_attachments WHERE task_id = ?))`,
-            [task.id, task.id],
-          );
-          // The namespace is metadata, and lastUpdatedAt tracks task activity, as in updateTaskTitle.
-          await tx.run('UPDATE agent_tasks SET "key" = ?, updated_by = ? WHERE id = ?', [
-            key,
-            input.changedBy ?? null,
-            task.id,
-          ]);
-          for (const mapping of mappedFiles) {
-            if (mapping.key === key) continue;
-            await tx.run(
-              'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
-              [key, now, input.changedBy ?? null, mapping.id],
-            );
-            await insertAssetKeyHistory({
-              entityType: "file",
-              entityId: mapping.id,
-              previousKey: mapping.key,
-              newKey: key,
-              changedBy: input.changedBy,
-            });
-          }
-          await insertAssetKeyHistory({
-            entityType: "task",
-            entityId: task.id,
-            previousKey: task.key,
-            newKey: key,
-            changedBy: input.changedBy,
-          });
-          movedTaskIds.push(task.id);
-        }
+        const movedTaskIds = await moveTaskChainKeyInTx(
+          input.id,
+          input.descendantTaskIds ?? [],
+          key,
+          input.changedBy,
+        );
+        if (movedTaskIds === false) return false;
         return { movedTaskIds };
       }
       case "workflow":
@@ -2605,7 +2572,7 @@ export async function createTaskExtended(
       }
 
       // VCS identity (GitHub / GitLab issue / PR / MR + webhook routing)
-      // Webhook handlers locate active work via `findTaskByVcs(repo, number)`,
+      // Webhook handlers locate active work via `findTaskByVcs(repo, number, provider)`,
       // so a resume / follow-up child MUST carry the full VCS identity or
       // subsequent review/update events get dropped.
       if (parent.vcsProvider && !options.vcsProvider) {
@@ -12921,7 +12888,7 @@ export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]>
   return rows.map(rowToAgentTask);
 }
 
-export interface SessionListItem {
+export interface SessionListItem extends SessionRowFields {
   root: AgentTask;
   chainTaskCount: number;
   lastActivityAt: string;
@@ -12934,42 +12901,18 @@ export interface SessionListItem {
  * The session list only renders a brief of the root; the full root + chain are
  * on `GET /api/sessions/{rootTaskId}`.
  */
-export interface SessionListItemSummary {
+export interface SessionListItemSummary extends SessionRowFields {
   root: AgentTaskSummary;
   chainTaskCount: number;
   lastActivityAt: string;
   latestStatus: AgentTaskStatus;
 }
 
-/**
- * List the most recent sessions ordered by chain-wide latest activity.
- * A "session" here is any task with `parentTaskId IS NULL` — its descendants
- * (children, grand-children, …) are summarized via the recursive CTE.
- *
- * Single-pass CTE: seeds with root tasks matching the filter, walks the full
- * descendant tree once, then aggregates chainCount / lastActivityAt /
- * latestStatus in two lightweight non-recursive CTEs — replacing the original
- * pattern of 3 correlated subqueries each re-running the recursion per row.
- */
-interface ListRecentSessionsOpts {
+interface ListRecentSessionsOpts extends SessionFilters {
   limit?: number;
   offset?: number;
-  /** Filter to root tasks whose `source` is in this list. Empty/undefined → no source filter. */
-  source?: string[];
-  /** Case-insensitive substring match against `r.task`. */
-  q?: string;
-  /** When set, restrict to root tasks where `requestedByUserId` equals this value. NULL rows are excluded. */
-  requestedByUserId?: string;
-  /**
-   * When set, restrict to root tasks whose `contextKey` starts with this
-   * literal prefix (`%`, `_` and `\` are escaped). Powers the UI contextual
-   * session panel's per-page dropdown.
-   */
-  contextKeyPrefix?: string;
-  /** When true, return slim `SessionListItemSummary` rows (default: full). */
+  /** Return a slim root task summary instead of the full task. */
   slim?: boolean;
-  /** Restrict to sessions this viewer may open (session sharing). */
-  viewer?: SessionViewer;
 }
 
 export async function listRecentSessions(
@@ -12979,149 +12922,50 @@ export async function listRecentSessions(
   opts: ListRecentSessionsOpts & { slim: true },
 ): Promise<SessionListItemSummary[]>;
 export async function listRecentSessions(
-  opts?: ListRecentSessionsOpts,
+  opts: ListRecentSessionsOpts = {},
 ): Promise<SessionListItem[] | SessionListItemSummary[]> {
-  const limit = opts?.limit ?? 25;
-  const offset = opts?.offset ?? 0;
-  const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
-  const q = opts?.q?.trim();
-  const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
-
-  const conditions: string[] = ["r.parentTaskId IS NULL"];
-  const params: (string | number | null)[] = [];
-
-  if (sources.length > 0) {
-    conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
-    params.push(...sources);
-  }
-  if (q && q.length > 0) {
-    conditions.push("(lower(r.task) LIKE ? OR lower(COALESCE(r.title, '')) LIKE ?)");
-    const like = `%${q.toLowerCase()}%`;
-    params.push(like, like);
-  }
-  if (requestedByUserId) {
-    conditions.push("r.requestedByUserId = ?");
-    params.push(requestedByUserId);
-  }
-  if (opts?.contextKeyPrefix) {
-    conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
-    params.push(literalPrefixPattern(opts.contextKeyPrefix));
-  }
-  if (opts?.viewer) {
-    const viewer = sessionViewerCondition(opts.viewer);
-    conditions.push(viewer.sql);
-    params.push(...viewer.params);
-  }
-  params.push(limit, offset);
-
+  const query = sessionSummaryQuery(opts);
   const rootRows = await getDbClient().query<
-    AgentTaskRow & { __chainCount: number; __lastActivityAt: string; __latestStatus: string }
+    AgentTaskRow & {
+      __chainCount: number;
+      __lastActivityAt: string;
+      __latestStatus: AgentTaskStatus;
+      __readState: SessionReadState | null;
+      __snoozeUntil: string | null;
+      __needsYou: number;
+    }
   >(
-    `WITH RECURSIVE chain(root_id, id, lastUpdatedAt, status) AS (
-         SELECT r.id, r.id, r.lastUpdatedAt, r.status
-         FROM agent_tasks r
-         WHERE ${conditions.join(" AND ")}
-         UNION ALL
-         SELECT c.root_id, t.id, t.lastUpdatedAt, t.status
-         FROM agent_tasks t
-         JOIN chain c ON t.parentTaskId = c.id
-       ),
-       agg AS (
-         SELECT
-           root_id,
-           COUNT(*) AS chainCount,
-           MAX(lastUpdatedAt) AS lastActivityAt
-         FROM chain
-         GROUP BY root_id
-       ),
-       latest_status AS (
-         SELECT c.root_id, c.status AS latestStatus
-         FROM chain c
-         JOIN agg a ON c.root_id = a.root_id AND c.lastUpdatedAt = a.lastActivityAt
-         GROUP BY c.root_id
-       )
-       SELECT
-         r.*,
-         a.chainCount AS __chainCount,
-         a.lastActivityAt AS __lastActivityAt,
-         COALESCE(ls.latestStatus, r.status) AS __latestStatus
-       FROM agent_tasks r
-       JOIN agg a ON a.root_id = r.id
-       LEFT JOIN latest_status ls ON ls.root_id = r.id
-       ORDER BY a.lastActivityAt DESC, r.createdAt DESC, r.id DESC
-       LIMIT ? OFFSET ?`,
-    params,
+    `SELECT r.*, a.chainCount AS __chainCount, a.lastActivityAt AS __lastActivityAt,
+      a.latestStatus AS __latestStatus, a.readState AS __readState,
+      a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou
+    FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id
+    ORDER BY ${opts.triage === "later" ? "a.snoozeUntil ASC," : ""}
+      a.lastActivityAt DESC, r.createdAt DESC, r.id DESC LIMIT ? OFFSET ?`,
+    [...query.params, opts.limit ?? 25, opts.offset ?? 0],
   );
-
-  if (opts?.slim) {
-    return rootRows.map((row): SessionListItemSummary => {
-      const { __chainCount, __lastActivityAt, __latestStatus, ...taskRow } = row;
-      return {
-        root: rowToAgentTaskSummary(taskRow as AgentTaskRow),
-        chainTaskCount: __chainCount,
-        lastActivityAt: __lastActivityAt ?? row.lastUpdatedAt,
-        latestStatus: (__latestStatus as AgentTaskStatus) ?? row.status,
-      };
-    });
-  }
-
-  return rootRows.map((row): SessionListItem => {
-    const { __chainCount, __lastActivityAt, __latestStatus, ...taskRow } = row;
-    return {
-      root: rowToAgentTask(taskRow as AgentTaskRow),
-      chainTaskCount: __chainCount,
-      lastActivityAt: __lastActivityAt ?? row.lastUpdatedAt,
-      latestStatus: (__latestStatus as AgentTaskStatus) ?? row.status,
-    };
-  });
+  const fields = await sessionPageFields(
+    rootRows.map((row) => ({
+      id: row.id,
+      requestedByUserId: row.requestedByUserId ?? undefined,
+    })),
+  );
+  return rootRows.map((row) => ({
+    root: opts.slim ? rowToAgentTaskSummary(row) : rowToAgentTask(row),
+    chainTaskCount: row.__chainCount,
+    lastActivityAt: row.__lastActivityAt,
+    latestStatus: row.__latestStatus,
+    ...(row.__readState ? { readState: row.__readState } : {}),
+    snoozeUntil: row.__snoozeUntil,
+    needsYou: !!row.__needsYou,
+    groupKey: sessionGroupKey(row.key),
+    ...fields.get(row.id),
+  }));
 }
 
-/**
- * Filter-aware count of sessions (root tasks) matching the same `source` / `q`
- * / `requestedByUserId` filters as `listRecentSessions`. Powers a correct
- * `total` in the `/api/sessions` pager — a session is a root task, so this is
- * a plain count, no recursive chain walk needed.
- */
-export async function countSessions(
-  opts?: Pick<
-    ListRecentSessionsOpts,
-    "source" | "q" | "requestedByUserId" | "contextKeyPrefix" | "viewer"
-  >,
-): Promise<number> {
-  const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
-  const q = opts?.q?.trim();
-  const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
-
-  const conditions: string[] = ["r.parentTaskId IS NULL"];
-  const params: (string | null)[] = [];
-
-  if (sources.length > 0) {
-    conditions.push(`r.source IN (${sources.map(() => "?").join(", ")})`);
-    params.push(...sources);
-  }
-  if (q && q.length > 0) {
-    conditions.push("(lower(r.task) LIKE ? OR lower(COALESCE(r.title, '')) LIKE ?)");
-    const like = `%${q.toLowerCase()}%`;
-    params.push(like, like);
-  }
-  if (requestedByUserId) {
-    conditions.push("r.requestedByUserId = ?");
-    params.push(requestedByUserId);
-  }
-  if (opts?.contextKeyPrefix) {
-    conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
-    params.push(literalPrefixPattern(opts.contextKeyPrefix));
-  }
-  if (opts?.viewer) {
-    const viewer = sessionViewerCondition(opts.viewer);
-    conditions.push(viewer.sql);
-    params.push(...viewer.params);
-  }
-
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM agent_tasks r WHERE ${conditions.join(" AND ")}`,
-    params,
-  );
+/** Count roots directly unless a filter needs chain activity or participants. */
+export async function countSessions(opts: SessionFilters = {}): Promise<number> {
+  const query = sessionCountQuery(opts);
+  const row = await getDbClient().get<{ count: number }>(query.sql, query.params);
   return row?.count ?? 0;
 }
 

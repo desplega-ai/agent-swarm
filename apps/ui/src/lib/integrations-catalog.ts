@@ -574,6 +574,75 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
 
+  // ------------------------------------------------------------ Bitbucket
+  {
+    id: "bitbucket",
+    name: "Bitbucket",
+    description:
+      "React to Bitbucket Cloud pull request mentions and review requests, and push commits from agents.",
+    category: "issues",
+    iconKey: "git-merge",
+    logoSrc: "/integration-logos/bitbucket.svg",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/bitbucket",
+    disableKey: "BITBUCKET_DISABLE",
+    restartRequired: true,
+    fields: [
+      {
+        key: "BITBUCKET_TOKEN",
+        label: "API token",
+        type: "password",
+        required: true,
+        isSecret: true,
+        placeholder: "ATATT3x...",
+        helpText:
+          "Atlassian API token of the bot service account, or a workspace access token. Used for REST calls and worker git clone and push.",
+        affectsRestart: true,
+      },
+      {
+        key: "BITBUCKET_WEBHOOK_SECRET",
+        label: "Webhook secret",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText:
+          "Secret configured on your Bitbucket webhook. Verifies the `X-Hub-Signature` of incoming payloads and enables the integration.",
+        affectsRestart: true,
+      },
+      {
+        key: "BITBUCKET_EMAIL",
+        label: "Commit author email",
+        type: "text",
+        placeholder: "agent-swarm-bot@example.com",
+        helpText:
+          "Used as `user.email` on workers, only when no GitHub, GitLab, or Azure DevOps token is set.",
+      },
+      {
+        key: "BITBUCKET_NAME",
+        label: "Commit author name",
+        type: "text",
+        placeholder: "Agent Swarm Bot",
+        helpText: "Used as `user.name` on workers, with the same rule as the email.",
+      },
+      {
+        key: "BITBUCKET_BOT_NAME",
+        label: "Bot name",
+        type: "text",
+        advanced: true,
+        placeholder: "agent-swarm-bot",
+        helpText: "Name matched by plain-text `@name` mentions. Defaults to `agent-swarm-bot`.",
+      },
+      {
+        key: "BITBUCKET_BOT_ACCOUNT_ID",
+        label: "Bot account ID",
+        type: "text",
+        advanced: true,
+        placeholder: "557058:00000000-0000-0000-0000-000000000000",
+        helpText:
+          "The bot's Atlassian `account_id`. Resolved from the token by default; required with a workspace access token.",
+      },
+    ],
+  },
+
   // --------------------------------------------------------------- Linear
   {
     id: "linear",

@@ -34,6 +34,7 @@ import { NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
 const TASK_SOURCE_LABELS: Record<string, string> = {
   agentmail: "Email",
   api: "API",
+  bitbucket: "Bitbucket",
   chat: "Chat",
   comb: "Comb",
   github: "GitHub",
@@ -71,6 +72,7 @@ const SOURCE_LOGOS: Record<string, string> = {
   slack: "/integration-logos/slack.svg",
   github: "/integration-logos/github.svg",
   gitlab: "/integration-logos/gitlab.svg",
+  bitbucket: "/integration-logos/bitbucket.svg",
   linear: "/integration-logos/linear.svg",
   jira: "/integration-logos/jira.svg",
 };
@@ -108,6 +110,13 @@ function SourceMark({ source }: { source: string }) {
 }
 
 /** "PR", "MR" or "Issue" for a VCS event type. Empty when unknown. */
+/** Providers whose tasks link their PR or issue in the source line. */
+const LINKED_VCS = ["github", "gitlab", "bitbucket"] as const;
+
+function isLinkedVcs(value: string | undefined): value is (typeof LINKED_VCS)[number] {
+  return (LINKED_VCS as readonly (string | undefined)[]).includes(value);
+}
+
 function vcsKind(eventType: string | undefined): string {
   if (!eventType) return "";
   if (eventType.startsWith("pull_request")) return "PR";
@@ -163,7 +172,8 @@ function describeSource(
         : { lead: label, named: true, shrinks: false, extras };
     }
     case "github":
-    case "gitlab": {
+    case "gitlab":
+    case "bitbucket": {
       const kind = vcsKind(task.vcsEventType);
       const repo = task.vcsRepo ? (
         <span className="min-w-0 truncate" title={task.vcsRepo}>
@@ -376,7 +386,7 @@ function TaskPromptDialog({
 /**
  * Where a task came from, under its title: the source's mark, who or what
  * sent it, and a "View full prompt" button. A Slack task names the speaker
- * and counts the earlier thread messages. A GitHub or GitLab task links its
+ * and counts the earlier thread messages. A GitHub, GitLab or Bitbucket task links its
  * PR or issue. Other sources show their name.
  */
 export function TaskSourceLine({
@@ -391,14 +401,13 @@ export function TaskSourceLine({
   creatorName: string | null;
 }) {
   const prompt = useMemo(() => parseSlackPrompt(task.task), [task.task]);
-  // A task from a GitHub or GitLab event reads as that event, whatever its
-  // `source` (an API call can carry VCS fields too).
-  const vcs =
-    task.vcsProvider === "github" || task.vcsProvider === "gitlab"
-      ? task.vcsProvider
-      : task.source === "github" || task.source === "gitlab"
-        ? task.source
-        : null;
+  // A task from a GitHub, GitLab or Bitbucket event reads as that event,
+  // whatever its `source` (an API call can carry VCS fields too).
+  const vcs = isLinkedVcs(task.vcsProvider)
+    ? task.vcsProvider
+    : isLinkedVcs(task.source)
+      ? task.source
+      : null;
   const source = task.source === "slack" ? "slack" : (vcs ?? task.source);
   const label = taskSourceLabel(source);
   const view = describeSource(task, source, prompt, {

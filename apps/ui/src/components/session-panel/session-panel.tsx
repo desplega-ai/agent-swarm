@@ -14,6 +14,8 @@
  *   The new session is selected in place.
  * - Links open the session in `/sessions` and its root task in `/tasks`; each
  *   task in the timeline opens its detail sheet, which links to its task page.
+ * - The conversation uses the sessions v2 turn timeline, or the legacy
+ *   timeline after "Legacy sessions" (the same per-browser preference).
  * - "Add screenshot" in the composer captures `screenshotTarget` (the page,
  *   never the panel: it is marked `data-screenshot-exclude`) and attaches the
  *   PNG through the composer's normal attachment upload, for a new session and
@@ -29,9 +31,11 @@ import { SessionConversation } from "@/components/sessions/session-conversation"
 import { SessionMeta } from "@/components/sessions/session-meta";
 import { useStartSession } from "@/components/sessions/use-start-session";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useStoredSessionsView } from "@/hooks/use-sessions-view";
 import { cn } from "@/lib/utils";
 import { contextKeyPrefix, newSessionContextKey, sessionLabel, withContextFooter } from "./model";
 import { ScreenshotButton } from "./screenshot-button";
@@ -142,7 +146,7 @@ function SessionPanelBody({
     limit: 20,
     enabled: !!userId,
   });
-  const items = userId ? (list.data ?? []) : [];
+  const items = userId ? (list.data?.sessions ?? []) : [];
 
   const isNew = selected === NEW_SESSION;
   // The trigger label comes from the session itself: a search can filter it
@@ -290,6 +294,9 @@ function ActiveSession({
 }) {
   const { userId } = useCurrentUser();
   const { data: detail } = useSession(rootTaskId);
+  // The panel follows the "Legacy sessions" preference (plan D15). Until the
+  // version check ends, a skeleton: the view may still flip.
+  const { view, pending } = useStoredSessionsView();
   return (
     <>
       {detail ? (
@@ -297,21 +304,29 @@ function ActiveSession({
           <SessionMeta detail={detail} />
         </div>
       ) : null}
-      <SessionConversation
-        rootTaskId={rootTaskId}
-        scrollClassName="px-3 py-4"
-        renderComposerActions={
-          screenshotTarget
-            ? (addAttachment) => (
-                <ScreenshotButton
-                  getTarget={screenshotTarget}
-                  disabled={!userId}
-                  onCaptured={addAttachment}
-                />
-              )
-            : undefined
-        }
-      />
+      {pending ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-3 px-3 py-4">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      ) : (
+        <SessionConversation
+          rootTaskId={rootTaskId}
+          scrollClassName="px-3 py-4"
+          timeline={view === "v2" ? "turns" : "legacy"}
+          renderComposerActions={
+            screenshotTarget
+              ? (addAttachment) => (
+                  <ScreenshotButton
+                    getTarget={screenshotTarget}
+                    disabled={!userId}
+                    onCaptured={addAttachment}
+                  />
+                )
+              : undefined
+          }
+        />
+      )}
     </>
   );
 }

@@ -297,7 +297,8 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackReplySent: !!row.slackReplySent,
     slackProgressMessageTs: row.slackProgressMessageTs ?? undefined,
     slackTreeRootMessageTs: row.slackTreeRootMessageTs ?? undefined,
-    vcsProvider: (row.vcsProvider as "github" | "gitlab" | "azure-devops" | null) ?? undefined,
+    vcsProvider:
+      (row.vcsProvider as "github" | "gitlab" | "azure-devops" | "bitbucket" | null) ?? undefined,
     vcsRepo: row.vcsRepo ?? undefined,
     vcsEventType: row.vcsEventType ?? undefined,
     vcsNumber: row.vcsNumber ?? undefined,
@@ -713,16 +714,51 @@ export async function getTasksByStatus(status: AgentTaskStatus): Promise<AgentTa
  * in `src/types.ts`. SQL strings can't import a TS const — if you add a
  * new terminal status, grep for `NOT IN ('completed'` across this file.
  */
-export async function findTaskByVcs(vcsRepo: string, vcsNumber: number): Promise<AgentTask | null> {
+/**
+ * Most recent active task for a provider + repo + PR/issue number. The
+ * provider is required: `owner/repo` exists on GitHub, GitLab and Bitbucket
+ * alike, so an unscoped lookup lets one host's webhook act on another host's
+ * task. A NULL `vcsProvider` is a legacy GitHub row (pre-provider writers), so
+ * the GitHub lookup still matches it.
+ */
+export async function findTaskByVcs(
+  vcsRepo: string,
+  vcsNumber: number,
+  vcsProvider: NonNullable<AgentTask["vcsProvider"]>,
+): Promise<AgentTask | null> {
+  const providerClause =
+    vcsProvider === "github" ? "(vcsProvider = ? OR vcsProvider IS NULL)" : "vcsProvider = ?";
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
-       WHERE vcsRepo = ? AND vcsNumber = ?
+       WHERE vcsRepo = ? AND vcsNumber = ? AND ${providerClause}
        AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY createdAt DESC
        LIMIT 1`,
-    [vcsRepo, vcsNumber],
+    [vcsRepo, vcsNumber, vcsProvider],
   );
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Every active task for a provider + repo + PR/issue number, newest first.
+ * Same scoping as `findTaskByVcs`; for callers that must settle all of them
+ * (a PR close leaves no task worth running).
+ */
+export async function findActiveTasksByVcs(
+  vcsRepo: string,
+  vcsNumber: number,
+  vcsProvider: NonNullable<AgentTask["vcsProvider"]>,
+): Promise<AgentTask[]> {
+  const providerClause =
+    vcsProvider === "github" ? "(vcsProvider = ? OR vcsProvider IS NULL)" : "vcsProvider = ?";
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE vcsRepo = ? AND vcsNumber = ? AND ${providerClause}
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       ORDER BY createdAt DESC`,
+    [vcsRepo, vcsNumber, vcsProvider],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /** @deprecated Use findTaskByVcs instead */

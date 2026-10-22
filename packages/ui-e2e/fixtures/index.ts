@@ -197,6 +197,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           activeId: "conn_e2e",
         }),
       },
+      {
+        // A fresh profile opens the sessions v2 first-run guide, a modal dialog that
+        // blocks every click on /sessions. "off" is what "Don't show again" stores.
+        name: "agent-swarm-sessions-v2-guide",
+        value: "off",
+      },
       ...(swarm.manifest
         ? [
             {

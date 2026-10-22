@@ -5,7 +5,7 @@ import { httpUrlError } from "../../components/http-url";
 
 /**
  * What step 6 (integrations) offers, in two groups:
- * - "Chat and code": the five integrations the API derives the step from,
+ * - "Chat and code": the six integrations the API derives the step from,
  *   plus the field specs each pane edits. Labels, placeholders, and secret
  *   flags come from the Settings catalog (`lib/integrations-catalog.ts`).
  * - "Business tools": Gmail and Microsoft 365 connect inline over the OAuth
@@ -108,6 +108,16 @@ export const CORE_INTEGRATIONS: CoreIntegration[] = [
     docsUrl: docsUrl("gitlab"),
     method: "gitlab",
     chipKeys: ["GITLAB_TOKEN"],
+  },
+  {
+    group: "core",
+    id: "bitbucket",
+    name: "Bitbucket",
+    purpose: "Bitbucket Cloud pull requests and reviews.",
+    logo: "/integration-logos/bitbucket.svg",
+    docsUrl: docsUrl("bitbucket"),
+    method: "bitbucket",
+    chipKeys: ["BITBUCKET_TOKEN", "BITBUCKET_WEBHOOK_SECRET"],
   },
   {
     group: "core",
@@ -292,6 +302,19 @@ export const GITLAB_FIELDS: SetupFieldSpec[] = [
   }),
 ];
 
+export const BITBUCKET_FIELDS: SetupFieldSpec[] = [
+  spec("bitbucket", "BITBUCKET_TOKEN", { required: true, secretRule: KEY_RULES.bitbucket }),
+  spec("bitbucket", "BITBUCKET_WEBHOOK_SECRET", {
+    required: true,
+    hint: "The same secret goes on the Bitbucket webhook. It enables the integration.",
+  }),
+  spec("bitbucket", "BITBUCKET_EMAIL", {
+    hint: "Signs commits only when no GitHub, GitLab, or Azure DevOps token is set.",
+    validate: validEmail,
+  }),
+  spec("bitbucket", "BITBUCKET_NAME"),
+];
+
 export const LINEAR_FIELDS: SetupFieldSpec[] = [
   spec("linear", "LINEAR_CLIENT_ID", { required: true }),
   spec("linear", "LINEAR_CLIENT_SECRET", { required: true }),
@@ -310,6 +333,7 @@ export const ALL_SETUP_KEYS: string[] = [
   ...GITHUB_FIELDS,
   ...GITHUB_APP_FIELDS,
   ...GITLAB_FIELDS,
+  ...BITBUCKET_FIELDS,
   ...LINEAR_FIELDS,
   ...JIRA_FIELDS,
 ].map((f) => f.key);

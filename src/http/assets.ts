@@ -5,6 +5,7 @@ import { auditAssetKeys } from "../be/asset-key-audit";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
+  AssetKeyMovesBlockedError,
   getDb,
   getDbClient,
   getRootTaskChain,
@@ -25,6 +26,7 @@ import {
 import { getRequestAuth } from "../utils/request-auth-context";
 import { requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
+import { canReadSession, hasSessionWrite, SESSION_READ_DENIED } from "./session-access";
 import { jsonError } from "./utils";
 
 const AssetKeyAuditIssueSchema = z.object({
@@ -184,7 +186,7 @@ const moveAssetRoute = route({
   },
 });
 
-async function canMutateTaskNamespace(
+export async function canMutateTaskNamespace(
   task: { id: string; agentId: string | null; creatorAgentId?: string },
   myAgentId: string | undefined,
   req: IncomingMessage,
@@ -322,6 +324,16 @@ export async function handleAssets(
         jsonError(res, "Asset not found", 404);
         return true;
       }
+      if (!(await hasSessionWrite(req, myAgentId, task.id))) {
+        jsonError(
+          res,
+          (await canReadSession(req, myAgentId, task.id))
+            ? "You can view this session but not move it."
+            : SESSION_READ_DENIED,
+          403,
+        );
+        return true;
+      }
       // Only the tasks checked here move: a subtask created after this read stays put.
       const tasks = parsed.body.cascade ? await getRootTaskChain(task.id) : [task];
       for (const target of tasks) {
@@ -382,7 +394,7 @@ export async function handleAssets(
         return true;
       }
       const message = error instanceof Error ? error.message : String(error);
-      jsonError(res, message, message.includes("blocked until") ? 409 : 400);
+      jsonError(res, message, error instanceof AssetKeyMovesBlockedError ? 409 : 400);
     }
     return true;
   }

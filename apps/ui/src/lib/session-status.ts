@@ -1,4 +1,5 @@
 import type { AgentTask, AgentTaskStatus } from "../api/types";
+import { TERMINAL_STATUSES } from "./task-activity";
 
 /**
  * Non-terminal statuses in the order the session header prefers them. The
@@ -54,4 +55,13 @@ export function deriveSessionStatus(root: AgentTask, chain: AgentTask[]): Sessio
 
   const latest = tasks.reduce((a, b) => (b.lastUpdatedAt > a.lastUpdatedAt ? b : a));
   return { status: latest.status, failedCount };
+}
+
+/**
+ * The status a session chip shows. Any live status reads RUNNING (the
+ * `running` label, not IN PROGRESS, UX review R9). Paused and the end
+ * states keep their own label.
+ */
+export function sessionChipStatus(status: AgentTaskStatus): AgentTaskStatus | "running" {
+  return TERMINAL_STATUSES.has(status) || status === "paused" ? status : "running";
 }

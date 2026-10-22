@@ -4,7 +4,7 @@
  * `/sessions/:rootTaskId` header and the contextual session panel.
  */
 
-import { type ReactNode, useMemo } from "react";
+import { type ComponentProps, type ReactNode, useMemo } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useUsers } from "@/api/hooks/use-users";
@@ -14,6 +14,7 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { deriveSessionStatus } from "@/lib/session-status";
+import { cn } from "@/lib/utils";
 
 const usdFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -87,32 +88,55 @@ export function SessionMeta({ detail, children }: SessionMetaProps) {
 
 const MAX_STACKED_AGENTS = 5;
 
-/** The session's agents as an overlapping avatar stack; hover lists their names. */
-function SessionAgents({ agentIds }: { agentIds: string[] }) {
-  const { data: agents } = useAgents();
-  const knownName = (id: string) => agents?.find((a) => a.id === id)?.name;
-  const names = agentIds.map((id) => knownName(id) ?? `${id.slice(0, 8)}…`);
-  const visible = agentIds.slice(0, MAX_STACKED_AGENTS);
+/**
+ * Agents as an overlapping avatar stack, then "+N" past `max`. Other props go
+ * to the wrapper, so it works under `TooltipTrigger asChild`.
+ */
+export function AgentAvatarStack({
+  agentIds,
+  nameOf,
+  max = MAX_STACKED_AGENTS,
+  children,
+  ...props
+}: ComponentProps<"span"> & {
+  agentIds: readonly (string | null)[];
+  /** A known name; `undefined` lets the avatar look it up. */
+  nameOf?: (agentId: string | null) => string | undefined;
+  max?: number;
+}) {
+  const visible = agentIds.slice(0, max);
   const extra = agentIds.length - visible.length;
+  return (
+    <span {...props} className={cn("inline-flex shrink-0 items-center gap-1", props.className)}>
+      <AvatarStack size={20}>
+        {visible.map((id) => (
+          <AgentAvatar
+            key={id ?? "pool"}
+            agentId={id}
+            agentName={nameOf?.(id)}
+            size="xs"
+            className="size-full"
+          />
+        ))}
+      </AvatarStack>
+      {extra > 0 ? <span className="tabular-nums">+{extra}</span> : null}
+      {children}
+    </span>
+  );
+}
+
+/** The session's agents as an overlapping avatar stack; hover lists their names. */
+export function SessionAgents({ agentIds }: { agentIds: string[] }) {
+  const { data: agents } = useAgents();
+  const knownName = (id: string | null) => agents?.find((a) => a.id === id)?.name;
+  const names = agentIds.map((id) => knownName(id) ?? `${id.slice(0, 8)}…`);
   const label = `${agentIds.length} agent${agentIds.length === 1 ? "" : "s"}: ${names.join(", ")}`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0 items-center gap-1">
-          <AvatarStack size={20}>
-            {visible.map((id) => (
-              <AgentAvatar
-                key={id}
-                agentId={id}
-                agentName={knownName(id)}
-                size="xs"
-                className="size-full"
-              />
-            ))}
-          </AvatarStack>
-          {extra > 0 ? <span className="tabular-nums">+{extra}</span> : null}
+        <AgentAvatarStack agentIds={agentIds} nameOf={knownName}>
           <span className="sr-only">{label}</span>
-        </span>
+        </AgentAvatarStack>
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>

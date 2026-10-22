@@ -301,6 +301,7 @@ const VCS_PROVIDERS: ReadonlySet<string> = new Set<VcsProvider>([
   "github",
   "gitlab",
   "azure-devops",
+  "bitbucket",
 ]);
 const VCS_KINDS: ReadonlySet<string> = new Set<VcsEventKind>([
   "pull_request",

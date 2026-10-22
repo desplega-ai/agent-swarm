@@ -1,0 +1,133 @@
+{
+  "actor": {
+    "type": "user",
+    "display_name": "Dana Developer",
+    "nickname": "dana",
+    "account_id": "557058:11111111-1111-4111-8111-111111111111",
+    "uuid": "{11111111-2222-4333-8444-555555555555}",
+    "links": {
+      "html": {
+        "href": "https://bitbucket.org/%7B11111111-2222-4333-8444-555555555555%7D/"
+      }
+    }
+  },
+  "repository": {
+    "type": "repository",
+    "full_name": "acme-ws/widgets",
+    "name": "widgets",
+    "is_private": true,
+    "scm": "git",
+    "uuid": "{0f9b2c4e-7a1d-4e5f-9c3b-2d8e6a1f4b70}",
+    "links": {
+      "html": {
+        "href": "https://bitbucket.org/acme-ws/widgets"
+      }
+    },
+    "workspace": {
+      "type": "workspace",
+      "slug": "acme-ws",
+      "name": "Acme",
+      "uuid": "{a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5}"
+    },
+    "project": {
+      "type": "project",
+      "key": "WID",
+      "name": "Widgets"
+    }
+  },
+  "pullrequest": {
+    "type": "pullrequest",
+    "id": 42,
+    "title": "Add retry to the widget fetcher",
+    "description": "Adds exponential backoff.",
+    "state": "DECLINED",
+    "author": {
+      "type": "user",
+      "display_name": "Dana Developer",
+      "nickname": "dana",
+      "account_id": "557058:11111111-1111-4111-8111-111111111111",
+      "uuid": "{11111111-2222-4333-8444-555555555555}",
+      "links": {
+        "html": {
+          "href": "https://bitbucket.org/%7B11111111-2222-4333-8444-555555555555%7D/"
+        }
+      }
+    },
+    "source": {
+      "branch": {
+        "name": "feature/retry"
+      },
+      "commit": {
+        "hash": "1a2b3c4d5e6f"
+      },
+      "repository": {
+        "type": "repository",
+        "full_name": "acme-ws/widgets",
+        "name": "widgets",
+        "is_private": true,
+        "scm": "git",
+        "uuid": "{0f9b2c4e-7a1d-4e5f-9c3b-2d8e6a1f4b70}",
+        "links": {
+          "html": {
+            "href": "https://bitbucket.org/acme-ws/widgets"
+          }
+        },
+        "workspace": {
+          "type": "workspace",
+          "slug": "acme-ws",
+          "name": "Acme",
+          "uuid": "{a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5}"
+        },
+        "project": {
+          "type": "project",
+          "key": "WID",
+          "name": "Widgets"
+        }
+      }
+    },
+    "destination": {
+      "branch": {
+        "name": "main"
+      },
+      "commit": {
+        "hash": "6f5e4d3c2b1a"
+      },
+      "repository": {
+        "type": "repository",
+        "full_name": "acme-ws/widgets",
+        "name": "widgets",
+        "is_private": true,
+        "scm": "git",
+        "uuid": "{0f9b2c4e-7a1d-4e5f-9c3b-2d8e6a1f4b70}",
+        "links": {
+          "html": {
+            "href": "https://bitbucket.org/acme-ws/widgets"
+          }
+        },
+        "workspace": {
+          "type": "workspace",
+          "slug": "acme-ws",
+          "name": "Acme",
+          "uuid": "{a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5}"
+        },
+        "project": {
+          "type": "project",
+          "key": "WID",
+          "name": "Widgets"
+        }
+      }
+    },
+    "merge_commit": null,
+    "participants": [],
+    "reviewers": [],
+    "close_source_branch": true,
+    "created_on": "2026-10-22T09:00:00.000000+00:00",
+    "updated_on": "2026-10-22T09:00:00.000000+00:00",
+    "links": {
+      "html": {
+        "href": "https://bitbucket.org/acme-ws/widgets/pull-requests/42"
+      }
+    },
+    "reason": "Superseded by #43"
+  }
+}

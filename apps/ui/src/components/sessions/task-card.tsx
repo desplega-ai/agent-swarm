@@ -13,8 +13,8 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Ban, ChevronDown, ChevronRight, Maximize2, Pause, Play, Split } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAgent } from "@/api/hooks/use-agents";
 import { useCancelTask, usePauseTask, useResumeTask } from "@/api/hooks/use-tasks";
 import type { AgentTask, SessionLog } from "@/api/types";
@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTaskSheetParam } from "@/hooks/use-task-sheet-param";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ChainOfThought } from "./chain-of-thought";
@@ -101,24 +102,8 @@ export function TaskCard({
   const queryClient = useQueryClient();
 
   // Sheet open-state lives in the URL (`?task=<id>`) so links to a session
-  // with a particular task expanded are shareable. `replace: true` keeps the
-  // back button useful — opening/closing sheets doesn't litter history.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const open = searchParams.get("task") === task.id;
-  const setOpen = useCallback(
-    (next: boolean) => {
-      setSearchParams(
-        (prev) => {
-          const sp = new URLSearchParams(prev);
-          if (next) sp.set("task", task.id);
-          else if (sp.get("task") === task.id) sp.delete("task");
-          return sp;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams, task.id],
-  );
+  // with a particular task expanded are shareable.
+  const [open, setOpen] = useTaskSheetParam(task.id);
 
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();

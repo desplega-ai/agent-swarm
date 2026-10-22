@@ -88,6 +88,11 @@ describe("handleCore auth middleware (route() auth.apiKey=false is honored)", ()
     expect(res.status).not.toBe(401);
   });
 
+  test("Bitbucket webhook is public", async () => {
+    const res = await fetch(`http://localhost:${port}/api/bitbucket/webhook`, { method: "POST" });
+    expect(res.status).not.toBe(401);
+  });
+
   test("AgentMail webhook is still public", async () => {
     const res = await fetch(`http://localhost:${port}/api/agentmail/webhook`, { method: "POST" });
     expect(res.status).not.toBe(401);

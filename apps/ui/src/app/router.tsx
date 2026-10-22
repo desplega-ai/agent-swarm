@@ -14,7 +14,6 @@ const TasksPage = lazyRoute(() => import("@/pages/tasks/page"));
 const TaskDetailPage = lazyRoute(() => import("@/pages/tasks/[id]/page"));
 const TaskLineagePage = lazyRoute(() => import("@/pages/tasks/[id]/lineage/page"));
 const SessionsPage = lazyRoute(() => import("@/pages/sessions/page"));
-const SessionDetailPage = lazyRoute(() => import("@/pages/sessions/[rootTaskId]/page"));
 const ChatPage = lazyRoute(() => import("@/pages/chat/page"));
 const SchedulesPage = lazyRoute(() => import("@/pages/schedules/page"));
 const ScheduleDetailPage = lazyRoute(() => import("@/pages/schedules/[id]/page"));
@@ -150,8 +149,10 @@ export const router = createBrowserRouter([
       { path: "tasks", element: <TasksPage /> },
       { path: "tasks/:id", element: <TaskDetailPage /> },
       { path: "tasks/:id/lineage", element: <TaskLineagePage /> },
+      // One page for both paths (as chat does), so the sessions v2 shell stays
+      // mounted when the focused session changes. It also picks the legacy pages.
       { path: "sessions", element: <SessionsPage /> },
-      { path: "sessions/:rootTaskId", element: <SessionDetailPage /> },
+      { path: "sessions/:rootTaskId", element: <SessionsPage /> },
       { path: "chat", element: <ChatPage /> },
       { path: "chat/:channelId", element: <ChatPage /> },
       { path: "schedules", element: <SchedulesPage /> },

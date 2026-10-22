@@ -29,41 +29,91 @@ export interface StackPeer {
 /**
  * A small stack of people: 3 avatars, then "+N". The tooltip names each one
  * and what they are doing. Comb files and session headers share it.
+ *
+ * `decorative` drops the tooltips and the tab stops, for a row whose own
+ * label names the people (a sidebar row in a keyboard list). `size="xs"`
+ * (16 px) fits a 26 px row. Its ring takes `--avatar-ring`, so it can match
+ * the row's fill.
  */
-export function AvatarStack({ peers, className }: { peers: StackPeer[]; className?: string }) {
+export function AvatarStack({
+  peers,
+  label,
+  max = MAX_AVATARS,
+  size = "sm",
+  decorative = false,
+  className,
+}: {
+  peers: StackPeer[];
+  /** The group's accessible name. Defaults to the presence wording ("2 other people here"). */
+  label?: string;
+  /** Avatars before the rest collapse into "+N". */
+  max?: number;
+  size?: "sm" | "xs";
+  decorative?: boolean;
+  className?: string;
+}) {
   if (peers.length === 0) return null;
-  const shown = peers.slice(0, MAX_AVATARS);
-  const rest = peers.slice(MAX_AVATARS);
+  const shown = peers.slice(0, max);
+  const rest = peers.slice(max);
+  const xs = size === "xs";
+  // An xs ring takes the row's fill, so the stack sits flush on a hovered row.
+  const ring = xs ? "ring-[var(--avatar-ring,var(--color-background))]" : "ring-background";
+  const avatar = (peer: StackPeer) => (
+    <Avatar
+      key={peer.id}
+      size={size}
+      tabIndex={decorative ? undefined : 0}
+      role={decorative ? undefined : "img"}
+      aria-label={decorative ? undefined : `${peer.name}, ${peer.doing.toLowerCase()}`}
+      className={cn("ring-2 outline-none focus-visible:ring-ring/60", ring)}
+    >
+      {peer.avatar ? <AvatarImage src={peer.avatar} alt="" referrerPolicy="no-referrer" /> : null}
+      <AvatarFallback
+        className={cn("font-mono font-semibold", !xs && "text-[10px]")}
+        style={{ backgroundColor: peerColorVar(peer.color), color: PEER_FOREGROUND_VAR }}
+      >
+        {userInitials(peer.name)}
+      </AvatarFallback>
+    </Avatar>
+  );
+  const more = (
+    <AvatarGroupCount
+      tabIndex={decorative ? undefined : 0}
+      role={decorative ? undefined : "img"}
+      aria-label={
+        decorative ? undefined : `${rest.length} more: ${rest.map((peer) => peer.name).join(", ")}`
+      }
+      className={cn(
+        "font-mono outline-none focus-visible:ring-ring/60",
+        xs ? "size-4 text-[7px]" : "size-6 text-[10px]",
+        ring,
+      )}
+    >
+      +{rest.length}
+    </AvatarGroupCount>
+  );
+  if (decorative) {
+    return (
+      <span aria-hidden className={cn("flex shrink-0 items-center -space-x-1", className)}>
+        {shown.map(avatar)}
+        {rest.length > 0 ? more : null}
+      </span>
+    );
+  }
   return (
     // `AvatarGroup` rings its children in the background color with a rule
     // that also hides the focus ring, so the stack sets the rings itself.
     // biome-ignore lint/a11y/useSemanticElements: a fieldset groups form controls, not avatars
     <div
       role="group"
-      aria-label={peers.length === 1 ? "1 other person here" : `${peers.length} other people here`}
-      className={cn("flex items-center -space-x-1.5", className)}
+      aria-label={
+        label ?? (peers.length === 1 ? "1 other person here" : `${peers.length} other people here`)
+      }
+      className={cn("flex items-center", xs ? "-space-x-1" : "-space-x-1.5", className)}
     >
       {shown.map((peer) => (
         <Tooltip key={peer.id}>
-          <TooltipTrigger asChild>
-            <Avatar
-              size="sm"
-              tabIndex={0}
-              role="img"
-              aria-label={`${peer.name}, ${peer.doing.toLowerCase()}`}
-              className="ring-2 ring-background outline-none focus-visible:ring-ring/60"
-            >
-              {peer.avatar ? (
-                <AvatarImage src={peer.avatar} alt="" referrerPolicy="no-referrer" />
-              ) : null}
-              <AvatarFallback
-                className="font-mono text-[10px] font-semibold"
-                style={{ backgroundColor: peerColorVar(peer.color), color: PEER_FOREGROUND_VAR }}
-              >
-                {userInitials(peer.name)}
-              </AvatarFallback>
-            </Avatar>
-          </TooltipTrigger>
+          <TooltipTrigger asChild>{avatar(peer)}</TooltipTrigger>
           <TooltipContent side="bottom">
             {peer.name}
             <span className="ml-1.5 opacity-70">{peer.doing}</span>
@@ -72,16 +122,7 @@ export function AvatarStack({ peers, className }: { peers: StackPeer[]; classNam
       ))}
       {rest.length > 0 ? (
         <Tooltip>
-          <TooltipTrigger asChild>
-            <AvatarGroupCount
-              tabIndex={0}
-              role="img"
-              aria-label={`${rest.length} more: ${rest.map((peer) => peer.name).join(", ")}`}
-              className="size-6 font-mono text-[10px] outline-none focus-visible:ring-ring/60"
-            >
-              +{rest.length}
-            </AvatarGroupCount>
-          </TooltipTrigger>
+          <TooltipTrigger asChild>{more}</TooltipTrigger>
           <TooltipContent side="bottom">{rest.map((peer) => peer.name).join(", ")}</TooltipContent>
         </Tooltip>
       ) : null}

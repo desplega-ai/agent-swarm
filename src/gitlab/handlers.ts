@@ -8,13 +8,21 @@
  * - Detects bot mentions
  */
 
-import { failTask, findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
+import {
+  failTask,
+  findActiveTasksByVcs,
+  findTaskByVcs,
+  getAllAgents,
+  incrKv,
+  upsertKv,
+} from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
 import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { gitlabContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { GITLAB_BOT_NAME } from "./auth";
+import type { AgentTask } from "../types";
+import { getGitLabBotName } from "./auth";
 import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
 import type { GitLabUser } from "./types";
 // Side-effect import: registers all GitLab event templates in the in-memory registry
@@ -40,11 +48,37 @@ function isDuplicate(key: string): boolean {
 
 function detectMention(text: string | null | undefined): boolean {
   if (!text) return false;
-  return new RegExp(`@${GITLAB_BOT_NAME}\\b`, "i").test(text);
+  return new RegExp(`@${getGitLabBotName()}\\b`, "i").test(text);
 }
 
 function extractMentionContext(text: string): string {
-  return text.replace(new RegExp(`@${GITLAB_BOT_NAME}\\b`, "gi"), "").trim();
+  return text.replace(new RegExp(`@${getGitLabBotName()}\\b`, "gi"), "").trim();
+}
+
+// Legacy rows written before contextKey existed: scoped only on positive evidence.
+const LEGACY_SCOPE = {
+  mr: {
+    taskTypes: new Set(["gitlab-mr", "gitlab-ci"]),
+    eventTypes: new Set(["merge_request", "note_on_mr", "pipeline"]),
+  },
+  issue: {
+    taskTypes: new Set(["gitlab-issue"]),
+    eventTypes: new Set(["issue", "note_on_issue"]),
+  },
+};
+
+/**
+ * GitLab issue and MR iids are separate per-project sequences, so a vcsNumber
+ * match alone hits both issue #N and MR !N. Match on the contextKey instead; a
+ * row without one counts only when its taskType or vcsEventType names the kind.
+ */
+function isScopedTask(task: AgentTask, kind: "mr" | "issue", contextKey: string): boolean {
+  if (task.contextKey) return task.contextKey === contextKey;
+  const legacy = LEGACY_SCOPE[kind];
+  return (
+    (task.taskType !== undefined && legacy.taskTypes.has(task.taskType)) ||
+    (task.vcsEventType !== undefined && legacy.eventTypes.has(task.vcsEventType))
+  );
 }
 
 async function findLeadAgent() {
@@ -206,19 +240,25 @@ export async function handleMergeRequest(
 
     case "close":
     case "merge": {
-      // Cancel existing tasks for this MR
-      const existingTask = await findTaskByVcs(repo, mr.iid);
-      if (existingTask) {
-        const reason = action === "merge" ? "MR was merged" : "MR was closed";
-        console.log(`[GitLab] Cancelling task ${existingTask.id} — ${reason}`);
-        await failTask(existingTask.id, reason);
+      // Every active task, not only the newest: a note task is a child of the
+      // MR task, and failTask does not cascade up to the parent.
+      const reason = action === "merge" ? "MR was merged" : "MR was closed";
+      const mrContextKey = gitlabContextKey({
+        projectId: String(project.id),
+        kind: "mr",
+        iid: mr.iid,
+      });
+      const tasks = await findActiveTasksByVcs(repo, mr.iid, "gitlab");
+      for (const task of tasks.filter((t) => isScopedTask(t, "mr", mrContextKey))) {
+        console.log(`[GitLab] Cancelling task ${task.id} — ${reason}`);
+        await failTask(task.id, reason);
       }
       return { created: false };
     }
 
     case "update": {
       // Check if there's an active task for this MR — if so, notify about the update
-      const task = await findTaskByVcs(repo, mr.iid);
+      const task = await findTaskByVcs(repo, mr.iid, "gitlab");
       if (task) {
         console.log(`[GitLab] MR #${mr.iid} updated, active task exists: ${task.id}`);
         // Don't create a new task — the worker will see the changes
@@ -262,7 +302,7 @@ export async function handleIssue(
       if (!hasMention) {
         // Check if bot is in assignees
         const isBotAssigned = event.assignees?.some(
-          (a) => a.username.toLowerCase() === GITLAB_BOT_NAME.toLowerCase(),
+          (a) => a.username.toLowerCase() === getGitLabBotName().toLowerCase(),
         );
         if (!isBotAssigned) {
           console.log(`[GitLab] Issue opened without bot mention/assignment, skipping`);
@@ -318,7 +358,15 @@ export async function handleIssue(
     }
 
     case "close": {
-      const existingTask = await findTaskByVcs(repo, issue.iid);
+      const issueContextKey = gitlabContextKey({
+        projectId: String(project.id),
+        kind: "issue",
+        iid: issue.iid,
+      });
+      // Newest issue-scoped task only; MR !N shares the iid but not the issue.
+      const existingTask = (await findActiveTasksByVcs(repo, issue.iid, "gitlab")).find((t) =>
+        isScopedTask(t, "issue", issueContextKey),
+      );
       if (existingTask) {
         console.log(`[GitLab] Cancelling task ${existingTask.id} — issue closed`);
         await failTask(existingTask.id, "Issue was closed");
@@ -375,7 +423,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   }
 
   // Check if there's already an active task for this entity
-  const existingTask = targetNumber ? await findTaskByVcs(repo, targetNumber) : null;
+  const existingTask = targetNumber ? await findTaskByVcs(repo, targetNumber, "gitlab") : null;
 
   const existingTaskNote = existingTask
     ? `\n\n_Note: There's an active task (${existingTask.id}) for this ${entityLabel}._`
@@ -462,7 +510,7 @@ export async function handlePipeline(
   }
 
   // Only create task if there's already an active task for this MR
-  const existingTask = await findTaskByVcs(repo, mrIid);
+  const existingTask = await findTaskByVcs(repo, mrIid, "gitlab");
   if (!existingTask) {
     return { created: false };
   }

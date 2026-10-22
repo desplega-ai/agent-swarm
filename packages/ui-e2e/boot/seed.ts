@@ -61,12 +61,12 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
-async function ensureUser(options: SeedOptions): Promise<User> {
+async function ensureUser(options: SeedOptions, name = "e2e-user"): Promise<User> {
   const users = await request<{ users: (User | null)[] }>(options, "GET", "/api/users");
-  const existing = users.users.find((user): user is User => user?.name === "e2e-user");
+  const existing = users.users.find((user): user is User => user?.name === name);
   if (existing) return existing;
   const result = await request<{ user: User }>(options, "POST", "/api/users", {
-    body: { name: "e2e-user", email: "e2e-user@gmail.com" },
+    body: { name, email: `${name}@gmail.com` },
   });
   return result.user;
 }
@@ -319,6 +319,51 @@ async function poll(options: SeedOptions, agentId: string): Promise<void> {
   await request(options, "GET", "/api/poll", { agentId });
 }
 
+/** The sessions v2 group of the seeded chain: one segment under `shared/`. */
+const SESSION_GROUP_NAME = "e2e-sessions";
+/** A root with this key sits in the group itself. */
+const SESSION_GROUP_KEY = `shared/${SESSION_GROUP_NAME}/`;
+/** The root task text. The root has no title, so the dashboard shows this text. */
+const SESSION_TITLE = "e2e grouped session";
+
+/**
+ * One session chain for the sessions v2 view: a `ui` root that `e2e-user` requested in the
+ * `e2e-sessions` group, one follow-up task, and a read share with a second user. The chain is
+ * created after the worker polls, so no seeded worker claims it.
+ */
+async function ensureSessionChain(
+  options: SeedOptions,
+  user: User,
+): Promise<SeedManifest["sessionChain"]> {
+  const teammate = await ensureUser(options, "e2e-teammate");
+  const root = await ensureTask(options, SESSION_GROUP_KEY, {
+    task: SESSION_TITLE,
+    source: "ui",
+    requestedByUserId: user.id,
+    tags: ["e2e"],
+  });
+  // A child copies its parent's key, so the same key finds it again on a reseed.
+  const child = await ensureTask(options, SESSION_GROUP_KEY, {
+    task: `${SESSION_TITLE} follow-up`,
+    source: "ui",
+    requestedByUserId: user.id,
+    parentTaskId: root.id,
+    tags: ["e2e"],
+  });
+  // The full desired state, so a reseed writes the same share again.
+  await request(options, "PUT", `/api/sessions/${root.id}/shares`, {
+    body: { everyone: "none", users: [{ userId: teammate.id, access: "read" }] },
+  });
+  return {
+    groupKey: SESSION_GROUP_KEY,
+    groupName: SESSION_GROUP_NAME,
+    title: SESSION_TITLE,
+    root: root.id,
+    child: child.id,
+    teammate: { id: teammate.id, name: teammate.name },
+  };
+}
+
 export async function seed(options: SeedOptions): Promise<SeedManifest> {
   const user = await ensureUser(options);
   const workerA = await ensureAgent(options, "e2e-worker-a", { isLead: false, maxTasks: 2 });
@@ -380,6 +425,15 @@ export async function seed(options: SeedOptions): Promise<SeedManifest> {
       body: { status: "failed", failureReason: "e2e seeded failure" },
     });
   }
+  // A running task of its own for codex-logs.spec.ts, so its Codex logs and context
+  // snapshots never reach the in-progress task that tasks.spec.ts reads. It is created after
+  // the polls above, so this poll claims it (e2e-worker-a runs 2 tasks: this one and inProgress).
+  const codexLogs = await ensureTask(options, taskKey("codex-logs"), {
+    task: "e2e codex logs task",
+    agentId: workerA.id,
+    tags: ["e2e"],
+  });
+  if (codexLogs.status === "pending") await poll(options, workerA.id);
 
   await request(options, "POST", `/api/tasks/${inProgress.id}/progress`, {
     body: { progress: "e2e seed progress" },
@@ -456,6 +510,7 @@ export async function seed(options: SeedOptions): Promise<SeedManifest> {
   const publicPage = await ensurePage(options, lead.id, "e2e public page", "public");
   const authedPage = await ensurePage(options, lead.id, "e2e authed page", "authed");
   await ensureMemory(options);
+  const sessionChain = await ensureSessionChain(options, user);
 
   const foreachRun = options.db ? await ensureForeachRun({ ...options, db: options.db }) : null;
 
@@ -479,9 +534,11 @@ export async function seed(options: SeedOptions): Promise<SeedManifest> {
       pendingLead: pendingLead.id,
       offered: offered.id,
       draft: draft.id,
+      codexLogs: codexLogs.id,
     },
     pages: { public: publicPage, authed: authedPage },
     session: { id: sessionId },
+    sessionChain,
     memory: { name: "e2e memory" },
     ...(foreachRun ? { workflowRuns: { foreach: foreachRun } } : {}),
   };

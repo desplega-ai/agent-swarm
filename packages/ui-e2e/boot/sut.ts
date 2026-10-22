@@ -25,7 +25,15 @@ function parseExtraEnv(args: string[]): Record<string, string> {
 async function main(): Promise<void> {
   const keep = Boolean(process.env.E2E_KEEP);
   const extraEnv = parseExtraEnv(Bun.argv.slice(2));
-  const sut = await startSut(keep, {}, { HEARTBEAT_DISABLE: "true", ...extraEnv });
+  // SWARM_DEV_MODE bypasses the dashboard's version gates (`useFeatureGate`), so the
+  // suite drives surfaces that need a newer API than package.json, such as sessions v2.
+  // Remove it when package.json reaches SESSIONS_V2_MIN_VERSION
+  // (apps/ui/src/lib/sessions-v2.ts) and no other spec needs a newer API.
+  const sut = await startSut(
+    keep,
+    {},
+    { HEARTBEAT_DISABLE: "true", SWARM_DEV_MODE: "true", ...extraEnv },
+  );
   const manifestPath = `${sut.dbPath}.seed.json`;
   try {
     const db = new Database(sut.dbPath);

@@ -14,7 +14,15 @@
  * the right pane; the new-session button sits next to it.
  */
 
-import { ChevronLeft, Filter, MessageSquare, PanelLeftOpen, Plus, Search } from "lucide-react";
+import {
+  ChevronLeft,
+  Filter,
+  MessageSquare,
+  PanelLeftOpen,
+  PanelsTopLeft,
+  Plus,
+  Search,
+} from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -42,6 +50,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import type { NewViewLink } from "@/hooks/use-sessions-view";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { SESSION_SHARING_MIN_VERSION } from "@/lib/session-sharing";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
@@ -138,7 +147,41 @@ interface SessionsListProps {
   onShowSystemChange: (value: boolean) => void;
   onCollapse?: () => void;
   onNewSession: () => void;
+  /** The "New sessions view" button: a switch, or an upgrade tip. */
+  newView?: NewViewLink;
   identityState: "pending" | "needs-pick" | "ready";
+}
+
+/**
+ * "New sessions view" in the legacy view. On an API too old for v2 it stays,
+ * off (`aria-disabled`, so it keeps hover and focus), and its tooltip says
+ * what to upgrade to. `compact`: the icon-only button of the narrow header.
+ */
+function NewViewButton({ link, compact = false }: { link: NewViewLink; compact?: boolean }) {
+  const upgradeTip = "upgradeTip" in link ? link.upgradeTip : null;
+  const button = (
+    <Button
+      size={compact ? "icon" : "xs"}
+      variant="ghost"
+      aria-disabled={upgradeTip ? true : undefined}
+      aria-label={compact ? "New sessions view" : undefined}
+      onClick={"onSwitch" in link ? link.onSwitch : undefined}
+      className={cn(
+        "aria-disabled:opacity-50",
+        compact ? "size-9" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <PanelsTopLeft className={compact ? "size-4" : undefined} />
+      {compact ? null : "New sessions view"}
+    </Button>
+  );
+  if (!upgradeTip && !compact) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent className="max-w-64">{upgradeTip ?? "New sessions view"}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 function SessionsList({
@@ -152,6 +195,7 @@ function SessionsList({
   onShowSystemChange,
   onCollapse,
   onNewSession,
+  newView,
   identityState,
 }: SessionsListProps) {
   const items = sessions ?? [];
@@ -164,6 +208,7 @@ function SessionsList({
           Sessions
         </h2>
         <div className="flex items-center gap-0.5">
+          {newView ? <NewViewButton link={newView} /> : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -307,6 +352,7 @@ interface MobileSessionPickerProps {
   isLoading: boolean;
   activeRootTaskId?: string;
   onNewSession: () => void;
+  newView?: NewViewLink;
 }
 
 function MobileSessionPicker({
@@ -314,6 +360,7 @@ function MobileSessionPicker({
   isLoading,
   activeRootTaskId,
   onNewSession,
+  newView,
 }: MobileSessionPickerProps) {
   const navigate = useNavigate();
   const items = sessions ?? [];
@@ -354,6 +401,7 @@ function MobileSessionPicker({
         <Plus className="h-3.5 w-3.5" />
         New
       </Button>
+      {newView ? <NewViewButton link={newView} compact /> : null}
     </div>
   );
 }
@@ -374,10 +422,12 @@ export function useSessionsShell(): SessionsShellApi {
 
 export interface SessionsShellProps {
   activeRootTaskId?: string;
+  /** The "New sessions view" button: a switch, or an upgrade tip on an API older than v2. */
+  newView?: NewViewLink;
   children: ReactNode;
 }
 
-export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps) {
+export function SessionsShell({ activeRootTaskId, newView, children }: SessionsShellProps) {
   const navigate = useNavigate();
   const { userId, state: identityState } = useCurrentUser();
   const { searchParams, setParam } = useUrlSearchState();
@@ -416,7 +466,7 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
     [showSystem],
   );
 
-  const { data: sessions, isLoading } = useSessions({
+  const { data: sessionsPage, isLoading } = useSessions({
     limit: 50,
     source: sourceFilter,
     q: debouncedQuery.trim() || undefined,
@@ -425,13 +475,15 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
   });
   // "Shared with me": someone else's sessions shared with me or everyone.
   const sharingGate = useFeatureGate(SESSION_SHARING_MIN_VERSION);
-  const { data: sharedSessions } = useSessions({
+  const { data: sharedPage } = useSessions({
     limit: 50,
     source: sourceFilter,
     q: debouncedQuery.trim() || undefined,
     scope: "shared",
     enabled: sharingGate.supported && identityState === "ready",
   });
+  const sessions = sessionsPage?.sessions;
+  const sharedSessions = sharedPage?.sessions;
 
   const openNew = useCallback(() => navigate("/sessions"), [navigate]);
   const api = useMemo<SessionsShellApi>(() => ({ openNew }), [openNew]);
@@ -444,6 +496,7 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
           isLoading={isLoading}
           activeRootTaskId={activeRootTaskId}
           onNewSession={openNew}
+          newView={newView}
         />
 
         <div
@@ -465,6 +518,7 @@ export function SessionsShell({ activeRootTaskId, children }: SessionsShellProps
                 onShowSystemChange={setShowSystem}
                 onCollapse={() => setCollapsed(true)}
                 onNewSession={openNew}
+                newView={newView}
                 identityState={identityState}
               />
             </aside>

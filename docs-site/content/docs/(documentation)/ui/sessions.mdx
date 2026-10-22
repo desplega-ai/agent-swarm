@@ -1,0 +1,351 @@
+---
+title: "Sessions"
+description: "Organize and triage swarm sessions in the dashboard: groups, Inbox, Done and Later, search, keys, tabs, the split, the phone layout, and the Legacy view"
+---
+
+The **Sessions** page (`/sessions`) holds your conversations with the swarm. A session starts with a first task, usually your message to the lead, and holds every task that follows from it. The page has three parts:
+
+- The **sidebar** on the left: the search field, then your sessions in sections and groups.
+- The **panes** on the right: tabs that show sessions, and one optional split pane.
+- The **status bar** at the bottom: live counts and the **Keys** button.
+
+While the page is open, the global navigation collapses to icons. Drag the edge of the sidebar to change its width. A double-click on the edge resets it. This browser keeps the width.
+
+<Callout type="info" title="Requirements">
+  The new view needs an API at version 2.5.1 or later. With an older API, the dashboard shows the [Legacy view](#legacy-view) only. Its **New sessions view** button stays, turned off, and its tooltip names the version to upgrade to. Read state, Done, and Later need a dashboard user. With the operator key and no picked user, the sidebar shows every session and hides those controls.
+</Callout>
+
+## The sidebar
+
+The sidebar shows these sections, from top to bottom:
+
+| Section | What it holds |
+| --- | --- |
+| **Inbox** | Every session that is not in Later or Done |
+| **Later** | The sessions that you snoozed, in order of wake time |
+| **Done** | The sessions that you marked Done |
+| **No group** | Inbox sessions that are in no group |
+| **My groups** | Groups under `shared/` and under your own `personal/<user-id>/` key, nested by path |
+| **Shared with me** | Groups under other people's `personal/<user-id>/` keys, with one entry for each owner |
+
+The sidebar shows the sessions that you started and the sessions that other people share with you.
+
+Groups and No group list only Inbox sessions. A session in Later or Done shows in Later or Done, not in its group.
+
+Each list shows its 10 newest sessions, by latest activity. **Show 10 more** shows the next 10. After that, **View all N** opens the full list in the [group tab](#group-tab).
+
+A session row shows:
+
+- A dot and a bold title when the session is unread.
+- A spinning ring while the session runs, or **Needs you** when it needs you.
+- The name of its group, in Inbox, Later, and Done.
+- The other people in the session, and the time of the latest activity. A row in Later shows its wake time.
+
+Hover a row to see a card with the group path, the full title, the latest output, the status, the task count, and the people. The card also opens when the keyboard cursor rests on a row.
+
+Sections and groups show their counts: running sessions, sessions that need you, and unread sessions. A folded group adds the counts of its subgroups. This browser keeps which sections and groups are open.
+
+## Groups
+
+A group is a prefix of the session's [asset namespace key](/docs/guides/asset-namespaces). The sidebar reads the key of the session's first task. The group is that key without its last segment, when the last segment names one resource: `task:<id>`, `thread:<id>`, `schedule:<id>`, or `workflow:<id>`.
+
+| Session key | Where the session shows |
+| --- | --- |
+| `shared/task:<id>/` | No group |
+| `personal/<your-user-id>/task:<id>/` | No group |
+| `shared/research/` | **research**, in My groups |
+| `shared/research/pricing/task:<id>/` | **pricing** under **research**, in My groups |
+| `personal/<your-user-id>/drafts/` | **drafts**, in My groups |
+| `personal/<other-user-id>/drafts/` | **drafts** under that person's name, in Shared with me |
+
+Groups nest by `/`. A group shows a chevron only when it has subgroups. When one of your personal groups has the same path as a `shared/` group, the personal group shows a lock ("Only you").
+
+A session that you start in the dashboard gets the key `shared/task:<id>/` (No group), or the key of the group that you start it in.
+
+<Callout type="warn">
+  A group organizes sessions. It does not share them. Other people see a session only when you share it with **Share** in the session header. A `personal/` key is not a privacy boundary either. See [Asset Namespaces](/docs/guides/asset-namespaces).
+</Callout>
+
+### Shared with me
+
+Shared with me holds the groups under other people's `personal/<user-id>/` keys. Each owner gets one entry, with their name. A session that someone shares with you under a `shared/` key shows at its real path, in My groups or in No group.
+
+Groups under Shared with me have no menu, and you cannot drop sessions on them.
+
+### Create, rename, and delete groups
+
+- **New group**, at the end of My groups, opens a name field. Enter saves and Escape cancels. The new group goes under `shared/`.
+- The group menu has **New session here**, **New subgroup**, **Rename group**, and **Delete group…**. Open it with the **⋯** on a group row, a right-click, or the menu key.
+- The **+** on a group row opens a New session tab that starts in that group.
+- A subgroup goes under its parent. So a subgroup of a personal group is personal too.
+- A group name uses lowercase letters, digits, `.`, `_`, and `-`, with 48 characters at most. The sidebar changes capitals to lowercase and spaces to `-`. It removes other characters.
+
+A new group with no sessions lives only in this browser. The server knows the group after you move the first session into it.
+
+**Rename group** and **Delete group** move the sessions under the group, subgroups included:
+
+- Rename moves the sessions to the new path.
+- Delete asks first. Then it moves the sessions to No group.
+- Both move only the sessions that you started. The sessions of other people stay at the old path, so the group stays for them. The toast tells you how many sessions stayed.
+
+## Move sessions
+
+You can move one session or many into a group, or to No group:
+
+- **Drag** a session row onto a group in My groups, or onto No group.
+- Press `m`, or choose **Move to group…** in the row menu, the header, the bulk bar, or Cmd+K. The move dialog filters the groups as you type. **Create group #name** makes a new group under `shared/` and moves the sessions into it.
+
+A move gives the session's first task, and every other task in the session, the key of the group. A move to No group gives the key `shared/task:<id>/`. A toast confirms the move and offers **Undo** for about 5 seconds.
+
+You can move a session that you started, or a session that someone shared with you with **Can edit**. When a selection holds sessions that you cannot move, they stay where they are. The toast tells you how many stayed.
+
+<Callout type="warn" title="Personal groups need a user token">
+  The API accepts writes to `personal/` keys only from a user token (`aswt_`). With the operator key and a picked user, the dashboard turns off each write into a personal group. It shows "Personal groups need a user token." These writes are off:
+
+  - Moves into the group, and drops on it.
+  - New sessions in the group: **+**, **New session here**, and **Start in**.
+  - **New subgroup** and **Rename group**.
+
+  A move out of a personal group and **Delete group** still work. A move out has no **Undo**. To get a user token, open **People**, select yourself, and click **Mint token** on the **Tokens** tab. See [Connect an outside app](/docs/ui#connect-an-app).
+</Callout>
+
+### Select many sessions
+
+- Click the checkbox that shows when you hover a row, press `x`, or Cmd+click (Ctrl+click) a row.
+- Shift+click a row or its checkbox to select a range: every session from the row that you selected last (or the open session) to that row. The range adds to the selection.
+- While sessions are selected, the bulk bar covers the sidebar header. It shows the count and **Done**, **Later**, **Mark read**, **Move**, and **Clear**.
+- The keys `e`, `l`, `u`, and `m` act on the selection. The row menu of a selected row also acts on the selection.
+- Escape clears the selection.
+
+## Inbox, Done, and Later
+
+You can triage from the row menu, the keys, the session header, the bulk bar, and Cmd+K. On a phone, you can also swipe.
+
+### Read and unread
+
+- An unread session shows a dot and a bold title.
+- A session becomes unread when it gets new activity after you read it.
+- Opening an unread session marks it read. Opening a session in Done or Later does not change its state.
+- **Mark read** and **Mark unread** (`u`) change the state by hand.
+- A session that has no read mark from you is unread only when it had activity in the last 7 days. Older sessions count as read, so your first visit does not show all your history as unread.
+
+The read state belongs to your dashboard user and lives on the server. It is the same in every browser.
+
+A session **needs you** when it is unread and its latest task failed. It also needs you when one of its tasks waits for an approval.
+
+### Done
+
+- `e`, the **Done** button, or **Done** in a menu moves a session to Done. The session leaves the Inbox and its group list.
+- New activity brings a Done session back to the Inbox, as unread.
+- `e` on a session in Done moves it back to the Inbox. In the session header, the **Done** button of a session in Done shows pressed. Click it to move the session back to the Inbox.
+
+### Later
+
+- `l` or **Later…** snoozes a session until a wake time:
+  - **In 1 hour**
+  - **This evening**, at 18:00. It shows while 18:00 is more than 30 minutes away.
+  - **Tomorrow**, at 09:00
+  - **Next week**, on Monday at 09:00
+  - **Pick a date and time…**
+- At the wake time, the session goes back to the Inbox, as unread.
+- While a dashboard tab is open, the dashboard tells you with a toast, and with a browser notification if you allow it. The first Later asks for the permission. No alert goes out while no dashboard tab is open. The session waits in the Inbox.
+- `l` on a session in Later moves it back to the Inbox. In the session header, the **Later** button of a session in Later shows pressed. Click it to move the session back to the Inbox.
+
+After Done, Later, or Move back to the Inbox, a toast offers **Undo** for about 5 seconds. After `e` or `l`, the keyboard cursor stays where it is, and the next row moves up under it.
+
+## Search
+
+Press `/` to go to the search field at the top of the sidebar. The sidebar then shows one list of matching sessions, 50 at a time. The groups whose path holds every search word show after the sessions. The down arrow moves into the results. Escape clears the search and gives the focus back to the sidebar.
+
+Free words match the session title and the first message. Tokens narrow the search:
+
+| Token | Finds |
+| --- | --- |
+| `with:<name>` | Sessions where this person sent a message, or that are shared with this person. The start of a name works: `with:lena`. |
+| `in:<group>` | Sessions in this group and its subgroups. A group name or a part of its path works: `in:pricing`. |
+| `is:unread` | Unread sessions |
+| `is:running` | Sessions that run now |
+| `is:needs` | Sessions that need you |
+| `is:later` | Sessions in Later |
+| `is:done` | Sessions in Done |
+
+You can combine tokens and words, for example `with:lena is:unread pricing`. One search takes one person, one group, one of `unread`, `later`, and `done`, and one of `running` and `needs`. When a search cannot match, the sidebar tells you why.
+
+`in:` alone finds the Inbox sessions of the group, as the group list does. Add `is:later` or `is:done` to find the sessions in Later or Done.
+
+The search text stays in the URL (`?q=`). The Cmd+K palette accepts the same tokens.
+
+### Cmd+K
+
+On the Sessions page, Cmd+K (Ctrl+K) has a **Sessions** group:
+
+- With no text, it lists 5 sessions. The sessions that need you come first, then the unread ones, then the newest.
+- With text, it lists the 8 best matches from the server.
+- For the session in the focused tab: **Move to group…**, **Rename session**, **Mark read** or **Mark unread**, **Done**, and **Later…**. In Done or Later, **Move back to the Inbox** replaces Done or Later.
+- **New session**, **New session in group…**, **Next unread**, **Open in split…**, **Close the split**, **Show the guide**, and **Legacy sessions**.
+
+## Keys
+
+The sidebar keys work while the sidebar has the focus. A click in the sidebar gives it the focus. A key with Shift (except Shift+F10), Cmd, Ctrl, or Alt does nothing here. No key acts while you type in a field.
+
+| Key | In the sidebar |
+| --- | --- |
+| `j` or `↓`, `k` or `↑` | Move the cursor down or up |
+| `Home`, `End` | Go to the first or the last row |
+| `Enter` or `o` | Open the session. On a section or a group, fold or unfold it. |
+| `→` | Unfold a section or a group |
+| `←` | Fold a section or a group, or go up to the row that holds the cursor row |
+| `e` | Done, or back to the Inbox |
+| `l` | Later, or back to the Inbox |
+| `x` | Select or unselect |
+| `m` | Move to group |
+| `u` | Mark read or unread |
+| `c` | New session, in the group of the cursor row |
+| `t` | Open in a new tab |
+| `v` | Open in the split pane |
+| `n` | Open the next unread session |
+| Menu key or `Shift+F10` | Open the row menu or the group menu |
+| `Esc` | Clear the selection, then the search |
+
+Outside the sidebar, some keys act on the session in the active pane. The header tooltips name these keys.
+
+| Key | Outside the sidebar |
+| --- | --- |
+| `e`, `l`, `u`, `m` | Done, Later, read or unread, and Move to group |
+| `v` | **Open in split…** |
+| `c` | A New session tab |
+
+| Key | Anywhere on the page |
+| --- | --- |
+| `/` | Search |
+| `Cmd+K` (`Ctrl+K`) | Actions |
+| `?` | Show the keys in the guide |
+
+With the mouse, a right-click opens the row menu, and a middle-click opens the session in a background tab.
+
+## Tabs and the split
+
+### Tabs
+
+- A click on a session opens it in the current tab. `t` opens it in a new tab.
+- A middle-click opens it in a background tab. The session stays unread.
+- A click never replaces a New session tab or the group tab. The session opens in a tab next to it.
+- **+** at the end of the tab strip opens a New session tab.
+- Each tab shows the read mark, the title, the activity, and a close button.
+- A middle-click on a tab closes it. So does Delete or Backspace while the tab has the focus. When you close the last tab, a New session tab takes its place.
+- The arrow keys move the focus along the tab strip. Enter or Space opens the tab.
+- When the tabs do not fit, the strip scrolls and keeps the open tab in view. The **All tabs** menu lists every tab.
+
+### The split
+
+The split shows a second session next to the main pane. Open it with one of these:
+
+- `v` on a sidebar row, or **Open in split** in the row menu.
+- The split button in the tab strip, `v` outside the sidebar, or Cmd+K **Open in split…**. They open a picker: **New session** first, then the open tabs, then the search results for the text that you type.
+- Drag a session tab to the right edge of the pane.
+
+**New session** in the picker opens a New session tab in the split. It starts in the group of the session in the active pane. When you send, the split shows the new session. There is one New session tab: while the split has it, **+** and `c` go to it, and a click on a sidebar row opens in the main pane. Its text stays when it moves between the panes. Attached files do not.
+
+A session shows in one pane only. When you open a different session in the split, the previous one goes back to the main tabs. You cannot split the only open tab. Open a second session first.
+
+To close the split and its session, close its tab. The split button and Cmd+K **Close the split** also close the split, and move its session back to the main tabs.
+
+Keys act on the active pane: the pane that you clicked or focused last. Its open tab shows an amber bar.
+
+The tabs and the split stay in the URL (`?tabs=` and `?split=`). A reload, or a link that you share, opens the same tabs.
+
+### New sessions
+
+The New session tab holds the composer and a **Start in** picker. The picker lists your groups and No group. Groups under Shared with me are not in the list.
+
+The tab starts in the group that you opened it from. That is the group of the **+** or of **New session here**. For `c`, it is the group of the cursor row. Cmd+K **New session in group…** asks for the group first. **Send** starts the session in that group, and the tab becomes the session.
+
+## Status bar
+
+On the left, the status bar shows the number of sessions that run, that need you, and that are unread. Each count includes Inbox, Later, and Done.
+
+Each count is a filter. A click adds `is:running`, `is:needs`, or `is:unread` to the sidebar search, so the sidebar shows only those sessions. One filter is on at a time. Click it again to remove it. Escape in the sidebar clears the whole search.
+
+On the right, the status bar shows the number of tabs and panes, and the **Keys** button. **Keys** opens the keys step of the guide, as `?` does.
+
+## Group tab
+
+**View all N**, at the end of a long list, opens the group tab. The group tab shows the full list of a section or a group, with these columns: title, group, people, activity, and time.
+
+- **All**, **Unread**, **Running**, and **Needs you** filter the rows.
+- The search box searches this list only.
+- The pager shows 50 sessions at a time.
+- A click or Enter on a row opens the session in a tab next to the group tab.
+
+One group tab is open at a time. The tab keeps its page, filter, and search while you visit a session and come back. `?view=` names the list: `inbox`, `later`, `done`, `nogroup`, or a group key.
+
+## The session pane
+
+The header of a session has two rows:
+
+- **First row.** The group path, and "Shared by" with your access when someone shared the session with you. Click the group path to show the group in the sidebar. On the right: the people who look at the session now, the **People** button, the triage buttons, and **Share** (owner only).
+- **Second row.** The title, and the meta line: status, the Done or Later note, workers, tasks, cost, start time, and **Handoffs**. A narrow pane hides the start time first, then the cost, the workers, and the task count.
+
+**People** lists each person with their access and their last message, then the workers with their task counts. The owner also gets **Share…** there.
+
+To rename a session, click the pencil next to the title, double-click the title, or use Cmd+K **Rename session**. The owner and people with **Can edit** can rename.
+
+### Turn timeline
+
+The conversation reads in turns. A turn starts at each message from a person.
+
+- Your messages show on the right, with no name. Other people's messages show on the left, with their name. Hover a message to show **Copy**.
+- The swarm's reply follows, with its time and a **Copy** button.
+- The work of the workers folds into one line, for example "Writer worked for 17m" or "2 workers worked for 26m". The line also counts retries and failures. While work runs, it shows who works and for how long.
+- Click the worker line to see each step, with its tries and its output. The timeline remembers which lines you opened.
+- When the session waits for an approval, a **Waiting for approval** line links to the approval request.
+- When the lead defers work and picks it up later, the turn splits into parts. Each part has its own reply and worker line.
+- **Handoffs**, in the meta line, shows the internal rows: follow-ups, deferred wake-ups, resumes, reroutes, and superseded tasks. The toggle shows only when the session has such rows.
+- A session that no person started, for example from a schedule, starts with a task card in place of a message.
+
+The view follows new messages while you are near the bottom. Scroll up to stop it, and click **Latest** to go back down. When someone types, a bubble with three dots shows in the timeline.
+
+### The session panel (Cmd+I)
+
+On the pages that offer it, Cmd+I (Ctrl+I) opens the session panel next to the page. The header button next to the notification bell does the same. The panel shows the same turn timeline as the Sessions page. When you use the Legacy view, the panel shows the legacy timeline.
+
+## Phone layout
+
+Below 768 px, the Sessions page is a stack of screens. The browser's back button moves back through them.
+
+- **List screen.** A large "Sessions" title, a **New session** button, and **⋯** (**Legacy sessions**, the theme, and **Show the guide**). Then the search and the same sections as on a desktop. Each session row has two lines: the title, then the group, the time, and the people.
+- **Session screen.** A tap on a session pushes it in. The top bar has the back button, the title (tap it to rename), **People**, and **⋯**. The **⋯** sheet has **Mark read** or **Mark unread**, **Done**, **Later…**, **Move to group…**, **Rename**, **Share…** (owner only), and **Handoffs**. The composer stays above the keyboard.
+- **View all N** and **New session** open as full screens. Back returns to the list at the same scroll position.
+
+Touch gestures on a session row:
+
+- **Swipe left** for Done. On a session in Done, it moves the session back to the Inbox.
+- **Swipe right** for Later. On a session in Later, it moves the session back to the Inbox.
+- A swipe acts after 80 px. A toast offers **Undo**.
+- **Long-press** a session to start a selection. Then tap other sessions to add them. A bar at the bottom has **Done**, **Later**, **Read**, **Move**, and **Cancel**.
+- Long-press one of your groups to open its menu.
+
+Menus open as sheets from the bottom of the screen: Later, People, Share, Move to group, Start in, **⋯**, and the group menu. Drag a sheet down to close it.
+
+In the search field, chips add `with:`, `in:`, `is:unread`, and `is:running`. After `with:` or `in:`, the field suggests matching people or groups.
+
+The phone layout has no tabs, no split, no status bar, and no keys.
+
+## First-run guide
+
+The guide shows once in a new browser, after the dashboard knows your user. It has 4 steps: the sidebar, tabs and the split, Done and Later, then search, keys, and the Legacy view. On a phone it has 3 cards for touch.
+
+- **Next**, **Back**, and the arrow keys move through the steps. **Skip** closes the guide.
+- **Don't show again** is on for the first open. Turn it off to see the guide again on your next visit.
+- `?`, the **Keys** button, Cmd+K **Show the guide**, or **Show the guide** in the phone **⋯** menu opens the guide again.
+- `?guide=1` in the URL opens the guide. `?guide=0` skips it for that one page load.
+
+## Legacy view
+
+The Legacy view is the earlier Sessions page.
+
+- **Legacy sessions** in the sidebar header, in Cmd+K, or in the phone **⋯** menu switches to it.
+- **New sessions view** in the Legacy header, or in Cmd+K, switches back.
+- `?legacy=1` in the URL opens the Legacy view, and `?legacy=0` opens the new view. The dashboard then removes the parameter from the URL.
+
+This browser keeps your choice. The Cmd+I panel follows it too. Links to `/sessions/<id>` open the session in both views.

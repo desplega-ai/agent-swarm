@@ -3,6 +3,7 @@
  * `getUserMedia` + `MediaRecorder`; stop hands the clip to the composer as an
  * ordinary attachment, so it goes through the same upload as a picked file and
  * the server appends its `[Transcript of <file>]` block to the draft task.
+ * While it records, the button shows the live mic level as a few bars.
  *
  * The state lives in `useAudioRecorder`, held by the composer, not in the
  * button: the composer swaps its steer and follow-up children under a poll,
@@ -10,6 +11,7 @@
  */
 
 import { Mic, MicOff, Square } from "lucide-react";
+import { useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,12 +34,55 @@ const RECORDING_EXTENSIONS: Record<string, string> = {
 const ELAPSED_TICK_MS = 250;
 const MIC_BLOCKED = "Microphone access is blocked";
 
+/** 128 frequency bins, about 190 Hz each at 48 kHz. */
+const WAVE_FFT_SIZE = 256;
+/** Each band averages 4 bins from bin 1 up: about 190 Hz to 4 kHz, the speech range. */
+const WAVE_BINS_PER_BAND = 4;
+/**
+ * One entry per bar: the band it shows (the loudest, lowest band in the
+ * middle) and its height at rest and under reduced motion.
+ */
+const WAVE_BARS = [
+  { band: 3, rest: 0.45 },
+  { band: 1, rest: 0.75 },
+  { band: 0, rest: 1 },
+  { band: 2, rest: 0.65 },
+  { band: 4, rest: 0.4 },
+];
+const WAVE_MIN_SCALE = 0.2;
+
 function isRecordingSupported(): boolean {
   return (
     typeof MediaRecorder !== "undefined" &&
     typeof navigator !== "undefined" &&
     typeof navigator.mediaDevices?.getUserMedia === "function"
   );
+}
+
+/**
+ * Web Audio on the mic stream, for the waveform. Null without Web Audio or
+ * when it refuses the stream: the waveform is feedback, never a reason not to
+ * record.
+ */
+function createAnalyser(
+  stream: MediaStream,
+): { context: AudioContext; analyser: AnalyserNode } | null {
+  if (typeof AudioContext === "undefined") return null;
+  let context: AudioContext | null = null;
+  try {
+    context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = WAVE_FFT_SIZE;
+    // A quiet room reads near zero, so the bars move with the voice, not the hum.
+    analyser.minDecibels = -85;
+    context.createMediaStreamSource(stream).connect(analyser);
+    // Made after the mic prompt, so outside the click: Safari starts it suspended.
+    context.resume().catch(() => {});
+    return { context, analyser };
+  } catch {
+    void context?.close();
+    return null;
+  }
 }
 
 function pickMimeType(): string | undefined {
@@ -62,6 +107,8 @@ export interface AudioRecorder {
   elapsedMs: number;
   /** Why recording is off (no MediaRecorder, mic blocked, no mic), or null. */
   unavailableReason: string | null;
+  /** The mic's analyser while recording, for the waveform. Null without Web Audio. */
+  analyser: AnalyserNode | null;
   start: () => Promise<void>;
   stop: () => void;
 }
@@ -75,6 +122,8 @@ export function useAudioRecorder(onClip: (file: File) => void): AudioRecorder {
   );
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(false);
   const onClipRef = useRef(onClip);
@@ -86,6 +135,9 @@ export function useAudioRecorder(onClip: (file: File) => void): AudioRecorder {
     for (const track of streamRef.current?.getTracks() ?? []) track.stop();
     streamRef.current = null;
     recorderRef.current = null;
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+    setAnalyser(null);
   }, []);
 
   // A mic the user already blocked disables the button before the first click.
@@ -178,6 +230,9 @@ export function useAudioRecorder(onClip: (file: File) => void): AudioRecorder {
     };
     streamRef.current = stream;
     recorderRef.current = recorder;
+    const audio = createAnalyser(stream);
+    audioContextRef.current = audio?.context ?? null;
+    setAnalyser(audio?.analyser ?? null);
     recorder.start();
     const startedAt = Date.now();
     setElapsedMs(0);
@@ -190,7 +245,55 @@ export function useAudioRecorder(onClip: (file: File) => void): AudioRecorder {
     if (recorder && recorder.state !== "inactive") recorder.stop();
   }, []);
 
-  return { status, elapsedMs, unavailableReason, start, stop };
+  return { status, elapsedMs, unavailableReason, analyser, start, stop };
+}
+
+/**
+ * The live mic level as a few bars. A frame loop writes each bar's `scaleY`
+ * to the DOM: no React render and no layout per frame. Without an analyser
+ * the bars hold a fixed shape and pulse. Under reduced motion they stay still.
+ */
+function RecordingWaveform({ analyser }: { analyser: AnalyserNode | null }) {
+  const barsRef = useRef<(HTMLSpanElement | null)[]>([]);
+  const reduceMotion = useReducedMotion();
+  const live = analyser !== null && !reduceMotion;
+
+  useEffect(() => {
+    if (!analyser || reduceMotion) return;
+    const bins = new Uint8Array(analyser.frequencyBinCount);
+    let frame = requestAnimationFrame(function draw() {
+      analyser.getByteFrequencyData(bins);
+      WAVE_BARS.forEach(({ band }, i) => {
+        const from = 1 + band * WAVE_BINS_PER_BAND;
+        let sum = 0;
+        for (let bin = from; bin < from + WAVE_BINS_PER_BAND; bin++) sum += bins[bin] ?? 0;
+        const level = sum / WAVE_BINS_PER_BAND / 255;
+        const scale = WAVE_MIN_SCALE + (1 - WAVE_MIN_SCALE) * level;
+        barsRef.current[i]?.style.setProperty("transform", `scaleY(${scale})`);
+      });
+      frame = requestAnimationFrame(draw);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [analyser, reduceMotion]);
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("flex h-3.5 items-center gap-0.5", !live && "motion-safe:animate-pulse")}
+    >
+      {WAVE_BARS.map(({ band, rest }, i) => (
+        <span
+          key={band}
+          ref={(bar) => {
+            barsRef.current[i] = bar;
+          }}
+          className="h-full w-0.5 rounded-full bg-current"
+          // React rewrites this only when `live` flips, so the loop's writes stay.
+          style={{ transform: `scaleY(${live ? WAVE_MIN_SCALE : rest})` }}
+        />
+      ))}
+    </span>
+  );
 }
 
 /** The composer's mic button: record, then stop with the elapsed time shown. */
@@ -220,7 +323,7 @@ export function RecordAudioButton({
               bar ? "h-11" : "h-8",
             )}
           >
-            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-current animate-pulse" />
+            <RecordingWaveform analyser={recorder.analyser} />
             <span className="font-mono text-xs tabular-nums" aria-live="off">
               {formatElapsed(elapsedMs)}
             </span>

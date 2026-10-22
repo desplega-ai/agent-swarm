@@ -10,13 +10,13 @@
  */
 
 import { MessageSquarePlus } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { SessionPanel } from "@/components/session-panel";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { useSidebar } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import { useConfig } from "@/hooks/use-config";
 import {
   buildPageContextFooter,
@@ -51,30 +51,6 @@ function useMediaQuery(query: string): boolean {
     return () => mql.removeEventListener("change", onChange);
   }, [query]);
   return matches;
-}
-
-/**
- * Collapses the nav to icons while `active`, and expands it again afterwards
- * if this hook was what collapsed it.
- */
-function useCollapseNavWhile(active: boolean) {
-  const sidebar = useSidebar();
-  // Latest values without re-running the effect: it acts on `active` changes
-  // only, so the user can still expand the nav while the panel is open.
-  const sidebarRef = useRef(sidebar);
-  sidebarRef.current = sidebar;
-  const collapsedByPanel = useRef(false);
-  useEffect(() => {
-    const { open, setOpen } = sidebarRef.current;
-    if (active) {
-      if (!open) return;
-      collapsedByPanel.current = true;
-      setOpen(false);
-    } else if (collapsedByPanel.current) {
-      collapsedByPanel.current = false;
-      setOpen(true);
-    }
-  }, [active]);
 }
 
 /** Header button next to the notification bell. Hidden where the panel is not offered. */

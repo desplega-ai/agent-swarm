@@ -25,7 +25,7 @@ The full recipe, the env table, and the CI notes live in [LOCAL_TESTING.md](../.
 | `boot/manifest.ts` | both | The `SeedManifest` type. |
 | `global-setup.ts` | Node | Static server for `apps/ui/dist` on a free port (`E2E_UI_URL`), remote seeding. |
 | `fixtures/index.ts` | Node | `swarm`, `seed`, `api`, `clean`, plus the `baseURL` and `storageState` overrides. |
-| `specs/` | Node | `home`, the route smoke (`routes.ts` + `smoke.spec.ts`), `tasks`, `configuration`, `pages`. |
+| `specs/` | Node | `home`, the route smoke (`routes.ts` + `smoke.spec.ts`), `tasks`, `configuration`, `pages`, and `sessions-v2` (desktop tests on `chromium`, the phone test on `mobile-iphone`). |
 | `reporter/summary.ts` | Node | Writes `test-results/summary.json`, including `titlePath` (the describe-block path plus the test's own title) and `attachments` (each attachment's name, contentType, and path). |
 | `reporter/comment.ts` | Node | Turns summaries into the sticky PR comment. |
 | `reporter/publish-plan.ts` | Node | Turns summaries into the agent-fs upload plan and the comment image pick. |
@@ -44,7 +44,7 @@ Two tsconfigs cover the two runtimes: `tsconfig.json` (Node, `specs`, `fixtures`
 3. The child prints one JSON line: `{ apiUrl, apiKey, dbPath, manifestPath }`. Nothing else goes to stdout.
 4. The fixture reads the manifest and serves tests. When the worker ends it closes the child's stdin. EOF, SIGTERM, or SIGINT stop the API and delete the temp files.
 
-`APP_URL` puts the UI origin on the API's CSP `frame-ancestors` list. `HEARTBEAT_DISABLE=true` keeps the backdated in-progress task stalled. `E2E_KEEP=1` keeps the DB, the log, and the manifest.
+`APP_URL` puts the UI origin on the API's CSP `frame-ancestors` list. `HEARTBEAT_DISABLE=true` keeps the backdated in-progress task stalled. `SWARM_DEV_MODE=true` bypasses the dashboard's version gates, so the suite drives surfaces that need a newer API than `package.json` (sessions v2). `E2E_KEEP=1` keeps the DB, the log, and the manifest.
 
 ## Fixtures
 
@@ -54,7 +54,7 @@ Two tsconfigs cover the two runtimes: `tsconfig.json` (Node, `specs`, `fixtures`
 | `seed` | test | The manifest, or `null` in a remote run without `E2E_REMOTE_SEED=1`. Guard with `test.skip(!seed, ...)`. |
 | `api` | test | `get`, `post`, `put`, `delete` against the worker API with the bearer. |
 | `clean` | test, auto | Collects console errors and `/api` responses with status 400 or higher. `assertClean()` fails with both lists. |
-| `storageState` | test | Pre-writes `agent-swarm-connections` (the active connection), `swarm:v1:<apiUrl>:current-user` (the identity), and a freshly dismissed `swarm:feedback-popup:v1:<apiUrl>:<userId>` so no dialog blocks the dashboard. |
+| `storageState` | test | Pre-writes `agent-swarm-connections` (the active connection), `swarm:v1:<apiUrl>:current-user` (the identity), a freshly dismissed `swarm:feedback-popup:v1:<apiUrl>:<userId>`, and `agent-swarm-sessions-v2-guide=off` (the sessions v2 first-run guide) so no dialog blocks the dashboard. |
 
 Two console errors are ignored on purpose, each with a comment in `fixtures/index.ts`: the browser SDK's `/@swarm/config` probe inside `/p/:id` (the pages API does not serve that route yet) and, only in remote mode with the static build, the CSP `frame-ancestors` violation for the page preview.
 
@@ -67,15 +67,23 @@ Two console errors are ignored on purpose, each with a comment in `fixtures/inde
   "tasks": {
     "pool": ["...", "..."],
     "inProgress": "...", "completed": "...", "failed": "...",
-    "pendingLead": "...", "offered": "...", "draft": "..."
+    "pendingLead": "...", "offered": "...", "draft": "...",
+    "codexLogs": "..."
   },
   "pages": { "public": { "id": "...", "apiUrl": "..." }, "authed": { "id": "...", "apiUrl": "..." } },
   "session": { "id": "e2e-session-1" },
+  "sessionChain": {
+    "groupKey": "shared/e2e-sessions/", "groupName": "e2e-sessions",
+    "title": "e2e grouped session", "root": "...", "child": "...",
+    "teammate": { "id": "...", "name": "e2e-teammate" }
+  },
   "memory": { "name": "e2e memory" }
 }
 ```
 
-The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e-worker-b` by one day. Finishing the two worker tasks makes the API create two lead follow-up tasks, so a seeded DB holds ten tasks: the eight seeded rows plus those two.
+`sessionChain` is one session for the sessions v2 view: a `ui` root that `e2e-user` requested in the `e2e-sessions` group, one follow-up task, and a read share with the second user `e2e-teammate`.
+
+The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e-worker-b` by one day. Finishing the two worker tasks makes the API create two lead follow-up tasks, so a seeded DB holds thirteen tasks: the eleven seeded rows plus those two. `tasks.codexLogs` is a second running task on `e2e-worker-a` that only `codex-logs.spec.ts` writes logs to, so `tasks.spec.ts` always reads the seeded log on `tasks.inProgress`.
 
 ## Remote mode
 
@@ -87,6 +95,8 @@ The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e
 | `E2E_REMOTE_SEED=1` | Seed once per run (idempotent). Without it seeded specs and id routes are skipped. |
 
 Specs tagged `@local` run only in local mode. None exist yet; the tag is for assertions on escape-hatch state.
+
+The target API must be 2.5.1 or later, or run with `SWARM_DEV_MODE=true`, for `sessions-v2.spec.ts` and the phone test in `composer-enter-key.spec.ts`. An older API renders the Legacy sessions view, and those tests fail.
 
 ## CI
 

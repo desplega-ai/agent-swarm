@@ -83,6 +83,23 @@ export function defaultAssetKey(resource: AssetKeyResource, id: string): string 
   return normalizeAssetKey(`shared/${resource}:${id}/`);
 }
 
+/** Bounds for an indexed, literal prefix lookup on canonical asset keys. */
+export function keyPrefixRange(prefix: string): { lo: string; hi: string } {
+  const lo = normalizeAssetKey(prefix);
+  return { lo, hi: `${lo.slice(0, -1)}${String.fromCharCode(lo.charCodeAt(lo.length - 1) + 1)}` };
+}
+
+export const SESSION_LEAF_KINDS = ["task", "thread", "schedule", "workflow"] as const;
+const sessionLeafPattern = new RegExp(`/(?:${SESSION_LEAF_KINDS.join("|")}):[^/]+/$`);
+
+/** Remove only a resource leaf, preserving user groups that contain a colon. */
+export function sessionGroupKey(key: string): string {
+  const normalized = normalizeAssetKey(key);
+  const namespace = parseAssetKey(normalized);
+  if (namespace.relativeSegments.length === 0) return normalized;
+  return normalized.replace(sessionLeafPattern, "/");
+}
+
 export function parseAssetKey(input: string): AssetNamespace {
   const key = normalizeAssetKey(input);
   const segments = key.slice(0, -1).split("/");

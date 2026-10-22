@@ -102,6 +102,13 @@ replicas use one `AGENT_ID` and one named volume at `/workspace/personal`. The
 runtime identity is generated inside each worker at boot, so there is no
 per-container runtime setting in the file.
 
+It is a deliberately reduced example that isolates one multi-runtime agent, not
+an install template. For a real deployment, start from the reference
+deployment,
+[`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml),
+and deploy its full roster (1 lead and 11 workers) by default. Then add
+replicas that share an `AGENT_ID` to the agents that need more capacity.
+
 Create a `.env` beside the file first:
 
 ```dotenv title=".env"

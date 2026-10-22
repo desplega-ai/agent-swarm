@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   Bot,
@@ -13,7 +14,16 @@ import {
   UserPlus,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -37,6 +47,95 @@ interface NavItem {
   gate?: { minVersion: string };
 }
 
+/** One command a page adds to the palette. */
+export interface CommandMenuItem {
+  /** Unique in its group. */
+  id: string;
+  label: string;
+  icon?: LucideIcon;
+  /** More words the palette filter matches. */
+  keywords?: string[];
+  /** A key hint at the right of the row, e.g. "E". */
+  shortcut?: string;
+  onSelect: () => void;
+}
+
+interface CommandMenuGroupEntry {
+  id: string;
+  heading: string;
+  items: CommandMenuItem[];
+}
+
+type RegisterGroup = (id: string, group: CommandMenuGroupEntry | null) => void;
+
+// Three contexts, so a page that registers commands never re-renders when
+// the registered groups change (that would register again, in a loop).
+const RegisterContext = createContext<RegisterGroup | null>(null);
+const GroupsContext = createContext<CommandMenuGroupEntry[]>([]);
+const SearchContext = createContext<{ search: string; setSearch: (value: string) => void } | null>(
+  null,
+);
+
+/** Holds the page command groups and the palette's search text. Mount it around the routes and `CommandMenu`. */
+export function CommandMenuProvider({ children }: { children: ReactNode }) {
+  const [groups, setGroups] = useState<CommandMenuGroupEntry[]>([]);
+  const [search, setSearch] = useState("");
+  const register = useCallback<RegisterGroup>((id, group) => {
+    setGroups((prev) => {
+      const at = prev.findIndex((entry) => entry.id === id);
+      if (!group) return at < 0 ? prev : prev.filter((entry) => entry.id !== id);
+      if (at < 0) return [...prev, group];
+      const next = [...prev];
+      next[at] = group;
+      return next;
+    });
+  }, []);
+  const searchValue = useMemo(() => ({ search, setSearch }), [search]);
+  return (
+    <RegisterContext.Provider value={register}>
+      <GroupsContext.Provider value={groups}>
+        <SearchContext.Provider value={searchValue}>{children}</SearchContext.Provider>
+      </GroupsContext.Provider>
+    </RegisterContext.Provider>
+  );
+}
+
+/**
+ * Adds a group of commands to the palette while the caller is mounted. An
+ * empty `items` list hides the group. Memoize `items`: a new array registers
+ * the group again. With `enabled` false the caller leaves the group alone,
+ * so another caller can own the same id (the sessions page hands the
+ * `sessions` group to the v2 view).
+ */
+export function useCommandMenuGroup(
+  id: string,
+  heading: string,
+  items: CommandMenuItem[],
+  enabled = true,
+) {
+  const register = useContext(RegisterContext);
+  useEffect(() => {
+    if (enabled) register?.(id, items.length > 0 ? { id, heading, items } : null);
+  }, [register, id, heading, items, enabled]);
+  // React runs every cleanup before any new effect, so a hand-over between
+  // two callers never drops the other caller's group.
+  useEffect(() => {
+    if (!enabled) return;
+    return () => register?.(id, null);
+  }, [register, id, enabled]);
+}
+
+/** The palette's search text. Empty while the palette is closed. */
+export function useCommandMenuSearch(): string {
+  return useContext(SearchContext)?.search ?? "";
+}
+
+function useSearchState() {
+  const value = useContext(SearchContext);
+  if (!value) throw new Error("CommandMenu needs a CommandMenuProvider around it");
+  return value;
+}
+
 const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
   { label: "Agents", path: "/agents", icon: Bot },
@@ -52,6 +151,8 @@ const NAV_ITEMS: NavItem[] = [
 
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
+  const pageGroups = useContext(GroupsContext);
+  const { search, setSearch } = useSearchState();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -81,20 +182,29 @@ export function CommandMenu() {
   };
   const visibleNav = NAV_ITEMS.filter((i) => !i.gate || gates[i.gate.minVersion] !== false);
 
+  // Every close path clears the search, so the palette always opens empty.
+  const close = useCallback(() => {
+    setOpen(false);
+    setSearch("");
+  }, [setSearch]);
+  const openRef = useRef(open);
+  openRef.current = open;
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setOpen((prev) => !prev);
+        if (openRef.current) close();
+        else setOpen(true);
       }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [close]);
 
   function handleSelect(path: string) {
     void navigate(path);
-    setOpen(false);
+    close();
   }
 
   function handleTaskAction(action: "cancel" | "pause" | "resume", task: AgentTask) {
@@ -105,12 +215,12 @@ export function CommandMenu() {
     } else {
       resumeTask.mutate(task.id);
     }
-    setOpen(false);
+    close();
   }
 
   function handleCreateForAgent(agentId: string) {
     void navigate(`/tasks?new=true&agentId=${encodeURIComponent(agentId)}`);
-    setOpen(false);
+    close();
   }
 
   function taskLabel(task: AgentTask) {
@@ -118,10 +228,41 @@ export function CommandMenu() {
   }
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Search navigation, agents, tasks, actions..." />
+    <CommandDialog open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
+      <CommandInput
+        placeholder="Search navigation, agents, tasks, actions..."
+        value={search}
+        onValueChange={setSearch}
+      />
       <CommandList className="max-h-[520px]">
         <CommandEmpty>No results found.</CommandEmpty>
+
+        {/* Page commands first: they act on what the user is looking at. */}
+        {pageGroups.map((group) => (
+          <CommandGroup key={group.id} heading={group.heading}>
+            {group.items.map((item) => (
+              <CommandItem
+                key={item.id}
+                value={`${group.heading} ${item.label} ${item.id}`}
+                keywords={item.keywords}
+                onSelect={() => {
+                  close();
+                  item.onSelect();
+                }}
+                className="group/item"
+              >
+                {item.icon ? <item.icon className="h-4 w-4" /> : null}
+                {/* One line with an ellipsis. The highlighted row (keys or
+                    pointer) shows the whole label, e.g. a long session title. */}
+                <span className="truncate group-data-[selected=true]/item:whitespace-normal group-data-[selected=true]/item:wrap-anywhere">
+                  {item.label}
+                </span>
+                {item.shortcut ? <CommandShortcut>{item.shortcut}</CommandShortcut> : null}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ))}
+        {pageGroups.length > 0 ? <CommandSeparator /> : null}
 
         <CommandGroup heading="Navigation">
           {visibleNav.map((item) => (

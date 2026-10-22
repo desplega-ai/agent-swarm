@@ -26,10 +26,16 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
+import type { NewViewLink } from "@/hooks/use-sessions-view";
 import { SESSION_SHARING_MIN_VERSION } from "@/lib/session-sharing";
 import { sessionDisplayTitle } from "@/lib/utils";
 
-export default function SessionDetailPage() {
+/**
+ * The legacy detail page. `pages/sessions/page.tsx` renders it for
+ * `/sessions/:rootTaskId` when the legacy view is on. `newView` is the
+ * "New sessions view" button (a switch, or an upgrade tip on an older API).
+ */
+export default function SessionDetailPage({ newView }: { newView?: NewViewLink }) {
   const { rootTaskId } = useParams<{ rootTaskId: string }>();
   const gate = useFeatureGate("1.76.0");
   const renameGate = useFeatureGate("1.120.0");
@@ -87,14 +93,14 @@ export default function SessionDetailPage() {
 
   if (!rootTaskId) {
     return (
-      <SessionsShell>
+      <SessionsShell newView={newView}>
         <p className="text-muted-foreground p-3">Missing session id.</p>
       </SessionsShell>
     );
   }
 
   return (
-    <SessionsShell activeRootTaskId={rootTaskId}>
+    <SessionsShell activeRootTaskId={rootTaskId} newView={newView}>
       <SessionPresenceProvider rootTaskId={rootTaskId} enabled={!!detail}>
         {/* Editorial header — serif title + quiet meta caption. Single 72px
           band, no double divider. */}

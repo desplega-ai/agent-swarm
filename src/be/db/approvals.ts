@@ -144,3 +144,21 @@ export function scrubApprovalVotesJson(approvals: ApprovalVote[]): ScrubbedText 
   if (!breaksJsonValidity(raw, scrubbed)) return scrubbed;
   return JSON.stringify(scrubObject(approvals)) as ScrubbedText;
 }
+
+/** Pending approval summaries for an already loaded session chain. */
+export async function getPendingApprovalsForTasks(taskIds: string[]): Promise<
+  {
+    id: string;
+    status: "pending";
+    sourceTaskId: string;
+    title: string;
+  }[]
+> {
+  if (!taskIds.length) return [];
+  return getDbClient().query(
+    `SELECT id, status, sourceTaskId, title FROM approval_requests
+     WHERE sourceTaskId IN (${taskIds.map(() => "?").join(",")}) AND status = 'pending'
+     ORDER BY createdAt, id`,
+    taskIds,
+  );
+}

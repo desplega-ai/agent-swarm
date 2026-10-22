@@ -39,6 +39,8 @@ Templates are fetched from the [Templates Registry](https://templates.agent-swar
 
 Browse all available templates at [templates.agent-swarm.dev](https://templates.agent-swarm.dev).
 
+[`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) is the reference deployment for every option below. Deploy every agent in it by default (1 lead and 11 workers on the official templates), and trim the roster only when you have a reason to.
+
 ## Option A: Onboard Wizard (Recommended)
 
 The fastest way to get a full swarm running. The interactive wizard collects credentials, generates `docker-compose.yml` + `.env`, starts the stack, and verifies health.
@@ -47,12 +49,12 @@ The fastest way to get a full swarm running. The interactive wizard collects cre
 bunx @desplega.ai/agent-swarm onboard
 ```
 
-Or use the one-shot installer. It checks Docker and Compose v2, installs Bun when missing, runs `onboard --yes` (preset `solo` by default) in `~/agent-swarm`, waits for `/health`, and prints the dashboard `/setup` link:
+Or use the one-shot installer. It checks Docker and Compose v2, installs Bun when missing, runs `onboard --yes` (preset `solo` by default) in `~/agent-swarm`, waits for `/health`, and prints the dashboard `/setup` link. Pass `--preset full` to deploy every official template; `solo` runs a single coder:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full
 # Options: --dir <path>, --preset <name>, --version <ver>, --tunnel, --dry-run
-curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --tunnel
+curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full --tunnel
 ```
 
 `--tunnel` exposes the API through localtunnel and sets `PUBLIC_MCP_BASE_URL`. It is off by default.
@@ -60,10 +62,10 @@ curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/instal
 Or in non-interactive mode with a preset:
 
 ```bash
-ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=dev
+ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=full
 ```
 
-Available presets: `full`, `dev`, `content`, `research`, `solo`. Use `--max-concurrent-tasks` to set each generated agent's task capacity from 1 to 100 (defaults: lead 2, worker 1), or `--dry-run` to preview without writing files.
+Available presets: `full`, `dev`, `content`, `research`, `solo`. Use `full` by default: it deploys the same official templates as the Compose example, with one coder where the example runs two. The interactive wizard preselects it. Use `--max-concurrent-tasks` to set each generated agent's task capacity from 1 to 100 (defaults: lead 2, worker 1), or `--dry-run` to preview without writing files.
 `--yes` no longer requires a Claude, OpenAI or OpenRouter credential: without one, workers wait in credential-wait until you add a credential on `/setup` (Bedrock settings stay required). It stops after the health check instead of opening the post-deploy prompts.
 When the wizard finishes, it prints a dashboard URL that already includes the generated `apiUrl` and `apiKey`, so the first dashboard session auto-connects to the new swarm.
 
@@ -71,7 +73,7 @@ Fresh self-hosted installs also seed a disabled starter catalog of schedules and
 
 ## Option B: Manual Docker Compose
 
-Set up manually with Docker Compose for full control.
+Set up manually with Docker Compose for full control. Start from [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) and keep every agent service in it by default.
 
 ```bash
 git clone https://github.com/desplega-ai/agent-swarm.git

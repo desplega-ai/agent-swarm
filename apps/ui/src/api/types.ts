@@ -23,6 +23,7 @@ export type AgentTaskSource =
   | "ui"
   | "github"
   | "gitlab"
+  | "bitbucket"
   | "agentmail"
   | "system"
   | "schedule"
@@ -793,6 +794,92 @@ export interface SessionListItem {
   chainTaskCount: number;
   lastActivityAt: string;
   latestStatus: AgentTaskStatus;
+  /** The viewer's read state (sessions v2 servers). Omitted for callers that act for no user. */
+  readState?: SessionReadState;
+  /** The Later wake time, when `readState` is `later`. */
+  snoozeUntil?: string | null;
+  /** Unread with a failed latest status, or a pending approval in the chain. */
+  needsYou?: boolean;
+  /** The root key without its `<kind>:<id>/` leaf (`shared/northwind/pricing/`). */
+  groupKey?: string;
+  /** The root has an active share. */
+  shared?: boolean;
+  /** Up to 8 people: the requester, then chain requesters, then share users. */
+  people?: SessionPerson[];
+  /** Everyone counted, also past the 8 in `people`. */
+  peopleCount?: number;
+  /** The newest chain output, cut to 200 characters. */
+  preview?: string | null;
+  /** Active shares with their access level. `userId` null means everyone on the swarm. */
+  shares?: SessionShareSummary[];
+}
+
+export interface SessionShareSummary {
+  userId: string | null;
+  name: string | null;
+  access: "read" | "write";
+}
+
+/** A session's read state for the viewer (`inbox_item_state`, the D5 rule on the server). */
+export type SessionReadState = "unread" | "read" | "later" | "done";
+
+export interface SessionPerson {
+  id: string;
+  name: string;
+}
+
+/** `triage` filter on `GET /api/sessions`. Inbox excludes Later and Done. */
+export type SessionTriageFilter = "inbox" | "later" | "done" | "unread";
+
+/** `status` filter on `GET /api/sessions`. `needs` is "Needs you". */
+export type SessionStatusFilter = "running" | "failed" | "needs";
+
+/** Counts for one sidebar section or group (`GET /api/session-tree`). */
+export interface SessionSectionCounts {
+  total: number;
+  unread: number;
+  running: number;
+  needsYou: number;
+}
+
+/** One group (an asset key prefix) with its own counts. The client nests groups by `/`. */
+export interface SessionTreeGroup extends SessionSectionCounts {
+  key: string;
+  lastActivityAt: string;
+}
+
+/** `GET /api/session-tree`: every visible group plus the section counts. */
+export interface SessionTreeResponse {
+  groups: SessionTreeGroup[];
+  inbox: SessionSectionCounts;
+  later: SessionSectionCounts;
+  done: SessionSectionCounts;
+  noGroup: SessionSectionCounts;
+}
+
+/** A pending approval request in a session chain (`GET /api/sessions/:rootTaskId`). */
+export interface SessionApproval {
+  id: string;
+  status: "pending";
+  sourceTaskId: string;
+  title: string;
+}
+
+/** A session a move did not touch, and why. */
+export interface SessionMoveSkip {
+  rootTaskId: string;
+  reason: string;
+}
+
+/** `POST /api/session-moves`. */
+export interface SessionMoveResult {
+  moved: string[];
+  skipped: SessionMoveSkip[];
+}
+
+/** `POST /api/session-moves/prefix`. Repeat the call while `remaining > 0`. */
+export interface SessionPrefixMoveResult extends SessionMoveResult {
+  remaining: number;
 }
 
 /**
@@ -824,6 +911,8 @@ export interface InboxItemState {
   doneAt?: string;
   /** First-viewed timestamp, set once on first notification panel open. */
   readAt?: string;
+  /** Read cursor: the activity time the user last read up to. Clients may move it back. */
+  lastReadAt?: string;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -907,6 +996,11 @@ export interface CredentialMissingAgentsResponse {
 
 export interface SessionsListResponse {
   sessions: SessionListItem[];
+  /** Every session that matches the filters, for paging. */
+  total: number;
+  /** The page size the server used (it clamps `limit` to 200). */
+  limit: number;
+  offset: number;
 }
 
 /**
@@ -935,6 +1029,12 @@ export interface SessionDetailResponse {
   access?: SessionAccess;
   /** The root's requester. Null for Slack/schedule sessions; omitted by older servers. */
   owner?: SessionOwner | null;
+  /** Pending approval requests in the chain. Missing means none. */
+  approvals?: SessionApproval[];
+  /** The viewer's read state (the list's rule). Omitted with no picked user. */
+  readState?: SessionReadState;
+  /** Newest chain activity: the read cursor that "mark read" writes. With `readState`. */
+  lastActivityAt?: string;
 }
 
 /** What the caller may do in a session: `owner` and `write` can post, `read` can only view. */
@@ -3809,6 +3909,7 @@ export type OnboardingIntegrationMethod =
   | "slack"
   | "github"
   | "gitlab"
+  | "bitbucket"
   | "linear_oauth"
   | "jira_oauth";
 
@@ -3845,6 +3946,7 @@ export interface OnboardingSignals {
     slack: boolean;
     github: boolean;
     gitlab: boolean;
+    bitbucket: boolean;
     linear: boolean;
     jira: boolean;
   };

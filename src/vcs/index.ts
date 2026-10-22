@@ -3,6 +3,7 @@
  */
 
 import { isAzureDevOpsUrl } from "./azure-devops";
+import { isBitbucketUrl } from "./bitbucket";
 import type { VcsProvider } from "./types";
 
 export type { VcsProvider } from "./types";
@@ -13,6 +14,7 @@ export type { VcsProvider } from "./types";
  */
 export function detectVcsProvider(url: string): VcsProvider | null {
   if (isAzureDevOpsUrl(url)) return "azure-devops";
+  if (isBitbucketUrl(url)) return "bitbucket";
   if (url.includes("gitlab.com") || url.includes("gitlab.")) return "gitlab";
   if (url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url)) return "github";
   return null;

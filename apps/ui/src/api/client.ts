@@ -127,12 +127,16 @@ import type {
   ScriptVersion,
   SessionCostsResponse,
   SessionDetailResponse,
-  SessionListItem,
   SessionLog,
   SessionLogsResponse,
+  SessionMoveResult,
+  SessionPrefixMoveResult,
   SessionShares,
   SessionSharesInput,
+  SessionStatusFilter,
   SessionsListResponse,
+  SessionTreeResponse,
+  SessionTriageFilter,
   Skill,
   SkillFile,
   SkillFilesResponse,
@@ -3330,11 +3334,25 @@ class ApiClient {
     contextKeyPrefix?: string;
     /**
      * `mine`: sessions the caller owns. `shared`: someone else's sessions
-     * shared with the caller or everyone. Omit for every session the caller
-     * can open. Session sharing servers only (`SESSION_SHARING_MIN_VERSION`).
+     * shared with the caller or everyone. `tree`: the sessions that
+     * `GET /api/session-tree` counts (mine plus shared with me, no ownerless
+     * roots), so list totals match the tree. Omit for every session the
+     * caller can open. Session sharing servers only (`SESSION_SHARING_MIN_VERSION`).
      */
-    scope?: "mine" | "shared";
-  }): Promise<SessionListItem[]> {
+    scope?: "mine" | "shared" | "tree";
+    /** Asset key prefix, subgroups included (sessions v2). */
+    keyPrefix?: string;
+    /** Exactly this group, not its subgroups (sessions v2). */
+    groupKey?: string;
+    /** Sessions in no group: `shared/` or the viewer's `personal/<id>/` (sessions v2). */
+    noGroup?: boolean;
+    /** Read-state section (sessions v2). */
+    triage?: SessionTriageFilter;
+    /** Latest chain status, or `needs` for "Needs you" (sessions v2). */
+    status?: SessionStatusFilter;
+    /** A requester anywhere in the chain, or a share user (sessions v2). */
+    withUserId?: string;
+  }): Promise<SessionsListResponse> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
     if (opts?.offset != null) params.set("offset", String(opts.offset));
@@ -3343,12 +3361,62 @@ class ApiClient {
     if (opts?.requestedByUserId) params.set("requestedByUserId", opts.requestedByUserId);
     if (opts?.contextKeyPrefix) params.set("contextKeyPrefix", opts.contextKeyPrefix);
     if (opts?.scope) params.set("scope", opts.scope);
+    if (opts?.keyPrefix) params.set("keyPrefix", opts.keyPrefix);
+    if (opts?.groupKey) params.set("groupKey", opts.groupKey);
+    if (opts?.noGroup) params.set("noGroup", "true");
+    if (opts?.triage) params.set("triage", opts.triage);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.withUserId) params.set("withUserId", opts.withUserId);
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/sessions${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`);
-    const data = (await res.json()) as SessionsListResponse;
-    return data.sessions;
+    return (await res.json()) as SessionsListResponse;
+  }
+
+  /** Every visible session group with its counts, plus the Inbox, Later, Done, and No group counts. */
+  async getSessionTree(): Promise<SessionTreeResponse> {
+    const url = `${this.getBaseUrl()}/api/session-tree`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to load the session tree: ${res.status}`);
+    return (await res.json()) as SessionTreeResponse;
+  }
+
+  /**
+   * Move up to 200 sessions (each with its whole chain) into a group, or to
+   * no group with `groupKey: null`. Sessions the caller may not move come
+   * back in `skipped`. The error carries the server's message (403, 409).
+   */
+  async moveSessions(rootTaskIds: string[], groupKey: string | null): Promise<SessionMoveResult> {
+    const url = `${this.getBaseUrl()}/api/session-moves`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ rootTaskIds, groupKey }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? `Failed to move sessions: ${res.status}`);
+    }
+    return (await res.json()) as SessionMoveResult;
+  }
+
+  /**
+   * Rename (`to` = new prefix) or delete (`to: null`) a group. One call moves
+   * up to 200 sessions. Repeat it while `remaining > 0`.
+   */
+  async moveSessionPrefix(from: string, to: string | null): Promise<SessionPrefixMoveResult> {
+    const url = `${this.getBaseUrl()}/api/session-moves/prefix`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ from, to }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? `Failed to move the group: ${res.status}`);
+    }
+    return (await res.json()) as SessionPrefixMoveResult;
   }
 
   /** The error carries the HTTP `status` (403: the caller has no access to this session). */
@@ -3450,6 +3518,8 @@ class ApiClient {
     snoozeUntil?: string;
     /** ISO 8601 datetime; first-viewed marker, sticky server-side. */
     readAt?: string;
+    /** ISO 8601 read cursor. Omit to keep it, `null` clears it. */
+    lastReadAt?: string | null;
   }): Promise<InboxItemState> {
     const url = `${this.getBaseUrl()}/api/inbox-state`;
     const res = await fetch(url, {
@@ -3463,6 +3533,32 @@ class ApiClient {
     }
     const data = (await res.json()) as InboxStateUpsertResponse;
     return data.item;
+  }
+
+  /** Upsert 1 to 200 rows for one user in one transaction (`PATCH /api/inbox-state/bulk`). */
+  async patchInboxStateBulk(body: {
+    userId: string;
+    items: Array<{
+      itemType: InboxItemType;
+      itemId: string;
+      status: InboxItemStatus;
+      snoozeUntil?: string;
+      readAt?: string;
+      lastReadAt?: string | null;
+    }>;
+  }): Promise<InboxItemState[]> {
+    const url = `${this.getBaseUrl()}/api/inbox-state/bulk`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to update inbox state" }));
+      throw new Error(err.error || `Failed to update inbox state: ${res.status}`);
+    }
+    const data = (await res.json()) as InboxStateResponse;
+    return data.items;
   }
 
   // ─── Dashboard telemetry ──────────────────────────────────────────────────

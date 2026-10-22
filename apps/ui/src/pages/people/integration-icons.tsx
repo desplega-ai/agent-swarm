@@ -1,13 +1,14 @@
 import { Mail, Plug } from "lucide-react";
+import { BitbucketMark } from "@/components/shared/bitbucket-mark";
 import { cn } from "@/lib/utils";
 
 /**
  * Brand icon + Title-Case label lookup for platform identities.
  *
  * Inline monochrome SVGs (`currentColor` fill) for the canonical brands
- * (Slack, GitHub, Linear, GitLab, Jira, AgentMail) so they inherit text
+ * (Slack, GitHub, Linear, GitLab, Bitbucket, Jira, AgentMail) so they inherit text
  * color and render correctly in both light and dark themes. SVG path data
- * for Slack/GitHub/Linear/GitLab is the canonical mono mark from
+ * for Slack/GitHub/Linear/GitLab/Bitbucket is the canonical mono mark from
  * simple-icons (CC0,
  * https://github.com/simple-icons/simple-icons/tree/develop/icons) — do not
  * substitute hand-drawn variants. Jira mark is the Atlassian Jira glyph
@@ -24,6 +25,7 @@ export const INTEGRATION_LABELS: Record<string, string> = {
   github: "GitHub",
   linear: "Linear",
   gitlab: "GitLab",
+  bitbucket: "Bitbucket",
   agentmail: "AgentMail",
   jira: "Jira",
   "email-alias": "Email alias",
@@ -136,6 +138,10 @@ export function IntegrationIcon({ kind, className }: { kind: string; className?:
       return <LinearIcon className={cls} />;
     case "gitlab":
       return <GitLabIcon className={cls} />;
+    case "bitbucket":
+      return (
+        <BitbucketMark className={cls} role="img" aria-hidden={false} aria-label="Bitbucket" />
+      );
     case "jira":
       return <JiraIcon className={cls} />;
     case "agentmail":
