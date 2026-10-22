@@ -2,7 +2,7 @@ import { type QueryKey, useMutation, useQueryClient } from "@tanstack/react-quer
 import { useMemo } from "react";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
+import { SESSIONS_TOAST_POSITION, sidebarListParams } from "@/lib/sessions-v2";
 import { api } from "../client";
 import type {
   InboxItemStatus,
@@ -10,6 +10,7 @@ import type {
   SessionListItem,
   SessionReadState,
   SessionsListResponse,
+  SessionTreeResponse,
 } from "../types";
 import { SESSION_TREE_KEY } from "./use-session-tree";
 import {
@@ -17,6 +18,7 @@ import {
   type SessionListParams,
   sessionDetailKey,
   sessionListParamsOf,
+  sessionsQueryOptions,
 } from "./use-sessions";
 
 /** The read cursor that marks a session unread. The my-swarm app writes the same value. */
@@ -121,9 +123,36 @@ interface PageChange {
   removed: Array<{ row: SessionListItem; index: number }>;
 }
 
+/** Rows that a write moved into the sidebar's Later or Done list, and the section count it raised. */
+interface Arrival {
+  section: "later" | "done";
+  listKey: QueryKey;
+  treeKey: QueryKey;
+  ids: string[];
+}
+
+/**
+ * Where a row that arrives in Later or Done goes on the page: Later by wake
+ * time (the server's order), Done by newest activity. The rows already
+ * there keep their order.
+ */
+function insertArrived(
+  sessions: SessionListItem[],
+  row: SessionListItem,
+  section: Arrival["section"],
+): SessionListItem[] {
+  const before = (other: SessionListItem) =>
+    section === "later"
+      ? (row.snoozeUntil ?? "") < (other.snoozeUntil ?? "\uffff")
+      : row.lastActivityAt > other.lastActivityAt;
+  const at = sessions.findIndex(before);
+  return at < 0 ? [...sessions, row] : [...sessions.slice(0, at), row, ...sessions.slice(at)];
+}
+
 interface TriageContext {
   patch: RowPatch;
   changes: PageChange[];
+  arrival: Arrival | null;
   /** The open session details this write patched, with their read state before it. */
   details: Array<{ key: QueryKey; before: SessionReadState }>;
 }
@@ -158,9 +187,12 @@ function rollBack(
  * selection. One session writes `PATCH /api/inbox-state`; a selection writes
  * the bulk route. Rows in the cached list pages change at once (a row that
  * leaves a list drops out of it), and so does the read state of a cached
- * session detail (the pane header). Both roll back with a toast on failure. The
- * tree is not recounted here (that would repeat the server's read rule):
- * the tree and the lists refetch when the last write in flight settles.
+ * session detail (the pane header). A row that moves into Later or Done
+ * also lands in the sidebar's list of that section, and that section's
+ * count goes up, so the section never flashes its empty state. All of it
+ * rolls back with a toast on failure. The other tree counts are not
+ * recounted here (that would repeat the server's read rule): the tree and
+ * the lists refetch when the last write in flight settles.
  *
  * `canTriage` is false without a picked user (an operator key alone): there
  * is no user to write for, so hide the controls.
@@ -189,10 +221,12 @@ export function useSessionTriage() {
     onMutate: async ({ targets, action }) => {
       // Only this user's pages: the rows carry this user's read state.
       const listKey = [...SESSION_LIST_KEY, userId ?? null];
+      const treeKey = [...SESSION_TREE_KEY, userId ?? null];
       const ids = new Set(targets.map((target) => target.rootId));
       // A poll that started before the write would bring the old state back.
       await Promise.all([
         queryClient.cancelQueries({ queryKey: listKey }),
+        queryClient.cancelQueries({ queryKey: treeKey }),
         ...[...ids].map((id) =>
           queryClient.cancelQueries({ queryKey: sessionDetailKey(id, userId ?? null) }),
         ),
@@ -235,12 +269,84 @@ export function useSessionTriage() {
           total: Math.max(0, page.total - change.removed.length),
         });
       }
-      return { patch, changes, details };
+      // A row that moves into Later or Done shows there at once. Without
+      // this, a Later or Done list that was empty shows its empty state
+      // ("Nothing snoozed.") until the refetch after the write. The section
+      // count goes up by the rows that arrive, and the sidebar's list of
+      // that section gets them (it may not be loaded yet: it was empty).
+      let arrival: Arrival | null = null;
+      if (patch.readState === "later" || patch.readState === "done") {
+        const section = patch.readState;
+        const moved = new Map<string, SessionListItem>();
+        for (const [, page] of pages) {
+          for (const row of page?.sessions ?? []) {
+            if (ids.has(row.root.id) && row.readState !== section && !moved.has(row.root.id)) {
+              moved.set(row.root.id, { ...row, ...patch });
+            }
+          }
+        }
+        if (moved.size > 0) {
+          const params = sidebarListParams(section);
+          const sectionKey = sessionsQueryOptions(userId ?? null, params).queryKey;
+          queryClient.setQueryData<SessionTreeResponse>(treeKey, (tree) =>
+            tree
+              ? {
+                  ...tree,
+                  [section]: { ...tree[section], total: tree[section].total + moved.size },
+                }
+              : tree,
+          );
+          queryClient.setQueryData<SessionsListResponse>(sectionKey, (page) => {
+            const base = page ?? { sessions: [], total: 0, limit: params.limit, offset: 0 };
+            let sessions = base.sessions;
+            for (const row of moved.values()) {
+              if (!sessions.some((other) => other.root.id === row.root.id)) {
+                sessions = insertArrived(sessions, row, section);
+              }
+            }
+            return {
+              ...base,
+              sessions,
+              total: base.total + sessions.length - base.sessions.length,
+            };
+          });
+          arrival = { section, listKey: sectionKey, treeKey, ids: [...moved.keys()] };
+        }
+      }
+      return { patch, changes, details, arrival };
     },
     onError: (error, _variables, context) => {
       for (const change of context?.changes ?? []) {
         queryClient.setQueryData<SessionsListResponse>(change.key, (page) =>
           page ? rollBack(page, change, context!.patch) : page,
+        );
+      }
+      // The rows that arrived in Later or Done leave again, while they still
+      // show this write's state.
+      if (context?.arrival) {
+        const { section, listKey, treeKey, ids } = context.arrival;
+        const arrived = new Set(ids);
+        queryClient.setQueryData<SessionsListResponse>(listKey, (page) => {
+          if (!page) return page;
+          const sessions = page.sessions.filter(
+            (row) => !(arrived.has(row.root.id) && row.readState === context.patch.readState),
+          );
+          return {
+            ...page,
+            sessions,
+            total: Math.max(0, page.total - (page.sessions.length - sessions.length)),
+          };
+        });
+        queryClient.setQueryData<SessionTreeResponse>(treeKey, (tree) =>
+          tree
+            ? {
+                ...tree,
+                [section]: {
+                  ...tree[section],
+                  total: Math.max(0, tree[section].total - ids.length),
+                },
+              }
+            : tree,
         );
       }
       // A newer write to the same session keeps its own state.

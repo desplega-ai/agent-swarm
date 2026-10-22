@@ -23,7 +23,7 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { focusQuietly } from "../pane/quiet-focus";
+import { focusQuietly, useQuietTooltip } from "../pane/quiet-focus";
 import { TipKey } from "../sidebar/tree-row";
 import { SILENT_DRAG_ACCESSIBILITY, useMouseDragSensors } from "../sidebar/use-row-drag";
 import { type TabDragData, TabStrip } from "./tab-strip";
@@ -114,9 +114,11 @@ export function SplitPanes({
     setDragging(null);
   };
   const two = split !== null;
+  // The picker gives the focus back quietly: no tooltip on that focus.
+  const splitTip = useQuietTooltip();
 
   const splitButton = (
-    <Tooltip>
+    <Tooltip {...splitTip}>
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
@@ -131,12 +133,13 @@ export function SplitPanes({
           <Columns2 className="size-3.5" />
         </Button>
       </TooltipTrigger>
+      {/* The same name as the button, then the state (as Handoffs does). */}
       <TooltipContent className="flex items-center gap-1.5">
         {two ? (
-          "Close the split"
+          "Split view · On. Click to close it."
         ) : (
           <>
-            Open a session in split
+            Split view
             <TipKey>V</TipKey>
           </>
         )}

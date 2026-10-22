@@ -62,7 +62,8 @@ export function MobileGroupScreen({
       <GroupTab
         view={view}
         onOpen={onOpen}
-        className="px-4 pt-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        // One page scrolls: the search, the filter, the rows, then the pager.
+        className="overflow-y-auto overscroll-contain px-4 pt-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
         phoneList={(rows, { loading, label }) => (
           <GroupRows
             rows={rows}
@@ -144,7 +145,18 @@ function GroupRows({
 
   return (
     <>
-      <MobileList label={label} loading={loading} emptyMessage="No sessions match.">
+      <MobileList
+        label={label}
+        loading={loading}
+        emptyMessage="No sessions match."
+        // The rows run edge to edge like the list screen's, with no box and
+        // no scroll of their own: the screen scrolls, and the pager follows them.
+        className={
+          rows?.length
+            ? "-mx-4 flex-none overflow-visible rounded-none border-x-0 border-t border-b border-border-subtle bg-transparent"
+            : undefined
+        }
+      >
         {(rows ?? []).map((session) => (
           <MobileSessionRow
             key={session.root.id}

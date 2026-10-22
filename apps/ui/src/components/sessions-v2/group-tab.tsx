@@ -27,7 +27,7 @@ import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionListItem } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
-import { DataGrid } from "@/components/shared/data-grid";
+import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -160,12 +160,14 @@ function GroupList({
   // biome-ignore lint/correctness/useExhaustiveDependencies: nameOf reads `users`, rebuilt each render
   const columns = useMemo(
     // No column sorts: the grid holds one page of 50, and a sort of one page reads like a sort of all.
+    // A narrow pane (the split) drops Group, then People, then Activity, so the
+    // grid never scrolls sideways: Title and Time always stay (UX review R9).
     (): ColDef<SessionListItem>[] => [
       {
         headerName: "Title",
         colId: "title",
         flex: 1,
-        minWidth: 240,
+        minWidth: 200,
         sortable: false,
         valueGetter: (p) => (p.data ? sessionDisplayTitle(p.data.root) : ""),
         cellRenderer: (p: { data?: SessionListItem }) => {
@@ -187,6 +189,7 @@ function GroupList({
         headerName: "Group",
         colId: "group",
         width: 180,
+        context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 0 },
         sortable: false,
         valueGetter: (p) => (p.data ? groupCrumb(p.data.groupKey, me, nameOf) : ""),
         cellClass: "text-muted-foreground",
@@ -195,6 +198,7 @@ function GroupList({
         headerName: "People",
         colId: "people",
         width: 120,
+        context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 1 },
         sortable: false,
         cellRenderer: (p: { data?: SessionListItem }) => {
           const others = p.data ? othersOf(p.data, me) : [];
@@ -219,7 +223,8 @@ function GroupList({
       {
         headerName: "Activity",
         colId: "activity",
-        width: 120,
+        width: 104,
+        context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 2 },
         sortable: false,
         cellRenderer: (p: { data?: SessionListItem }) =>
           p.data ? (
@@ -231,7 +236,7 @@ function GroupList({
       {
         headerName: "Time",
         colId: "time",
-        width: 100,
+        width: 80,
         sortable: false,
         valueGetter: (p) => p.data?.lastActivityAt ?? "",
         cellRenderer: (p: { data?: SessionListItem }) =>
@@ -261,8 +266,13 @@ function GroupList({
         searchValue={text}
         onSearchChange={setText}
         searchPlaceholder={`Search ${section ? title : "this group"}`}
-        // A phone: a 44 px field with 16 px text (iOS does not zoom in).
-        searchClassName={phone ? "w-full [&_input]:h-11 [&_input]:text-base" : undefined}
+        // A phone: a 44 px field with 16 px text (iOS does not zoom in). A narrow
+        // pane: the filter wraps under the field before the placeholder cuts.
+        searchClassName={
+          phone
+            ? "w-full [&_input]:h-11 [&_input]:text-base"
+            : "w-full min-w-48 sm:max-w-sm sm:flex-1"
+        }
       >
         <SegmentedControl<Filter>
           aria-label="Show"

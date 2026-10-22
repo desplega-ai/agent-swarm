@@ -70,15 +70,22 @@ export function countsLabel(counts: SessionSectionCounts, plain?: boolean): stri
  * shows the session total when nothing else shows. The row's name already
  * says them, so they are hidden from screen readers here. `touch` (the
  * phone rows): larger text and no tooltip.
+ *
+ * On desktop the name has priority: in a narrow row the counts give way a
+ * whole mark at a time, the running count first and "unread" last. They
+ * wrap out of a one-line box (DOM order reversed under `flex-row-reverse`,
+ * so the marks read left to right as usual).
  */
 export function SessionCounts({
   counts,
   plain,
   touch = false,
+  className,
 }: {
   counts: SessionSectionCounts;
   plain?: boolean;
   touch?: boolean;
+  className?: string;
 }) {
   const tip = countsLabel(counts, plain);
   if (!tip) return null;
@@ -86,40 +93,56 @@ export function SessionCounts({
     "font-mono tabular-nums text-muted-foreground",
     touch ? "text-data" : "px-0.5 text-meta",
   );
-  const marks = (
-    <span
-      aria-hidden
-      className={cn("ml-auto flex shrink-0 items-center", touch ? "gap-1.5" : "gap-1")}
-    >
-      {counts.running > 0 ? (
-        <span className={cn("flex items-center gap-1", number)}>
-          <TaskStatusIcon variant="active" className={touch ? "size-3.5" : "size-3"} />
-          {counts.running}
-        </span>
-      ) : null}
-      {counts.needsYou > 0 ? (
-        <NeedsYouBadge>
-          {counts.needsYou} {counts.needsYou === 1 ? "needs" : "need"} you
-        </NeedsYouBadge>
-      ) : null}
-      {counts.unread > 0 ? (
-        <Badge
-          variant="outline"
-          className={cn(
-            "rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums",
-            touch ? "h-5" : "h-[18px]",
-          )}
-        >
-          {counts.unread} unread
-        </Badge>
-      ) : null}
-      {plain && !countsTip(counts) ? <span className={number}>{counts.total}</span> : null}
-    </span>
-  );
-  if (touch) return marks;
+  const items = [
+    counts.running > 0 ? (
+      <span key="running" className={cn("flex shrink-0 items-center gap-1", number)}>
+        <TaskStatusIcon variant="active" className={touch ? "size-3.5" : "size-3"} />
+        {counts.running}
+      </span>
+    ) : null,
+    counts.needsYou > 0 ? (
+      <NeedsYouBadge key="needs">
+        {counts.needsYou} {counts.needsYou === 1 ? "needs" : "need"} you
+      </NeedsYouBadge>
+    ) : null,
+    counts.unread > 0 ? (
+      <Badge
+        key="unread"
+        variant="outline"
+        className={cn(
+          "rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums",
+          touch ? "h-5" : "h-[18px]",
+        )}
+      >
+        {counts.unread} unread
+      </Badge>
+    ) : null,
+    plain && !countsTip(counts) ? (
+      <span key="total" className={number}>
+        {counts.total}
+      </span>
+    ) : null,
+  ];
+  if (touch) {
+    return (
+      <span aria-hidden className={cn("ml-auto flex shrink-0 items-center gap-1.5", className)}>
+        {items}
+      </span>
+    );
+  }
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{marks}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        <span
+          aria-hidden
+          className={cn(
+            "flex h-[18px] min-w-0 flex-row-reverse flex-wrap items-center gap-1 overflow-hidden",
+            className,
+          )}
+        >
+          {items.reverse()}
+        </span>
+      </TooltipTrigger>
       <TooltipContent side="right">{tip}</TooltipContent>
     </Tooltip>
   );
@@ -311,6 +334,7 @@ function GroupNodeView({
   const { dropRef, isOver } = useGroupDroppable(row.key, dropKey);
   const counts = row.counts;
   const foldTip = row.open ? "Hide subgroups" : "Show subgroups";
+  const actionCount = renaming ? 0 : Number(Boolean(onMenu)) + Number(Boolean(onNewSession));
   return (
     <TreeRow
       ref={dropRef}
@@ -386,14 +410,38 @@ function GroupNodeView({
           </TooltipContent>
         </Tooltip>
       ) : null}
-      <span className="min-w-0 flex-1" />
-      {(onNewSession || onMenu) && !renaming ? (
-        // No width of its own: the actions lie over the end of the name, left
-        // of the counts, so the name keeps its room and the counts never move.
-        <span className="relative h-6 w-0 shrink-0">
+      {/* The counts and the hover actions share one slot at the end of the
+          row. The actions show in place of the counts (on hover and on the
+          keyboard cursor), so they never cover the name or the fold
+          chevron, at any sidebar width. The slot keeps room for the
+          actions. It takes only the room the name leaves (basis 0), so the
+          name never truncates while the counts could give way (UX review R9). */}
+      <span
+        className={cn(
+          "relative flex min-w-0 grow basis-0 items-center justify-end",
+          actionCount === 2 ? "min-w-12.5" : actionCount === 1 && "min-w-6",
+        )}
+      >
+        {counts ? (
+          <SessionCounts
+            counts={counts}
+            plain={plain}
+            className={
+              actionCount > 0
+                ? cn(
+                    // Out at once, back with the row's linger. No fade while keys move.
+                    "transition-opacity delay-50 duration-200 ease-snappy group-hover/row:pointer-events-none group-hover/row:opacity-0 group-hover/row:delay-0 group-hover/row:duration-0",
+                    NO_KEYBOARD_MOTION,
+                    showActions && "pointer-events-none opacity-0",
+                  )
+                : undefined
+            }
+          />
+        ) : null}
+        {actionCount > 0 ? (
           <span
             className={cn(
-              "absolute top-0 right-0 flex gap-0.5",
+              "absolute inset-y-0 right-0 flex items-center gap-0.5",
               // In at once, out with the row's linger (UX review R9). No
               // fade at all while keys move the cursor.
               "transition-opacity delay-50 duration-200 ease-snappy group-hover/row:delay-0 group-hover/row:duration-0",
@@ -419,9 +467,8 @@ function GroupNodeView({
               </RowAction>
             ) : null}
           </span>
-        </span>
-      ) : null}
-      {counts ? <SessionCounts counts={counts} plain={plain} /> : null}
+        ) : null}
+      </span>
     </TreeRow>
   );
 }

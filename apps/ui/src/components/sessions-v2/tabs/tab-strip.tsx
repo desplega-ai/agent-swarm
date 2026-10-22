@@ -24,7 +24,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isSessionTab } from "@/lib/sessions-v2";
+import { isSessionTab, NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { useQuietTooltip } from "../pane/quiet-focus";
 import { ReadMark, TipKey, UNREAD_TITLE } from "../sidebar/tree-row";
@@ -115,6 +115,8 @@ function TabItem({
             "data-selected:after:absolute data-selected:after:inset-x-0 data-selected:after:-bottom-px data-selected:after:h-px data-selected:after:bg-background",
             "data-selected:before:absolute data-selected:before:inset-x-0 data-selected:before:top-0 data-selected:before:h-0.5 data-selected:before:bg-border",
             "data-pane-active:data-selected:before:bg-primary",
+            // "New session" is short and fixed: it keeps its whole label (UX review R9).
+            tab === NEW_SESSION_TAB && "shrink-0",
             isDragging && "opacity-50",
           )}
         >

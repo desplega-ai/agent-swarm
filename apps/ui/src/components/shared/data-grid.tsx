@@ -202,8 +202,14 @@ export function DataGrid<TData>({
   }, []);
 
   const [containerWidth, setContainerWidth] = useState(0);
+  // A marked column carries an explicit `hide: false` when it fits: AG Grid
+  // keeps a column's last `hide` while the def leaves it undefined, so a
+  // column hidden in a narrow pane would never come back when it widens.
   const effectiveColumnDefs = useMemo(
-    () => resolveCompactColumnDefs(columnDefs, containerWidth),
+    () =>
+      resolveCompactColumnDefs(columnDefs, containerWidth).map((col) =>
+        col.context?.hideWhenCompact && col.hide === undefined ? { ...col, hide: false } : col,
+      ),
     [columnDefs, containerWidth],
   );
   const hiddenCount = useMemo(
