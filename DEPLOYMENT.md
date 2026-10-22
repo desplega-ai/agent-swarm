@@ -41,7 +41,7 @@ The easiest way to deploy a full swarm with API, workers, and lead agent.
 
 ### Quick Start
 
-**Step 1:** Copy the example compose file.
+**Step 1:** Copy the example compose file. [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) is the reference deployment. Deploy every agent in it by default (1 lead and 11 workers, see [What's Included](#whats-included)), and remove agents only when you have a reason to.
 
 ```bash
 cp docker-compose.example.yml docker-compose.yml

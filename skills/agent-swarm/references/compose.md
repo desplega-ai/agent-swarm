@@ -1,6 +1,6 @@
 # Docker Compose
 
-Re-fetch the [Compose example](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) and [environment example](https://github.com/desplega-ai/agent-swarm/blob/main/.env.docker.example) before acting.
+Re-fetch the [Compose example](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) and [environment example](https://github.com/desplega-ai/agent-swarm/blob/main/.env.docker.example) before acting. The Compose example is the reference deployment: start every agent service in it (1 lead and 11 workers) by default, and remove services only when the operator has a reason.
 
 ## Prepare
 

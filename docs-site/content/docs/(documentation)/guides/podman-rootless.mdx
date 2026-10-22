@@ -63,14 +63,16 @@ With Podman, the wizard runs `podman compose --env-file .env up -d`, prints `pod
 Non-interactive mode works the same way:
 
 ```bash
-ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=dev --container-engine=podman
+ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=full --container-engine=podman
 # or, reading the engine from env like the rest of --yes mode:
-AGENT_SWARM_CONTAINER_ENGINE=podman ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=dev
+AGENT_SWARM_CONTAINER_ENGINE=podman ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=full
 ```
+
+`full` deploys every official template, the same agents as [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) with one coder where the example runs two. Use it by default.
 
 ## Option B: the Compose example file
 
-Follow [Deployment](/docs/guides/deployment) and replace `docker compose` with `podman compose`:
+Follow [Deployment](/docs/guides/deployment) and replace `docker compose` with `podman compose`. [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) is the reference deployment; keep every agent service in it by default:
 
 ```bash
 curl -O https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/docker-compose.example.yml

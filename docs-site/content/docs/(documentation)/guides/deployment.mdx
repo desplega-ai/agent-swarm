@@ -19,6 +19,8 @@ Before you start, make sure you have:
 
 ### Step 1: Download the Compose File
 
+[`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) is the reference deployment. Deploy every agent in it by default (1 lead and 11 workers, see [What's Included](#whats-included)), and remove agents only when you have a reason to.
+
 ```bash
 curl -O https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/docker-compose.example.yml
 mv docker-compose.example.yml docker-compose.yml

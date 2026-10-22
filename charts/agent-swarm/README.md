@@ -19,6 +19,8 @@ Omit `--version` for latest, or pin the release you want.
 
 This installs the API and the CLI's **Full Swarm**: one lead plus one each of coder, content-reviewer, content-strategist, content-writer, discoverability-optimizer, forward-deployed-engineer, researcher, reviewer, tester, and ux-principles. agent-fs and litestream are opt-in.
 
+That is the agent roster of the reference deployment, [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml), with one coder where it runs two (add `--set pools.coder.replicas=2` to match it). Keep every pool by default and remove pools only when you have a reason to.
+
 For a smaller install, use [examples/values-minimal.yaml](examples/values-minimal.yaml) with the Secret created above. From the repository root:
 
 ```bash
