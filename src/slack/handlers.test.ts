@@ -20,6 +20,7 @@ import {
   checkUserAccess,
   isBotMessage,
   isSwarmThreadRoot,
+  type isUserAllowed,
   registerMessageHandler,
   type UserFilterConfig,
 } from "./handlers";
@@ -185,6 +186,163 @@ describe("checkUserAccess", () => {
       expect(checkUserAccess("U2", "b@partner.org", config)).toBe(true);
       expect(checkUserAccess("U3", "c@vendor.net", config)).toBe(true);
       expect(checkUserAccess("U4", "d@other.io", config)).toBe(false);
+    });
+  });
+});
+
+describe("isUserAllowed", () => {
+  const usersInfo = mock(async () => ({ ok: true, user: {} }));
+  const client = { users: { info: usersInfo } } as never;
+  let enrichSpy: ReturnType<typeof spyOn<typeof slackEnrichModule, "enrichSlackUserEmail">>;
+  let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
+
+  // handlers.ts reads SLACK_ALLOWED_* once at module load, so each case evaluates a fresh
+  // copy under its own env and calls the production two-argument isUserAllowed. The copy
+  // shares ./enrich with this file, so the enrichSlackUserEmail spy still applies.
+  const ENV_KEYS = ["SLACK_ALLOWED_EMAIL_DOMAINS", "SLACK_ALLOWED_USER_IDS"] as const;
+  let loadCount = 0;
+  async function loadIsUserAllowed(env: {
+    SLACK_ALLOWED_EMAIL_DOMAINS?: string;
+    SLACK_ALLOWED_USER_IDS?: string;
+  }): Promise<typeof isUserAllowed> {
+    const saved = ENV_KEYS.map((key) => [key, process.env[key]] as const);
+    try {
+      for (const key of ENV_KEYS) {
+        if (env[key] === undefined) delete process.env[key];
+        else process.env[key] = env[key];
+      }
+      loadCount += 1;
+      const fresh = (await import(`./handlers?env=${loadCount}`)) as typeof import("./handlers");
+      return fresh.isUserAllowed;
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  beforeEach(() => {
+    usersInfo.mockClear();
+    enrichSpy = spyOn(slackEnrichModule, "enrichSlackUserEmail");
+    logSpy = spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    enrichSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  const loggedLines = () => logSpy.mock.calls.map((call) => String(call[0]));
+
+  describe("filtering off (neither env var set)", () => {
+    test("allows everyone without an email lookup", async () => {
+      const allowed = await loadIsUserAllowed({});
+      expect(await allowed(client, "U_ANY")).toBe(true);
+      expect(enrichSpy).not.toHaveBeenCalled();
+      expect(usersInfo).not.toHaveBeenCalled();
+    });
+
+    test("treats blank and comma-only values as unset", async () => {
+      const allowed = await loadIsUserAllowed({
+        SLACK_ALLOWED_EMAIL_DOMAINS: " , ",
+        SLACK_ALLOWED_USER_IDS: ",",
+      });
+      expect(await allowed(client, "U_ANY")).toBe(true);
+      expect(enrichSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("user IDs only", () => {
+    const env = { SLACK_ALLOWED_USER_IDS: " U_LISTED , U_SECOND ," };
+
+    test("allows trimmed allowlisted IDs without an email lookup", async () => {
+      const allowed = await loadIsUserAllowed(env);
+      expect(await allowed(client, "U_LISTED")).toBe(true);
+      expect(await allowed(client, "U_SECOND")).toBe(true);
+      expect(enrichSpy).not.toHaveBeenCalled();
+      expect(usersInfo).not.toHaveBeenCalled();
+    });
+
+    test("denies an unlisted ID without an email lookup", async () => {
+      enrichSpy.mockResolvedValue("person@company.com");
+      const allowed = await loadIsUserAllowed(env);
+      expect(await allowed(client, "U_OTHER")).toBe(false);
+      expect(enrichSpy).not.toHaveBeenCalled();
+      expect(usersInfo).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("email domains only", () => {
+    const env = { SLACK_ALLOWED_EMAIL_DOMAINS: " Company.COM , other.org " };
+
+    test("allows trimmed, case-insensitive domains after one lookup", async () => {
+      const allowed = await loadIsUserAllowed(env);
+      enrichSpy.mockResolvedValue("person@company.com");
+      expect(await allowed(client, "U_A")).toBe(true);
+      enrichSpy.mockResolvedValue("person@Other.Org");
+      expect(await allowed(client, "U_B")).toBe(true);
+      expect(enrichSpy).toHaveBeenCalledTimes(2);
+      expect(enrichSpy).toHaveBeenNthCalledWith(1, client, "U_A");
+      expect(enrichSpy).toHaveBeenNthCalledWith(2, client, "U_B");
+      expect(loggedLines()).toEqual([]);
+    });
+
+    test("denies and logs a domain that is not allowed", async () => {
+      enrichSpy.mockResolvedValue("person@evil.com");
+      const allowed = await loadIsUserAllowed(env);
+      expect(await allowed(client, "U_OTHER")).toBe(false);
+      expect(loggedLines()).toEqual([
+        '[Slack] User U_OTHER email domain "evil.com" not in allowed list',
+      ]);
+    });
+  });
+
+  describe("user IDs and email domains", () => {
+    const env = {
+      SLACK_ALLOWED_EMAIL_DOMAINS: "company.com",
+      SLACK_ALLOWED_USER_IDS: "U_LISTED",
+    };
+
+    test("allows an allowlisted ID without an email lookup", async () => {
+      const allowed = await loadIsUserAllowed(env);
+      expect(await allowed(client, "U_LISTED")).toBe(true);
+      expect(enrichSpy).not.toHaveBeenCalled();
+      expect(usersInfo).not.toHaveBeenCalled();
+    });
+
+    test("allows an unlisted ID whose email domain is allowed", async () => {
+      enrichSpy.mockResolvedValue("person@Company.com");
+      const allowed = await loadIsUserAllowed(env);
+      expect(await allowed(client, "U_OTHER")).toBe(true);
+      expect(enrichSpy).toHaveBeenCalledTimes(1);
+      expect(enrichSpy).toHaveBeenCalledWith(client, "U_OTHER");
+      expect(loggedLines()).toEqual([]);
+    });
+
+    test("denies and logs a domain that is not allowed", async () => {
+      enrichSpy.mockResolvedValue("person@other.com");
+      const allowed = await loadIsUserAllowed(env);
+      expect(await allowed(client, "U_OTHER")).toBe(false);
+      expect(loggedLines()).toEqual([
+        '[Slack] User U_OTHER email domain "other.com" not in allowed list',
+      ]);
+    });
+
+    test("denies and logs a user with no email", async () => {
+      enrichSpy.mockResolvedValue(null);
+      const allowed = await loadIsUserAllowed(env);
+      expect(await allowed(client, "U_OTHER")).toBe(false);
+      expect(loggedLines()).toEqual(["[Slack] User U_OTHER has no email, denying access"]);
+    });
+
+    test("denies and logs a user with a malformed email", async () => {
+      enrichSpy.mockResolvedValue("no-at-sign");
+      const allowed = await loadIsUserAllowed(env);
+      expect(await allowed(client, "U_OTHER")).toBe(false);
+      expect(loggedLines()).toEqual([
+        "[Slack] User U_OTHER has invalid email format, denying access",
+      ]);
     });
   });
 });

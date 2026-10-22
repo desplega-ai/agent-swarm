@@ -6,9 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.4.6] - 2026-10-22
+
 ### Added
+- Workflows: the run page groups `foreach` child rows by item, counts only each item's latest attempt, shows queued and running-vs-cap counts plus the effective failure policy, and lists earlier attempts behind a disclosure. The graph dedupes to latest attempts too (#2317).
 - Workflows: a `foreach` body can be any registered executor except `foreach`. A `sub-workflow` body runs one child workflow per item, an instant body (`script`, `swarm-script`, ...) runs once per item against its own timeout, and approval, wait and child-run items close the join through the same settle path. Each child step records the body's real node type, and the recovery sweep restarts queued or orphaned items (#2029).
 - Workflows: `foreach` takes `concurrency` (items in flight, held across restarts) and `failurePolicy` (`fail-fast` or `collect-outcomes`, defaulting from `onNodeFailure`). Fail-fast cancels queued items and lets in-flight ones finish. `retry-workflow-run` on a failed fan-out reruns only the failed and cancelled items as new attempts, so a `sub-workflow` item gets a new child run and completed items keep their output (#2029).
+
+### Changed
+- Worker boot: a new `GET /api/agents/{id}/skills/bundle` returns every installed and enabled skill with its bundled files and signature, so a worker syncs its skill tree in two calls instead of one per file. System-prompt template renders are cached for the boot window only. Together these remove most of the roughly 89 sequential calls a worker made before its first poll (about 44 for skill sync, about 20 for repeated template renders). Older servers fall back to the per-file path (#2306).
+- MCP: the `script-delete` description now says it permanently removes the script and all its versions (#2325).
+
+### Fixed
+- Telegram: a line that starts with `#123` or `#tag` is no longer rendered as a heading; only CommonMark headings (`# Title`) stay headings, and fenced code is left alone (#2323).
+- Telegram: a reply to a bot message that starts a supergroup reply chain now reaches the gate. The adapter mistook it for a forum topic root; only `is_topic_message` marks a topic now (#2324).
 
 ## [2.4.5] - 2026-10-21
 

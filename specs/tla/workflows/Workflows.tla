@@ -666,7 +666,7 @@ H9 ==
                           i \in {j \in StepIds : steps[j].st = "waiting" /\ steps[j].task \in {"ok", "fail"}}}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H10 resume.ts:808-821 resumeFromChildRun pre-checks, outside any
+\* H10 resume.ts:974-988 resumeFromChildRun pre-checks, outside any
 \* transaction: step still waiting, child outcome (null while it runs), run
 \* waiting or running. No task-generation fence and no retry policy.
 H10 ==
@@ -681,8 +681,8 @@ H10 ==
                                ELSE IF steps[i].task = "ok" THEN "h11" ELSE "h12"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H11 resume.ts:830-854 checkpointPortStepAndResolveSuccessors
-\* (task-step-routing.ts:79-99: CAS on step waiting AND, since #2257, run
+\* H11 resume.ts:992-1033 checkpointPortStepAndResolveSuccessors
+\* (task-step-routing.ts:132-176: CAS on step waiting AND, since #2257, run
 \* waiting or running; then run -> running), then walkGraph(successors) or
 \* finalizeOrWait.
 H11 ==
@@ -700,15 +700,16 @@ H11 ==
           /\ UNCHANGED <<steps, okCount, run, active>>
   /\ UNCHANGED <<execLive, hbLeft, crashes>>
 
-\* H11U resume.ts:830 `run.context` throws before the claim;
-\* failClosedOnUnreadableReplay fails the step, then the run.
+\* H11U resume.ts:992 `run.context` throws before the claim;
+\* failClosedOnUnreadableReplay fails the step, then the run. Since #2314 the
+\* read precedes the failed-child branch too (h12).
 H11Unreadable ==
   /\ ReplayUnreadable
-  /\ thr[THb].pc = "h11"
+  /\ thr[THb].pc \in {"h11", "h12"}
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "hRF", !.rf = "h10"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H12 resume.ts:825-827 failStepAndRunIfWaiting (no ownerTaskId).
+\* H12 resume.ts:997-1004 failStepAndRunIfWaiting (no ownerTaskId).
 H12 ==
   /\ thr[THb].pc = "h12"
   /\ LET i == thr[THb].sid IN
@@ -718,7 +719,7 @@ H12 ==
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h10"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-\* H13 resume.ts:855-857 finalizeOrWait (as EFin): no run-status guard.
+\* H13 resume.ts:1033 finalizeOrWait (as EFin): no run-status guard.
 H13 ==
   /\ thr[THb].pc = "h13"
   /\ run' = FinalizeOrWait
@@ -740,10 +741,10 @@ TaskFinish(i) ==
                                             !.g = steps[i].tg])
   /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
 
-\* E1 resume.ts:140-144 / 249-257 — pre-checks outside any transaction,
-\* including isStaleTaskEvent (resume.ts:325): another task is bound now.
+\* E1 resume.ts:198-228 / 327-342 — pre-checks outside any transaction,
+\* including isStaleTaskEvent (resume.ts:440-444): another task is bound now.
 \* CR (#2030): a `workflow.child.finished` event runs resumeFromChildRun
-\* (resume.ts:808-821): no generation fence, the child outcome must be
+\* (resume.ts:974-988): no generation fence, the child outcome must be
 \* terminal, and a failed child fails the step (no retry policy, EF).
 E1(t) ==
   /\ thr[t].pc = "e1"
@@ -757,9 +758,9 @@ E1(t) ==
                 ELSE IF FixTaskRetry THEN "eR" ELSE "eF"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* E2 resume.ts:194-240 -> task-step-routing.ts:206-256 — claim transaction
+\* E2 resume.ts:231-266 -> task-step-routing.ts:263-314 — claim transaction
 \* (re-reads the STEP only), then walkGraph(successors) or finalizeOrWait.
-\* CR: checkpointPortStepAndResolveSuccessors (task-step-routing.ts:79-99)
+\* CR: checkpointPortStepAndResolveSuccessors (task-step-routing.ts:132-176)
 \* also re-reads the run inside the claim (#2257): only waiting or running.
 E2(t) ==
   /\ thr[t].pc = "e2"
@@ -776,16 +777,18 @@ E2(t) ==
           /\ UNCHANGED <<steps, okCount, run, active>>
   /\ UNCHANGED <<execLive, hbLeft, crashes>>
 
-\* E2U resume.ts:180 `run.context` throws after the E1 checks, before the
-\* claim; failClosedOnUnreadableReplay (resume.ts:136-146) fails the event's
-\* step and the run.
+\* E2U resume.ts:231 `run.context` throws after the E1 checks, before the
+\* claim; failClosedOnUnreadableReplay (resume.ts:165-175) fails the event's
+\* step and the run. CR: since #2314 resumeFromChildRun reads `run.context`
+\* (resume.ts:992) before BOTH branches, so a failed child (eF) can throw too.
 E2Unreadable(t) ==
   /\ ReplayUnreadable
-  /\ thr[t].pc = "e2"
+  /\ \/ thr[t].pc = "e2"
+     \/ ChildRunResume /\ thr[t].pc = "eF"
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eRF", !.rf = "eDone"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* E3 resume.ts:206-233 finalizeOrWait — transaction, but no run-status guard.
+\* E3 resume.ts:273-300 finalizeOrWait — transaction, but no run-status guard.
 \* F7: a retry-pending row keeps the run waiting, like a waiting row.
 EFin(t) ==
   /\ thr[t].pc = "eFin"
@@ -793,7 +796,7 @@ EFin(t) ==
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
   /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* ER F7 resume.ts:259-274 -> scheduleTaskStepRetry (task.failed only): the
+\* ER F7 resume.ts:344-359 -> scheduleTaskStepRetry (task.failed only): the
 \* same claim transaction as H7R. not-claimed stops; not-eligible -> EF.
 ER(t) ==
   /\ thr[t].pc = "eR"
@@ -806,7 +809,7 @@ ER(t) ==
      ELSE SetT(t, [thr[t] EXCEPT !.pc = "eDone"]) /\ UNCHANGED steps
   /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
 
-\* E4 resume.ts:279 markRunFailed -> failStepAndRunIfWaiting (onNodeFailure "fail").
+\* E4 resume.ts:366 markRunFailed -> failStepAndRunIfWaiting (onNodeFailure "fail").
 EF(t) ==
   /\ thr[t].pc = "eF"
   /\ LET i == thr[t].sid IN
@@ -821,7 +824,7 @@ Event(t) == E1(t) \/ E2(t) \/ E2Unreadable(t) \/ EFin(t) \/ ER(t) \/ EF(t) \/ Wa
 ----------------------------------------------------------------------------
 (* User actions (resume.ts)                                                *)
 
-\* C1 resume.ts:370-418 cancelWorkflowRun — one transaction. Steps already
+\* C1 resume.ts:644-700 cancelWorkflowRun — one transaction. Steps already
 \* `failed` count as terminal and are skipped, nextRetryAt included.
 Cancel ==
   /\ thr[TCancel].pc = "cIdle"
@@ -836,13 +839,21 @@ Cancel ==
   /\ SetT(TCancel, [thr[TCancel] EXCEPT !.pc = "cDone"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-\* U1 resume.ts:308-335 retryFailedRun — reads outside the transaction.
+\* U1 resume.ts:471-512 retryFailedRun — reads outside the transaction.
+\* Since #2316 the failed step is the first node (in order of its first row)
+\* whose LATEST row is failed (latestStepPerNode, resume.ts:480-483); an older
+\* failed row of a node that has a newer row is history and is not picked.
+IsLatestRow(i) == \A j \in StepIds : steps[j].node = steps[i].node => j <= i
+FirstRow(n) == CHOOSE i \in StepIds : steps[i].node = n
+                 /\ \A j \in StepIds : steps[j].node = n => i <= j
+LatestFailed(i) == steps[i].st = "failed" /\ IsLatestRow(i)
 U1 ==
   /\ thr[TRetry].pc = "uIdle"
   /\ run = "failed"
-  /\ \E i \in StepIds : steps[i].st = "failed"
-  /\ LET fs == CHOOSE i \in StepIds : steps[i].st = "failed"
-                        /\ \A j \in StepIds : j < i => steps[j].st # "failed"
+  /\ \E i \in StepIds : LatestFailed(i)
+  /\ LET fs == CHOOSE i \in StepIds : LatestFailed(i)
+                        /\ \A j \in StepIds : LatestFailed(j)
+                              => FirstRow(steps[i].node) <= FirstRow(steps[j].node)
          done == NodesWith("completed")
      IN SetT(TRetry, [thr[TRetry] EXCEPT !.pc = "u2", !.sid = fs, !.cur = steps[fs].node,
                        !.pend = {n \in Ready(done, Edges(done)) :
@@ -850,7 +861,7 @@ U1 ==
                                 \cup {steps[fs].node}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* U2 resume.ts:341-363 — claim transaction, then walkGraph.
+\* U2 resume.ts:518-546 — claim transaction, then walkGraph (:567).
 U2 ==
   /\ thr[TRetry].pc = "u2"
   /\ IF run = "failed"
