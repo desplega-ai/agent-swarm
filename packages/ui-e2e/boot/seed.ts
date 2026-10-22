@@ -319,8 +319,12 @@ async function poll(options: SeedOptions, agentId: string): Promise<void> {
   await request(options, "GET", "/api/poll", { agentId });
 }
 
-/** The sessions v2 group of the seeded chain. A root with this key sits in the group itself. */
-const SESSION_GROUP_KEY = "shared/e2e-sessions/";
+/** The sessions v2 group of the seeded chain: one segment under `shared/`. */
+const SESSION_GROUP_NAME = "e2e-sessions";
+/** A root with this key sits in the group itself. */
+const SESSION_GROUP_KEY = `shared/${SESSION_GROUP_NAME}/`;
+/** The root task text. The root has no title, so the dashboard shows this text. */
+const SESSION_TITLE = "e2e grouped session";
 
 /**
  * One session chain for the sessions v2 view: a `ui` root that `e2e-user` requested in the
@@ -333,14 +337,14 @@ async function ensureSessionChain(
 ): Promise<SeedManifest["sessionChain"]> {
   const teammate = await ensureUser(options, "e2e-teammate");
   const root = await ensureTask(options, SESSION_GROUP_KEY, {
-    task: "e2e grouped session",
+    task: SESSION_TITLE,
     source: "ui",
     requestedByUserId: user.id,
     tags: ["e2e"],
   });
   // A child copies its parent's key, so the same key finds it again on a reseed.
   const child = await ensureTask(options, SESSION_GROUP_KEY, {
-    task: "e2e grouped session follow-up",
+    task: `${SESSION_TITLE} follow-up`,
     source: "ui",
     requestedByUserId: user.id,
     parentTaskId: root.id,
@@ -352,6 +356,8 @@ async function ensureSessionChain(
   });
   return {
     groupKey: SESSION_GROUP_KEY,
+    groupName: SESSION_GROUP_NAME,
+    title: SESSION_TITLE,
     root: root.id,
     child: child.id,
     teammate: { id: teammate.id, name: teammate.name },
@@ -419,6 +425,15 @@ export async function seed(options: SeedOptions): Promise<SeedManifest> {
       body: { status: "failed", failureReason: "e2e seeded failure" },
     });
   }
+  // A running task of its own for codex-logs.spec.ts, so its Codex logs and context
+  // snapshots never reach the in-progress task that tasks.spec.ts reads. It is created after
+  // the polls above, so this poll claims it (e2e-worker-a runs 2 tasks: this one and inProgress).
+  const codexLogs = await ensureTask(options, taskKey("codex-logs"), {
+    task: "e2e codex logs task",
+    agentId: workerA.id,
+    tags: ["e2e"],
+  });
+  if (codexLogs.status === "pending") await poll(options, workerA.id);
 
   await request(options, "POST", `/api/tasks/${inProgress.id}/progress`, {
     body: { progress: "e2e seed progress" },
@@ -519,6 +534,7 @@ export async function seed(options: SeedOptions): Promise<SeedManifest> {
       pendingLead: pendingLead.id,
       offered: offered.id,
       draft: draft.id,
+      codexLogs: codexLogs.id,
     },
     pages: { public: publicPage, authed: authedPage },
     session: { id: sessionId },

@@ -9,11 +9,12 @@ import { expect, test } from "../fixtures";
  * - The test API runs with `SWARM_DEV_MODE=true` (`boot/sut.ts`). It is older than
  *   `SESSIONS_V2_MIN_VERSION`, and dev mode opens the version gate.
  * - The `storageState` fixture turns the first-run guide off, so its dialog does not block clicks.
- * - One API serves the whole worker, and retries and `--repeat-each` reuse it. A test that
- *   changes a session's state starts its own session first.
+ * - One API serves each Playwright worker. Tests that share a worker, and `--repeat-each`,
+ *   reuse it. So a test that changes a session's state starts its own session first, and the
+ *   seeded chain stays read-only.
+ * - The sidebar tree is flat: `level` gives the depth. A row shows only while its container is
+ *   open, so "hidden while folded, visible once open" proves which container holds it.
  */
-
-const PHONE_PROJECT = "mobile-iphone";
 
 interface SwarmTarget {
   apiUrl: string;
@@ -50,18 +51,19 @@ async function sessionFor(swarm: SwarmTarget, userId: string, rootId: string) {
   return (await response.json()) as { root: { key: string }; readState?: string };
 }
 
-/** A container row of the tree (Inbox, Done, a group), by its name before the counts. */
-function container(scope: Locator, name: string): Locator {
-  return scope.getByRole("treeitem", { name: new RegExp(`^${name}(,|$)`) });
+/** A session row of the tree: level 2, under a section or a top-level group. */
+function sessionRow(tree: Locator, name: string): Locator {
+  return tree.getByRole("treeitem", { name, level: 2 });
 }
 
 /**
- * Open a container row. A click on an open container would fold it. The click goes to the
- * name: a group row shows its "Group actions" and "New session" buttons on hover, and the
- * middle of the row can be one of them.
+ * Open a container row (Inbox, Done, a group), named by its label before the counts. A click
+ * on an open container would fold it. The click goes to the visible name, which has no role
+ * of its own: a group row shows its "Group actions" and "New session" buttons on hover, and
+ * the middle of the row can be one of them.
  */
 async function expand(scope: Locator, name: string): Promise<void> {
-  const row = container(scope, name);
+  const row = scope.getByRole("treeitem", { name: new RegExp(`^${name}(,|$)`), level: 1 });
   await expect(row).toBeVisible();
   if ((await row.getAttribute("aria-expanded")) !== "true") {
     await row.getByText(name, { exact: true }).click();
@@ -69,52 +71,32 @@ async function expand(scope: Locator, name: string): Promise<void> {
   await expect(row).toHaveAttribute("aria-expanded", "true");
 }
 
-/**
- * The accessible names of the rows under one container. The tree is flat: a row belongs to
- * the nearest level 1 container above it.
- */
-async function rowsIn(tree: Locator, name: string): Promise<string[]> {
-  const items = await tree.getByRole("treeitem").evaluateAll((nodes) =>
-    nodes.map((node) => ({
-      name: node.getAttribute("aria-label") ?? "",
-      level: Number(node.getAttribute("aria-level")),
-    })),
-  );
-  const rows: string[] = [];
-  let inside = false;
-  for (const item of items) {
-    if (item.level === 1) inside = item.name.split(",")[0] === name;
-    else if (inside) rows.push(item.name);
-  }
-  return rows;
-}
-
 test.describe("desktop", () => {
-  test.beforeEach(({ seed }, testInfo) => {
+  test.beforeEach(({ seed, isMobile }) => {
     test.skip(!seed, "remote run without seed");
-    test.skip(testInfo.project.name === PHONE_PROJECT, "desktop layout, see the phone test");
+    test.skip(isMobile, "desktop layout, see the phone test");
   });
 
   test("the tree shows the seeded group and its shared session", async ({ page, seed, clean }) => {
-    const { teammate } = seed!.sessionChain;
+    const { title, groupName, teammate } = seed!.sessionChain;
     await page.goto("/sessions");
     const tree = page.getByRole("tree", { name: "Sessions" });
-    await expand(page.getByRole("group", { name: /^My groups/ }), "e2e-sessions");
-    await expect
-      .poll(() => rowsIn(tree, "e2e-sessions"))
-      .toContainEqual(
-        expect.stringMatching(
-          new RegExp(`e2e grouped session\\. .*Shared with ${teammate.name} \\(can view\\)`),
-        ),
-      );
+    // Inside its group a row does not name the group ("In <group>"), unlike the Inbox row.
+    const inGroup = sessionRow(
+      tree,
+      `${title}. With you, ${teammate.name}. Shared with ${teammate.name} (can view)`,
+    );
+    await expect(inGroup).toBeHidden();
+
+    await expand(page.getByRole("group", { name: /^My groups/ }), groupName);
+    await expect(inGroup).toBeVisible();
     await clean.assertClean();
   });
 
   test("opening a session marks it read", async ({ page, api, swarm, seed, clean }) => {
     const session = await startSession(api, seed!.user.id, "read");
     await page.goto("/sessions");
-    const tree = page.getByRole("tree", { name: "Sessions" });
-    const row = tree.getByRole("treeitem", { name: session.title });
+    const row = sessionRow(page.getByRole("tree", { name: "Sessions" }), session.title);
     await expect(row).toHaveAccessibleName(/^Unread\. /);
 
     await row.click();
@@ -134,21 +116,19 @@ test.describe("desktop", () => {
     await expect
       .poll(async () => (await sessionFor(swarm, seed!.user.id, session.id)).readState)
       .toBe("read");
+    const tree = page.getByRole("tree", { name: "Sessions" });
+    // The Inbox is open. Done and No group start folded.
+    const row = sessionRow(tree, session.title);
+    await expect(row).toBeVisible();
 
     const done = page.getByRole("group", { name: "Triage" }).getByRole("button", { name: "Done" });
     await expect(done).toHaveAttribute("aria-pressed", "false");
     await done.click();
     await expect(done).toHaveAttribute("aria-pressed", "true");
-
-    const tree = page.getByRole("tree", { name: "Sessions" });
+    // Out of the Inbox, and in Done: the row comes back when Done opens.
+    await expect(row).toBeHidden();
     await expand(tree, "Done");
-    const holds = (rows: string[]) => rows.some((row) => row.includes(session.title));
-    await expect
-      .poll(async () => ({
-        inbox: holds(await rowsIn(tree, "Inbox")),
-        done: holds(await rowsIn(tree, "Done")),
-      }))
-      .toEqual({ inbox: false, done: true });
+    await expect(row).toBeVisible();
     await expect
       .poll(async () => (await sessionFor(swarm, seed!.user.id, session.id)).readState)
       .toBe("done");
@@ -162,7 +142,7 @@ test.describe("desktop", () => {
     seed,
     clean,
   }) => {
-    const { groupKey } = seed!.sessionChain;
+    const { groupKey, groupName } = seed!.sessionChain;
     const session = await startSession(api, seed!.user.id, "move");
     await page.goto(`/sessions/${session.id}`);
     await expect(page.getByRole("heading", { level: 2, name: session.title })).toBeVisible();
@@ -172,8 +152,8 @@ test.describe("desktop", () => {
       .getByRole("button", { name: "Move to group" })
       .click();
     const dialog = page.getByRole("dialog", { name: "Move to group" });
-    await dialog.getByPlaceholder("Pick a group, or type a new name").fill("e2e-sessions");
-    await dialog.getByRole("option", { name: "e2e-sessions", exact: true }).click();
+    await dialog.getByRole("combobox").fill(groupName);
+    await dialog.getByRole("option", { name: groupName, exact: true }).click();
     await expect(dialog).toBeHidden();
 
     await expect
@@ -183,56 +163,65 @@ test.describe("desktop", () => {
     await expect(
       page
         .getByRole("tabpanel", { name: session.title })
-        .getByRole("button", { name: "e2e-sessions", exact: true }),
+        .getByRole("button", { name: groupName, exact: true }),
     ).toBeVisible();
+    // The Inbox row names its group, and the open group holds a second row.
     const tree = page.getByRole("tree", { name: "Sessions" });
-    await expand(tree, "e2e-sessions");
-    await expect
-      .poll(() => rowsIn(tree, "e2e-sessions"))
-      .toContainEqual(expect.stringContaining(session.title));
+    await expect(sessionRow(tree, `${session.title}. In ${groupName}.`)).toBeVisible();
+    await expand(tree, groupName);
+    await expect(sessionRow(tree, session.title)).toHaveCount(2);
     await clean.assertClean();
   });
 
-  test("the Legacy toggle switches the view and back", async ({ page, clean }) => {
+  test("the Legacy toggle switches the view and back", async ({ page, seed, clean }) => {
+    const { title, root } = seed!.sessionChain;
     await page.goto("/sessions");
     const tree = page.getByRole("tree", { name: "Sessions" });
     const legacy = page.getByRole("button", { name: "Legacy sessions" });
     const v2 = page.getByRole("button", { name: "New sessions view" });
+    // Controls only the Legacy view has: its list search and a link per session.
+    const legacySearch = page.getByRole("textbox", {
+      name: "Search sessions by title or initial task text",
+    });
+    const legacyRow = page.getByRole("link", { name: title });
     await expect(tree).toBeVisible();
+    await expect(legacySearch).toBeHidden();
 
     await legacy.click();
     await expect(v2).toBeVisible();
+    await expect(legacySearch).toBeVisible();
+    await expect(legacyRow).toHaveAttribute("href", `/sessions/${root}`);
     await expect(tree).toBeHidden();
     // The pick is a per-browser preference, so a reload keeps the Legacy view.
     await page.reload();
-    await expect(v2).toBeVisible();
+    await expect(legacySearch).toBeVisible();
     await expect(tree).toBeHidden();
 
     await v2.click();
     await expect(tree).toBeVisible();
     await expect(legacy).toBeVisible();
+    await expect(legacySearch).toBeHidden();
     await clean.assertClean();
   });
 });
 
 test.describe("phone", () => {
-  test.beforeEach(({ seed }, testInfo) => {
+  test.beforeEach(({ seed, isMobile }) => {
     test.skip(!seed, "remote run without seed");
-    test.skip(testInfo.project.name !== PHONE_PROJECT, "phone layout, runs on the phone project");
+    test.skip(!isMobile, "phone layout, runs on the mobile-iphone project");
   });
 
-  test("the list opens the session detail and back returns", async ({ page, seed, clean }) => {
-    const { root } = seed!.sessionChain;
+  test("the list opens the session detail and back returns", async ({ page, api, seed, clean }) => {
+    const session = await startSession(api, seed!.user.id, "phone");
     await page.goto("/sessions");
     const tree = page.getByRole("tree", { name: "Sessions" });
     const detail = page.getByRole("region", { name: "Session" });
-    // The Inbox row of the seeded root. Rows in a flat list name their group.
-    const row = tree.getByRole("treeitem", { name: "e2e grouped session. In e2e-sessions" });
+    const row = sessionRow(tree, session.title);
 
     await row.tap();
-    await expect(page).toHaveURL(new RegExp(`/sessions/${root}(\\?|$)`));
+    await expect(page).toHaveURL(new RegExp(`/sessions/${session.id}(\\?|$)`));
     await expect(
-      detail.getByRole("button", { name: "e2e grouped session. Rename session" }),
+      detail.getByRole("button", { name: `${session.title}. Rename session` }),
     ).toBeVisible();
     await expect(tree).toBeHidden();
 

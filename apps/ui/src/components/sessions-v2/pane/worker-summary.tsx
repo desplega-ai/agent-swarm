@@ -52,7 +52,8 @@ export function WorkerSummaryLine({
       aria-expanded={open}
       aria-controls={controls}
       onClick={onToggle}
-      className="hover-linger -ml-1 flex w-fit max-w-full min-w-0 items-center gap-2 rounded-md py-0.5 pr-2 pl-1 text-left text-xs text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 pointer-coarse:min-h-11"
+      // Phones and touch screens: the whole 44 px row is the tap target (UX review R9).
+      className="hover-linger -ml-1 flex w-fit max-w-full min-w-0 items-center gap-2 rounded-md py-0.5 pr-2 pl-1 text-left text-xs text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 max-md:w-full pointer-coarse:min-h-11 pointer-coarse:w-full"
     >
       <TaskStatusIcon variant={ICON[summary.state]} className="size-3.5" />
       <AgentAvatarStack

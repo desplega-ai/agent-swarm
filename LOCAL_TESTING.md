@@ -203,10 +203,10 @@ It builds `apps/ui` once with no deployment config, serves `apps/ui/dist` from a
 and boots one fresh API per Playwright worker (`scripts/e2e/sut.ts` through `packages/ui-e2e/boot/sut.ts`).
 Each API runs with `SWARM_DEV_MODE=true`, so the dashboard's version gates open (sessions v2 needs a newer API than `package.json`).
 Each API gets a temp SQLite file and the seed from `packages/ui-e2e/boot/seed.ts`:
-three agents, eight tasks across every status, session logs, a cost row, two pages, one memory, the `e2e-user` identity,
+three agents, nine tasks across every status (one running task is only for `codex-logs.spec.ts`), session logs, a cost row, two pages, one memory, the `e2e-user` identity,
 and one grouped session chain that `e2e-user` shares with a second user, `e2e-teammate`.
 The browser context starts with the connection, the identity, a dismissed feedback dialog, and the sessions v2 guide turned off in `localStorage`, so no dialog blocks the dashboard.
-Specs live in `packages/ui-e2e/specs/`: a route smoke over every sidebar route (`smoke.spec.ts` + `routes.ts`) and three flows (`tasks`, `configuration`, `pages`).
+Specs live in `packages/ui-e2e/specs/`: a route smoke over every sidebar route (`smoke.spec.ts` + `routes.ts`), three flows (`tasks`, `configuration`, `pages`), and `sessions-v2.spec.ts` (desktop tests on the `chromium` project, the phone test on `mobile-iphone`).
 Every test fails on a browser console error or an `/api` response with status 400 or higher.
 
 Requirements: Node 22 or newer on `PATH` (Playwright runs under Node) and the Chromium build for the pinned `@playwright/test`

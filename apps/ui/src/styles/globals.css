@@ -785,6 +785,14 @@ button[data-slot="sidebar-rail"] {
   font-size: 0.95em;
 }
 
+/* Phones (below md) read a swarm reply in the sessions timeline at 16 px
+ * (UX review R9). Desktop and other prose keep 0.85rem. */
+@media (width < 48rem) {
+  [data-slot="swarm-reply"] .prose-chat {
+    font-size: 1rem;
+  }
+}
+
 /* Session log prose, tighter than chat */
 .prose-session-log {
   font-size: 0.8rem;

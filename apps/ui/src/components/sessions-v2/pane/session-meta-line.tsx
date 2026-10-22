@@ -57,8 +57,10 @@ export function TriageNote({ session }: { session: SessionListItem }) {
  */
 export function useSessionMeta(detail: SessionDetailResponse) {
   const { data: costs } = useSessionCosts({ taskId: detail.root.id, enabled: true });
-  // The server's latest-task rule, as the sidebar row and the tab read it,
-  // so the three never disagree on a chain with tied update times.
+  // The server's latest-task rule (`latestTask`), which the sidebar row and
+  // the tab also follow, so the three agree. On a rare tie of update times
+  // the server takes the row SQLite meets first, and the client's walk order
+  // can pick another task.
   const status = useMemo(() => sessionChipStatus(latestTask(detail).status), [detail]);
   const handoffRows = useMemo(() => hasHandoffs(buildTurns(detail.chain).turns), [detail.chain]);
   return {

@@ -25,7 +25,7 @@ The full recipe, the env table, and the CI notes live in [LOCAL_TESTING.md](../.
 | `boot/manifest.ts` | both | The `SeedManifest` type. |
 | `global-setup.ts` | Node | Static server for `apps/ui/dist` on a free port (`E2E_UI_URL`), remote seeding. |
 | `fixtures/index.ts` | Node | `swarm`, `seed`, `api`, `clean`, plus the `baseURL` and `storageState` overrides. |
-| `specs/` | Node | `home`, the route smoke (`routes.ts` + `smoke.spec.ts`), `tasks`, `configuration`, `pages`. |
+| `specs/` | Node | `home`, the route smoke (`routes.ts` + `smoke.spec.ts`), `tasks`, `configuration`, `pages`, and `sessions-v2` (desktop tests on `chromium`, the phone test on `mobile-iphone`). |
 | `reporter/summary.ts` | Node | Writes `test-results/summary.json`, including `titlePath` (the describe-block path plus the test's own title) and `attachments` (each attachment's name, contentType, and path). |
 | `reporter/comment.ts` | Node | Turns summaries into the sticky PR comment. |
 | `reporter/publish-plan.ts` | Node | Turns summaries into the agent-fs upload plan and the comment image pick. |
@@ -67,12 +67,14 @@ Two console errors are ignored on purpose, each with a comment in `fixtures/inde
   "tasks": {
     "pool": ["...", "..."],
     "inProgress": "...", "completed": "...", "failed": "...",
-    "pendingLead": "...", "offered": "...", "draft": "..."
+    "pendingLead": "...", "offered": "...", "draft": "...",
+    "codexLogs": "..."
   },
   "pages": { "public": { "id": "...", "apiUrl": "..." }, "authed": { "id": "...", "apiUrl": "..." } },
   "session": { "id": "e2e-session-1" },
   "sessionChain": {
-    "groupKey": "shared/e2e-sessions/", "root": "...", "child": "...",
+    "groupKey": "shared/e2e-sessions/", "groupName": "e2e-sessions",
+    "title": "e2e grouped session", "root": "...", "child": "...",
     "teammate": { "id": "...", "name": "e2e-teammate" }
   },
   "memory": { "name": "e2e memory" }
@@ -81,7 +83,7 @@ Two console errors are ignored on purpose, each with a comment in `fixtures/inde
 
 `sessionChain` is one session for the sessions v2 view: a `ui` root that `e2e-user` requested in the `e2e-sessions` group, one follow-up task, and a read share with the second user `e2e-teammate`.
 
-The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e-worker-b` by one day. Finishing the two worker tasks makes the API create two lead follow-up tasks, so a seeded DB holds twelve tasks: the ten seeded rows plus those two.
+The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e-worker-b` by one day. Finishing the two worker tasks makes the API create two lead follow-up tasks, so a seeded DB holds thirteen tasks: the eleven seeded rows plus those two. `tasks.codexLogs` is a second running task on `e2e-worker-a` that only `codex-logs.spec.ts` writes logs to, so `tasks.spec.ts` always reads the seeded log on `tasks.inProgress`.
 
 ## Remote mode
 
@@ -93,6 +95,8 @@ The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e
 | `E2E_REMOTE_SEED=1` | Seed once per run (idempotent). Without it seeded specs and id routes are skipped. |
 
 Specs tagged `@local` run only in local mode. None exist yet; the tag is for assertions on escape-hatch state.
+
+The target API must be 2.4.6 or later, or run with `SWARM_DEV_MODE=true`, for `sessions-v2.spec.ts` and the phone test in `composer-enter-key.spec.ts`. An older API renders the Legacy sessions view, and those tests fail.
 
 ## CI
 

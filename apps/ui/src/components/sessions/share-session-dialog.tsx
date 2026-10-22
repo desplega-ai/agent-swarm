@@ -26,9 +26,16 @@ import {
 import { userInitials } from "@/components/shared/user-chip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { SearchableSelect } from "@/components/ui/searchable-select";
+import { SearchableSelect, tokenFilter } from "@/components/ui/searchable-select";
 import {
   Select,
   SelectContent,
@@ -176,7 +183,10 @@ function ShareRow({
 /**
  * "Add people" in the phone sheet (UX review R9): the search field at the
  * top and 48 px person rows, so the results sit above the keyboard and not
- * in a popover under it. `data-sheet-tall` grows the sheet to 92 dvh.
+ * in a popover under it. It is the desktop picker's cmdk list with the same
+ * token match (name, user id, email), so a search finds the same people on
+ * both. No row is highlighted until the user types (touch has no cursor).
+ * `data-sheet-tall` grows the sheet to 92 dvh.
  */
 function AddPeopleView({
   options,
@@ -188,12 +198,7 @@ function AddPeopleView({
   onPick: (userId: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const words = query.trim().toLowerCase();
-  const shown = words
-    ? options.filter((option) =>
-        `${option.label} ${option.hint ?? ""}`.toLowerCase().includes(words),
-      )
-    : options;
+  const [active, setActive] = useState("");
   return (
     <div data-sheet-tall className="flex min-h-0 flex-1 flex-col gap-3">
       <DialogHeader className="flex-row items-center gap-1 text-left">
@@ -212,22 +217,31 @@ function AddPeopleView({
           Pick a person. They can view this session.
         </DialogDescription>
       </DialogHeader>
-      <Input
-        autoFocus
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search people"
-        aria-label="Search people"
-        className="h-11 text-base"
-      />
-      {shown.length > 0 ? (
-        <ul aria-label="People" className="-mx-1 min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {shown.map((option) => (
-            <li key={option.value}>
-              <button
-                type="button"
-                onClick={() => onPick(option.value)}
-                className="flex min-h-12 w-full items-center gap-3 rounded-md px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:bg-accent"
+      <Command
+        filter={tokenFilter}
+        label="Search people"
+        value={query ? active : ""}
+        onValueChange={setActive}
+        // A 44 px field with 16 px text (iOS does not zoom in), and 48 px rows.
+        className="h-auto min-h-0 flex-1 bg-transparent **:data-[slot=command-input-wrapper]:h-11 [&_[cmdk-input]]:h-11 [&_[cmdk-input]]:text-base [&_[cmdk-item]]:min-h-12"
+      >
+        <CommandInput
+          autoFocus
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Search people"
+        />
+        <CommandList className="max-h-none min-h-0 flex-1 overscroll-contain">
+          <CommandEmpty>
+            {options.length > 0 ? "No one matches." : "No one else to add."}
+          </CommandEmpty>
+          <CommandGroup>
+            {options.map((option) => (
+              <CommandItem
+                key={option.value}
+                value={`${option.label} ${option.value} ${option.hint ?? ""}`}
+                onSelect={() => onPick(option.value)}
+                className="gap-3 px-1"
               >
                 <PersonAvatar id={option.value} name={option.label} />
                 <span className="flex min-w-0 flex-1 flex-col">
@@ -236,15 +250,11 @@ function AddPeopleView({
                     <span className="truncate text-data text-muted-foreground">{option.hint}</span>
                   ) : null}
                 </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="px-1 text-data text-muted-foreground">
-          {options.length > 0 ? "No one matches." : "No one else to add."}
-        </p>
-      )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </Command>
     </div>
   );
 }

@@ -13,6 +13,8 @@ export interface SeedManifest {
     pendingLead: string;
     offered: string;
     draft: string;
+    /** In progress on workerA, for codex-logs.spec.ts only: its logs stay off `inProgress`. */
+    codexLogs: string;
   };
   pages: {
     public: { id: string; apiUrl: string };
@@ -25,6 +27,10 @@ export interface SeedManifest {
    */
   sessionChain: {
     groupKey: string;
+    /** The group as the sidebar names it: the last segment of `groupKey`. */
+    groupName: string;
+    /** The root's title in the dashboard (its task text). */
+    title: string;
     root: string;
     child: string;
     teammate: { id: string; name: string };

@@ -172,8 +172,8 @@ test("Codex app-server logs render messages, deltas, and MCP results", async ({
   clean,
 }, testInfo) => {
   test.skip(!seed, "remote run without seed");
-  const logs = await seedCodexLogs(api, seed!.tasks.inProgress, testInfo.testId);
-  await openSessionLogs(page, seed!.tasks.inProgress);
+  const logs = await seedCodexLogs(api, seed!.tasks.codexLogs, testInfo.testId);
+  await openSessionLogs(page, seed!.tasks.codexLogs);
 
   await expect(
     page.getByText(logs.wrappedUserMessage, { exact: true }).filter({ visible: true }),
@@ -194,7 +194,7 @@ test("Codex app-server logs render messages, deltas, and MCP results", async ({
     page.getByText(logs.mcpResult, { exact: true }).filter({ visible: true }),
   ).toBeVisible();
 
-  await completeLiveMessage(api, seed!.tasks.inProgress, logs);
+  await completeLiveMessage(api, seed!.tasks.codexLogs, logs);
   await expect(
     page.getByText(logs.liveMessage, { exact: true }).filter({ visible: true }),
   ).toHaveCount(1, {
@@ -244,8 +244,8 @@ test("context usage keeps the latest complete measurement", async ({
   clean,
 }, testInfo) => {
   test.skip(!seed, "remote run without seed");
-  await seedContextSnapshots(swarm, seed!.tasks.inProgress, seed!.agents.workerA, testInfo.testId);
-  await page.goto(`/tasks/${seed!.tasks.inProgress}`);
+  await seedContextSnapshots(swarm, seed!.tasks.codexLogs, seed!.agents.workerA, testInfo.testId);
+  await page.goto(`/tasks/${seed!.tasks.codexLogs}`);
 
   await expect(
     page.getByText("191.5K of 1.1M tokens", { exact: true }).filter({ visible: true }),
@@ -299,8 +299,8 @@ test.describe("below the 60rem page-width switch (tabs layout)", () => {
     clean,
   }, testInfo) => {
     test.skip(!seed, "remote run without seed");
-    const logs = await seedCodexLogs(api, seed!.tasks.inProgress, testInfo.testId);
-    await openSessionLogs(page, seed!.tasks.inProgress, true);
+    const logs = await seedCodexLogs(api, seed!.tasks.codexLogs, testInfo.testId);
+    await openSessionLogs(page, seed!.tasks.codexLogs, true);
 
     await expect(
       page.getByText(logs.wrappedUserMessage, { exact: true }).filter({ visible: true }),

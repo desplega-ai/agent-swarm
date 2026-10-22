@@ -54,7 +54,8 @@ export function PersonBubble({
         <TaskPromptAttachments taskId={task.id} attachments={task.attachments} />
         <div
           className={cn(
-            "min-w-0 rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere",
+            // Phones read message text at 16 px (UX review R9). Desktop keeps 14 px.
+            "min-w-0 rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:text-sm",
             mine ? "rounded-tr-sm bg-muted" : "rounded-tl-sm border border-border bg-card",
             // A message from Slack or a chat channel stays greyed (SPEC R2).
             external && "border border-dashed bg-surface text-muted-foreground",

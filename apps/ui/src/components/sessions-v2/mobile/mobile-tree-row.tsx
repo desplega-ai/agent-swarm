@@ -244,6 +244,9 @@ function MobileSessionRowView({
                 decorative
                 size="sm"
                 max={2}
+                // 24 px avatars with 11 px initials (UX review R9). The Avatar
+                // primitive's sm size would set 12 px, so this one is marked important.
+                className="[&_[data-slot=avatar-fallback]]:text-meta!"
                 peers={others.map((person) => ({
                   id: person.id,
                   name: person.name,

@@ -55,8 +55,8 @@ export interface SearchableMultiSelectProps extends SearchableSelectBaseProps {
   onChange: (next: string[]) => void;
 }
 
-/** Tokenized AND match, so "lea" + " worker" both narrow. */
-function tokenFilter(itemValue: string, search: string): number {
+/** Tokenized AND match, so "lea" + " worker" both narrow. The phone Add people list shares it. */
+export function tokenFilter(itemValue: string, search: string): number {
   const haystack = itemValue.toLowerCase();
   const needle = search.toLowerCase().trim();
   if (!needle) return 1;

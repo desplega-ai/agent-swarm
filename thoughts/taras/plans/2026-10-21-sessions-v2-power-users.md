@@ -979,10 +979,10 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   | 116 | P1 | Desktop tree indentation on phones | fixed in Phase 9 | One indent step, no guide lines. |
   | 117 | P1 | with: and in: chips dead-end | fixed in Phase 9 | People and group suggestions. |
   | 118 | P1 | Phone composer differs from ComposerDock | fixed in Phase 9 | ComposerDock in bar mode. |
-  | 119 | P1 | Tap targets under 44 px | fixed now | Phase 9 plus the search clear, the approval Review button, and the group pager. |
+  | 119 | P1 | Tap targets under 44 px | fixed now | Phase 9 plus the search clear, the approval Review button, the group pager, and a full-width worker line on phones. |
   | 120 | P1 | Phone rename has no Cancel | fixed in Phase 9 | RenameBar with Cancel and Save; a blur cancels. |
   | 121 | P1 | Add people opens a popover inside the sheet | fixed now (partly) | AddPeopleView in the sheet, 48 px rows, 92 dvh. No "Saved" toast (deferred: the row shows at once, failures toast). |
-  | 122 | P1 | Phone font sizes are off the scale | fixed in Phase 9 | Only `text-base`, `text-data`, `text-meta`, `text-2xl`. |
+  | 122 | P1 | Phone font sizes are off the scale | fixed now | Phase 9 kept phone text on the named scale. The Phase 10 review found 14 px bubbles: phone bubbles and replies are now 16 px, and row avatar initials 11 px. Desktop is unchanged. |
 - **References**:
   - Research: `thoughts/taras/research/2026-10-20-sessions-ui-power-users.md`
   - Brainstorm: `thoughts/taras/brainstorms/2026-10-20-sessions-ui-power-users.md`
