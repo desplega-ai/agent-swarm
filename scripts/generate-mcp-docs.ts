@@ -8,8 +8,9 @@
  * Run with: bun run docs:mcp
  */
 
-import { Glob } from "bun";
 import path from "node:path";
+import { openAICompatibleProviderIds } from "@desplega/model-catalog";
+import { Glob } from "bun";
 
 const TOOLS_DIR = path.join(import.meta.dir, "../src/tools");
 const TYPES_FILE = path.join(import.meta.dir, "../src/types.ts");
@@ -229,9 +230,8 @@ async function discoverToolFiles(): Promise<string[]> {
  * captured in full instead of being truncated at the first inner quote.
  *
  * Backslash escapes are decoded for common cases (`\n`, `\t`, `\r`, `\\`,
- * matching the opening quote) — anything else passes through as-is. Template
- * literals are treated as plain strings (no `${}` interpolation handling)
- * because no MCP tool description uses interpolation today.
+ * matching the opening quote) — anything else passes through as-is. Known
+ * provider-id interpolation is resolved without evaluating arbitrary source.
  */
 function parseStringLiteralChain(
   source: string,
@@ -284,7 +284,13 @@ function parseStringLiteralChain(
   }
 
   if (!parsedAtLeastOne) return null;
-  return { value: result, endIdx: i };
+  return {
+    value: result.replace(
+      /\$\{openAICompatibleProviderIds\(\)\.join\(["'], ["']\)\}/g,
+      openAICompatibleProviderIds().join(", "),
+    ),
+    endIdx: i,
+  };
 }
 
 /**
@@ -321,6 +327,22 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
   ];
   if (registrations.length === 0) return [];
 
+  // Read shared tool-schema declarations as source, without importing their
+  // runtime dependencies (which can initialize the database or integrations).
+  let schemaContent = content;
+  for (const imported of content.matchAll(
+    /import\s*\{([^}]+)\}\s*from\s*["'](@\/tools\/[^"']+)["']/g,
+  )) {
+    const shared = await Bun.file(
+      path.join(TOOLS_DIR, `${imported[2]!.slice("@/tools/".length)}.ts`),
+    ).text();
+    for (const name of imported[1]!.split(",").map((part) => part.trim())) {
+      if (!/^\w+$/.test(name)) continue;
+      const declaration = new RegExp(`const\\s+${name}\\s*=\\s*z\\s*\\.[^;]+;`).exec(shared);
+      if (declaration) schemaContent += `\n${declaration[0]}`;
+    }
+  }
+
   const infos: ToolInfo[] = [];
   for (let idx = 0; idx < registrations.length; idx++) {
     const match = registrations[idx]!;
@@ -348,14 +370,17 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
 
     // Helper calls pass description and raw input shape as their second and
     // third arguments, rather than a registrar options object.
-    let fields = parseSchemaFields(snippet, content);
+    let fields = parseSchemaFields(snippet, schemaContent);
     if (!description && match[0].startsWith("register(")) {
       const descriptionStart = snippet.indexOf(",", match[0].length);
       const positional = parseStringLiteralChain(snippet, descriptionStart + 1);
       if (positional) {
         description = positional.value.replace(/\s+/g, " ").trim();
         const shapeStart = snippet.indexOf(",", positional.endIdx) + 1;
-        fields = parseSchemaFields(`inputSchema: z.object(${snippet.slice(shapeStart)}`, content);
+        fields = parseSchemaFields(
+          `inputSchema: z.object(${snippet.slice(shapeStart)}`,
+          schemaContent,
+        );
         // Resolve a helper's shared literal shape, e.g. {...base, ...shape}.
         const shared = content.match(
           /inputSchema:\s*z\.object\(\{\s*\.\.\.(\w+),\s*\.\.\.shape\s*\}/,
@@ -497,7 +522,7 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
   // properties ({ rowId }) and chained references (limit.optional()).
   const reference = /^([A-Za-z_$][\w$]*)(?=\.|$)/.exec(expression);
   if (reference && reference[1] !== "z") {
-    const declaration = new RegExp(`const\\s+${reference[1]}\\s*=\\s*(z\\.[^;]+);`).exec(
+    const declaration = new RegExp(`const\\s+${reference[1]}\\s*=\\s*(z\\s*\\.[^;]+);`).exec(
       fullContent,
     );
     if (declaration) expression = declaration[1]! + expression.slice(reference[1]!.length);
@@ -510,8 +535,12 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
   if (typeChain.startsWith("string")) type = "string";
   else if (typeChain.startsWith("number")) type = "number";
   else if (typeChain.startsWith("boolean")) type = "boolean";
-  else if (typeChain.startsWith("array")) type = "array";
-  else if (typeChain.startsWith("uuid")) type = "uuid";
+  else if (typeChain.startsWith("array")) {
+    type =
+      reference && reference[1] !== "z" && /^array\(z\.string\(/.test(typeChain)
+        ? "string[]"
+        : "array";
+  } else if (typeChain.startsWith("uuid")) type = "uuid";
   else if (typeChain.startsWith("object")) type = "object";
   else if (typeChain.startsWith("record")) type = "object";
   else if (typeChain.startsWith("providerSchema")) type = "string";
