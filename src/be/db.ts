@@ -2605,7 +2605,7 @@ export async function createTaskExtended(
       }
 
       // VCS identity (GitHub / GitLab issue / PR / MR + webhook routing)
-      // Webhook handlers locate active work via `findTaskByVcs(repo, number)`,
+      // Webhook handlers locate active work via `findTaskByVcs(repo, number, provider)`,
       // so a resume / follow-up child MUST carry the full VCS identity or
       // subsequent review/update events get dropped.
       if (parent.vcsProvider && !options.vcsProvider) {

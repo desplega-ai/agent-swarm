@@ -715,23 +715,26 @@ export async function getTasksByStatus(status: AgentTaskStatus): Promise<AgentTa
  * new terminal status, grep for `NOT IN ('completed'` across this file.
  */
 /**
- * Most recent active task for a repo + PR/issue number. Pass `vcsProvider`
- * when the repo name alone is ambiguous across hosts (`owner/repo` exists on
- * GitHub, GitLab and Bitbucket alike).
+ * Most recent active task for a provider + repo + PR/issue number. The
+ * provider is required: `owner/repo` exists on GitHub, GitLab and Bitbucket
+ * alike, so an unscoped lookup lets one host's webhook act on another host's
+ * task. A NULL `vcsProvider` is a legacy GitHub row (pre-provider writers), so
+ * the GitHub lookup still matches it.
  */
 export async function findTaskByVcs(
   vcsRepo: string,
   vcsNumber: number,
-  vcsProvider?: NonNullable<AgentTask["vcsProvider"]>,
+  vcsProvider: NonNullable<AgentTask["vcsProvider"]>,
 ): Promise<AgentTask | null> {
+  const providerClause =
+    vcsProvider === "github" ? "(vcsProvider = ? OR vcsProvider IS NULL)" : "vcsProvider = ?";
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
-       WHERE vcsRepo = ? AND vcsNumber = ?
-       ${vcsProvider ? "AND vcsProvider = ?" : ""}
+       WHERE vcsRepo = ? AND vcsNumber = ? AND ${providerClause}
        AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY createdAt DESC
        LIMIT 1`,
-    vcsProvider ? [vcsRepo, vcsNumber, vcsProvider] : [vcsRepo, vcsNumber],
+    [vcsRepo, vcsNumber, vcsProvider],
   );
   return row ? rowToAgentTask(row) : null;
 }
