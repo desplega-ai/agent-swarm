@@ -107,6 +107,8 @@ Or use the onboard wizard which runs this automatically:
 bunx @desplega.ai/agent-swarm onboard
 ```
 
+When the wizard asks for a preset, choose `full`. It deploys the agent roster of the reference deployment, [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) (1 lead and 11 workers), with one coder where the example runs two. Pick a smaller preset only when you have a reason to.
+
 ### Environment Variables
 
 | Variable | Required | Default | Description |
@@ -791,6 +793,8 @@ For the full provisioning guide, rate-limit detection details, and verification 
 ---
 
 ## Docker Configuration Examples
+
+These are reduced `.env` fragments that show only the harness settings for one agent. For a full install, start from [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) and deploy its full roster (1 lead and 11 workers) by default, then apply these settings to the agents that should use each harness.
 
 ### Claude Code Worker
 

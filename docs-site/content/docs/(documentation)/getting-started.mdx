@@ -54,7 +54,7 @@ Or use the one-shot installer. It checks Docker and Compose v2, installs Bun whe
 ```bash
 curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full
 # Options: --dir <path>, --preset <name>, --version <ver>, --tunnel, --dry-run
-curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --tunnel
+curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --preset full --tunnel
 ```
 
 `--tunnel` exposes the API through localtunnel and sets `PUBLIC_MCP_BASE_URL`. It is off by default.
