@@ -138,13 +138,10 @@ export function checkUserAccess(
  * Check if a user is allowed to interact with the swarm.
  * Returns true if filtering is disabled, user is in whitelist, or user's email domain is allowed.
  * The allow/deny decision is `checkUserAccess`; this wrapper only adds the lazy email lookup
- * and the deny logs. `config` defaults to the SLACK_ALLOWED_* env vars and is a test seam.
+ * and the deny logs. The config comes from the SLACK_ALLOWED_* env vars, read at module load.
  */
-export async function isUserAllowed(
-  client: WebClient,
-  userId: string,
-  config: UserFilterConfig = envUserFilterConfig,
-): Promise<boolean> {
+export async function isUserAllowed(client: WebClient, userId: string): Promise<boolean> {
+  const config = envUserFilterConfig;
   // Decide without an email first: filtering off and allowlisted IDs pass, and with no
   // email domains configured an unlisted ID is denied. Only domain checks need a lookup.
   const allowedWithoutEmail = checkUserAccess(userId, null, config);
