@@ -20,6 +20,8 @@ export interface ListPagerProps {
   onPageSizeChange: (pageSize: number) => void;
   /** Shown instead of the range when there are no rows, e.g. "0 tasks". */
   emptyLabel?: string;
+  /** 44 px previous / next buttons (a phone screen). Desktop keeps 32 px. */
+  touch?: boolean;
   className?: string;
 }
 
@@ -65,6 +67,7 @@ export function ListPager({
   onPageChange,
   onPageSizeChange,
   emptyLabel = "0 rows",
+  touch = false,
   className,
 }: ListPagerProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -105,7 +108,7 @@ export function ListPager({
         <Button
           variant="outline"
           size="icon"
-          className="hit-area h-8 w-8"
+          className={cn("hit-area", touch ? "size-11" : "h-8 w-8")}
           disabled={page === 0}
           onClick={() => onPageChange(Math.max(0, page - 1))}
           aria-label="Previous page"
@@ -123,7 +126,7 @@ export function ListPager({
         <Button
           variant="outline"
           size="icon"
-          className="hit-area h-8 w-8"
+          className={cn("hit-area", touch ? "size-11" : "h-8 w-8")}
           disabled={page >= totalPages - 1}
           onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
           aria-label="Next page"

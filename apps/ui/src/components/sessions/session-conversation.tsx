@@ -186,6 +186,8 @@ export function SessionConversation({
             onClick={scrollToBottom}
             className={cn(
               "absolute left-1/2 z-10 h-8 -translate-x-1/2 rounded-full px-3 shadow-sm bg-card",
+              // A touch screen: a 44 px tap area around the 32 px pill (UX review R9).
+              "pointer-coarse:after:absolute pointer-coarse:after:inset-x-0 pointer-coarse:after:-inset-y-1.5",
               turns ? "bottom-0.5" : "bottom-0 translate-y-1/2",
             )}
             aria-label="Jump to latest"

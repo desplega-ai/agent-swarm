@@ -44,7 +44,7 @@ Two tsconfigs cover the two runtimes: `tsconfig.json` (Node, `specs`, `fixtures`
 3. The child prints one JSON line: `{ apiUrl, apiKey, dbPath, manifestPath }`. Nothing else goes to stdout.
 4. The fixture reads the manifest and serves tests. When the worker ends it closes the child's stdin. EOF, SIGTERM, or SIGINT stop the API and delete the temp files.
 
-`APP_URL` puts the UI origin on the API's CSP `frame-ancestors` list. `HEARTBEAT_DISABLE=true` keeps the backdated in-progress task stalled. `E2E_KEEP=1` keeps the DB, the log, and the manifest.
+`APP_URL` puts the UI origin on the API's CSP `frame-ancestors` list. `HEARTBEAT_DISABLE=true` keeps the backdated in-progress task stalled. `SWARM_DEV_MODE=true` bypasses the dashboard's version gates, so the suite drives surfaces that need a newer API than `package.json` (sessions v2). `E2E_KEEP=1` keeps the DB, the log, and the manifest.
 
 ## Fixtures
 
@@ -54,7 +54,7 @@ Two tsconfigs cover the two runtimes: `tsconfig.json` (Node, `specs`, `fixtures`
 | `seed` | test | The manifest, or `null` in a remote run without `E2E_REMOTE_SEED=1`. Guard with `test.skip(!seed, ...)`. |
 | `api` | test | `get`, `post`, `put`, `delete` against the worker API with the bearer. |
 | `clean` | test, auto | Collects console errors and `/api` responses with status 400 or higher. `assertClean()` fails with both lists. |
-| `storageState` | test | Pre-writes `agent-swarm-connections` (the active connection), `swarm:v1:<apiUrl>:current-user` (the identity), and a freshly dismissed `swarm:feedback-popup:v1:<apiUrl>:<userId>` so no dialog blocks the dashboard. |
+| `storageState` | test | Pre-writes `agent-swarm-connections` (the active connection), `swarm:v1:<apiUrl>:current-user` (the identity), a freshly dismissed `swarm:feedback-popup:v1:<apiUrl>:<userId>`, and `agent-swarm-sessions-v2-guide=off` (the sessions v2 first-run guide) so no dialog blocks the dashboard. |
 
 Two console errors are ignored on purpose, each with a comment in `fixtures/index.ts`: the browser SDK's `/@swarm/config` probe inside `/p/:id` (the pages API does not serve that route yet) and, only in remote mode with the static build, the CSP `frame-ancestors` violation for the page preview.
 
@@ -71,11 +71,17 @@ Two console errors are ignored on purpose, each with a comment in `fixtures/inde
   },
   "pages": { "public": { "id": "...", "apiUrl": "..." }, "authed": { "id": "...", "apiUrl": "..." } },
   "session": { "id": "e2e-session-1" },
+  "sessionChain": {
+    "groupKey": "shared/e2e-sessions/", "root": "...", "child": "...",
+    "teammate": { "id": "...", "name": "e2e-teammate" }
+  },
   "memory": { "name": "e2e memory" }
 }
 ```
 
-The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e-worker-b` by one day. Finishing the two worker tasks makes the API create two lead follow-up tasks, so a seeded DB holds ten tasks: the eight seeded rows plus those two.
+`sessionChain` is one session for the sessions v2 view: a `ui` root that `e2e-user` requested in the `e2e-sessions` group, one follow-up task, and a read share with the second user `e2e-teammate`.
+
+The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e-worker-b` by one day. Finishing the two worker tasks makes the API create two lead follow-up tasks, so a seeded DB holds twelve tasks: the ten seeded rows plus those two.
 
 ## Remote mode
 

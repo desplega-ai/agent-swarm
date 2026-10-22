@@ -152,7 +152,7 @@ const STEPS = [
   },
   {
     title: "Search, keys, and the Legacy view",
-    body: `Press / to search titles, first messages, and people. Try with:lena or is:unread. ${MOD}K runs actions, and Legacy sessions opens the old view.`,
+    body: `Press / to search titles and first messages. with: finds people (with:lena). Try is:unread too. ${MOD}K runs actions, and Legacy sessions opens the old view.`,
     sample: <KeysSample />,
   },
 ];

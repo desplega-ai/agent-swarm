@@ -61,12 +61,12 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
-async function ensureUser(options: SeedOptions): Promise<User> {
+async function ensureUser(options: SeedOptions, name = "e2e-user"): Promise<User> {
   const users = await request<{ users: (User | null)[] }>(options, "GET", "/api/users");
-  const existing = users.users.find((user): user is User => user?.name === "e2e-user");
+  const existing = users.users.find((user): user is User => user?.name === name);
   if (existing) return existing;
   const result = await request<{ user: User }>(options, "POST", "/api/users", {
-    body: { name: "e2e-user", email: "e2e-user@gmail.com" },
+    body: { name, email: `${name}@gmail.com` },
   });
   return result.user;
 }
@@ -319,6 +319,45 @@ async function poll(options: SeedOptions, agentId: string): Promise<void> {
   await request(options, "GET", "/api/poll", { agentId });
 }
 
+/** The sessions v2 group of the seeded chain. A root with this key sits in the group itself. */
+const SESSION_GROUP_KEY = "shared/e2e-sessions/";
+
+/**
+ * One session chain for the sessions v2 view: a `ui` root that `e2e-user` requested in the
+ * `e2e-sessions` group, one follow-up task, and a read share with a second user. The chain is
+ * created after the worker polls, so no seeded worker claims it.
+ */
+async function ensureSessionChain(
+  options: SeedOptions,
+  user: User,
+): Promise<SeedManifest["sessionChain"]> {
+  const teammate = await ensureUser(options, "e2e-teammate");
+  const root = await ensureTask(options, SESSION_GROUP_KEY, {
+    task: "e2e grouped session",
+    source: "ui",
+    requestedByUserId: user.id,
+    tags: ["e2e"],
+  });
+  // A child copies its parent's key, so the same key finds it again on a reseed.
+  const child = await ensureTask(options, SESSION_GROUP_KEY, {
+    task: "e2e grouped session follow-up",
+    source: "ui",
+    requestedByUserId: user.id,
+    parentTaskId: root.id,
+    tags: ["e2e"],
+  });
+  // The full desired state, so a reseed writes the same share again.
+  await request(options, "PUT", `/api/sessions/${root.id}/shares`, {
+    body: { everyone: "none", users: [{ userId: teammate.id, access: "read" }] },
+  });
+  return {
+    groupKey: SESSION_GROUP_KEY,
+    root: root.id,
+    child: child.id,
+    teammate: { id: teammate.id, name: teammate.name },
+  };
+}
+
 export async function seed(options: SeedOptions): Promise<SeedManifest> {
   const user = await ensureUser(options);
   const workerA = await ensureAgent(options, "e2e-worker-a", { isLead: false, maxTasks: 2 });
@@ -456,6 +495,7 @@ export async function seed(options: SeedOptions): Promise<SeedManifest> {
   const publicPage = await ensurePage(options, lead.id, "e2e public page", "public");
   const authedPage = await ensurePage(options, lead.id, "e2e authed page", "authed");
   await ensureMemory(options);
+  const sessionChain = await ensureSessionChain(options, user);
 
   const foreachRun = options.db ? await ensureForeachRun({ ...options, db: options.db }) : null;
 
@@ -482,6 +522,7 @@ export async function seed(options: SeedOptions): Promise<SeedManifest> {
     },
     pages: { public: publicPage, authed: authedPage },
     session: { id: sessionId },
+    sessionChain,
     memory: { name: "e2e memory" },
     ...(foreachRun ? { workflowRuns: { foreach: foreachRun } } : {}),
   };

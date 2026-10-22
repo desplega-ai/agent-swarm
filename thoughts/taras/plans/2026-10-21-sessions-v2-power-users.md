@@ -917,9 +917,72 @@ curl -s -H "Authorization: Bearer <PROD_API_KEY>" <PROD_API_URL>/api/assets/key-
   - Phase 9 decisions: phones (below 768 px) get `MobileSessions`, with the URL as the screen stack (`useIsPhone` reads the breakpoint in the first render). `ResponsiveOverlay` is a Popover or Dialog from md up and a vaul Drawer on phones, so Share is a drawer on phones in the Legacy view too. Every drawer eats the click that ends a drag. Phone taps are at least 44 px, through `--hit-size: 44px` and the phone branch, and desktop sizes are unchanged. Search chips `with:` and `in:` suggest people and groups. A swiped Done row collapses in 150 ms (a height animation, which UX-REVIEW-R9 asks for). Crossing md swaps the whole tree and drops selection and unsent composer text.
   - Phase 9 open items for Taras (PR Heads-up): the app header stays on the phone list screen (SPEC R8.5 says none), because it is the only way to global nav. No `viewport-fit=cover` or `interactive-widget` meta change, because it is global. The real-iPhone check shows if the safe area and keyboard need them. No "Select all" (P2). The group screen pager buttons (shared `ListPager`) stay 32 px.
   - Phase 10 start: rebased onto origin/main 2a81a2129 (package.json 2.4.5), so `SESSIONS_V2_MIN_VERSION` is now 2.4.6. Only the generated API reference index conflicted (endpoint counts). The pre-rebase head is kept as branch `backup/sv2-pre-rebase-1e96cd53c` until the PR merges.
+  - Phase 10 decision: the pane header status chip follows the server's latest-task rule (`latestTask`), the same as the tab and the sidebar row, so the three agree. This reverses the Phase 6 rule (any live task shows RUNNING). A running older worker still shows in the timeline's worker line. On tied `lastUpdatedAt`, the server's pick follows SQLite scan order, so a rare tie can still differ.
   - If the production key audit is not clean (Manual E2E step 7), moves fail with 409 today too. Fixing the audit warnings is a separate task.
   - The app treats a missing read-state row as unread. D5 treats rows older than 7 days as read. The two clients can disagree on old sessions until the app adopts the same rule.
-- **UX-REVIEW-R9 status**: (table filled in during Phase 10).
+- **UX-REVIEW-R9 status** (Phase 10 checklist pass, every P0 and P1 finding; line numbers point into `mockups/sessions-v2/UX-REVIEW-R9.md`):
+
+  | Line | Pri | Finding (short) | Status | Where or why |
+  |---|---|---|---|---|
+  | 19 | P1 | Running is a hand-rolled spinner | fixed in Phase 4 | TaskStatusIcon `active` in rows and counts (Phase 4), tabs and status bar (Phase 8), worker line (Phase 7). It spins everywhere (Taras decision 2026-10-22). |
+  | 20 | P1 | Failed is a pink "!" disc | fixed in Phase 4 | TaskStatusIcon `failed` in rows, tabs (Phase 8), and steps and tries (Phase 7). |
+  | 21 | P1 | Step states are hand-drawn glyphs | fixed in Phase 7 | worker-step.tsx and worker-summary.tsx use TaskStatusIcon. |
+  | 22 | P1 | Status chip draws a dot | fixed in Phase 6 | StatusBadge with the `running` key. Phase 10 moves it to the server's latest-task rule. |
+  | 23 | P1 | Done uses CircleCheck | fixed in Phase 4 | lucide Archive in rows, menus, bulk bars, header, Cmd+K, phone sheet, and swipe. |
+  | 24 | P1 | Clock means five things | fixed in Phase 4 | AlarmClock for Later and wake times. Clock stays only for "In 1 hour" and the deferred handoff. |
+  | 25 | P1 | Pressed "back to Inbox" state is invisible | fixed in Phase 6 | Inbox icon, `aria-pressed`, `bg-accent`. Also in the row menu, Cmd+K, and the phone sheet. |
+  | 26 | P1 | No group is a dashed circle | fixed in Phase 4 | SquareDashed in rows, tree, Start in, move picker, and crumb. |
+  | 27 | P1 | Swarm hex mark reads as a status | does not apply | SPEC R10.2 removed the mark from swarm replies. |
+  | 28 | P1 | Worker avatars are grey squares | fixed in Phase 7 | AgentAvatarStack in the worker line, SessionAgents in the header, AgentAvatar in People. |
+  | 29 | P1 | Telegram logo and BrandLogo marks | does not apply | Source sections and Slack or Telegram rows are out of scope (What We're NOT Doing, D1). |
+  | 30 | P1 | Lowercase l keycap reads as 1 | fixed in Phase 4 | Uppercase keycaps. Handlers stay case-insensitive. |
+  | 31 | P1 | Needs-you dot looks like the unread dot | fixed in Phase 8 | Hourglass in the status bar, the "N need you" pill in counts. |
+  | 32 | P1 | People popover icon differs from Share | fixed in Phase 6 | `EVERYONE_ICON` in both. |
+  | 33 | P1 | Tab glyph looks like Calendar | fixed in Phase 4 | ArrowRight for "View all N", AppWindow for tabs (Phase 8). |
+  | 34 | P1 | Icon map literal traps | fixed now | Ellipsis for group actions, SquareX for "Close the split". |
+  | 51 | P0 | Desktop toast off-center, no exit | fixed in Phase 4 | Sonner bottom-left with a 5200 ms Undo. |
+  | 52 | P1 | No overlay has an exit | fixed in Phase 4 | Radix primitives with the shipped exits; phone sheets are the vaul Drawer (Phase 9). |
+  | 53 | P1 | Worker steps snap open | fixed in Phase 7 | AnimatedReveal fast. |
+  | 54 | P1 | Typing line shifts the layout | does not apply | Replaced by SPEC R10.4: a typing bubble row in the flow. |
+  | 55 | P1 | 13 spinners turn at once | does not apply | Taras decision 2026-10-22: every running mark spins. |
+  | 56 | P1 | Reduced motion removes all motion | fixed in Phase 9 | Fades stay; the push cross-fades in 150 ms. |
+  | 57 | P1 | Sheet timing is off the tokens | fixed in Phase 3 | vaul Drawer 400/250 on ease-swift. |
+  | 58 | P1 | Drawer primitive is missing | fixed in Phase 3 | `components/ui/drawer.tsx` (vaul, D11); ResponsiveOverlay in Phase 9. |
+  | 59 | P1 | Phone push curve | fixed in Phase 9 | 300 in, 250 back, ease-swift. |
+  | 60 | P1 | Swipe Done leaves a jumping gap | fixed in Phase 9 | Slide-out, then a 150 ms collapse. |
+  | 61 | P1 | Flash fades to transparent | does not apply | The build has no row or tab flash. |
+  | 62 | P1 | Rows flash on data changes | fixed in Phase 4 | No flash; the unread dot and bold title carry the news. |
+  | 63 | P1 | Keyboard highlight leaves a trail | fixed in Phase 4 | `data-kb` and `NO_KEYBOARD_MOTION`. |
+  | 64 | P1 | iOS back swipe slides twice | fixed in Phase 9 | Skips the slide on `hasUAVisualTransition`. |
+  | 65 | P1 | Three liveness motions | fixed in Phase 7 | ChainOfThought live line, TaskStatusIcon plus `.shimmer-text` on the worker line. |
+  | 80 | P0 | Tab strip breaks with many tabs | fixed in Phase 8 | Reveal, edge mask, wheel, All tabs. |
+  | 81 | P1 | Key hints work only in the tree | fixed in Phase 6 | Pane keys e, u, l, m; c and v outside the tree (Phase 8). |
+  | 82 | P1 | Open row is the dimmest row | fixed in Phase 4 | Open title in `text-foreground`, marker inside the row. |
+  | 83 | P1 | Row metadata squeezes the title | fixed in Phase 4 | Lighter group label, one avatar plus "+N", title min width 45 %. |
+  | 84 | P1 | Split header title truncates first | fixed in Phase 6 | Title min width, container queries drop meta items. |
+  | 85 | P1 | Global sidebar missing from the layout math | fixed in Phase 3 | `useCollapseNavWhile`. |
+  | 86 | P1 | Focus rings clipped or browser blue | fixed in Phase 8 | `ring-inset` on tabs, crumb is a ghost Button (Phase 6). |
+  | 87 | P1 | Lowercase l keycap | fixed in Phase 4 | Same as line 30. |
+  | 88 | P1 | Static running glyph in rows | does not apply | Reversed by the Taras decision of 2026-10-22. |
+  | 89 | P1 | Triage state shown as a status chip | fixed in Phase 6 | TriageNote: "In Done", "Back Thu 09:00". |
+  | 90 | P1 | Toast covers the composer | fixed in Phase 4 | Sessions toasts sit bottom-left. |
+  | 91 | P1 | Send is enabled on an empty draft | fixed in Phase 3 | The shipped ComposerDock. |
+  | 92 | P1 | Agents and people drawn two ways | fixed in Phase 7 | AgentAvatar for agents, UserAvatar for people (D13). |
+  | 93 | P1 | Second Cmd+K palette | fixed in Phase 5 | One "Sessions" group in the global CommandMenu. |
+  | 94 | P1 | Group tab uses hand-made rows | fixed in Phase 8 | DataGrid, ListPager, SegmentedControl (D2). |
+  | 95 | P1 | Rows and tabs flash amber | fixed in Phase 4 | No flash. |
+  | 111 | P0 | "Channels: off" row is cut | does not apply | The source filter sheet is not built. |
+  | 112 | P0 | Timeline scroll anchoring | fixed in Phase 7 | useAutoScroll with `recheck`; the Latest pill has its own strip and a 44 px touch area (Phase 10). |
+  | 113 | P1 | No keyboard handling | deferred (Taras) | `visualViewport` on pushed screens is built. The `viewport-fit=cover` and `interactive-widget` meta change is global, so it waits for Taras (PR Heads-up). |
+  | 114 | P1 | Sheet drags only from the grab strip | fixed in Phase 9 | vaul drags from anywhere. |
+  | 115 | P1 | Phone motion is off the tokens | fixed in Phase 9 | Drawer 400/250, push 300/250, swipe 200, all ease-swift. |
+  | 116 | P1 | Desktop tree indentation on phones | fixed in Phase 9 | One indent step, no guide lines. |
+  | 117 | P1 | with: and in: chips dead-end | fixed in Phase 9 | People and group suggestions. |
+  | 118 | P1 | Phone composer differs from ComposerDock | fixed in Phase 9 | ComposerDock in bar mode. |
+  | 119 | P1 | Tap targets under 44 px | fixed now | Phase 9 plus the search clear, the approval Review button, and the group pager. |
+  | 120 | P1 | Phone rename has no Cancel | fixed in Phase 9 | RenameBar with Cancel and Save; a blur cancels. |
+  | 121 | P1 | Add people opens a popover inside the sheet | fixed now (partly) | AddPeopleView in the sheet, 48 px rows, 92 dvh. No "Saved" toast (deferred: the row shows at once, failures toast). |
+  | 122 | P1 | Phone font sizes are off the scale | fixed in Phase 9 | Only `text-base`, `text-data`, `text-meta`, `text-2xl`. |
 - **References**:
   - Research: `thoughts/taras/research/2026-10-20-sessions-ui-power-users.md`
   - Brainstorm: `thoughts/taras/brainstorms/2026-10-20-sessions-ui-power-users.md`

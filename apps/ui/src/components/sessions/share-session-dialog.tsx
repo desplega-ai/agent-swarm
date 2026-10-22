@@ -1,7 +1,8 @@
 /**
  * Sessions surface: the Share button and its Google Docs style dialog.
  *
- * - "Add people…" picks a user, who lands at Can view.
+ * - "Add people…" picks a user, who lands at Can view. On a phone it opens
+ *   a view of its own in the sheet (search at the top, 48 px rows).
  * - Each person has one Can view / Can edit / Remove select.
  * - General access: Private / Everyone can view / Everyone can edit.
  *
@@ -10,8 +11,8 @@
  * removal or access change revokes the old share instead of deleting it.
  */
 
-import { Globe, Link2, Lock, Share2, Users } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronLeft, Globe, Link2, Lock, Share2, Users } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSessionShares, useUpdateSessionShares } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
@@ -26,6 +27,7 @@ import { userInitials } from "@/components/shared/user-chip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
@@ -171,6 +173,82 @@ function ShareRow({
   );
 }
 
+/**
+ * "Add people" in the phone sheet (UX review R9): the search field at the
+ * top and 48 px person rows, so the results sit above the keyboard and not
+ * in a popover under it. `data-sheet-tall` grows the sheet to 92 dvh.
+ */
+function AddPeopleView({
+  options,
+  onBack,
+  onPick,
+}: {
+  options: { value: string; label: string; hint?: string }[];
+  onBack: () => void;
+  onPick: (userId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const words = query.trim().toLowerCase();
+  const shown = words
+    ? options.filter((option) =>
+        `${option.label} ${option.hint ?? ""}`.toLowerCase().includes(words),
+      )
+    : options;
+  return (
+    <div data-sheet-tall className="flex min-h-0 flex-1 flex-col gap-3">
+      <DialogHeader className="flex-row items-center gap-1 text-left">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Back to Share"
+          onClick={onBack}
+          className="-ml-2 size-11 shrink-0"
+        >
+          <ChevronLeft className="size-5" />
+        </Button>
+        <DialogTitle className="text-base">Add people</DialogTitle>
+        <DialogDescription className="sr-only">
+          Pick a person. They can view this session.
+        </DialogDescription>
+      </DialogHeader>
+      <Input
+        autoFocus
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search people"
+        aria-label="Search people"
+        className="h-11 text-base"
+      />
+      {shown.length > 0 ? (
+        <ul aria-label="People" className="-mx-1 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {shown.map((option) => (
+            <li key={option.value}>
+              <button
+                type="button"
+                onClick={() => onPick(option.value)}
+                className="flex min-h-12 w-full items-center gap-3 rounded-md px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:bg-accent"
+              >
+                <PersonAvatar id={option.value} name={option.label} />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-base">{option.label}</span>
+                  {option.hint ? (
+                    <span className="truncate text-data text-muted-foreground">{option.hint}</span>
+                  ) : null}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-1 text-data text-muted-foreground">
+          {options.length > 0 ? "No one matches." : "No one else to add."}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** General access as an icon: Lock = Private, Globe = Everyone can view, Users = Everyone can edit. */
 export const EVERYONE_ICON: Record<SessionEveryoneAccess, typeof Lock> = {
   none: Lock,
@@ -216,6 +294,27 @@ function ShareSessionDialogBody({
     );
   };
 
+  // A phone: "Add people…" opens a view of its own in the sheet. Back and a
+  // pick return here, and the focus goes back to "Add people…".
+  const [adding, setAdding] = useState(false);
+  const addRef = useRef<HTMLButtonElement>(null);
+  const endAdding = () => {
+    setAdding(false);
+    requestAnimationFrame(() => addRef.current?.focus());
+  };
+  if (touch && adding) {
+    return (
+      <AddPeopleView
+        options={addOptions}
+        onBack={endAdding}
+        onPick={(id) => {
+          apply(addPerson(shares, id, owner.id));
+          endAdding();
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <DialogHeader>
@@ -225,16 +324,28 @@ function ShareSessionDialogBody({
         </DialogDescription>
       </DialogHeader>
 
-      <SearchableSelect
-        value=""
-        onChange={(id) => apply(addPerson(shares, id, owner.id))}
-        options={addOptions}
-        placeholder="Add people…"
-        searchPlaceholder="Search people"
-        emptyLabel="No one else to add."
-        aria-label="Add people"
-        triggerClassName={cn("w-full", touch && "h-11")}
-      />
+      {touch ? (
+        <Button
+          ref={addRef}
+          type="button"
+          variant="outline"
+          onClick={() => setAdding(true)}
+          className="h-11 w-full justify-start text-base font-normal text-muted-foreground"
+        >
+          Add people…
+        </Button>
+      ) : (
+        <SearchableSelect
+          value=""
+          onChange={(id) => apply(addPerson(shares, id, owner.id))}
+          options={addOptions}
+          placeholder="Add people…"
+          searchPlaceholder="Search people"
+          emptyLabel="No one else to add."
+          aria-label="Add people"
+          triggerClassName="w-full"
+        />
+      )}
 
       <section className="flex flex-col gap-1">
         <h3 className="text-xs font-medium text-muted-foreground">People with access</h3>

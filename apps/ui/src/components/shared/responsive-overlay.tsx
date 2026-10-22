@@ -146,7 +146,9 @@ export function ResponsiveOverlayContent({
       aria-label={ariaLabel}
       // A title row has no description line: tell Radix there is none.
       {...(title !== undefined ? { "aria-describedby": undefined } : {})}
-      className="pb-[max(0.75rem,env(safe-area-inset-bottom))] data-[vaul-drawer-direction=bottom]:max-h-[85dvh]"
+      // A body view marked `data-sheet-tall` (a search with results under it)
+      // gets a fixed 92 dvh sheet, so its field stays put while rows filter.
+      className="pb-[max(0.75rem,env(safe-area-inset-bottom))] data-[vaul-drawer-direction=bottom]:max-h-[85dvh] has-[[data-sheet-tall]]:h-[92dvh] data-[vaul-drawer-direction=bottom]:has-[[data-sheet-tall]]:max-h-[92dvh]"
       {...focus}
       onPointerDownCapture={(event) => {
         press.current = { x: event.clientX, y: event.clientY, dragged: false };

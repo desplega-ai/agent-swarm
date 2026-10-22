@@ -18,9 +18,9 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCost } from "@/lib/cost-format";
-import { deriveSessionStatus, sessionChipStatus } from "@/lib/session-status";
+import { sessionChipStatus } from "@/lib/session-status";
 import { buildTurns, hasHandoffs } from "@/lib/session-turns";
-import { plural } from "@/lib/sessions-v2";
+import { latestTask, plural } from "@/lib/sessions-v2";
 import { formatRelativeTime } from "@/lib/utils";
 import { formatWakeShort } from "../sidebar/snooze-times";
 import { sessionWorkers } from "./people-popover";
@@ -57,10 +57,9 @@ export function TriageNote({ session }: { session: SessionListItem }) {
  */
 export function useSessionMeta(detail: SessionDetailResponse) {
   const { data: costs } = useSessionCosts({ taskId: detail.root.id, enabled: true });
-  const status = useMemo(
-    () => sessionChipStatus(deriveSessionStatus(detail.root, detail.chain).status),
-    [detail],
-  );
+  // The server's latest-task rule, as the sidebar row and the tab read it,
+  // so the three never disagree on a chain with tied update times.
+  const status = useMemo(() => sessionChipStatus(latestTask(detail).status), [detail]);
   const handoffRows = useMemo(() => hasHandoffs(buildTurns(detail.chain).turns), [detail.chain]);
   return {
     status,

@@ -14,7 +14,8 @@ export function ApprovalLine({ approval }: { approval: SessionApproval }) {
       // Part of the timeline, not news: no alert on every open.
       role="note"
       action={
-        <Button asChild size="sm" variant="outline">
+        // Touch screens: a 44 px tap area (UX review R9).
+        <Button asChild size="sm" variant="outline" className="hit-area [--hit-size:44px]">
           <Link to={`/approval-requests/${approval.id}`}>
             Review
             <ArrowRight />

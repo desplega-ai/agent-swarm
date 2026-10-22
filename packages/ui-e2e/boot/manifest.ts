@@ -19,6 +19,16 @@ export interface SeedManifest {
     authed: { id: string; apiUrl: string };
   };
   session: { id: string };
+  /**
+   * The sessions v2 chain: a root and a follow-up that `user` requested in the
+   * `groupKey` group, shared read-only with `teammate`.
+   */
+  sessionChain: {
+    groupKey: string;
+    root: string;
+    child: string;
+    teammate: { id: string; name: string };
+  };
   memory: { name: string };
   /** Seeded only when the seed has DB access (a local SUT). */
   workflowRuns?: { foreach: string };

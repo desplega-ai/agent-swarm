@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Pencil,
   Plus,
+  SquareX,
 } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { sessionsQueryOptions, useSession } from "@/api/hooks/use-sessions";
@@ -274,7 +275,7 @@ export function useSessionsCommands({
       actions.push({
         id: "close-split",
         label: "Close the split",
-        icon: Columns2,
+        icon: SquareX,
         keywords: ["pane"],
         onSelect: run((a) => a.closeSplit?.()),
       });

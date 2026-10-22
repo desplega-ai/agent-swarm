@@ -55,6 +55,8 @@ test("mobile: Enter inserts a newline, blank lines survive, the send button subm
 
   const calls = await interceptTaskCreate(page);
   await page.goto("/sessions");
+  // The sessions v2 phone layout opens on the list. Its New session screen holds the composer.
+  await page.getByRole("button", { name: "New session" }).click();
   const composer = page.getByPlaceholder("What's the goal?");
   await expect(composer).toBeVisible();
 

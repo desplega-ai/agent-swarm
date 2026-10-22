@@ -11,11 +11,11 @@ import {
   AlarmClock,
   Archive,
   ChevronDown,
+  Ellipsis,
   Hash,
   Inbox,
   Lock,
   type LucideIcon,
-  MoreHorizontal,
   Plus,
   SquareDashed,
 } from "lucide-react";
@@ -405,7 +405,7 @@ function GroupNodeView({
           >
             {onMenu ? (
               <RowAction label="Group actions" onClick={(event) => onMenu(row.key, event)}>
-                <MoreHorizontal aria-hidden className="size-3.5" />
+                <Ellipsis aria-hidden className="size-3.5" />
               </RowAction>
             ) : null}
             {onNewSession ? (

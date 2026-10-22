@@ -102,7 +102,8 @@ export function MobileSearch({
           onKeyDown={onKeyDown}
           clearable
           onClear={clear}
-          className="flex-1 [&_input]:h-11 [&_input]:rounded-lg [&_input]:bg-muted/60 [&_input]:text-base"
+          // The 28 px clear button gets a 44 px tap area (UX review R9).
+          className="flex-1 [&_button]:after:absolute [&_button]:after:-inset-2 [&_input]:h-11 [&_input]:rounded-lg [&_input]:bg-muted/60 [&_input]:text-base"
         />
         {searching ? (
           <Button

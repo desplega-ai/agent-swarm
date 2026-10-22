@@ -308,6 +308,8 @@ function GroupList({
         onPageChange={(next) => setState((prev) => ({ ...prev, page: next }))}
         onPageSizeChange={() => {}}
         emptyLabel="0 sessions"
+        // A phone: 44 px previous and next buttons.
+        touch={phone}
       />
     </div>
   );
