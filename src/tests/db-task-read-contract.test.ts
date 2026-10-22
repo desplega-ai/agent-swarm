@@ -215,6 +215,7 @@ value:ensureSlackRenderV2Activation
 value:extensionAgentAssignmentError
 value:failPendingResumeIfUnclaimed
 value:failTask
+value:findActiveTasksByVcs
 value:findCompletedTaskInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread
@@ -615,6 +616,7 @@ type:PendingChatRelay
 type:TaskFilters
 value:SUPERSEDED_RESUME_REPAIR_WINDOW_MS
 value:TASK_LINEAGE_LIMITS
+value:findActiveTasksByVcs
 value:findCompletedTaskInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread

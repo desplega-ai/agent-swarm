@@ -5,7 +5,7 @@ export {
   resolveBitbucketBotAccountId,
 } from "./api";
 export {
-  BITBUCKET_BOT_NAME,
+  getBitbucketBotName,
   getBitbucketToken,
   initBitbucket,
   isBitbucketEnabled,

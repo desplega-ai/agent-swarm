@@ -739,6 +739,28 @@ export async function findTaskByVcs(
   return row ? rowToAgentTask(row) : null;
 }
 
+/**
+ * Every active task for a provider + repo + PR/issue number, newest first.
+ * Same scoping as `findTaskByVcs`; for callers that must settle all of them
+ * (a PR close leaves no task worth running).
+ */
+export async function findActiveTasksByVcs(
+  vcsRepo: string,
+  vcsNumber: number,
+  vcsProvider: NonNullable<AgentTask["vcsProvider"]>,
+): Promise<AgentTask[]> {
+  const providerClause =
+    vcsProvider === "github" ? "(vcsProvider = ? OR vcsProvider IS NULL)" : "vcsProvider = ?";
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE vcsRepo = ? AND vcsNumber = ? AND ${providerClause}
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       ORDER BY createdAt DESC`,
+    [vcsRepo, vcsNumber, vcsProvider],
+  );
+  return rows.map(rowToAgentTask);
+}
+
 /** @deprecated Use findTaskByVcs instead */
 export const findTaskByGitHub = findTaskByVcs;
 

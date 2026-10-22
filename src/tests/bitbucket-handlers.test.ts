@@ -14,7 +14,7 @@ import {
 } from "../be/db";
 import { linkIdentity } from "../be/users";
 import { resetBitbucketBotCache } from "../bitbucket/api";
-import { BITBUCKET_BOT_NAME, resetBitbucket } from "../bitbucket/auth";
+import { getBitbucketBotName, resetBitbucket } from "../bitbucket/auth";
 import {
   detectMention,
   handlePullRequestClosed,
@@ -100,13 +100,23 @@ afterEach(() => {
 describe("detectMention", () => {
   test("matches a picker mention and a typed @name", () => {
     expect(detectMention(`hi @{${BOT_ACCOUNT_ID}} there`, BOT_ACCOUNT_ID)).toBe(true);
-    expect(detectMention(`hi @${BITBUCKET_BOT_NAME} there`, null)).toBe(true);
+    expect(detectMention(`hi @${getBitbucketBotName()} there`, null)).toBe(true);
   });
 
   test("ignores other accounts and lookalike names", () => {
     expect(detectMention(`hi @{${HUMAN_ACCOUNT_ID}}`, BOT_ACCOUNT_ID)).toBe(false);
-    expect(detectMention(`hi @${BITBUCKET_BOT_NAME}-two`, BOT_ACCOUNT_ID)).toBe(false);
+    expect(detectMention(`hi @${getBitbucketBotName()}-two`, BOT_ACCOUNT_ID)).toBe(false);
     expect(detectMention(null, BOT_ACCOUNT_ID)).toBe(false);
+  });
+
+  test("reads BITBUCKET_BOT_NAME at match time, so a config reload applies", () => {
+    process.env.BITBUCKET_BOT_NAME = "renamed-bot";
+    try {
+      expect(detectMention("hi @renamed-bot there", null)).toBe(true);
+      expect(detectMention("hi @agent-swarm-bot there", null)).toBe(false);
+    } finally {
+      delete process.env.BITBUCKET_BOT_NAME;
+    }
   });
 });
 
@@ -245,7 +255,7 @@ describe("handlePullRequestCommentCreated", () => {
 
   test("matches a typed @name when no bot account id is known", async () => {
     delete process.env.BITBUCKET_BOT_ACCOUNT_ID;
-    const event = commentEvent(commentSample, 206, `@${BITBUCKET_BOT_NAME} please rebase`);
+    const event = commentEvent(commentSample, 206, `@${getBitbucketBotName()} please rebase`);
     expect((await handlePullRequestCommentCreated(event)).created).toBe(true);
   });
 
@@ -275,6 +285,25 @@ describe("handlePullRequestClosed", () => {
     const task = await getTaskById(existing.id);
     expect(task?.status).toBe("failed");
     expect(task?.failureReason).toBe("PR was declined");
+  });
+
+  test("a merge cancels every active task for the PR, not only the newest", async () => {
+    const prTask = await seedActiveTask(304);
+    const commentTask = await createTaskExtended("[Bitbucket PR #304] Comment", {
+      source: "bitbucket",
+      vcsProvider: "bitbucket",
+      vcsRepo: REPO,
+      vcsEventType: "pull_request_comment",
+      vcsNumber: 304,
+      agentId: LEAD_ID,
+      parentTaskId: prTask.id,
+    });
+    await handlePullRequestClosed(withPr(fulfilledSample, 304), "merged");
+    for (const id of [prTask.id, commentTask.id]) {
+      const task = await getTaskById(id);
+      expect(task?.status).toBe("failed");
+      expect(task?.failureReason).toBe("PR was merged");
+    }
   });
 
   test("a close with no active task is a no-op", async () => {

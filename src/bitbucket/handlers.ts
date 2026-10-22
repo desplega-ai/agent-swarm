@@ -8,14 +8,21 @@
  * - Detects bot mentions and reviewer requests
  */
 
-import { failTask, findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
+import {
+  failTask,
+  findActiveTasksByVcs,
+  findTaskByVcs,
+  getAllAgents,
+  incrKv,
+  upsertKv,
+} from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
 import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { bitbucketContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { resolveBitbucketBotAccountId } from "./api";
-import { BITBUCKET_BOT_NAME } from "./auth";
+import { getBitbucketBotName } from "./auth";
 // Side-effect import: registers all Bitbucket event templates in the in-memory registry
 import "./templates";
 import type {
@@ -98,7 +105,7 @@ export function escapeRegExp(value: string): string {
  */
 function mentionPatterns(botAccountId: string | null): RegExp[] {
   // `(?![\w-])` rather than `\b`, so `@agent-swarm-bot-two` is not the bot.
-  const patterns = [new RegExp(`@${escapeRegExp(BITBUCKET_BOT_NAME)}(?![\\w-])`, "gi")];
+  const patterns = [new RegExp(`@${escapeRegExp(getBitbucketBotName())}(?![\\w-])`, "gi")];
   if (botAccountId) patterns.push(new RegExp(`@\\{${escapeRegExp(botAccountId)}\\}`, "gi"));
   return patterns;
 }
@@ -403,8 +410,8 @@ export async function handlePullRequestCommentCreated(body: unknown): Promise<Ha
 }
 
 /**
- * `pullrequest:fulfilled` / `pullrequest:rejected`: cancel the PR's active
- * task, as GitLab does on MR merge/close.
+ * `pullrequest:fulfilled` / `pullrequest:rejected`: cancel every active task
+ * for the PR.
  */
 export async function handlePullRequestClosed(
   body: unknown,
@@ -416,11 +423,12 @@ export async function handlePullRequestClosed(
     return { created: false };
   }
   const { pullrequest: pr, repository } = event;
-  const existingTask = await findTaskByVcs(repository.full_name, pr.id, "bitbucket");
-  if (existingTask) {
-    const reason = outcome === "merged" ? "PR was merged" : "PR was declined";
-    console.log(`[Bitbucket] Cancelling task ${existingTask.id} — ${reason}`);
-    await failTask(existingTask.id, reason);
+  // Every active task, not only the newest: a comment task is a child of the
+  // PR task, and failTask does not cascade up to the parent.
+  const reason = outcome === "merged" ? "PR was merged" : "PR was declined";
+  for (const task of await findActiveTasksByVcs(repository.full_name, pr.id, "bitbucket")) {
+    console.log(`[Bitbucket] Cancelling task ${task.id} — ${reason}`);
+    await failTask(task.id, reason);
   }
   return { created: false };
 }

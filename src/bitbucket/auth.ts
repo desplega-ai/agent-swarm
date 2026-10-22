@@ -47,8 +47,14 @@ export function getBitbucketToken(): string | null {
   return apiToken;
 }
 
-/** Bot name for plain-text `@name` mentions. */
-export const BITBUCKET_BOT_NAME = process.env.BITBUCKET_BOT_NAME ?? "agent-swarm-bot";
+/**
+ * Bot name for plain-text `@name` mentions. Read on every call: a stored
+ * swarm_config value reaches process.env after this module loads, and again
+ * on each config reload.
+ */
+export function getBitbucketBotName(): string {
+  return process.env.BITBUCKET_BOT_NAME || "agent-swarm-bot";
+}
 
 /** Reset state for testing and config reloads. */
 export function resetBitbucket(): void {

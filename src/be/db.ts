@@ -300,6 +300,7 @@ export {
 export {
   type ExistingTrackerContextWork,
   type ExistingTrackerContextWorkReason,
+  findActiveTasksByVcs,
   findCompletedTaskInThread,
   findExistingLinearTrackerContextWork,
   findRecentCancelledTaskInThread,
