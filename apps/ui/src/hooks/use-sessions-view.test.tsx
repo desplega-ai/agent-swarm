@@ -28,8 +28,8 @@ const API_URL = "http://sessions-view.test";
 mock.module("@/api/hooks/use-feature-gate", () => ({
   useFeatureGate: () => ({
     supported: true,
-    currentVersion: "2.4.7",
-    requiredVersion: "2.4.7",
+    currentVersion: "2.5.1",
+    requiredVersion: "2.5.1",
     isError: false,
     error: null,
   }),
@@ -127,7 +127,7 @@ describe("newViewLink (the legacy view's New sessions view button)", () => {
     const link = newViewLink({
       view: "legacy",
       supported: true,
-      currentVersion: "2.4.7",
+      currentVersion: "2.5.1",
       pending: false,
       setView: (view) => picked.push(view),
     });
@@ -138,12 +138,12 @@ describe("newViewLink (the legacy view's New sessions view button)", () => {
 
   test("on an older API, gives the version to upgrade to instead", () => {
     const base = { view: "legacy" as const, supported: false, pending: false, setView: () => {} };
-    expect(newViewLink({ ...base, currentVersion: "2.4.6" })).toEqual({
+    expect(newViewLink({ ...base, currentVersion: "2.5.0" })).toEqual({
       upgradeTip:
-        "The new sessions view needs API 2.4.7 or later. This swarm runs 2.4.6. Upgrade the swarm to use it.",
+        "The new sessions view needs API 2.5.1 or later. This swarm runs 2.5.0. Upgrade the swarm to use it.",
     });
     expect(newViewLink({ ...base, currentVersion: null })).toEqual({
-      upgradeTip: "The new sessions view needs API 2.4.7 or later. Upgrade the swarm to use it.",
+      upgradeTip: "The new sessions view needs API 2.5.1 or later. Upgrade the swarm to use it.",
     });
   });
 });
