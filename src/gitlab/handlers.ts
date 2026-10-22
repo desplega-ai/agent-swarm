@@ -8,13 +8,20 @@
  * - Detects bot mentions
  */
 
-import { failTask, findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
+import {
+  failTask,
+  findActiveTasksByVcs,
+  findTaskByVcs,
+  getAllAgents,
+  incrKv,
+  upsertKv,
+} from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
 import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { gitlabContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { GITLAB_BOT_NAME } from "./auth";
+import { getGitLabBotName } from "./auth";
 import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
 import type { GitLabUser } from "./types";
 // Side-effect import: registers all GitLab event templates in the in-memory registry
@@ -40,11 +47,11 @@ function isDuplicate(key: string): boolean {
 
 function detectMention(text: string | null | undefined): boolean {
   if (!text) return false;
-  return new RegExp(`@${GITLAB_BOT_NAME}\\b`, "i").test(text);
+  return new RegExp(`@${getGitLabBotName()}\\b`, "i").test(text);
 }
 
 function extractMentionContext(text: string): string {
-  return text.replace(new RegExp(`@${GITLAB_BOT_NAME}\\b`, "gi"), "").trim();
+  return text.replace(new RegExp(`@${getGitLabBotName()}\\b`, "gi"), "").trim();
 }
 
 async function findLeadAgent() {
@@ -206,12 +213,12 @@ export async function handleMergeRequest(
 
     case "close":
     case "merge": {
-      // Cancel existing tasks for this MR
-      const existingTask = await findTaskByVcs(repo, mr.iid, "gitlab");
-      if (existingTask) {
-        const reason = action === "merge" ? "MR was merged" : "MR was closed";
-        console.log(`[GitLab] Cancelling task ${existingTask.id} — ${reason}`);
-        await failTask(existingTask.id, reason);
+      // Every active task, not only the newest: a note task is a child of the
+      // MR task, and failTask does not cascade up to the parent.
+      const reason = action === "merge" ? "MR was merged" : "MR was closed";
+      for (const task of await findActiveTasksByVcs(repo, mr.iid, "gitlab")) {
+        console.log(`[GitLab] Cancelling task ${task.id} — ${reason}`);
+        await failTask(task.id, reason);
       }
       return { created: false };
     }
@@ -262,7 +269,7 @@ export async function handleIssue(
       if (!hasMention) {
         // Check if bot is in assignees
         const isBotAssigned = event.assignees?.some(
-          (a) => a.username.toLowerCase() === GITLAB_BOT_NAME.toLowerCase(),
+          (a) => a.username.toLowerCase() === getGitLabBotName().toLowerCase(),
         );
         if (!isBotAssigned) {
           console.log(`[GitLab] Issue opened without bot mention/assignment, skipping`);

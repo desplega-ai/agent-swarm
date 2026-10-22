@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
-  GITLAB_BOT_NAME,
+  getGitLabBotName,
   getGitLabToken,
   getGitLabUrl,
   initGitLab,
@@ -100,10 +100,18 @@ describe("GitLab auth", () => {
     });
   });
 
-  describe("GITLAB_BOT_NAME", () => {
-    test("defaults to agent-swarm-bot", () => {
-      // The default is set at module load time from env
-      expect(typeof GITLAB_BOT_NAME).toBe("string");
+  describe("getGitLabBotName", () => {
+    test("defaults to agent-swarm-bot and follows GITLAB_BOT_NAME", () => {
+      const saved = process.env.GITLAB_BOT_NAME;
+      try {
+        delete process.env.GITLAB_BOT_NAME;
+        expect(getGitLabBotName()).toBe("agent-swarm-bot");
+        process.env.GITLAB_BOT_NAME = "renamed-bot";
+        expect(getGitLabBotName()).toBe("renamed-bot");
+      } finally {
+        if (saved === undefined) delete process.env.GITLAB_BOT_NAME;
+        else process.env.GITLAB_BOT_NAME = saved;
+      }
     });
   });
 });

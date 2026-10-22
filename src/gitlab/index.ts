@@ -1,6 +1,6 @@
 // GitLab Integration
 export {
-  GITLAB_BOT_NAME,
+  getGitLabBotName,
   getGitLabToken,
   getGitLabUrl,
   initGitLab,

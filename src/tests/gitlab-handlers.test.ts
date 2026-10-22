@@ -13,7 +13,7 @@ import {
   initDb,
 } from "../be/db";
 import { findUserByExternalId, linkIdentity } from "../be/users";
-import { GITLAB_BOT_NAME } from "../gitlab/auth";
+import { getGitLabBotName } from "../gitlab/auth";
 import { handleIssue, handleMergeRequest, handleNote, handlePipeline } from "../gitlab/handlers";
 import type { IssueEvent, MergeRequestEvent, NoteEvent, PipelineEvent } from "../gitlab/types";
 
@@ -37,7 +37,7 @@ function makeMREvent(overrides: Partial<MergeRequestEvent> = {}): MergeRequestEv
       id: 100,
       iid: 1,
       title: "Test MR",
-      description: `@${GITLAB_BOT_NAME} please review`,
+      description: `@${getGitLabBotName()} please review`,
       state: "opened",
       action: "open",
       source_branch: "feature",
@@ -66,7 +66,7 @@ function makeIssueEvent(overrides: Partial<IssueEvent> = {}): IssueEvent {
       id: 200,
       iid: 10,
       title: "Test Issue",
-      description: `@${GITLAB_BOT_NAME} fix this`,
+      description: `@${getGitLabBotName()} fix this`,
       state: "opened",
       action: "open",
       url: "https://gitlab.com/group/project/-/issues/10",
@@ -90,7 +90,7 @@ function makeNoteEvent(overrides: Partial<NoteEvent> = {}): NoteEvent {
     },
     object_attributes: {
       id: 300,
-      note: `@${GITLAB_BOT_NAME} can you help?`,
+      note: `@${getGitLabBotName()} can you help?`,
       noteable_type: "MergeRequest",
       noteable_id: 100,
       url: "https://gitlab.com/group/project/-/merge_requests/1#note_300",
@@ -181,7 +181,7 @@ describe("handleMergeRequest", () => {
         id: 101,
         iid: 50,
         title: "MR with mention",
-        description: `@${GITLAB_BOT_NAME} review this please`,
+        description: `@${getGitLabBotName()} review this please`,
         state: "opened",
         action: "open",
         source_branch: "feat-a",
@@ -302,13 +302,84 @@ describe("handleMergeRequest", () => {
     expect(existing).toBeNull();
   });
 
+  test("a merge cancels every active task for the MR, not only the newest", async () => {
+    const mrTask = await createTaskExtended("[GitLab MR #62] Test", {
+      source: "gitlab",
+      vcsProvider: "gitlab",
+      vcsRepo: "group/project",
+      vcsEventType: "merge_request",
+      vcsNumber: 62,
+      agentId: "lead-gl-001",
+    });
+    const noteTask = await createTaskExtended("[GitLab MR #62] Comment", {
+      source: "gitlab",
+      vcsProvider: "gitlab",
+      vcsRepo: "group/project",
+      vcsEventType: "note",
+      vcsNumber: 62,
+      agentId: "lead-gl-001",
+      parentTaskId: mrTask.id,
+    });
+
+    const event = makeMREvent({
+      object_attributes: {
+        id: 105,
+        iid: 62,
+        title: "MR to merge",
+        description: null,
+        state: "merged",
+        action: "merge",
+        source_branch: "feat-e",
+        target_branch: "main",
+        url: "https://gitlab.com/group/project/-/merge_requests/62",
+        last_commit: null,
+        author_id: 1,
+      },
+    });
+    await handleMergeRequest(event);
+
+    for (const id of [mrTask.id, noteTask.id]) {
+      const task = await getTaskById(id);
+      expect(task?.status).toBe("failed");
+      expect(task?.failureReason).toBe("MR was merged");
+    }
+  });
+
+  test("reads GITLAB_BOT_NAME at match time, so a config reload applies", async () => {
+    const mrEvent = (iid: number, description: string) =>
+      makeMREvent({
+        object_attributes: {
+          id: 1000 + iid,
+          iid,
+          title: "MR for renamed bot",
+          description,
+          state: "opened",
+          action: "open",
+          source_branch: "feat-renamed",
+          target_branch: "main",
+          url: `https://gitlab.com/group/project/-/merge_requests/${iid}`,
+          last_commit: null,
+          author_id: 1,
+        },
+      });
+    process.env.GITLAB_BOT_NAME = "renamed-bot";
+    try {
+      expect((await handleMergeRequest(mrEvent(63, "@renamed-bot review"))).created).toBe(true);
+      expect((await handleMergeRequest(mrEvent(64, "@agent-swarm-bot review"))).created).toBe(
+        false,
+      );
+    } finally {
+      delete process.env.GITLAB_BOT_NAME;
+    }
+  });
+
   test("ignores update action when no active task", async () => {
     const event = makeMREvent({
       object_attributes: {
         id: 105,
         iid: 62,
         title: "Updated MR",
-        description: `@${GITLAB_BOT_NAME} review`,
+        description: `@${getGitLabBotName()} review`,
         state: "opened",
         action: "update",
         source_branch: "feat-e",
@@ -329,7 +400,7 @@ describe("handleMergeRequest", () => {
         id: 106,
         iid: 70,
         title: "Dedup MR",
-        description: `@${GITLAB_BOT_NAME} review`,
+        description: `@${getGitLabBotName()} review`,
         state: "opened",
         action: "open",
         source_branch: "feat-dedup",
@@ -360,7 +431,7 @@ describe("handleIssue", () => {
         id: 201,
         iid: 20,
         title: "Issue with mention",
-        description: `@${GITLAB_BOT_NAME} implement this feature`,
+        description: `@${getGitLabBotName()} implement this feature`,
         state: "opened",
         action: "open",
         url: "https://gitlab.com/group/project/-/issues/20",
@@ -391,7 +462,7 @@ describe("handleIssue", () => {
         url: "https://gitlab.com/group/project/-/issues/21",
         author_id: 1,
       },
-      assignees: [{ id: 99, name: "Bot", username: GITLAB_BOT_NAME, avatar_url: "" }],
+      assignees: [{ id: 99, name: "Bot", username: getGitLabBotName(), avatar_url: "" }],
     });
 
     const result = await handleIssue(event);
@@ -458,7 +529,7 @@ describe("handleNote", () => {
     const event = makeNoteEvent({
       object_attributes: {
         id: 301,
-        note: `@${GITLAB_BOT_NAME} please check this code`,
+        note: `@${getGitLabBotName()} please check this code`,
         noteable_type: "MergeRequest",
         noteable_id: 100,
         url: "https://gitlab.com/group/project/-/merge_requests/1#note_301",
@@ -493,7 +564,7 @@ describe("handleNote", () => {
     const event = makeNoteEvent({
       object_attributes: {
         id: 302,
-        note: `@${GITLAB_BOT_NAME} what do you think?`,
+        note: `@${getGitLabBotName()} what do you think?`,
         noteable_type: "Issue",
         noteable_id: 200,
         url: "https://gitlab.com/group/project/-/issues/40#note_302",
@@ -542,7 +613,7 @@ describe("handleNote", () => {
     const event = makeNoteEvent({
       object_attributes: {
         id: 304,
-        note: `@${GITLAB_BOT_NAME} review this commit`,
+        note: `@${getGitLabBotName()} review this commit`,
         noteable_type: "Commit",
         noteable_id: 999,
         url: "https://gitlab.com/group/project/-/commit/abc#note_304",
@@ -572,7 +643,7 @@ describe("handleNote", () => {
     const event = makeNoteEvent({
       object_attributes: {
         id: 305,
-        note: `@${GITLAB_BOT_NAME} also fix the linting`,
+        note: `@${getGitLabBotName()} also fix the linting`,
         noteable_type: "MergeRequest",
         noteable_id: 100,
         url: "https://gitlab.com/group/project/-/merge_requests/85#note_305",
@@ -742,7 +813,7 @@ describe("identity resolution — MR handler", () => {
         id: 901,
         iid: 901,
         title: "Known MR",
-        description: `@${GITLAB_BOT_NAME} review`,
+        description: `@${getGitLabBotName()} review`,
         state: "opened",
         action: "open",
         source_branch: "feat-known",
@@ -779,7 +850,7 @@ describe("identity resolution — MR handler", () => {
         id: 902,
         iid: 902,
         title: "Inline-email MR",
-        description: `@${GITLAB_BOT_NAME} please`,
+        description: `@${getGitLabBotName()} please`,
         state: "opened",
         action: "open",
         source_branch: "feat-inline",
@@ -816,7 +887,7 @@ describe("identity resolution — MR handler", () => {
         id: 903,
         iid: 903,
         title: "Ghost MR",
-        description: `@${GITLAB_BOT_NAME} ping`,
+        description: `@${getGitLabBotName()} ping`,
         state: "opened",
         action: "open",
         source_branch: "feat-ghost",
@@ -850,7 +921,7 @@ describe("identity resolution — MR handler", () => {
           id: 910 + i,
           iid: 910 + i,
           title: `Ghost MR ${i}`,
-          description: `@${GITLAB_BOT_NAME} ping`,
+          description: `@${getGitLabBotName()} ping`,
           state: "opened",
           action: "open",
           source_branch: `feat-g-${i}`,
@@ -879,7 +950,7 @@ describe("identity resolution — MR handler", () => {
         id: 920,
         iid: 920,
         title: "Empty email MR",
-        description: `@${GITLAB_BOT_NAME} review`,
+        description: `@${getGitLabBotName()} review`,
         state: "opened",
         action: "open",
         source_branch: "feat-empty",
@@ -914,7 +985,7 @@ describe("identity resolution — Issue handler", () => {
         id: 950,
         iid: 950,
         title: "Ghost issue",
-        description: `@${GITLAB_BOT_NAME} fix`,
+        description: `@${getGitLabBotName()} fix`,
         state: "opened",
         action: "open",
         url: "https://gitlab.com/group/project/-/issues/950",
@@ -942,7 +1013,7 @@ describe("identity resolution — Note handler", () => {
   });
 
   test("unknown user WITHOUT email → unmapped entry tagged 'note'", async () => {
-    const noteBody = `@${GITLAB_BOT_NAME} can you look at this comment that is somewhat longer than usual to verify the slice(0,100) truncation downstream`;
+    const noteBody = `@${getGitLabBotName()} can you look at this comment that is somewhat longer than usual to verify the slice(0,100) truncation downstream`;
     const event = makeNoteEvent({
       user: { id: 31, name: "Note Ghost", username: "noteghost", avatar_url: "" },
       object_attributes: {
@@ -976,7 +1047,7 @@ describe("identity resolution — Note handler", () => {
     expect(meta).not.toBeNull();
     expect(meta?.sampleEventType).toBe("note");
     expect((meta?.sampleContext as string).length).toBeLessThanOrEqual(100);
-    expect((meta?.sampleContext as string).startsWith(`@${GITLAB_BOT_NAME}`)).toBe(true);
+    expect((meta?.sampleContext as string).startsWith(`@${getGitLabBotName()}`)).toBe(true);
     expect(await getUnmappedCount("noteghost")).toBe(1);
 
     // The dead-coded `_requestedByUserId` is now wired: undefined for an
@@ -996,7 +1067,7 @@ describe("identity resolution — Note handler", () => {
       user: { id: 32, name: "Known Commenter", username: "knowncommenter", avatar_url: "" },
       object_attributes: {
         id: 961,
-        note: `@${GITLAB_BOT_NAME} please take a look`,
+        note: `@${getGitLabBotName()} please take a look`,
         noteable_type: "MergeRequest",
         noteable_id: 101,
         url: "https://gitlab.com/group/project/-/merge_requests/2#note_961",

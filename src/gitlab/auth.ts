@@ -53,8 +53,14 @@ export function getGitLabUrl(): string {
   return gitlabUrl;
 }
 
-/** Bot name for mention detection. */
-export const GITLAB_BOT_NAME = process.env.GITLAB_BOT_NAME ?? "agent-swarm-bot";
+/**
+ * Bot name for mention detection. Read on every call: a stored swarm_config
+ * value reaches process.env after this module loads, and again on each config
+ * reload.
+ */
+export function getGitLabBotName(): string {
+  return process.env.GITLAB_BOT_NAME || "agent-swarm-bot";
+}
 
 /** Reset state for testing. */
 export function resetGitLab(): void {
