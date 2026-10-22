@@ -60,7 +60,8 @@ function sessionReadStateSql(now = new Date().toISOString()): SqlFragment {
 function groupCondition(group: string): SqlFragment {
   const { lo, hi } = keyPrefixRange(group);
   // The remaining key must be one resource leaf, with no nested path.
-  const start = lo.length + 1;
+  // SQLite substr/length count code points, so count them here too (not UTF-16 units).
+  const start = [...lo].length + 1;
   return {
     sql: `(r."key" >= ? AND r."key" < ? AND (r."key" = ? OR (
       instr(substr(r."key", ?, length(r."key") - ?), '/') = 0 AND

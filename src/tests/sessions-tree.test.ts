@@ -134,6 +134,26 @@ describe("session groups and prefix bounds", () => {
       expect(sessionGroupKey(key)).toBe(key);
     }
   });
+  test("non-BMP group keys agree between the tree count and the exact-group list", async () => {
+    const group = "shared/🚀/";
+    const leaf = await task(`${group}task:a/`);
+    const root = await task(group);
+    await task(`${group}b/`);
+    expect(await ids({ groupKey: group })).toEqual([leaf.id, root.id].sort());
+    const headers = { "x-swarm-user-id": owner.id };
+    const tree = (await (
+      await fetch(`${baseUrl}/api/session-tree`, { headers })
+    ).json()) as Awaited<ReturnType<typeof getSessionTree>>;
+    const total = tree.groups.find((g) => g.key === group)!.total;
+    const response = await fetch(
+      `${baseUrl}/api/sessions?scope=tree&groupKey=${encodeURIComponent(group)}`,
+      { headers },
+    );
+    const body = (await response.json()) as { total: number; sessions: unknown[] };
+    expect(total).toBe(2);
+    expect(body.total).toBe(total);
+    expect(body.sessions).toHaveLength(total);
+  });
   test("exact group differs from prefix and the planner avoids a root table scan", async () => {
     const a = await task();
     const leaf = await task("shared/a/task:abc/");
