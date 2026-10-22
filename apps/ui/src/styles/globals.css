@@ -492,6 +492,21 @@ button[data-slot="sidebar-rail"] {
   background: var(--color-muted-foreground);
 }
 
+/* A styled scrollbar takes 8 px when it shows, so the content jumps when a
+ * list starts to overflow. Vertical scroll containers keep the gutter, so
+ * nothing moves. Left out: horizontal-only strips (`overflow-x-auto`), where
+ * the gutter would be an empty strip, and boxes that switch to
+ * `overflow-hidden` (a hidden box reserves the gutter too). In the base layer,
+ * so a `[scrollbar-gutter:…]` utility wins. */
+@layer base {
+  :where(.overflow-auto, .overflow-y-auto, .overflow-scroll, .overflow-y-scroll):not(
+      [class*="overflow-hidden"],
+      [class*="overflow-y-hidden"]
+    ) {
+    scrollbar-gutter: stable;
+  }
+}
+
 /* Shimmer text, used by the inline "chain of thought" indicator on
  * in-progress agent turns. A linear gradient slides across the text via
  * background-clip:text, giving a subtle "live / streaming" pulse. */
