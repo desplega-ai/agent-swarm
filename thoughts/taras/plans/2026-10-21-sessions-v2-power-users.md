@@ -23,6 +23,7 @@ Replace the dashboard sessions page with the "A+B merged" design from `mockups/s
   - Spec: `mockups/sessions-v2/SPEC.md`. Round 10 is at the top, and newer rounds override older ones.
   - Polish checklist: `mockups/sessions-v2/UX-REVIEW-R9.md` (95 findings, each names the shipped primitive or token).
   - Mockup: `mockups/sessions-v2/option-ab-merged/index.html` and `mobile.html` (open them directly, no server).
+  - The mockups moved out of the repo on 2026-10-22 (Taras: keep 48k lines of HTML out of PR #2329). They live in agent-fs at `/mockups/agent-swarm/sessions-v2/`, with the same layout. Every `mockups/sessions-v2/` path in this document points there.
 
 ## Current State Analysis
 

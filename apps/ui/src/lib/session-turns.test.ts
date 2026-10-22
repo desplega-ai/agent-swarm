@@ -15,7 +15,8 @@ const NOW = Date.parse("2026-10-21T12:00:00.000Z");
 const at = (minAgo: number) => new Date(NOW - minAgo * 60_000).toISOString();
 const LEAD = "lead";
 
-// The timeline kinds of `mockups/sessions-v2/demo-data-big.js`.
+// The timeline kinds of the mockup data `demo-data-big.js`
+// (agent-fs `/mockups/agent-swarm/sessions-v2/`).
 type Item =
   | { kind: "human"; who: string; ago: number; text: string; via?: "slack" }
   | { kind: "reply"; who: string; ago: number; text: string }

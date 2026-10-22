@@ -11,6 +11,8 @@ last_updated_by: Claude
 
 # Sessions UI for power users: learnings from the my-swarm app groups (Brainstorm)
 
+> The mockups moved out of the repo on 2026-10-22 (Taras: keep 48k lines of HTML out of PR #2329). They live in agent-fs at `/mockups/agent-swarm/sessions-v2/`, with the same layout. Every `mockups/sessions-v2/` path in this document points there.
+
 ## Context
 
 Two inputs drive this exploration:
