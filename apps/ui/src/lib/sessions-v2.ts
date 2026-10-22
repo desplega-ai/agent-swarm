@@ -8,10 +8,10 @@ import { groupKeyOf } from "./session-groups";
 
 /**
  * The first API that serves `GET /api/session-tree`, the session moves, and
- * the v2 list filters. It is the patch after the `package.json` version that
- * the sessions v2 branch started from. Recheck it before the merge.
+ * the v2 list filters. v2.4.6 was released from main before sessions v2
+ * merged, so it has none of them: the first release with them is 2.4.7.
  */
-export const SESSIONS_V2_MIN_VERSION = "2.4.6";
+export const SESSIONS_V2_MIN_VERSION = "2.4.7";
 
 /**
  * Where sessions toasts sit: bottom left, over the sidebar. Bottom right

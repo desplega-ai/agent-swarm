@@ -96,7 +96,7 @@ The escape hatch backdates the in-progress task by 45 minutes (stalled) and `e2e
 
 Specs tagged `@local` run only in local mode. None exist yet; the tag is for assertions on escape-hatch state.
 
-The target API must be 2.4.6 or later, or run with `SWARM_DEV_MODE=true`, for `sessions-v2.spec.ts` and the phone test in `composer-enter-key.spec.ts`. An older API renders the Legacy sessions view, and those tests fail.
+The target API must be 2.4.7 or later, or run with `SWARM_DEV_MODE=true`, for `sessions-v2.spec.ts` and the phone test in `composer-enter-key.spec.ts`. An older API renders the Legacy sessions view, and those tests fail.
 
 ## CI
 
