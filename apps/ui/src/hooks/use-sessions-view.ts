@@ -12,8 +12,10 @@ export type SessionsViewMode = "legacy" | "v2";
 export interface SessionsView {
   /** The view to render. `legacy` when the API cannot serve v2. */
   view: SessionsViewMode;
-  /** The API serves v2. Offer the "New sessions view" link only then. */
+  /** The API serves v2. The "New sessions view" link switches only then. */
   supported: boolean;
+  /** The API version, for the upgrade tip. Null until it loads. */
+  currentVersion: string | null;
   /** The version check still runs. Render a skeleton, not a view that may flip. */
   pending: boolean;
   /** Pick the view for this browser (the stored preference). */
@@ -57,7 +59,27 @@ export function useSessionsView(): SessionsView {
   );
 
   const legacy = !gate.supported || (forced ?? legacyPref);
-  return { view: legacy ? "legacy" : "v2", supported: gate.supported, pending, setView };
+  return {
+    view: legacy ? "legacy" : "v2",
+    supported: gate.supported,
+    currentVersion: gate.currentVersion,
+    pending,
+    setView,
+  };
+}
+
+/**
+ * The legacy view's "New sessions view" button: a switch, or, on an API too
+ * old for v2, a button that stays visible but off, with a tip to upgrade.
+ */
+export type NewViewLink = { onSwitch: () => void } | { upgradeTip: string };
+
+export function newViewLink({ supported, currentVersion, setView }: SessionsView): NewViewLink {
+  if (supported) return { onSwitch: () => setView("v2") };
+  const running = currentVersion ? ` This swarm runs ${currentVersion}.` : "";
+  return {
+    upgradeTip: `The new sessions view needs API ${SESSIONS_V2_MIN_VERSION} or later.${running} Upgrade the swarm to use it.`,
+  };
 }
 
 /**

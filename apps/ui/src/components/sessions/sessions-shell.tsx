@@ -50,6 +50,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import type { NewViewLink } from "@/hooks/use-sessions-view";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { SESSION_SHARING_MIN_VERSION } from "@/lib/session-sharing";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
@@ -146,9 +147,41 @@ interface SessionsListProps {
   onShowSystemChange: (value: boolean) => void;
   onCollapse?: () => void;
   onNewSession: () => void;
-  /** Switch to the sessions v2 view. Absent when the API cannot serve it. */
-  onNewView?: () => void;
+  /** The "New sessions view" button: a switch, or an upgrade tip. */
+  newView?: NewViewLink;
   identityState: "pending" | "needs-pick" | "ready";
+}
+
+/**
+ * "New sessions view" in the legacy view. On an API too old for v2 it stays,
+ * off (`aria-disabled`, so it keeps hover and focus), and its tooltip says
+ * what to upgrade to. `compact`: the icon-only button of the narrow header.
+ */
+function NewViewButton({ link, compact = false }: { link: NewViewLink; compact?: boolean }) {
+  const upgradeTip = "upgradeTip" in link ? link.upgradeTip : null;
+  const button = (
+    <Button
+      size={compact ? "icon" : "xs"}
+      variant="ghost"
+      aria-disabled={upgradeTip ? true : undefined}
+      aria-label={compact ? "New sessions view" : undefined}
+      onClick={"onSwitch" in link ? link.onSwitch : undefined}
+      className={cn(
+        "aria-disabled:opacity-50",
+        compact ? "size-9" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <PanelsTopLeft className={compact ? "size-4" : undefined} />
+      {compact ? null : "New sessions view"}
+    </Button>
+  );
+  if (!upgradeTip && !compact) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent className="max-w-64">{upgradeTip ?? "New sessions view"}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 function SessionsList({
@@ -162,7 +195,7 @@ function SessionsList({
   onShowSystemChange,
   onCollapse,
   onNewSession,
-  onNewView,
+  newView,
   identityState,
 }: SessionsListProps) {
   const items = sessions ?? [];
@@ -175,17 +208,7 @@ function SessionsList({
           Sessions
         </h2>
         <div className="flex items-center gap-0.5">
-          {onNewView ? (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={onNewView}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <PanelsTopLeft />
-              New sessions view
-            </Button>
-          ) : null}
+          {newView ? <NewViewButton link={newView} /> : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -329,7 +352,7 @@ interface MobileSessionPickerProps {
   isLoading: boolean;
   activeRootTaskId?: string;
   onNewSession: () => void;
-  onNewView?: () => void;
+  newView?: NewViewLink;
 }
 
 function MobileSessionPicker({
@@ -337,7 +360,7 @@ function MobileSessionPicker({
   isLoading,
   activeRootTaskId,
   onNewSession,
-  onNewView,
+  newView,
 }: MobileSessionPickerProps) {
   const navigate = useNavigate();
   const items = sessions ?? [];
@@ -378,22 +401,7 @@ function MobileSessionPicker({
         <Plus className="h-3.5 w-3.5" />
         New
       </Button>
-      {onNewView ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={onNewView}
-              className="size-9"
-              aria-label="New sessions view"
-            >
-              <PanelsTopLeft className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>New sessions view</TooltipContent>
-        </Tooltip>
-      ) : null}
+      {newView ? <NewViewButton link={newView} compact /> : null}
     </div>
   );
 }
@@ -414,12 +422,12 @@ export function useSessionsShell(): SessionsShellApi {
 
 export interface SessionsShellProps {
   activeRootTaskId?: string;
-  /** Switch to the sessions v2 view. Pass it only when the API can serve v2. */
-  onNewView?: () => void;
+  /** The "New sessions view" button: a switch, or an upgrade tip on an API older than v2. */
+  newView?: NewViewLink;
   children: ReactNode;
 }
 
-export function SessionsShell({ activeRootTaskId, onNewView, children }: SessionsShellProps) {
+export function SessionsShell({ activeRootTaskId, newView, children }: SessionsShellProps) {
   const navigate = useNavigate();
   const { userId, state: identityState } = useCurrentUser();
   const { searchParams, setParam } = useUrlSearchState();
@@ -488,7 +496,7 @@ export function SessionsShell({ activeRootTaskId, onNewView, children }: Session
           isLoading={isLoading}
           activeRootTaskId={activeRootTaskId}
           onNewSession={openNew}
-          onNewView={onNewView}
+          newView={newView}
         />
 
         <div
@@ -510,7 +518,7 @@ export function SessionsShell({ activeRootTaskId, onNewView, children }: Session
                 onShowSystemChange={setShowSystem}
                 onCollapse={() => setCollapsed(true)}
                 onNewSession={openNew}
-                onNewView={onNewView}
+                newView={newView}
                 identityState={identityState}
               />
             </aside>

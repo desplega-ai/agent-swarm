@@ -45,7 +45,7 @@ mock.module("@/lib/sessions-v2", () => require("../lib/sessions-v2"));
 const { createRoot } = await import("react-dom/client");
 const { createMemoryRouter, RouterProvider, useLocation } = await import("react-router-dom");
 const { deriveStorageKey } = await import("./use-dismissible-card-key");
-const { useSessionsView } = await import("./use-sessions-view");
+const { newViewLink, useSessionsView } = await import("./use-sessions-view");
 
 const PREF_KEY = deriveStorageKey(API_URL, "sessions:legacy");
 
@@ -118,5 +118,32 @@ describe("useSessionsView and ?legacy=", () => {
     await page.click("v2");
     expect(page.text("view")).toBe("v2");
     await page.unmount();
+  });
+});
+
+describe("newViewLink (the legacy view's New sessions view button)", () => {
+  test("switches to v2 on an API that serves it", () => {
+    const picked: string[] = [];
+    const link = newViewLink({
+      view: "legacy",
+      supported: true,
+      currentVersion: "2.4.7",
+      pending: false,
+      setView: (view) => picked.push(view),
+    });
+    if (!("onSwitch" in link)) throw new Error("expected a switch");
+    link.onSwitch();
+    expect(picked).toEqual(["v2"]);
+  });
+
+  test("on an older API, gives the version to upgrade to instead", () => {
+    const base = { view: "legacy" as const, supported: false, pending: false, setView: () => {} };
+    expect(newViewLink({ ...base, currentVersion: "2.4.6" })).toEqual({
+      upgradeTip:
+        "The new sessions view needs API 2.4.7 or later. This swarm runs 2.4.6. Upgrade the swarm to use it.",
+    });
+    expect(newViewLink({ ...base, currentVersion: null })).toEqual({
+      upgradeTip: "The new sessions view needs API 2.4.7 or later. Upgrade the swarm to use it.",
+    });
   });
 });

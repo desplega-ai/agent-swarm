@@ -21,7 +21,7 @@ import { MobileSessions } from "@/components/sessions-v2/mobile/mobile-sessions"
 import { SessionsV2Shell } from "@/components/sessions-v2/sessions-v2-shell";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { useIsPhone } from "@/hooks/use-mobile";
-import { useSessionsView, useSessionsViewCommand } from "@/hooks/use-sessions-view";
+import { newViewLink, useSessionsView, useSessionsViewCommand } from "@/hooks/use-sessions-view";
 import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import SessionDetailPage from "./[rootTaskId]/page";
 
@@ -46,8 +46,8 @@ export default function SessionsPage() {
     );
   }
 
-  const onNewView = sessionsView.supported ? () => sessionsView.setView("v2") : undefined;
-  if (rootTaskId) return <SessionDetailPage onNewView={onNewView} />;
+  const newView = newViewLink(sessionsView);
+  if (rootTaskId) return <SessionDetailPage newView={newView} />;
 
   if (!gate.supported) {
     return (
@@ -60,7 +60,7 @@ export default function SessionsPage() {
   }
 
   return (
-    <SessionsShell onNewView={onNewView}>
+    <SessionsShell newView={newView}>
       <NewSessionView />
     </SessionsShell>
   );
