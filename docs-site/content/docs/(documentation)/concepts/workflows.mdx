@@ -26,7 +26,7 @@ The engine includes 15 built-in executor types:
 | `script` | Run a shell script or JavaScript expression |
 | `swarm-script` | Run a reusable TypeScript script from the swarm catalog with optional `args`, `scope`, `pinHash`, and a configurable `timeoutMs` wall-clock budget |
 | `agent-task` | Create and delegate a task to a swarm agent |
-| `foreach` | Fan out one agent task per array item, wait for every child, and emit one aggregate result |
+| `foreach` | Fan out one body node (any executor except `foreach`) per array item, with an optional concurrency cap, wait for every child, and emit one aggregate result |
 | `raw-llm` | Call an LLM directly with a prompt template |
 | `system-one-decision` | Make typed decisions (probability, choice, score) over supplied state with a SystemOne model such as Jev or Clef. Can send uncertain answers to a person |
 | `system-one-extraction` | Read typed values (text, numbers, dates, durations, lists, estimates, forecasts) out of a text and up to 4 images, with Cloudflare Clairic |

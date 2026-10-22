@@ -606,7 +606,7 @@ Add or update hand-verified facts for one model (e.g. a launch models.dev has no
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, nan, helmcode. |
+| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, nan, helmcode. |
 | `modelId` | `string` | Yes | - | Model id as models.dev keys it (e.g. claude-opus-5-5). |
 | `name` | `string` | No | - | Display name. |
 | `releaseDate` | `string` | No | - | Release date, YYYY-MM-DD. |
@@ -1548,11 +1548,11 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 
 **Ask a SystemOne decision model**
 
-Send a state and typed questions (noul, choice, score) to a SystemOne decision host such as Jev, and return the validated answers. Same request, provider list, credentials and validation as the `system-one-decision` workflow node, without its human review band. The provider credential is a global secret that stays on the server; this tool never returns it.
+Send a state and typed questions (noul, choice, score) to a SystemOne decision host such as Jev or Clef, and return the validated answers. Same request, provider list, credentials and validation as the `system-one-decision` workflow node, without its human review band. The provider credential is a global secret that stays on the server; this tool never returns it.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `unknown` | No | - | Decision host (default typesafe) |
+| `provider` | `unknown` | No | - | Decision host (default: the SYSTEM_ONE_DEFAULT_PROVIDER global config, typesafe when unset) |
 | `model` | `string` | No | - | Provider model id (default: the provider's) |
 | `state` | `unknown` | Yes | - | The state to decide on |
 | `questions` | `object` | Yes | - | Questions by id, each `{ type: 'noul' | 'choice' | 'score', instructions, criteria }` |
