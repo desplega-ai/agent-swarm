@@ -184,6 +184,34 @@ describe("POST /api/bitbucket/webhook", () => {
     expect(emitted).toEqual([]);
   });
 
+  test("413 on a declared Content-Length over 1 MiB, before any signature check", async () => {
+    const body = commentBody(7);
+    const res = await deliver(body, {
+      "content-length": String(1024 * 1024 + 1),
+      "x-event-key": "pullrequest:comment_created",
+      "x-hub-signature": sign(body),
+    });
+    expect(res.status).toBe(413);
+    expect(emitted).toEqual([]);
+  });
+
+  test("413 on a streamed body over 1 MiB with no Content-Length", async () => {
+    const chunk = Buffer.alloc(512 * 1024, "a");
+    const req = {
+      method: "POST",
+      headers: { "x-event-key": "pullrequest:comment_created", "x-hub-signature": "sha256=00" },
+      async *[Symbol.asyncIterator]() {
+        yield chunk;
+        yield chunk;
+        yield chunk;
+      },
+    } as unknown as IncomingMessage;
+    const { res, captured } = fakeReqRes("", {});
+    expect(await handleWebhooks(req, res, PATH)).toBe(true);
+    expect(captured.status).toBe(413);
+    expect(emitted).toEqual([]);
+  });
+
   test("400 on a signed but non-JSON body", async () => {
     const body = "not json";
     const res = await deliver(body, { "x-hub-signature": sign(body) });

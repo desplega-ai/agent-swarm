@@ -205,9 +205,13 @@ const bitbucketWebhook = route({
   responses: {
     200: { description: "Event processed", schema: WebhookDispatchResultSchema },
     401: { description: "Invalid signature" },
+    413: { description: "Body exceeds 1 MiB" },
     503: { description: "Bitbucket integration not configured" },
   },
 });
+
+/** Bitbucket Cloud event payloads are far below this. */
+const BITBUCKET_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 
 const agentmailWebhook = route({
   method: "post",
@@ -747,10 +751,26 @@ export async function handleWebhooks(
       return true;
     }
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
+    // The body is read before the HMAC check, so cap it like the Chat SDK
+    // route: reject a declared or streamed body over the limit with 413.
+    if (enforceContentLengthCap(req, res, BITBUCKET_WEBHOOK_MAX_BODY_BYTES) === BODY_TOO_LARGE) {
+      return true;
     }
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let tooLarge = false;
+    for await (const chunk of req) {
+      if (tooLarge) continue;
+      receivedBytes += (chunk as Buffer).byteLength;
+      if (receivedBytes > BITBUCKET_WEBHOOK_MAX_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        jsonError(res, `Payload too large (max ${BITBUCKET_WEBHOOK_MAX_BODY_BYTES} bytes)`, 413);
+        continue;
+      }
+      chunks.push(chunk as Buffer);
+    }
+    if (tooLarge) return true;
     const rawBody = Buffer.concat(chunks).toString();
 
     const signature = req.headers["x-hub-signature"] as string | undefined;
