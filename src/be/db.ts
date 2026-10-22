@@ -196,6 +196,11 @@ import {
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { getDb, getDbClient } from "./db/runtime";
 import {
+  assertAssetKeyMovesAllowed,
+  configureSessionMoveDependencies,
+  moveTaskChainKeyInTx,
+} from "./db/session-moves";
+import {
   type SessionFilters,
   type SessionReadState,
   type SessionRowFields,
@@ -217,7 +222,6 @@ import {
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { emitChildRunFinished, wakeParentsOfDeletedRuns } from "./db/workflow-runs";
-import { isInTransaction } from "./db-client";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -277,6 +281,7 @@ export { recordKeySeatMismatch } from "./db/api-keys";
 export {
   type ApprovalRequestSummary,
   type ApprovalVote,
+  getPendingApprovalsForTasks,
   getPendingApprovalVoteState,
   listApprovalRequestSummaries,
   recordApprovalVotes,
@@ -289,6 +294,11 @@ export {
   getLatestContextVersion,
 } from "./db/context-versions";
 export { getScriptRunExecutionArgs } from "./db/script-runs";
+export {
+  AssetKeyMovesBlockedError,
+  assertAssetKeyMovesAllowed,
+  moveTaskChainKeyInTx,
+} from "./db/session-moves";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -393,6 +403,11 @@ configureTaskWriteDependencies({
   taskContextForTelemetry: (...args) => taskContextForTelemetry(...args),
   promotePendingSteeringForTask: (...args) => promotePendingSteeringForTask(...args),
   cascadeFailDependents: (...args) => cascadeFailDependents(...args),
+});
+
+configureSessionMoveDependencies({
+  auditAssetKeys: () => auditAssetKeys(getDb()),
+  insertAssetKeyHistory: (...args) => insertAssetKeyHistory(...args),
 });
 
 configureTaskReadDependencies({
@@ -1739,96 +1754,6 @@ async function currentAssetKey(entityType: AssetEntityType, id: string): Promise
       return mapping?.key ?? null;
     }
   }
-}
-
-export class AssetKeyMovesBlockedError extends Error {
-  constructor() {
-    super(
-      "Asset namespace moves are blocked until structural errors, unknown personal users, or provider mapping drift are repaired.",
-    );
-    this.name = "AssetKeyMovesBlockedError";
-  }
-}
-
-export async function assertAssetKeyMovesAllowed(): Promise<void> {
-  // auditAssetKeys stays sync (shared with the boot audit); run it inside a
-  // client transaction so this request-path read cannot observe another
-  // request's uncommitted writes on the shared connection.
-  const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()), {
-    readOnly: true,
-  });
-  if (!audit.ok) {
-    throw new AssetKeyMovesBlockedError();
-  }
-}
-
-/** Move only authorized task ids. The caller owns the transaction and audit gate. */
-export async function moveTaskChainKeyInTx(
-  rootId: string,
-  taskIds: readonly string[],
-  key: string,
-  changedBy?: string,
-): Promise<string[] | false> {
-  if (!isInTransaction()) {
-    throw new Error("moveTaskChainKeyInTx requires an active transaction");
-  }
-  const client = getDbClient();
-  const now = new Date().toISOString();
-  const root = await getTaskById(rootId);
-  if (!root) return false;
-  const tasks = [root];
-  for (const id of taskIds) {
-    const task = id === root.id ? null : await getTaskById(id);
-    if (task) tasks.push(task);
-  }
-  const movedTaskIds: string[] = [];
-  for (const task of tasks) {
-    if (task.key === key) continue;
-    // A file shared with another task keeps the namespace of the task whose attachment
-    // sources its mapping. Mappings with no attachment source follow any attaching task.
-    const mappedFiles = await client.query<{ id: string; key: string }>(
-      `SELECT DISTINCT m.id, m."key" AS key
-       FROM asset_key_mappings m
-       JOIN task_attachments a
-         ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
-        AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
-        AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
-        AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-       WHERE a.task_id = ?
-         AND (m.source_entity_type IS NOT 'task-attachment'
-           OR m.source_entity_id IN (SELECT id FROM task_attachments WHERE task_id = ?))`,
-      [task.id, task.id],
-    );
-    // The namespace is metadata, and lastUpdatedAt tracks task activity, as in updateTaskTitle.
-    await client.run('UPDATE agent_tasks SET "key" = ?, updated_by = ? WHERE id = ?', [
-      key,
-      changedBy ?? null,
-      task.id,
-    ]);
-    for (const mapping of mappedFiles) {
-      if (mapping.key === key) continue;
-      await client.run(
-        'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
-        [key, now, changedBy ?? null, mapping.id],
-      );
-      await insertAssetKeyHistory({
-        entityType: "file",
-        entityId: mapping.id,
-        previousKey: mapping.key,
-        newKey: key,
-        changedBy,
-      });
-    }
-    await insertAssetKeyHistory({
-      entityType: "task",
-      entityId: task.id,
-      previousKey: task.key,
-      newKey: key,
-      changedBy,
-    });
-    movedTaskIds.push(task.id);
-  }
-  return movedTaskIds;
 }
 
 export async function moveAssetKey(input: {
@@ -9902,24 +9827,6 @@ export async function getApprovalRequestById(id: string): Promise<ApprovalReques
     [id],
   );
   return row ? rowToApprovalRequest(row) : null;
-}
-
-/** Pending approval summaries for an already loaded session chain. */
-export async function getPendingApprovalsForTasks(taskIds: string[]): Promise<
-  {
-    id: string;
-    status: "pending";
-    sourceTaskId: string;
-    title: string;
-  }[]
-> {
-  if (!taskIds.length) return [];
-  return getDbClient().query(
-    `SELECT id, status, sourceTaskId, title FROM approval_requests
-     WHERE sourceTaskId IN (${taskIds.map(() => "?").join(",")}) AND status = 'pending'
-     ORDER BY createdAt, id`,
-    taskIds,
-  );
 }
 
 export async function resolveApprovalRequest(
