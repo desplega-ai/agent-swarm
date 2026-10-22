@@ -315,7 +315,7 @@ describe("handleMergeRequest", () => {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
-      vcsEventType: "note",
+      vcsEventType: "note_on_mr",
       vcsNumber: 62,
       agentId: "lead-gl-001",
       parentTaskId: mrTask.id,
@@ -342,6 +342,129 @@ describe("handleMergeRequest", () => {
       const task = await getTaskById(id);
       expect(task?.status).toBe("failed");
       expect(task?.failureReason).toBe("MR was merged");
+    }
+  });
+
+  test("closing MR !5 leaves issue #5 and its notes active", async () => {
+    // GitLab issue and MR iids are separate sequences: issue #5 and MR !5 coexist.
+    const issue = await handleIssue(
+      makeIssueEvent({
+        object_attributes: {
+          id: 205,
+          iid: 5,
+          title: "Issue five",
+          description: `@${getGitLabBotName()} fix this`,
+          state: "opened",
+          action: "open",
+          url: "https://gitlab.com/group/project/-/issues/5",
+          author_id: 1,
+        },
+      }),
+    );
+    const issueNote = await handleNote(
+      makeNoteEvent({
+        object_attributes: {
+          id: 395,
+          note: `@${getGitLabBotName()} any update?`,
+          noteable_type: "Issue",
+          noteable_id: 205,
+          url: "https://gitlab.com/group/project/-/issues/5#note_395",
+          author_id: 1,
+          type: null,
+        },
+        merge_request: undefined,
+        issue: {
+          id: 205,
+          iid: 5,
+          title: "Issue five",
+          description: null,
+          state: "opened",
+          action: "open",
+          url: "https://gitlab.com/group/project/-/issues/5",
+          author_id: 1,
+        },
+      }),
+    );
+    const mr = await handleMergeRequest(
+      makeMREvent({
+        object_attributes: {
+          id: 155,
+          iid: 5,
+          title: "MR five",
+          description: `@${getGitLabBotName()} please review`,
+          state: "opened",
+          action: "open",
+          source_branch: "feat-five",
+          target_branch: "main",
+          url: "https://gitlab.com/group/project/-/merge_requests/5",
+          last_commit: null,
+          author_id: 1,
+        },
+      }),
+    );
+    const mrNote = await handleNote(
+      makeNoteEvent({
+        object_attributes: {
+          id: 396,
+          note: `@${getGitLabBotName()} looks good?`,
+          noteable_type: "MergeRequest",
+          noteable_id: 155,
+          url: "https://gitlab.com/group/project/-/merge_requests/5#note_396",
+          author_id: 1,
+          type: null,
+        },
+        merge_request: {
+          id: 155,
+          iid: 5,
+          title: "MR five",
+          description: null,
+          state: "opened",
+          action: "open",
+          source_branch: "feat-five",
+          target_branch: "main",
+          url: "https://gitlab.com/group/project/-/merge_requests/5",
+          last_commit: null,
+          author_id: 1,
+        },
+      }),
+    );
+    // A pre-contextKey issue row must not be swept up either.
+    const legacyIssue = await createTaskExtended("[GitLab Issue #5] Legacy", {
+      source: "gitlab",
+      vcsProvider: "gitlab",
+      vcsRepo: "group/project",
+      vcsEventType: "issue",
+      vcsNumber: 5,
+      agentId: "lead-gl-001",
+    });
+    for (const r of [issue, issueNote, mr, mrNote]) expect(r.created).toBe(true);
+
+    await handleMergeRequest(
+      makeMREvent({
+        object_attributes: {
+          id: 155,
+          iid: 5,
+          title: "MR five",
+          description: null,
+          state: "closed",
+          action: "close",
+          source_branch: "feat-five",
+          target_branch: "main",
+          url: "https://gitlab.com/group/project/-/merge_requests/5",
+          last_commit: null,
+          author_id: 1,
+        },
+      }),
+    );
+
+    for (const id of [mr.taskId!, mrNote.taskId!]) {
+      const task = await getTaskById(id);
+      expect(task?.status).toBe("failed");
+      expect(task?.failureReason).toBe("MR was closed");
+    }
+    for (const id of [issue.taskId!, issueNote.taskId!, legacyIssue.id]) {
+      const task = await getTaskById(id);
+      expect(task?.status).not.toBe("failed");
     }
   });
 
@@ -517,6 +640,60 @@ describe("handleIssue", () => {
     // Task should no longer be active
     const task = await findTaskByVcs("group/project", 30, "gitlab");
     expect(task).toBeNull();
+  });
+
+  test("closing issue #6 fails the issue task, not the newer MR !6 task", async () => {
+    const issue = await handleIssue(
+      makeIssueEvent({
+        object_attributes: {
+          id: 206,
+          iid: 6,
+          title: "Issue six",
+          description: `@${getGitLabBotName()} fix this`,
+          state: "opened",
+          action: "open",
+          url: "https://gitlab.com/group/project/-/issues/6",
+          author_id: 1,
+        },
+      }),
+    );
+    // Created second, so it is the newest row for vcsNumber 6.
+    const mr = await handleMergeRequest(
+      makeMREvent({
+        object_attributes: {
+          id: 156,
+          iid: 6,
+          title: "MR six",
+          description: `@${getGitLabBotName()} please review`,
+          state: "opened",
+          action: "open",
+          source_branch: "feat-six",
+          target_branch: "main",
+          url: "https://gitlab.com/group/project/-/merge_requests/6",
+          last_commit: null,
+          author_id: 1,
+        },
+      }),
+    );
+    expect(issue.created && mr.created).toBe(true);
+
+    await handleIssue(
+      makeIssueEvent({
+        object_attributes: {
+          id: 206,
+          iid: 6,
+          title: "Issue six",
+          description: null,
+          state: "closed",
+          action: "close",
+          url: "https://gitlab.com/group/project/-/issues/6",
+          author_id: 1,
+        },
+      }),
+    );
+
+    expect((await getTaskById(issue.taskId!))?.failureReason).toBe("Issue was closed");
+    expect((await getTaskById(mr.taskId!))?.status).not.toBe("failed");
   });
 });
 
