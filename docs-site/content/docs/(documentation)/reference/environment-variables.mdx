@@ -370,6 +370,20 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
 | `AZURE_DEVOPS_DISABLE` | Set to `true` to disable the Azure DevOps integration |
 
+## Bitbucket Integration
+
+Bitbucket Cloud only. See [Bitbucket Integration](/docs/integrations/bitbucket).
+
+| Variable | Description |
+|----------|-------------|
+| `BITBUCKET_WEBHOOK_SECRET` | Secret the webhook signs deliveries with (`X-Hub-Signature: sha256=...`); enables the integration |
+| `BITBUCKET_TOKEN` | Atlassian API token of the bot service account (recommended) or a workspace access token. API server: REST calls and the bot identity lookup (`GET /2.0/user`). Workers: git clone and push (username `x-token-auth`) and REST calls for PR linking |
+| `BITBUCKET_BOT_ACCOUNT_ID` | Atlassian `account_id` of the bot (e.g. `557058:<uuid>`) for `@{<account_id>}` mentions (default: resolved from `BITBUCKET_TOKEN` via `GET /2.0/user`; set it with a workspace access token) |
+| `BITBUCKET_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
+| `BITBUCKET_EMAIL` | Git commit email for Bitbucket commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN`, `GITLAB_TOKEN` or `AZURE_DEVOPS_TOKEN` is set) |
+| `BITBUCKET_NAME` | Git commit name for Bitbucket commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN`, `GITLAB_TOKEN` or `AZURE_DEVOPS_TOKEN` is set) |
+| `BITBUCKET_DISABLE` | Set to `true` to disable the Bitbucket integration |
+
 ## AgentMail Integration
 
 | Variable | Description |

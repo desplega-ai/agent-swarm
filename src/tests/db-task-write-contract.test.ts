@@ -240,6 +240,7 @@ value:ensureSlackRenderV2Activation
 value:extensionAgentAssignmentError
 value:failPendingResumeIfUnclaimed
 value:failTask
+value:findActiveTasksByVcs
 value:findCompletedTaskInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread

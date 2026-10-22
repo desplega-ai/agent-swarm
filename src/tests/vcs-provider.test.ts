@@ -20,8 +20,23 @@ describe("detectVcsProvider", () => {
     expect(detectVcsProvider("https://gitlab.internal/group/project")).toBe("gitlab");
   });
 
+  test("detects bitbucket.org URLs in https, ssh and .git forms", () => {
+    for (const url of [
+      "https://bitbucket.org/org/repo",
+      "https://bitbucket.org/org/repo.git",
+      "https://user@bitbucket.org/org/repo.git",
+      "git@bitbucket.org:org/repo.git",
+      "ssh://git@bitbucket.org/org/repo.git",
+      // A slug containing "github" or "gitlab" must not fall through to those hosts.
+      "https://bitbucket.org/org/github-mirror",
+      "git@bitbucket.org:gitlab-team/repo.git",
+    ]) {
+      expect(detectVcsProvider(url)).toBe("bitbucket");
+    }
+  });
+
   test("returns null for unrecognised URLs", () => {
-    expect(detectVcsProvider("https://bitbucket.org/org/repo")).toBeNull();
     expect(detectVcsProvider("https://example.com")).toBeNull();
+    expect(detectVcsProvider("https://notbitbucket.org/org/repo")).toBeNull();
   });
 });

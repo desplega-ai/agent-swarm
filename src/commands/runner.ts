@@ -108,6 +108,7 @@ import {
   isAzureDevOpsUrl,
   parseAzureDevOpsRepoUrl,
 } from "../vcs/azure-devops.ts";
+import { bitbucketFullName, isBitbucketUrl, parseBitbucketRepoUrl } from "../vcs/bitbucket.ts";
 import { detectVcsProvider, type VcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildAttachmentsSection } from "./attachments-section.ts";
@@ -311,6 +312,7 @@ const CONTINUATION_TASK_TYPES = new Set([
   "gitlab-comment",
   "gitlab-ci",
   "azure-devops-comment",
+  "bitbucket-comment",
 ]);
 
 /**
@@ -2947,10 +2949,50 @@ const vcsCheckTimestamps = new Map<string, number>();
 const VCS_CHECK_INTERVAL = 60_000; // 60 seconds
 
 /**
+ * Find the open Bitbucket Cloud pull request whose source branch is `branch`.
+ * There is no Bitbucket CLI in the worker image, so this calls the REST API
+ * with `BITBUCKET_TOKEN` as a Bearer token. Returns null when the token is
+ * unset, the remote is not a Bitbucket Cloud repo, the API answers non-2xx,
+ * no PR matches, or the request fails. Never throws.
+ */
+export async function findBitbucketOpenPullRequest(
+  remoteUrl: string,
+  branch: string,
+  opts: { token?: string; fetchImpl?: typeof fetch } = {},
+): Promise<{ number: number; url: string } | null> {
+  const token = opts.token ?? process.env.BITBUCKET_TOKEN;
+  if (!token) return null;
+  const repo = parseBitbucketRepoUrl(remoteUrl);
+  if (!repo) return null;
+  const query = `source.branch.name="${branch.replace(/["\\]/g, "\\$&")}" AND state="OPEN"`;
+  const url =
+    `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(repo.workspace)}` +
+    `/${encodeURIComponent(repo.repoSlug)}/pullrequests?q=${encodeURIComponent(query)}&pagelen=1`;
+  try {
+    const res = await (opts.fetchImpl ?? fetch)(url, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      values?: Array<{ id?: unknown; links?: { html?: { href?: unknown } } }>;
+    };
+    const pr = body.values?.[0];
+    const href = pr?.links?.html?.href;
+    if (typeof pr?.id !== "number" || pr.id <= 0 || typeof href !== "string" || !href) {
+      return null;
+    }
+    return { number: pr.id, url: href };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Detect if the task's working directory has an open PR for the current branch.
  * If found, report VCS info to the API so webhook events can link back to this task.
  */
-async function detectVcsForTask(
+export async function detectVcsForTask(
   apiUrl: string,
   apiKey: string,
   taskId: string,
@@ -2974,6 +3016,7 @@ async function detectVcsForTask(
     let vcsProvider: VcsProvider;
     let prJson: string;
     let azureRepo: string | null = null;
+    let bitbucketRepo: string | null = null;
 
     if (isAzureDevOpsUrl(remoteUrl)) {
       const parsed = parseAzureDevOpsRepoUrl(remoteUrl);
@@ -2991,6 +3034,14 @@ async function detectVcsForTask(
           url: `${azureRepo}/pullrequest/${pr.pullRequestId}`,
         })),
       );
+    } else if (isBitbucketUrl(remoteUrl)) {
+      // Checked before the loose "github" substring match below, so a
+      // Bitbucket repo with "github" in its slug is not sent to `gh`.
+      bitbucketRepo = bitbucketFullName(remoteUrl);
+      if (!bitbucketRepo) return;
+      vcsProvider = "bitbucket";
+      const pr = await findBitbucketOpenPullRequest(remoteUrl, branch);
+      prJson = JSON.stringify(pr ? [pr] : []);
     } else if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
       vcsProvider = "github";
       prJson = (
@@ -3017,9 +3068,10 @@ async function detectVcsForTask(
     if (!vcsNumber || !vcsUrl) return;
 
     // 6. Extract repo from remote URL (Azure Repos keep the canonical clone URL,
-    // matching the vcsRepo their webhook tasks carry)
+    // matching the vcsRepo their webhook tasks carry; Bitbucket uses the
+    // `workspace/repo_slug` full name its webhook tasks carry)
     const repoMatch = remoteUrl.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
-    const vcsRepo = azureRepo ?? repoMatch?.[1];
+    const vcsRepo = azureRepo ?? bitbucketRepo ?? repoMatch?.[1];
     if (!vcsRepo) return;
 
     // 7. Report to API

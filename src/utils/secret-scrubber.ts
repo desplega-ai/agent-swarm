@@ -53,6 +53,10 @@ const SENSITIVE_KEY_EXACT = new Set<string>([
   "AZURE_DEVOPS_TOKEN",
   // Worker-side copy of AZURE_DEVOPS_TOKEN read by the az azure-devops extension
   "AZURE_DEVOPS_EXT_PAT",
+  // The `_TOKEN` / `_SECRET` suffixes already match these, so listing them
+  // does not change redaction and does not bump SCRUBBER_RULES_VERSION.
+  "BITBUCKET_TOKEN",
+  "BITBUCKET_WEBHOOK_SECRET",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",

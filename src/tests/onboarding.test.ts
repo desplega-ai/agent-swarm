@@ -34,6 +34,7 @@ const ENV_KEYS = [
   "EMBEDDING_MODEL",
   "GITHUB_TOKEN",
   "GITLAB_TOKEN",
+  "BITBUCKET_TOKEN",
   "SLACK_BOT_TOKEN",
   "SLACK_APP_TOKEN",
   "SLACK_MODE",
@@ -378,6 +379,17 @@ describe("onboarding state", () => {
 
     expect(body.signals.integrations.github).toBe(true);
     expect(body.state.steps.integrations).toMatchObject({ status: "done", method: "github" });
+  });
+
+  test("GET derives the Bitbucket integration from BITBUCKET_TOKEN", async () => {
+    process.env.BITBUCKET_TOKEN = "example-bitbucket-token";
+    const body = (await (await request("/api/onboarding")).json()) as {
+      state: OnboardingState;
+      signals: { integrations: Record<string, boolean> };
+    };
+
+    expect(body.signals.integrations.bitbucket).toBe(true);
+    expect(body.state.steps.integrations).toMatchObject({ status: "done", method: "bitbucket" });
   });
 
   test("the selected first task completes onboarding after that task completes", async () => {

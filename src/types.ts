@@ -384,6 +384,7 @@ export const AgentTaskSourceSchema = z.enum([
   "github",
   "gitlab",
   "azure-devops",
+  "bitbucket",
   "agentmail",
   "system",
   "schedule",
@@ -697,7 +698,7 @@ export const AgentTaskSchema = z
     slackTreeRootMessageTs: z.string().optional(),
 
     // VCS metadata (GitHub / GitLab / Azure DevOps — provider-agnostic)
-    vcsProvider: z.enum(["github", "gitlab", "azure-devops"]).optional(),
+    vcsProvider: z.enum(["github", "gitlab", "azure-devops", "bitbucket"]).optional(),
     vcsRepo: z.string().optional(),
     vcsEventType: z.string().optional(),
     vcsNumber: z.number().int().optional(),
@@ -863,7 +864,7 @@ export const CreateTaskOptionsSchema = z.object({
    * this boundary must not let a caller silently persist a mismatch.
    */
   overrideSlackContext: z.boolean().optional(),
-  vcsProvider: z.enum(["github", "gitlab", "azure-devops"]).optional(),
+  vcsProvider: z.enum(["github", "gitlab", "azure-devops", "bitbucket"]).optional(),
   vcsRepo: z.string().optional(),
   vcsEventType: z.string().optional(),
   vcsNumber: z.number().int().optional(),

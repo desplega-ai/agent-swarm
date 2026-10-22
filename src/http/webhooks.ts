@@ -31,6 +31,17 @@ import {
   isAzureDevOpsEnabled,
   verifyAzureDevOpsWebhook,
 } from "../azure-devops";
+import {
+  pullRequestCommentEventOf as bitbucketCommentEventOf,
+  pullRequestEventOf as bitbucketPullRequestEventOf,
+  handlePullRequestClosed as handleBitbucketPullRequestClosed,
+  handlePullRequestCommentCreated as handleBitbucketPullRequestCommentCreated,
+  handlePullRequestCreated as handleBitbucketPullRequestCreated,
+  isBitbucketEnabled,
+  isDuplicateDelivery as isDuplicateBitbucketDelivery,
+  markDeliveryProcessed as markBitbucketDeliveryProcessed,
+  verifyBitbucketWebhook,
+} from "../bitbucket";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -179,6 +190,28 @@ const azureDevOpsWebhook = route({
     503: { description: "Azure DevOps integration not configured" },
   },
 });
+
+const bitbucketWebhook = route({
+  method: "post",
+  path: "/api/bitbucket/webhook",
+  pattern: ["api", "bitbucket", "webhook"],
+  summary: "Handle Bitbucket Cloud webhook events",
+  tags: ["Webhooks"],
+  auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "provider webhook: authenticated by the per-webhook HMAC secret, not a swarm principal",
+  },
+  responses: {
+    200: { description: "Event processed", schema: WebhookDispatchResultSchema },
+    401: { description: "Invalid signature" },
+    413: { description: "Body exceeds 1 MiB" },
+    503: { description: "Bitbucket integration not configured" },
+  },
+});
+
+/** Bitbucket Cloud event payloads are far below this. */
+const BITBUCKET_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 
 const agentmailWebhook = route({
   method: "post",
@@ -704,6 +737,114 @@ export async function handleWebhooks(
       if (err instanceof Error && err.stack) {
         console.error(err.stack);
       }
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Internal server error" }));
+    }
+    return true;
+  }
+
+  // Bitbucket Cloud webhook — HMAC over the raw body, event keyed by X-Event-Key
+  if (bitbucketWebhook.match(req.method, pathSegments)) {
+    if (!isBitbucketEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Bitbucket integration not configured" }));
+      return true;
+    }
+
+    // The body is read before the HMAC check, so cap it like the Chat SDK
+    // route: reject a declared or streamed body over the limit with 413.
+    if (enforceContentLengthCap(req, res, BITBUCKET_WEBHOOK_MAX_BODY_BYTES) === BODY_TOO_LARGE) {
+      return true;
+    }
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let tooLarge = false;
+    for await (const chunk of req) {
+      if (tooLarge) continue;
+      receivedBytes += (chunk as Buffer).byteLength;
+      if (receivedBytes > BITBUCKET_WEBHOOK_MAX_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        jsonError(res, `Payload too large (max ${BITBUCKET_WEBHOOK_MAX_BODY_BYTES} bytes)`, 413);
+        continue;
+      }
+      chunks.push(chunk as Buffer);
+    }
+    if (tooLarge) return true;
+    const rawBody = Buffer.concat(chunks).toString();
+
+    const signature = req.headers["x-hub-signature"] as string | undefined;
+    if (!verifyBitbucketWebhook(rawBody, signature)) {
+      console.log("[Bitbucket] Invalid webhook signature");
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid signature" }));
+      return true;
+    }
+
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      return true;
+    }
+
+    const eventKey = req.headers["x-event-key"] as string | undefined;
+    const requestUuid = req.headers["x-request-uuid"] as string | undefined;
+    if (isDuplicateBitbucketDelivery(requestUuid)) {
+      console.log(`[Bitbucket] Skipping duplicate delivery ${requestUuid}`);
+      bitbucketWebhook.respond(res, 200, { created: false });
+      return true;
+    }
+    console.log(`[Bitbucket] Received ${eventKey} event`);
+
+    try {
+      const result = await runBlockableHandler("Bitbucket", async () => {
+        switch (eventKey) {
+          case "pullrequest:created":
+            return await handleBitbucketPullRequestCreated(body);
+          case "pullrequest:comment_created":
+            return await handleBitbucketPullRequestCommentCreated(body);
+          case "pullrequest:fulfilled":
+            return await handleBitbucketPullRequestClosed(body, "merged");
+          case "pullrequest:rejected":
+            return await handleBitbucketPullRequestClosed(body, "declined");
+          default:
+            console.log(`[Bitbucket] Ignoring unsupported event type: ${eventKey}`);
+            return { created: false };
+        }
+      });
+
+      // Emit workflow trigger events for Bitbucket
+      const workflowEvent = {
+        "pullrequest:created": "created",
+        "pullrequest:comment_created": "commented",
+        "pullrequest:fulfilled": "merged",
+        "pullrequest:rejected": "declined",
+      }[eventKey ?? ""];
+      const prEvent = workflowEvent ? bitbucketPullRequestEventOf(body) : null;
+      if (workflowEvent && prEvent) {
+        const pr = prEvent.pullrequest;
+        const comment =
+          workflowEvent === "commented" ? bitbucketCommentEventOf(body)?.comment : undefined;
+        const user = comment?.user ?? prEvent.actor;
+        workflowEventBus.emit(`bitbucket.pull_request.${workflowEvent}`, {
+          repo: prEvent.repository.full_name,
+          number: pr.id,
+          ...(workflowEvent === "commented"
+            ? { body: comment?.content.raw }
+            : { title: pr.title, body: pr.description ?? undefined }),
+          action: workflowEvent,
+          user_login: user.account_id ?? user.nickname ?? user.display_name,
+        });
+      }
+
+      markBitbucketDeliveryProcessed(requestUuid);
+      bitbucketWebhook.respond(res, 200, result);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`[Bitbucket] Error handling ${eventKey} event: ${scrubSecrets(errorMessage)}`);
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Internal server error" }));
     }

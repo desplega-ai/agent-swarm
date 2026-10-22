@@ -33,6 +33,7 @@ import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
+import { initBitbucket } from "../bitbucket";
 import {
   loadEnabledExtensions,
   setExtensionLoopbackBaseUrl,
@@ -797,6 +798,9 @@ httpServer
     // Initialize Azure DevOps service-hook handler (if configured)
     initAzureDevOps();
     initAzureDevOpsOutbound();
+
+    // Initialize Bitbucket Cloud webhook handler (if configured)
+    initBitbucket();
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();

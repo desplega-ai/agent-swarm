@@ -240,7 +240,7 @@ describe("handleMergeRequest", () => {
       agentId: "lead-gl-001",
     });
 
-    const existing = await findTaskByVcs("group/project", 60);
+    const existing = await findTaskByVcs("group/project", 60, "gitlab");
     expect(existing).not.toBeNull();
 
     const event = makeMREvent({
@@ -297,7 +297,7 @@ describe("handleMergeRequest", () => {
     const result = await handleMergeRequest(event);
     expect(result.created).toBe(false);
 
-    const existing = await findTaskByVcs("group/project", 61);
+    const existing = await findTaskByVcs("group/project", 61, "gitlab");
     // Should no longer be active (findTaskByVcs filters out completed/failed)
     expect(existing).toBeNull();
   });
@@ -444,7 +444,7 @@ describe("handleIssue", () => {
     expect(result.created).toBe(false);
 
     // Task should no longer be active
-    const task = await findTaskByVcs("group/project", 30);
+    const task = await findTaskByVcs("group/project", 30, "gitlab");
     expect(task).toBeNull();
   });
 });

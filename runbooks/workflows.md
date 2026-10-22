@@ -883,6 +883,10 @@ The following events are already emitted on `workflowEventBus` today and are usa
 | `gitlab.issue.<action>` | `src/http/webhooks.ts:308` | GitLab issue payload |
 | `gitlab.note.created` | `src/http/webhooks.ts:318` | note payload |
 | `gitlab.pipeline.<status>` | `src/http/webhooks.ts:327` | pipeline payload |
+| `bitbucket.pull_request.created` | `src/http/webhooks.ts` (Bitbucket dispatch, `pullrequest:created`) | `{ repo, number, title?, body?, action, user_login }` |
+| `bitbucket.pull_request.commented` | `src/http/webhooks.ts` (Bitbucket dispatch, `pullrequest:comment_created`) | `{ repo, number, title?, body?, action, user_login }` |
+| `bitbucket.pull_request.merged` | `src/http/webhooks.ts` (Bitbucket dispatch, `pullrequest:fulfilled`) | `{ repo, number, title?, body?, action, user_login }` |
+| `bitbucket.pull_request.declined` | `src/http/webhooks.ts` (Bitbucket dispatch, `pullrequest:rejected`) | `{ repo, number, title?, body?, action, user_login }` |
 
 For `task.completed` specifically, the canonical payload shape lives in `src/be/db.ts` next to the emit site. Because it includes `workflowRunId`, you can use a `scope: run` wait with a filter like `{ workflowRunId: "<the run id>" }` to correlate against a specific upstream task — see "Ordering caveat" below.
 

@@ -15,6 +15,7 @@ declare module "swarm-extension" {
       | "github"
       | "gitlab"
       | "azure-devops"
+      | "bitbucket"
       | "system"
       | "linear"
       | "jira"
@@ -41,7 +42,7 @@ declare module "swarm-extension" {
     slackTriggerMessageTs?: string | undefined;
     slackUserId?: string | undefined;
     overrideSlackContext?: boolean | undefined;
-    vcsProvider?: "github" | "gitlab" | "azure-devops" | undefined;
+    vcsProvider?: "github" | "gitlab" | "azure-devops" | "bitbucket" | undefined;
     vcsRepo?: string | undefined;
     vcsEventType?: string | undefined;
     vcsNumber?: number | undefined;
@@ -132,6 +133,7 @@ declare module "swarm-extension" {
       | "github"
       | "gitlab"
       | "azure-devops"
+      | "bitbucket"
       | "system"
       | "linear"
       | "jira"
@@ -172,7 +174,7 @@ declare module "swarm-extension" {
     slackUserId?: string | undefined;
     slackProgressMessageTs?: string | undefined;
     slackTreeRootMessageTs?: string | undefined;
-    vcsProvider?: "github" | "gitlab" | "azure-devops" | undefined;
+    vcsProvider?: "github" | "gitlab" | "azure-devops" | "bitbucket" | undefined;
     vcsRepo?: string | undefined;
     vcsEventType?: string | undefined;
     vcsNumber?: number | undefined;
@@ -625,7 +627,7 @@ declare module "swarm-extension" {
     /** The text, or a placeholder naming the type for a non-text message. */
     text: string;
   }
-  export type VcsProvider = "github" | "gitlab" | "azure-devops";
+  export type VcsProvider = "github" | "gitlab" | "azure-devops" | "bitbucket";
   /**
    * The provider object the event is about, as the provider names it. GitLab
    * calls a pull request a merge request, and a comment a `note`.
@@ -648,7 +650,7 @@ declare module "swarm-extension" {
     provider: VcsProvider;
     kind: VcsEventKind;
     action: string;
-    /** `owner/name` on GitHub and GitLab, the repository URL on Azure DevOps. */
+    /** `owner/name` on GitHub and GitLab, `workspace/repo_slug` on Bitbucket, the repository URL on Azure DevOps. */
     repo: string;
     /** The PR, merge request, or issue number. Absent for a pipeline outside a merge request. */
     number?: number;

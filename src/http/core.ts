@@ -29,6 +29,12 @@ import {
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
 import { syncTelemetryEnabled } from "../be/telemetry-enable";
+import {
+  initBitbucket,
+  isBitbucketEnabled,
+  resetBitbucket,
+  resetBitbucketBotCache,
+} from "../bitbucket";
 import { initGitHub, resetGitHub } from "../github";
 import { initGitLab, isGitLabEnabled, resetGitLab } from "../gitlab";
 import { restartChatSdkIfConfigChanged } from "../integrations/chat-sdk/runtime";
@@ -247,6 +253,12 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
   if (isAzureDevOpsEnabled()) integrations.push("azure-devops");
   teardownAzureDevOpsOutbound();
   if (isAzureDevOpsEnabled()) initAzureDevOpsOutbound();
+
+  // Same reset-then-init: the webhook secret and bot account id are cached.
+  resetBitbucket();
+  resetBitbucketBotCache();
+  initBitbucket();
+  if (isBitbucketEnabled()) integrations.push("bitbucket");
 
   resetLinear();
   if (await initLinear()) integrations.push("linear");

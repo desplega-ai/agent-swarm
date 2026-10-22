@@ -74,6 +74,21 @@ describe("scrubSecrets — env-based replacement", () => {
     expect(out).toBe("Authorization: Bearer [REDACTED:GITHUB_TOKEN] end");
   });
 
+  test("redacts the Bitbucket token and webhook secret as exact keys", () => {
+    const values = {
+      BITBUCKET_TOKEN: `example-bitbucket-${randomToken(24)}`,
+      BITBUCKET_WEBHOOK_SECRET: `example-bbhook-${randomToken(24)}`,
+    };
+    for (const [name, value] of Object.entries(values)) process.env[name] = value;
+    refreshSecretScrubberCache();
+    for (const [name, value] of Object.entries(values)) {
+      expect(isSensitiveKey(name)).toBe(true);
+      expect(scrubSecrets(`Authorization: Bearer ${value} end`)).toBe(
+        `Authorization: Bearer [REDACTED:${name}] end`,
+      );
+    }
+  });
+
   test("redacts any key with _API_KEY suffix", () => {
     process.env.FOO_SERVICE_API_KEY = "example-supersecretFooApiKey_longerthan12chars";
     refreshSecretScrubberCache();

@@ -10,6 +10,7 @@ import type {
   TaskWithLogs,
 } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
+import { BitbucketMark } from "@/components/shared/bitbucket-mark";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
@@ -377,6 +378,8 @@ function SourceControlSection({ task }: { task: TaskWithLogs }) {
             <Github className="size-4 shrink-0" />
           ) : task.vcsProvider === "gitlab" ? (
             <Gitlab className="size-4 shrink-0" />
+          ) : task.vcsProvider === "bitbucket" ? (
+            <BitbucketMark className="size-4 shrink-0" />
           ) : task.vcsProvider ? (
             <Link2 className="size-4 shrink-0" />
           ) : null}

@@ -1185,6 +1185,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/gitlab`,
       },
       {
+        key: "BITBUCKET_DISABLE",
+        label: "Disable Bitbucket",
+        description:
+          "Stop the Bitbucket handler from starting. Credentials stay untouched — manage them on the Integrations page.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/bitbucket`,
+      },
+      {
         key: "LINEAR_DISABLE",
         label: "Disable Linear",
         description:

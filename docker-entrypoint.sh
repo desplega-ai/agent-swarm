@@ -765,6 +765,40 @@ else
 fi
 echo "=============================="
 
+# Configure Bitbucket Cloud authentication if a token is provided
+echo ""
+echo "=== Bitbucket Authentication ==="
+if [ -n "$BITBUCKET_TOKEN" ] && [ "${BITBUCKET_DISABLE:-false}" = "true" ]; then
+    echo "BITBUCKET_DISABLE=true - Bitbucket integration disabled for this worker"
+elif [ -n "$BITBUCKET_TOKEN" ]; then
+    echo "Configuring Bitbucket authentication..."
+
+    # git: same env-reading helper as GitLab and Azure DevOps, so the token
+    # never lands in ~/.gitconfig or a credential store. Bitbucket Cloud takes
+    # the static username x-token-auth with an API token or an access token.
+    # There is no Bitbucket CLI: REST calls use curl or fetch with a Bearer header.
+    git config --global "credential.https://bitbucket.org.helper" \
+        '!f() { test "$1" = get || exit 0; echo username=x-token-auth; echo "password=${BITBUCKET_TOKEN}"; }; f'
+
+    # Set git user config for Bitbucket commits (fall back like GitLab does)
+    BITBUCKET_GIT_EMAIL="${BITBUCKET_EMAIL:-${GITHUB_EMAIL:-worker-agent@desplega.ai}}"
+    BITBUCKET_GIT_NAME="${BITBUCKET_NAME:-${GITHUB_NAME:-Worker Agent}}"
+    # Only override git config if GitHub/GitLab/Azure DevOps didn't set it already
+    if [ -z "$GITHUB_TOKEN" ] && [ -z "$GITLAB_TOKEN" ] && [ -z "$AZURE_DEVOPS_TOKEN" ]; then
+        git config --global user.email "$BITBUCKET_GIT_EMAIL"
+        git config --global user.name "$BITBUCKET_GIT_NAME"
+        export GIT_AUTHOR_NAME="$BITBUCKET_GIT_NAME"
+        export GIT_AUTHOR_EMAIL="$BITBUCKET_GIT_EMAIL"
+        export GIT_COMMITTER_NAME="$BITBUCKET_GIT_NAME"
+        export GIT_COMMITTER_EMAIL="$BITBUCKET_GIT_EMAIL"
+    fi
+
+    echo "Bitbucket authentication configured successfully (host: bitbucket.org)"
+else
+    echo "BITBUCKET_TOKEN not set - Bitbucket integration disabled for this worker"
+fi
+echo "=============================="
+
 # ---- Auto-clone registered repos ----
 echo ""
 echo "=== Repo Auto-Clone ==="
@@ -816,13 +850,13 @@ if [ -n "$AGENT_ID" ]; then
                 else
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
                     # gh only speaks GitHub: it cannot parse Azure Repos URLs (…/_git/…)
-                    # and POSTs GitHub GraphQL queries to GitLab hosts. Plain git uses the
+                    # or Bitbucket URLs, and POSTs GitHub GraphQL queries to GitLab hosts. Plain git uses the
                     # credential helpers configured above. GitLab = gitlab.com / gitlab.*
                     # (same rule as detectVcsProvider) or a self-hosted GITLAB_URL whose
                     # hostname has no "gitlab." in it (empty glob when GITLAB_URL is unset).
                     GITLAB_URL_GLOB="${GITLAB_URL:+${GITLAB_URL%/}/*}"
                     case "$REPO_URL" in
-                        *dev.azure.com*|*.visualstudio.com*|*gitlab.*|$GITLAB_URL_GLOB) CLONE_CMD="git clone '$REPO_URL' '$REPO_DIR' --branch '$REPO_BRANCH' --single-branch" ;;
+                        *dev.azure.com*|*.visualstudio.com*|*bitbucket.org*|*gitlab.*|$GITLAB_URL_GLOB) CLONE_CMD="git clone '$REPO_URL' '$REPO_DIR' --branch '$REPO_BRANCH' --single-branch" ;;
                         *) CLONE_CMD="gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" ;;
                     esac
                     gosu worker bash -c "$CLONE_CMD" || echo "  Warning: Could not clone ${REPO_NAME}"

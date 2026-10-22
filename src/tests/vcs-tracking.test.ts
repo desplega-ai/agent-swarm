@@ -122,7 +122,7 @@ describe("updateTaskVcs", () => {
     });
 
     // Before update — no VCS fields, shouldn't be found
-    const notFound = await findTaskByVcs("owner/findme", 99);
+    const notFound = await findTaskByVcs("owner/findme", 99, "github");
     expect(notFound).toBeNull();
 
     await updateTaskVcs(task.id, {
@@ -133,7 +133,7 @@ describe("updateTaskVcs", () => {
     });
 
     // After update — should be found (task is pending, not completed/failed)
-    const found = await findTaskByVcs("owner/findme", 99);
+    const found = await findTaskByVcs("owner/findme", 99, "github");
     expect(found).not.toBeNull();
     expect(found!.id).toBe(task.id);
   });
@@ -171,7 +171,7 @@ describe("updateTaskVcs", () => {
       await startTask(task.id);
       await c.terminate(task.id);
 
-      const found = await findTaskByVcs("owner/terminal", c.number);
+      const found = await findTaskByVcs("owner/terminal", c.number, "github");
       expect(found).toBeNull();
     }
   });

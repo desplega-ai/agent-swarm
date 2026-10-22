@@ -65,7 +65,7 @@ kubectl -n agent-swarm get pods,pvc,ingress
 curl -fsS https://swarm-api.example.com/health
 ```
 
-Add `--version <chart-version>` to pin a release. This installs a single API replica, a lead pool, and a coder pool. The API uses SQLite and must remain at one replica. Each agent pod gets persistent personal storage. Shared agent-fs storage and Litestream backups are opt-in; see the [chart README](https://github.com/desplega-ai/agent-swarm/tree/main/charts/agent-swarm) for pool sizing, storage, and backup configuration.
+Add `--version <chart-version>` to pin a release. This installs a single API replica, a lead pool, and one pool per official worker template: the agent roster of the reference deployment, [`docker-compose.example.yml`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml), with one coder where it runs two (add `--set pools.coder.replicas=2` to match it). Keep every pool by default and remove pools only when you have a reason to. The API uses SQLite and must remain at one replica. Each agent pod gets persistent personal storage. Shared agent-fs storage and Litestream backups are opt-in; see the [chart README](https://github.com/desplega-ai/agent-swarm/tree/main/charts/agent-swarm) for pool sizing, storage, and backup configuration.
 
 For an existing release, apply the same values with `helm upgrade swarm oci://ghcr.io/desplega-ai/charts/agent-swarm --namespace agent-swarm --values swarm-values.yaml`.
 

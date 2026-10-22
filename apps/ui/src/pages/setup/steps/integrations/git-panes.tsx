@@ -1,5 +1,5 @@
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { GITHUB_APP_FIELDS, GITHUB_FIELDS, GITLAB_FIELDS } from "./catalog";
+import { BITBUCKET_FIELDS, GITHUB_APP_FIELDS, GITHUB_FIELDS, GITLAB_FIELDS } from "./catalog";
 import { ConnectedGate } from "./pane-parts";
 import { FieldGrid } from "./setup-field";
 import { type PaneProps, useConfigForm } from "./use-config-form";
@@ -29,6 +29,18 @@ export function GitLabPane({ configs, presence, connected }: PaneProps) {
       summary="Connected. Agents can clone, push, and open merge requests."
     >
       <FieldGrid specs={GITLAB_FIELDS} form={form} />
+    </ConnectedGate>
+  );
+}
+
+export function BitbucketPane({ configs, presence, connected }: PaneProps) {
+  const form = useConfigForm(configs, presence);
+  return (
+    <ConnectedGate
+      connected={connected}
+      summary="Connected. Agents can clone, push, and open pull requests."
+    >
+      <FieldGrid specs={BITBUCKET_FIELDS} form={form} />
     </ConnectedGate>
   );
 }

@@ -337,7 +337,7 @@ export interface KapsoMessageEvent {
   text: string;
 }
 
-export type VcsProvider = "github" | "gitlab" | "azure-devops";
+export type VcsProvider = "github" | "gitlab" | "azure-devops" | "bitbucket";
 
 /**
  * The provider object the event is about, as the provider names it. GitLab
@@ -362,7 +362,7 @@ export interface VcsEvent {
   provider: VcsProvider;
   kind: VcsEventKind;
   action: string;
-  /** `owner/name` on GitHub and GitLab, the repository URL on Azure DevOps. */
+  /** `owner/name` on GitHub and GitLab, `workspace/repo_slug` on Bitbucket, the repository URL on Azure DevOps. */
   repo: string;
   /** The PR, merge request, or issue number. Absent for a pipeline outside a merge request. */
   number?: number;
