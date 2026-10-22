@@ -714,14 +714,24 @@ export async function getTasksByStatus(status: AgentTaskStatus): Promise<AgentTa
  * in `src/types.ts`. SQL strings can't import a TS const — if you add a
  * new terminal status, grep for `NOT IN ('completed'` across this file.
  */
-export async function findTaskByVcs(vcsRepo: string, vcsNumber: number): Promise<AgentTask | null> {
+/**
+ * Most recent active task for a repo + PR/issue number. Pass `vcsProvider`
+ * when the repo name alone is ambiguous across hosts (`owner/repo` exists on
+ * GitHub, GitLab and Bitbucket alike).
+ */
+export async function findTaskByVcs(
+  vcsRepo: string,
+  vcsNumber: number,
+  vcsProvider?: NonNullable<AgentTask["vcsProvider"]>,
+): Promise<AgentTask | null> {
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ?
+       ${vcsProvider ? "AND vcsProvider = ?" : ""}
        AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY createdAt DESC
        LIMIT 1`,
-    [vcsRepo, vcsNumber],
+    vcsProvider ? [vcsRepo, vcsNumber, vcsProvider] : [vcsRepo, vcsNumber],
   );
   return row ? rowToAgentTask(row) : null;
 }

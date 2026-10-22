@@ -48,6 +48,24 @@ export function isDuplicate(key: string): boolean {
 }
 
 /**
+ * Hold the content-key reservation for `key` while `fn` runs. A throw releases
+ * it, so Bitbucket's retry of a delivery that failed with a 5xx is not taken
+ * for a duplicate. Returns null when the key is already held.
+ */
+async function withDedupReservation(
+  key: string,
+  fn: () => Promise<HandlerResult>,
+): Promise<HandlerResult | null> {
+  if (isDuplicate(key)) return null;
+  try {
+    return await fn();
+  } catch (err) {
+    processedEvents.delete(key);
+    throw err;
+  }
+}
+
+/**
  * Delivery dedup on `X-Request-UUID`. Bitbucket retries a delivery (same
  * UUID) when it gets a 5xx or times out, so only a delivery that was acked
  * is recorded — see `markDeliveryProcessed`.
@@ -278,42 +296,42 @@ export async function handlePullRequestCreated(body: unknown): Promise<HandlerRe
     return { created: false };
   }
 
-  if (isDuplicate(`bitbucket-pr-${repository.uuid}-${pr.id}-created`)) {
-    console.log(`[Bitbucket] Skipping duplicate PR event`);
-    return { created: false };
-  }
+  const dedupKey = `bitbucket-pr-${repository.uuid}-${pr.id}-created`;
+  const outcome = await withDedupReservation(dedupKey, async () => {
+    const requestedByUserId = await resolveBitbucketSender(
+      author,
+      "pull_request",
+      `PR #${pr.id}: ${pr.title}`,
+    );
 
-  const requestedByUserId = await resolveBitbucketSender(
-    author,
-    "pull_request",
-    `PR #${pr.id}: ${pr.title}`,
-  );
+    const context = pr.description ? extractMentionContext(pr.description, botAccountId) : "";
+    // A mention is the explicit ask; the reviewer template is for a bare review request.
+    const templateId = mentioned
+      ? "bitbucket.pull_request.opened"
+      : "bitbucket.pull_request.review_requested";
+    const result = resolveTemplate(templateId, {
+      pr_id: pr.id,
+      pr_title: pr.title,
+      repo,
+      username: await renderBitbucketIdentity(author),
+      source_branch: pr.source?.branch?.name ?? "",
+      target_branch: pr.destination?.branch?.name ?? "",
+      pr_url: pullRequestWebUrl(repo, pr),
+      context_section: context ? `Context: ${context}\n\n` : "",
+    });
+    if (result.skipped) {
+      return { created: false };
+    }
 
-  const context = pr.description ? extractMentionContext(pr.description, botAccountId) : "";
-  // A mention is the explicit ask; the reviewer template is for a bare review request.
-  const templateId = mentioned
-    ? "bitbucket.pull_request.opened"
-    : "bitbucket.pull_request.review_requested";
-  const result = resolveTemplate(templateId, {
-    pr_id: pr.id,
-    pr_title: pr.title,
-    repo,
-    username: await renderBitbucketIdentity(author),
-    source_branch: pr.source?.branch?.name ?? "",
-    target_branch: pr.destination?.branch?.name ?? "",
-    pr_url: pullRequestWebUrl(repo, pr),
-    context_section: context ? `Context: ${context}\n\n` : "",
+    return createBitbucketTask(result.text, event, {
+      taskType: "bitbucket-pr",
+      vcsEventType: "pull_request",
+      author,
+      requestedByUserId,
+    });
   });
-  if (result.skipped) {
-    return { created: false };
-  }
-
-  return createBitbucketTask(result.text, event, {
-    taskType: "bitbucket-pr",
-    vcsEventType: "pull_request",
-    author,
-    requestedByUserId,
-  });
+  if (!outcome) console.log(`[Bitbucket] Skipping duplicate PR event`);
+  return outcome ?? { created: false };
 }
 
 /**
@@ -340,48 +358,48 @@ export async function handlePullRequestCommentCreated(body: unknown): Promise<Ha
 
   console.log(`[Bitbucket] Comment by ${author.display_name} on PR #${pr.id} in ${repo}`);
 
-  if (isDuplicate(`bitbucket-comment-${repository.uuid}-${pr.id}-${comment.id}`)) {
-    return { created: false };
-  }
+  const dedupKey = `bitbucket-comment-${repository.uuid}-${pr.id}-${comment.id}`;
+  const outcome = await withDedupReservation(dedupKey, async () => {
+    const requestedByUserId = await resolveBitbucketSender(
+      author,
+      "pull_request_comment",
+      comment.content.raw,
+    );
 
-  const requestedByUserId = await resolveBitbucketSender(
-    author,
-    "pull_request_comment",
-    comment.content.raw,
-  );
+    const existingTask = await findTaskByVcs(repo, pr.id, "bitbucket");
+    const existingTaskNote = existingTask
+      ? `\n\n_Note: There's an active task (${existingTask.id}) for this PR #${pr.id}._`
+      : "";
 
-  const existingTask = await findTaskByVcs(repo, pr.id);
-  const existingTaskNote = existingTask
-    ? `\n\n_Note: There's an active task (${existingTask.id}) for this PR #${pr.id}._`
-    : "";
+    const line = comment.inline?.to ?? comment.inline?.from;
+    const locationSection = comment.inline
+      ? `File: ${comment.inline.path}${line != null ? `:${line}` : ""}\n`
+      : "";
 
-  const line = comment.inline?.to ?? comment.inline?.from;
-  const locationSection = comment.inline
-    ? `File: ${comment.inline.path}${line != null ? `:${line}` : ""}\n`
-    : "";
+    const result = resolveTemplate("bitbucket.comment.mentioned", {
+      pr_id: pr.id,
+      pr_title: pr.title,
+      username: await renderBitbucketIdentity(author),
+      repo,
+      pr_url: comment.links?.html?.href ?? pullRequestWebUrl(repo, pr),
+      location_section: locationSection,
+      context: extractMentionContext(comment.content.raw, botAccountId),
+      existing_task_note: existingTaskNote,
+    });
+    if (result.skipped) {
+      return { created: false };
+    }
 
-  const result = resolveTemplate("bitbucket.comment.mentioned", {
-    pr_id: pr.id,
-    pr_title: pr.title,
-    username: await renderBitbucketIdentity(author),
-    repo,
-    pr_url: comment.links?.html?.href ?? pullRequestWebUrl(repo, pr),
-    location_section: locationSection,
-    context: extractMentionContext(comment.content.raw, botAccountId),
-    existing_task_note: existingTaskNote,
+    return createBitbucketTask(result.text, event, {
+      taskType: "bitbucket-comment",
+      vcsEventType: "pull_request_comment",
+      author,
+      requestedByUserId,
+      vcsCommentId: comment.id,
+      parentTaskId: existingTask?.id,
+    });
   });
-  if (result.skipped) {
-    return { created: false };
-  }
-
-  return createBitbucketTask(result.text, event, {
-    taskType: "bitbucket-comment",
-    vcsEventType: "pull_request_comment",
-    author,
-    requestedByUserId,
-    vcsCommentId: comment.id,
-    parentTaskId: existingTask?.id,
-  });
+  return outcome ?? { created: false };
 }
 
 /**
@@ -398,7 +416,7 @@ export async function handlePullRequestClosed(
     return { created: false };
   }
   const { pullrequest: pr, repository } = event;
-  const existingTask = await findTaskByVcs(repository.full_name, pr.id);
+  const existingTask = await findTaskByVcs(repository.full_name, pr.id, "bitbucket");
   if (existingTask) {
     const reason = outcome === "merged" ? "PR was merged" : "PR was declined";
     console.log(`[Bitbucket] Cancelling task ${existingTask.id} — ${reason}`);

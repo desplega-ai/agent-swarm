@@ -6,6 +6,7 @@ import {
   createTaskExtended,
   createUser,
   deletePromptTemplate,
+  getDb,
   getKv,
   getTaskById,
   initDb,
@@ -324,5 +325,72 @@ describe("identity resolution", () => {
     expect((meta?.value as Record<string, unknown>).sampleEventType).toBe("pull_request");
     const count = await getKv(UNMAPPED_NS, `${accountId}:count`);
     expect(count?.value).toBe(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// Provider scoping and retry after a failed write
+// ═══════════════════════════════════════════════════════
+
+describe("same owner/repo on another host", () => {
+  async function seedGitHubTask(prId: number) {
+    return createTaskExtended(`[GitHub PR #${prId}] Same name, other host`, {
+      source: "github",
+      vcsProvider: "github",
+      vcsRepo: REPO,
+      vcsEventType: "pull_request",
+      vcsNumber: prId,
+      agentId: LEAD_ID,
+    });
+  }
+
+  test("a Bitbucket merge does not cancel a GitHub task with the same repo and number", async () => {
+    const github = await seedGitHubTask(501);
+    await handlePullRequestClosed(withPr(fulfilledSample, 501), "merged");
+    expect((await getTaskById(github.id))?.status).not.toBe("failed");
+  });
+
+  test("a Bitbucket comment does not parent onto a GitHub task with the same repo and number", async () => {
+    const github = await seedGitHubTask(502);
+    const result = await handlePullRequestCommentCreated(commentEvent(commentSample, 502));
+    expect(result.created).toBe(true);
+    const task = await getTaskById(result.taskId!);
+    expect(task?.parentTaskId).toBeFalsy();
+    expect(task?.task).not.toContain(github.id);
+  });
+});
+
+describe("retry after a failed task insert", () => {
+  // A temp trigger makes the next agent_tasks INSERT fail, as a transient DB
+  // error would; Bitbucket then retries the delivery after our 5xx.
+  function failTaskInserts() {
+    getDb().run(
+      "CREATE TEMP TRIGGER bb_fail_insert BEFORE INSERT ON agent_tasks BEGIN SELECT RAISE(ABORT, 'injected fault'); END",
+    );
+  }
+  function restoreTaskInserts() {
+    getDb().run("DROP TRIGGER IF EXISTS temp.bb_fail_insert");
+  }
+
+  test("a PR event that failed to write creates its task on retry", async () => {
+    const event = withPr(mentionSample, 601);
+    failTaskInserts();
+    try {
+      await expect(handlePullRequestCreated(event)).rejects.toThrow();
+    } finally {
+      restoreTaskInserts();
+    }
+    expect((await handlePullRequestCreated(event)).created).toBe(true);
+  });
+
+  test("a comment event that failed to write creates its task on retry", async () => {
+    const event = commentEvent(commentSample, 602);
+    failTaskInserts();
+    try {
+      await expect(handlePullRequestCommentCreated(event)).rejects.toThrow();
+    } finally {
+      restoreTaskInserts();
+    }
+    expect((await handlePullRequestCommentCreated(event)).created).toBe(true);
   });
 });

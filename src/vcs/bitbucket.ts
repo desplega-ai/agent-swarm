@@ -3,8 +3,22 @@
  * the worker (no DB imports). Bitbucket Data Center is out of scope.
  */
 
+/**
+ * True when the URL's host is bitbucket.org. Only the host counts, so a
+ * `bitbucket.org` path segment on another host (`gitlab.com/bitbucket.org/x`)
+ * is not Bitbucket.
+ */
 export function isBitbucketUrl(url: string): boolean {
-  return /(^|[/@.])bitbucket\.org([/:]|$)/i.test(url.trim());
+  const trimmed = url.trim();
+  // SCP-style SSH: user@host:path
+  const scp = trimmed.match(/^[^@/\s:]+@([^:/\s]+):/);
+  if (scp) return (scp[1] as string).toLowerCase() === "bitbucket.org";
+  try {
+    return new URL(trimmed).hostname.toLowerCase() === "bitbucket.org";
+  } catch {
+    // Scheme-less `bitbucket.org/ws/repo`
+    return /^bitbucket\.org(\/|$)/i.test(trimmed);
+  }
 }
 
 /**

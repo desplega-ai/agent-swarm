@@ -18,6 +18,9 @@ describe("Bitbucket Cloud URL helpers", () => {
       "https://notbitbucket.org/ws/repo",
       "https://bitbucket.org.evil.com/ws/repo",
       "https://example.com/bitbucket.org.html",
+      "https://gitlab.com/bitbucket.org/repo.git",
+      "git@gitlab.com:bitbucket.org/repo.git",
+      "https://github.com/acme/bitbucket.org",
       "ws/repo",
     ]) {
       expect(isBitbucketUrl(url)).toBe(false);
@@ -79,5 +82,10 @@ describe("Bitbucket Cloud URL helpers", () => {
   test("detectVcsProvider checks Bitbucket before the GitHub owner/repo fallback", () => {
     expect(detectVcsProvider("https://bitbucket.org/ws/repo")).toBe("bitbucket");
     expect(detectVcsProvider("ws/repo")).toBe("github");
+  });
+
+  test("a bitbucket.org path segment on another host keeps that host's provider", () => {
+    expect(detectVcsProvider("https://gitlab.com/bitbucket.org/repo.git")).toBe("gitlab");
+    expect(parseBitbucketRepoUrl("https://gitlab.com/bitbucket.org/repo.git")).toBeNull();
   });
 });
