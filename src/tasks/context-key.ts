@@ -21,6 +21,10 @@
  *   task:trackers:gitlab:{projectId}:{mr|issue}:{iid}
  *   task:trackers:azure-devops:{repositoryId}:pr:{pullRequestId}
  *   task:trackers:azure-devops:{organization}:workitem:{workItemId}
+ *   task:trackers:bitbucket:{repoUuid}:pr:{pullRequestId}
+ *                                                 (repo UUID with Bitbucket's `{}` braces
+ *                                                  stripped and lowercased, so renames keep
+ *                                                  task threads)
  *   task:trackers:linear:{issueIdentifier}        (e.g. DES-42 — case preserved)
  *   task:trackers:jira:{issueIdentifier}          (e.g. PROJ-123 — case preserved)
  *   task:schedule:{scheduleId}
@@ -50,7 +54,13 @@ export type ContextKeyFamily =
   | "schedule"
   | "workflow";
 
-export type TrackerProvider = "github" | "gitlab" | "azure-devops" | "linear" | "jira";
+export type TrackerProvider =
+  | "github"
+  | "gitlab"
+  | "azure-devops"
+  | "bitbucket"
+  | "linear"
+  | "jira";
 
 export type ParsedContextKey =
   | { family: "slack"; parts: { channelId: string; threadTs: string } }
@@ -75,6 +85,11 @@ export type ParsedContextKey =
       family: "trackers";
       subFamily: "azure-devops";
       parts: { organization: string; kind: "workitem"; workItemId: number };
+    }
+  | {
+      family: "trackers";
+      subFamily: "bitbucket";
+      parts: { repoUuid: string; kind: "pr"; pullRequestId: number };
     }
   | {
       family: "trackers";
@@ -222,6 +237,34 @@ export function azureDevOpsWorkItemContextKey(input: {
     );
   }
   return ["task", "trackers", "azure-devops", organization, "workitem", workItemId].join(SEPARATOR);
+}
+
+/**
+ * Bitbucket Cloud wraps repository UUIDs in braces (`{1a2b...}`). Strip them
+ * and lowercase so the key is stable regardless of which payload field the
+ * UUID came from.
+ */
+export function bitbucketContextKey({
+  repoUuid,
+  pullRequestId,
+}: {
+  repoUuid: string;
+  pullRequestId: number | string;
+}): string {
+  const rawUuid = typeof repoUuid === "string" ? repoUuid.trim().replace(/^\{|\}$/g, "") : repoUuid;
+  const uuid = assertSafePart(rawUuid, "repoUuid").toLowerCase();
+  if (/[{}]/.test(uuid)) {
+    throw new Error(
+      `context-key: bitbucket "repoUuid" has unbalanced braces (got ${JSON.stringify(repoUuid)})`,
+    );
+  }
+  const id = assertSafePart(pullRequestId, "pullRequestId");
+  if (!/^\d+$/.test(id)) {
+    throw new Error(
+      `context-key: bitbucket "pullRequestId" must be a positive integer (got ${JSON.stringify(id)})`,
+    );
+  }
+  return ["task", "trackers", "bitbucket", uuid, "pr", id].join(SEPARATOR);
 }
 
 export function linearContextKey(input: { issueIdentifier: string }): string {
@@ -399,6 +442,23 @@ export function parseContextKey(key: string): ParsedContextKey {
           family: "trackers",
           subFamily: "azure-devops",
           parts: { repositoryId: parts[3] as string, kind: "pr", pullRequestId },
+        };
+      }
+      if (subFamily === "bitbucket") {
+        if (parts.length !== 6 || parts[4] !== "pr" || !parts[3]) {
+          throw new Error(`context-key: malformed bitbucket key: ${JSON.stringify(key)}`);
+        }
+        const idStr = parts[5] as string;
+        const pullRequestId = Number.parseInt(idStr, 10);
+        if (!/^\d+$/.test(idStr) || !Number.isFinite(pullRequestId)) {
+          throw new Error(
+            `context-key: malformed bitbucket pullRequestId "${idStr}": ${JSON.stringify(key)}`,
+          );
+        }
+        return {
+          family: "trackers",
+          subFamily: "bitbucket",
+          parts: { repoUuid: parts[3] as string, kind: "pr", pullRequestId },
         };
       }
       if (subFamily === "linear") {

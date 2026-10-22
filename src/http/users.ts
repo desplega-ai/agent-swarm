@@ -555,6 +555,7 @@ const UNMAPPED_KINDS = [
   "github",
   "gitlab",
   "azure-devops",
+  "bitbucket",
   "linear",
   "kapso",
   // Chat SDK adapters record unknown senders under the adapter name.

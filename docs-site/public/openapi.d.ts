@@ -12596,7 +12596,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -12691,7 +12691,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -13528,7 +13528,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -14063,7 +14063,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        vcsProvider: "github" | "gitlab" | "azure-devops";
+                        vcsProvider: "github" | "gitlab" | "azure-devops" | "bitbucket";
                         vcsRepo: string;
                         vcsNumber: number;
                         /** Format: uri */
@@ -18811,7 +18811,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -23947,6 +23947,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/bitbucket/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle Bitbucket Cloud webhook events */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Event processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            created: boolean;
+                            taskId?: string;
+                            skipped?: boolean;
+                            reason?: string;
+                            extension?: {
+                                id: string;
+                                name: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid signature */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Bitbucket integration not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agentmail/webhook": {
         parameters: {
             query?: never;
@@ -25682,7 +25745,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -25725,7 +25788,7 @@ export interface components {
             slackProgressMessageTs?: string;
             slackTreeRootMessageTs?: string;
             /** @enum {string} */
-            vcsProvider?: "github" | "gitlab" | "azure-devops";
+            vcsProvider?: "github" | "gitlab" | "azure-devops" | "bitbucket";
             vcsRepo?: string;
             vcsEventType?: string;
             vcsNumber?: number;

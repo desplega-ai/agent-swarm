@@ -6,6 +6,7 @@ import { resolveTemplate } from "../prompts/resolver";
 
 // Side-effect imports: register all templates from each source
 import "../gitlab/templates";
+import "../bitbucket/templates";
 import "../agentmail/templates";
 import "../linear/templates";
 import "../heartbeat/templates";
@@ -28,6 +29,7 @@ async function ensureTemplatesRegistered(): Promise<void> {
   // module state across parallel test files, a single-template check is racy.
   const ts = Date.now();
   await import(`../gitlab/templates?t=${ts}`);
+  await import(`../bitbucket/templates?t=${ts}`);
   await import(`../agentmail/templates?t=${ts}`);
   await import(`../linear/templates?t=${ts}`);
   await import(`../heartbeat/templates?t=${ts}`);
@@ -92,6 +94,42 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("gitlab.issue.assigned");
     expect(eventTypes).toContain("gitlab.comment.mentioned");
     expect(eventTypes).toContain("gitlab.pipeline.failed");
+  });
+
+  test("Bitbucket templates are registered (2 common + 3 event)", () => {
+    const eventTypes = getAllTemplateDefinitions().map((d) => d.eventType);
+    expect(eventTypes).toContain("common.delegation_instruction.bitbucket");
+    expect(eventTypes).toContain("common.command_suggestions.bitbucket_pr");
+    expect(eventTypes).toContain("bitbucket.pull_request.opened");
+    expect(eventTypes).toContain("bitbucket.pull_request.review_requested");
+    expect(eventTypes).toContain("bitbucket.comment.mentioned");
+  });
+
+  test("Bitbucket templates resolve with no unresolved variables", () => {
+    const shared = {
+      pr_id: 42,
+      pr_title: "Fix retry",
+      repo: "acme-ws/widgets",
+      username: "Dana",
+      pr_url: "https://bitbucket.org/acme-ws/widgets/pull-requests/42",
+    };
+    const pr = { ...shared, source_branch: "feat", target_branch: "main", context_section: "" };
+    for (const id of ["bitbucket.pull_request.opened", "bitbucket.pull_request.review_requested"]) {
+      const result = resolveTemplate(id, pr);
+      expect(result.skipped).toBe(false);
+      expect(result.unresolved).toEqual([]);
+      expect(result.text).toContain("[Bitbucket PR #42]");
+      expect(result.text).toContain("api.bitbucket.org/2.0/repositories/acme-ws/widgets");
+    }
+    const comment = resolveTemplate("bitbucket.comment.mentioned", {
+      ...shared,
+      location_section: "File: src/a.ts:3\n",
+      context: "please fix",
+      existing_task_note: "",
+    });
+    expect(comment.unresolved).toEqual([]);
+    expect(comment.text).toContain("File: src/a.ts:3");
+    expect(comment.text).toContain("please fix");
   });
 
   test("AgentMail templates are registered (5 event)", () => {

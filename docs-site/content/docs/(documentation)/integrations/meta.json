@@ -6,6 +6,7 @@
     "github",
     "gitlab",
     "azure-devops",
+    "bitbucket",
     "linear",
     "jira",
     "sentry",

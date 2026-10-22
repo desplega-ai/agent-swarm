@@ -1060,7 +1060,7 @@ export async function setSlackMessageTracking(
 export async function updateTaskVcs(
   taskId: string,
   vcs: {
-    vcsProvider: "github" | "gitlab" | "azure-devops";
+    vcsProvider: "github" | "gitlab" | "azure-devops" | "bitbucket";
     vcsRepo: string;
     vcsNumber: number;
     vcsUrl: string;

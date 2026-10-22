@@ -4,6 +4,7 @@ import {
   agentmailContextKey,
   azureDevOpsContextKey,
   azureDevOpsWorkItemContextKey,
+  bitbucketContextKey,
   buildJiraContextKey,
   chatSdkContextKey,
   githubContextKey,
@@ -154,6 +155,55 @@ describe("azure-devops work item keys", () => {
 
   test("rejects a workitem key with the wrong part count", () => {
     expect(() => parseContextKey("task:trackers:azure-devops:workitem:42")).toThrow();
+  });
+});
+
+describe("bitbucket pull request keys", () => {
+  const UUID = "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d";
+
+  test("strips the braces Bitbucket wraps repository UUIDs in", () => {
+    expect(bitbucketContextKey({ repoUuid: `{${UUID}}`, pullRequestId: 12 })).toBe(
+      `task:trackers:bitbucket:${UUID}:pr:12`,
+    );
+    expect(bitbucketContextKey({ repoUuid: UUID, pullRequestId: "12" })).toBe(
+      `task:trackers:bitbucket:${UUID}:pr:12`,
+    );
+  });
+
+  test("lowercases the UUID so payload casing cannot fork a thread", () => {
+    expect(bitbucketContextKey({ repoUuid: `{${UUID.toUpperCase()}}`, pullRequestId: 3 })).toBe(
+      `task:trackers:bitbucket:${UUID}:pr:3`,
+    );
+  });
+
+  test("round-trips through parseContextKey", () => {
+    const key = bitbucketContextKey({ repoUuid: `{${UUID}}`, pullRequestId: 42 });
+    expect(parseContextKey(key)).toEqual({
+      family: "trackers",
+      subFamily: "bitbucket",
+      parts: { repoUuid: UUID, kind: "pr", pullRequestId: 42 },
+    });
+  });
+
+  test("rejects empty, braces-only, unbalanced or separator-bearing UUIDs", () => {
+    expect(() => bitbucketContextKey({ repoUuid: "", pullRequestId: 1 })).toThrow();
+    expect(() => bitbucketContextKey({ repoUuid: "{}", pullRequestId: 1 })).toThrow();
+    expect(() => bitbucketContextKey({ repoUuid: "{{abc}", pullRequestId: 1 })).toThrow();
+    expect(() => bitbucketContextKey({ repoUuid: "a:b", pullRequestId: 1 })).toThrow();
+  });
+
+  test("rejects a non-integer pull request id", () => {
+    expect(() => bitbucketContextKey({ repoUuid: UUID, pullRequestId: 1.5 })).toThrow(/integer/);
+    expect(() => bitbucketContextKey({ repoUuid: UUID, pullRequestId: "abc" })).toThrow(/integer/);
+    expect(() => bitbucketContextKey({ repoUuid: UUID, pullRequestId: -1 })).toThrow(/integer/);
+  });
+
+  test("parseContextKey rejects malformed bitbucket keys", () => {
+    expect(() => parseContextKey(`task:trackers:bitbucket:${UUID}:pr:abc`)).toThrow();
+    expect(() => parseContextKey(`task:trackers:bitbucket:${UUID}:issue:1`)).toThrow();
+    expect(() => parseContextKey(`task:trackers:bitbucket:${UUID}:pr`)).toThrow();
+    expect(() => parseContextKey("task:trackers:bitbucket::pr:1")).toThrow();
+    expect(() => parseContextKey(`task:trackers:bitbucket:${UUID}:pr:1:extra`)).toThrow();
   });
 });
 

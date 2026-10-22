@@ -22,6 +22,7 @@ This section is the canonical home for each integration's setup, behavior, and o
 - [**GitHub**](/docs/integrations/github) — App + webhooks. Issues, PRs, and review threads create or update swarm tasks; the agent comments back inline.
 - [**GitLab**](/docs/integrations/gitlab) — token-based webhooks. Merge requests and issues map to swarm tasks the same way GitHub does.
 - [**Azure DevOps**](/docs/integrations/azure-devops) — PAT plus service hooks. A bot mention in an Azure Repos pull request creates a swarm task; workers clone, push, and open PRs with `git` and `az`.
+- [**Bitbucket Cloud**](/docs/integrations/bitbucket) — API token plus a signed webhook. A bot mention or review request on a pull request creates a swarm task; merge or decline cancels it. Workers clone and push with `git` and use the REST API through `curl`.
 
 ### Chat & email
 

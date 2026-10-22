@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Bitbucket Cloud: `POST /api/bitbucket/webhook` verifies the `X-Hub-Signature` HMAC and turns a bot mention or review request on a pull request into a lead task; a merge or decline cancels it. Workers clone and push through a `bitbucket.org` credential helper and link the PRs they open. Configure with `BITBUCKET_WEBHOOK_SECRET` and `BITBUCKET_TOKEN`; Data Center, Issues and reactions are not supported.
+
 ## [2.4.6] - 2026-10-22
 
 ### Added
