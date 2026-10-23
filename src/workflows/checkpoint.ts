@@ -2,7 +2,29 @@ import { getDbClient, getWorkflowRun, updateWorkflowRun, updateWorkflowRunStep }
 import type { RetryPolicy } from "../types";
 
 /**
+ * The execution a checkpoint belongs to: the step attempt (`retryCount`) that
+ * claimed the row. A fenced checkpoint writes only while that attempt still
+ * owns the row: the step is `running` with that `retryCount` in a `running` or
+ * `waiting` run. A cancel, a newer attempt or another settle that committed
+ * meanwhile wins, and the stale execution writes nothing.
+ */
+export type StepFence = { retryCount: number };
+
+async function holdsFence(runId: string, stepId: string, fence: StepFence): Promise<boolean> {
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found
+       FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+      WHERE s.id = ? AND s.runId = ? AND s.status = 'running' AND s.retryCount = ?
+        AND r.status IN ('running', 'waiting')`,
+    [stepId, runId, fence.retryCount],
+  );
+  return row != null;
+}
+
+/**
  * Checkpoint a successful step — atomic DB write of step result + run context.
+ * Returns false, writing nothing, when `fence` no longer holds.
  */
 export async function checkpointStep(
   runId: string,
@@ -10,8 +32,10 @@ export async function checkpointStep(
   nodeId: string,
   result: { output?: unknown; nextPort?: string },
   ctx: Record<string, unknown>,
-): Promise<void> {
-  await getDbClient().transaction(async () => {
+  options: { fence?: StepFence } = {},
+): Promise<boolean> {
+  return getDbClient().transaction(async () => {
+    if (options.fence && !(await holdsFence(runId, stepId, options.fence))) return false;
     await updateWorkflowRunStep(stepId, {
       status: "completed",
       output: result.output,
@@ -24,11 +48,14 @@ export async function checkpointStep(
     await updateWorkflowRun(runId, {
       context: ctx,
     });
+    return true;
   });
 }
 
 /**
  * Checkpoint a step failure — marks step failed, calculates retry if applicable.
+ * With `fence`, a stale execution writes nothing and gets `stale: true`.
+ * `output` is kept on the failed step for observability, in the same write.
  */
 export async function checkpointStepFailure(
   runId: string,
@@ -36,49 +63,56 @@ export async function checkpointStepFailure(
   error: string,
   retryCount: number,
   retryPolicy?: RetryPolicy,
-  options?: { markRunFailed?: boolean },
-): Promise<{ shouldRetry: boolean }> {
+  options?: { markRunFailed?: boolean; fence?: StepFence; output?: unknown },
+): Promise<{ shouldRetry: boolean; stale?: true }> {
   const now = new Date().toISOString();
 
-  if (retryPolicy && retryCount < retryPolicy.maxRetries) {
-    const delay = calculateBackoff(retryPolicy, retryCount);
-    const nextRetryAt = new Date(Date.now() + delay).toISOString();
+  return getDbClient().transaction(async () => {
+    if (options?.fence && !(await holdsFence(runId, stepId, options.fence))) {
+      return { shouldRetry: false, stale: true as const };
+    }
 
+    if (retryPolicy && retryCount < retryPolicy.maxRetries) {
+      const delay = calculateBackoff(retryPolicy, retryCount);
+      const nextRetryAt = new Date(Date.now() + delay).toISOString();
+
+      await updateWorkflowRunStep(stepId, {
+        status: "failed",
+        error,
+        output: options?.output,
+        retryCount: retryCount + 1,
+        maxRetries: retryPolicy.maxRetries,
+        nextRetryAt,
+      });
+
+      return { shouldRetry: true };
+    }
+
+    // No retries left — mark step failed, and optionally the run too
+    // Clear nextRetryAt so the poller stops picking this step up
     await updateWorkflowRunStep(stepId, {
       status: "failed",
       error,
-      retryCount: retryCount + 1,
-      maxRetries: retryPolicy.maxRetries,
-      nextRetryAt,
+      output: options?.output,
+      finishedAt: now,
+      nextRetryAt: null,
     });
 
-    return { shouldRetry: true };
-  }
-
-  // No retries left — mark step failed, and optionally the run too
-  // Clear nextRetryAt so the poller stops picking this step up
-  await updateWorkflowRunStep(stepId, {
-    status: "failed",
-    error,
-    finishedAt: now,
-    nextRetryAt: null,
-  });
-
-  const markRunFailed = options?.markRunFailed ?? true;
-  if (markRunFailed) {
-    // A cancel or finalization that committed while the step ran wins.
-    await getDbClient().transaction(async () => {
+    const markRunFailed = options?.markRunFailed ?? true;
+    if (markRunFailed) {
+      // A cancel or finalization that committed while the step ran wins.
       const run = await getWorkflowRun(runId);
-      if (run?.status !== "running" && run?.status !== "waiting") return;
-      await updateWorkflowRun(runId, {
-        status: "failed",
-        error: `Step failed: ${error}`,
-        finishedAt: now,
-      });
-    });
-  }
+      if (run?.status === "running" || run?.status === "waiting") {
+        await updateWorkflowRun(runId, {
+          status: "failed",
+          error: `Step failed: ${error}`,
+          finishedAt: now,
+        });
+      }
+    }
 
-  return { shouldRetry: false };
+    return { shouldRetry: false };
+  });
 }
 
 /**

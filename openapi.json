@@ -5354,6 +5354,10 @@
           },
           "parentStepId": {
             "type": "string"
+          },
+          "parentStepAttempt": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
@@ -5408,6 +5412,10 @@
           },
           "parentStepId": {
             "type": "string"
+          },
+          "parentStepAttempt": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [

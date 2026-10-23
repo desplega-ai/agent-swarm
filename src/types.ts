@@ -2958,6 +2958,13 @@ export const WorkflowRunSchema = z
     finishedAt: z.string().optional(),
     /** The `sub-workflow` step that started this run. Unset on a top-level run. */
     parentStepId: z.string().optional(),
+    /**
+     * The parent step's attempt (its `retryCount`) that started this run. A
+     * step has at most one child per attempt, so `(parentStepId,
+     * parentStepAttempt)` identifies the invocation; a node `retry` adds a
+     * child with the next attempt. Unset on a top-level run.
+     */
+    parentStepAttempt: z.number().int().min(0).optional(),
   })
   .openapi("WorkflowRun");
 
