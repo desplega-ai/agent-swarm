@@ -502,7 +502,22 @@ const SessionHideSourceSchema = z
       .filter(Boolean),
   )
   .describe(
-    "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`.",
+    "Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it.",
+  );
+
+const SessionShowSourceSchema = z
+  .string()
+  // The same cap as the `showSource` body field of `POST /api/session-triage`.
+  .refine((value) => value.split(",").length <= 32, "showSource takes at most 32 sources.")
+  .optional()
+  .transform((value) =>
+    value
+      ?.split(",")
+      .map((source) => source.trim())
+      .filter(Boolean),
+  )
+  .describe(
+    "Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source.",
   );
 
 const listSessions = route({
@@ -568,6 +583,8 @@ const listSessions = route({
     show: SessionShowSchema,
     /** Root sources to leave out. Must match the tree's `hideSource`. */
     hideSource: SessionHideSourceSchema,
+    /** Root sources to keep. Must match the tree's `showSource`. */
+    showSource: SessionShowSourceSchema,
   }),
   responses: {
     200: {
@@ -590,7 +607,11 @@ const sessionTree = route({
   pattern: ["api", "session-tree"],
   summary: "Get session groups and triage counts",
   tags: ["Sessions"],
-  query: z.object({ show: SessionShowSchema, hideSource: SessionHideSourceSchema }),
+  query: z.object({
+    show: SessionShowSchema,
+    hideSource: SessionHideSourceSchema,
+    showSource: SessionShowSourceSchema,
+  }),
   responses: {
     200: { description: "Visible groups and section counts", schema: SessionTreeResponseSchema },
     401: { description: "Unauthorized" },
@@ -615,6 +636,8 @@ const triageSessionListRoute = route({
       groupKey: SessionKeyFilterSchema.optional(),
       show: SessionShowSchema,
       hideSource: z.array(z.string().min(1)).max(32).optional(),
+      /** Root sources to keep; an empty array keeps none. */
+      showSource: z.array(z.string().min(1)).max(32).optional(),
     })
     .refine((body) => [body.triage, body.noGroup, body.groupKey].filter(Boolean).length === 1, {
       message: "Name exactly one list: triage, noGroup, or groupKey",
@@ -941,6 +964,7 @@ export async function handleSessions(
     const filterOpts = {
       source: sources,
       hideSource: parsed.query.hideSource,
+      showSource: parsed.query.showSource,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
       contextKeyPrefix: parsed.query.contextKeyPrefix,
@@ -994,6 +1018,7 @@ export async function handleSessions(
       await getSessionTree(actor, undefined, {
         mine: parsed.query.show !== "all",
         hideSource: parsed.query.hideSource,
+        showSource: parsed.query.showSource,
       }),
     );
     return true;

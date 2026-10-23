@@ -7,7 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Sessions: the sidebar source filter keeps an allowlist and shows only dashboard (`ui`) sessions by default; any other source, a new one included, stays off until ticked. `GET /api/sessions`, `GET /api/session-tree` and `POST /api/session-triage` take `showSource`; `hideSource` still works for older clients.
 - Approvals: a `config` question type asks a person to set one swarm config key or secret on the dashboard. The card shows whether the key is already set, offers keep, replace or skip, and takes non-secret values from options. Secrets go straight into encrypted swarm config; the request, workflow output and follow-up task carry only `{ key, scope, isSecret, status, updatedAt }`.
+
+### Fixed
+- Sessions: Done holds through agent activity. A Done session came back to the Inbox on the next agent progress update; now it comes back only for a pending approval or a person's message created after it was marked Done.
 
 ## [2.5.2] - 2026-10-23
 

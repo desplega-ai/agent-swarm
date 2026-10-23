@@ -49182,11 +49182,21 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`."
+              "description": "Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it."
             },
             "required": false,
-            "description": "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`.",
+            "description": "Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it.",
             "name": "hideSource",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source."
+            },
+            "required": false,
+            "description": "Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source.",
+            "name": "showSource",
             "in": "query"
           }
         ],
@@ -49569,11 +49579,21 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`."
+              "description": "Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it."
             },
             "required": false,
-            "description": "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`.",
+            "description": "Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it.",
             "name": "hideSource",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source."
+            },
+            "required": false,
+            "description": "Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source.",
+            "name": "showSource",
             "in": "query"
           }
         ],
@@ -49806,6 +49826,14 @@
                     "description": "Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged."
                   },
                   "hideSource": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 32
+                  },
+                  "showSource": {
                     "type": "array",
                     "items": {
                       "type": "string",

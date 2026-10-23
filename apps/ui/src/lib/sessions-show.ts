@@ -4,14 +4,15 @@
 // - The "Mine / All" view. Mine (the default) lists the sessions the picked
 //   user started from a human channel, plus the ones shared with them. All
 //   adds the workflow, schedule, and system runs attributed to them.
-// - Hidden sources: root sources (Slack, a chat channel, ...) left out of
-//   every list and count, the Inbox included. None by default, so a new
-//   source shows until the user hides it.
+// - Shown sources: the root sources (the dashboard, Slack, GitHub, ...) that
+//   lists and counts keep, the Inbox included. Only `ui` by default, so any
+//   other source, one never seen before included, stays out until the user
+//   ticks it.
 //
-// The server applies both (`show` and `hideSource` on
+// The server applies both (`show` and `showSource` on
 // `GET /api/sessions?scope=tree` and `GET /api/session-tree`), so totals and
 // pages stay right. They never change who can open a session: a direct link
-// to a hidden session still works.
+// to a filtered-out session still works.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
@@ -20,14 +21,20 @@ import { useSyncExternalStore } from "react";
 export type SessionsShow = "mine" | "all";
 
 const SHOW_KEY = "swarm:v1:sessions-v2:show";
-const HIDDEN_KEY = "swarm:v1:sessions-v2:hidden-sources";
+// A new key: the older hidden-sources list was a denylist, and everyone
+// starts on the `ui`-only default.
+const SHOWN_KEY = "swarm:v1:sessions-v2:shown-sources";
+
+/** The sources shown until the user changes the filter. */
+export const DEFAULT_SHOWN_SOURCES: readonly string[] = ["ui"];
+const DEFAULT_SHOWN_RAW = DEFAULT_SHOWN_SOURCES.join(",");
 
 // One store for every hook instance in this tab, plus the `storage` event for
 // other tabs. Query options read it outside React, so the list keys and the
 // tree key always agree.
 const listeners = new Set<() => void>();
 let memoryShow: SessionsShow = "mine";
-let memoryHidden = "";
+let memoryShown = DEFAULT_SHOWN_RAW;
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
@@ -67,24 +74,30 @@ export function setSessionsShow(next: SessionsShow) {
   write(SHOW_KEY, next);
 }
 
-/** Hidden sources in one sorted, comma-joined string: a stable snapshot and query key part. */
-function hiddenRaw(): string {
-  const stored = read(HIDDEN_KEY);
-  return stored === null ? memoryHidden : stored;
+/**
+ * Shown sources in one sorted, comma-joined string: a stable snapshot and
+ * query key part. An empty string shows no source.
+ */
+function shownRaw(): string {
+  const stored = read(SHOWN_KEY);
+  return stored === null ? memoryShown : stored;
 }
 
-let parsed: { raw: string; list: readonly string[] } = { raw: "", list: [] };
+let parsed: { raw: string; list: readonly string[] } = {
+  raw: DEFAULT_SHOWN_RAW,
+  list: DEFAULT_SHOWN_SOURCES,
+};
 
-/** The hidden root sources, sorted. The same array until they change. */
-export function getSessionsHiddenSources(): readonly string[] {
-  const raw = hiddenRaw();
+/** The shown root sources, sorted. The same array until they change. */
+export function getSessionsShownSources(): readonly string[] {
+  const raw = shownRaw();
   if (raw !== parsed.raw) parsed = { raw, list: raw ? raw.split(",") : [] };
   return parsed.list;
 }
 
-export function setSessionsHiddenSources(next: readonly string[]) {
-  memoryHidden = [...new Set(next.filter(Boolean))].sort().join(",");
-  write(HIDDEN_KEY, memoryHidden);
+export function setSessionsShownSources(next: readonly string[]) {
+  memoryShown = [...new Set(next.filter(Boolean))].sort().join(",");
+  write(SHOWN_KEY, memoryShown);
 }
 
 /** The view, re-rendering on a change from any tab. */
@@ -93,37 +106,35 @@ export function useSessionsShow(): [SessionsShow, (next: SessionsShow) => void] 
   return [show, setSessionsShow];
 }
 
-/** The hidden sources, re-rendering on a change from any tab. */
-export function useSessionsHiddenSources(): [readonly string[], (next: readonly string[]) => void] {
-  const hidden = useSyncExternalStore(subscribe, getSessionsHiddenSources, () => parsed.list);
-  return [hidden, setSessionsHiddenSources];
+/** The shown sources, re-rendering on a change from any tab. */
+export function useSessionsShownSources(): [readonly string[], (next: readonly string[]) => void] {
+  const shown = useSyncExternalStore(subscribe, getSessionsShownSources, () => parsed.list);
+  return [shown, setSessionsShownSources];
 }
 
 /** The whole filter as one string, for a component that only re-renders on a change. */
 function filterSnapshot(): string {
-  return `${getSessionsShow()}|${hiddenRaw()}`;
+  return `${getSessionsShow()}|${shownRaw()}`;
 }
 
-/** Re-render on any filter change (the view or the hidden sources), from any tab. */
+/** Re-render on any filter change (the view or the shown sources), from any tab. */
 export function useSessionsFilter(): void {
-  useSyncExternalStore(subscribe, filterSnapshot, () => "mine|");
+  useSyncExternalStore(subscribe, filterSnapshot, () => `mine|${DEFAULT_SHOWN_RAW}`);
 }
 
 /**
  * The filter query params: `show` for All only (Mine is the server
- * default), `hideSource` when a source is hidden.
+ * default), and always `showSource`, empty when no source is shown (the
+ * server keeps every source when it is missing).
  */
 export function sessionsFilterParams(
   show: SessionsShow,
-  hidden: readonly string[],
-): { show?: "all"; hideSource?: string } {
-  return {
-    ...(show === "all" ? { show } : {}),
-    ...(hidden.length > 0 ? { hideSource: hidden.join(",") } : {}),
-  };
+  shown: readonly string[],
+): { show?: "all"; showSource: string } {
+  return { ...(show === "all" ? { show } : {}), showSource: shown.join(",") };
 }
 
-/** Whether the filter differs from the default (Mine, nothing hidden): the menu icon shows a dot. */
-export function sessionsFilterActive(show: SessionsShow, hidden: readonly string[]): boolean {
-  return show !== "mine" || hidden.length > 0;
+/** Whether the filter differs from the default (Mine, only `ui`): the menu icon shows a dot. */
+export function sessionsFilterActive(show: SessionsShow, shown: readonly string[]): boolean {
+  return show !== "mine" || shown.join(",") !== DEFAULT_SHOWN_RAW;
 }

@@ -30,6 +30,8 @@ The sidebar shows these sections, from top to bottom:
 
 The sidebar shows the sessions that you started and the sessions that other people share with you.
 
+The filter menu at the end of the search row picks the sources the sidebar shows. Only sessions started from the dashboard (`ui`) are on by default. Every other source, Slack, GitHub, or one the sidebar has not seen before, stays off until you tick it. The Inbox, groups, and their counts follow the filter. A direct link to a session that the filter leaves out still opens it.
+
 Groups and No group list only Inbox sessions. A session in Later or Done shows in Later or Done, not in its group.
 
 Each list shows its 10 newest sessions, by latest activity. **Show 10 more** shows the next 10. After that, **View all N** opens the full list in the [group tab](#group-tab).
@@ -136,7 +138,8 @@ A session **needs you** when it is unread and its latest task failed. It also ne
 ### Done
 
 - `e`, the **Done** button, or **Done** in a menu moves a session to Done. The session leaves the Inbox and its group list.
-- New activity brings a Done session back to the Inbox, as unread.
+- Agent work does not bring a Done session back: progress, status changes, finished tasks, and tasks that agents create or delegate leave it in Done.
+- A Done session goes back to the Inbox, as unread, only when it needs you: an approval request created after you marked it Done, or a new message from a person in the session.
 - `e` on a session in Done moves it back to the Inbox. In the session header, the **Done** button of a session in Done shows pressed. Click it to move the session back to the Inbox.
 
 ### Later
