@@ -4,7 +4,8 @@ import { scrubJsonValue } from "../scrub-json";
 import { getDbClient } from "./runtime";
 
 // Parent/child links between workflow runs (migration 203): a `sub-workflow`
-// step starts a child run that records the step in `parentStepId`.
+// step starts a child run that records the step in `parentStepId`, and the
+// step's `retryCount` at that time in `parentStepAttempt` (migration 240).
 
 const TERMINAL_STATUSES = new Set<WorkflowRunStatus>([
   "completed",
@@ -13,13 +14,58 @@ const TERMINAL_STATUSES = new Set<WorkflowRunStatus>([
   "skipped",
 ]);
 
-/** The id of the child run a `sub-workflow` step started, if any. */
-export async function getChildWorkflowRunId(parentStepId: string): Promise<string | null> {
+/** The id of the child run a `sub-workflow` step started on `attempt`, if any. */
+export async function getChildWorkflowRunId(
+  parentStepId: string,
+  attempt: number,
+): Promise<string | null> {
   const row = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM workflow_runs WHERE parentStepId = ?",
-    [parentStepId],
+    "SELECT id FROM workflow_runs WHERE parentStepId = ? AND parentStepAttempt = ?",
+    [parentStepId, attempt],
   );
   return row?.id ?? null;
+}
+
+/**
+ * True while `attempt` of the step is executing in a live run: the step is
+ * `running` with that `retryCount`. A child run is created only then, so a
+ * cancelled run, a step another attempt moved on, or a step already parked
+ * never gets a new child.
+ */
+export async function isParentStepAttemptCurrent(
+  parentStepId: string,
+  attempt: number,
+): Promise<boolean> {
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found
+       FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+      WHERE s.id = ? AND s.status = 'running' AND s.retryCount = ?
+        AND r.status IN ('running', 'waiting')`,
+    [parentStepId, attempt],
+  );
+  return row != null;
+}
+
+/**
+ * `sub-workflow` steps left `running` in a live run: each is its node's latest
+ * row, so a row a newer one superseded is not listed. The caller skips the
+ * ones this process is still executing.
+ */
+export async function getRunningSubWorkflowSteps(): Promise<
+  Array<{ stepId: string; runId: string; nodeId: string }>
+> {
+  return getDbClient().query<{ stepId: string; runId: string; nodeId: string }>(
+    `SELECT s.id AS stepId, s.runId AS runId, s.nodeId AS nodeId
+       FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+      WHERE s.status = 'running' AND s.nodeType = 'sub-workflow'
+        AND r.status IN ('running', 'waiting')
+        AND s.rowid = (
+          SELECT MAX(rowid) FROM workflow_run_steps
+           WHERE runId = s.runId AND nodeId = s.nodeId
+        )`,
+  );
 }
 
 /** Where a child run came from: the `sub-workflow` step that started it and that step's run. */
@@ -65,12 +111,13 @@ export async function getWorkflowRunLineage(runId: string, maxDepth: number): Pr
   return rows.map((row) => row.workflowId);
 }
 
-/** Waiting `sub-workflow` steps whose child run is terminal or deleted. */
+/** Waiting `sub-workflow` steps whose current attempt's child run is terminal or deleted. */
 export async function getSettledChildRunParentSteps(): Promise<string[]> {
   const rows = await getDbClient().query<{ id: string }>(
     `SELECT s.id
        FROM workflow_run_steps s
-       LEFT JOIN workflow_runs c ON c.parentStepId = s.id
+       LEFT JOIN workflow_runs c
+         ON c.parentStepId = s.id AND c.parentStepAttempt = s.retryCount
       WHERE s.status = 'waiting' AND s.nodeType = 'sub-workflow'
         AND (c.id IS NULL OR c.status IN ('completed', 'failed', 'cancelled', 'skipped'))`,
   );

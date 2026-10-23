@@ -11,7 +11,9 @@
 import { useUsers } from "@/api/hooks/use-users";
 import type { TaskAttachment } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
+import { PromptContext } from "@/components/shared/prompt-context";
 import { TaskPromptAttachments } from "@/components/shared/task-attachments-section";
+import { parsePromptDisplay } from "@/lib/prompt-display";
 import { cn } from "@/lib/utils";
 
 export interface UserPromptBubbleProps {
@@ -33,8 +35,12 @@ export function UserPromptBubble({
   className,
 }: UserPromptBubbleProps) {
   const { data: users } = useUsers();
+  // The contextual panel's page-context footer is for the lead, not the reader.
+  const prompt = parsePromptDisplay(stripContextFooter(text));
   const requesterName =
-    (requestedByUserId && users?.find((u) => u.id === requestedByUserId)?.name) || "User";
+    (requestedByUserId && users?.find((u) => u.id === requestedByUserId)?.name) ||
+    prompt.speaker ||
+    "User";
   const date = new Date(createdAt);
   const dateLabel = date.toLocaleString();
   return (
@@ -58,8 +64,8 @@ export function UserPromptBubble({
             "whitespace-pre-wrap wrap-anywhere text-left min-w-0",
           )}
         >
-          {/* The contextual panel's page-context footer is for the lead, not the reader. */}
-          {stripContextFooter(text)}
+          <PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />
+          {prompt.ask}
         </div>
       </div>
     </section>

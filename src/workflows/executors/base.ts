@@ -51,6 +51,12 @@ export interface ExecutorResult<TOutput = unknown> {
   output?: TOutput;
   nextPort?: string;
   error?: string;
+  /**
+   * False on a failure no retry can change (a child run that was cancelled,
+   * for example). The engine then skips the node's retry policy. Unset means
+   * retryable.
+   */
+  retryable?: boolean;
 }
 
 export interface AsyncExecutorResult<TOutput = unknown> extends ExecutorResult<TOutput> {

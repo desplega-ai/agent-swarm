@@ -18,12 +18,14 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { createForeachAttemptSteps, getChildWorkflowRunId } from "../be/db/workflow-runs";
-import type {
-  WaitStateRow,
-  WorkflowDefinition,
-  WorkflowNode,
-  WorkflowRun,
-  WorkflowRunStep,
+import {
+  type RetryPolicy,
+  RetryPolicySchema,
+  type WaitStateRow,
+  type WorkflowDefinition,
+  type WorkflowNode,
+  type WorkflowRun,
+  type WorkflowRunStep,
 } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
@@ -31,6 +33,7 @@ import {
   postApprovalCancellationUpdates,
 } from "./approval-notifications";
 import { shapeApprovalResolution } from "./approval-resolution";
+import { checkpointStepFailure } from "./checkpoint";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getNextTargets } from "./definition";
@@ -963,10 +966,11 @@ async function resumeClaimedWait(
 }
 
 /**
- * Resume a waiting `sub-workflow` step once its child run is terminal: a
- * completed child completes the step, any other end (or a deleted child) fails
- * the step and its run. Returns true when this call claimed the step. Safe to call repeatedly:
- * the live event and the recovery sweep both route here.
+ * Resume a waiting `sub-workflow` step once its current attempt's child run is
+ * terminal: a completed child completes the step, any other end (or a deleted
+ * child) fails the step and its run. Returns true when this call claimed the
+ * step. Safe to call repeatedly: the live event and the recovery sweep both
+ * route here, and only the call that claims the step walks its successors.
  */
 export async function resumeFromChildRun(
   parentStepId: string,
@@ -974,13 +978,6 @@ export async function resumeFromChildRun(
 ): Promise<boolean> {
   const step = await getWorkflowRunStep(parentStepId);
   if (!step || step.status !== "waiting" || step.nodeType !== "sub-workflow") return false;
-  const childId = await getChildWorkflowRunId(parentStepId);
-  const child = childId ? await getWorkflowRun(childId) : null;
-  // The child row exists before the step parks, so a missing one was deleted.
-  const outcome = child
-    ? childRunOutcome(child)
-    : { error: `Child workflow run of step ${parentStepId} was deleted` };
-  if (!outcome) return false;
 
   let claimed = false;
   await failClosedOnUnreadableReplay(step.runId, step.id, async () => {
@@ -990,10 +987,32 @@ export async function resumeFromChildRun(
     if (!workflow) return;
 
     const ctx = (run.context ?? {}) as Record<string, unknown>;
-    // A foreach item's failure settles the item: under `onNodeFailure:
-    // "continue"` it can close the join, so it routes like a success.
-    const routing =
-      "error" in outcome
+    // The step's attempt, that attempt's child and the claim share one
+    // transaction: a retry that re-parks the step under a newer attempt in
+    // between must not be settled by the previous attempt's child.
+    const routing = await getDbClient().transaction(async () => {
+      const current = await getWorkflowRunStep(step.id);
+      if (!current || current.status !== "waiting") return null;
+      const childId = await getChildWorkflowRunId(step.id, current.retryCount);
+      const child = childId ? await getWorkflowRun(childId) : null;
+      // The child row exists before the step parks, so a missing one was deleted.
+      const outcome = child
+        ? childRunOutcome(child)
+        : { error: `Child workflow run of step ${parentStepId} was deleted`, retryable: false };
+      if (!outcome) return null;
+      // A retryable end (a failed child) is this attempt failing: the node's
+      // retry policy applies exactly as on the executor path. The poller
+      // re-executes the step under the next attempt, which starts a new child.
+      if ("error" in outcome && outcome.retryable) {
+        const policy = childStepRetryPolicy(workflow.definition, step.nodeId);
+        if (policy && current.retryCount < policy.maxRetries) {
+          await checkpointStepFailure(run.id, step.id, outcome.error, current.retryCount, policy);
+          return CHILD_RETRY_SCHEDULED;
+        }
+      }
+      // A foreach item's failure settles the item: under `onNodeFailure:
+      // "continue"` it can close the join, so it routes like a success.
+      return "error" in outcome
         ? await failStepAndRunIfWaiting(
             workflow.definition,
             step.id,
@@ -1012,6 +1031,12 @@ export async function resumeFromChildRun(
             ctx,
             registry,
           );
+    });
+    if (!routing) return;
+    if (routing === CHILD_RETRY_SCHEDULED) {
+      claimed = true;
+      return;
+    }
     if (!routing.claimed || routing.runFailed) {
       claimed = routing.claimed;
       return;
@@ -1034,6 +1059,20 @@ export async function resumeFromChildRun(
     }
   });
   return claimed;
+}
+
+const CHILD_RETRY_SCHEDULED = {
+  claimed: true,
+  runFailed: false,
+  successors: [] as WorkflowNode[],
+} as const;
+
+/** The `node.retry` of a top-level `sub-workflow` node; foreach items retry through their parent. */
+function childStepRetryPolicy(def: WorkflowDefinition, nodeId: string): RetryPolicy | null {
+  const node = def.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node?.retry) return null;
+  const parsed = RetryPolicySchema.safeParse(node.retry);
+  return parsed.success ? parsed.data : null;
 }
 
 // ─── 64KB firedPayload cap ──────────────────────────────────────────────────

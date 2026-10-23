@@ -1,6 +1,7 @@
 import { notifyAutomationPreflightFailure } from "../automation-preflight-alert";
 import {
   getAutomationSetupStates,
+  isFirstWorkflowPreflightFailureToday,
   preflightAutomation,
   recordWorkflowPreflightFailure,
   renderAutomationTokens,
@@ -20,10 +21,16 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { getChildWorkflowRunId, isParentStepAttemptCurrent } from "../be/db/workflow-runs";
 import { WorkflowReplayStateError } from "../be/workflow-replay";
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
-import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
+import {
+  checkpointStep,
+  checkpointStepFailure,
+  checkpointStepWaiting,
+  type StepFence,
+} from "./checkpoint";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FOREACH_ITEMS_WAIT_FOR } from "./constants";
 import { shouldSkipCooldown } from "./cooldown";
@@ -58,6 +65,8 @@ export interface WorkflowExecutionOptions {
   triggerType?: "schedule" | "manual" | "event" | "api";
   /** Set when a `sub-workflow` step starts this run as its child. */
   parentStepId?: string;
+  /** The parent step's `retryCount`; each attempt gets its own child run. */
+  parentStepAttempt?: number;
 }
 
 /**
@@ -87,11 +96,9 @@ async function resolveRenderedWorkflowInputs(
 /**
  * Start executing a workflow from scratch.
  *
- * 1. Check cooldown
- * 2. Create workflow run
- * 3. Resolve inputs
- * 4. Find entry nodes
- * 5. Walk the graph
+ * 1. Check cooldown, readiness and inputs
+ * 2. Create the workflow run with its initial state (one transaction)
+ * 3. Walk the graph from the entry nodes
  */
 export async function startWorkflowExecution(
   workflow: Workflow,
@@ -103,7 +110,7 @@ export async function startWorkflowExecution(
     workflowPreflightInput(workflow),
     await getAutomationSetupStates(),
   );
-  if (preflight.state === "needs_setup") {
+  if (preflight.state === "needs_setup" && !options.parentStepId) {
     const { runId, recorded } = await recordWorkflowPreflightFailure({
       workflowId: workflow.id,
       triggerType: options.triggerType ?? "manual",
@@ -115,63 +122,126 @@ export async function startWorkflowExecution(
     return runId;
   }
 
-  // Templates can consume install params outside the graph definition (most
-  // importantly workflow.input). Render the complete runtime snapshot once;
-  // exact-token values retain their JSON type, including COMPETITORS arrays.
-  workflow = renderAutomationTokens(workflow, workflow.params ?? {});
+  // Settle everything the run starts from before its row exists, so the row
+  // commits together with its initial context or terminal status. A crash
+  // right after the commit leaves a run that recovery can walk, never a
+  // `running` row with an empty context.
+  let initial: InitialRunState;
+  if (preflight.state === "needs_setup") {
+    // A child keeps its parent link and attempt even when it cannot start:
+    // the day-deduped top-level failure run is shared and unlinked, so a
+    // retry or recovery of the step would never find it.
+    initial = {
+      status: "failed",
+      error: preflight.failureReason!,
+      finishedAt: new Date().toISOString(),
+      preflight: true,
+    };
+  } else {
+    // Templates can consume install params outside the graph definition (most
+    // importantly workflow.input). Render the complete runtime snapshot once;
+    // exact-token values retain their JSON type, including COMPETITORS arrays.
+    workflow = renderAutomationTokens(workflow, workflow.params ?? {});
 
-  // Validate trigger data against triggerSchema (before any DB writes)
-  if (workflow.triggerSchema) {
-    const validationErrors = validateJsonSchema(workflow.triggerSchema, triggerData);
-    if (validationErrors.length > 0) {
-      throw new TriggerSchemaError(validationErrors);
+    // Validate trigger data against triggerSchema (before any DB writes)
+    if (workflow.triggerSchema) {
+      const validationErrors = validateJsonSchema(workflow.triggerSchema, triggerData);
+      if (validationErrors.length > 0) {
+        throw new TriggerSchemaError(validationErrors);
+      }
+    }
+
+    if (workflow.cooldown && (await shouldSkipCooldown(workflow.id, workflow.cooldown))) {
+      initial = { status: "skipped", error: "cooldown", finishedAt: new Date().toISOString() };
+    } else {
+      initial = await buildInitialRunState(workflow, triggerData, registry, options);
     }
   }
 
-  // Cooldown check
-  if (workflow.cooldown && (await shouldSkipCooldown(workflow.id, workflow.cooldown))) {
-    const runId = crypto.randomUUID();
-    await createWorkflowRun({
-      id: runId,
-      workflowId: workflow.id,
-      triggerType: options.triggerType ?? "manual",
+  // Held from before the commit until the walk holds the run itself, so a
+  // recovery sweep never walks the new run alongside it.
+  const newRunId = crypto.randomUUID();
+  const release = holdWorkflowRun(newRunId);
+  try {
+    const { runId, created, preflightAlert } = await createRunWithInitialState(
+      workflow,
       triggerData,
-      createdBy: options.requestedByUserId,
-      parentStepId: options.parentStepId,
+      options,
+      initial,
+      newRunId,
+    );
+    if (!created) return runId;
+    if (initial.status === "failed" && initial.preflight) {
+      if (preflightAlert) await notifyAutomationPreflightFailure(preflight);
+      return runId;
+    }
+    if (initial.status === "skipped") return runId;
+    telemetry.workflow("started", {
+      workflowId: workflow.id,
+      nodeCount: workflow.definition.nodes.length,
+      triggerType: options.triggerType ?? "manual",
     });
-    await updateWorkflowRun(runId, {
-      status: "skipped",
-      error: "cooldown",
-      finishedAt: new Date().toISOString(),
-    });
+    if (initial.status) return runId;
+
+    const walk = walkGraph(
+      workflow.definition,
+      runId,
+      initial.context,
+      findEntryNodes(workflow.definition),
+      registry,
+      workflow.id,
+      getSecretInputKeys(workflow.input),
+      options,
+    );
+    // A child run walks on its own, outside the parent executor's timeout. Its
+    // terminal status wakes the parent step (`resumeFromChildRun`).
+    if (options.parentStepId) {
+      walk.catch((err) => console.error(`[workflows] Child workflow run ${runId} failed:`, err));
+      return runId;
+    }
+    await walk;
     return runId;
+  } finally {
+    release();
   }
+}
 
-  const runId = crypto.randomUUID();
-  await createWorkflowRun({
-    id: runId,
-    workflowId: workflow.id,
-    triggerType: options.triggerType ?? "manual",
-    triggerData,
-    createdBy: options.requestedByUserId,
-    parentStepId: options.parentStepId,
-  });
-  telemetry.workflow("started", {
-    workflowId: workflow.id,
-    nodeCount: workflow.definition.nodes.length,
-    triggerType: options.triggerType ?? "manual",
-  });
+/**
+ * Thrown when a `sub-workflow` step asks for a child run while the step's
+ * attempt no longer executes (cancelled, re-attempted or already parked).
+ */
+export class ParentStepNotCurrentError extends Error {
+  constructor(parentStepId: string, attempt: number) {
+    super(
+      `Parent step ${parentStepId} (attempt ${attempt}) is no longer running; no child run started`,
+    );
+    this.name = "ParentStepNotCurrentError";
+  }
+}
 
+/**
+ * A new run's first committed state: a terminal status, or the context it
+ * walks from. `preflight` marks a setup failure, which alerts once a day.
+ */
+type InitialRunState =
+  | { status: "skipped" | "failed"; error: string; finishedAt: string; preflight?: true }
+  | { status?: undefined; context: Record<string, unknown> };
+
+async function buildInitialRunState(
+  workflow: Workflow,
+  triggerData: unknown,
+  registry: ExecutorRegistry,
+  options: WorkflowExecutionOptions,
+): Promise<InitialRunState> {
   // An executor that cannot run (for example a system-one-decision node with no API key) fails
   // the run here, before any node has side effects, instead of partway through.
   const notReady = await findWorkflowReadinessProblems(workflow.definition, registry);
   if (notReady.length > 0) {
-    await updateWorkflowRun(runId, {
+    return {
       status: "failed",
       error: formatReadinessRunError(notReady),
       finishedAt: new Date().toISOString(),
-    });
-    return runId;
+    };
   }
 
   // Resolve inputs and merge into initial context
@@ -190,35 +260,62 @@ export async function startWorkflowExecution(
       const resolved = await resolveRenderedWorkflowInputs(workflow.input);
       Object.assign(ctx, { input: resolved });
     } catch (err) {
-      await updateWorkflowRun(runId, {
+      return {
         status: "failed",
         error: `Input resolution failed: ${err}`,
         finishedAt: new Date().toISOString(),
-      });
-      return runId;
+      };
     }
   }
+  return { context: ctx };
+}
 
-  const entryNodes = findEntryNodes(workflow.definition);
-  const secretKeys = getSecretInputKeys(workflow.input);
-  const walk = walkGraph(
-    workflow.definition,
-    runId,
-    ctx,
-    entryNodes,
-    registry,
-    workflow.id,
-    secretKeys,
-    options,
-  );
-  // A child run walks on its own, outside the parent executor's timeout. Its
-  // terminal status wakes the parent step (`resumeFromChildRun`).
-  if (options.parentStepId) {
-    walk.catch((err) => console.error(`[workflows] Child workflow run ${runId} failed:`, err));
-    return runId;
-  }
-  await walk;
-  return runId;
+/**
+ * Insert the run with its initial state in one transaction. For a child run
+ * the same transaction checks that the parent step's attempt is still
+ * executing and returns the child that attempt already started instead of a
+ * second one; the unique (parentStepId, parentStepAttempt) index backs this
+ * across processes. A setup failure claims the day's alert in the same
+ * transaction, so concurrent failures alert exactly once.
+ */
+async function createRunWithInitialState(
+  workflow: Workflow,
+  triggerData: unknown,
+  options: WorkflowExecutionOptions,
+  initial: InitialRunState,
+  runId: string,
+): Promise<{ runId: string; created: boolean; preflightAlert?: boolean }> {
+  return getDbClient().transaction(async () => {
+    const { parentStepId } = options;
+    const attempt = options.parentStepAttempt ?? 0;
+    if (parentStepId) {
+      if (!(await isParentStepAttemptCurrent(parentStepId, attempt))) {
+        throw new ParentStepNotCurrentError(parentStepId, attempt);
+      }
+      const existingId = await getChildWorkflowRunId(parentStepId, attempt);
+      if (existingId) return { runId: existingId, created: false };
+    }
+    await createWorkflowRun({
+      id: runId,
+      workflowId: workflow.id,
+      triggerType: options.triggerType ?? "manual",
+      triggerData,
+      createdBy: options.requestedByUserId,
+      parentStepId,
+      parentStepAttempt: parentStepId ? attempt : undefined,
+    });
+    await updateWorkflowRun(
+      runId,
+      initial.status
+        ? { status: initial.status, error: initial.error, finishedAt: initial.finishedAt }
+        : { context: initial.context },
+    );
+    const preflightAlert =
+      initial.status === "failed" && initial.preflight
+        ? await isFirstWorkflowPreflightFailureToday(workflow.id, runId)
+        : undefined;
+    return { runId, created: true, preflightAlert };
+  });
 }
 
 // ─── Graph Walker ──────────────────────────────────────────
@@ -268,6 +365,11 @@ export async function failRunOnUnreadableReplay(
 
 export function isWorkflowRunActive(runId: string): boolean {
   return activeWalks.has(runId);
+}
+
+/** True while an executeStep call in this process owns the step row. */
+export function isStepExecuting(stepId: string): boolean {
+  return executingSteps.has(stepId);
 }
 
 /**
@@ -705,6 +807,20 @@ async function executeStep(
       if (current && (current.status !== "running" || executingSteps.has(current.id))) {
         return { current };
       }
+      // An orphaned `sub-workflow` row is this same invocation: it covers the
+      // current predecessor completions, so it is not a new loop iteration.
+      // Re-enter it under its step id, key and retry count, so the executor
+      // reconnects to the child it already started instead of a second one.
+      if (current && node.type === "sub-workflow") {
+        claimedStepId = current.id;
+        executingSteps.add(current.id);
+        return {
+          existingStep: current,
+          stepId: current.id,
+          fence: { retryCount: current.retryCount },
+          deduped: false,
+        };
+      }
     }
 
     // Count existing steps for this node to determine the current iteration.
@@ -717,7 +833,12 @@ async function executeStep(
       existingStep &&
       (existingStep.status === "completed" || existingStep.status === "waiting")
     ) {
-      return { existingStep, stepId: existingStep.id, deduped: true };
+      return {
+        existingStep,
+        stepId: existingStep.id,
+        fence: { retryCount: existingStep.retryCount },
+        deduped: true,
+      };
     }
     // For "pending" or "failed" steps, fall through to re-execute
 
@@ -748,7 +869,8 @@ async function executeStep(
     // this `running` row without also seeing it owned.
     claimedStepId = stepId;
     executingSteps.add(stepId);
-    return { existingStep, stepId, deduped: false };
+    const fence = { retryCount: reusableForeachStep?.retryCount ?? 0 };
+    return { existingStep, stepId, fence, deduped: false };
   };
   const dedup = await getDbClient()
     .transaction(claimStep)
@@ -787,6 +909,7 @@ async function executeStep(
       registry,
       dedup.existingStep,
       dedup.stepId,
+      dedup.fence,
       workflowId,
       options,
     );
@@ -800,7 +923,11 @@ async function executeStep(
   }
 }
 
-/** Steps 3-10 of executeStep, for a step row this call inserted and owns. */
+/**
+ * Steps 3-10 of executeStep, for a step row this call claimed. Every result
+ * write is fenced on the claim: once a cancel, a newer attempt or another
+ * settle moved the row, this execution writes nothing and routes nothing.
+ */
 async function runClaimedStep(
   def: WorkflowDefinition,
   runId: string,
@@ -809,9 +936,11 @@ async function runClaimedStep(
   registry: ExecutorRegistry,
   existingStep: WorkflowRunStep | null | undefined,
   stepId: string,
+  fence: StepFence,
   workflowId?: string,
   options: WorkflowExecutionOptions = {},
 ): Promise<StepResult> {
+  const stale: StepResult = { outcome: "failed", successors: [] };
   // 3. Get executor
   const executor = registry.get(node.type);
 
@@ -820,7 +949,9 @@ async function runClaimedStep(
   // requests and multiply paid attempts. Fail before any request is built.
   const systemOneRetryProblems = systemOneRetryViolations(node);
   if (systemOneRetryProblems.length > 0) {
-    await checkpointStepFailure(runId, stepId, systemOneRetryProblems.join("; "), 0);
+    await checkpointStepFailure(runId, stepId, systemOneRetryProblems.join("; "), 0, undefined, {
+      fence,
+    });
     return { outcome: "failed", successors: [] };
   }
 
@@ -835,7 +966,10 @@ async function runClaimedStep(
     );
     if (inputErrors.length > 0) {
       const errorMsg = `Input schema validation failed: ${inputErrors.join("; ")}`;
-      await checkpointStepFailure(runId, stepId, errorMsg, 0);
+      const { stale: lost } = await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, {
+        fence,
+      });
+      if (lost) return stale;
       throw new Error(errorMsg);
     }
   }
@@ -852,7 +986,7 @@ async function runClaimedStep(
 
   if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
     const errorMsg = scriptBodyInterpolationError(node.id, scriptBodyUnresolved);
-    await checkpointStepFailure(runId, stepId, errorMsg, 0);
+    await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, { fence });
     return { outcome: "failed", successors: [] };
   }
 
@@ -863,6 +997,8 @@ async function runClaimedStep(
       stepId,
       systemOneUnresolvedError(node.id, strictUnresolved, node.type),
       0,
+      undefined,
+      { fence },
     );
     return { outcome: "failed", successors: [] };
   }
@@ -905,14 +1041,16 @@ async function runClaimedStep(
     // Apply retry policy if configured
     const retryPolicy = node.retry || executor.retryPolicy;
     const currentRetryCount = existingStep?.retryCount || 0;
-    const { shouldRetry } = await checkpointStepFailure(
+    const { shouldRetry, stale: lost } = await checkpointStepFailure(
       runId,
       stepId,
       errorMsg,
       currentRetryCount,
       retryPolicy,
+      { fence },
     );
 
+    if (lost) return stale;
     if (!shouldRetry) {
       throw err; // Will be caught by walkGraph
     }
@@ -922,20 +1060,21 @@ async function runClaimedStep(
 
   // 6. Handle result
   if (result.status === "failed") {
-    const retryPolicy = node.retry || executor.retryPolicy;
+    // A failure the executor marks non-retryable skips the policy here as on
+    // every other path that settles the same outcome.
+    const retryPolicy = result.retryable === false ? undefined : node.retry || executor.retryPolicy;
     const currentRetryCount = existingStep?.retryCount || 0;
-    const { shouldRetry } = await checkpointStepFailure(
+    // Output is persisted for observability even on failure (e.g. script
+    // nodes keep {exitCode, stdout, stderr}), in the same fenced write.
+    const { shouldRetry, stale: lost } = await checkpointStepFailure(
       runId,
       stepId,
       result.error || "Executor returned failed status",
       currentRetryCount,
       retryPolicy,
+      { fence, output: result.output },
     );
-
-    // Persist output for observability even on failure (e.g. script nodes keep {exitCode, stdout, stderr})
-    if (result.output !== undefined) {
-      await updateWorkflowRunStep(stepId, { output: result.output });
-    }
+    if (lost) return stale;
 
     if (!shouldRetry) {
       throw new Error(result.error || "Step execution failed");
@@ -976,7 +1115,10 @@ async function runClaimedStep(
     );
     if (outputErrors.length > 0) {
       const errorMsg = `Output schema validation failed: ${outputErrors.join("; ")}`;
-      await checkpointStepFailure(runId, stepId, errorMsg, 0);
+      const { stale: lost } = await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, {
+        fence,
+      });
+      if (lost) return stale;
       throw new Error(errorMsg);
     }
   }
@@ -988,7 +1130,10 @@ async function runClaimedStep(
 
     if (validationResult.outcome === "halt") {
       const errorMsg = "Validation failed (mustPass)";
-      await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, { markRunFailed: false });
+      await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, {
+        markRunFailed: false,
+        fence,
+      });
       return { outcome: "failed", successors: [] };
     }
 
@@ -1001,13 +1146,15 @@ async function runClaimedStep(
       }
       const retryPolicy = node.validation.retry || node.retry;
       const currentRetryCount = existingStep?.retryCount || 0;
-      await checkpointStepFailure(
+      const { stale: lost } = await checkpointStepFailure(
         runId,
         stepId,
         "Validation failed, retrying",
         currentRetryCount,
         retryPolicy,
+        { fence },
       );
+      if (lost) return stale;
       return { outcome: "completed", successors: [] }; // Retry handled by poller
     }
   }
@@ -1020,7 +1167,7 @@ async function runClaimedStep(
   result.nextPort = resolveValidationPort(node.next, result.nextPort, validationResult?.passed);
 
   // 9. Checkpoint success
-  await checkpointStep(runId, stepId, node.id, result, ctx);
+  if (!(await checkpointStep(runId, stepId, node.id, result, ctx, { fence }))) return stale;
 
   // 10. Determine successors based on nextPort
   // If executor returned a specific port, use it. Otherwise, get all successors

@@ -7843,6 +7843,8 @@ type WorkflowRunRow = {
   finishedAt: string | null;
   /** The `sub-workflow` step that started this run (migration 203). */
   parentStepId?: string | null;
+  /** That step's attempt (`retryCount`) when it started this run (migration 240). */
+  parentStepAttempt?: number | null;
 };
 
 /**
@@ -7863,6 +7865,7 @@ function rowToWorkflowRun(row: WorkflowRunRow, view: WorkflowPayloadView = "repl
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     finishedAt: normalizeDate(row.finishedAt) ?? undefined,
     parentStepId: row.parentStepId ?? undefined,
+    parentStepAttempt: row.parentStepId ? (row.parentStepAttempt ?? 0) : undefined,
   };
   return defineWorkflowPayload(run, "context", row.context, row.context_replay, view, {
     runId: row.id,
@@ -7877,10 +7880,12 @@ export async function createWorkflowRun(data: {
   triggerData?: unknown;
   createdBy?: string;
   parentStepId?: string;
+  /** The parent step's `retryCount` when it started this run (migration 240). */
+  parentStepAttempt?: number;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7889,6 +7894,7 @@ export async function createWorkflowRun(data: {
       data.triggerData ? scrubJsonValue(data.triggerData) : null,
       data.createdBy ?? null,
       data.parentStepId ?? null,
+      data.parentStepAttempt ?? 0,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");
@@ -7993,9 +7999,10 @@ export type WorkflowRunListOptions = {
 };
 
 // Everything but `context`. `triggerData` stays: it is small, and stored
-// scripts read it off list rows (dedupe by trigger, failure reports).
+// scripts read it off list rows (dedupe by trigger, failure reports). The
+// parent link and attempt stay so a list row identifies a child's invocation.
 const WORKFLOW_RUN_SUMMARY_COLUMNS =
-  "id, workflowId, status, triggerType, triggerData, error, created_by, startedAt, lastUpdatedAt, finishedAt";
+  "id, workflowId, status, triggerType, triggerData, error, created_by, startedAt, lastUpdatedAt, finishedAt, parentStepId, parentStepAttempt";
 
 export type WorkflowRunPage = {
   runs: WorkflowRun[];

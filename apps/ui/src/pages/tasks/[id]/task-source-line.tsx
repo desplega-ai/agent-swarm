@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import type { AgentTask } from "@/api/types";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { PromptContext } from "@/components/shared/prompt-context";
 import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { parsePromptDisplay } from "@/lib/prompt-display";
 import { formatSlackMentions, parseSlackPrompt, type SlackPrompt } from "@/lib/slack-text";
 import { cn } from "@/lib/utils";
 import { NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
@@ -251,8 +253,15 @@ function TaskPromptDialog({
 }) {
   const threadHeadingId = useId();
   const askHeadingId = useId();
-  // A prompt that is only a thread block has no ask: show the whole prompt.
-  const ask = formatSlackMentions(prompt.ask).trim() || formatSlackMentions(task.task).trim();
+  // The thread renders below from `prompt`; the other wrapper blocks and markers
+  // render above the ask.
+  const display = parsePromptDisplay(task.task);
+  const context = {
+    meta: display.meta,
+    sections: display.sections.filter((s) => s.tag !== "thread_context"),
+  };
+  // A prompt that is only wrapper blocks has no ask: show the whole prompt.
+  const ask = display.ask || formatSlackMentions(task.task).trim();
   const hasThread = prompt.thread.length > 0;
   return (
     <Dialog>
@@ -296,6 +305,7 @@ function TaskPromptDialog({
               </ol>
             </section>
           ) : null}
+          <PromptContext display={context} />
           <section aria-labelledby={hasThread ? askHeadingId : undefined} className="space-y-2">
             {hasThread ? (
               <h3 id={askHeadingId} className="text-xs font-medium text-muted-foreground">

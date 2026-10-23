@@ -43,6 +43,7 @@ import { DataGrid } from "@/components/shared/data-grid";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
+import { PromptContext } from "@/components/shared/prompt-context";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +60,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
+import { parsePromptDisplay } from "@/lib/prompt-display";
 import {
   describeModelResolution,
   taskDisplayEffort,
@@ -204,13 +206,15 @@ function DescriptionCell({ title, prompt }: { title?: string; prompt?: string })
   // read alike. Show the title or the first real line; the tooltip keeps all.
   const label = taskListTitle({ title, task: prompt ?? "" });
   if (!label) return DASH;
-  const tooltipText = prompt?.trim() || label;
+  const display = parsePromptDisplay(prompt ?? "");
+  const tooltipText = display.ask || prompt?.trim() || label;
   return (
     <Tooltip delayDuration={400}>
       <TooltipTrigger asChild>
         <span className="block truncate">{label}</span>
       </TooltipTrigger>
       <TooltipContent side="right" align="start" className={MARKDOWN_TOOLTIP_CLASS}>
+        <PromptContext display={display} className="mb-2" />
         <TooltipMarkdown text={tooltipText} />
       </TooltipContent>
     </Tooltip>

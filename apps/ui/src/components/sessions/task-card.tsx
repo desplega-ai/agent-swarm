@@ -19,6 +19,7 @@ import { useAgent } from "@/api/hooks/use-agents";
 import { useCancelTask, usePauseTask, useResumeTask } from "@/api/hooks/use-tasks";
 import type { AgentTask, SessionLog } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { PromptContext } from "@/components/shared/prompt-context";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ProgressRing } from "@/components/shared/task-status-icon";
 import {
@@ -35,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTaskSheetParam } from "@/hooks/use-task-sheet-param";
+import { parsePromptDisplay } from "@/lib/prompt-display";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ChainOfThought } from "./chain-of-thought";
@@ -283,7 +285,7 @@ export function TaskCard({
             </p>
           ) : null}
 
-          {hideTaskText ? null : <TaskBrief text={task.task} />}
+          {hideTaskText ? null : <TaskBrief raw={task.task} />}
 
           {/* Activity stream — always rendered so the user keeps the
               breadcrumb of "what the agent did". Active tasks show it
@@ -308,13 +310,16 @@ export function TaskCard({
  * briefs (>3 visual lines) clamp by default with a Show more / Show less
  * toggle so the timeline doesn't drown in delegation prompts.
  */
-function TaskBrief({ text }: { text: string }) {
+function TaskBrief({ raw }: { raw: string }) {
   const [expanded, setExpanded] = useState(false);
+  const prompt = parsePromptDisplay(raw);
+  const text = prompt.ask;
   // Cheap "is long" heuristic — line-clamp can't tell us itself without DOM
   // measurement, so trigger the toggle for either ≥3 newlines or ≥240 chars.
   const isLong = text.length > 240 || text.split("\n").length > 3;
   return (
     <blockquote className="border-l-2 border-border pl-3 py-0.5 text-xs text-muted-foreground italic min-w-0 break-words">
+      <PromptContext display={prompt} className="not-italic mb-1" />
       <span className={cn("block whitespace-pre-wrap", !expanded && isLong && "line-clamp-3")}>
         {text}
       </span>

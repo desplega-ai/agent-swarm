@@ -345,6 +345,29 @@ function utcDayBounds(now: Date): { start: string; end: string } {
   return { start: start.toISOString(), end: new Date(start.getTime() + 86_400_000).toISOString() };
 }
 
+/**
+ * True when `runId` is the workflow's only setup-failure run so far this UTC
+ * day, top-level or child. Call it in the transaction that inserted `runId`:
+ * transactions serialize on the write lock, so of several concurrent failures
+ * exactly one sees no other and alerts.
+ */
+export async function isFirstWorkflowPreflightFailureToday(
+  workflowId: string,
+  runId: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const bounds = utcDayBounds(now);
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found FROM workflow_runs
+     WHERE workflowId = ? AND id != ? AND status = 'failed'
+       AND error LIKE 'needs_setup:%'
+       AND startedAt >= ? AND startedAt < ?
+     LIMIT 1`,
+    [workflowId, runId, bounds.start, bounds.end],
+  );
+  return row == null;
+}
+
 /** Record at most one copy of the same setup failure on a schedule per UTC day. */
 export async function recordSchedulePreflightFailure(
   scheduleId: string,
@@ -376,7 +399,11 @@ export async function recordSchedulePreflightFailure(
   });
 }
 
-/** Create and finish at most one failed preflight run per workflow and UTC day. */
+/**
+ * Create and finish at most one failed top-level preflight run per workflow
+ * and UTC day. `recorded` is true when the caller should alert: this call
+ * inserted the run and no child failure run of the workflow came first today.
+ */
 export async function recordWorkflowPreflightFailure(input: {
   workflowId: string;
   triggerType: "schedule" | "manual" | "event" | "api";
@@ -388,9 +415,11 @@ export async function recordWorkflowPreflightFailure(input: {
   const now = input.now ?? new Date();
   const bounds = utcDayBounds(now);
   return await getDbClient().transaction(async (tx) => {
+    // Child runs record their own linked failure (`startWorkflowExecution`);
+    // a top-level trigger never reuses one.
     const existing = await tx.get<{ id: string }>(
       `SELECT id FROM workflow_runs
-       WHERE workflowId = ? AND status = 'failed'
+       WHERE workflowId = ? AND status = 'failed' AND parentStepId IS NULL
          AND error LIKE 'needs_setup:%'
          AND startedAt >= ? AND startedAt < ?
        ORDER BY startedAt ASC LIMIT 1`,
@@ -417,6 +446,11 @@ export async function recordWorkflowPreflightFailure(input: {
         timestamp,
       ],
     );
-    return { runId, recorded: true };
+    // Claimed in this transaction, which also sees every child failure run
+    // committed before it: concurrent failures alert exactly once a day.
+    return {
+      runId,
+      recorded: await isFirstWorkflowPreflightFailureToday(input.workflowId, runId, now),
+    };
   });
 }

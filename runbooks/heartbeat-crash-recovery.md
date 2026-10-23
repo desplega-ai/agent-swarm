@@ -103,6 +103,28 @@ child rows, not in-process state.
 | During collection | Settle and join committed together | The join is idempotent (parent already `completed`); a missed drive is caught by the sweep |
 | During a run retry | One transaction adds every attempt row and resets the run | A second retry finds the run not `failed` and stops |
 
+After the fan-out pass, `recoverOrphanedSubWorkflowSteps` re-enters
+`sub-workflow` steps a crash left `running` (each node's latest row, in a run
+that is `running` or `waiting`, not executing in this process). The running-run
+pass misses a run another branch parked and a loop iteration of a node that
+completed before. The walk re-claims the same step row, so the executor
+reconnects to the child that attempt already started.
+
+```
+recoverOrphanedSubWorkflowSteps():
+  for each latest sub-workflow step row with status running,
+      where run.status in (running, waiting), run not walked, step not executing here:
+    walkGraph(run, [node])
+      executeStep: the row covers the current predecessor completions
+        → re-claim it: same step id, idempotency key and retryCount
+      executor: child of (stepId, retryCount) exists → reconnect; else create it
+                (one transaction, only while that attempt is still running)
+```
+
+A child run commits with its initial context, so recovery walks it from
+`trigger` / `input` like the first walk. A `running` child run with no stored
+context (created before that held) fails instead of walking on blanks.
+
 This ownership guard is process-local, not a distributed lease. It assumes one
 API workflow engine owns the database; multiple worker runtimes do not create
 multiple API engines. Separate API processes sharing a database would need
