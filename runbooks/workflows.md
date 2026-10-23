@@ -298,13 +298,18 @@ A `sub-workflow` node runs another workflow as a child run and waits for it.
   parent run stay `waiting` until the child run is terminal, so the parent never completes while its
   child is running, waiting on a human, or awaiting a retry.
 - A child that fails, is cancelled, or is skipped (cooldown) fails the node and the parent run,
-  whatever `onNodeFailure` says. Node `retry` reconnects to the same failed child, so it does not
-  rerun it.
-- The child run stores the parent step in `workflow_runs.parentStepId` (unique). A re-executed step
-  reconnects to that child instead of starting a second one. The child's terminal status emits
-  `workflow.child.finished` after commit. The engine rechecks the child once the step parks, and the
-  recovery sweep resumes any waiting step whose child already finished, so a lost event or a
-  restart does not strand the parent.
+  whatever `onNodeFailure` says. Node `retry` is a new attempt: it starts a new child run, and the
+  previous attempt's child can no longer settle the step.
+- The child run stores the parent step and that step's attempt (`retryCount`) in
+  `workflow_runs.parentStepId` / `parentStepAttempt` (unique together). One attempt has at most one
+  child: a re-executed or recovered step reconnects to it, and concurrent executions get the same
+  child. The child is created in one transaction with its initial context, and only while the
+  parent step's attempt is still `running` in a live run. A step a crash left `running` is
+  re-claimed by recovery under the same step id, so it reconnects instead of starting a second
+  child. The child's terminal status emits `workflow.child.finished` after commit. The engine and
+  the retry poller recheck the child once the step parks, and the recovery sweep resumes any
+  waiting step whose child already finished, so a lost event or a restart does not strand the
+  parent. Only the call that claims the waiting step routes its successors.
 - Deleting a workflow fails every waiting step that started one of its runs as a child. Recovery
   also fails a waiting step whose child row is missing.
 - Recursion is rejected: a workflow cannot invoke itself or any workflow already running in its

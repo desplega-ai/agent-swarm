@@ -27576,6 +27576,7 @@ export interface components {
             lastUpdatedAt: string;
             finishedAt?: string;
             parentStepId?: string;
+            parentStepAttempt?: number;
         };
         WorkflowRun: {
             /** Format: uuid */
@@ -27594,6 +27595,7 @@ export interface components {
             lastUpdatedAt: string;
             finishedAt?: string;
             parentStepId?: string;
+            parentStepAttempt?: number;
         };
         WorkflowRunStep: {
             /** Format: uuid */

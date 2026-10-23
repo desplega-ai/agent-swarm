@@ -2,6 +2,7 @@ import { type ClassValue, clsx } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 import { stripContextFooter } from "../components/session-panel/model";
 import { formatCost } from "./cost-format";
+import { promptTitle } from "./prompt-display";
 
 // The theme's own type steps (`--text-data`, `--text-meta` in globals.css).
 // Unregistered, tailwind-merge reads `text-meta` as a color and drops the
@@ -53,12 +54,13 @@ export function formatRelativeTime(date: string | Date): string {
 }
 
 /**
- * A session's display title: the user's custom title if set, otherwise the
- * root task's prompt text. Renders identically to today when no title is set.
+ * A session's display title: the user's custom title if set, otherwise one
+ * readable line of the root task's prompt (`promptTitle`): no wrapper blocks,
+ * no Slack tokens.
  */
 export function sessionDisplayTitle(root: { task: string; title?: string }): string {
   // Sessions started from the contextual panel carry a page-context footer for the lead.
-  return root.title?.trim() || stripContextFooter(root.task);
+  return root.title?.trim() || promptTitle(stripContextFooter(root.task));
 }
 
 /**
