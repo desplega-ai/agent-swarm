@@ -332,6 +332,26 @@ describe("Chat SDK inbound pipeline", () => {
     }
   });
 
+  test("a mention in a subscribed group gets 👀 before the flush, and the flush does not react again", async () => {
+    await postTelegramUpdate(telegramUpdate(group(-2991), "@swarm_test_bot first ask"));
+    await flushChatBuffers();
+    const ask = telegramUpdate(group(-2991), "@swarm_test_bot second ask");
+    await postTelegramUpdate(ask);
+    expect(reactionsOn(-2991, ask)).toEqual(["👀"]);
+    await flushChatBuffers();
+    expect(await chatTasks(-2991)).toHaveLength(2);
+    expect(reactionsOn(-2991, ask)).toEqual(["👀"]);
+  });
+
+  test("a !now mention in a subscribed group gets ⚡, not 👀", async () => {
+    await postTelegramUpdate(telegramUpdate(group(-2992), "@swarm_test_bot first ask"));
+    await flushChatBuffers();
+    const ask = telegramUpdate(group(-2992), "@swarm_test_bot !now second ask");
+    await postTelegramUpdate(ask);
+    expect(await chatTasks(-2992)).toHaveLength(2);
+    expect(reactionsOn(-2992, ask)).toEqual(["⚡"]);
+  });
+
   test("two asks back to back each anchor to their own message, not the parent's", async () => {
     const firstAsk = telegramUpdate(group(-2010), "@swarm_test_bot !now summarize the PR");
     await postTelegramUpdate(firstAsk);

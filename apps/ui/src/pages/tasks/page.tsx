@@ -251,7 +251,8 @@ function CreateTaskDialog({
                           setForm({ ...form, dependsOn: form.dependsOn.filter((d) => d !== depId) })
                         }
                       >
-                        #{depId.slice(0, 8)} {depTask ? `— ${depTask.task.slice(0, 20)}` : ""}
+                        #{depId.slice(0, 8)}{" "}
+                        {depTask ? `— ${taskListTitle(depTask).slice(0, 20)}` : ""}
                         <X className="h-2.5 w-2.5" />
                       </Badge>
                     );
@@ -278,7 +279,7 @@ function CreateTaskDialog({
                         className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <StatusBadge status={t.status} />
-                        <span className="truncate flex-1">{t.task}</span>
+                        <span className="truncate flex-1">{taskListTitle(t)}</span>
                         <span className="text-[10px] font-mono text-muted-foreground shrink-0">
                           #{t.id.slice(0, 8)}
                         </span>

@@ -13,6 +13,7 @@ import { TaskOutcome } from "@/components/sessions/task-outcome";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { Badge } from "@/components/ui/badge";
 import { markdownPreview } from "@/lib/markdown-preview";
+import { promptTitle } from "@/lib/prompt-display";
 import { cn } from "@/lib/utils";
 import { MessageTime } from "./swarm-reply";
 
@@ -36,7 +37,7 @@ function preview(task: AgentTask): string {
   const full = fullText(task);
   if (full) return markdownPreview(full);
   if (task.status === "pending" || task.status === "unassigned") return "Waiting for the lead.";
-  return markdownPreview(task.task.split("\n").find((line) => line.trim()) ?? "");
+  return markdownPreview(promptTitle(task.task));
 }
 
 /**

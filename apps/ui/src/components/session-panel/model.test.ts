@@ -77,8 +77,7 @@ describe("sessionDisplayTitle", () => {
     );
     expect(sessionDisplayTitle({ task })).toBe("legend is wrong");
     expect(sessionDisplayTitle({ task, title: "Renamed" })).toBe("Renamed");
-    expect(sessionDisplayTitle({ task: "plain\n---\nnot a footer" })).toBe(
-      "plain\n---\nnot a footer",
-    );
+    // One line: a `---` that does not open the footer stays in the prompt.
+    expect(sessionDisplayTitle({ task: "plain\n---\nnot a footer" })).toBe("plain");
   });
 });

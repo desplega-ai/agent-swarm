@@ -1,3 +1,5 @@
+import { promptTitle } from "../../lib/prompt-display";
+
 /**
  * Session panel — pure helpers for context keys, the page-context footer, and
  * dropdown labels. No React, no fetch.
@@ -52,12 +54,8 @@ export function sessionLabel(
   root: { task: string; title?: string; taskPreview?: string },
   maxLength = 80,
 ): string {
-  const raw = root.title?.trim() || stripContextFooter(root.taskPreview ?? root.task);
   const firstLine =
-    raw
-      .split("\n")
-      .find((line) => line.trim().length > 0)
-      ?.trim() ?? "";
+    root.title?.trim() || promptTitle(stripContextFooter(root.taskPreview ?? root.task));
   if (!firstLine) return "Untitled session";
   return firstLine.length > maxLength ? `${firstLine.slice(0, maxLength - 1)}…` : firstLine;
 }
