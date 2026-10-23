@@ -4,6 +4,7 @@ import { keyPrefixRange, sessionGroupKey } from "../assets/key";
 import {
   closeDb,
   countSessions,
+  createSteeringMessage,
   createTaskExtended,
   createUser,
   getDbClient,
@@ -58,6 +59,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await getDbClient().run("DELETE FROM approval_requests");
+  await getDbClient().run("DELETE FROM task_steering_messages");
   await getDbClient().run("DELETE FROM inbox_item_state");
   await getDbClient().run("DELETE FROM session_shares");
   await getDbClient().run("DELETE FROM agent_tasks");
@@ -348,6 +350,54 @@ describe("Done holds until the session needs the user", () => {
     const tree = await getSessionTree(actor(), NOW);
     expect(tree.inbox.total).toBe(2);
     expect(tree.done.total).toBe(1);
+  });
+
+  test("a person's steer or queued message after Done returns it to the Inbox", async () => {
+    // The real writer stamps created_at with the column default, after DONE_AT.
+    const steered = await doneSession();
+    await createSteeringMessage({
+      taskId: steered.id,
+      body: "Change course",
+      mode: "steer",
+      source: "ui",
+      createdByKind: "user",
+      createdByUserId: owner.id,
+    });
+    expect(await readState(steered.id)).toBe("unread");
+
+    const queued = await doneSession();
+    const agent = await child(queued.id, { source: "mcp" });
+    await createSteeringMessage({
+      taskId: agent.id,
+      body: "Also check this",
+      mode: "queue",
+      source: "slack",
+      createdByKind: "user",
+      createdByUserId: owner.id,
+    });
+    expect(await readState(queued.id)).toBe("unread");
+    expect((await ids({ triage: "inbox" })).sort()).toEqual([steered.id, queued.id].sort());
+  });
+
+  test("agent, system, cancelled and earlier steering keep it Done", async () => {
+    const steer = async (
+      taskId: string,
+      createdByKind: "user" | "agent" | "system",
+      createdAt = AFTER,
+      status = "pending",
+    ) =>
+      getDbClient().run(
+        `INSERT INTO task_steering_messages
+          (id, task_id, body, mode, status, source, created_by_kind, created_at)
+        VALUES (?, ?, 'Steer', 'queue', ?, 'mcp', ?, ?)`,
+        [crypto.randomUUID(), taskId, status, createdByKind, createdAt],
+      );
+    const root = await doneSession();
+    await steer(root.id, "agent");
+    await steer(root.id, "system");
+    await steer(root.id, "user", AFTER, "cancelled");
+    await steer(root.id, "user", BEFORE, "handled");
+    expect(await readState(root.id)).toBe("done");
   });
 });
 

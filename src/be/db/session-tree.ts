@@ -181,13 +181,19 @@ const AGENT_TASK_SOURCES = ["mcp", "system", "schedule", "workflow"] as const;
  * Per chain row, over `chain` and the viewer's Done row `d`: whether the row
  * needs the user since they marked the session Done. That is a human message
  * (a task attributed to a person directly, not copied from its parent, from a
- * human channel) or a pending approval, created after the Done mark.
+ * human channel), a person's steering message on a chain task (steer or
+ * queue, not cancelled), or a pending approval, created after the Done mark.
+ * Steering `created_at` and the Done mark's `lastUpdatedAt` are both written
+ * as `%Y-%m-%dT%H:%M:%fZ`, so they compare as text.
  */
 const reopensDoneSql = `(d.id IS NOT NULL AND (
         (chain.createdAt > d.lastUpdatedAt
           AND chain.requestedByUserId IS NOT NULL
           AND chain.requestedByUserIdInherited = 0
           AND COALESCE(chain.source, '') NOT IN (${AGENT_TASK_SOURCES.map((s) => `'${s}'`).join(",")}))
+        OR EXISTS (SELECT 1 FROM task_steering_messages sm
+          WHERE sm.task_id = chain.id AND sm.created_by_kind = 'user'
+            AND sm.status != 'cancelled' AND sm.created_at > d.lastUpdatedAt)
         OR EXISTS (SELECT 1 FROM approval_requests ar
           WHERE ar.sourceTaskId = chain.id AND ar.status = 'pending' AND ar.createdAt > d.lastUpdatedAt)
       ))`;

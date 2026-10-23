@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - Sessions: Done holds through agent activity. A Done session came back to the Inbox on the next agent progress update; now it comes back only for a pending approval or a person's message created after it was marked Done.
+- Sessions: a person's steering message (steer or queue) on any task in a Done session now returns it to the Inbox, like a new follow-up does. Agent and system steering, cancelled messages, and messages from before the Done mark keep it Done.
 
 ## [2.5.2] - 2026-10-23
 
