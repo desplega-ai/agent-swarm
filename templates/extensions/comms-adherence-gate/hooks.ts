@@ -367,7 +367,8 @@ const selfTest = async (swarm: Swarm, cfg: Cfg, signal?: AbortSignal): Promise<v
 const TASK_SQL = `SELECT t.source, t.slackThreadTs, t.agentId, t.requestedByUserId,
        json_extract(u.metadata, '$.comms') AS comms, u.name,
        substr(t.task, 1, 400) AS askHead,
-       substr(t.task, -1400) AS askTail
+       substr(t.task, -1400) AS askTail,
+       t.creatorAgentId
 FROM agent_tasks t
 LEFT JOIN users u ON u.id = t.requestedByUserId
 WHERE t.id = ?`;
@@ -458,9 +459,17 @@ const extension: SwarmExtension = (api) => {
       const threadOpening = String(cell(row, 6, "askHead") ?? "");
       const ask = latestAsk(String(cell(row, 7, "askTail") ?? ""));
 
-      // Judge only a call on a task the caller may write to, so no agent can ship
-      // another task's thread and preferences to the external judge.
-      if (!(await mayWriteProgress(ctx.swarm, event.requestInfo?.agentId, agentId))) return;
+      // Judge only a call the tool itself will accept, so no agent can ship another
+      // task's thread and preferences to the external judge. store-progress follows
+      // its write rule; the Slack tools follow slack-reply's: the caller is the
+      // task's assignee or its creator.
+      const callerId = event.requestInfo?.agentId;
+      const creatorAgentId = String(cell(row, 8, "creatorAgentId") ?? "");
+      const allowed =
+        event.tool === "store-progress"
+          ? await mayWriteProgress(ctx.swarm, callerId, agentId)
+          : Boolean(callerId) && (callerId === agentId || callerId === creatorAgentId);
+      if (!allowed) return;
 
       // A completion reaches a human only on a Slack task; a Slack tool always does.
       if (event.tool === "store-progress" && source !== "slack" && !slackThreadTs) return;

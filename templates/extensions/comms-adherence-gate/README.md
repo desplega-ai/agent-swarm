@@ -27,7 +27,7 @@ Hook: `pre.tool.call` on:
 - `store-progress` with `status: "completed"` and a non-empty `output`, on a task that came from Slack (`source = "slack"` or a `slackThreadTs`). Other completions pass without a Jev call.
 - `slack-reply`, `slack-post`, `slack-start-thread` and `slack-update`, judged on `message`. The task is `slack-reply`'s `taskId`, else the caller's task context. A post with no task context passes.
 
-The caller must own the task, the task must be unassigned, or the caller must be a lead. Calls made by extensions are skipped. Script SDK calls never reach `pre.tool.call` (the tool registrar dispatches it only for MCP calls); if one ever does, the gate records it and never blocks.
+Only a call the tool itself accepts is judged, so no other task's text reaches Jev. For `store-progress` the caller must own the task, the task must be unassigned, or the caller must be a lead. For the Slack tools the caller must be the task's assignee or its creator, the rule `slack-reply` enforces. Calls made by extensions are skipped. Script SDK calls never reach `pre.tool.call` (the tool registrar dispatches it only for MCP calls); if one ever does, the gate records it and never blocks.
 
 A requester with no stated preferences in `users.metadata.comms` still gets the `plain` question. Set preferences with the `manage-user` tool.
 

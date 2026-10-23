@@ -554,6 +554,30 @@ describe("plain", () => {
     expect(jevCalls).toHaveLength(0);
   });
 
+  test("a Slack post on an unassigned task the caller did not create skips Jev", async () => {
+    // slack-reply itself rejects this task, so nothing from it may reach the judge,
+    // even though store-progress may write to an unassigned task.
+    jevScores(0.05);
+    const unassigned = makeCtx({ plainMode: "enforce" }, { row: taskRow({ agentId: null }) });
+    expect(await handler(slackReply("x"), unassigned.ctx)).toBeUndefined();
+    const lead = makeCtx(
+      { plainMode: "enforce" },
+      { row: taskRow({ agentId: "agent-2" }), callerIsLead: true },
+    );
+    expect(await handler(slackReply("x"), lead.ctx)).toBeUndefined();
+    expect(jevCalls).toHaveLength(0);
+  });
+
+  test("the task's creator may post and is judged", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx(
+      {},
+      { row: taskRow({ agentId: "agent-2", creatorAgentId: "agent-1" }) },
+    );
+    await handler(slackReply("Deploys take 4 minutes now."), ctx);
+    expect(jevCalls).toHaveLength(1);
+  });
+
   test("store-progress and slack-reply share one block budget per task", async () => {
     jevScores({ plain: 0.05 });
     const { ctx, counters } = makeCtx({ plainMode: "enforce" });
