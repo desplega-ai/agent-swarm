@@ -61,6 +61,9 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           // the run were read outside it: a cancel committing in between must
           // win, or the step re-executes inside a cancelled run.
           if (!(await claimRetry(run.id, step.id))) continue;
+          // Every result write below is fenced on this claim, so a cancel or
+          // another settle that commits while the executor runs wins.
+          const fence = { retryCount: step.retryCount };
 
           // Rebuild `run.id`, upstream outputs and the node's declared-inputs
           // context the way the original execution saw them. Without the alias
@@ -78,6 +81,8 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
               step.id,
               scriptBodyInterpolationError(node.id, scriptBodyUnresolved),
               step.retryCount,
+              undefined,
+              { fence },
             );
             continue;
           }
@@ -104,14 +109,17 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             if (result.status === "failed") {
               // Re-failed — use the EXISTING retryCount from the step.
               // checkpointStepFailure handles marking run as failed if no retries left,
-              // or setting nextRetryAt for the next poll cycle.
-              const retryPolicy = node.retry || executor.retryPolicy;
+              // or setting nextRetryAt for the next poll cycle. A non-retryable
+              // failure skips the policy, as in executeStep.
+              const retryPolicy =
+                result.retryable === false ? undefined : node.retry || executor.retryPolicy;
               await checkpointStepFailure(
                 run.id,
                 step.id,
                 result.error || "Retry failed",
                 step.retryCount,
                 retryPolicy,
+                { fence, output: result.output },
               );
             } else if (
               "async" in result &&
@@ -150,6 +158,12 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
               // find the parent already advanced.
               const waiting = await checkpointStepWaiting(run.id, step.id, ctx);
               if (!waiting) continue;
+              // As in executeStep: a child run that finished before the step
+              // parked had its event dropped.
+              if ((result as AsyncExecutorResult).waitFor === "workflow.child.finished") {
+                const { resumeFromChildRun } = await import("./resume");
+                await resumeFromChildRun(step.id, registry);
+              }
             } else {
               // Success! Re-run validation if configured before checkpointing.
               let validationPassed: boolean | undefined;
@@ -168,6 +182,8 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                     step.id,
                     "Validation failed (mustPass)",
                     step.retryCount,
+                    undefined,
+                    { fence },
                   );
                   continue;
                 }
@@ -186,6 +202,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                     "Validation failed, retrying",
                     step.retryCount,
                     retryPolicy,
+                    { fence },
                   );
                   continue;
                 }
@@ -197,7 +214,9 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
               result.nextPort = resolveValidationPort(node.next, result.nextPort, validationPassed);
 
               // Validation passed (or no validation) — checkpoint and continue
-              await checkpointStep(run.id, step.id, step.nodeId, result, ctx);
+              if (!(await checkpointStep(run.id, step.id, step.nodeId, result, ctx, { fence }))) {
+                continue;
+              }
 
               const port = result.nextPort || "default";
               const successors = getSuccessors(workflow.definition, step.nodeId, port);
@@ -219,7 +238,9 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             if (await failRunOnUnreadableReplay(run.id, err, step.id)) continue;
             const errorMsg = err instanceof Error ? err.message : String(err);
             const retryPolicy = node.retry || executor.retryPolicy;
-            await checkpointStepFailure(run.id, step.id, errorMsg, step.retryCount, retryPolicy);
+            await checkpointStepFailure(run.id, step.id, errorMsg, step.retryCount, retryPolicy, {
+              fence,
+            });
           }
         } catch (err) {
           if (await failRunOnUnreadableReplay(step.runId, err, step.id)) continue;

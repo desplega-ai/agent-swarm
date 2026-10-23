@@ -345,6 +345,28 @@ function utcDayBounds(now: Date): { start: string; end: string } {
   return { start: start.toISOString(), end: new Date(start.getTime() + 86_400_000).toISOString() };
 }
 
+/**
+ * True when `runId` is the workflow's only setup-failure run so far this UTC
+ * day, top-level or child, so a child's failure alerts at most once a day
+ * like the top-level run.
+ */
+export async function isFirstWorkflowPreflightFailureToday(
+  workflowId: string,
+  runId: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const bounds = utcDayBounds(now);
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT 1 AS found FROM workflow_runs
+     WHERE workflowId = ? AND id != ? AND status = 'failed'
+       AND error LIKE 'needs_setup:%'
+       AND startedAt >= ? AND startedAt < ?
+     LIMIT 1`,
+    [workflowId, runId, bounds.start, bounds.end],
+  );
+  return row == null;
+}
+
 /** Record at most one copy of the same setup failure on a schedule per UTC day. */
 export async function recordSchedulePreflightFailure(
   scheduleId: string,
@@ -388,9 +410,11 @@ export async function recordWorkflowPreflightFailure(input: {
   const now = input.now ?? new Date();
   const bounds = utcDayBounds(now);
   return await getDbClient().transaction(async (tx) => {
+    // Child runs record their own linked failure (`startWorkflowExecution`);
+    // a top-level trigger never reuses one.
     const existing = await tx.get<{ id: string }>(
       `SELECT id FROM workflow_runs
-       WHERE workflowId = ? AND status = 'failed'
+       WHERE workflowId = ? AND status = 'failed' AND parentStepId IS NULL
          AND error LIKE 'needs_setup:%'
          AND startedAt >= ? AND startedAt < ?
        ORDER BY startedAt ASC LIMIT 1`,

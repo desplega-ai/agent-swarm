@@ -12,7 +12,7 @@ import {
   resolveApprovalRequest,
   updateWorkflowRun,
 } from "../be/db";
-import { getSettledChildRunParentSteps } from "../be/db/workflow-runs";
+import { getRunningSubWorkflowSteps, getSettledChildRunParentSteps } from "../be/db/workflow-runs";
 import type { WorkflowRunStep } from "../types";
 import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
@@ -20,6 +20,7 @@ import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import {
   failRunOnUnreadableReplay,
   findReadyNodes,
+  isStepExecuting,
   isWorkflowRunActive,
   walkGraph,
 } from "./engine";
@@ -76,6 +77,9 @@ export async function recoverIncompleteRuns(registry: ExecutorRegistry): Promise
   // --- Case 6: foreach fan-outs with queued or orphaned items ---
   recovered += await recoverForeachFanouts(registry);
 
+  // --- Case 7: sub-workflow steps a crash left running ---
+  recovered += await recoverOrphanedSubWorkflowSteps(registry);
+
   if (recovered > 0) {
     console.log(`[workflows] Recovered ${recovered} incomplete run(s)`);
   }
@@ -98,6 +102,13 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
       if (isWorkflowRunActive(runId)) continue;
       const run = await getWorkflowRun(runId);
       if (!run || run.status !== "running") continue;
+      // A child run commits with its initial context. One without it was
+      // created before that held and lost its trigger and inputs in a crash;
+      // walking it from an empty context would run its nodes on blanks.
+      if (run.parentStepId && run.context === undefined) {
+        await failRunningRun(runId, "Child workflow run lost its initial context in a restart");
+        continue;
+      }
 
       const workflow = await getWorkflow(run.workflowId);
       if (!workflow) continue;
@@ -143,6 +154,57 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
     }
   }
 
+  return recovered;
+}
+
+/** Fail a run that is still `running`; a cancel or finish that committed first wins. */
+async function failRunningRun(runId: string, error: string): Promise<void> {
+  await getDbClient().transaction(async () => {
+    const run = await getWorkflowRun(runId);
+    if (run?.status !== "running") return;
+    await updateWorkflowRun(runId, {
+      status: "failed",
+      error,
+      finishedAt: new Date().toISOString(),
+    });
+  });
+}
+
+/**
+ * Re-enter `sub-workflow` steps a crash left `running`. The running-run case
+ * misses two shapes: a run another branch already parked in `waiting`, and a
+ * loop iteration of a node that completed before. Walking the node lets
+ * executeStep re-claim the same step row, so the executor reconnects to the
+ * child that attempt already started. Foreach items are left to the fan-out
+ * case: their synthetic node ids are not in the definition.
+ */
+async function recoverOrphanedSubWorkflowSteps(registry: ExecutorRegistry): Promise<number> {
+  let recovered = 0;
+  for (const row of await getRunningSubWorkflowSteps()) {
+    try {
+      if (isWorkflowRunActive(row.runId) || isStepExecuting(row.stepId)) continue;
+      const run = await getWorkflowRun(row.runId);
+      if (!run || (run.status !== "running" && run.status !== "waiting")) continue;
+      const workflow = await getWorkflow(run.workflowId);
+      const node = workflow?.definition.nodes.find((n) => n.id === row.nodeId);
+      if (!workflow || !node) continue;
+      // DB reads above yield; a resume may have acquired the run meanwhile.
+      if (isWorkflowRunActive(row.runId)) continue;
+      await walkGraph(
+        workflow.definition,
+        row.runId,
+        (run.context ?? {}) as Record<string, unknown>,
+        [node],
+        registry,
+        workflow.id,
+        getSecretInputKeys(workflow.input),
+      );
+      recovered++;
+    } catch (err) {
+      if (await failRunOnUnreadableReplay(row.runId, err)) continue;
+      console.error(`[workflows] Failed to recover sub-workflow step ${row.stepId}:`, err);
+    }
+  }
   return recovered;
 }
 

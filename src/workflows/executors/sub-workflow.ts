@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getChildWorkflowRunId, getWorkflowRunLineage } from "../../be/db/workflow-runs";
 import type { ExecutorMeta, WorkflowRun } from "../../types";
-import { startWorkflowExecution } from "../engine";
+import { ParentStepNotCurrentError, startWorkflowExecution } from "../engine";
 import type { ExecutorDependencies, ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 import type { ExecutorRegistry } from "./registry";
@@ -35,15 +35,21 @@ const NON_NODE_CONTEXT_KEYS = new Set(["trigger", "input", "swarm", "workflow"])
 /**
  * The parent step's outcome for a child run: its result once the child
  * completed, an error once it failed, was cancelled or was skipped, and null
- * while it is still running or waiting.
+ * while it is still running or waiting. Only a failed child is retryable: a
+ * cancel or a skip is a decision, and a node retry must not override it. The
+ * synchronous (executor) and the parked (`resumeFromChildRun`) paths both
+ * apply this, so the same child end gets the same policy whenever it lands.
  */
 export function childRunOutcome(
   child: WorkflowRun,
-): { output: SubWorkflowOutput } | { error: string } | null {
+): { output: SubWorkflowOutput } | { error: string; retryable: boolean } | null {
   if (child.status === "running" || child.status === "waiting") return null;
   if (child.status !== "completed") {
     const reason = child.error ? `: ${child.error}` : "";
-    return { error: `Child workflow run ${child.id} ${child.status}${reason}` };
+    return {
+      error: `Child workflow run ${child.id} ${child.status}${reason}`,
+      retryable: child.status === "failed",
+    };
   }
   const outputs: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(child.context ?? {})) {
@@ -56,8 +62,9 @@ export function childRunOutcome(
 
 /**
  * Runs another workflow as a child run and waits for it. The child run records
- * this step as its parent, so a re-executed step reconnects to it instead of
- * starting a second child. The resume path is `resumeFromChildRun`.
+ * this step and its attempt (`retryCount`) as its parent, so a re-executed or
+ * recovered step reconnects to it instead of starting a second child, while a
+ * retry starts a new one. The resume path is `resumeFromChildRun`.
  */
 export class SubWorkflowExecutor extends BaseExecutor<
   typeof SubWorkflowConfigSchema,
@@ -82,9 +89,12 @@ export class SubWorkflowExecutor extends BaseExecutor<
   ): Promise<ExecutorResult<SubWorkflowOutput>> {
     const { db } = this.deps;
 
-    const existingId = await getChildWorkflowRunId(meta.stepId);
+    // The retry poller re-executes a failed step under the same id with a
+    // higher retryCount; that attempt must not settle on the previous child.
+    const attempt = (await db.getWorkflowRunStep(meta.stepId))?.retryCount ?? 0;
+    const existingId = await getChildWorkflowRunId(meta.stepId, attempt);
     const existing = existingId ? await db.getWorkflowRun(existingId) : null;
-    if (existing) return this.settle(existing);
+    if (existing) return this.settle(existing, config.workflowId);
 
     // Capped at the max depth, so a long chain fails closed instead of
     // hiding a cycle past the end of the scan.
@@ -109,17 +119,34 @@ export class SubWorkflowExecutor extends BaseExecutor<
     }
 
     // Returns once the child run exists; the child walks on its own. A child
-    // that already ended (cooldown, readiness, input failure) settles here.
-    const childRunId = await startWorkflowExecution(workflow, config.inputs ?? {}, this.registry, {
-      requestedByUserId: meta.requestedByUserId,
-      parentStepId: meta.stepId,
-    });
+    // that already ended (cooldown, readiness, input failure) settles here,
+    // and a concurrent execution of this attempt gets the child it created.
+    let childRunId: string;
+    try {
+      childRunId = await startWorkflowExecution(workflow, config.inputs ?? {}, this.registry, {
+        requestedByUserId: meta.requestedByUserId,
+        parentStepId: meta.stepId,
+        parentStepAttempt: attempt,
+      });
+    } catch (err) {
+      if (err instanceof ParentStepNotCurrentError) return { status: "failed", error: err.message };
+      throw err;
+    }
     const child = await db.getWorkflowRun(childRunId);
     if (!child) return { status: "failed", error: `Child workflow run ${childRunId} not found` };
-    return this.settle(child);
+    return this.settle(child, config.workflowId);
   }
 
-  private settle(child: WorkflowRun): ExecutorResult<SubWorkflowOutput> {
+  private settle(child: WorkflowRun, workflowId: string): ExecutorResult<SubWorkflowOutput> {
+    // The attempt already started a child of another workflow (the config
+    // changed under a recovered step). That is a conflict, not a reason to
+    // start a replacement next to it.
+    if (child.workflowId !== workflowId) {
+      return {
+        status: "failed",
+        error: `Child workflow run ${child.id} runs workflow ${child.workflowId}, not ${workflowId}`,
+      };
+    }
     const outcome = childRunOutcome(child);
     if (!outcome) {
       return {
@@ -129,7 +156,9 @@ export class SubWorkflowExecutor extends BaseExecutor<
         correlationId: child.id,
       } as ExecutorResult<SubWorkflowOutput>;
     }
-    if ("error" in outcome) return { status: "failed", error: outcome.error };
+    if ("error" in outcome) {
+      return { status: "failed", error: outcome.error, retryable: outcome.retryable };
+    }
     return { status: "success", output: outcome.output, nextPort: "success" };
   }
 }
