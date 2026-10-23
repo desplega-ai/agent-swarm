@@ -136,6 +136,55 @@ export function sessionRange(rows: TreeRow[], fromKey: string | null, toKey: str
     .flatMap((row) => (row.type === "session" ? [row.session.root.id] : []));
 }
 
+/** Whether a list's loaded rows are all, some, or none selected (its checkbox). */
+export type ListSelectState = "all" | "some" | "none";
+
+/** The loaded session ids of each list, in row order. */
+export function listSessionIds(rows: TreeRow[]): Map<ContainerId, string[]> {
+  const found = new Map<ContainerId, string[]>();
+  for (const row of rows) {
+    if (row.type !== "session") continue;
+    const ids = found.get(row.container) ?? [];
+    ids.push(row.session.root.id);
+    found.set(row.container, ids);
+  }
+  return found;
+}
+
+/** A list's checkbox state from its loaded `ids`. Null: no loaded rows to select. */
+export function listSelectState(
+  ids: readonly string[] | undefined,
+  selected: ReadonlySet<string>,
+): ListSelectState | null {
+  if (!ids?.length) return null;
+  const count = ids.filter((id) => selected.has(id)).length;
+  return count === 0 ? "none" : count === ids.length ? "all" : "some";
+}
+
+/** `list` when its loaded rows (`ids`) are exactly the selection, else null. */
+export function fullListOf(
+  list: ContainerId | null,
+  ids: readonly string[] | undefined,
+  selected: ReadonlySet<string>,
+): ContainerId | null {
+  return list && ids?.length === selected.size && ids.every((id) => selected.has(id)) ? list : null;
+}
+
+/**
+ * The N of "Select all N" for a list: its "View all N" total when the list
+ * has more sessions than it loaded, else null. A list that "Show 10 more"
+ * loaded in full keeps its "View all" row, so the row alone is not enough.
+ */
+export function wholeListTotal(rows: TreeRow[], container: ContainerId): number | null {
+  let loaded = 0;
+  let total: number | null = null;
+  for (const row of rows) {
+    if (row.type === "session" && row.container === container) loaded++;
+    else if (row.type === "all" && row.container === container) total = row.total;
+  }
+  return total !== null && total > loaded ? total : null;
+}
+
 /** Open until folded: the Inbox, Later (the mockup default), and other people's groups. */
 export function openByDefault(id: string, me: string | null): boolean {
   if (id === "inbox" || id === "later") return true;

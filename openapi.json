@@ -48617,6 +48617,16 @@
             "description": "Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged.",
             "name": "show",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`."
+            },
+            "required": false,
+            "description": "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`.",
+            "name": "hideSource",
+            "in": "query"
           }
         ],
         "responses": {
@@ -48994,6 +49004,16 @@
             "description": "Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged.",
             "name": "show",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`."
+            },
+            "required": false,
+            "description": "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`.",
+            "name": "hideSource",
+            "in": "query"
           }
         ],
         "responses": {
@@ -49129,6 +49149,25 @@
                         "running",
                         "needsYou"
                       ]
+                    },
+                    "sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string"
+                          },
+                          "total": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "total"
+                        ]
+                      },
+                      "description": "Each root source in this view with its session count, hidden sources included."
                     }
                   },
                   "required": [
@@ -49136,8 +49175,116 @@
                     "inbox",
                     "later",
                     "done",
-                    "noGroup"
+                    "noGroup",
+                    "sources"
                   ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/session-triage": {
+      "post": {
+        "summary": "Triage every session of one sidebar list",
+        "description": "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "done",
+                      "inbox",
+                      "read",
+                      "unread"
+                    ]
+                  },
+                  "triage": {
+                    "type": "string",
+                    "enum": [
+                      "inbox",
+                      "later",
+                      "done"
+                    ]
+                  },
+                  "noGroup": {
+                    "type": "boolean"
+                  },
+                  "groupKey": {
+                    "type": "string"
+                  },
+                  "show": {
+                    "type": "string",
+                    "enum": [
+                      "mine",
+                      "all"
+                    ],
+                    "description": "Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged."
+                  },
+                  "hideSource": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 32
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The number of sessions written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "updated"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error, or no picked user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

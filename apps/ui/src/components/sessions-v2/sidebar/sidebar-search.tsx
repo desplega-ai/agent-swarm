@@ -8,7 +8,15 @@
  * suggestions for `with:` and `in:`, and Cancel.
  */
 
-import { type KeyboardEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { useKeyboardShortcuts } from "@/components/shared/questions/keyboard";
 import { SearchBox } from "@/components/shared/search-box";
 import { Kbd } from "@/components/ui/kbd";
@@ -34,6 +42,7 @@ export function SidebarSearch({
   phone = false,
   groups = [],
   onSearchMode,
+  action,
 }: {
   /** The search in the URL. */
   value: string;
@@ -47,6 +56,8 @@ export function SidebarSearch({
   groups?: SearchGroup[];
   /** The phone search mode turned on or off (the list screen hides its top bar). */
   onSearchMode?: (on: boolean) => void;
+  /** At the end of the row: the filter menu. The phone hides it while searching. */
+  action?: ReactNode;
 }) {
   const [text, setText] = useState(value);
   // The last value this field sent. A different URL value came from
@@ -109,12 +120,14 @@ export function SidebarSearch({
         onLeave={onLeave}
         groups={groups}
         onSearchMode={onSearchMode}
+        action={action}
       />
     );
   }
   return (
-    <search className="shrink-0 px-2 pt-2 pb-1">
+    <search className="flex shrink-0 items-center gap-1 px-2 pt-2 pb-1">
       <SearchBox
+        className="flex-1"
         size="sm"
         value={text}
         onChange={setText}
@@ -128,6 +141,7 @@ export function SidebarSearch({
         onClear={clear}
         hint={<Kbd aria-hidden>/</Kbd>}
       />
+      {action}
       <p id={helpId} className="sr-only">
         Filters: with:name, in:group, is:unread, is:running, is:needs, is:later, is:done. Escape
         clears.

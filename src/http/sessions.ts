@@ -26,7 +26,7 @@ import {
   moveSessionChains,
   type SessionKeyMove,
 } from "../be/db/session-moves";
-import { getSessionReadState, getSessionTree } from "../be/db/session-tree";
+import { getSessionReadState, getSessionTree, triageSessionList } from "../be/db/session-tree";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   getSessionRoot,
@@ -157,6 +157,9 @@ const SessionTreeResponseSchema = z.object({
   later: SessionSectionCountsSchema,
   done: SessionSectionCountsSchema,
   noGroup: SessionSectionCountsSchema,
+  sources: z
+    .array(z.object({ source: z.string(), total: z.number().int() }))
+    .describe("Each root source in this view with its session count, hidden sources included."),
 });
 
 const SessionApprovalSchema = z.object({
@@ -487,6 +490,21 @@ const SessionShowSchema = z
     "Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged.",
   );
 
+const SessionHideSourceSchema = z
+  .string()
+  // The same cap as the `hideSource` body field of `POST /api/session-triage`.
+  .refine((value) => value.split(",").length <= 32, "hideSource takes at most 32 sources.")
+  .optional()
+  .transform((value) =>
+    value
+      ?.split(",")
+      .map((source) => source.trim())
+      .filter(Boolean),
+  )
+  .describe(
+    "Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`.",
+  );
+
 const listSessions = route({
   method: "get",
   path: "/api/sessions",
@@ -548,6 +566,8 @@ const listSessions = route({
       ),
     /** With `scope=tree`: `mine` (default) or `all`. Must match the tree's `show`. */
     show: SessionShowSchema,
+    /** Root sources to leave out. Must match the tree's `hideSource`. */
+    hideSource: SessionHideSourceSchema,
   }),
   responses: {
     200: {
@@ -570,12 +590,45 @@ const sessionTree = route({
   pattern: ["api", "session-tree"],
   summary: "Get session groups and triage counts",
   tags: ["Sessions"],
-  query: z.object({ show: SessionShowSchema }),
+  query: z.object({ show: SessionShowSchema, hideSource: SessionHideSourceSchema }),
   responses: {
     200: { description: "Visible groups and section counts", schema: SessionTreeResponseSchema },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+});
+
+const triageSessionListRoute = route({
+  method: "post",
+  path: "/api/session-triage",
+  pattern: ["api", "session-triage"],
+  summary: "Triage every session of one sidebar list",
+  description:
+    "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.",
+  tags: ["Sessions"],
+  body: z
+    .object({
+      action: z.enum(["done", "inbox", "read", "unread"]),
+      /** The list: one of Inbox, Later, Done, No group, or a group. */
+      triage: z.enum(["inbox", "later", "done"]).optional(),
+      noGroup: z.boolean().optional(),
+      groupKey: SessionKeyFilterSchema.optional(),
+      show: SessionShowSchema,
+      hideSource: z.array(z.string().min(1)).max(32).optional(),
+    })
+    .refine((body) => [body.triage, body.noGroup, body.groupKey].filter(Boolean).length === 1, {
+      message: "Name exactly one list: triage, noGroup, or groupKey",
+    }),
+  responses: {
+    200: {
+      description: "The number of sessions written",
+      schema: z.object({ updated: z.number().int() }),
+    },
+    400: { description: "Validation error, or no picked user" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+  rbac: { ungated: "per-user inbox UI state, same posture as PATCH /api/inbox-state" },
 });
 
 const SESSION_MOVE_LIMIT = 200;
@@ -887,6 +940,7 @@ export async function handleSessions(
     }
     const filterOpts = {
       source: sources,
+      hideSource: parsed.query.hideSource,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
       contextKeyPrefix: parsed.query.contextKeyPrefix,
@@ -937,8 +991,29 @@ export async function handleSessions(
     sessionTree.respond(
       res,
       200,
-      await getSessionTree(actor, undefined, { mine: parsed.query.show !== "all" }),
+      await getSessionTree(actor, undefined, {
+        mine: parsed.query.show !== "all",
+        hideSource: parsed.query.hideSource,
+      }),
     );
+    return true;
+  }
+
+  if (triageSessionListRoute.match(req.method, pathSegments)) {
+    const parsed = await triageSessionListRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const actor = await resolveSessionActor(req, myAgentId);
+    if (actor.kind !== "user" || !actor.userId) {
+      jsonError(res, "Pick a user to triage sessions", 400);
+      return true;
+    }
+    const { action, show, ...list } = parsed.body;
+    const updated = await triageSessionList(
+      actor.userId,
+      { ...list, mine: show !== "all" },
+      action,
+    );
+    triageSessionListRoute.respond(res, 200, { updated });
     return true;
   }
 

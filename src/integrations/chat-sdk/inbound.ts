@@ -33,6 +33,12 @@ import { type ChatAddressedReason, formatChatHeaderFacts, readChatMessageFacts }
 import { errorMessage } from "./logger";
 import { emitChatMessageSent, postChatMessage } from "./outbound";
 import {
+  chatAdapterReacts,
+  clearChatMessageReactions,
+  setChatMessageReaction,
+  wantsChatTextAck,
+} from "./reactions";
+import {
   type ChatAgentMatch,
   type ChatRouteTarget,
   chatOwnerWindowStart,
@@ -154,6 +160,8 @@ export async function handleChatInbound(
       console.log(
         `[chat-sdk] ${adapter} message steered task ${steering.task.id} (${steering.result.outcome})`,
       );
+      await setChatMessageReaction(adapter, thread.id, message.id, "steered");
+      if (!(await wantsChatTextAck(adapter, thread.channelId))) return;
       try {
         const ack = formatChatSteeringAck(steering.result);
         // Telegram threads the ack under the steering message; other adapters post it.
@@ -180,6 +188,9 @@ export async function handleChatInbound(
   }
 
   if (text || attachments.length > 0) {
+    // Subscribed-thread messages may be dropped by the router at flush time;
+    // they get typing and a reaction once a task exists (see flushChatThread).
+    const acknowledge = kind !== "subscribed";
     bufferChatMessage(thread.id, {
       messageId: message.id,
       channelId: thread.channelId,
@@ -189,12 +200,14 @@ export async function handleChatInbound(
       botMentioned: mentioned || facts.replyToBot,
       isDirectMessage,
       addressed,
+      reacted: acknowledge && chatAdapterReacts(adapter),
       facts,
       attachments,
     });
-    // Subscribed-thread messages may be dropped by the router at flush time;
-    // they get typing once a task exists (see flushChatThread).
-    if (kind !== "subscribed") startTypingKeepalive(adapter, thread.id);
+    if (acknowledge) {
+      startTypingKeepalive(adapter, thread.id);
+      await setChatMessageReaction(adapter, thread.id, message.id, immediate ? "now" : "accepted");
+    }
   }
   if (immediate) await instantFlushChat(thread.id);
 }
@@ -380,6 +393,9 @@ export async function flushChatThread(
   // One task carries every sender's text, so a batch from several people
   // gets no requester: one sender's identity must not vouch for another's words.
   const otherSenders = new Set(items.map((item) => item.userId)).size - 1;
+  // The task answers the newest message; it alone carries the reaction lifecycle.
+  const answered = items.at(-1) ?? first;
+  const reacted = items.filter((item) => item.reacted).map((item) => item.messageId);
 
   // After `/reset` the thread's earlier tasks are not context: the new task gets
   // no parent and no thread history older than the reset.
@@ -421,6 +437,7 @@ export async function flushChatThread(
       scrubSecrets(routeResult.reason),
     );
     stopTypingKeepalive(threadId);
+    await clearChatMessageReactions(adapter, threadId, reacted);
     return;
   }
 
@@ -436,12 +453,14 @@ export async function flushChatThread(
   if (!target) {
     console.log(`[chat-sdk] ${threadId}: message not addressed to the swarm, ignored`);
     stopTypingKeepalive(threadId);
+    await clearChatMessageReactions(adapter, threadId, reacted);
     return;
   }
 
   if (target.kind === "workflow") {
-    // A workflow run has no relay that would stop the indicator.
+    // A workflow run has no relay that would stop the indicator or end the reaction.
     stopTypingKeepalive(threadId);
+    await clearChatMessageReactions(adapter, threadId, reacted);
     try {
       // The adapter verified the platform signature, and the workflow id comes
       // from an operator mapping or an extension, never from the message.
@@ -539,7 +558,7 @@ export async function flushChatThread(
       // The relay answers as a reply to the newest buffered message. Always set
       // explicitly: `createTask` copies the parent's anchor into a child that
       // has none, and that would point at an older ask.
-      mentionMessageId: items.at(-1)?.messageId ?? first.messageId,
+      mentionMessageId: answered.messageId,
       mentionChannelId: first.channelId,
     };
     try {
@@ -563,8 +582,16 @@ export async function flushChatThread(
     await subscribe(thread);
     // Subscribed-thread messages start typing only here, once a task exists.
     startTypingKeepalive(adapter, threadId);
+    await clearChatMessageReactions(
+      adapter,
+      threadId,
+      reacted.filter((id) => id !== answered.messageId),
+    );
+    if (!answered.reacted)
+      await setChatMessageReaction(adapter, threadId, answered.messageId, "accepted");
   } else {
     stopTypingKeepalive(threadId);
+    await clearChatMessageReactions(adapter, threadId, reacted);
   }
 }
 

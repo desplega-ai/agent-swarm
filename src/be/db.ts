@@ -12629,6 +12629,8 @@ export async function upsertInboxState(opts: {
 
   // SQLite upsert via UNIQUE(userId, itemType, itemId). readAt is sticky: the
   // first non-null value written wins on every subsequent conflict.
+  // `triageSessionList` in src/be/db/session-tree.ts copies these conflict
+  // rules for whole-list triage. Keep the two in step.
   const row = await getDbClient().get<InboxItemStateRow>(
     `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, lastReadAt, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

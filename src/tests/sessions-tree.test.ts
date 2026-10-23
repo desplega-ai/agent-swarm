@@ -536,3 +536,200 @@ describe("Mine view hides machine-started roots", () => {
     expect(detail.status).toBe(200);
   });
 });
+
+describe("source filter and list triage", () => {
+  const asOwner = () => ({ "x-swarm-user-id": owner.id, "content-type": "application/json" });
+  const treeOf = async (query = "") => {
+    const res = await fetch(`${baseUrl}/api/session-tree?${query}`, { headers: asOwner() });
+    expect(res.status).toBe(200);
+    return (await res.json()) as Awaited<ReturnType<typeof getSessionTree>>;
+  };
+  const listOf = async (query: string) => {
+    const res = await fetch(`${baseUrl}/api/sessions?scope=tree&limit=50&${query}`, {
+      headers: asOwner(),
+    });
+    const body = (await res.json()) as {
+      total: number;
+      sessions: { root: { id: string }; readState?: string }[];
+    };
+    return body;
+  };
+  const triage = (body: Record<string, unknown>, withUser = true) =>
+    fetch(`${baseUrl}/api/session-triage`, {
+      method: "POST",
+      headers: withUser ? asOwner() : { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  test("hideSource leaves a source out of sections and lists, and sources still count it", async () => {
+    const slackA = await task("shared/", { source: "slack" });
+    const slackB = await task("shared/a/", { source: "slack" });
+    const ui = await task("shared/", { source: "ui" });
+    const chat = await task("shared/", { source: "chat" });
+
+    const full = await treeOf();
+    expect(full.inbox.total).toBe(4);
+    expect(full.sources).toEqual([
+      { source: "slack", total: 2 },
+      { source: "chat", total: 1 },
+      { source: "ui", total: 1 },
+    ]);
+
+    const hidden = await treeOf("hideSource=slack,chat");
+    expect(hidden.inbox.total).toBe(1);
+    expect(hidden.noGroup.total).toBe(1);
+    expect(hidden.groups).toEqual([]);
+    // The menu still offers the hidden sources back.
+    expect(hidden.sources).toEqual(full.sources);
+
+    const inbox = await listOf("triage=inbox&hideSource=slack,chat");
+    expect(inbox.total).toBe(1);
+    expect(inbox.sessions.map((s) => s.root.id)).toEqual([ui.id]);
+    const all = await listOf("triage=inbox");
+    expect(all.sessions.map((s) => s.root.id).sort()).toEqual(
+      [slackA.id, slackB.id, ui.id, chat.id].sort(),
+    );
+  });
+
+  test("triage by list writes every matching session, honoring the list and the filters", async () => {
+    const a = await task("shared/", { source: "ui" });
+    const b = await task("shared/", { source: "ui" }, OLD);
+    const slack = await task("shared/", { source: "slack" });
+    const grouped = await task("shared/a/", { source: "ui" });
+    const workflow = await task("shared/", { source: "workflow" });
+    const later = await task("shared/", { source: "ui" });
+    await state(later.id, "snoozed", NOW, { snoozeUntil: "2999-01-01T00:00:00.000Z" });
+
+    // No group, Slack hidden, Mine view: a and b only.
+    let res = await triage({ action: "done", noGroup: true, hideSource: ["slack"] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 2 });
+    let done = await listOf("triage=done");
+    expect(done.sessions.map((s) => s.root.id).sort()).toEqual([a.id, b.id].sort());
+    // The rest keep their state; the workflow root (All only) was not touched.
+    const inbox = await listOf("triage=inbox&show=all");
+    expect(inbox.sessions.map((s) => s.root.id).sort()).toEqual(
+      [slack.id, grouped.id, workflow.id].sort(),
+    );
+    expect((await listOf("triage=later")).sessions.map((s) => s.root.id)).toEqual([later.id]);
+
+    // Back to the Inbox from the Done list, then read and unread across the Inbox.
+    res = await triage({ action: "inbox", triage: "done" });
+    expect(await res.json()).toEqual({ updated: 2 });
+    expect((await listOf("triage=done")).total).toBe(0);
+    res = await triage({ action: "unread", triage: "inbox" });
+    expect(await res.json()).toEqual({ updated: 4 });
+    expect((await treeOf()).inbox.unread).toBe(4);
+    res = await triage({ action: "read", triage: "inbox" });
+    expect(await res.json()).toEqual({ updated: 4 });
+    const tree = await treeOf();
+    expect(tree.inbox.unread).toBe(0);
+    expect(tree.inbox.total).toBe(4);
+
+    // One group only.
+    res = await triage({ action: "done", groupKey: "shared/a/" });
+    expect(await res.json()).toEqual({ updated: 1 });
+    done = await listOf("triage=done");
+    expect(done.sessions.map((s) => s.root.id)).toEqual([grouped.id]);
+    // Show All reaches the workflow root.
+    res = await triage({ action: "done", triage: "inbox", show: "all" });
+    expect(await res.json()).toEqual({ updated: 4 });
+    expect((await listOf("triage=inbox&show=all")).total).toBe(0);
+  });
+
+  test("triage by list acts on the Later list", async () => {
+    const snoozedA = await task("shared/", { source: "ui" });
+    const snoozedB = await task("shared/", { source: "ui" });
+    const open = await task("shared/", { source: "ui" });
+    for (const id of [snoozedA.id, snoozedB.id]) {
+      await state(id, "snoozed", NOW, { snoozeUntil: "2999-01-01T00:00:00.000Z" });
+    }
+
+    let res = await triage({ action: "done", triage: "later" });
+    expect(await res.json()).toEqual({ updated: 2 });
+    expect((await listOf("triage=later")).total).toBe(0);
+    const done = await listOf("triage=done");
+    expect(done.sessions.map((s) => s.root.id).sort()).toEqual([snoozedA.id, snoozedB.id].sort());
+    const cleared = await getDbClient().query<{ snoozeUntil: string | null }>(
+      "SELECT snoozeUntil FROM inbox_item_state WHERE itemId IN (?, ?)",
+      [snoozedA.id, snoozedB.id],
+    );
+    expect(cleared.map((row) => row.snoozeUntil)).toEqual([null, null]);
+
+    await state(snoozedA.id, "snoozed", NOW, { snoozeUntil: "2999-01-01T00:00:00.000Z" });
+    res = await triage({ action: "inbox", triage: "later" });
+    expect(await res.json()).toEqual({ updated: 1 });
+    const inbox = await listOf("triage=inbox");
+    expect(inbox.sessions.map((s) => s.root.id).sort()).toEqual([snoozedA.id, open.id].sort());
+  });
+
+  test("triage by list writes the same row fields as the one-session PATCH", async () => {
+    type Row = {
+      status: string;
+      snoozeUntil: string | null;
+      dismissedAt: string | null;
+      doneAt: string | null;
+      readAt: string | null;
+      lastReadAt: string | null;
+    };
+    const rowOf = async (id: string) =>
+      (await getDbClient().get<Row>("SELECT * FROM inbox_item_state WHERE itemId = ?", [
+        id,
+      ])) as Row;
+    const unreadCursor = "1970-01-01T00:00:00.000Z";
+    for (const action of ["done", "inbox", "read", "unread"] as const) {
+      // Two sessions with the same earlier state: read once, then snoozed past
+      // the wake time (back in the Inbox). One gets the dashboard's PATCH
+      // write, the other the list write.
+      const one = await task(`shared/${action}-one/`, { source: "ui" });
+      const list = await task(`shared/${action}-list/`, { source: "ui" });
+      for (const id of [one.id, list.id]) {
+        await state(id, "snoozed", NOW, { snoozeUntil: OLD, lastReadAt: OLD });
+        await getDbClient().run("UPDATE inbox_item_state SET readAt = ? WHERE itemId = ?", [
+          OLD,
+          id,
+        ]);
+      }
+      const listed = (await fetch(
+        `${baseUrl}/api/sessions?scope=tree&groupKey=shared/${action}-one/`,
+        {
+          headers: asOwner(),
+        },
+      ).then((res) => res.json())) as { sessions: { lastActivityAt: string }[] };
+      const lastActivityAt = listed.sessions[0]?.lastActivityAt;
+      expect(lastActivityAt).toBeTruthy();
+      // The write of `writeFor` in apps/ui/src/api/hooks/use-session-triage.ts.
+      const write =
+        action === "done"
+          ? { status: "done" as const }
+          : action === "read"
+            ? { status: "open" as const, readAt: NOW, lastReadAt: lastActivityAt }
+            : action === "unread"
+              ? { status: "open" as const, lastReadAt: unreadCursor }
+              : { status: "open" as const };
+      await upsertInboxState({ userId: owner.id, itemType: "to_read", itemId: one.id, ...write });
+      const res = await triage({ action, groupKey: `shared/${action}-list/` });
+      expect(await res.json()).toEqual({ updated: 1 });
+
+      const [a, b] = [await rowOf(one.id), await rowOf(list.id)];
+      expect({ ...b, doneAt: b.doneAt !== null }).toMatchObject({
+        status: a.status,
+        snoozeUntil: a.snoozeUntil,
+        dismissedAt: a.dismissedAt,
+        doneAt: a.doneAt !== null,
+        readAt: a.readAt,
+        lastReadAt: a.lastReadAt,
+      });
+      // readAt is sticky: the first view stays.
+      expect(b.readAt).toBe(OLD);
+    }
+  });
+
+  test("triage by list needs a picked user and exactly one list", async () => {
+    await task("shared/", { source: "ui" });
+    expect((await triage({ action: "done", triage: "inbox" }, false)).status).toBe(400);
+    expect((await triage({ action: "done" })).status).toBe(400);
+    expect((await triage({ action: "done", triage: "inbox", noGroup: true })).status).toBe(400);
+    expect((await listOf("triage=inbox")).total).toBe(1);
+  });
+});

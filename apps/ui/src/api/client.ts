@@ -3342,6 +3342,8 @@ class ApiClient {
     scope?: "mine" | "shared" | "tree";
     /** With `scope=tree`: `all` adds machine-started runs to the Mine default (sessions v2). */
     show?: "all";
+    /** With `scope=tree`: comma-joined root sources to leave out (sessions v2). */
+    hideSource?: string;
     /** Asset key prefix, subgroups included (sessions v2). */
     keyPrefix?: string;
     /** Exactly this group, not its subgroups (sessions v2). */
@@ -3364,6 +3366,7 @@ class ApiClient {
     if (opts?.contextKeyPrefix) params.set("contextKeyPrefix", opts.contextKeyPrefix);
     if (opts?.scope) params.set("scope", opts.scope);
     if (opts?.show) params.set("show", opts.show);
+    if (opts?.hideSource) params.set("hideSource", opts.hideSource);
     if (opts?.keyPrefix) params.set("keyPrefix", opts.keyPrefix);
     if (opts?.groupKey) params.set("groupKey", opts.groupKey);
     if (opts?.noGroup) params.set("noGroup", "true");
@@ -3378,11 +3381,41 @@ class ApiClient {
   }
 
   /** Every visible session group with its counts, plus the Inbox, Later, Done, and No group counts. */
-  async getSessionTree(opts?: { show?: "all" }): Promise<SessionTreeResponse> {
-    const url = `${this.getBaseUrl()}/api/session-tree${opts?.show ? `?show=${opts.show}` : ""}`;
+  async getSessionTree(opts?: { show?: "all"; hideSource?: string }): Promise<SessionTreeResponse> {
+    const params = new URLSearchParams();
+    if (opts?.show) params.set("show", opts.show);
+    if (opts?.hideSource) params.set("hideSource", opts.hideSource);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/session-tree${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to load the session tree: ${res.status}`);
     return (await res.json()) as SessionTreeResponse;
+  }
+
+  /**
+   * "Select all N": Done, back to the Inbox, read, or unread for every
+   * session of one sidebar list (Inbox, Later, Done, No group, or a group),
+   * with the same filter as the list. Needs a picked user.
+   */
+  async triageSessionList(body: {
+    action: "done" | "inbox" | "read" | "unread";
+    triage?: "inbox" | "later" | "done";
+    noGroup?: boolean;
+    groupKey?: string;
+    show?: "all";
+    hideSource?: string[];
+  }): Promise<{ updated: number }> {
+    const url = `${this.getBaseUrl()}/api/session-triage`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const error = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(error?.error ?? `Failed to update the sessions: ${res.status}`);
+    }
+    return (await res.json()) as { updated: number };
   }
 
   /**

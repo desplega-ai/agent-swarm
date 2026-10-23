@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Sessions: the sessions list shows only sessions you started from a human channel or that were shared with you, with a Mine / All toggle for the rest. Workflow, schedule and system starts move behind All; access is unchanged (#2347).
 
 ### Changed
+- Chat SDK on Telegram: the ask shows its task state as one reaction that changes, 👀 when taken (⚡ for `!now`), then 👍 when the answer posts or 👎 for a failed or cancelled task. A steering message gets ✍ instead of the text acknowledgement; a channel can opt back into the text with `{ "textAcks": true }` in the KV namespace `integrations:chat:channel-settings`. A refused reaction (`400 REACTION_INVALID`) is logged and never blocks delivery. Slack, Discord and Teams through the Chat SDK keep the text acknowledgement (#2199).
 - Chat SDK: Telegram answers reply to the message that asked, start with a `#<id8> · <agent>` task tag, fold long bodies behind a summary, and a deferral posts nothing until the real answer. `/start` no longer says "Unknown command" (#2203).
 - Scripts: a script run with a real executing agent presents a short-lived session token bound to that agent instead of the swarm API key, revoked when the run ends. Runs with no real agent keep the API key (#2349).
 - Worker image bumps claude-code to 2.1.309, codex to 0.164.0, copilot to 1.0.103, amp, and agent-browser to 0.39.2 (#2352, #2357).
