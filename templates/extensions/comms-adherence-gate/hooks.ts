@@ -5,22 +5,26 @@ import { z } from "zod";
  * comms-adherence-gate
  *
  * When an agent calls `store-progress` with status "completed" on a task that
- * reaches a human in Slack, judge the `output` against the requesting user's
- * stored comms preferences (users.metadata.$.comms) with Jev, and against what
- * that user actually asked for in their latest message. An explicit request
- * ("tell me a long joke", "explain in detail") outranks the stored default, so
- * a requested long answer is not a verbosity failure.
+ * reaches a human in Slack, or posts to Slack itself (`slack-reply`,
+ * `slack-post`, `slack-start-thread`, `slack-update`), judge the text with Jev:
+ * against the requesting user's stored comms preferences
+ * (users.metadata.$.comms) and what that user actually asked for in their
+ * latest message, and against a plain-language rubric that applies to every
+ * message whatever preferences exist. An explicit request ("tell me a long
+ * joke", "explain in detail") outranks the stored default, so a requested long
+ * answer is not a verbosity failure.
  *
  * Transport (config.provider): Jev is served by TypeSafe directly and by
  * OpenRouter's Decisions endpoint. Both take the same {model, state, questions}
  * body and return the same `answers` shape. `auto` uses TYPESAFE_API_KEY when
  * set, else OPENROUTER_API_KEY.
  *
- * modes (config.mode):
+ * modes (config.mode for the preference dimensions, config.plainMode for `plain`):
  *   off     -> never evaluate
  *   shadow  -> evaluate + record, never block (default)
- *   enforce -> record, and block the completion up to maxBlocksPerTask times
- *              per task with actionable feedback
+ *   enforce -> record, and block the call up to maxBlocksPerTask times per task
+ *              with actionable feedback. The budget is shared by both modes and
+ *              by every gated tool.
  *
  * Fails OPEN on every error: a judge outage must never wall the swarm.
  * Every verdict lands in KV namespace `ext:comms-gate`.
@@ -28,8 +32,15 @@ import { z } from "zod";
 
 export const config = z.object({
   mode: z.enum(["off", "shadow", "enforce"]).default("shadow"),
-  /** A dimension scoring below this fails. */
+  /** A preference dimension scoring below this fails. */
   threshold: z.number().min(0).max(1).default(0.5),
+  /** The `plain` dimension, judged on every message. Independent of `mode`. */
+  plainMode: z.enum(["off", "shadow", "enforce"]).default("shadow"),
+  /**
+   * `plain` scoring below this fails. Jev scores dense status text low and
+   * plain text high with little in between, so this sits far below `threshold`.
+   */
+  plainThreshold: z.number().min(0).max(1).default(0.25),
   timeoutMs: z.number().int().positive().default(4000),
   maxBlocksPerTask: z.number().int().min(0).default(1),
   provider: z.enum(["auto", "typesafe", "openrouter"]).default("auto"),
@@ -48,6 +59,13 @@ const NS = "ext:comms-gate";
 const TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 const UUID_RE = /^[0-9a-fA-F-]{36}$/;
+/** MCP tools that post agent-authored text to Slack, all with a `message` arg. */
+export const SLACK_TOOLS = new Set([
+  "slack-reply",
+  "slack-post",
+  "slack-start-thread",
+  "slack-update",
+]);
 // The dispatcher cancels a handler after 5 s; leave room for the DB read and KV writes.
 const MAX_TIMEOUT_MS = 4000;
 
@@ -95,6 +113,39 @@ const JUDGING_RULES = [
 ];
 
 type Prefs = { verbosity?: unknown; tone?: unknown; language?: unknown } & Record<string, unknown>;
+
+/**
+ * The `plain` rubric, from the `comms` skill (Simpler and Precise modes). Jev
+ * separates dense from plain text reliably only with contrasting examples; a
+ * prose-only rubric scored a plain rewrite as low as the dense original.
+ */
+export const PLAIN_RULES = [
+  "Examples of NOT plain: 'p50 Δ +120ms vs baseline (n=37)', 'error rate 2.1% → 0.4% (cohort B, ±0.3 at 95%)', 'cost $-42/day', 'first-call hit ratio 0.61', 'drift unmeasured; 2 flaky'.",
+  "Examples of plain: 'Pages load 120 ms slower than last week, across 37 runs', 'Errors dropped from 2 in 100 requests to 4 in 1,000', 'We spend $42 a day less', 'PR #123 keeps the migration reversible', 'Lead saves about $75 a week'.",
+  "Code identifiers, task ids, PR numbers, links, file paths and version numbers are fine as they are.",
+];
+
+export const PLAIN_QUESTION = {
+  type: "noul",
+  instructions:
+    "Is agent_message written like the plain examples in plain_language_rules rather than like the NOT plain ones? Ignore length and tone.",
+  criteria: {
+    true: "Written like the plain examples: everyday words and numbers with units and direction.",
+    false:
+      "Written like the NOT plain examples: statistics shorthand, abbreviations, signed or cryptic numbers.",
+  },
+};
+
+/** Structured output (an outputSchema answer) is for machines; `plain` skips it. */
+export const looksLikeJson = (text: string): boolean => {
+  if (!/^[[{]/.test(text)) return false;
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 /** One `noul` question per stated preference the gate knows how to judge. */
 export const buildQuestions = (prefs: Prefs): Record<string, unknown> => {
@@ -246,27 +297,41 @@ const SELFTEST_BAD =
   "Great question! Let me walk you through what I did here. First I looked at the task, then I reviewed the relevant files, and after careful consideration I decided to go with option B. I hope this helps - let me know if you would like me to elaborate further on any of the above!";
 const SELFTEST_GOOD =
   "Went with option B: it is the only one that keeps the migration reversible. PR #123.";
+// A real dense monitor post a requester had to ask to have rewritten, and that rewrite.
+const SELFTEST_PLAIN_BAD =
+  "Prompt cache monitor, day 7 verdict for v2.0.0: partial. Lead first-call read median 12.4k (baseline v1.173.0, n 410) → 19.1k tokens (n 2234; expected 25.0k-40.0k). First-call saving about $75/week on Lead vs v1.173.0 (expected $129; sampling noise ±$24 at 95%, one baseline version, day-to-day drift not measured); session $ change $-167/week; fleet first-call saving $-7/week.";
+const SELFTEST_PLAIN_GOOD =
+  "Cheaper, but half what we hoped: Lead saves about $75 a week, not $129. Whole Lead tasks still cost $167 a week more, probably from other releases and heavier work, not this change.";
+
+const below = (bad: unknown, good: unknown, threshold: number): boolean =>
+  typeof bad === "number" && typeof good === "number" && bad < threshold && good >= threshold;
 
 /**
- * Run the judge on a known-bad (positive control, must score below threshold) and a
- * known-good (negative control, must score at or above it) message and record both
- * under `selftest:last`. Proves key, egress and KV from inside the API runtime
- * without touching real traffic.
+ * Run the judge on known-bad (positive control, must score below threshold) and
+ * known-good (negative control, must score at or above it) messages and record
+ * them under `selftest:last`: one pair for verbosity, one for `plain`. Proves key,
+ * egress and KV from inside the API runtime without touching real traffic.
  */
 const selfTest = async (swarm: Swarm, cfg: Cfg, signal?: AbortSignal): Promise<void> => {
   const started = Date.now();
   try {
     const transport = resolveTransport(cfg);
-    const questions = { verbosity: buildQuestions(SELFTEST_PREFS).verbosity };
-    const judge = (message: string) =>
+    const judge = (message: string, dim: "verbosity" | "plain") =>
       askJev(
-        { requester_preferences: SELFTEST_PREFS, agent_message: message },
-        questions,
+        dim === "plain"
+          ? { plain_language_rules: PLAIN_RULES, agent_message: message }
+          : { requester_preferences: SELFTEST_PREFS, agent_message: message },
+        { [dim]: dim === "plain" ? PLAIN_QUESTION : buildQuestions(SELFTEST_PREFS).verbosity },
         transport,
         cfg,
         signal,
-      ).then((r) => r.scores.verbosity ?? null);
-    const [bad, good] = await Promise.all([judge(SELFTEST_BAD), judge(SELFTEST_GOOD)]);
+      ).then((r) => r.scores[dim] ?? null);
+    const [bad, good, plainBad, plainGood] = await Promise.all([
+      judge(SELFTEST_BAD, "verbosity"),
+      judge(SELFTEST_GOOD, "verbosity"),
+      judge(SELFTEST_PLAIN_BAD, "plain"),
+      judge(SELFTEST_PLAIN_GOOD, "plain"),
+    ]);
     await swarm.kv_set({
       namespace: NS,
       key: "selftest:last",
@@ -276,11 +341,11 @@ const selfTest = async (swarm: Swarm, cfg: Cfg, signal?: AbortSignal): Promise<v
         threshold: cfg.threshold,
         positiveControlBadScore: bad,
         negativeControlGoodScore: good,
-        controlsOk:
-          typeof bad === "number" &&
-          typeof good === "number" &&
-          bad < cfg.threshold &&
-          good >= cfg.threshold,
+        controlsOk: below(bad, good, cfg.threshold),
+        plainThreshold: cfg.plainThreshold,
+        plainPositiveControlBadScore: plainBad,
+        plainNegativeControlGoodScore: plainGood,
+        plainControlsOk: below(plainBad, plainGood, cfg.plainThreshold),
         latencyMs: Date.now() - started,
       },
     });
@@ -327,29 +392,56 @@ const mayWriteProgress = async (
   return Number(cell(row, 0, "isLead") ?? 0) === 1;
 };
 
+/** The text a gated call would put in front of a human, and the task it belongs to. */
+const gatedText = (
+  tool: string,
+  args: Record<string, unknown>,
+  sourceTaskId: string | undefined,
+): { text: string; taskId: string } | null => {
+  if (tool === "store-progress") {
+    if (args.status !== "completed") return null;
+    return {
+      text: typeof args.output === "string" ? args.output.trim() : "",
+      taskId: String(args.taskId ?? sourceTaskId ?? ""),
+    };
+  }
+  if (SLACK_TOOLS.has(tool)) {
+    // slack-reply names its task; the other tools post from the caller's task context.
+    const named = tool === "slack-reply" ? args.taskId : undefined;
+    return {
+      text: typeof args.message === "string" ? args.message.trim() : "",
+      taskId: String(named ?? sourceTaskId ?? ""),
+    };
+  }
+  return null;
+};
+
 const extension: SwarmExtension = (api) => {
   api.on("pre.tool.call", async (event, ctx) => {
-    if (event.tool !== "store-progress") return;
-    if (event.requestInfo?.callOrigin === "extension") return;
+    if (event.tool !== "store-progress" && !SLACK_TOOLS.has(event.tool)) return;
+    const origin = event.requestInfo?.callOrigin;
+    if (origin === "extension") return;
 
     const cfg = cfgOf(ctx.config);
-    if (cfg.mode === "off") return;
+    if (cfg.mode === "off" && cfg.plainMode === "off") return;
 
     const args = (event.args ?? {}) as Record<string, unknown>;
 
     // Self-test hatch: a progress call whose text starts with the sentinel runs
     // the controls and records them under `selftest:last`.
-    if (args.status !== "completed") {
-      if (typeof args.progress === "string" && args.progress.startsWith(SELFTEST)) {
-        await selfTest(ctx.swarm, cfg, ctx.signal);
-      }
+    if (
+      event.tool === "store-progress" &&
+      args.status !== "completed" &&
+      typeof args.progress === "string" &&
+      args.progress.startsWith(SELFTEST)
+    ) {
+      await selfTest(ctx.swarm, cfg, ctx.signal);
       return;
     }
 
-    const output = typeof args.output === "string" ? args.output.trim() : "";
-    if (!output) return;
-
-    const taskId = String(args.taskId ?? event.requestInfo?.sourceTaskId ?? "");
+    const gated = gatedText(event.tool, args, event.requestInfo?.sourceTaskId);
+    if (!gated?.text) return;
+    const { text, taskId } = gated;
     if (!UUID_RE.test(taskId)) return;
 
     try {
@@ -362,33 +454,37 @@ const extension: SwarmExtension = (api) => {
       const agentId = String(cell(row, 2, "agentId") ?? "");
       const requesterId = String(cell(row, 3, "requestedByUserId") ?? "");
       const commsRaw = cell(row, 4, "comms");
-      const requesterName = String(cell(row, 5, "name") ?? requesterId);
+      const requesterName = String(cell(row, 5, "name") ?? (requesterId || "the requester"));
       const threadOpening = String(cell(row, 6, "askHead") ?? "");
       const ask = latestAsk(String(cell(row, 7, "askTail") ?? ""));
 
-      // Judge only a completion store-progress will accept, so no agent can ship
+      // Judge only a call on a task the caller may write to, so no agent can ship
       // another task's thread and preferences to the external judge.
       if (!(await mayWriteProgress(ctx.swarm, event.requestInfo?.agentId, agentId))) return;
 
-      // Only where the text actually reaches a human in Slack.
-      if (source !== "slack" && !slackThreadTs) return;
-      if (!commsRaw) return; // no stated preferences -> nothing to judge against
-      const prefs = (typeof commsRaw === "string" ? JSON.parse(commsRaw) : commsRaw) as Prefs;
-      if (!prefs || typeof prefs !== "object") return;
+      // A completion reaches a human only on a Slack task; a Slack tool always does.
+      if (event.tool === "store-progress" && source !== "slack" && !slackThreadTs) return;
 
-      const questions = buildQuestions(prefs);
+      const parsed = commsRaw
+        ? ((typeof commsRaw === "string" ? JSON.parse(commsRaw) : commsRaw) as Prefs)
+        : null;
+      const prefs: Prefs = parsed && typeof parsed === "object" ? parsed : {};
+
+      const questions: Record<string, unknown> = cfg.mode === "off" ? {} : buildQuestions(prefs);
+      if (cfg.plainMode !== "off" && !looksLikeJson(text)) questions.plain = PLAIN_QUESTION;
       if (Object.keys(questions).length === 0) return;
 
       const transport = resolveTransport(cfg);
       const { scores, latencyMs } = await askJev(
         {
-          role: "You audit an AI agent's final message to the human who requested the work.",
+          role: "You audit an AI agent's message to the human who requested the work.",
           requester: requesterName,
           requester_preferences: prefs,
           latest_request: ask,
           thread_opening: threadOpening,
           judging_rules: JUDGING_RULES,
-          agent_message: output,
+          plain_language_rules: PLAIN_RULES,
+          agent_message: text,
         },
         questions,
         transport,
@@ -396,12 +492,19 @@ const extension: SwarmExtension = (api) => {
         ctx.signal,
       );
 
+      const limitOf = (dim: string) => (dim === "plain" ? cfg.plainThreshold : cfg.threshold);
       const failed = Object.entries(scores)
-        .filter(([, v]) => v < cfg.threshold)
+        .filter(([k, v]) => v < limitOf(k))
         .map(([k]) => k);
+      // Script SDK calls never reach pre.tool.call today; if one does, record it only.
+      const blocking =
+        origin === "script-sdk"
+          ? []
+          : failed.filter((d) => (d === "plain" ? cfg.plainMode : cfg.mode) === "enforce");
 
       const verdict = {
         at: new Date().toISOString(),
+        tool: event.tool,
         taskId,
         agentId,
         source,
@@ -411,11 +514,13 @@ const extension: SwarmExtension = (api) => {
         scores,
         failed,
         threshold: cfg.threshold,
+        plainThreshold: cfg.plainThreshold,
         mode: cfg.mode,
+        plainMode: cfg.plainMode,
         latencyMs,
         preferences: prefs,
         askPreview: ask.slice(0, 400),
-        outputPreview: output.slice(0, 700),
+        outputPreview: text.slice(0, 700),
       };
 
       await ctx.swarm.kv_incr({ namespace: NS, key: "total" });
@@ -435,7 +540,7 @@ const extension: SwarmExtension = (api) => {
       // kv_get answers {success, data:{value}}, and {success:false} when absent.
       const prior = (await ctx.swarm.kv_get({ namespace: NS, key: blocksKey })) as Envelope;
       const priorBlocks = Number(prior?.data?.value ?? prior?.value ?? 0) || 0;
-      const willBlock = cfg.mode === "enforce" && priorBlocks < cfg.maxBlocksPerTask;
+      const willBlock = blocking.length > 0 && priorBlocks < cfg.maxBlocksPerTask;
 
       await ctx.swarm.kv_set({
         namespace: NS,
@@ -446,7 +551,7 @@ const extension: SwarmExtension = (api) => {
       if (!willBlock) {
         await ctx.swarm.kv_incr({
           namespace: NS,
-          key: cfg.mode === "enforce" ? "escaped" : "shadowed",
+          key: blocking.length > 0 ? "escaped" : "shadowed",
         });
         return;
       }
@@ -454,20 +559,25 @@ const extension: SwarmExtension = (api) => {
       await ctx.swarm.kv_incr({ namespace: NS, key: "blocked" });
       await ctx.swarm.kv_incr({ namespace: NS, key: blocksKey });
 
-      const detail = failed
-        .map(
-          (d) =>
-            `${d} (${scores[d]!.toFixed(2)} vs ${cfg.threshold}) — requested: ${String(prefs[d] ?? "").slice(0, 220)}`,
-        )
-        .join("\n");
-
-      return block(
-        [
-          `Comms gate: this output does not match ${requesterName}'s stated preferences.`,
-          detail,
-          "Rewrite the output to match and call store-progress again. Do not change the facts, only how they are said.",
-        ].join("\n"),
+      const lines = [
+        blocking.includes("plain")
+          ? `Comms gate: this message is not in plain words for ${requesterName}.`
+          : `Comms gate: this output does not match ${requesterName}'s stated preferences.`,
+      ];
+      for (const d of blocking) {
+        const score = `${d} (${scores[d]!.toFixed(2)} vs ${limitOf(d)})`;
+        lines.push(
+          d === "plain"
+            ? `${score}: a reader outside the swarm cannot follow it on first read.`
+            : `${score}: requested ${String(prefs[d] ?? "").slice(0, 220)}`,
+        );
+      }
+      lines.push(
+        blocking.includes("plain")
+          ? `Rewrite the message with the \`comms\` skill (Simpler mode): common words, one idea per sentence, every number with a unit and a direction word, shorthand explained or replaced. Keep every number, name, link and hedge verbatim, then call ${event.tool} again.`
+          : `Rewrite the message to match and call ${event.tool} again. Do not change the facts, only how they are said.`,
       );
+      return block(lines.join("\n"));
     } catch (err) {
       // Fail open, always.
       try {
@@ -475,7 +585,12 @@ const extension: SwarmExtension = (api) => {
         await ctx.swarm.kv_set({
           namespace: NS,
           key: "error:last",
-          value: { at: new Date().toISOString(), taskId, error: String(err).slice(0, 400) },
+          value: {
+            at: new Date().toISOString(),
+            tool: event.tool,
+            taskId,
+            error: String(err).slice(0, 400),
+          },
         });
       } catch {
         /* ignore */

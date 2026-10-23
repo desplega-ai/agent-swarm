@@ -157,6 +157,8 @@ describe("defaults", () => {
       timeoutMs: 4000,
       maxBlocksPerTask: 1,
       provider: "auto",
+      plainMode: "shadow",
+      plainThreshold: 0.25,
     });
   });
 
@@ -198,11 +200,17 @@ describe("pass", () => {
     const call = jevCalls[0]!;
     expect(call.url).toBe("https://api.typesafe.ai/v1/systemone");
     expect(call.auth).toBe("Bearer tsk-test");
-    expect(Object.keys(call.body.questions).sort()).toEqual(["language", "tone", "verbosity"]);
+    expect(Object.keys(call.body.questions).sort()).toEqual([
+      "language",
+      "plain",
+      "tone",
+      "verbosity",
+    ]);
+    expect(call.body.state.plain_language_rules).toEqual(mod.PLAIN_RULES);
     expect(call.body.state.latest_request).toBe("which option did you pick?");
   });
 
-  test("non-Slack tasks, requesters without prefs, non-completions and other agents' tasks skip Jev", async () => {
+  test("with plain off: non-Slack tasks, requesters without prefs, non-completions and other agents' tasks skip Jev", async () => {
     jevScores(0.1);
     const cases: Array<[any, Row]> = [
       [completion("x"), taskRow({ source: "mcp", slackThreadTs: null })],
@@ -220,7 +228,7 @@ describe("pass", () => {
       [completion("x", { taskId: "not-a-uuid" }), taskRow()],
     ];
     for (const [event, row] of cases) {
-      const { ctx } = makeCtx({ mode: "enforce" }, { row });
+      const { ctx } = makeCtx({ mode: "enforce", plainMode: "off" }, { row });
       expect(await handler(event, ctx)).toBeUndefined();
     }
     expect(jevCalls).toHaveLength(0);
@@ -264,9 +272,9 @@ describe("pass", () => {
     expect(queries).toHaveLength(1);
   });
 
-  test("mode off never reads the task", async () => {
+  test("mode off and plainMode off never read the task", async () => {
     jevScores(0.1);
-    const { ctx, queries } = makeCtx({ mode: "off" });
+    const { ctx, queries } = makeCtx({ mode: "off", plainMode: "off" });
     expect(await handler(completion("x"), ctx)).toBeUndefined();
     expect(queries).toHaveLength(0);
   });
@@ -387,13 +395,12 @@ describe("fail open", () => {
 
 describe("self-test", () => {
   test("records both controls without judging real traffic", async () => {
-    mockJev((body) =>
-      Response.json({
-        answers: {
-          verbosity: { noul: String(body.state.agent_message).startsWith("Great") ? 0.1 : 0.9 },
-        },
-      }),
-    );
+    mockJev((body) => {
+      const msg = String(body.state.agent_message);
+      const bad = msg.startsWith("Great") || msg.startsWith("Prompt cache monitor");
+      const [dim] = Object.keys(body.questions);
+      return Response.json({ answers: { [dim!]: { noul: bad ? 0.1 : 0.9 } } });
+    });
     const { ctx, kv, queries, counters } = makeCtx();
     const event = {
       tool: "store-progress",
@@ -405,9 +412,165 @@ describe("self-test", () => {
       positiveControlBadScore: 0.1,
       negativeControlGoodScore: 0.9,
       controlsOk: true,
+      plainPositiveControlBadScore: 0.1,
+      plainNegativeControlGoodScore: 0.9,
+      plainControlsOk: true,
       provider: "typesafe",
     });
+    // Two verbosity calls and two plain calls, each asking one question.
+    expect(jevCalls.map((c) => Object.keys(c.body.questions)[0]).sort()).toEqual([
+      "plain",
+      "plain",
+      "verbosity",
+      "verbosity",
+    ]);
     expect(queries).toHaveLength(0);
     expect(counters.total).toBeUndefined();
+  });
+});
+
+describe("plain", () => {
+  const slackReply = (message: string, extra: Record<string, unknown> = {}) => ({
+    tool: "slack-reply",
+    args: { taskId: TASK_ID, message, ...extra },
+    requestInfo: { callOrigin: "mcp", agentId: "agent-1" },
+  });
+
+  test("a requester without prefs still gets the plain question", async () => {
+    jevScores(0.9);
+    const { ctx, counters } = makeCtx({}, { row: taskRow({ comms: null }) });
+    expect(await handler(completion("Picked B."), ctx)).toBeUndefined();
+    expect(Object.keys(jevCalls[0]!.body.questions)).toEqual(["plain"]);
+    expect(counters).toMatchObject({ total: 1, pass: 1 });
+  });
+
+  test("mode off with plainMode shadow asks only plain", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx({ mode: "off" });
+    await handler(completion("Picked B."), ctx);
+    expect(Object.keys(jevCalls[0]!.body.questions)).toEqual(["plain"]);
+  });
+
+  test("plain uses plainThreshold, not threshold", async () => {
+    jevScores({ plain: 0.3 });
+    const passing = makeCtx({ mode: "enforce", plainMode: "enforce", threshold: 0.75 });
+    expect(await handler(completion("Picked B."), passing.ctx)).toBeUndefined();
+    expect(passing.counters).toMatchObject({ pass: 1 });
+
+    jevScores({ plain: 0.2 });
+    const failing = makeCtx({ mode: "enforce", plainMode: "enforce", threshold: 0.75 });
+    const result = await handler(completion("p50 Δ +120ms (n=37)"), failing.ctx);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("plain (0.20 vs 0.25)");
+  });
+
+  test("plainMode shadow records a plain failure and never blocks, even with mode enforce", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, counters, kv } = makeCtx({ mode: "enforce" });
+    expect(await handler(completion("p50 Δ +120ms (n=37)"), ctx)).toBeUndefined();
+    expect(counters).toMatchObject({ fail: 1, shadowed: 1, "dim:plain": 1 });
+    expect(counters.blocked).toBeUndefined();
+    expect(kv.last).toMatchObject({ failed: ["plain"], plainMode: "shadow" });
+  });
+
+  test("plainMode enforce blocks and points the agent at the comms skill", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, counters } = makeCtx({ mode: "shadow", plainMode: "enforce" });
+    const result = await handler(completion("p50 Δ +120ms (n=37)"), ctx);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("plain (0.05 vs 0.25)");
+    expect(result.reason).toContain("`comms` skill (Simpler mode)");
+    expect(result.reason).toContain("Keep every number, name, link and hedge verbatim");
+    expect(result.reason).toContain("call store-progress again");
+    expect(counters).toMatchObject({ blocked: 1, "dim:plain": 1 });
+  });
+
+  test("a failing preference in shadow is left out of a plain block", async () => {
+    jevScores({ plain: 0.05, verbosity: 0.1 });
+    const { ctx } = makeCtx({ mode: "shadow", plainMode: "enforce" });
+    const result = await handler(completion("x"), ctx);
+    expect(result.reason).toContain("plain (");
+    expect(result.reason).not.toContain("verbosity (");
+  });
+
+  test("structured JSON output skips the plain question", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx({ mode: "enforce", plainMode: "enforce" });
+    await handler(completion('{"prUrl":"https://example.com/pull/1","n":3}'), ctx);
+    expect(Object.keys(jevCalls[0]!.body.questions)).not.toContain("plain");
+    expect(mod.looksLikeJson("{not json")).toBe(false);
+  });
+
+  test("slack-reply is judged on its message with the named task", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, queries } = makeCtx({ plainMode: "enforce" });
+    const result = await handler(slackReply("p50 Δ +120ms (n=37)"), ctx);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("call slack-reply again");
+    expect(queries[0].params).toEqual([TASK_ID]);
+    expect(jevCalls[0]!.body.state.agent_message).toBe("p50 Δ +120ms (n=37)");
+  });
+
+  test("slack-post, slack-start-thread and slack-update use the caller's task context", async () => {
+    for (const tool of ["slack-post", "slack-start-thread", "slack-update"]) {
+      jevCalls = [];
+      jevScores(0.9);
+      const { ctx, queries } = makeCtx();
+      await handler(
+        {
+          tool,
+          args: { channelId: "C1", message: "Deploys take 4 minutes now." },
+          requestInfo: { callOrigin: "mcp", agentId: "agent-1", sourceTaskId: TASK_ID },
+        },
+        ctx,
+      );
+      expect(queries[0].params).toEqual([TASK_ID]);
+      expect(jevCalls).toHaveLength(1);
+    }
+  });
+
+  test("a Slack post from a non-Slack task is still judged", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx({}, { row: taskRow({ source: "mcp", slackThreadTs: null }) });
+    await handler(slackReply("Deploys take 4 minutes now."), ctx);
+    expect(jevCalls).toHaveLength(1);
+  });
+
+  test("a Slack post without a task, or on another agent's task, skips Jev", async () => {
+    jevScores(0.05);
+    const noTask = makeCtx({ plainMode: "enforce" });
+    expect(
+      await handler(
+        {
+          tool: "slack-post",
+          args: { channelId: "C1", message: "x" },
+          requestInfo: { callOrigin: "mcp", agentId: "agent-1" },
+        },
+        noTask.ctx,
+      ),
+    ).toBeUndefined();
+    const other = makeCtx({ plainMode: "enforce" }, { row: taskRow({ agentId: "agent-2" }) });
+    expect(await handler(slackReply("x"), other.ctx)).toBeUndefined();
+    expect(jevCalls).toHaveLength(0);
+  });
+
+  test("store-progress and slack-reply share one block budget per task", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, counters } = makeCtx({ plainMode: "enforce" });
+    expect(await handler(slackReply("p50 Δ"), ctx)).toMatchObject({ action: "block" });
+    expect(await handler(completion("p50 Δ"), ctx)).toBeUndefined();
+    expect(counters).toMatchObject({ blocked: 1, escaped: 1 });
+  });
+
+  test("a script SDK call is recorded and never blocked", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, counters } = makeCtx({ mode: "enforce", plainMode: "enforce" });
+    const event = {
+      ...slackReply("p50 Δ"),
+      requestInfo: { callOrigin: "script-sdk", agentId: "agent-1" },
+    };
+    expect(await handler(event, ctx)).toBeUndefined();
+    expect(counters).toMatchObject({ fail: 1, shadowed: 1 });
+    expect(counters.blocked).toBeUndefined();
   });
 });
