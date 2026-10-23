@@ -1,5 +1,20 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import {
+  applyConfigAnswer,
+  type ConfigAnswer,
+  ConfigQuestionSettingsSchema,
+  type ConfigResult,
+  type ConfigState,
+  ConfigStateSchema,
+  isConfigQuestion,
+  keptConfigResult,
+  normalizeApprovalQuestions,
+  parseConfigAnswer,
+  readConfigState,
+  type StoredConfigQuestion,
+  skippedConfigResult,
+} from "../be/approval-config-question";
 import { resolveTaskAuditUserId } from "../be/audit-user";
 import {
   type ApprovalRequest,
@@ -16,8 +31,9 @@ import {
   recordApprovalVotes,
   resolveApprovalRequest,
 } from "../be/db";
+import { getUserGrant } from "../be/rbac-roles";
 import { findUserById } from "../be/users";
-import { can, type RbacPrincipal } from "../rbac";
+import { can, isRbacEnabled, type RbacPrincipal } from "../rbac";
 import type { User } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -27,6 +43,7 @@ import {
   dispatchApprovalNotifications,
 } from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
+import { ensureConfigAdmin, runConfigWriteSideEffects } from "./config";
 import { bodyTask, route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -34,7 +51,7 @@ import { jsonError } from "./utils";
 
 const QuestionSchema = z.object({
   id: z.string(),
-  type: z.enum(["approval", "text", "single-select", "multi-select", "boolean"]),
+  type: z.enum(["approval", "text", "single-select", "multi-select", "boolean", "config"]),
   label: z.string(),
   required: z.boolean().optional(),
   description: z.string().optional(),
@@ -52,7 +69,13 @@ const QuestionSchema = z.object({
   minSelections: z.number().int().min(0).optional(),
   maxSelections: z.number().int().min(1).optional(),
   defaultValue: z.boolean().optional(),
+  config: ConfigQuestionSettingsSchema.optional().describe(
+    "Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value.",
+  ),
 });
+
+/** Create input: `label` may be omitted on a config question (it defaults to the key). */
+const QuestionInputSchema = QuestionSchema.extend({ label: z.string().optional() });
 
 export type ApprovalQuestion = z.infer<typeof QuestionSchema>;
 
@@ -133,6 +156,12 @@ const ApprovalRequestSchema = z.object({
   createdBy: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  configState: z
+    .record(z.string(), ConfigStateSchema)
+    .optional()
+    .describe(
+      "Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys.",
+    ),
 });
 
 /** Slim list row (`?fields=slim`) — see `ApprovalRequestSummary`. */
@@ -143,6 +172,7 @@ const ApprovalRequestSummarySchema = ApprovalRequestSchema.omit({
   approvals: true,
   resolutionReason: true,
   notificationChannels: true,
+  configState: true,
 }).extend({ questionCount: z.number().int() });
 
 /**
@@ -152,11 +182,16 @@ const ApprovalRequestSummarySchema = ApprovalRequestSchema.omit({
  */
 async function toApprovalRequestResponse(
   request: ApprovalRequest,
+  options: { withConfigState?: boolean } = {},
 ): Promise<z.infer<typeof ApprovalRequestSchema>> {
   const approvers = request.approvers as ApproversShape;
   const approvals = request.approvals ?? null;
+  const configState = options.withConfigState
+    ? await readConfigStates(request.questions as ApprovalQuestion[])
+    : undefined;
   return {
     ...request,
+    ...(configState ? { configState } : {}),
     questions: request.questions as ApprovalQuestion[],
     approvers,
     responses: request.responses as Record<string, unknown> | null,
@@ -186,6 +221,28 @@ async function withApprovalProgress(
       };
     }),
   );
+}
+
+/** Live state per config question id, or undefined when there are none. */
+async function readConfigStates(
+  questions: ApprovalQuestion[],
+): Promise<Record<string, ConfigState> | undefined> {
+  const configQuestions = questions.filter(isConfigQuestion);
+  if (configQuestions.length === 0) return undefined;
+  const entries = await Promise.all(
+    configQuestions.map(async (q) => [q.id, await readConfigState(q.config)] as const),
+  );
+  return Object.fromEntries(entries);
+}
+
+/** Thrown inside the respond transaction to roll back config writes. */
+class ConfigRespondAbort extends Error {
+  constructor(
+    readonly kind: "unavailable" | "conflict",
+    message: string = kind,
+  ) {
+    super(message);
+  }
 }
 
 export async function getWorkflowApprovalUnavailableReason(
@@ -241,6 +298,15 @@ function hasRequiredResponse(question: ApprovalQuestion, response: unknown): boo
     }
     case "boolean":
       return typeof response === "boolean";
+    case "config": {
+      // Shape only. The respond handler checks `keep` against the live row.
+      if (typeof response !== "object" || response === null) return false;
+      const answer = response as { action?: unknown; value?: unknown };
+      if (answer.action === "keep") return true;
+      return (
+        answer.action === "set" && typeof answer.value === "string" && answer.value.trim() !== ""
+      );
+    }
   }
 }
 
@@ -264,7 +330,12 @@ const createRoute = route({
   tags: ["ApprovalRequests"],
   body: z.object({
     title: z.string().min(1),
-    questions: z.array(QuestionSchema).min(1),
+    questions: z
+      .array(QuestionInputSchema)
+      .min(1)
+      .describe(
+        'A request with a `config` question needs `approvers.policy: "any"`. The answer is written to swarm_config; the request stores only `{ key, scope, scopeId, isSecret, status, updatedAt }` (plus `value` for non-secret keys).',
+      ),
     approvers: z.object({
       users: z.array(z.string()).optional(),
       roles: z.array(z.string()).optional(),
@@ -323,6 +394,8 @@ const getByIdRoute = route({
     404: { description: "Not found" },
   },
   auth: { apiKey: true },
+  description:
+    "Includes `configState` when the request has `config` questions: the live state of each target key, read now.",
 });
 
 const respondRoute = route({
@@ -331,7 +404,7 @@ const respondRoute = route({
   pattern: ["api", "approval-requests", null, "respond"],
   summary: "Submit a response to an approval request",
   description:
-    "Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`.",
+    'Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`. A `config` question takes `{ action: "set", value }`, `{ action: "keep" }` (key must exist) or `{ action: "skip" }` (optional questions only); `set` also needs the config write permission. The value is written only when the request is approved, and the stored answer is the result, never a secret value.',
   tags: ["ApprovalRequests"],
   params: z.object({ id: z.string().uuid() }),
   body: z.object({
@@ -487,11 +560,47 @@ export async function handleApprovalRequests(
       return true;
     }
 
+    // Config answers (D6) are checked here and replaced by their results (D7)
+    // before the vote exists, so no plaintext reaches any stored or sent copy.
+    const configQuestions = questions.filter(isConfigQuestion);
+    const configAnswers = new Map<
+      string,
+      { question: StoredConfigQuestion; answer: ConfigAnswer }
+    >();
+    for (const question of configQuestions) {
+      const state = await readConfigState(question.config);
+      const answer = parseConfigAnswer(question, parsed.body.responses[question.id], state);
+      if (!answer.ok) {
+        jsonError(res, answer.error, 400);
+        return true;
+      }
+      configAnswers.set(question.id, { question, answer: answer.answer });
+    }
+    if (configAnswers.size > 0 && approvers.policy !== "any") {
+      jsonError(res, 'Config questions need approvers.policy "any"', 409);
+      return true;
+    }
+    if ([...configAnswers.values()].some(({ answer }) => answer.action === "set")) {
+      if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
+      // Admission only checked `approval.respond`; `ensureConfigAdmin` passes
+      // every user, so check the config write grant here as PUT /api/config would.
+      const auth = getRequestAuth(req);
+      if (auth?.kind === "user" && isRbacEnabled()) {
+        const grant = await getUserGrant(auth.userId);
+        if (!grant.grantsAll && !grant.verbs.has("config.write.any")) {
+          jsonError(res, "Forbidden: setting a config value needs 'config.write.any'", 403);
+          return true;
+        }
+      }
+    }
+    const safeResponses: Record<string, unknown> = { ...parsed.body.responses };
+    for (const id of configAnswers.keys()) delete safeResponses[id];
+
     // Determine status from responses: if any approval question has approved: false → rejected
     let status: "approved" | "rejected" = "approved";
     for (const q of questions) {
       if (q.type === "approval") {
-        const answer = parsed.body.responses[q.id] as { approved?: boolean } | undefined;
+        const answer = safeResponses[q.id] as { approved?: boolean } | undefined;
         if (answer && answer.approved === false) {
           status = "rejected";
           break;
@@ -500,38 +609,89 @@ export async function handleApprovalRequests(
     }
 
     const responderId = responderKey(responder.responder);
-    const vote: ApprovalVote = {
-      responder: responderId,
-      approved: status === "approved",
-      responses: parsed.body.responses,
-      ...(parsed.body.respondedBy ? { claimedRespondedBy: parsed.body.respondedBy } : {}),
-      respondedAt: new Date().toISOString(),
-    };
+    const respondedAt = new Date().toISOString();
+    const configWrites: { result: ConfigResult; value: string }[] = [];
     // One write transaction (BEGIN IMMEDIATE) so concurrent answers to an
     // `all` / `{ min: N }` request append in turn and never drop each other.
-    const outcome = await getDbClient().transaction(async () => {
-      const current = await getApprovalRequestById(parsed.params.id);
-      if (!current || current.status !== "pending") return { kind: "unavailable" as const };
-      const prior = current.approvals ?? [];
-      if (prior.some((v) => v.responder === responderId)) return { kind: "duplicate" as const };
-      const votes = [...prior, vote];
-      if (status === "rejected" || (await approvalQuorumMet(approvers, votes))) {
-        const resolved = await resolveApprovalRequest(
-          parsed.params.id,
-          { status, responses: parsed.body.responses, approvals: votes, resolvedBy: responderId },
-          { requireActionableWorkflow: true },
-        );
-        return resolved
-          ? { kind: "resolved" as const, request: resolved }
+    // Config writes share it, so a lost race writes nothing.
+    const outcome = await getDbClient()
+      .transaction(async () => {
+        const current = await getApprovalRequestById(parsed.params.id);
+        if (!current || current.status !== "pending") return { kind: "unavailable" as const };
+        const prior = current.approvals ?? [];
+        if (prior.some((v) => v.responder === responderId)) return { kind: "duplicate" as const };
+
+        // Config values are written only when the request resolves approved (D8).
+        const responses = { ...safeResponses };
+        for (const [id, { question, answer }] of configAnswers) {
+          if (status === "rejected" || answer.action === "skip") {
+            responses[id] = skippedConfigResult(question);
+          } else if (answer.action === "keep") {
+            const kept = await keptConfigResult(question);
+            if (!kept) {
+              throw new ConfigRespondAbort(
+                "conflict",
+                `config question "${id}": the key was removed before the answer was saved`,
+              );
+            }
+            responses[id] = kept;
+          } else {
+            const written = await applyConfigAnswer(question, answer.value);
+            configWrites.push({ result: written, value: answer.value });
+            responses[id] = written;
+          }
+        }
+
+        const vote: ApprovalVote = {
+          responder: responderId,
+          approved: status === "approved",
+          responses,
+          ...(parsed.body.respondedBy ? { claimedRespondedBy: parsed.body.respondedBy } : {}),
+          respondedAt,
+        };
+        const votes = [...prior, vote];
+        if (status === "rejected" || (await approvalQuorumMet(approvers, votes))) {
+          const resolved = await resolveApprovalRequest(
+            parsed.params.id,
+            { status, responses, approvals: votes, resolvedBy: responderId },
+            { requireActionableWorkflow: true },
+          );
+          if (!resolved && configWrites.length > 0) throw new ConfigRespondAbort("unavailable");
+          return resolved
+            ? { kind: "resolved" as const, request: resolved }
+            : { kind: "unavailable" as const };
+        }
+        const recorded = (await recordApprovalVotes(parsed.params.id, votes))
+          ? await getApprovalRequestById(parsed.params.id)
+          : null;
+        return recorded
+          ? { kind: "recorded" as const, request: recorded }
           : { kind: "unavailable" as const };
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof ConfigRespondAbort)) throw error;
+        // Rolled back: nothing was written.
+        configWrites.length = 0;
+        return error.kind === "conflict"
+          ? { kind: "conflict" as const, message: error.message }
+          : { kind: "unavailable" as const };
+      });
+
+    if (outcome.kind === "conflict") {
+      jsonError(res, outcome.message, 409);
+      return true;
+    }
+    // The transaction has committed: run what PUT /api/config runs after a write.
+    for (const { result, value } of configWrites) {
+      try {
+        await runConfigWriteSideEffects(result.scope, result.key, value);
+      } catch (err) {
+        console.error(
+          "[approval-requests] Config side effects failed:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
       }
-      const recorded = (await recordApprovalVotes(parsed.params.id, votes))
-        ? await getApprovalRequestById(parsed.params.id)
-        : null;
-      return recorded
-        ? { kind: "recorded" as const, request: recorded }
-        : { kind: "unavailable" as const };
-    });
+    }
 
     if (outcome.kind === "duplicate") {
       jsonError(res, "You already answered this approval request", 409);
@@ -576,7 +736,7 @@ export async function handleApprovalRequests(
     await createApprovalFollowUpTask(updated, "hitl.follow_up");
 
     respondRoute.respond(res, 200, {
-      approvalRequest: await toApprovalRequestResponse(updated),
+      approvalRequest: await toApprovalRequestResponse(updated, { withConfigState: true }),
     });
     return true;
   }
@@ -617,7 +777,7 @@ export async function handleApprovalRequests(
     }
 
     getByIdRoute.respond(res, 200, {
-      approvalRequest: await toApprovalRequestResponse(request),
+      approvalRequest: await toApprovalRequestResponse(request, { withConfigState: true }),
     });
     return true;
   }
@@ -638,6 +798,15 @@ export async function handleApprovalRequests(
       }
     }
 
+    const normalized = await normalizeApprovalQuestions(parsed.body.questions, {
+      approvers: parsed.body.approvers,
+    });
+    if (!normalized.ok) {
+      jsonError(res, normalized.error, 400);
+      return true;
+    }
+    const questions = normalized.questions;
+
     const id = crypto.randomUUID();
     // Prefer a trusted authenticated user (never client-controlled); else fall
     // back to the ownership-validated sourceTaskId the request body carries.
@@ -651,7 +820,7 @@ export async function handleApprovalRequests(
     const request = await createApprovalRequest({
       id,
       title: parsed.body.title,
-      questions: parsed.body.questions,
+      questions,
       approvers: parsed.body.approvers,
       workflowRunId: parsed.body.workflowRunId,
       workflowRunStepId: parsed.body.workflowRunStepId,
@@ -668,7 +837,7 @@ export async function handleApprovalRequests(
       dispatchApprovalNotifications({
         requestId: request.id,
         title: request.title,
-        questions: parsed.body.questions,
+        questions,
         timeoutSeconds: parsed.body.timeoutSeconds,
         notifications,
       }).catch((err) => {
@@ -705,7 +874,9 @@ export async function handleApprovalRequests(
 
     const requests = await listApprovalRequests(filters);
     listRoute.respond(res, 200, {
-      approvalRequests: await Promise.all(requests.map(toApprovalRequestResponse)),
+      approvalRequests: await Promise.all(
+        requests.map((request) => toApprovalRequestResponse(request)),
+      ),
     });
     return true;
   }

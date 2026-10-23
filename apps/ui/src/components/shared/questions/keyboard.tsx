@@ -110,7 +110,7 @@ const SHEET_GROUPS: { title: string; rows: { keys: string[]; label: string }[] }
       { keys: ["1", "–", "9"], label: "Pick an option (Yes / No are 1 / 2)" },
       { keys: ["←", "→"], label: "Move the option highlight (multi-select)" },
       { keys: ["Space"], label: "Toggle the highlighted option (multi-select)" },
-      { keys: ["↵"], label: "Type into a text question" },
+      { keys: ["↵"], label: "Type into a text or config question" },
     ],
   },
   {

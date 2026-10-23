@@ -1,3 +1,4 @@
+import { formatConfigResult } from "../be/approval-config-question";
 import {
   type ApprovalRequest,
   claimApprovalCancellationNotification,
@@ -34,11 +35,15 @@ function escapeSlackMrkdwn(text: string): string {
  * question stays answerable on the dashboard page the card's button opens.
  */
 export function buildSlackQuestionsSummary(
-  questions: ReadonlyArray<{ label: string }>,
+  questions: ReadonlyArray<{ label?: string; type?: string }>,
   timeoutText = "",
 ): string {
   const header = "*Questions:*\n";
-  const lines = questions.map((q) => `• ${escapeSlackMrkdwn(q.label.replace(/\s+/g, " ").trim())}`);
+  // A config question is only ever answered on the dashboard, never in Slack.
+  const lines = questions.map(
+    (q) =>
+      `• ${escapeSlackMrkdwn((q.label ?? "").replace(/\s+/g, " ").trim())}${q.type === "config" ? " (set on dashboard)" : ""}`,
+  );
   const fits = (shown: string[], omitted: number) => {
     const tail =
       omitted > 0 ? `\n_…and ${omitted} more. Answer all of them on the dashboard._` : "";
@@ -71,7 +76,7 @@ export interface ApprovalNotificationChannel {
 export interface ApprovalNotificationsInput {
   requestId: string;
   title: string;
-  questions: ReadonlyArray<{ label: string }>;
+  questions: ReadonlyArray<{ label?: string; type?: string }>;
   timeoutSeconds?: number;
   notifications: ReadonlyArray<ApprovalNotificationChannel>;
 }
@@ -355,6 +360,8 @@ function formatResponses(
       let answerText: string;
       if (answer == null) {
         answerText = "(no answer)";
+      } else if (q.type === "config") {
+        answerText = formatConfigResult(answer) ?? "(unreadable config result)";
       } else if (q.type === "approval") {
         const a = answer as { approved?: boolean; comment?: string };
         answerText = a.approved ? "Approved" : "Rejected";

@@ -276,3 +276,59 @@ describe("multi-approver progress and refusals", () => {
     expect(respondErrorMessage("boom")).toBe("Failed to submit response");
   });
 });
+
+describe("config questions", () => {
+  const secret: ApprovalQuestion = {
+    id: "bb",
+    type: "config",
+    label: "API token",
+    required: true,
+    config: { key: "BITBUCKET_TOKEN", scope: "global", isSecret: true },
+  };
+  const plain: ApprovalQuestion = {
+    id: "region",
+    type: "config",
+    label: "Region",
+    required: false,
+    config: {
+      key: "REGION",
+      scope: "global",
+      isSecret: false,
+      options: [{ value: "eu", label: "Europe" }],
+    },
+  };
+
+  test("a pending secret answer never renders its value", () => {
+    const value = "super-secret-value-123";
+    const formatted = formatApprovalAnswer(secret, { action: "set", value });
+    expect(formatted.text).toBe("New value entered");
+    expect(JSON.stringify(formatted)).not.toContain(value);
+  });
+
+  test("stored results read as words", () => {
+    expect(
+      formatApprovalAnswer(secret, {
+        key: "BITBUCKET_TOKEN",
+        scope: "global",
+        scopeId: null,
+        isSecret: true,
+        status: "set",
+        updatedAt: "2026-10-23T16:40:12.000Z",
+      }).text,
+    ).toStartWith("Set (secret), updated ");
+    expect(formatApprovalAnswer(secret, { status: "kept", isSecret: true }).text).toBe("Kept");
+    expect(formatApprovalAnswer(secret, { status: "skipped", isSecret: true }).text).toBe(
+      "Skipped",
+    );
+    expect(formatApprovalAnswer(plain, { status: "set", isSecret: false, value: "eu" }).text).toBe(
+      "Set: Europe",
+    );
+  });
+
+  test("hints: required needs a value, an optional skip is fine", () => {
+    expect(answerHint(secret, undefined)).toBe("Enter a value or keep the current one");
+    expect(answerHint(secret, { action: "skip" })).toBe("This key is required; keep or set it");
+    expect(answerHint(plain, { action: "skip" })).toBeNull();
+    expect(answerHint(secret, { action: "set", value: "x" })).toBeNull();
+  });
+});

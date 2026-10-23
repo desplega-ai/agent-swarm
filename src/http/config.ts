@@ -21,10 +21,7 @@ import {
   internalConfigKeyError,
   isApiOnlyConfigKey,
   isInternalConfigKey,
-  isReservedConfigKey,
-  reservedKeyError,
-  validateConfigValue,
-  validateExportToEnv,
+  validateConfigEntry,
 } from "../be/swarm-config-guard";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
 import { SwarmConfigSchema } from "../types";
@@ -143,6 +140,25 @@ export async function ensureConfigAdmin(
       ? "Writing swarm config requires the lead agent"
       : "Deleting swarm config requires the lead agent",
   );
+}
+
+/**
+ * What a committed config write triggers beyond the row itself. Shared by
+ * `PUT /api/config` and HITL `config` answers.
+ */
+export async function runConfigWriteSideEffects(
+  scope: "global" | "agent" | "repo",
+  key: string,
+  value: string,
+): Promise<void> {
+  if (scope !== "global") return;
+  if (key === "SWARM_ORG_WEBSITE") await fillOrgLogoFromWebsite(value);
+  await syncRankingAfterConfigChange(key, value);
+  // Auto-reload integrations when a global-scoped config changes so callers
+  // (CLI, automation, dashboard) don't have to remember to hit /reload.
+  // Debounced to coalesce sequential single-key upserts from the dashboard
+  // batch save (no bulk endpoint exists).
+  scheduleIntegrationsReload();
 }
 
 /**
@@ -484,28 +500,7 @@ export async function handleConfig(
     if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
     const { scope, scopeId, key, value, isSecret, envPath, description, exportToEnv } = parsed.body;
 
-    if (scope === "global" && scopeId) {
-      jsonError(res, "Global scope must not have scopeId", 400);
-      return true;
-    }
-
-    if ((scope === "agent" || scope === "repo") && !scopeId) {
-      jsonError(res, "Agent/repo scope requires scopeId", 400);
-      return true;
-    }
-
-    if (isReservedConfigKey(key)) {
-      jsonError(res, reservedKeyError(key).message, 400);
-      return true;
-    }
-
-    if (isInternalConfigKey(key)) {
-      jsonError(res, internalConfigKeyError(key).message, 400);
-      return true;
-    }
-
-    const validationError =
-      validateConfigValue(key, value) ?? validateExportToEnv(key, exportToEnv);
+    const validationError = validateConfigEntry({ scope, scopeId, key, value, exportToEnv });
     if (validationError) {
       jsonError(res, validationError, 400);
       return true;
@@ -523,17 +518,7 @@ export async function handleConfig(
         description: description || null,
         exportToEnv,
       });
-      // Auto-reload integrations when a global-scoped config changes so callers
-      // (CLI, automation, dashboard) don't have to remember to hit /reload.
-      // Debounced to coalesce sequential single-key upserts from the dashboard
-      // batch save (no bulk endpoint exists).
-      if (scope === "global" && key === "SWARM_ORG_WEBSITE") {
-        await fillOrgLogoFromWebsite(String(value));
-      }
-      if (scope === "global") await syncRankingAfterConfigChange(key, String(value));
-      if (scope === "global") {
-        scheduleIntegrationsReload();
-      }
+      await runConfigWriteSideEffects(scope, key, String(value));
       const result = includeSecrets || !config.isSecret ? config : maskSecrets([config])[0]!;
       upsertConfig.respond(res, 200, result);
     } catch (error) {

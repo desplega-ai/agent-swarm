@@ -629,6 +629,29 @@ export function validateConfigValue(key: string, value: unknown): string | null 
 }
 
 /**
+ * Every check `PUT /api/config` runs before a write: scope and scopeId shape,
+ * reserved and internal keys, the per-key value validator and the env-export
+ * rule. Shared with HITL `config` questions so the two writers cannot drift.
+ */
+export function validateConfigEntry(entry: {
+  scope: "global" | "agent" | "repo";
+  scopeId?: string | null;
+  key: string;
+  value: unknown;
+  exportToEnv?: boolean;
+}): string | null {
+  if (entry.scope === "global" && entry.scopeId) return "Global scope must not have scopeId";
+  if ((entry.scope === "agent" || entry.scope === "repo") && !entry.scopeId) {
+    return "Agent/repo scope requires scopeId";
+  }
+  if (isReservedConfigKey(entry.key)) return reservedKeyError(entry.key).message;
+  if (isInternalConfigKey(entry.key)) return internalConfigKeyError(entry.key).message;
+  return (
+    validateConfigValue(entry.key, entry.value) ?? validateExportToEnv(entry.key, entry.exportToEnv)
+  );
+}
+
+/**
  * Rejects `exportToEnv: true` for keys only the API server reads. Omitting the
  * flag is fine: the write path stores false for those keys.
  */

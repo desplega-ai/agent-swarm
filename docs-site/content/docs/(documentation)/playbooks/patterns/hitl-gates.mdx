@@ -36,6 +36,10 @@ Agents can also request a human decision with the `request-human-input` MCP tool
 - Define both branches: what happens on approve **and** on reject (archive, retry, escalate).
 - Set a timeout/fallback so a forgotten gate doesn't wedge the workflow forever.
 
+## Ask a person for a secret
+
+When a workflow or agent needs a credential (an API token for a new integration, say), ask for it with a `config` question instead of telling the person to set an env var. The dashboard card names the key, says whether it is already set, and takes the value in a password field. The value goes straight into encrypted swarm config; the agent only learns that it was set. Slack and email cards link to the dashboard and never collect the value. See [Config questions](/docs/concepts/workflows#config-questions).
+
 ## Used in
 
 - [Lead Prospecting](/docs/playbooks/lead-prospecting)

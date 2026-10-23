@@ -27,6 +27,55 @@ function optionLabel(question: ApprovalQuestion, value: string): string {
   return question.options?.find((option) => option.value === value)?.label ?? value;
 }
 
+/** "23 Oct 2026, 18:40" in the viewer's local time zone, never UTC. */
+export function formatLocalDateTime(value: string): string {
+  return parseUTCDate(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+/**
+ * A config answer: the stored result (`{ status, isSecret, ... }`) or a
+ * pending dashboard answer (`{ action, value }`). A secret value is never
+ * part of the output.
+ */
+function formatConfigAnswer(question: ApprovalQuestion, response: unknown): FormattedAnswer {
+  if (typeof response !== "object" || Array.isArray(response) || response === null) {
+    return { kind: "text", tone: "neutral", text: "Config answer" };
+  }
+  const answer = response as {
+    status?: unknown;
+    action?: unknown;
+    isSecret?: unknown;
+    updatedAt?: unknown;
+    value?: unknown;
+  };
+  const isSecret = answer.isSecret === true || question.config?.isSecret !== false;
+  const updated =
+    typeof answer.updatedAt === "string"
+      ? `, updated ${formatLocalDateTime(answer.updatedAt)}`
+      : "";
+  const status = answer.status ?? answer.action;
+  if (status === "kept" || status === "keep") {
+    return { kind: "text", tone: "neutral", text: `Kept${updated}` };
+  }
+  if (status === "skipped" || status === "skip") {
+    return { kind: "text", tone: "empty", text: "Skipped" };
+  }
+  if (status === "set") {
+    if (isSecret) {
+      return {
+        kind: "text",
+        tone: "success",
+        text: answer.status === "set" ? `Set (secret)${updated}` : "New value entered",
+      };
+    }
+    const picked = typeof answer.value === "string" ? answer.value : "";
+    const value =
+      question.config?.options?.find((option) => option.value === picked)?.label ?? picked;
+    return { kind: "text", tone: "success", text: value ? `Set: ${value}` : `Set${updated}` };
+  }
+  return { kind: "text", tone: "neutral", text: "Config answer" };
+}
+
 function raw(response: unknown): FormattedAnswer {
   let text: string;
   try {
@@ -77,6 +126,8 @@ export function formatApprovalAnswer(
       if (typeof response !== "string") return raw(response);
       if (!response.trim()) return EMPTY;
       return { kind: "text", tone: "neutral", text: response };
+    case "config":
+      return formatConfigAnswer(question, response);
     default:
       return raw(response);
   }
@@ -93,6 +144,9 @@ export function isAnswered(question: ApprovalQuestion, response: unknown): boole
  */
 export function answerHint(question: ApprovalQuestion, response: unknown): string | null {
   if (isAnswered(question, response)) return null;
+  if (question.type === "config" && (response as { action?: unknown } | null)?.action === "skip") {
+    return question.required ? "This key is required; keep or set it" : null;
+  }
   const touched =
     response !== undefined &&
     response !== null &&
@@ -108,6 +162,8 @@ export function answerHint(question: ApprovalQuestion, response: unknown): strin
       return "Type a response";
     case "single-select":
       return "Pick one option";
+    case "config":
+      return "Enter a value or keep the current one";
     case "multi-select": {
       const count = Array.isArray(response) ? response.length : 0;
       const min = Math.max(1, question.minSelections ?? 0);

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Approvals: a `config` question type asks a person to set one swarm config key or secret on the dashboard. The card shows whether the key is already set, offers keep, replace or skip, and takes non-secret values from options. Secrets go straight into encrypted swarm config; the request, workflow output and follow-up task carry only `{ key, scope, isSecret, status, updatedAt }`.
+
 ### Fixed
 - Skills: `skill-search` finds the obvious skill for natural-language queries. English stopwords such as "a", "how" and "do" no longer match the whole catalog, and a second FTS5 index over name and description (migration 241, backfilled) adds its BM25 score three times over, so a long SKILL.md body no longer buries a name or description hit. A query of only stopwords uses the substring match.
 

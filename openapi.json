@@ -1164,6 +1164,78 @@
           "lastUpdatedAt"
         ]
       },
+      "SwarmConfig": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "agent",
+              "repo"
+            ]
+          },
+          "scopeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "value": {
+            "type": "string"
+          },
+          "isSecret": {
+            "type": "boolean"
+          },
+          "envPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "exportToEnv": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "scopeId",
+          "key",
+          "value",
+          "isSecret",
+          "envPath",
+          "description",
+          "createdAt",
+          "lastUpdatedAt",
+          "encrypted",
+          "exportToEnv"
+        ]
+      },
       "AssetSummary": {
         "type": "object",
         "properties": {
@@ -1390,78 +1462,6 @@
           "agentId",
           "cause",
           "createdAt"
-        ]
-      },
-      "SwarmConfig": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "scope": {
-            "type": "string",
-            "enum": [
-              "global",
-              "agent",
-              "repo"
-            ]
-          },
-          "scopeId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "key": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255
-          },
-          "value": {
-            "type": "string"
-          },
-          "isSecret": {
-            "type": "boolean"
-          },
-          "envPath": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "lastUpdatedAt": {
-            "type": "string"
-          },
-          "encrypted": {
-            "type": "boolean"
-          },
-          "exportToEnv": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "scope",
-          "scopeId",
-          "key",
-          "value",
-          "isSecret",
-          "envPath",
-          "description",
-          "createdAt",
-          "lastUpdatedAt",
-          "encrypted",
-          "exportToEnv"
         ]
       },
       "ContextSnapshot": {
@@ -12333,6 +12333,1020 @@
         }
       }
     },
+    "/api/used-by": {
+      "post": {
+        "summary": "Grant or revoke the 'used by' logo consent",
+        "description": "Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.",
+        "tags": [
+          "Telemetry"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "granted": {
+                    "type": "boolean"
+                  },
+                  "contactEmail": {
+                    "type": "string",
+                    "maxLength": 320,
+                    "format": "email"
+                  },
+                  "contactFunction": {
+                    "type": "string",
+                    "enum": [
+                      "engineer",
+                      "eng_lead",
+                      "founder",
+                      "product",
+                      "ops",
+                      "other"
+                    ]
+                  },
+                  "quote": {
+                    "type": "string",
+                    "maxLength": 280
+                  }
+                },
+                "required": [
+                  "granted"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Consent recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "granted": {
+                      "type": "boolean"
+                    },
+                    "changedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "granted",
+                    "changedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid contact details, or missing organization name or website",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only a config admin can change the consent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The telemetry proxy did not accept the consent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ranking": {
+      "get": {
+        "summary": "Public ranking state",
+        "description": "Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.",
+        "tags": [
+          "Telemetry"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ranking state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "eligible": {
+                      "type": "boolean"
+                    },
+                    "missing": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "SWARM_ORG_NAME",
+                          "SWARM_ORG_WEBSITE"
+                        ]
+                      }
+                    },
+                    "telemetryOn": {
+                      "type": "boolean"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "domain": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "listing": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "v": {
+                          "type": "number",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "domain": {
+                          "type": "string"
+                        },
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "engineering",
+                            "product",
+                            "marketing",
+                            "support",
+                            "operations",
+                            "other"
+                          ]
+                        },
+                        "subcategory": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "description": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sourceCodeUrl": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "v",
+                        "name",
+                        "domain",
+                        "category",
+                        "subcategory",
+                        "description",
+                        "sourceCodeUrl",
+                        "updatedAt"
+                      ]
+                    },
+                    "listingMatchesDomain": {
+                      "type": "boolean"
+                    },
+                    "verifyUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "eligible",
+                    "missing",
+                    "telemetryOn",
+                    "enabled",
+                    "name",
+                    "domain",
+                    "listing",
+                    "listingMatchesDomain",
+                    "verifyUrl"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only a config admin can read the ranking state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ranking/opt-in": {
+      "post": {
+        "summary": "Opt this install into the public ranking",
+        "description": "Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.",
+        "tags": [
+          "Telemetry"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "engineering",
+                      "product",
+                      "marketing",
+                      "support",
+                      "operations",
+                      "other"
+                    ]
+                  },
+                  "subcategory": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "sourceCodeUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "category"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Opted in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "domain": {
+                      "type": "string"
+                    },
+                    "listing": {
+                      "type": "object",
+                      "properties": {
+                        "v": {
+                          "type": "number",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "domain": {
+                          "type": "string"
+                        },
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "engineering",
+                            "product",
+                            "marketing",
+                            "support",
+                            "operations",
+                            "other"
+                          ]
+                        },
+                        "subcategory": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "description": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sourceCodeUrl": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "v",
+                        "name",
+                        "domain",
+                        "category",
+                        "subcategory",
+                        "description",
+                        "sourceCodeUrl",
+                        "updatedAt"
+                      ]
+                    },
+                    "verifyUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "listing",
+                    "verifyUrl"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A listing field is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only a config admin can opt in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ranking/opt-out": {
+      "post": {
+        "summary": "Leave the public ranking",
+        "description": "Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.",
+        "tags": [
+          "Telemetry"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Opted out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "enabled"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only a config admin can opt out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/resolved": {
+      "get": {
+        "summary": "Get resolved config (merged global + agent + repo scopes)",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "repoId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Return only the entry with this exact key. Omit to return every resolved entry."
+            },
+            "required": false,
+            "description": "Return only the entry with this exact key. Omit to return every resolved entry.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeSecrets",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved config entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SwarmConfig"
+                      }
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "configs"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/env-presence": {
+      "get": {
+        "summary": "Check which of the given env var keys are currently set in process.env (presence only, no values)",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "keys",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Map of key -> boolean (true iff set in process.env)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "presence": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "required": [
+                    "presence"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/reload": {
+      "post": {
+        "summary": "Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail)",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reload result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "configsLoaded": {
+                      "type": "number"
+                    },
+                    "keysUpdated": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "integrationsReinitialized": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "configsLoaded",
+                    "keysUpdated",
+                    "integrationsReinitialized"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reload failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/{id}": {
+      "get": {
+        "summary": "Get a single config entry by ID",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeSecrets",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Config entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SwarmConfig"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Config not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload.",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Config deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Config not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config": {
+      "get": {
+        "summary": "List config entries with optional filters",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopeId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Return only entries with this exact key. Omit to return every entry."
+            },
+            "required": false,
+            "description": "Return only entries with this exact key. Omit to return every entry.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeSecrets",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of config entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SwarmConfig"
+                      }
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "configs"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call.",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "global",
+                      "agent",
+                      "repo"
+                    ]
+                  },
+                  "scopeId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {},
+                  "isSecret": {
+                    "type": "boolean"
+                  },
+                  "envPath": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "exportToEnv": {
+                    "type": "boolean",
+                    "description": "Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads."
+                  }
+                },
+                "required": [
+                  "scope",
+                  "key"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Config entry upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwarmConfig"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/approval-requests": {
       "post": {
         "summary": "Create a new approval request",
@@ -12369,7 +13383,8 @@
                             "text",
                             "single-select",
                             "multi-select",
-                            "boolean"
+                            "boolean",
+                            "config"
                           ]
                         },
                         "label": {
@@ -12418,15 +13433,81 @@
                         },
                         "defaultValue": {
                           "type": "boolean"
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255,
+                              "pattern": "^\\S+$",
+                              "description": "The swarm config key to set, e.g. BITBUCKET_TOKEN"
+                            },
+                            "scope": {
+                              "type": "string",
+                              "enum": [
+                                "global",
+                                "agent",
+                                "repo"
+                              ],
+                              "description": "Config scope the value is written to"
+                            },
+                            "scopeId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent."
+                            },
+                            "isSecret": {
+                              "type": "boolean",
+                              "description": "Store encrypted and never show the value (default true). An existing secret row always stays secret."
+                            },
+                            "helpUrl": {
+                              "type": "string",
+                              "format": "uri",
+                              "description": "Link shown next to the field, e.g. where to create the token"
+                            },
+                            "options": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "label"
+                                ]
+                              },
+                              "description": "Allowed values for a non-secret key, rendered as a choice"
+                            },
+                            "defaultValue": {
+                              "type": "string",
+                              "description": "Prefilled value for a non-secret key"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "scope"
+                          ],
+                          "description": "Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value."
                         }
                       },
                       "required": [
                         "id",
-                        "type",
-                        "label"
+                        "type"
                       ]
                     },
-                    "minItems": 1
+                    "minItems": 1,
+                    "description": "A request with a `config` question needs `approvers.policy: \"any\"`. The answer is written to swarm_config; the request stores only `{ key, scope, scopeId, isSecret, status, updatedAt }` (plus `value` for non-secret keys)."
                   },
                   "approvers": {
                     "type": "object",
@@ -12558,7 +13639,8 @@
                                   "text",
                                   "single-select",
                                   "multi-select",
-                                  "boolean"
+                                  "boolean",
+                                  "config"
                                 ]
                               },
                               "label": {
@@ -12607,6 +13689,72 @@
                               },
                               "defaultValue": {
                                 "type": "boolean"
+                              },
+                              "config": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255,
+                                    "pattern": "^\\S+$",
+                                    "description": "The swarm config key to set, e.g. BITBUCKET_TOKEN"
+                                  },
+                                  "scope": {
+                                    "type": "string",
+                                    "enum": [
+                                      "global",
+                                      "agent",
+                                      "repo"
+                                    ],
+                                    "description": "Config scope the value is written to"
+                                  },
+                                  "scopeId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent."
+                                  },
+                                  "isSecret": {
+                                    "type": "boolean",
+                                    "description": "Store encrypted and never show the value (default true). An existing secret row always stays secret."
+                                  },
+                                  "helpUrl": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "description": "Link shown next to the field, e.g. where to create the token"
+                                  },
+                                  "options": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "value": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "description": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "value",
+                                        "label"
+                                      ]
+                                    },
+                                    "description": "Allowed values for a non-secret key, rendered as a choice"
+                                  },
+                                  "defaultValue": {
+                                    "type": "string",
+                                    "description": "Prefilled value for a non-secret key"
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "scope"
+                                ],
+                                "description": "Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value."
                               }
                             },
                             "required": [
@@ -12823,6 +13971,36 @@
                         },
                         "updatedAt": {
                           "type": "string"
+                        },
+                        "configState": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "exists": {
+                                "type": "boolean"
+                              },
+                              "isSecret": {
+                                "type": "boolean"
+                              },
+                              "updatedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "value": {
+                                "type": "string",
+                                "description": "Current value; present only for non-secret rows"
+                              }
+                            },
+                            "required": [
+                              "exists",
+                              "isSecret",
+                              "updatedAt"
+                            ]
+                          },
+                          "description": "Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys."
                         }
                       },
                       "required": [
@@ -12965,7 +14143,8 @@
                                         "text",
                                         "single-select",
                                         "multi-select",
-                                        "boolean"
+                                        "boolean",
+                                        "config"
                                       ]
                                     },
                                     "label": {
@@ -13014,6 +14193,72 @@
                                     },
                                     "defaultValue": {
                                       "type": "boolean"
+                                    },
+                                    "config": {
+                                      "type": "object",
+                                      "properties": {
+                                        "key": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255,
+                                          "pattern": "^\\S+$",
+                                          "description": "The swarm config key to set, e.g. BITBUCKET_TOKEN"
+                                        },
+                                        "scope": {
+                                          "type": "string",
+                                          "enum": [
+                                            "global",
+                                            "agent",
+                                            "repo"
+                                          ],
+                                          "description": "Config scope the value is written to"
+                                        },
+                                        "scopeId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent."
+                                        },
+                                        "isSecret": {
+                                          "type": "boolean",
+                                          "description": "Store encrypted and never show the value (default true). An existing secret row always stays secret."
+                                        },
+                                        "helpUrl": {
+                                          "type": "string",
+                                          "format": "uri",
+                                          "description": "Link shown next to the field, e.g. where to create the token"
+                                        },
+                                        "options": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "value": {
+                                                "type": "string"
+                                              },
+                                              "label": {
+                                                "type": "string"
+                                              },
+                                              "description": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "value",
+                                              "label"
+                                            ]
+                                          },
+                                          "description": "Allowed values for a non-secret key, rendered as a choice"
+                                        },
+                                        "defaultValue": {
+                                          "type": "string",
+                                          "description": "Prefilled value for a non-secret key"
+                                        }
+                                      },
+                                      "required": [
+                                        "key",
+                                        "scope"
+                                      ],
+                                      "description": "Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value."
                                     }
                                   },
                                   "required": [
@@ -13230,6 +14475,36 @@
                               },
                               "updatedAt": {
                                 "type": "string"
+                              },
+                              "configState": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "exists": {
+                                      "type": "boolean"
+                                    },
+                                    "isSecret": {
+                                      "type": "boolean"
+                                    },
+                                    "updatedAt": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "description": "Current value; present only for non-secret rows"
+                                    }
+                                  },
+                                  "required": [
+                                    "exists",
+                                    "isSecret",
+                                    "updatedAt"
+                                  ]
+                                },
+                                "description": "Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys."
                               }
                             },
                             "required": [
@@ -13387,6 +14662,7 @@
     "/api/approval-requests/{id}": {
       "get": {
         "summary": "Get approval request details",
+        "description": "Includes `configState` when the request has `config` questions: the live state of each target key, read now.",
         "tags": [
           "ApprovalRequests"
         ],
@@ -13438,7 +14714,8 @@
                                   "text",
                                   "single-select",
                                   "multi-select",
-                                  "boolean"
+                                  "boolean",
+                                  "config"
                                 ]
                               },
                               "label": {
@@ -13487,6 +14764,72 @@
                               },
                               "defaultValue": {
                                 "type": "boolean"
+                              },
+                              "config": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255,
+                                    "pattern": "^\\S+$",
+                                    "description": "The swarm config key to set, e.g. BITBUCKET_TOKEN"
+                                  },
+                                  "scope": {
+                                    "type": "string",
+                                    "enum": [
+                                      "global",
+                                      "agent",
+                                      "repo"
+                                    ],
+                                    "description": "Config scope the value is written to"
+                                  },
+                                  "scopeId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent."
+                                  },
+                                  "isSecret": {
+                                    "type": "boolean",
+                                    "description": "Store encrypted and never show the value (default true). An existing secret row always stays secret."
+                                  },
+                                  "helpUrl": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "description": "Link shown next to the field, e.g. where to create the token"
+                                  },
+                                  "options": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "value": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "description": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "value",
+                                        "label"
+                                      ]
+                                    },
+                                    "description": "Allowed values for a non-secret key, rendered as a choice"
+                                  },
+                                  "defaultValue": {
+                                    "type": "string",
+                                    "description": "Prefilled value for a non-secret key"
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "scope"
+                                ],
+                                "description": "Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value."
                               }
                             },
                             "required": [
@@ -13703,6 +15046,36 @@
                         },
                         "updatedAt": {
                           "type": "string"
+                        },
+                        "configState": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "exists": {
+                                "type": "boolean"
+                              },
+                              "isSecret": {
+                                "type": "boolean"
+                              },
+                              "updatedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "value": {
+                                "type": "string",
+                                "description": "Current value; present only for non-secret rows"
+                              }
+                            },
+                            "required": [
+                              "exists",
+                              "isSecret",
+                              "updatedAt"
+                            ]
+                          },
+                          "description": "Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys."
                         }
                       },
                       "required": [
@@ -13751,7 +15124,7 @@
     "/api/approval-requests/{id}/respond": {
       "post": {
         "summary": "Submit a response to an approval request",
-        "description": "Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`.",
+        "description": "Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`. A `config` question takes `{ action: \"set\", value }`, `{ action: \"keep\" }` (key must exist) or `{ action: \"skip\" }` (optional questions only); `set` also needs the config write permission. The value is written only when the request is approved, and the stored answer is the result, never a secret value.",
         "tags": [
           "ApprovalRequests"
         ],
@@ -13825,7 +15198,8 @@
                                   "text",
                                   "single-select",
                                   "multi-select",
-                                  "boolean"
+                                  "boolean",
+                                  "config"
                                 ]
                               },
                               "label": {
@@ -13874,6 +15248,72 @@
                               },
                               "defaultValue": {
                                 "type": "boolean"
+                              },
+                              "config": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255,
+                                    "pattern": "^\\S+$",
+                                    "description": "The swarm config key to set, e.g. BITBUCKET_TOKEN"
+                                  },
+                                  "scope": {
+                                    "type": "string",
+                                    "enum": [
+                                      "global",
+                                      "agent",
+                                      "repo"
+                                    ],
+                                    "description": "Config scope the value is written to"
+                                  },
+                                  "scopeId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent."
+                                  },
+                                  "isSecret": {
+                                    "type": "boolean",
+                                    "description": "Store encrypted and never show the value (default true). An existing secret row always stays secret."
+                                  },
+                                  "helpUrl": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "description": "Link shown next to the field, e.g. where to create the token"
+                                  },
+                                  "options": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "value": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "description": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "value",
+                                        "label"
+                                      ]
+                                    },
+                                    "description": "Allowed values for a non-secret key, rendered as a choice"
+                                  },
+                                  "defaultValue": {
+                                    "type": "string",
+                                    "description": "Prefilled value for a non-secret key"
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "scope"
+                                ],
+                                "description": "Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value."
                               }
                             },
                             "required": [
@@ -14090,6 +15530,36 @@
                         },
                         "updatedAt": {
                           "type": "string"
+                        },
+                        "configState": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "exists": {
+                                "type": "boolean"
+                              },
+                              "isSecret": {
+                                "type": "boolean"
+                              },
+                              "updatedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "value": {
+                                "type": "string",
+                                "description": "Current value; present only for non-secret rows"
+                              }
+                            },
+                            "required": [
+                              "exists",
+                              "isSecret",
+                              "updatedAt"
+                            ]
+                          },
+                          "description": "Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys."
                         }
                       },
                       "required": [
@@ -14234,7 +15704,8 @@
                                   "text",
                                   "single-select",
                                   "multi-select",
-                                  "boolean"
+                                  "boolean",
+                                  "config"
                                 ]
                               },
                               "label": {
@@ -14283,6 +15754,72 @@
                               },
                               "defaultValue": {
                                 "type": "boolean"
+                              },
+                              "config": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255,
+                                    "pattern": "^\\S+$",
+                                    "description": "The swarm config key to set, e.g. BITBUCKET_TOKEN"
+                                  },
+                                  "scope": {
+                                    "type": "string",
+                                    "enum": [
+                                      "global",
+                                      "agent",
+                                      "repo"
+                                    ],
+                                    "description": "Config scope the value is written to"
+                                  },
+                                  "scopeId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent."
+                                  },
+                                  "isSecret": {
+                                    "type": "boolean",
+                                    "description": "Store encrypted and never show the value (default true). An existing secret row always stays secret."
+                                  },
+                                  "helpUrl": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "description": "Link shown next to the field, e.g. where to create the token"
+                                  },
+                                  "options": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "value": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "description": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "value",
+                                        "label"
+                                      ]
+                                    },
+                                    "description": "Allowed values for a non-secret key, rendered as a choice"
+                                  },
+                                  "defaultValue": {
+                                    "type": "string",
+                                    "description": "Prefilled value for a non-secret key"
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "scope"
+                                ],
+                                "description": "Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value."
                               }
                             },
                             "required": [
@@ -14499,6 +16036,36 @@
                         },
                         "updatedAt": {
                           "type": "string"
+                        },
+                        "configState": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "exists": {
+                                "type": "boolean"
+                              },
+                              "isSecret": {
+                                "type": "boolean"
+                              },
+                              "updatedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "value": {
+                                "type": "string",
+                                "description": "Current value; present only for non-secret rows"
+                              }
+                            },
+                            "required": [
+                              "exists",
+                              "isSecret",
+                              "updatedAt"
+                            ]
+                          },
+                          "description": "Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys."
                         }
                       },
                       "required": [
@@ -15527,1020 +17094,6 @@
           },
           "404": {
             "description": "Budget not configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/used-by": {
-      "post": {
-        "summary": "Grant or revoke the 'used by' logo consent",
-        "description": "Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.",
-        "tags": [
-          "Telemetry"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "granted": {
-                    "type": "boolean"
-                  },
-                  "contactEmail": {
-                    "type": "string",
-                    "maxLength": 320,
-                    "format": "email"
-                  },
-                  "contactFunction": {
-                    "type": "string",
-                    "enum": [
-                      "engineer",
-                      "eng_lead",
-                      "founder",
-                      "product",
-                      "ops",
-                      "other"
-                    ]
-                  },
-                  "quote": {
-                    "type": "string",
-                    "maxLength": 280
-                  }
-                },
-                "required": [
-                  "granted"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Consent recorded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "granted": {
-                      "type": "boolean"
-                    },
-                    "changedAt": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "granted",
-                    "changedAt"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid contact details, or missing organization name or website",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Only a config admin can change the consent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "The telemetry proxy did not accept the consent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ranking": {
-      "get": {
-        "summary": "Public ranking state",
-        "description": "Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.",
-        "tags": [
-          "Telemetry"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Ranking state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "eligible": {
-                      "type": "boolean"
-                    },
-                    "missing": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "enum": [
-                          "SWARM_ORG_NAME",
-                          "SWARM_ORG_WEBSITE"
-                        ]
-                      }
-                    },
-                    "telemetryOn": {
-                      "type": "boolean"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "domain": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "listing": {
-                      "type": [
-                        "object",
-                        "null"
-                      ],
-                      "properties": {
-                        "v": {
-                          "type": "number",
-                          "enum": [
-                            1
-                          ]
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "domain": {
-                          "type": "string"
-                        },
-                        "category": {
-                          "type": "string",
-                          "enum": [
-                            "engineering",
-                            "product",
-                            "marketing",
-                            "support",
-                            "operations",
-                            "other"
-                          ]
-                        },
-                        "subcategory": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "description": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "sourceCodeUrl": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "updatedAt": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "v",
-                        "name",
-                        "domain",
-                        "category",
-                        "subcategory",
-                        "description",
-                        "sourceCodeUrl",
-                        "updatedAt"
-                      ]
-                    },
-                    "listingMatchesDomain": {
-                      "type": "boolean"
-                    },
-                    "verifyUrl": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "eligible",
-                    "missing",
-                    "telemetryOn",
-                    "enabled",
-                    "name",
-                    "domain",
-                    "listing",
-                    "listingMatchesDomain",
-                    "verifyUrl"
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Only a config admin can read the ranking state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ranking/opt-in": {
-      "post": {
-        "summary": "Opt this install into the public ranking",
-        "description": "Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.",
-        "tags": [
-          "Telemetry"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "category": {
-                    "type": "string",
-                    "enum": [
-                      "engineering",
-                      "product",
-                      "marketing",
-                      "support",
-                      "operations",
-                      "other"
-                    ]
-                  },
-                  "subcategory": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "description": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "sourceCodeUrl": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "category"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Opted in",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "domain": {
-                      "type": "string"
-                    },
-                    "listing": {
-                      "type": "object",
-                      "properties": {
-                        "v": {
-                          "type": "number",
-                          "enum": [
-                            1
-                          ]
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "domain": {
-                          "type": "string"
-                        },
-                        "category": {
-                          "type": "string",
-                          "enum": [
-                            "engineering",
-                            "product",
-                            "marketing",
-                            "support",
-                            "operations",
-                            "other"
-                          ]
-                        },
-                        "subcategory": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "description": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "sourceCodeUrl": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "updatedAt": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "v",
-                        "name",
-                        "domain",
-                        "category",
-                        "subcategory",
-                        "description",
-                        "sourceCodeUrl",
-                        "updatedAt"
-                      ]
-                    },
-                    "verifyUrl": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "domain",
-                    "listing",
-                    "verifyUrl"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "A listing field is invalid",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Only a config admin can opt in",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ranking/opt-out": {
-      "post": {
-        "summary": "Leave the public ranking",
-        "description": "Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.",
-        "tags": [
-          "Telemetry"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Opted out",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "enabled": {
-                      "type": "boolean",
-                      "enum": [
-                        false
-                      ]
-                    }
-                  },
-                  "required": [
-                    "enabled"
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Only a config admin can opt out",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/config/resolved": {
-      "get": {
-        "summary": "Get resolved config (merged global + agent + repo scopes)",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "agentId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "repoId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Return only the entry with this exact key. Omit to return every resolved entry."
-            },
-            "required": false,
-            "description": "Return only the entry with this exact key. Omit to return every resolved entry.",
-            "name": "key",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "true",
-                "false"
-              ]
-            },
-            "required": false,
-            "name": "includeSecrets",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Resolved config entries",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "configs": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SwarmConfig"
-                      }
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "configs"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/config/env-presence": {
-      "get": {
-        "summary": "Check which of the given env var keys are currently set in process.env (presence only, no values)",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "required": true,
-            "name": "keys",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Map of key -> boolean (true iff set in process.env)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "presence": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "boolean"
-                      }
-                    }
-                  },
-                  "required": [
-                    "presence"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/config/reload": {
-      "post": {
-        "summary": "Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail)",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Reload result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "configsLoaded": {
-                      "type": "number"
-                    },
-                    "keysUpdated": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "integrationsReinitialized": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "configsLoaded",
-                    "keysUpdated",
-                    "integrationsReinitialized"
-                  ]
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Reload failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/config/{id}": {
-      "get": {
-        "summary": "Get a single config entry by ID",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "true",
-                "false"
-              ]
-            },
-            "required": false,
-            "name": "includeSecrets",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Config entry",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/SwarmConfig"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Config not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload.",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Config deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    }
-                  },
-                  "required": [
-                    "success"
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Config not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/config": {
-      "get": {
-        "summary": "List config entries with optional filters",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "scope",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "scopeId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Return only entries with this exact key. Omit to return every entry."
-            },
-            "required": false,
-            "description": "Return only entries with this exact key. Omit to return every entry.",
-            "name": "key",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "true",
-                "false"
-              ]
-            },
-            "required": false,
-            "name": "includeSecrets",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of config entries",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "configs": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SwarmConfig"
-                      }
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "configs"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "summary": "Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call.",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "scope": {
-                    "type": "string",
-                    "enum": [
-                      "global",
-                      "agent",
-                      "repo"
-                    ]
-                  },
-                  "scopeId": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "key": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "value": {},
-                  "isSecret": {
-                    "type": "boolean"
-                  },
-                  "envPath": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "description": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "exportToEnv": {
-                    "type": "boolean",
-                    "description": "Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads."
-                  }
-                },
-                "required": [
-                  "scope",
-                  "key"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Config entry upserted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SwarmConfig"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
             "content": {
               "application/json": {
                 "schema": {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SwarmConfig } from "../api/types";
-import { getIntegrationFields, INTEGRATIONS } from "./integrations-catalog";
+import { findCatalogField, getIntegrationFields, INTEGRATIONS } from "./integrations-catalog";
 import { deriveIntegrationStatus } from "./integrations-status";
 
 describe("automation integration configure surfaces", () => {
@@ -111,5 +111,16 @@ describe("OpenAI-compatible provider cards", () => {
       (INTEGRATIONS.find((candidate) => candidate.id === id)?.fields ?? []).map((f) => f.key);
     expect(keys("vercel")).toEqual(["AI_GATEWAY_API_KEY"]);
     expect(keys("nan")).toEqual(["NAN_API_KEY", "NAN_BASE_URL"]);
+  });
+});
+
+describe("findCatalogField", () => {
+  test("maps a config key to its field and integration", () => {
+    const found = findCatalogField("BITBUCKET_TOKEN");
+    expect(found?.field.label).toBe("API token");
+    expect(found?.integration.docsUrl).toBe(
+      "https://docs.agent-swarm.dev/docs/integrations/bitbucket",
+    );
+    expect(findCatalogField("NOT_A_CATALOG_KEY")).toBeNull();
   });
 });

@@ -3198,6 +3198,658 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/used-by": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant or revoke the 'used by' logo consent
+         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        granted: boolean;
+                        /** Format: email */
+                        contactEmail?: string;
+                        /** @enum {string} */
+                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other";
+                        quote?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Consent recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            granted: boolean;
+                            changedAt: string;
+                        };
+                    };
+                };
+                /** @description Invalid contact details, or missing organization name or website */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can change the consent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The telemetry proxy did not accept the consent */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public ranking state
+         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Ranking state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            eligible: boolean;
+                            missing: ("SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE")[];
+                            telemetryOn: boolean;
+                            enabled: boolean;
+                            name: string | null;
+                            domain: string | null;
+                            listing: {
+                                /** @enum {number} */
+                                v: 1;
+                                name: string;
+                                domain: string;
+                                /** @enum {string} */
+                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                                subcategory: string | null;
+                                description: string | null;
+                                sourceCodeUrl: string | null;
+                                updatedAt: string;
+                            } | null;
+                            listingMatchesDomain: boolean;
+                            verifyUrl: string | null;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can read the ranking state */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking/opt-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Opt this install into the public ranking
+         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                        subcategory?: string | null;
+                        description?: string | null;
+                        sourceCodeUrl?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Opted in */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            domain: string;
+                            listing: {
+                                /** @enum {number} */
+                                v: 1;
+                                name: string;
+                                domain: string;
+                                /** @enum {string} */
+                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                                subcategory: string | null;
+                                description: string | null;
+                                sourceCodeUrl: string | null;
+                                updatedAt: string;
+                            };
+                            verifyUrl: string;
+                        };
+                    };
+                };
+                /** @description A listing field is invalid */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can opt in */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking/opt-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave the public ranking
+         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Opted out */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            enabled: false;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can opt out */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/resolved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get resolved config (merged global + agent + repo scopes) */
+        get: {
+            parameters: {
+                query?: {
+                    agentId?: string;
+                    repoId?: string;
+                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
+                    key?: string;
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Resolved config entries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            configs: components["schemas"]["SwarmConfig"][];
+                            message?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/env-presence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check which of the given env var keys are currently set in process.env (presence only, no values) */
+        get: {
+            parameters: {
+                query: {
+                    keys: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Map of key -> boolean (true iff set in process.env) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            presence: {
+                                [key: string]: boolean;
+                            };
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/reload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Reload result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            configsLoaded: number;
+                            keysUpdated: string[];
+                            integrationsReinitialized: string[];
+                        };
+                    };
+                };
+                /** @description Reload failed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a single config entry by ID */
+        get: {
+            parameters: {
+                query?: {
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Config entry */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwarmConfig"] & {
+                            message?: string;
+                        };
+                    };
+                };
+                /** @description Config not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Config deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                        };
+                    };
+                };
+                /** @description Config not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List config entries with optional filters */
+        get: {
+            parameters: {
+                query?: {
+                    scope?: string;
+                    scopeId?: string;
+                    /** @description Return only entries with this exact key. Omit to return every entry. */
+                    key?: string;
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description List of config entries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            configs: components["schemas"]["SwarmConfig"][];
+                            message?: string;
+                        };
+                    };
+                };
+            };
+        };
+        /** Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        scope: "global" | "agent" | "repo";
+                        scopeId?: string | null;
+                        key: string;
+                        value?: unknown;
+                        isSecret?: boolean;
+                        envPath?: string | null;
+                        description?: string | null;
+                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
+                        exportToEnv?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Config entry upserted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwarmConfig"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/approval-requests": {
         parameters: {
             query?: never;
@@ -3236,7 +3888,7 @@ export interface paths {
                                 questions: {
                                     id: string;
                                     /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                                     label: string;
                                     required?: boolean;
                                     description?: string;
@@ -3250,6 +3902,33 @@ export interface paths {
                                     minSelections?: number;
                                     maxSelections?: number;
                                     defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
                                 }[];
                                 workflowRunId: string | null;
                                 workflowRunStepId: string | null;
@@ -3300,6 +3979,16 @@ export interface paths {
                                 createdBy?: string;
                                 createdAt: string;
                                 updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
                             }[] | {
                                 id: string;
                                 title: string;
@@ -3343,11 +4032,12 @@ export interface paths {
                 content: {
                     "application/json": {
                         title: string;
+                        /** @description A request with a `config` question needs `approvers.policy: "any"`. The answer is written to swarm_config; the request stores only `{ key, scope, scopeId, isSecret, status, updatedAt }` (plus `value` for non-secret keys). */
                         questions: {
                             id: string;
                             /** @enum {string} */
-                            type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
-                            label: string;
+                            type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
+                            label?: string;
                             required?: boolean;
                             description?: string;
                             placeholder?: string;
@@ -3360,6 +4050,33 @@ export interface paths {
                             minSelections?: number;
                             maxSelections?: number;
                             defaultValue?: boolean;
+                            /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                            config?: {
+                                /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                key: string;
+                                /**
+                                 * @description Config scope the value is written to
+                                 * @enum {string}
+                                 */
+                                scope: "global" | "agent" | "repo";
+                                /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                scopeId?: string;
+                                /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                isSecret?: boolean;
+                                /**
+                                 * Format: uri
+                                 * @description Link shown next to the field, e.g. where to create the token
+                                 */
+                                helpUrl?: string;
+                                /** @description Allowed values for a non-secret key, rendered as a choice */
+                                options?: {
+                                    value: string;
+                                    label: string;
+                                    description?: string;
+                                }[];
+                                /** @description Prefilled value for a non-secret key */
+                                defaultValue?: string;
+                            };
                         }[];
                         approvers: {
                             users?: string[];
@@ -3399,7 +4116,7 @@ export interface paths {
                                 questions: {
                                     id: string;
                                     /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                                     label: string;
                                     required?: boolean;
                                     description?: string;
@@ -3413,6 +4130,33 @@ export interface paths {
                                     minSelections?: number;
                                     maxSelections?: number;
                                     defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
                                 }[];
                                 workflowRunId: string | null;
                                 workflowRunStepId: string | null;
@@ -3463,6 +4207,16 @@ export interface paths {
                                 createdBy?: string;
                                 createdAt: string;
                                 updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
                             };
                         };
                     };
@@ -3500,7 +4254,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get approval request details */
+        /**
+         * Get approval request details
+         * @description Includes `configState` when the request has `config` questions: the live state of each target key, read now.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -3525,7 +4282,7 @@ export interface paths {
                                 questions: {
                                     id: string;
                                     /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                                     label: string;
                                     required?: boolean;
                                     description?: string;
@@ -3539,6 +4296,33 @@ export interface paths {
                                     minSelections?: number;
                                     maxSelections?: number;
                                     defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
                                 }[];
                                 workflowRunId: string | null;
                                 workflowRunStepId: string | null;
@@ -3589,6 +4373,16 @@ export interface paths {
                                 createdBy?: string;
                                 createdAt: string;
                                 updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
                             };
                         };
                     };
@@ -3623,7 +4417,7 @@ export interface paths {
         put?: never;
         /**
          * Submit a response to an approval request
-         * @description Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`.
+         * @description Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`. A `config` question takes `{ action: "set", value }`, `{ action: "keep" }` (key must exist) or `{ action: "skip" }` (optional questions only); `set` also needs the config write permission. The value is written only when the request is approved, and the stored answer is the result, never a secret value.
          */
         post: {
             parameters: {
@@ -3659,7 +4453,7 @@ export interface paths {
                                 questions: {
                                     id: string;
                                     /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                                     label: string;
                                     required?: boolean;
                                     description?: string;
@@ -3673,6 +4467,33 @@ export interface paths {
                                     minSelections?: number;
                                     maxSelections?: number;
                                     defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
                                 }[];
                                 workflowRunId: string | null;
                                 workflowRunStepId: string | null;
@@ -3723,6 +4544,16 @@ export interface paths {
                                 createdBy?: string;
                                 createdAt: string;
                                 updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
                             };
                         };
                     };
@@ -3811,7 +4642,7 @@ export interface paths {
                                 questions: {
                                     id: string;
                                     /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                                     label: string;
                                     required?: boolean;
                                     description?: string;
@@ -3825,6 +4656,33 @@ export interface paths {
                                     minSelections?: number;
                                     maxSelections?: number;
                                     defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
                                 }[];
                                 workflowRunId: string | null;
                                 workflowRunStepId: string | null;
@@ -3875,6 +4733,16 @@ export interface paths {
                                 createdBy?: string;
                                 createdAt: string;
                                 updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
                             };
                             alreadyCancelled: boolean;
                             runCancelled: boolean;
@@ -4567,658 +5435,6 @@ export interface paths {
                 };
             };
         };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/used-by": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Grant or revoke the 'used by' logo consent
-         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        granted: boolean;
-                        /** Format: email */
-                        contactEmail?: string;
-                        /** @enum {string} */
-                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other";
-                        quote?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Consent recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            granted: boolean;
-                            changedAt: string;
-                        };
-                    };
-                };
-                /** @description Invalid contact details, or missing organization name or website */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can change the consent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description The telemetry proxy did not accept the consent */
-                502: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Public ranking state
-         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Ranking state */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            eligible: boolean;
-                            missing: ("SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE")[];
-                            telemetryOn: boolean;
-                            enabled: boolean;
-                            name: string | null;
-                            domain: string | null;
-                            listing: {
-                                /** @enum {number} */
-                                v: 1;
-                                name: string;
-                                domain: string;
-                                /** @enum {string} */
-                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                                subcategory: string | null;
-                                description: string | null;
-                                sourceCodeUrl: string | null;
-                                updatedAt: string;
-                            } | null;
-                            listingMatchesDomain: boolean;
-                            verifyUrl: string | null;
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can read the ranking state */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking/opt-in": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Opt this install into the public ranking
-         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                        subcategory?: string | null;
-                        description?: string | null;
-                        sourceCodeUrl?: string | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Opted in */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            domain: string;
-                            listing: {
-                                /** @enum {number} */
-                                v: 1;
-                                name: string;
-                                domain: string;
-                                /** @enum {string} */
-                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                                subcategory: string | null;
-                                description: string | null;
-                                sourceCodeUrl: string | null;
-                                updatedAt: string;
-                            };
-                            verifyUrl: string;
-                        };
-                    };
-                };
-                /** @description A listing field is invalid */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can opt in */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which). */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking/opt-out": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Leave the public ranking
-         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Opted out */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            enabled: false;
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can opt out */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/resolved": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get resolved config (merged global + agent + repo scopes) */
-        get: {
-            parameters: {
-                query?: {
-                    agentId?: string;
-                    repoId?: string;
-                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
-                    key?: string;
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Resolved config entries */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            configs: components["schemas"]["SwarmConfig"][];
-                            message?: string;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/env-presence": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Check which of the given env var keys are currently set in process.env (presence only, no values) */
-        get: {
-            parameters: {
-                query: {
-                    keys: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Map of key -> boolean (true iff set in process.env) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            presence: {
-                                [key: string]: boolean;
-                            };
-                        };
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/reload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail) */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Reload result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            configsLoaded: number;
-                            keysUpdated: string[];
-                            integrationsReinitialized: string[];
-                        };
-                    };
-                };
-                /** @description Reload failed */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a single config entry by ID */
-        get: {
-            parameters: {
-                query?: {
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Config entry */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SwarmConfig"] & {
-                            message?: string;
-                        };
-                    };
-                };
-                /** @description Config not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        /** Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload. */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Config deleted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                        };
-                    };
-                };
-                /** @description Config not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List config entries with optional filters */
-        get: {
-            parameters: {
-                query?: {
-                    scope?: string;
-                    scopeId?: string;
-                    /** @description Return only entries with this exact key. Omit to return every entry. */
-                    key?: string;
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description List of config entries */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            configs: components["schemas"]["SwarmConfig"][];
-                            message?: string;
-                        };
-                    };
-                };
-            };
-        };
-        /** Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call. */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        scope: "global" | "agent" | "repo";
-                        scopeId?: string | null;
-                        key: string;
-                        value?: unknown;
-                        isSecret?: boolean;
-                        envPath?: string | null;
-                        description?: string | null;
-                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
-                        exportToEnv?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Config entry upserted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SwarmConfig"];
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -26453,6 +26669,22 @@ export interface components {
             /** Format: date-time */
             lastUpdatedAt: string;
         };
+        SwarmConfig: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            scope: "global" | "agent" | "repo";
+            scopeId: string | null;
+            key: string;
+            value: string;
+            isSecret: boolean;
+            envPath: string | null;
+            description: string | null;
+            createdAt: string;
+            lastUpdatedAt: string;
+            encrypted: boolean;
+            exportToEnv: boolean;
+        };
         AssetSummary: {
             /** @enum {string} */
             entityType: "task" | "workflow" | "schedule" | "page" | "app" | "script" | "file";
@@ -26509,22 +26741,6 @@ export interface components {
             userBudgetUsd?: number | null;
             followUpTaskId?: string | null;
             createdAt: number;
-        };
-        SwarmConfig: {
-            /** Format: uuid */
-            id: string;
-            /** @enum {string} */
-            scope: "global" | "agent" | "repo";
-            scopeId: string | null;
-            key: string;
-            value: string;
-            isSecret: boolean;
-            envPath: string | null;
-            description: string | null;
-            createdAt: string;
-            lastUpdatedAt: string;
-            encrypted: boolean;
-            exportToEnv: boolean;
         };
         ContextSnapshot: {
             /** Format: uuid */
