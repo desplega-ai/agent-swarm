@@ -220,7 +220,7 @@ export function QuestionFlow({
         return;
       }
       case "edit": {
-        if (question.type !== "text") return false;
+        if (question.type !== "text" && question.type !== "config") return false;
         cards.current[targetIndex]?.querySelector<HTMLElement>("input, textarea")?.focus();
         setActiveIndex(targetIndex);
         return;

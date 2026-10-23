@@ -2521,9 +2521,47 @@ export interface RenderResponse {
 
 export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "timeout" | "cancelled";
 
+/** Settings of a `config` question: one swarm config key a person sets. */
+export interface ApprovalConfigSettings {
+  key: string;
+  scope: "global" | "agent" | "repo";
+  scopeId?: string;
+  /** Resolved at creation; an existing secret row is always secret. */
+  isSecret?: boolean;
+  helpUrl?: string;
+  options?: Array<{ value: string; label: string; description?: string }>;
+  defaultValue?: string;
+}
+
+/** Live state of a config question's key, read when the request is fetched. */
+export interface ApprovalConfigState {
+  exists: boolean;
+  isSecret: boolean;
+  updatedAt: string | null;
+  /** Present only for non-secret keys. */
+  value?: string;
+}
+
+/** What the dashboard sends for a config question. */
+export type ApprovalConfigAnswer =
+  | { action: "set"; value: string }
+  | { action: "keep" }
+  | { action: "skip" };
+
+/** What the server stores for a config question. Never holds a secret value. */
+export interface ApprovalConfigResult {
+  key: string;
+  scope: "global" | "agent" | "repo";
+  scopeId: string | null;
+  isSecret: boolean;
+  status: "set" | "kept" | "skipped";
+  updatedAt: string | null;
+  value?: string;
+}
+
 export interface ApprovalQuestion {
   id: string;
-  type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+  type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
   label: string;
   description?: string;
   required?: boolean;
@@ -2533,6 +2571,7 @@ export interface ApprovalQuestion {
   minSelections?: number;
   maxSelections?: number;
   defaultValue?: boolean;
+  config?: ApprovalConfigSettings;
 }
 
 /** One accepted answer. The server takes `responder` from the credential, never from the body. */
@@ -2568,6 +2607,8 @@ export interface ApprovalRequest {
   approvals?: ApprovalVote[] | null;
   /** Quorum progress while pending; null once resolved. */
   approvalProgress?: ApprovalProgress | null;
+  /** Live state per config question id (single-request reads only). */
+  configState?: Record<string, ApprovalConfigState>;
   /** From the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
   resolvedBy: string | null;
   resolvedAt: string | null;

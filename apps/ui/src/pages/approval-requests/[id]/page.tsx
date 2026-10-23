@@ -12,6 +12,7 @@ import { useWhoami } from "@/api/hooks/use-whoami";
 import type { ApprovalQuestion, ApprovalRequest } from "@/api/types";
 import { FadeIn } from "@/components/shared/fade-in";
 import { AnswerView } from "@/components/shared/questions/answer-view";
+import { withCatalogLabel } from "@/components/shared/questions/config-question-field";
 import {
   KeyHint,
   ShortcutSheet,
@@ -67,6 +68,7 @@ function keyHintFor(question: ApprovalQuestion) {
     case "multi-select":
       return "1–9 · Space";
     case "text":
+    case "config":
       return "↵ to type";
     default:
       return null;
@@ -124,7 +126,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const cards = useRef<(HTMLElement | null)[]>([]);
   const top = useRef<HTMLDivElement>(null);
 
-  const questions = request.questions;
+  const questions = useMemo(() => request.questions.map(withCatalogLabel), [request.questions]);
   const isPending = request.status === "pending";
   // The server records the responder from the credential: the token's user,
   // or `operator` for the shared key, whoever is picked in the switcher.
@@ -198,6 +200,8 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
       // from the response: no refetch flash.
       if (result.approvalRequest.status === "pending") setAnsweredHere(true);
       queryClient.setQueryData(["approval-request", request.id], result);
+      // Drop the typed answers (a config secret among them) once the server has them.
+      setResponses({});
       setActiveIndex(-1);
       top.current?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
     } catch (e) {
@@ -302,7 +306,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         return;
       }
       case "edit": {
-        if (question.type !== "text") return false;
+        if (question.type !== "text" && question.type !== "config") return false;
         cards.current[targetIndex]?.querySelector<HTMLElement>("input, textarea")?.focus();
         setActiveIndex(targetIndex);
         return;
@@ -381,6 +385,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
             cursor={focused ? (cursors[question.id] ?? -1) : -1}
             showKeys={showKeys}
             onSubmitShortcut={handleSubmit}
+            configState={request.configState?.[question.id]}
           />
         ) : collapsed === null || collapsed === false ? (
           <AnswerView question={question} response={response} />

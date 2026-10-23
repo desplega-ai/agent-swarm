@@ -171,6 +171,21 @@ export function getIntegrationFields(def: IntegrationDef): IntegrationField[] {
   return fields;
 }
 
+/**
+ * The catalog field for a swarm_config key and the integration it belongs to,
+ * or null. Used by HITL `config` questions for the label, help text,
+ * placeholder and docs link.
+ */
+export function findCatalogField(
+  key: string,
+): { field: IntegrationField; integration: IntegrationDef } | null {
+  for (const integration of INTEGRATIONS) {
+    const field = getIntegrationFields(integration).find((candidate) => candidate.key === key);
+    if (field) return { field, integration };
+  }
+  return null;
+}
+
 /** Docs section that covers every OpenAI-compatible registry provider. */
 const OPENAI_COMPATIBLE_DOCS_URL =
   "https://docs.agent-swarm.dev/docs/guides/harness-configuration#nan-and-helmcode";
