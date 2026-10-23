@@ -28,6 +28,7 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  createUser,
   createWorkflow,
   getApprovalRequestById,
   getDbClient,
@@ -37,6 +38,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { isSealedJson, openSealedJson } from "../be/sealed-json";
+import { type IdentityActor, mintToken } from "../be/users";
 import { handleApprovalRequests } from "../http/approval-requests";
 import { resolveHttpRequestAuth } from "../http/auth";
 import * as core from "../http/core";
@@ -498,6 +500,48 @@ describe("respond", () => {
     expect(kept.status).toBe(200);
     expect(kept.json.approvalRequest.responses.cfg).not.toHaveProperty("value");
     expect(kept.text).not.toContain(stored);
+  });
+
+  test("a user without config.write.any cannot set, one with it can", async () => {
+    const key = uniqueKey("USER_GRANT");
+    const id = await createConfigRequest({ key, scope: "global" });
+    const roleId = `approver-${crypto.randomUUID()}`;
+    await getDbClient().run(
+      "INSERT INTO roles (id, name, description, isBuiltin, grantsAll) VALUES (?, ?, '', 0, 0)",
+      [roleId, roleId],
+    );
+    await getDbClient().run("INSERT INTO role_permissions (roleId, verb) VALUES (?, ?)", [
+      roleId,
+      "approval.respond",
+    ]);
+    const approver = await createUser({ name: "Approver only" });
+    // New users start as admin (rbac-roles insert trigger); narrow this one.
+    await getDbClient().run("DELETE FROM principal_roles WHERE principalId = ?", [approver.id]);
+    await getDbClient().run(
+      "INSERT INTO principal_roles (principalType, principalId, roleId) VALUES ('user', ?, ?)",
+      [approver.id, roleId],
+    );
+    const actor: IdentityActor = { kind: "operator", id: "approval-config-question-test" };
+    const approverToken = (await mintToken(approver.id, "approver", actor)).plaintext;
+
+    const denied = await respond(
+      id,
+      { cfg: { action: "set", value: "nope" } },
+      { Authorization: `Bearer ${approverToken}` },
+    );
+    expect(denied.status).toBe(403);
+    expect(await configRow(key)).toBeNull();
+    expect((await getApprovalRequestById(id))!.status).toBe("pending");
+
+    const admin = await createUser({ name: "Config admin" });
+    const adminToken = (await mintToken(admin.id, "admin", actor)).plaintext;
+    const allowed = await respond(
+      id,
+      { cfg: { action: "set", value: "yes" } },
+      { Authorization: `Bearer ${adminToken}` },
+    );
+    expect(allowed.status).toBe(200);
+    expect(await configRow(key)).not.toBeNull();
   });
 
   test("an agent cannot answer a config question", async () => {

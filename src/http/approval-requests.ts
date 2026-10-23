@@ -31,8 +31,9 @@ import {
   recordApprovalVotes,
   resolveApprovalRequest,
 } from "../be/db";
+import { getUserGrant } from "../be/rbac-roles";
 import { findUserById } from "../be/users";
-import { can, type RbacPrincipal } from "../rbac";
+import { can, isRbacEnabled, type RbacPrincipal } from "../rbac";
 import type { User } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -579,11 +580,18 @@ export async function handleApprovalRequests(
       jsonError(res, 'Config questions need approvers.policy "any"', 409);
       return true;
     }
-    if (
-      [...configAnswers.values()].some(({ answer }) => answer.action === "set") &&
-      !(await ensureConfigAdmin(req, res, "config.write.any"))
-    ) {
-      return true;
+    if ([...configAnswers.values()].some(({ answer }) => answer.action === "set")) {
+      if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
+      // Admission only checked `approval.respond`; `ensureConfigAdmin` passes
+      // every user, so check the config write grant here as PUT /api/config would.
+      const auth = getRequestAuth(req);
+      if (auth?.kind === "user" && isRbacEnabled()) {
+        const grant = await getUserGrant(auth.userId);
+        if (!grant.grantsAll && !grant.verbs.has("config.write.any")) {
+          jsonError(res, "Forbidden: setting a config value needs 'config.write.any'", 403);
+          return true;
+        }
+      }
     }
     const safeResponses: Record<string, unknown> = { ...parsed.body.responses };
     for (const id of configAnswers.keys()) delete safeResponses[id];
