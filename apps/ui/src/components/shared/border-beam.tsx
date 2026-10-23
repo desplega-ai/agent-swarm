@@ -14,11 +14,15 @@ import { cn } from "@/lib/utils";
  * Amber marks liveness here (DESIGN.md, One Voice): use it only while the
  * surface is ready to act. Under `prefers-reduced-motion` it does not render.
  */
+// Order matters: React applies these in key order. Firefox treats `-webkit-mask`
+// as an alias of the `mask` shorthand (so it resets `mask-composite` to `add`) and
+// rejects `xor`. With the prefixed pair last, Firefox drew the whole gradient over
+// the card. The standard pair goes last so every engine ends on `exclude`.
 const RING_MASK: CSSProperties = {
-  mask: "linear-gradient(black 0 0) content-box, linear-gradient(black 0 0)",
-  maskComposite: "exclude",
   WebkitMask: "linear-gradient(black 0 0) content-box, linear-gradient(black 0 0)",
   WebkitMaskComposite: "xor",
+  mask: "linear-gradient(black 0 0) content-box, linear-gradient(black 0 0)",
+  maskComposite: "exclude",
 };
 
 const BEAM: CSSProperties = {
