@@ -156,7 +156,10 @@ export async function handleChatInbound(
       );
       try {
         const ack = formatChatSteeringAck(steering.result);
-        const sent = await thread.post({ markdown: ack });
+        // Telegram threads the ack under the steering message; other adapters post it.
+        const sent = thread.adapter.reply
+          ? await thread.reply(message, { markdown: ack })
+          : await thread.post({ markdown: ack });
         emitChatMessageSent({
           adapter,
           channelId: thread.channelId,
@@ -533,6 +536,11 @@ export async function flushChatThread(
       // A human message in the thread: never answer it in the previous task's
       // structured-output contract.
       inheritParentOutputSchema: false,
+      // The relay answers as a reply to the newest buffered message. Always set
+      // explicitly: `createTask` copies the parent's anchor into a child that
+      // has none, and that would point at an older ask.
+      mentionMessageId: items.at(-1)?.messageId ?? first.messageId,
+      mentionChannelId: first.channelId,
     };
     try {
       const { task, unattached } = await createChatTaskWithFiles(description, options, inbound);

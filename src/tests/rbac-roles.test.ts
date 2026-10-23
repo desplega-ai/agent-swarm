@@ -188,6 +188,16 @@ describe("role attachment helpers", () => {
 });
 
 describe("ensureRbacSeedsSynced", () => {
+  test("seeds viewer with a subset of the requester verbs", async () => {
+    await getDbClient().run("DELETE FROM roles WHERE id = 'rbac-role-viewer'");
+
+    ensureRbacSeedsSynced({ quiet: true });
+
+    const viewerVerbs = await roleVerbs("rbac-role-viewer");
+    expect(viewerVerbs).toEqual(["favorite.write.own", "session.presence"]);
+    for (const verb of viewerVerbs) expect(REQUESTER_VERBS).toContain(verb);
+  });
+
   test("restores a deleted built-in role and its permissions", async () => {
     await getDbClient().run("DELETE FROM roles WHERE id = ?", [REQUESTER_ROLE_ID]);
 

@@ -45,6 +45,7 @@ import {
   updateUser,
   upsertBudget,
 } from "../be/db";
+import { assertNotLastAdmin, LastAdminError } from "../be/rbac-roles";
 import {
   getUserIdentities,
   type IdentityEvent,
@@ -484,6 +485,7 @@ const mergeUsersRoute = route({
     400: { description: "Validation error (e.g. target == source)" },
     401: { description: "Unauthorized" },
     404: { description: "Target or source user not found" },
+    409: { description: "Source is the last active admin (last_admin)" },
   },
   auth: { apiKey: true },
 });
@@ -1071,6 +1073,9 @@ export async function handleUsers(
           }
         }
 
+        // The source's roles go with it; never leave the swarm without an admin.
+        await assertNotLastAdmin(sourceId);
+
         // Delete source — CASCADE cleans up any leftover external_ids row that
         // we may have missed. Retained user references move to the target.
         await deleteUser(sourceId, targetId);
@@ -1095,6 +1100,10 @@ export async function handleUsers(
       });
       mergeUsersRoute.respond(res, 200, { user: mergedUser });
     } catch (err) {
+      if (err instanceof LastAdminError) {
+        jsonError(res, "last_admin", 409);
+        return true;
+      }
       jsonError(res, err instanceof Error ? err.message : "Failed to merge users", 500);
     }
     return true;

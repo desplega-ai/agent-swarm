@@ -1,4 +1,5 @@
 import {
+  getAgentById,
   getPendingChatRelayTasks,
   giveUpStaleChatRelays,
   markChatRelayAttempted,
@@ -10,6 +11,8 @@ import { chatThreadOfContextKey } from "@/tasks/context-key";
 import type { AgentTask } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { workflowEventBus } from "@/workflows/event-bus";
+import { shortId } from "./commands";
+import { chatMessageLimit, splitChatMessage } from "./limits";
 import { errorMessage } from "./logger";
 import { postChatMessage } from "./outbound";
 import { taskOutputChatFiles } from "./outbound-files";
@@ -33,14 +36,64 @@ const SWEEP_EVERY_N_TICKS = 20;
 /** Coalesce bursts of terminal-task events into one early tick. */
 const EARLY_TICK_DEBOUNCE_MS = 250;
 
-/** The text posted for a terminal task. Failed and cancelled tasks get a status line first. */
-export function formatChatRelayText(task: AgentTask): string {
+/**
+ * The first line of every relayed answer: the short task id `/status` shows
+ * and the agent's name, e.g. `#a3f2b1c9 · Coder`. Two answers in one chat stay
+ * apart even when the platform cannot show what they reply to.
+ */
+export function formatChatTaskTag(task: Pick<AgentTask, "id">, agentName?: string): string {
+  return agentName ? `#${shortId(task)} · ${agentName}` : `#${shortId(task)}`;
+}
+
+/** The task tag, an optional status line, and the answer itself. */
+function relayHeadAndBody(task: AgentTask, agentName?: string): { head: string; body: string } {
+  const tag = formatChatTaskTag(task, agentName);
   const body = (task.output || task.failureReason || "").trim();
-  if (task.status === "failed") return body ? `**Task failed.**\n\n${body}` : "**Task failed.**";
-  if (task.status === "cancelled") {
-    return body ? `**Task cancelled.**\n\n${body}` : "**Task cancelled.**";
+  if (task.status === "failed") return { head: `${tag}\n**Task failed.**`, body };
+  if (task.status === "cancelled") return { head: `${tag}\n**Task cancelled.**`, body };
+  return { head: tag, body: body || "Task completed." };
+}
+
+/** The text posted for a terminal task. Failed and cancelled tasks get a status line after the tag. */
+export function formatChatRelayText(task: AgentTask, agentName?: string): string {
+  const { head, body } = relayHeadAndBody(task, agentName);
+  return body ? `${head}\n\n${body}` : head;
+}
+
+/** On Telegram, an answer body longer than this is posted collapsed. */
+export const TELEGRAM_FOLD_CHARS = 1000;
+/** A first paragraph up to this long stays visible above the collapsed rest. */
+const FOLD_LEAD_MAX_CHARS = 280;
+/** Room for the `<details>` markup and separators around one folded piece. */
+const FOLD_MARKUP_CHARS = 80;
+
+/**
+ * The messages posted for a terminal task. On Telegram a long body goes into
+ * collapsed `<details>` blocks: Bot API 10.1 rich messages render them folded
+ * and parse the markdown inside. Each message gets its own block, so the
+ * length split never cuts the markup in two.
+ */
+export function formatChatRelayMessages(
+  task: AgentTask,
+  adapter: string,
+  agentName?: string,
+): string[] {
+  const { head, body } = relayHeadAndBody(task, agentName);
+  if (adapter !== "telegram" || body.length <= TELEGRAM_FOLD_CHARS) {
+    return [formatChatRelayText(task, agentName)];
   }
-  return body || "Task completed.";
+  const breakAt = body.indexOf("\n\n");
+  const lead = breakAt > 0 && breakAt <= FOLD_LEAD_MAX_CHARS ? body.slice(0, breakAt) : "";
+  const rest = lead ? body.slice(breakAt).trim() : body;
+  const top = lead ? `${head}\n\n${lead}` : head;
+  const room = chatMessageLimit(adapter) - top.length - FOLD_MARKUP_CHARS;
+  const pieces = splitChatMessage(rest, room);
+  return pieces.map((piece, index) => {
+    const label = lead ? "Rest of the answer" : "Full answer";
+    const summary = pieces.length > 1 ? `${label} (${index + 1}/${pieces.length})` : label;
+    const block = `<details><summary>${summary}</summary>\n\n${piece}\n\n</details>`;
+    return index === 0 ? `${top}\n\n${block}` : block;
+  });
 }
 
 /**
@@ -96,12 +149,16 @@ export async function processPendingChatRelays(
 
     if (!(await markChatRelayAttempted(task.id, now))) continue;
     try {
+      const agent = task.agentId ? await getAgentById(task.agentId) : null;
       await postChatMessage({
         adapter: target.adapter,
         threadId: target.threadId,
-        text: formatChatRelayText(task),
+        text: formatChatRelayMessages(task, target.adapter, agent?.name),
         taskId: task.id,
         files: await taskOutputChatFiles(task.id),
+        // The inbound message this task answers. A lead follow-up, resume or
+        // defer wake-up inherits it from its parent, so it answers the same ask.
+        replyToMessageId: task.mentionMessageId,
       });
       stopTypingKeepalive(target.threadId);
       await markChatRelayDelivered(task.id, now);

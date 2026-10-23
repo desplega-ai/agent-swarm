@@ -32,6 +32,7 @@ import {
 } from "../be/scripts/db";
 import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
+import { runScriptWithRunCredential } from "../be/scripts/run-credential";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
 import {
   scriptSdkTypesWithGeneratedApis,
@@ -40,7 +41,6 @@ import {
 } from "../be/scripts/typecheck";
 import { can } from "../rbac";
 import { extractScriptSignature, type ScriptSignature } from "../scripts-runtime/extract-signature";
-import { runScript } from "../scripts-runtime/loader";
 import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
 import {
   ScriptApiAuthModeSchema,
@@ -782,7 +782,7 @@ export async function handleScripts(
       ? await touchScratchScriptLastUsed(namedScript.id)
       : null;
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
-    const output = await runScript({
+    const output = await runScriptWithRunCredential({
       source: source as string,
       args: parsed.body.args,
       fsMode,

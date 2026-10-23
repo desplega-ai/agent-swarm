@@ -33,6 +33,7 @@ import {
 } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+import { chatThreadOfContextKey } from "./context-key";
 import { taskModelPin } from "./model-pin";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
@@ -386,6 +387,7 @@ export async function createWorkerTaskFollowUp(args: {
       taskType: "follow-up",
       priority: changes.priority,
       parentTaskId: task.id,
+      contextKey: await deferredWorkChatContextKey(task),
       slackChannelId: task.slackChannelId,
       slackThreadTs: task.slackThreadTs,
       slackUserId: task.slackUserId,
@@ -396,6 +398,34 @@ export async function createWorkerTaskFollowUp(args: {
     },
     { origin: "followUp" },
   );
+}
+
+/** Hop cap for `deferredWorkChatContextKey`; a defer/resume chain is short. */
+const MAX_CONTINUATION_HOPS = 32;
+
+/**
+ * The chat thread a worker's deferred work answers in, for its Lead follow-up.
+ * A worker's defer-task wake-up (and any resume of it) runs on its schedule's
+ * contextKey, so the worker stays out of the chat (`scheduleTaskContextKey`).
+ * The Lead follow-up still answers the original ask: walk back through the
+ * wake-up and resume chain to the deferred task and report on its chat thread.
+ * Undefined when the task already has a chat key or the chain leads to none,
+ * so the follow-up inherits the task's own key as before.
+ */
+async function deferredWorkChatContextKey(task: AgentTask): Promise<string | undefined> {
+  if (chatThreadOfContextKey(task.contextKey)) return undefined;
+  const seen = new Set<string>();
+  let current: AgentTask | null = task;
+  while (current && !seen.has(current.id) && seen.size < MAX_CONTINUATION_HOPS) {
+    if (chatThreadOfContextKey(current.contextKey)) return current.contextKey;
+    const continuation =
+      (current.source === "schedule" && current.taskType === "deferred") ||
+      (current.source === "system" && current.taskType === "resume");
+    if (!continuation || !current.parentTaskId) return undefined;
+    seen.add(current.id);
+    current = await getTaskById(current.parentTaskId);
+  }
+  return undefined;
 }
 
 /** Result of `createResumeFollowUp`. */

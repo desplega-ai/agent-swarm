@@ -1716,6 +1716,18 @@ export async function getLatestLeadTaskInThread(
 }
 
 /**
+ * `source` filter of the contextKey lookups below. `'chat'` also matches a
+ * defer-task wake-up of a chat task: it keeps the chat contextKey with
+ * `source = 'schedule'` (src/scheduler/schedule-task.ts) and continues the
+ * same ask, so `/cancel`, steering and routing treat it as the chat task.
+ * Binds `source` three times.
+ */
+function contextKeySourceSql(alias = ""): string {
+  return `(? IS NULL OR ${alias}source = ?
+          OR (? = 'chat' AND ${alias}source = 'schedule' AND ${alias}taskType = 'deferred'))`;
+}
+
+/**
  * ContextKey twins of the Slack thread lookups above, for channels that key a
  * conversation by `contextKey` only (Chat SDK). `source` narrows to the
  * channel's ingress tasks, as the Slack twins do with `source = 'slack'`:
@@ -1731,7 +1743,7 @@ export async function getAgentWorkingOnContextKey(
   const taskRow = await getDbClient().get<AgentTaskRow>(
     `SELECT agentId FROM agent_tasks
        WHERE contextKey = ?
-       AND (? IS NULL OR source = ?)
+       AND ${contextKeySourceSql()}
        AND (? IS NULL
             OR status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
             OR finishedAt >= ?)
@@ -1739,6 +1751,7 @@ export async function getAgentWorkingOnContextKey(
        LIMIT 1`,
     [
       contextKey,
+      source ?? null,
       source ?? null,
       source ?? null,
       endedSince ?? null,
@@ -1760,11 +1773,11 @@ export async function getLatestActiveTaskByContextKey(
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE contextKey = ?
-       AND (? IS NULL OR source = ?)
+       AND ${contextKeySourceSql()}
        AND status IN ('in_progress', 'pending')
        ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
-    [contextKey, source ?? null, source ?? null],
+    [contextKey, source ?? null, source ?? null, source ?? null],
   );
 
   return row ? rowToAgentTask(row) : null;
@@ -1780,11 +1793,11 @@ export async function getLatestLeadTaskByContextKey(
        FROM agent_tasks t
        JOIN agents a ON a.id = t.agentId
        WHERE t.contextKey = ?
-         AND (? IS NULL OR t.source = ?)
+         AND ${contextKeySourceSql("t.")}
          AND a.isLead = 1
        ORDER BY t.createdAt DESC, t.rowid DESC
        LIMIT 1`,
-    [contextKey, source ?? null, source ?? null],
+    [contextKey, source ?? null, source ?? null, source ?? null],
   );
 
   return row ? rowToAgentTask(row) : null;

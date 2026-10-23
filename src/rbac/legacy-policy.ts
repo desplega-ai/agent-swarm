@@ -351,6 +351,7 @@ export const LEGACY_POLICY = {
   "script.api.update": leadOnly,
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
+  "schedule.deferral.update.any": leadOrResourceOwner,
   // Pool writes pick the image that receives a runtime token, so only humans
   // may make them. The lead may only place agents into operator-made pools.
   "runtime_pool.write": operatorOrUser,
@@ -358,6 +359,8 @@ export const LEGACY_POLICY = {
   "runtime_controller.write": operatorOrUser,
   // A worker token stands in for the swarm API key on a worker, so only humans mint it.
   "agent.token.manage": operatorOrUser,
+  // Agents never change human roles.
+  "user.role.manage": operatorOrUser,
   "extension.write": extensionWrite,
   "extension.activate": extensionActivation,
   "extension.install.inline": leadOrOperatorOrUser,

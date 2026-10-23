@@ -18,7 +18,7 @@ Agent Swarm ships without a built-in login page by design — early self-hosters
 | **2. Trusted-header** | oauth2-proxy + forwarded headers | Same gate, plus identity headers forwarded to the upstream | Medium | Recommended for most self-hosters. |
 
 <Callout type="info">
-Role-based access control (RBAC) is on by default: `RBAC_ENABLED` defaults to `true` (see [Environment Variables](/docs/reference/environment-variables)). There are two built-in roles, `admin` and `requester`, and every user gets `admin` by default. There is no API or UI to assign roles yet. Track and upvote role assignment at [feedback.agent-swarm.dev/p/user-rbac](https://feedback.agent-swarm.dev/p/user-rbac).
+Role-based access control (RBAC) is on by default: `RBAC_ENABLED` defaults to `true` (see [Environment Variables](/docs/reference/environment-variables)). There are three built-in roles, `admin`, `requester` and `viewer`, and every user gets `admin` by default. An operator or admin assigns roles with `PUT /api/users/{id}/roles`; there is no UI yet. Track and upvote role assignment at [feedback.agent-swarm.dev/p/user-rbac](https://feedback.agent-swarm.dev/p/user-rbac).
 </Callout>
 
 ---

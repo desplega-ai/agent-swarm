@@ -76,12 +76,14 @@ export class ChatFileTooLargeError extends Error {
   }
 }
 
+type SentChunk = { id: string; threadId?: string };
+
 interface PostTarget {
   post(message: {
     markdown: string;
     files?: FileUpload[];
     attachments?: Attachment[];
-  }): Promise<{ id: string; threadId?: string }>;
+  }): Promise<SentChunk>;
 }
 
 /** A fence opener or closer: up to 3 spaces, then 3+ backticks or tildes. */
@@ -120,16 +122,22 @@ export function escapeTelegramHashLines(markdown: string): string {
     .join("\n");
 }
 
+/** `replyFirst` sends the first chunk as a native reply; later chunks are plain posts. */
 async function postChunks(
   adapter: string,
   target: PostTarget,
-  text: string,
+  parts: readonly string[],
+  replyFirst?: (message: { markdown: string }) => Promise<SentChunk>,
 ): Promise<{ messageIds: string[]; threadId?: string }> {
   const messageIds: string[] = [];
   let threadId: string | undefined;
-  for (const chunk of splitChatMessage(text, chatMessageLimit(adapter))) {
-    const markdown = adapter === "telegram" ? escapeTelegramHashLines(chunk) : chunk;
-    const sent = await target.post({ markdown });
+  const limit = chatMessageLimit(adapter);
+  for (const chunk of parts.flatMap((part) => splitChatMessage(part, limit))) {
+    const message = { markdown: adapter === "telegram" ? escapeTelegramHashLines(chunk) : chunk };
+    const sent =
+      replyFirst && messageIds.length === 0
+        ? await replyFirst(message)
+        : await target.post(message);
     messageIds.push(sent.id);
     threadId ??= sent.threadId;
   }
@@ -323,28 +331,45 @@ export function formatUnsentFilesNote(unsent: UnsentChatFile[]): string {
  * Delivery is at-least-once: a chunk failure re-posts earlier chunks on retry,
  * and a crash between the send and `markChatRelayDelivered` re-sends the
  * message.
+ *
+ * An array `text` is posted as one message per element, each still split at
+ * the limit; the caller uses it when its own markup must not be cut in two.
+ *
+ * `replyToMessageId` anchors the first chunk to that message on a thread
+ * target. Telegram sends it with `allow_sending_without_reply`, so a deleted
+ * target still gets the message, unthreaded.
  */
 export async function postChatMessage(args: {
   adapter: string;
   threadId?: string;
   channelId?: string;
-  text: string;
+  text: string | readonly string[];
   taskId?: string;
   files?: OutboundChatFile[];
+  replyToMessageId?: string;
 }): Promise<ChatPostResult> {
   // Ids come from tools and stored context keys. Check the Teams origin
   // before the adapter sends its token.
   assertTrustedChatTarget(args.threadId ?? args.channelId ?? "");
   const chat = getChatInstance(args.adapter);
   if (!chat) throw new ChatAdapterUnavailableError(args.adapter);
-  const text = scrubSecrets(args.text);
+  const parts = (typeof args.text === "string" ? [args.text] : args.text).map(scrubSecrets);
+  const text = parts.join("\n\n");
 
   let result: ChatPostResult;
   let target: PostTarget;
   if (args.threadId) {
     const thread = chat.thread(args.threadId);
     target = thread;
-    const sent = await postChunks(args.adapter, thread, text);
+    // Only adapters with a native reply (Telegram in this SDK version) anchor;
+    // the others post unanchored, as before.
+    const replyTo = args.replyToMessageId;
+    const sent = await postChunks(
+      args.adapter,
+      thread,
+      parts,
+      replyTo && thread.adapter.reply ? (message) => thread.reply(replyTo, message) : undefined,
+    );
     result = {
       adapter: args.adapter,
       threadId: thread.id,
@@ -355,7 +380,7 @@ export async function postChatMessage(args: {
   } else if (args.channelId) {
     const channel = chat.channel(args.channelId);
     target = channel;
-    const sent = await postChunks(args.adapter, channel, text);
+    const sent = await postChunks(args.adapter, channel, parts);
     result = {
       adapter: args.adapter,
       threadId: sent.threadId ?? channel.id,
@@ -373,7 +398,7 @@ export async function postChatMessage(args: {
     result.unsentFiles = sent.unsent;
     if (sent.unsent.length > 0) {
       const note = formatUnsentFilesNote(sent.unsent);
-      const noted = await postChunks(args.adapter, target, scrubSecrets(note));
+      const noted = await postChunks(args.adapter, target, [scrubSecrets(note)]);
       result.messageIds.push(...noted.messageIds);
     }
   }

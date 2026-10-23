@@ -106,6 +106,7 @@ const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "runtime_controller.write",
   "runtime_pool.write",
   "agent.token.manage",
+  "user.role.manage",
 ];
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
@@ -122,6 +123,7 @@ const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "mcp-server.delete.any",
   "mcp-server.update.any",
   "page.delete.any",
+  "schedule.deferral.update.any",
 ];
 
 const LEAD_OR_TASK_CREATOR_VERBS: PermissionVerb[] = ["task.cancel.any", "task.steer.any"];

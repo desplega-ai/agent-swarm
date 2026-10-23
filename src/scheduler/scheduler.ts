@@ -25,7 +25,7 @@ import {
 } from "@/be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "@/be/script-credential-broker";
 import { getScript } from "@/be/scripts/db";
-import { runScript } from "@/scripts-runtime/loader";
+import { runScriptWithRunCredential } from "@/be/scripts/run-credential";
 import { telemetry } from "@/telemetry";
 import type { AgentTask, ScheduledTask } from "@/types";
 import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
@@ -72,7 +72,7 @@ function resolveExecutorRegistry(): ExecutorRegistry | null {
 
 /**
  * Execute a schedule's `targetType='script'` target directly via the
- * scripts-runtime — no agent/LLM in the loop. Reuses the same `runScript()`
+ * scripts-runtime — no agent/LLM in the loop. Reuses the same `runScriptWithRunCredential()`
  * path as the `swarm-script` workflow executor.
  */
 async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
@@ -98,10 +98,10 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
     startedAt: new Date().toISOString(),
   };
 
-  let output: Awaited<ReturnType<typeof runScript>>;
+  let output: Awaited<ReturnType<typeof runScriptWithRunCredential>>;
   try {
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId });
-    output = await runScript({
+    output = await runScriptWithRunCredential({
       source: script.source,
       args,
       fsMode: "none",

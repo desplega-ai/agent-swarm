@@ -3,14 +3,18 @@ import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   closeDb,
+  completeTask,
   createAgent,
+  createScheduledTask,
   createTaskExtended,
   getDbClient,
   getKv,
+  getScheduledTaskById,
   getTaskById,
   initDb,
 } from "../be/db";
 import { CHAT_CHANNELS_NAMESPACE } from "../integrations/chat-sdk/router";
+import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { createServer } from "../server";
 import { chatSdkContextKey } from "../tasks/context-key";
 import { registerChatOpenDmTool } from "../tools/chat-open-dm";
@@ -21,6 +25,8 @@ import {
   registerRegisterChatChannelTool,
   registerUnregisterChatChannelTool,
 } from "../tools/register-chat-channel";
+import { registerPatchScheduleTool } from "../tools/schedules/patch-schedule";
+import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
 import { registerSendTaskTool } from "../tools/send-task";
 import type { Agent } from "../types";
 import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-harness";
@@ -108,6 +114,8 @@ beforeAll(async () => {
   registerRegisterChatChannelTool(server);
   registerUnregisterChatChannelTool(server);
   registerSendTaskTool(server);
+  registerPatchScheduleTool(server);
+  registerUpdateScheduleTool(server);
 });
 
 afterAll(async () => {
@@ -194,6 +202,8 @@ describe("chat-reply", () => {
       agentId: worker.id,
       source: "chat",
       contextKey: chatSdkContextKey("telegram:991002"),
+      mentionMessageId: "991002:77",
+      mentionChannelId: "telegram:991002",
     });
     const result = await callTool(
       "chat-reply",
@@ -212,6 +222,11 @@ describe("chat-reply", () => {
         String((call.body as { chat_id?: unknown }).chat_id) === "991002",
     );
     expect(sends).toHaveLength(1);
+    // Anchored like the final answer: a reply to the message that started the task.
+    expect(sends[0]?.body.reply_parameters).toEqual({
+      message_id: 77,
+      allow_sending_without_reply: true,
+    });
   });
 });
 
@@ -516,5 +531,94 @@ describe("chat thread binding through send-task", () => {
     const child = await getTaskById((sent.structuredContent.task as { id: string }).id);
     expect(child?.parentTaskId).toBe(own.id);
     expect(child?.contextKey).toBe(chatSdkContextKey("telegram:444444"));
+  });
+});
+
+describe("defer-task wake-ups and chat thread access", () => {
+  let harness: TelegramHarness;
+
+  beforeAll(async () => {
+    harness = await startTelegramHarness();
+  });
+
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  /** A lead chat task deferred with defer-task: the task is done, its wake-up booked. */
+  async function leadDeferral(chatId: string) {
+    const parent = await createTaskExtended("human ask", {
+      agentId: lead.id,
+      source: "chat",
+      contextKey: chatSdkContextKey(`telegram:${chatId}`),
+      mentionMessageId: `${chatId}:55`,
+    });
+    await completeTask(parent.id, "Deferred.", { deferredAt: new Date().toISOString() });
+    const schedule = await createScheduledTask({
+      name: `deferred-${parent.id.slice(0, 8)}-${crypto.randomUUID()}`,
+      taskTemplate: "finish the original ask",
+      targetType: "agent-task",
+      scheduleType: "one_time",
+      nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      taskType: "deferred",
+      parentTaskId: parent.id,
+    });
+    return { parent, schedule };
+  }
+
+  test("another worker cannot change a lead's deferral", async () => {
+    const { schedule } = await leadDeferral("992881");
+    for (const tool of ["patch-schedule", "update-schedule"]) {
+      const result = await callTool(
+        tool,
+        { "x-agent-id": worker.id },
+        { scheduleId: schedule.id, targetAgentId: worker.id, taskTemplate: "emit ATTACKER OUTPUT" },
+      );
+      expect(result.structuredContent.success).toBe(false);
+    }
+    const after = await getScheduledTaskById(schedule.id);
+    expect(after?.targetAgentId).toBe(lead.id);
+    expect(after?.taskTemplate).toBe("finish the original ask");
+  });
+
+  test("a deferral re-targeted to another agent wakes up outside the chat thread", async () => {
+    const chatId = "992882";
+    const { schedule } = await leadDeferral(chatId);
+    // A lead may re-target it; the new assignee still gets no thread access.
+    const patched = await callTool(
+      "patch-schedule",
+      { "x-agent-id": lead.id },
+      { scheduleId: schedule.id, targetAgentId: worker.id },
+    );
+    expect(patched.structuredContent.success).toBe(true);
+    const retargeted = await getScheduledTaskById(schedule.id);
+    if (!retargeted) throw new Error("schedule vanished");
+
+    const wakeUp = await createStandaloneScheduleTask(retargeted);
+    expect(wakeUp.agentId).toBe(worker.id);
+    expect(wakeUp.contextKey).toBe(`task:schedule:${schedule.id}`);
+
+    const reply = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": wakeUp.id },
+      { text: "ATTACKER DIRECT REPLY" },
+    );
+    expect(reply.structuredContent.success).toBe(false);
+
+    await completeTask(wakeUp.id, "ATTACKER OUTPUT");
+    const obligation = await getDbClient().get(
+      "SELECT task_id FROM chat_relay_obligations WHERE task_id = ?",
+      [wakeUp.id],
+    );
+    expect(obligation).toBeNull();
+    expect(
+      harness.mock.calls.some(
+        (call) =>
+          /^send(Rich)?Message$/.test(call.method) &&
+          String((call.body as { chat_id?: unknown }).chat_id) === chatId,
+      ),
+    ).toBe(false);
   });
 });

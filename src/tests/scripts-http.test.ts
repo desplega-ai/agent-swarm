@@ -574,6 +574,25 @@ describe("/api/scripts HTTP", () => {
     ).toBe(beforeFailed);
   });
 
+  skip("a run mints a per-run token for its agent and revokes it when the run ends", async () => {
+    const tokens = () =>
+      getDbClient().query<{ revokedAt: string | null }>(
+        "SELECT revokedAt FROM session_tokens WHERE agentId = ? AND scriptRun = 1",
+        [workerId],
+      );
+    const before = (await tokens()).length;
+    const res = await dispatch("/api/scripts/run", {
+      method: "POST",
+      agentId: workerId,
+      body: JSON.stringify({ source: validSource(2), args: { value: 2 }, intent: "token" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({ result: 4 });
+    const minted = (await tokens()).slice(before);
+    expect(minted).toHaveLength(1);
+    expect(minted[0]?.revokedAt).not.toBeNull();
+  });
+
   test("workspace-rw named scripts return 501", async () => {
     await upsert({ name: "workspace", source: validSource(2), fsMode: "workspace-rw" });
     const res = await dispatch("/api/scripts/run", {

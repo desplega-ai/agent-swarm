@@ -1,5 +1,6 @@
 import type { PermissionVerb } from "../rbac";
 import { PermissionVerbSchema } from "../rbac";
+import { invalidateTelemetryUserRole } from "../telemetry-identity";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getDb, getDbClient } from "./db";
 
@@ -39,7 +40,18 @@ export const BUILTIN_ROLES = [
       "session.presence",
     ],
   },
+  {
+    id: "rbac-role-viewer",
+    name: "viewer",
+    description: "Read-only: no task, approval or script writes.",
+    isBuiltin: true,
+    grantsAll: false,
+    verbs: ["favorite.write.own", "session.presence"],
+  },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
+
+/** A person holds exactly one of these; other roles are extras on top. */
+export const PRIMARY_ROLE_NAMES: readonly string[] = ["admin", "requester", "viewer"];
 
 export type EffectiveGrant = {
   grantsAll: boolean;
@@ -79,6 +91,8 @@ type RoleIdentityRow = {
   id: string;
   name: string;
 };
+
+type GrantRoleRow = RoleIdentityRow & { grantsAll: number };
 
 type UserRoleRow = {
   id: string;
@@ -231,6 +245,130 @@ export async function listUserRoles(userId: string): Promise<UserRole[]> {
     [userId],
   );
   return rows.map(roleRowToUserRole);
+}
+
+export type RbacRoleCatalogEntry = UserRole & { primary: boolean; verbs: string[] };
+
+/** Every role with its verbs, for the role picker. */
+export async function listRbacRoles(): Promise<RbacRoleCatalogEntry[]> {
+  const client = getDbClient();
+  const roles = await client.query<UserRoleRow>(
+    "SELECT id, name, description, isBuiltin, grantsAll, createdAt FROM roles ORDER BY name",
+  );
+  const perms = await client.query<{ roleId: string; verb: string }>(
+    "SELECT roleId, verb FROM role_permissions ORDER BY verb",
+  );
+  return roles.map((row) => ({
+    ...roleRowToUserRole(row),
+    primary: PRIMARY_ROLE_NAMES.includes(row.name),
+    verbs: perms.filter((p) => p.roleId === row.id).map((p) => p.verb),
+  }));
+}
+
+export class InvalidRoleSetError extends Error {}
+
+export class LastAdminError extends Error {
+  constructor() {
+    super("last_admin");
+  }
+}
+
+/**
+ * Throw LastAdminError when removing this user would leave the swarm without
+ * an active grant-all user. Joins the caller's transaction.
+ */
+export async function assertNotLastAdmin(userId: string): Promise<void> {
+  const client = getDbClient();
+  const self = await client.get<{ n: number }>(
+    `SELECT COUNT(*) AS n
+     FROM users u
+     JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
+     JOIN roles r ON r.id = pr.roleId AND r.grantsAll = 1
+     WHERE u.status = 'active' AND u.id = ?`,
+    [userId],
+  );
+  if ((self?.n ?? 0) === 0) return;
+  const others = await client.get<{ n: number }>(
+    `SELECT COUNT(DISTINCT u.id) AS n
+     FROM users u
+     JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
+     JOIN roles r ON r.id = pr.roleId AND r.grantsAll = 1
+     WHERE u.status = 'active' AND u.id <> ?`,
+    [userId],
+  );
+  if ((others?.n ?? 0) === 0) throw new LastAdminError();
+}
+
+/**
+ * Replace a user's RBAC roles. The set holds exactly one primary role
+ * (admin, requester or viewer) plus any extra roles. Refuses to leave the
+ * swarm without an active grant-all user.
+ */
+export async function setUserRoles(
+  userId: string,
+  roleNames: string[],
+  actorUserId: string | null,
+): Promise<{ before: string[]; after: string[] }> {
+  const names = [...new Set(roleNames)];
+  if (names.filter((name) => PRIMARY_ROLE_NAMES.includes(name)).length !== 1) {
+    throw new InvalidRoleSetError(
+      `Pick exactly one primary role: ${PRIMARY_ROLE_NAMES.join(", ")}`,
+    );
+  }
+  return getDbClient().transaction(async (tx) => {
+    const wanted: GrantRoleRow[] = [];
+    for (const name of names) {
+      const row = await tx.get<GrantRoleRow>(
+        "SELECT id, name, grantsAll FROM roles WHERE name = ?",
+        [name],
+      );
+      if (!row) throw new InvalidRoleSetError(`Unknown role: ${name}`);
+      wanted.push(row);
+    }
+    const current = await tx.query<GrantRoleRow>(
+      `SELECT r.id, r.name, r.grantsAll
+       FROM principal_roles pr JOIN roles r ON r.id = pr.roleId
+       WHERE pr.principalType = 'user' AND pr.principalId = ?
+       ORDER BY r.name`,
+      [userId],
+    );
+    const wantsAll = wanted.some((r) => r.grantsAll === 1);
+    if (current.some((r) => r.grantsAll === 1) && !wantsAll) {
+      const user = await tx.get<{ status: string }>("SELECT status FROM users WHERE id = ?", [
+        userId,
+      ]);
+      if (user?.status === "active") {
+        const others = await tx.get<{ n: number }>(
+          `SELECT COUNT(DISTINCT u.id) AS n
+           FROM users u
+           JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
+           JOIN roles r ON r.id = pr.roleId AND r.grantsAll = 1
+           WHERE u.status = 'active' AND u.id <> ?`,
+          [userId],
+        );
+        if ((others?.n ?? 0) === 0) throw new LastAdminError();
+      }
+    }
+    const wantedIds = new Set(wanted.map((r) => r.id));
+    for (const row of current) {
+      if (!wantedIds.has(row.id)) {
+        await tx.run(
+          `DELETE FROM principal_roles
+           WHERE principalType = 'user' AND principalId = ? AND roleId = ?`,
+          [userId, row.id],
+        );
+      }
+    }
+    for (const row of wanted) {
+      await tx.run(
+        `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId, created_by)
+         VALUES ('user', ?, ?, ?)`,
+        [userId, row.id, actorUserId],
+      );
+    }
+    getDbClient().afterCommit(() => invalidateTelemetryUserRole(userId));
+    return { before: current.map((r) => r.name), after: wanted.map((r) => r.name).sort() };
+  });
 }
 
 export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncStats {

@@ -9,6 +9,7 @@ import {
 } from "node:http";
 import {
   closeDb,
+  createAgent,
   createScheduledTask,
   getScheduledTaskById,
   initDb,
@@ -116,5 +117,48 @@ describe("Schedule HTTP triage tooling", () => {
     const body = (await res.json()) as { schedules: ScheduledTaskSummary[]; count: number };
     expect(body.schedules.some((s) => s.id === failing.id)).toBe(true);
     expect(body.schedules.some((s) => s.id === ok.id)).toBe(false);
+  });
+  test("PUT and PATCH /api/schedules/:id let only the owner, a lead or the operator change a deferral", async () => {
+    const owner = await createAgent({ name: "DeferralOwner", isLead: false, status: "idle" });
+    const other = await createAgent({ name: "DeferralOther", isLead: false, status: "idle" });
+    const lead = await createAgent({ name: "DeferralLead", isLead: true, status: "idle" });
+    const schedule = await createScheduledTask({
+      name: `http-deferral-${crypto.randomUUID()}`,
+      taskTemplate: "finish the original ask",
+      targetType: "agent-task",
+      scheduleType: "one_time",
+      nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+      targetAgentId: owner.id,
+      createdByAgentId: owner.id,
+      taskType: "deferred",
+    });
+    const send = (method: "PUT" | "PATCH", agentId: string | null, taskTemplate: string) =>
+      fetch(`${baseUrl}/api/schedules/${schedule.id}`, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(agentId ? { "X-Agent-ID": agentId } : {}),
+        },
+        body: JSON.stringify({ targetAgentId: other.id, taskTemplate }),
+      });
+
+    for (const method of ["PUT", "PATCH"] as const) {
+      const denied = await send(method, other.id, "emit ATTACKER OUTPUT");
+      expect(denied.status).toBe(403);
+      const after = await getScheduledTaskById(schedule.id);
+      expect(after?.targetAgentId).toBe(owner.id);
+      expect(after?.taskTemplate).toBe("finish the original ask");
+    }
+
+    for (const [agentId, label] of [
+      [owner.id, "owner"],
+      [lead.id, "lead"],
+      [null, "operator"],
+    ] as const) {
+      const allowed = await send("PATCH", agentId, `changed by ${label}`);
+      expect(allowed.status).toBe(200);
+      expect((await getScheduledTaskById(schedule.id))?.taskTemplate).toBe(`changed by ${label}`);
+      await updateScheduledTask(schedule.id, { targetAgentId: owner.id });
+    }
   });
 });
