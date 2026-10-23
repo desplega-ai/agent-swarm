@@ -27,7 +27,7 @@ const entrypointPath = `${import.meta.dir}/../../docker-entrypoint.sh`;
 
 // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal shell expansion in the entrypoint
 const HELPER_KEY_EXPR = '"credential.${GITLAB_HOST%/}.helper"';
-const SYNTHETIC_TOKEN = "glpat-synthetic-test-token";
+const SYNTHETIC_TOKEN = "glpat-synthetic-test-token"; // gitleaks:allow (synthetic test fixture)
 const HOOK_HELPER = "!synthetic-hook-helper";
 
 function extractGitlabHelperSnippet(): string {
