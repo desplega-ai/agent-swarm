@@ -479,6 +479,27 @@ describe("respond", () => {
     expect(await configRow(key)).toMatchObject({ value: "new", description: "kept description" });
   });
 
+  test("an API-only key is treated as secret even when stored plain", async () => {
+    const key = "TRANSCRIPTION_API_KEY";
+    const stored = `hitl-api-only-${crypto.randomUUID()}`;
+    await upsertSwarmConfig({ scope: "global", key, value: stored, isSecret: false });
+    const created = await createRequest({
+      questions: [{ id: "cfg", type: "config", config: { key, scope: "global", isSecret: false } }],
+    });
+    expect(created.status).toBe(201);
+    expect(created.json.approvalRequest.questions[0].config.isSecret).toBe(true);
+    const id = created.json.approvalRequest.id as string;
+
+    const get = await api("GET", `/api/approval-requests/${id}`);
+    expect(get.json.approvalRequest.configState.cfg.isSecret).toBe(true);
+    expect(get.text).not.toContain(stored);
+
+    const kept = await respond(id, { cfg: { action: "keep" } });
+    expect(kept.status).toBe(200);
+    expect(kept.json.approvalRequest.responses.cfg).not.toHaveProperty("value");
+    expect(kept.text).not.toContain(stored);
+  });
+
   test("an agent cannot answer a config question", async () => {
     const key = uniqueKey("AGENT_DENIED");
     const id = await createConfigRequest({ key, scope: "global" });

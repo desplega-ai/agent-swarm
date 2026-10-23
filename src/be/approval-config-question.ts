@@ -10,6 +10,7 @@ import { getDbClient } from "./db";
 import { upsertSwarmConfigWithPolicyMirror } from "./multi-runtime";
 import {
   internalConfigKeyError,
+  isApiOnlyConfigKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
@@ -133,7 +134,8 @@ async function readConfigRow(
     scopeId === null ? [settings.scope, settings.key] : [settings.scope, scopeId, settings.key],
   );
   if (!row) return null;
-  const isSecret = row.isSecret === 1;
+  // API-only keys are never readable over HTTP, so they count as secret here.
+  const isSecret = row.isSecret === 1 || isApiOnlyConfigKey(settings.key);
   return {
     isSecret,
     updatedAt: row.lastUpdatedAt,
@@ -192,7 +194,8 @@ export async function normalizeConfigQuestion<Q extends ConfigQuestionInput>(
   if (isInternalConfigKey(settings.key)) return fail(internalConfigKeyError(settings.key).message);
 
   const row = await readConfigRow(settings);
-  const isSecret = settings.isSecret !== false || row?.isSecret === true;
+  const isSecret =
+    settings.isSecret !== false || row?.isSecret === true || isApiOnlyConfigKey(settings.key);
   if (isSecret && (settings.options || settings.defaultValue !== undefined)) {
     return fail(
       "options and defaultValue are only allowed when isSecret is false (and the key is not already stored as a secret)",
