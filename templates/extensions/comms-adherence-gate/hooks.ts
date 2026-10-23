@@ -14,6 +14,10 @@ import { z } from "zod";
  * joke", "explain in detail") outranks the stored default, so a requested long
  * answer is not a verbosity failure.
  *
+ * Threads with several people: a message that @-mentions someone is judged
+ * against the first mentioned person with stored preferences; otherwise against
+ * the task requester. `plain` applies to everyone.
+ *
  * Transport (config.provider): Jev is served by TypeSafe directly and by
  * OpenRouter's Decisions endpoint. Both take the same {model, state, questions}
  * body and return the same `answers` shape. `auto` uses TYPESAFE_API_KEY when
@@ -375,6 +379,65 @@ WHERE t.id = ?`;
 
 const LEAD_SQL = "SELECT isLead FROM agents WHERE id = ?";
 
+/** Slack user mentions in agent text: `<@U123>` or `<@U123|name>`. */
+const MENTION_RE = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
+const MAX_MENTIONS = 5;
+
+/** Mentioned Slack user ids in order of first appearance, capped. */
+export const mentionedSlackIds = (text: string): string[] => {
+  const ids: string[] = [];
+  for (const m of text.matchAll(MENTION_RE)) {
+    if (!ids.includes(m[1]!)) ids.push(m[1]!);
+    if (ids.length >= MAX_MENTIONS) break;
+  }
+  return ids;
+};
+
+const addresseeSql = (n: number) => `SELECT x.externalId, u.id, u.name,
+       json_extract(u.metadata, '$.comms') AS comms
+FROM user_external_ids x
+JOIN users u ON u.id = x.userId
+WHERE x.kind = 'slack' AND x.externalId IN (${Array(n).fill("?").join(", ")})`;
+
+const parsePrefs = (raw: unknown): Prefs | null => {
+  if (!raw) return null;
+  const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  return parsed && typeof parsed === "object" && Object.keys(parsed).length > 0
+    ? (parsed as Prefs)
+    : null;
+};
+
+type Audience = { id: string; name: string; prefs: Prefs; via: "mention" | "requester" };
+
+/**
+ * Whose preferences a message is judged against. In a thread with several
+ * people, the message is for whoever it @-mentions: the first mentioned person
+ * with stored preferences wins. Without such a mention, the task requester (the
+ * person whose message created this task). One SQL read, only when the text
+ * mentions someone; no judge call.
+ */
+const resolveAudience = async (
+  swarm: Swarm,
+  text: string,
+  requester: Audience,
+): Promise<Audience> => {
+  const ids = mentionedSlackIds(text);
+  if (ids.length === 0) return requester;
+  const q = (await swarm.db_query({ sql: addresseeSql(ids.length), params: ids })) as Envelope;
+  const rows = q?.data?.rows ?? q?.rows ?? [];
+  for (const slackId of ids) {
+    const row = rows.find((r) => String(cell(r, 0, "externalId")) === slackId);
+    if (!row) continue;
+    const userId = String(cell(row, 1, "id") ?? "");
+    // The requester mentioned by name keeps their own task context.
+    if (userId && userId === requester.id) return requester;
+    const prefs = parsePrefs(cell(row, 3, "comms"));
+    if (!prefs) continue;
+    return { id: userId, name: String(cell(row, 2, "name") ?? userId), prefs, via: "mention" };
+  }
+  return requester;
+};
+
 /**
  * Mirrors the `task.progress.write` rule store-progress enforces
  * (src/rbac/legacy-policy.ts): the caller owns the task, the task is
@@ -474,10 +537,16 @@ const extension: SwarmExtension = (api) => {
       // A completion reaches a human only on a Slack task; a Slack tool always does.
       if (event.tool === "store-progress" && source !== "slack" && !slackThreadTs) return;
 
-      const parsed = commsRaw
-        ? ((typeof commsRaw === "string" ? JSON.parse(commsRaw) : commsRaw) as Prefs)
-        : null;
-      const prefs: Prefs = parsed && typeof parsed === "object" ? parsed : {};
+      const requester: Audience = {
+        id: requesterId,
+        name: requesterName,
+        prefs: parsePrefs(commsRaw) ?? {},
+        via: "requester",
+      };
+      // `plain` alone judges no one's preferences, so it skips the lookup.
+      const audience =
+        cfg.mode === "off" ? requester : await resolveAudience(ctx.swarm, text, requester);
+      const { prefs, name: audienceName } = audience;
 
       const questions: Record<string, unknown> = cfg.mode === "off" ? {} : buildQuestions(prefs);
       // Only a store-progress outputSchema answer is machine JSON; a Slack post is
@@ -490,7 +559,7 @@ const extension: SwarmExtension = (api) => {
       const { scores, latencyMs } = await askJev(
         {
           role: "You audit an AI agent's message to the human who requested the work.",
-          requester: requesterName,
+          requester: audienceName,
           requester_preferences: prefs,
           latest_request: ask,
           thread_opening: threadOpening,
@@ -522,6 +591,9 @@ const extension: SwarmExtension = (api) => {
         source,
         requester: requesterName,
         requesterId,
+        judgedFor: audience.via,
+        audienceId: audience.id,
+        audience: audienceName,
         provider: transport.provider,
         scores,
         failed,
@@ -573,8 +645,8 @@ const extension: SwarmExtension = (api) => {
 
       const lines = [
         blocking.includes("plain")
-          ? `Comms gate: this message is not in plain words for ${requesterName}.`
-          : `Comms gate: this output does not match ${requesterName}'s stated preferences.`,
+          ? `Comms gate: this message is not in plain words for ${audienceName}.`
+          : `Comms gate: this output does not match ${audienceName}'s stated preferences.`,
       ];
       for (const d of blocking) {
         const score = `${d} (${scores[d]!.toFixed(2)} vs ${limitOf(d)})`;

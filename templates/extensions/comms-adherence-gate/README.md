@@ -31,6 +31,8 @@ Only a call the tool itself accepts is judged, so no other task's text reaches J
 
 A requester with no stated preferences in `users.metadata.comms` still gets the `plain` question. Set preferences with the `manage-user` tool.
 
+In a thread with several people, the requester is the person whose message created the task. A message that @-mentions someone (`<@U123>`) is judged against the first mentioned person with stored preferences, resolved through their Slack identity in `user_external_ids`; otherwise against the requester. The lookup is one SQL read, only when the text mentions someone and `mode` is not `off`. The verdict records who was judged in `judgedFor` (`mention` or `requester`) and `audience`.
+
 ## Decision
 
 The gate reads the task row and asks one `noul` question per stated preference it knows: `verbosity`, `tone`, `language`. Any other key in `comms` is context only.

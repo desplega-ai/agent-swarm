@@ -83,6 +83,8 @@ const makeCtx = (
     dbThrows?: boolean;
     /** The caller's agents.isLead; null means no agents row. */
     callerIsLead?: boolean | null;
+    /** user_external_ids x users rows for the mention lookup. */
+    addressees?: Record<string, unknown>[];
   } = {},
 ) => {
   const kv: Record<string, unknown> = {};
@@ -99,6 +101,10 @@ const makeCtx = (
     db_query: async (args: any) => {
       queries.push(args);
       if (opts.dbThrows) throw new Error("db down");
+      if (String(args.sql).includes("user_external_ids")) {
+        const rows = (opts.addressees ?? []).filter((r) => args.params.includes(r.externalId));
+        return { success: true, data: { rows } };
+      }
       if (String(args.sql).includes("FROM agents")) {
         const lead = opts.callerIsLead ?? false;
         return {
@@ -616,5 +622,84 @@ describe("plain", () => {
     expect(await handler(event, ctx)).toBeUndefined();
     expect(counters).toMatchObject({ fail: 1, shadowed: 1 });
     expect(counters.blocked).toBeUndefined();
+  });
+});
+
+describe("multi-person threads", () => {
+  const BOB_PREFS = { language: "Spanish", tone: "warm" };
+  const bob = { externalId: "UBOB", id: "user-2", name: "Bob", comms: JSON.stringify(BOB_PREFS) };
+  const post = (message: string) => ({
+    tool: "slack-reply",
+    args: { taskId: TASK_ID, message },
+    requestInfo: { callOrigin: "mcp", agentId: "agent-1" },
+  });
+
+  test("mentionedSlackIds keeps first-appearance order and drops duplicates", () => {
+    expect(mod.mentionedSlackIds("<@UBOB|bob> and <@U1> then <@UBOB>")).toEqual(["UBOB", "U1"]);
+    expect(mod.mentionedSlackIds("no mentions, @bob")).toEqual([]);
+  });
+
+  test("a message that mentions another person is judged against that person's prefs", async () => {
+    jevScores({ language: 0.1 });
+    const { ctx, kv } = makeCtx({ mode: "enforce" }, { addressees: [bob] });
+    const result = await handler(post("<@UBOB> hola, el deploy tarda 4 minutos."), ctx);
+    const state = jevCalls[0]!.body.state;
+    expect(state.requester).toBe("Bob");
+    expect(state.requester_preferences).toEqual(BOB_PREFS);
+    expect(Object.keys(jevCalls[0]!.body.questions).sort()).toEqual(["language", "plain", "tone"]);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("Bob's stated preferences");
+    expect(kv.last).toMatchObject({
+      judgedFor: "mention",
+      audienceId: "user-2",
+      requester: "Alice",
+    });
+  });
+
+  test("the first mentioned person with prefs wins; one without prefs is skipped", async () => {
+    jevScores(0.9);
+    const carol = { externalId: "UCAROL", id: "user-3", name: "Carol", comms: null };
+    const { ctx } = makeCtx({}, { addressees: [carol, bob] });
+    await handler(post("<@UCAROL> <@UBOB> deploys take 4 minutes."), ctx);
+    expect(jevCalls[0]!.body.state.requester).toBe("Bob");
+  });
+
+  test("no mention, or an unknown one, falls back to the requester", async () => {
+    for (const message of ["Deploys take 4 minutes.", "<@UNOBODY> deploys take 4 minutes."]) {
+      jevCalls = [];
+      jevScores(0.9);
+      const { ctx, kv } = makeCtx({}, { addressees: [bob] });
+      await handler(post(message), ctx);
+      expect(jevCalls[0]!.body.state.requester_preferences).toEqual(PREFS);
+      expect(kv.last).toMatchObject({ judgedFor: "requester", audience: "Alice" });
+    }
+  });
+
+  test("mentioning the requester keeps the requester's prefs", async () => {
+    jevScores(0.9);
+    const alice = {
+      externalId: "U1",
+      id: "user-1",
+      name: "Alice",
+      comms: JSON.stringify(BOB_PREFS),
+    };
+    const { ctx } = makeCtx({}, { addressees: [alice] });
+    await handler(post("<@U1> deploys take 4 minutes."), ctx);
+    expect(jevCalls[0]!.body.state.requester_preferences).toEqual(PREFS);
+  });
+
+  test("a completion that mentions someone is judged for them too", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx({}, { addressees: [bob] });
+    await handler(completion("<@UBOB> done, PR #12."), ctx);
+    expect(jevCalls[0]!.body.state.requester).toBe("Bob");
+  });
+
+  test("with mode off, plain alone skips the mention lookup", async () => {
+    jevScores(0.9);
+    const { ctx, queries } = makeCtx({ mode: "off" }, { addressees: [bob] });
+    await handler(post("<@UBOB> deploys take 4 minutes."), ctx);
+    expect(queries.some((q) => String(q.sql).includes("user_external_ids"))).toBe(false);
+    expect(jevCalls).toHaveLength(1);
   });
 });
