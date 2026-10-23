@@ -74,6 +74,11 @@ describe("searchSkills on long skill bodies", () => {
         content:
           "Open a pull request, ask a reviewer, review a pull request, request a fix. ".repeat(6),
       },
+      // "get" is a stopword, and "aaa-get-helper" sorts first by name.
+      { name: "get", description: "Fetch API resources.", content: "fetch resources" },
+      { name: "aaa-get-helper", description: "Get helper instructions", content: "get content" },
+      { name: "what is it", description: "Release notes digest.", content: "notes" },
+      { name: "aaa-what-is-it", description: "What is it for, in short.", content: "notes" },
     ];
     for (const skill of fixture) await createSkill({ ...skill, scope: "swarm" });
   });
@@ -100,6 +105,21 @@ describe("searchSkills on long skill bodies", () => {
     const names = await topNames("how do I");
     expect(names).toContain("social-content");
     expect(names).not.toContain("pages");
+  });
+
+  test.each([
+    "get",
+    "GET",
+    " Get ",
+  ])("an exact-name query of only stopwords (%p) ranks that skill first", async (query) => {
+    expect((await searchSkills(query, 1, false)).map((skill) => skill.name)).toEqual(["get"]);
+    expect((await topNames(query)).slice(0, 2)).toEqual(["get", "aaa-get-helper"]);
+  });
+
+  test("a multi-word exact name of only stopwords ranks first", async () => {
+    expect((await searchSkills("What Is It", 1, false)).map((skill) => skill.name)).toEqual([
+      "what is it",
+    ]);
   });
 
   test("keeps the name/description index in sync on update and delete", async () => {

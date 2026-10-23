@@ -10992,7 +10992,8 @@ export async function listSkills(filters?: SkillFilters): Promise<Skill[]> {
 
 /**
  * Ranked skill search (see searchSkillRowsRanked). Falls back to the unranked
- * substring match when the ranked query finds nothing, e.g. a partial word.
+ * substring match when the ranked query finds nothing, e.g. a partial word or
+ * a query of only stopwords. The fallback also ranks an exact name first.
  */
 export async function searchSkills(
   query: string,
@@ -11014,8 +11015,8 @@ export async function searchSkills(
     return [term, term, term];
   });
   const rows = await getDbClient().query<SkillRow>(
-    `SELECT ${columns} FROM skills WHERE ${[...searchClauses, "isEnabled = 1"].join(" AND ")} ORDER BY name ASC LIMIT ?`,
-    [...params, limit],
+    `SELECT ${columns} FROM skills WHERE ${[...searchClauses, "isEnabled = 1"].join(" AND ")} ORDER BY lower(name) = lower(?) DESC, name ASC LIMIT ?`,
+    [...params, query.trim(), limit],
   );
   return rows.map(rowToSkill);
 }
