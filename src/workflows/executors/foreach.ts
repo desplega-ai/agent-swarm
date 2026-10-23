@@ -6,7 +6,7 @@ import { getSuccessors } from "../definition";
 import { foreachBodyTypeError } from "../foreach-body";
 import {
   buildForeachAggregate,
-  FOREACH_TERMINAL_STEP_STATUSES,
+  isForeachChildSettled,
   parseSyntheticNodeId,
 } from "../foreach-join";
 import { getMaxWorkflowStepsPerRun } from "../limits";
@@ -144,7 +144,7 @@ export class ForeachExecutor extends BaseExecutor<
     const childSteps = (await this.deps.db.getWorkflowRunStepsByRunId(meta.runId)).filter(
       (step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId,
     );
-    if (childSteps.every((step) => FOREACH_TERMINAL_STEP_STATUSES.has(step.status))) {
+    if (childSteps.every(isForeachChildSettled)) {
       return { status: "success", output: buildForeachAggregate(childSteps) };
     }
 

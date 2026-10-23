@@ -18,6 +18,7 @@ import {
 import { checkpointStep, checkpointStepFailure } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import type { ExecutorRegistry } from "./executors/registry";
+import { resolveStepNode } from "./foreach-body";
 import { type ForeachSettleResult, resolveForeachParent, settleForeachChild } from "./foreach-join";
 
 export interface TaskStepRoutingResult {
@@ -217,8 +218,12 @@ export const SUPERSEDE_RETRY_POLICY: RetryPolicy = {
  * only after ownership is confirmed: a stale caller's step snapshot may carry
  * the counter of a newer attempt.
  *
- * Foreach children (`<foreachId>#<key>`) are not matched here: the retry
- * poller resolves nodes by exact id and cannot re-dispatch a child yet.
+ * A foreach child (`<foreachId>#<key>`) with an `agent-task` body takes the
+ * parent foreach node's `retry`, else the same supersede default. While queued
+ * it does not settle, so the join stays open; the retry poller re-queues it and
+ * the foreach driver starts it under the fan-out's concurrency cap. Exhausted
+ * retries and every other failure settle the item through `onNodeFailure` and
+ * the fan-out's failure policy as before.
  */
 export async function scheduleTaskStepRetry(
   def: WorkflowDefinition,
@@ -227,11 +232,14 @@ export async function scheduleTaskStepRetry(
   taskId: string,
   reason: string,
 ): Promise<TaskStepRetryOutcome> {
-  const node = def.nodes.find((n) => n.id === step.nodeId);
+  const foreachParent = resolveForeachParent(def, step.nodeId);
+  const node = resolveStepNode(def, step.nodeId);
   if (!node || node.type !== "agent-task") return "not-eligible";
+  // A synthesized child node carries only the body; its retry lives on the parent.
+  const declaredRetry = foreachParent ? foreachParent.retry : node.retry;
   let policy: RetryPolicy;
-  if (node.retry) {
-    const parsed = RetryPolicySchema.safeParse(node.retry);
+  if (declaredRetry) {
+    const parsed = RetryPolicySchema.safeParse(declaredRetry);
     if (!parsed.success) return "not-eligible";
     policy = parsed.data;
   } else {

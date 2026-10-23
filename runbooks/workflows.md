@@ -326,10 +326,14 @@ A deploy drain or heartbeat remediation fails an in-flight workflow-step task wi
 - An explicit node `retry` always wins. `retry: { maxRetries: 0 }` is the opt-out for a node with
   external side effects that must not run twice.
 - A second cut exhausts the implicit retry and follows `onNodeFailure`.
-- Foreach children (`<foreachId>#<key>`) are not covered: the retry poller resolves the node by
-  exact id (`src/workflows/retry-poller.ts`) and cannot re-dispatch a child step. Automatic per-item
-  retry is a follow-up to #2029; until then, a cut item follows its fan-out's failure policy, and a
-  fail-fast run is resumed with `retry-workflow-run`, which reruns only the failed items.
+- A foreach child (`<foreachId>#<key>`) with an `agent-task` body gets the same retry. The parent
+  foreach node's `retry` applies to its items (the body carries none), else
+  `SUPERSEDE_RETRY_POLICY` on a cut, so `retry: { maxRetries: 0 }` on the foreach opts every item
+  out. A queued item is not settled: the join stays open and the item keeps its `concurrency` slot.
+  When the retry is due, the retry poller (`src/workflows/retry-poller.ts`) flips the item back to
+  `pending` and drives the fan-out, which starts it with a fresh task; its result settles into the
+  join like any other item. A fail-fast failure of a sibling cancels a queued item with the rest of
+  the queue. Exhausted retries and every other failure follow the fan-out's failure policy as before.
 
 ## Script node types
 

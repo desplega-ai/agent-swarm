@@ -41,6 +41,7 @@ import {
   cancelQueuedForeachChildren,
   FOREACH_TERMINAL_STEP_STATUSES,
   type ForeachChildOutcome,
+  isRetryPending,
   latestForeachChildren,
   settleForeachChild,
 } from "./foreach-join";
@@ -352,8 +353,8 @@ async function parkRunIfRunning(runId: string): Promise<void> {
 
 /**
  * Flip `pending` children to `running`, in item order, while fewer than the
- * fan-out's `concurrency` cap are in flight (`running` or `waiting`, latest
- * attempt rows only), and collect unowned `running` ones. Ownership is registered before commit, so no other
+ * fan-out's `concurrency` cap are in flight (`running`, `waiting` or queued
+ * for a retry, latest attempt rows only), and collect unowned `running` ones. Ownership is registered before commit, so no other
  * drive can see a claimed row without also seeing it owned.
  */
 async function claimChildren(
@@ -379,7 +380,8 @@ async function claimChildren(
         }
       }
       const inFlight = children.filter(
-        (child) => child.status === "running" || child.status === "waiting",
+        (child) =>
+          child.status === "running" || child.status === "waiting" || isRetryPending(child),
       ).length;
       let free = foreachConcurrencyCap(parentNode) - inFlight;
       for (const child of children) {

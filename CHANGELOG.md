@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - Approvals: `POST /api/approval-requests` now posts the Slack card for each `slack` entry in `notifications` and stores its `messageTs`, the same card workflow approval steps send. Before, the route stored the targets and posted nothing. Slack targets need a lead agent caller (403 otherwise, the `slack-post` permission), channels shared with another org are skipped when `SLACK_BLOCK_EXTERNAL_CHANNELS` is on, and the card escapes the title. Email targets are still skipped.
+- Workflows: a `foreach` item with an `agent-task` body whose task a deploy drain cuts (`superseded_workflow_task`) now gets the same one-shot retry as a plain `agent-task` node, instead of settling failed into the join. The foreach node's `retry` applies to its items (`maxRetries: 0` opts out). The queued item keeps the join open and its concurrency slot, and the retry's result counts in the aggregate.
 
 ## [2.5.1] - 2026-10-23
 
