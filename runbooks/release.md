@@ -4,6 +4,8 @@ Publishing a release is **automated**. You do not run `npm publish`, `docker pus
 
 ## TL;DR
 
+The release PR writes the `## [X.Y.Z] - YYYY-MM-DD` section in `CHANGELOG.md` from the commits in `v<previous tag>..main`, because no other PR adds entries.
+
 ```bash
 # 1. Bump the version (on a branch, not directly on main)
 npm version --no-git-tag-version patch   # or minor / major — edits package.json only, no git tag
@@ -15,7 +17,7 @@ bun run prepare-release
 bun run lint && bun run tsc:check && bun run test:root
 
 # 4. Commit the bump + ALL regenerated files together, open a PR, merge to main
-git add package.json charts/agent-swarm/Chart.yaml openapi.json docs-site/content/docs/api-reference \
+git add package.json CHANGELOG.md charts/agent-swarm/Chart.yaml openapi.json docs-site/content/docs/api-reference \
   .claude-plugin .codex-plugin .cursor-plugin .devin-plugin .kimi-plugin gemini-extension.json
 git commit -m "chore(release): vX.Y.Z"
 ```

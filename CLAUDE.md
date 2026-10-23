@@ -318,6 +318,8 @@ Hard rules:
 
 <important if="you are preparing a commit, push, or pull request — or CI just failed and you need to know why">
 
+`CHANGELOG.md` is edited only by release PRs (`release: vX.Y.Z`); feature, fix, chore and docs PRs never touch it, not even an `[Unreleased]` entry. On a `CHANGELOG.md` merge conflict in a non-release PR, restore the merge-base version so the PR diff shows no CHANGELOG change.
+
 Mirror what `.github/workflows/merge-gate.yml` runs. Full job-by-job breakdown, drift checks, lockfile rules, and "why CI fails" list: [runbooks/ci.md](./runbooks/ci.md).
 
 Inner loop: `bun run check:local` (`scripts/check.sh`). It runs a frozen install, Biome on changed files, `bun check`, and the tests affected by your change (the pre-push hook's scoping). Run it before every push. Secrets scanning stays with the prek hooks.
