@@ -69,7 +69,8 @@ function formatConfigAnswer(question: ApprovalQuestion, response: unknown): Form
       };
     }
     const picked = typeof answer.value === "string" ? answer.value : "";
-    const value = question.config?.options?.find((option) => option.value === picked)?.label ?? picked;
+    const value =
+      question.config?.options?.find((option) => option.value === picked)?.label ?? picked;
     return { kind: "text", tone: "success", text: value ? `Set: ${value}` : `Set${updated}` };
   }
   return { kind: "text", tone: "neutral", text: "Config answer" };
