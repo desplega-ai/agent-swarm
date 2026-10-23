@@ -12,7 +12,11 @@ import {
   resolveApprovalRequest,
   updateWorkflowRun,
 } from "../be/db";
-import { getRunningSubWorkflowSteps, getSettledChildRunParentSteps } from "../be/db/workflow-runs";
+import {
+  getRunLineageBlock,
+  getRunningSubWorkflowSteps,
+  getSettledChildRunParentSteps,
+} from "../be/db/workflow-runs";
 import type { WorkflowRunStep } from "../types";
 import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
@@ -227,6 +231,7 @@ async function completeIfSettled(runId: string, ctx: Record<string, unknown>): P
   return getDbClient().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (run?.status !== "running") return false;
+    if (await getRunLineageBlock(runId)) return false;
     const steps = await getWorkflowRunStepsByRunId(runId);
     if (retryPendingNodeIds(steps).size > 0) return false;
     const latest = new Map<string, WorkflowRunStep>();

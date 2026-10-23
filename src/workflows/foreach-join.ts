@@ -7,6 +7,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { getRunLineageBlock } from "../be/db/workflow-runs";
 import type {
   WorkflowDefinition,
   WorkflowNode,
@@ -261,6 +262,8 @@ export async function settleForeachChild(
     });
 
     if (run.status !== "running" && run.status !== "waiting") return unclaimed;
+    // The outcome stays on the item as history; a cancelled tree routes nothing.
+    if (await getRunLineageBlock(runId)) return unclaimed;
 
     if (outcome.status !== "completed" && effectiveFailurePolicy(parent, def) === "fail-fast") {
       const reason = options.runError ?? outcome.error ?? `foreach item ${current.nodeId} failed`;

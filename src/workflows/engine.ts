@@ -21,7 +21,11 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import { getChildWorkflowRunId, isParentStepAttemptCurrent } from "../be/db/workflow-runs";
+import {
+  getChildWorkflowRunId,
+  getRunLineageBlock,
+  isParentStepAttemptCurrent,
+} from "../be/db/workflow-runs";
 import { WorkflowReplayStateError } from "../be/workflow-replay";
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
@@ -619,6 +623,8 @@ async function walkGraphOwned(
   await getDbClient().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || run.status !== "running") return;
+    // Inside a cancelled tree the run's outcome is the cancel, not its steps.
+    if (await getRunLineageBlock(runId)) return;
 
     const finalSteps = await getWorkflowRunStepsByRunId(runId);
     // Another walker is still executing a branch; it finalizes the run.
@@ -806,6 +812,9 @@ async function executeStep(
     if (!run || (run.status !== "running" && run.status !== "waiting")) {
       return { halted: true as const };
     }
+    // A live run under a cancelled ancestor (or with a broken parent link)
+    // starts no step: the cancel covers its whole tree.
+    if (await getRunLineageBlock(runId)) return { halted: true as const };
 
     // Another walker already started or finished this node for the same
     // predecessor completions (two branch completions both walking the join,

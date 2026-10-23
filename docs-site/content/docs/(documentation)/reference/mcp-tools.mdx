@@ -732,7 +732,7 @@ Retry a failed workflow run from the point of failure.
 
 ### cancel-workflow-run
 
-Cancel a running or waiting workflow run. Cancels all non-terminal steps and their associated tasks.
+Cancel a running or waiting workflow run and every child run below it. Cancels their non-terminal steps, tasks, pending approvals and queued retries in one transaction; finished child runs keep their status. Repeating the cancel on a cancelled run finishes any child runs still open.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

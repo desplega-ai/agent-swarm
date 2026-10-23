@@ -4,16 +4,15 @@ import {
   getApprovalRequestById,
   getDbClient,
   getTaskById,
-  getWorkflowRun,
-  listCancelledApprovalRequestsForRun,
   resolveApprovalRequest,
 } from "../be/db";
+import { getWorkflowRunStatus } from "../be/db/workflow-runs";
 import { can, type RbacPrincipal } from "../rbac";
 import {
   createApprovalFollowUpTask,
   postApprovalCancellationUpdates,
 } from "./approval-notifications";
-import { cancelWorkflowRunRows } from "./resume";
+import { cancelWorkflowRunRows, postTreeApprovalCancellations } from "./resume";
 
 export type CancelApprovalRequestResult =
   | { ok: true; request: ApprovalRequest; alreadyCancelled: boolean; runCancelled: boolean }
@@ -126,25 +125,28 @@ export async function cancelApprovalRequestAndRun(
     if (!request) return null;
 
     // The request is cancelled first so it keeps this reason; the run cancel
-    // then skips it because it is no longer pending.
+    // then skips it because it is no longer pending. The run's child tree is
+    // cancelled with it.
     let runCancelled = false;
+    let treeRunIds: string[] = [];
     const runId = request.workflowRunId;
     if (runId) {
-      const run = await getWorkflowRun(runId);
-      if (run && LIVE_RUN_STATUSES.has(run.status)) {
-        runCancelled = await cancelWorkflowRunRows(runId, data.reason);
+      const status = await getWorkflowRunStatus(runId);
+      if (status && LIVE_RUN_STATUSES.has(status)) {
+        const result = await cancelWorkflowRunRows(runId, data.reason);
+        runCancelled = result.cancelled;
+        treeRunIds = result.runIds;
       }
     }
 
     const slackReason = data.slackReason ?? data.reason;
     client.afterCommit(async () => {
       await postApprovalCancellationUpdates([request], slackReason);
-      if (runCancelled && runId) {
-        // Other requests the run cancel closed get the run's reason.
-        const others = (await listCancelledApprovalRequestsForRun(runId)).filter(
-          (row) => row.id !== request.id,
-        );
-        await postApprovalCancellationUpdates(others, data.reason);
+      if (runCancelled) {
+        // Other requests the tree cancel closed get the run's reason.
+        await postTreeApprovalCancellations(treeRunIds, data.reason, {
+          exceptRequestId: request.id,
+        });
       }
     });
     return { request, runCancelled };

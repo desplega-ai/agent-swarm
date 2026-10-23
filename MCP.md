@@ -1537,7 +1537,7 @@ Resume the same failed workflow run from its failed step(s); completed steps are
 
 **Cancel Workflow Run**
 
-Cancel a running or waiting workflow run. Cancels all non-terminal steps and their associated tasks.
+Cancel a running or waiting workflow run and every child run below it. Cancels their non-terminal steps, tasks, pending approvals and queued retries in one transaction; finished child runs keep their status. Repeating the cancel on a cancelled run finishes any child runs still open.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

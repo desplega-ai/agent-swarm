@@ -1864,15 +1864,17 @@ describe("Approval Requests", () => {
 
     test("cancel on a waiting run cancels the run, its step, and its task", async () => {
       const { runId, stepId, approvalId } = await makeRun("waiting");
+      // Linked directly: the engine binds a step's task while the step is
+      // still running, and this step is already parked.
       const task = await createTaskExtended("step task", {
         agentId: owner.id,
         source: "mcp",
         workflowRunId: runId,
-        workflowRunStepId: stepId,
       });
-      await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
-        task.id,
-      ]);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'in_progress', workflowRunStepId = ? WHERE id = ?",
+        [stepId, task.id],
+      );
 
       const res = await post(
         `/api/approval-requests/${approvalId}/cancel`,

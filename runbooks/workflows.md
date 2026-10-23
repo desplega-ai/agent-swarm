@@ -315,10 +315,58 @@ A `sub-workflow` node runs another workflow as a child run and waits for it.
 - Recursion is rejected: a workflow cannot invoke itself or any workflow already running in its
   ancestor runs, and nesting stops at 16 levels below the root run (`MAX_SUB_WORKFLOW_DEPTH`). The
   checks run when the node executes, not when the definition is saved.
+- Cancelling a run cancels its child runs too (see [Cancelling a run](#cancelling-a-run)).
 - Not yet supported (tracked in the sub-workflow issue): pinning the child's definition version
-  (the child runs its live definition), cancelling the child when the parent is cancelled, and a
-  per-node timeout. As a `foreach` body, a run retry gives the failed item a new child run (see
+  (the child runs its live definition) and a per-node timeout. As a `foreach` body, a run retry gives the failed item a new child run (see
   [Retry with preserved siblings](#retry-with-preserved-siblings)).
+
+## Cancelling a run
+
+`cancelWorkflowRun` (`src/workflows/resume.ts`) backs the HTTP route
+(`POST /api/workflow-runs/{id}/cancel`), the `cancel-workflow-run` MCP tool and the dashboard. An
+approval cancel and the approval auto-cancel sweep cancel their run through the same
+`cancelWorkflowRunRows`.
+
+- The cancel covers the run and every run below it: children of every attempt of every
+  `sub-workflow` step, through runs that already ended. The tree comes only from stored links
+  (`child.parentStepId` → step → run). Run outputs, names and trigger data are never used.
+- One `BEGIN IMMEDIATE` transaction reads the tree and, for each run, cancels its open tasks
+  (found by the indexed `agent_tasks.workflowRunId`; a retry detaches only the step link, so tasks
+  of earlier attempts are included), its non-terminal steps, its pending approvals and its queued
+  step retries (`nextRetryAt` is cleared). Every non-terminal
+  run becomes `cancelled` with the reason. A completed, failed or skipped descendant keeps its
+  status, error and output; only its leftover open work is cancelled.
+- A root that is completed, failed or skipped is refused, as before. A `cancelled` root is walked
+  again, so a repeat cancel finishes descendants an earlier cancel (or an older release) left open.
+  Reasons already written are kept.
+- A cycle in the links, a tree deeper than `WORKFLOW_RUN_TREE_MAX_DEPTH` (32) or larger than
+  `WORKFLOW_RUN_TREE_MAX_RUNS` (2000) throws, and nothing commits. Any other error rolls back the
+  whole tree too.
+- After commit: worker nudges and task lifecycle events (queued with `afterCommit`), then the Slack
+  update of every cancelled approval in the tree. A failed Slack post is logged; it does not undo
+  the cancel.
+
+After the commit, nothing in the tree starts new engine work. The guard is
+`getRunLineageBlock(runId)` (`src/be/db/workflow-runs.ts`): it blocks a run that is cancelled, has a
+cancelled ancestor, or has a broken parent link, a cycle or too deep a chain. Completed and failed
+ancestors do not block. Each write that starts work checks it inside its own transaction, so a
+cancel either commits first and is seen there, or sees the new row and cancels it:
+
+| Path | Guard |
+|---|---|
+| Child run insert | `isParentStepAttemptCurrent`: step attempt `running`, run live, lineage clear |
+| Workflow task insert (`createTaskExtended` with `workflowRunStepId`) | `getStepExecutionBlock`; throws `WorkflowStepNotExecutableError` |
+| Approval request (`requireActionableWorkflow`) | created `cancelled` |
+| Step claim (`executeStep`), foreach item claim | no step is claimed |
+| Checkpoint fences, `checkpointStepWaiting` | nothing is written |
+| Task / approval / wait / child-run callbacks, `scheduleTaskStepRetry` | the step is not claimed and nothing routes |
+| Retry poller claim | the retry is dropped (`nextRetryAt` cleared); a failed run is never revived |
+| Manual `retryFailedRun` | refused, run stays `failed` |
+| Run finalizers (walk, `finalizeOrWait`, recovery, retry poller) | the run is not completed or parked |
+
+The cancel is a database guarantee. It does not stop a process that is already running (a script,
+an LLM call, an agent session until the worker sees its task cancelled) and does not undo external
+side effects that already happened.
 
 ## Agent-task steps cut by a deploy
 

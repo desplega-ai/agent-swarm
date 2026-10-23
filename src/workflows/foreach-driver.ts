@@ -11,6 +11,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { getRunLineageBlock, getWorkflowRunStatus } from "../be/db/workflow-runs";
 import type {
   Workflow,
   WorkflowDefinition,
@@ -368,6 +369,10 @@ async function claimChildren(
     // so concurrent drives (a settlement's drive and the recovery sweep)
     // serialize here and never exceed the cap together.
     await getDbClient().transaction(async () => {
+      // A cancel of the run (or of an ancestor) that committed first wins.
+      const status = await getWorkflowRunStatus(runId);
+      if (status !== "running" && status !== "waiting") return;
+      if (await getRunLineageBlock(runId)) return;
       const children = latestForeachChildren(
         def,
         parentNode.id,

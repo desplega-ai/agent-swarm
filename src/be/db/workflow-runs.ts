@@ -1,4 +1,4 @@
-import type { WorkflowRunStatus } from "../../types";
+import { TERMINAL_TASK_STATUSES, type WorkflowRunStatus } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { scrubJsonValue } from "../scrub-json";
 import { getDbClient } from "./runtime";
@@ -14,6 +14,180 @@ const TERMINAL_STATUSES = new Set<WorkflowRunStatus>([
   "skipped",
 ]);
 
+/**
+ * Deepest run tree the lineage guard and the cascade cancel walk. Twice the
+ * sub-workflow nesting cap (16), so any tree the engine can build fits; a
+ * deeper chain is corrupt and fails closed.
+ */
+export const WORKFLOW_RUN_TREE_MAX_DEPTH = 32;
+
+/** Most runs one cascade cancel covers. A larger tree is refused whole, never cut. */
+export const WORKFLOW_RUN_TREE_MAX_RUNS = 2_000;
+
+/** Thrown when a run's stored parent links cannot be walked: a cycle, or a tree past its bounds. */
+export class WorkflowRunTreeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkflowRunTreeError";
+  }
+}
+
+/**
+ * Thrown when work is created for a workflow step that may no longer run: the
+ * step is not `running`, its run is not live, or the run's lineage is blocked
+ * (see `getRunLineageBlock`).
+ */
+export class WorkflowStepNotExecutableError extends Error {
+  constructor(stepId: string, reason: string) {
+    super(`Workflow step ${stepId} may not start new work: ${reason}`);
+    this.name = "WorkflowStepNotExecutableError";
+  }
+}
+
+/**
+ * Why the run and its ancestors forbid new engine work, or null when they
+ * allow it. Blocked when the run is missing, the run or an ancestor is
+ * `cancelled`, a stored parent link points at a missing step or run, the
+ * links form a cycle, or the chain is deeper than WORKFLOW_RUN_TREE_MAX_DEPTH.
+ * A completed or failed ancestor does not block: a child of an earlier
+ * attempt may outlive its parent's run. The run's own live status is left to
+ * the caller, since the retry claim also revives a `failed` run.
+ *
+ * Call it inside the transaction that writes the new work, so a cascade
+ * cancel either commits first and is seen here or sees the new row itself.
+ */
+export async function getRunLineageBlock(runId: string): Promise<string | null> {
+  const rows = await getDbClient().query<{
+    id: string;
+    status: WorkflowRunStatus;
+    parentStepId: string | null;
+    depth: number;
+  }>(
+    `WITH RECURSIVE lineage(id, status, parentStepId, depth) AS (
+       SELECT id, status, parentStepId, 0 FROM workflow_runs WHERE id = ?
+       UNION ALL
+       SELECT r.id, r.status, r.parentStepId, l.depth + 1
+         FROM lineage l
+         JOIN workflow_run_steps s ON s.id = l.parentStepId
+         JOIN workflow_runs r ON r.id = s.runId
+        WHERE l.depth < ?
+     )
+     SELECT id, status, parentStepId, depth FROM lineage ORDER BY depth`,
+    [runId, WORKFLOW_RUN_TREE_MAX_DEPTH],
+  );
+  if (rows.length === 0) return `Workflow run ${runId} is missing`;
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.id)) return `Workflow run ${runId} has a cycle in its parent links`;
+    seen.add(row.id);
+    if (row.status === "cancelled") {
+      return row.id === runId
+        ? `Workflow run ${runId} is cancelled`
+        : `Ancestor workflow run ${row.id} is cancelled`;
+    }
+  }
+  const top = rows[rows.length - 1]!;
+  if (top.parentStepId == null) return null;
+  if (top.depth >= WORKFLOW_RUN_TREE_MAX_DEPTH) {
+    return `Workflow run ${runId} is nested deeper than ${WORKFLOW_RUN_TREE_MAX_DEPTH} levels`;
+  }
+  return `Parent step ${top.parentStepId} of workflow run ${top.id} is missing`;
+}
+
+/**
+ * The run and every run below it, root first: children of every attempt of
+ * every step, through terminal runs too, since a run that ended can still have
+ * a live child of an earlier attempt. The tree comes from stored links only
+ * (child.parentStepId → step → run). Throws WorkflowRunTreeError on a cycle or
+ * past the bounds, so the caller's transaction rolls back whole.
+ */
+export async function getWorkflowRunTreeIds(
+  rootId: string,
+  bounds: { maxDepth?: number; maxRuns?: number } = {},
+): Promise<string[]> {
+  const maxDepth = bounds.maxDepth ?? WORKFLOW_RUN_TREE_MAX_DEPTH;
+  const maxRuns = bounds.maxRuns ?? WORKFLOW_RUN_TREE_MAX_RUNS;
+  // One level past maxDepth is read, so a row there proves the tree is too
+  // deep; LIMIT stops a cycle once the run budget is spent.
+  const rows = await getDbClient().query<{ id: string; depth: number }>(
+    `WITH RECURSIVE tree(id, depth) AS (
+       SELECT id, 0 FROM workflow_runs WHERE id = ?
+       UNION ALL
+       SELECT c.id, t.depth + 1
+         FROM tree t
+         JOIN workflow_run_steps s ON s.runId = t.id
+         JOIN workflow_runs c ON c.parentStepId = s.id
+        WHERE t.depth <= ?
+     )
+     SELECT id, depth FROM tree LIMIT ?`,
+    [rootId, maxDepth, maxRuns + 1],
+  );
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    // Each run has one parent link, so reaching a run twice means a cycle.
+    if (seen.has(row.id)) {
+      throw new WorkflowRunTreeError(`Workflow run tree of ${rootId} has a cycle at run ${row.id}`);
+    }
+    if (row.depth > maxDepth) {
+      throw new WorkflowRunTreeError(
+        `Workflow run tree of ${rootId} is nested deeper than ${maxDepth} levels`,
+      );
+    }
+    seen.add(row.id);
+    ids.push(row.id);
+  }
+  if (ids.length > maxRuns) {
+    throw new WorkflowRunTreeError(`Workflow run tree of ${rootId} has more than ${maxRuns} runs`);
+  }
+  return ids;
+}
+
+/** A run's status alone, without opening its sealed context. Null when the run is missing. */
+export async function getWorkflowRunStatus(runId: string): Promise<WorkflowRunStatus | null> {
+  const row = await getDbClient().get<{ status: WorkflowRunStatus }>(
+    "SELECT status FROM workflow_runs WHERE id = ?",
+    [runId],
+  );
+  return row?.status ?? null;
+}
+
+/** Ids of a run's steps that are not terminal (pending, running, waiting). */
+export async function getOpenWorkflowRunStepIds(runId: string): Promise<string[]> {
+  const rows = await getDbClient().query<{ id: string }>(
+    `SELECT id FROM workflow_run_steps
+      WHERE runId = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'skipped')`,
+    [runId],
+  );
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Ids of the run's non-terminal tasks, including tasks of earlier attempts
+ * that a retry detached from their step: the run link stays on them.
+ */
+export async function getOpenWorkflowRunTaskIds(runId: string): Promise<string[]> {
+  const rows = await getDbClient().query<{ id: string }>(
+    `SELECT id FROM agent_tasks
+      WHERE workflowRunId = ? AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})`,
+    [runId, ...TERMINAL_TASK_STATUSES],
+  );
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Drop the pending retries of a run's failed steps. The step keeps its
+ * status, error, output and retryCount; only the queued next attempt goes.
+ */
+export async function disarmWorkflowRunRetries(runId: string, finishedAt: string): Promise<void> {
+  await getDbClient().run(
+    `UPDATE workflow_run_steps
+        SET nextRetryAt = NULL, finishedAt = COALESCE(finishedAt, ?)
+      WHERE runId = ? AND status = 'failed' AND nextRetryAt IS NOT NULL`,
+    [finishedAt, runId],
+  );
+}
+
 /** The id of the child run a `sub-workflow` step started on `attempt`, if any. */
 export async function getChildWorkflowRunId(
   parentStepId: string,
@@ -28,23 +202,48 @@ export async function getChildWorkflowRunId(
 
 /**
  * True while `attempt` of the step is executing in a live run: the step is
- * `running` with that `retryCount`. A child run is created only then, so a
- * cancelled run, a step another attempt moved on, or a step already parked
- * never gets a new child.
+ * `running` with that `retryCount` and no ancestor run is cancelled. A child
+ * run is created only then, so a cancelled run or tree, a step another attempt
+ * moved on, or a step already parked never gets a new child.
  */
 export async function isParentStepAttemptCurrent(
   parentStepId: string,
   attempt: number,
 ): Promise<boolean> {
-  const row = await getDbClient().get<{ found: number }>(
-    `SELECT 1 AS found
+  const row = await getDbClient().get<{ runId: string }>(
+    `SELECT r.id AS runId
        FROM workflow_run_steps s
        JOIN workflow_runs r ON r.id = s.runId
       WHERE s.id = ? AND s.status = 'running' AND s.retryCount = ?
         AND r.status IN ('running', 'waiting')`,
     [parentStepId, attempt],
   );
-  return row != null;
+  return row != null && (await getRunLineageBlock(row.runId)) == null;
+}
+
+/**
+ * Why `stepId` may not start new work (a task, an approval, a child run), or
+ * null when it may: the step is `running` in a live run whose lineage is not
+ * blocked. Call it inside the transaction that inserts the work.
+ */
+export async function getStepExecutionBlock(stepId: string): Promise<string | null> {
+  const row = await getDbClient().get<{
+    stepStatus: string;
+    runId: string;
+    runStatus: WorkflowRunStatus;
+  }>(
+    `SELECT s.status AS stepStatus, r.id AS runId, r.status AS runStatus
+       FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+      WHERE s.id = ?`,
+    [stepId],
+  );
+  if (!row) return "the step or its run is missing";
+  if (row.runStatus !== "running" && row.runStatus !== "waiting") {
+    return `its run is ${row.runStatus}`;
+  }
+  if (row.stepStatus !== "running") return `the step is ${row.stepStatus}`;
+  return getRunLineageBlock(row.runId);
 }
 
 /**

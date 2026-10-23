@@ -6,6 +6,7 @@ import {
   getWorkflowRunStepsByRunId,
   updateWorkflowRun,
 } from "../be/db";
+import { disarmWorkflowRunRetries, getRunLineageBlock } from "../be/db/workflow-runs";
 import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { getSuccessors, resolveValidationPort } from "./definition";
@@ -287,6 +288,8 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
  * A queued child never revives a failed run: its retry does not settle, so
  * something else failed the run. The queued retry is retired instead, leaving
  * the item `failed` with the cut's error for a run retry to give a new attempt.
+ *
+ * A run inside a cancelled tree is never revived: its queued retry is dropped.
  */
 async function claimRetry(
   runId: string,
@@ -296,6 +299,10 @@ async function claimRetry(
   return getDbClient().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || !RETRYABLE_RUN_STATUSES.has(run.status)) return false;
+    if (await getRunLineageBlock(runId)) {
+      await disarmWorkflowRunRetries(runId, new Date().toISOString());
+      return false;
+    }
     if (options.requeueForeachChild && run.status === "failed") {
       await getDbClient().run(
         `UPDATE workflow_run_steps SET nextRetryAt = NULL, finishedAt = ?
@@ -331,6 +338,7 @@ async function completeRunIfSettled(runId: string, ctx: Record<string, unknown>)
   await getDbClient().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "running" && run.status !== "waiting")) return;
+    if (await getRunLineageBlock(runId)) return;
     const steps = await getWorkflowRunStepsByRunId(runId);
     const live = steps.some(
       (s) =>

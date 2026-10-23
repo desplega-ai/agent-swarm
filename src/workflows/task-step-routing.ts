@@ -7,6 +7,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { getRunLineageBlock } from "../be/db/workflow-runs";
 import {
   type RetryPolicy,
   RetryPolicySchema,
@@ -147,6 +148,7 @@ export async function checkpointPortStepAndResolveSuccessors(
     if (!run || (run.status !== "waiting" && run.status !== "running")) {
       return UNCLAIMED;
     }
+    if (await getRunLineageBlock(runId)) return UNCLAIMED;
     // A foreach child's port (approval rejected/timeout, wait event/timeout)
     // is stored for display and still counts as a completed item: the body's
     // ports do not route, the item's consumer reads the output.
@@ -259,6 +261,8 @@ export async function scheduleTaskStepRetry(
       const run = await getWorkflowRun(runId);
       if (run?.status !== "running" && run?.status !== "waiting") return "not-eligible";
     }
+    // No retry is queued inside a cancelled tree.
+    if (await getRunLineageBlock(runId)) return "not-claimed";
     if (current.retryCount >= policy.maxRetries) return "not-eligible";
     await detachTaskFromWorkflowRunStep(taskId);
     await checkpointStepFailure(runId, step.id, reason, current.retryCount, policy);
@@ -296,6 +300,8 @@ export async function completeTaskStepAndResolveSuccessors(
     if (!current || current.status !== "waiting") return UNCLAIMED;
     // A stale snapshot of a step since redriven to a fresh task must not route it.
     if (ownerTaskId && !(await isTaskBoundToStep(ownerTaskId, step.id))) return UNCLAIMED;
+    // A late result inside a cancelled tree routes nothing and revives nothing.
+    if (await getRunLineageBlock(runId)) return UNCLAIMED;
 
     if (resolveForeachParent(def, step.nodeId)) {
       // onNodeFailure:"continue" completions persist the failure reason as

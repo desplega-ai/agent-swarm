@@ -17,7 +17,16 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import { createForeachAttemptSteps, getChildWorkflowRunId } from "../be/db/workflow-runs";
+import {
+  createForeachAttemptSteps,
+  disarmWorkflowRunRetries,
+  getChildWorkflowRunId,
+  getOpenWorkflowRunStepIds,
+  getOpenWorkflowRunTaskIds,
+  getRunLineageBlock,
+  getWorkflowRunStatus,
+  getWorkflowRunTreeIds,
+} from "../be/db/workflow-runs";
 import {
   type RetryPolicy,
   RetryPolicySchema,
@@ -279,12 +288,16 @@ export async function finalizeOrWait(runId: string): Promise<void> {
   // move a step into `waiting` between the read and the write, and a run
   // finalized from a stale snapshot strands that branch.
   await getDbClient().transaction(async () => {
+    // A cancel (or another finalizer) that committed after the caller's claim
+    // wins: a terminal run is never re-parked or completed from here.
+    const status = await getWorkflowRunStatus(runId);
+    if (status !== "running" && status !== "waiting") return;
+    if (await getRunLineageBlock(runId)) return;
     const steps = await getWorkflowRunStepsByRunId(runId);
     // A branch still executing belongs to a live walk, which finalizes the
     // run itself; its finalizer only acts on a `running` run.
     if (hasRunningStep(steps)) {
-      const run = await getWorkflowRun(runId);
-      if (run?.status === "waiting") await updateWorkflowRun(runId, { status: "running" });
+      if (status === "waiting") await updateWorkflowRun(runId, { status: "running" });
       return;
     }
     // A step queued for the retry poller is still live, like a waiting one.
@@ -522,6 +535,10 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const attempts = await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
     if (!current || current.status !== "failed") return null;
+    // A failed run inside a cancelled tree keeps its failure; the cancel
+    // forbids starting it again.
+    const blocked = await getRunLineageBlock(runId);
+    if (blocked) throw new Error(`Retry not started, run left failed: ${blocked}`);
     // Fan-outs with failed or cancelled items get one new attempt row per such
     // item; completed items are never rerun. Selected from the rows as of this
     // transaction: an in-flight sibling of a fail-fast fan-out can record its
@@ -647,80 +664,124 @@ function foreachRetryCapError(
   return `foreach retry would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${existingSteps} existing + ${added} new attempts leaves no room for the retry walk`;
 }
 
-/**
- * The DB writes of a run cancel, with no Slack post. Returns false when the
- * run is missing or already terminal. Called inside a caller's transaction,
- * the writes join it (as a SAVEPOINT) and commit or roll back with it.
- */
-export async function cancelWorkflowRunRows(runId: string, cancelReason: string): Promise<boolean> {
-  const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
-  const now = new Date().toISOString();
+const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled", "skipped"]);
 
-  // Step snapshot, task cancels, and both status writes commit together so a
-  // step created after the snapshot cannot survive the cancel and a
-  // concurrent cancel cannot interleave. Task lifecycle events queue behind
-  // this transaction's COMMIT (afterCommit) and drop on rollback.
-  return await getDbClient().transaction(async () => {
-    const current = await getWorkflowRun(runId);
-    if (!current || terminalStatuses.includes(current.status)) return false;
-
-    // Cancel non-terminal steps and their associated tasks
-    const steps = await getWorkflowRunStepsByRunId(runId);
-    for (const step of steps) {
-      if (terminalStatuses.includes(step.status)) continue;
-
-      // Cancel any task linked to this step
-      const task = await getTaskByWorkflowRunStepId(step.id);
-      if (task) {
-        await cancelTask(task.id, cancelReason);
-      }
-
-      await updateWorkflowRunStep(step.id, {
-        status: "cancelled",
-        error: cancelReason,
-        finishedAt: now,
-      });
-    }
-
-    await cancelPendingApprovalRequestsForRun(runId, cancelReason);
-
-    // Mark the run itself as cancelled
-    await updateWorkflowRun(runId, {
-      status: "cancelled",
-      error: cancelReason,
-      finishedAt: now,
-    });
-    return true;
-  });
+/** What one `cancelWorkflowRunRows` call covered. */
+export interface WorkflowRunCancelResult {
+  /** True when this call moved the root run to `cancelled`. */
+  cancelled: boolean;
+  /** The root and every run below it, root first. Empty when nothing was cancelled. */
+  runIds: string[];
 }
 
 /**
- * Cancel a workflow run and all its non-terminal steps.
- * Also cancels any in-progress tasks spawned by waiting/running steps.
+ * The DB writes of a run cancel, with no Slack post. Cancels the run and its
+ * whole child tree (every attempt's child, through terminal runs) in one
+ * transaction:
+ * - every non-terminal step, its task, and the run's other open tasks;
+ * - pending approvals and queued step retries;
+ * - every non-terminal run. A terminal descendant keeps its status, result
+ *   and reason; only its leftover open work is cancelled.
+ *
+ * A missing root, or one that is completed, failed or skipped, cancels
+ * nothing. An already cancelled root is walked again, so a repeat cancel
+ * finishes descendants an earlier cancel missed. A tree with a cycle or past
+ * its bounds throws and nothing commits.
+ *
+ * Called inside a caller's transaction, the writes join it (as a SAVEPOINT)
+ * and commit or roll back with it. Task lifecycle events and worker nudges
+ * queue behind COMMIT (afterCommit) and drop on rollback.
+ */
+export async function cancelWorkflowRunRows(
+  runId: string,
+  cancelReason: string,
+): Promise<WorkflowRunCancelResult> {
+  const now = new Date().toISOString();
+
+  // The tree snapshot and every write commit together. A child run, task or
+  // step that commits first is in the snapshot; one that commits after sees
+  // the cancelled rows in its own guard (getRunLineageBlock and the step
+  // claims) and is refused.
+  return await getDbClient().transaction(async () => {
+    const rootStatus = await getWorkflowRunStatus(runId);
+    if (!rootStatus || (TERMINAL_RUN_STATUSES.has(rootStatus) && rootStatus !== "cancelled")) {
+      return { cancelled: false, runIds: [] };
+    }
+
+    const runIds = await getWorkflowRunTreeIds(runId);
+    for (const id of runIds) await cancelOpenRunRows(id, cancelReason, now);
+    return { cancelled: rootStatus !== "cancelled", runIds };
+  });
+}
+
+/** Cancel one run's open work, and the run itself unless it is terminal. */
+async function cancelOpenRunRows(runId: string, reason: string, now: string): Promise<void> {
+  // Every step task carries the run link (indexed), and a retry detaches only
+  // the step link, so this covers current and earlier attempts' tasks.
+  for (const taskId of await getOpenWorkflowRunTaskIds(runId)) {
+    await cancelTask(taskId, reason);
+  }
+  for (const stepId of await getOpenWorkflowRunStepIds(runId)) {
+    await updateWorkflowRunStep(stepId, { status: "cancelled", error: reason, finishedAt: now });
+  }
+  await disarmWorkflowRunRetries(runId, now);
+  await cancelPendingApprovalRequestsForRun(runId, reason);
+
+  const status = await getWorkflowRunStatus(runId);
+  if (status && !TERMINAL_RUN_STATUSES.has(status)) {
+    await updateWorkflowRun(runId, { status: "cancelled", error: reason, finishedAt: now });
+  }
+}
+
+/**
+ * Cancel a workflow run and its child tree (see `cancelWorkflowRunRows`), then
+ * post the Slack updates for every approval the cancel closed. The posts run
+ * after COMMIT, and a failed post is logged without undoing the cancel.
  */
 export async function cancelWorkflowRun(runId: string, reason?: string): Promise<void> {
-  const run = await getWorkflowRun(runId);
+  const run = await getWorkflowRun(runId, "display");
   if (!run) throw new Error("Workflow run not found");
 
-  const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
-  if (terminalStatuses.includes(run.status) && run.status !== "cancelled") {
+  if (TERMINAL_RUN_STATUSES.has(run.status) && run.status !== "cancelled") {
     throw new Error(`Cannot cancel run in '${run.status}' state`);
   }
 
   const cancelReason = reason ?? "Cancelled by user";
-  const applied = await cancelWorkflowRunRows(runId, cancelReason);
+  const { cancelled, runIds } = await cancelWorkflowRunRows(runId, cancelReason);
 
-  // The migration trigger also catches direct step cancellation. Re-read after
-  // commit so its rows are included alongside the run-wide sweep.
-  const cancelledApprovals = await listCancelledApprovalRequestsForRun(runId);
-  const latestRun = await getWorkflowRun(runId);
-  if (!applied && latestRun?.status !== "cancelled") {
+  const latestRun = await getWorkflowRun(runId, "display");
+  if (!cancelled && latestRun?.status !== "cancelled") {
     throw new Error(`Cannot cancel run in '${latestRun?.status ?? "missing"}' state`);
   }
-  await postApprovalCancellationUpdates(
-    cancelledApprovals,
-    applied ? cancelReason : (latestRun?.error ?? cancelReason),
+  await postTreeApprovalCancellations(
+    runIds,
+    cancelled ? cancelReason : (latestRun?.error ?? cancelReason),
   );
+}
+
+/**
+ * Post the cancellation update of every cancelled approval in the given runs.
+ * Re-read after commit: the migration trigger also cancels the approvals of a
+ * directly cancelled step. Each post is claimed, so a repeat is a no-op.
+ */
+export async function postTreeApprovalCancellations(
+  runIds: string[],
+  reason: string,
+  options: { exceptRequestId?: string } = {},
+): Promise<void> {
+  try {
+    for (const id of runIds) {
+      const approvals = (await listCancelledApprovalRequestsForRun(id)).filter(
+        (row) => row.id !== options.exceptRequestId,
+      );
+      await postApprovalCancellationUpdates(approvals, reason);
+    }
+  } catch (err) {
+    console.error(
+      "[workflows] approval cancellation updates not posted:",
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    );
+  }
 }
 
 /** Cancel one HITL step and close any approval request it gates. */
@@ -1001,6 +1062,8 @@ export async function resumeFromChildRun(
     const routing = await getDbClient().transaction(async () => {
       const current = await getWorkflowRunStep(step.id);
       if (!current || current.status !== "waiting") return null;
+      // Inside a cancelled tree a child's end settles nothing and queues no retry.
+      if (await getRunLineageBlock(run.id)) return null;
       const childId = await getChildWorkflowRunId(step.id, current.retryCount);
       const child = childId ? await getWorkflowRun(childId) : null;
       // The child row exists before the step parks, so a missing one was deleted.

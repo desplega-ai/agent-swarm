@@ -1,12 +1,14 @@
 import { getDbClient, getWorkflowRun, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
+import { getRunLineageBlock } from "../be/db/workflow-runs";
 import type { RetryPolicy } from "../types";
 
 /**
  * The execution a checkpoint belongs to: the step attempt (`retryCount`) that
  * claimed the row. A fenced checkpoint writes only while that attempt still
  * owns the row: the step is `running` with that `retryCount` in a `running` or
- * `waiting` run. A cancel, a newer attempt or another settle that committed
- * meanwhile wins, and the stale execution writes nothing.
+ * `waiting` run with no cancelled ancestor. A cancel, a newer attempt or
+ * another settle that committed meanwhile wins, and the stale execution
+ * writes nothing.
  */
 export type StepFence = { retryCount: number };
 
@@ -19,7 +21,7 @@ async function holdsFence(runId: string, stepId: string, fence: StepFence): Prom
         AND r.status IN ('running', 'waiting')`,
     [stepId, runId, fence.retryCount],
   );
-  return row != null;
+  return row != null && (await getRunLineageBlock(runId)) == null;
 }
 
 /**
@@ -129,6 +131,7 @@ export async function checkpointStepWaiting(
   options: { keepRunStatus?: boolean } = {},
 ): Promise<boolean> {
   return getDbClient().transaction(async () => {
+    if (await getRunLineageBlock(runId)) return false;
     const step = await getDbClient().get<{ id: string }>(
       `UPDATE workflow_run_steps
          SET status = 'waiting'

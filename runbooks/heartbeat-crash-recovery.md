@@ -125,6 +125,14 @@ A child run commits with its initial context, so recovery walks it from
 `trigger` / `input` like the first walk. A `running` child run with no stored
 context (created before that held) fails instead of walking on blanks.
 
+Every recovery pass checks the run's lineage (`getRunLineageBlock`) inside the
+transaction that claims or finalizes. A run inside a cancelled tree (a live
+child an older release left under a cancelled parent) is walked, but claims no
+step, routes no callback and is not completed from its steps. The retry poller
+drops a queued retry in such a tree instead of reviving the run. A repeat
+cancel of the root cancels the leftover run. See
+[runbooks/workflows.md § Cancelling a run](./workflows.md#cancelling-a-run).
+
 This ownership guard is process-local, not a distributed lease. It assumes one
 API workflow engine owns the database; multiple worker runtimes do not create
 multiple API engines. Separate API processes sharing a database would need
@@ -154,7 +162,8 @@ autoCancelStaleApprovalRequests():
     transaction:
       cancelApprovalRequestById(reason = "Auto-cancelled by the approval sweep after <days> days ...")
       if its workflow run is running/waiting:
-        cancelWorkflowRunRows(runId, reason)   # steps, linked tasks, run → cancelled
+        cancelWorkflowRunRows(runId, reason)   # the run and its child tree: steps, tasks,
+                                               # approvals, queued retries, runs → cancelled
       afterCommit: post "no longer actionable" to each recorded Slack thread (claimed once)
     # a failed row rolls back alone and stays pending for the next tick
 ```

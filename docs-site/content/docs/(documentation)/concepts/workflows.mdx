@@ -545,7 +545,11 @@ For orchestration that needs more than 5 minutes, launch a durable one-off scrip
 
 ### Cancelling a Workflow Run
 
-Running or waiting workflow runs can be cancelled using the `cancel-workflow-run` MCP tool. Cancellation terminates all non-terminal steps and their associated tasks. An optional reason can be provided for audit purposes.
+Running or waiting workflow runs can be cancelled using the `cancel-workflow-run` MCP tool, the API (`POST /api/workflow-runs/{id}/cancel`) or the dashboard. An optional reason can be provided for audit purposes.
+
+The cancel covers the run and every child run below it, including children of earlier retry attempts. In one transaction it cancels their non-terminal steps, tasks, pending approvals and queued retries, and marks every unfinished run `cancelled`. A child run that already completed or failed keeps its status and result. After the cancel, no step, task, child run or retry starts anywhere in that tree, and a late task result or approval does not resume it. Cancelling an already cancelled run again finishes any child runs still open.
+
+Cancellation does not stop work that is already executing outside the database, such as a running script or an agent session before its worker sees the task cancelled, and it does not undo external side effects.
 
 ### Per-Step Validation
 

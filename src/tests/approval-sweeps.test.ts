@@ -223,15 +223,17 @@ describe("approval sweeps", () => {
 
     test("cancels the waiting run, its step, and its linked task", async () => {
       const { runId, stepId } = await makeRun("waiting");
+      // Linked directly: the engine binds a step's task while the step is
+      // still running, and this step is already parked.
       const task = await createTaskExtended("step task", {
         agentId,
         source: "mcp",
         workflowRunId: runId,
-        workflowRunStepId: stepId,
       });
-      await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
-        task.id,
-      ]);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'in_progress', workflowRunStepId = ? WHERE id = ?",
+        [stepId, task.id],
+      );
       const id = await makeRequest({ ageDays: 8, workflowRunId: runId, workflowRunStepId: stepId });
 
       const result = await autoCancelStaleApprovalRequests();
