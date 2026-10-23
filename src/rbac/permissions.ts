@@ -37,6 +37,10 @@ export const PERMISSIONS = {
     description: "Mint, rotate, or revoke an agent-bound worker token.",
     namespace: "agent",
   },
+  "user.role.manage": {
+    description: "Assign or remove a person's RBAC roles.",
+    namespace: "user",
+  },
   "task.cancel.any": {
     description: "Cancel any task (beyond tasks the caller created).",
     namespace: "task",

@@ -15,12 +15,12 @@ import {
   restoreScratchScriptLastUsedIfUnchanged,
   touchScratchScriptLastUsed,
 } from "../be/scripts/db";
+import { runScriptWithRunCredential } from "../be/scripts/run-credential";
 import {
   MAX_SCRIPT_WALL_CLOCK_MS,
   MIN_SCRIPT_WALL_CLOCK_MS,
 } from "../scripts-runtime/executors/types";
 import type { RunScriptOutput } from "../scripts-runtime/loader";
-import { runScript } from "../scripts-runtime/loader";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
 import { route } from "./route-def";
@@ -242,7 +242,7 @@ export async function handleX(
   const credentials = await buildScriptCredentialBindingsWithFailures({
     agentId: endpoint.agentId,
   });
-  const output = await runScript({
+  const output = await runScriptWithRunCredential({
     source: script.source,
     args: args ?? null,
     fsMode: "none",

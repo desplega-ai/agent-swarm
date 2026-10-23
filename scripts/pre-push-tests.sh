@@ -63,6 +63,7 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/heartbeat-jev-gate-credentials.test.ts \
     src/tests/sandboxed-process.test.ts \
     src/tests/schedule-target-type.test.ts \
+    src/tests/script-api-credential.test.ts \
     src/tests/script-connections-sql.test.ts \
     src/tests/script-connections.test.ts \
     src/tests/script-executor-conformance.test.ts \

@@ -615,6 +615,23 @@ export async function mintRuntimeToken(
   return await insertSessionToken(agentId, null, runtimeId, ttlMs);
 }
 
+/**
+ * Mint the short-lived `aseph_` token a script run uses for its `ctx.swarm`
+ * SDK calls, so those calls present the executing agent instead of the swarm
+ * API key (the operator). It resolves as a plain agent principal (`kind:
+ * "agent"`, no task/runtime binding), so the API layer scopes it to that
+ * agent's permissions: a lead keeps lead powers, a worker reads only its own
+ * scope. Marked `scriptRun` so it stays apart from the agent's worker token
+ * (see `AGENT_TOKEN_BINDING`). The run revokes it when it ends; `ttlMs` is the
+ * backstop for a run that dies without revoking.
+ */
+export async function mintScriptRunToken(
+  agentId: string,
+  ttlMs: number,
+): Promise<{ tokenId: string; plaintext: string }> {
+  return await insertSessionToken(agentId, null, null, ttlMs, null, undefined, null, null, true);
+}
+
 export async function insertSessionToken(
   agentId: string,
   taskId: string | null,
@@ -624,6 +641,7 @@ export async function insertSessionToken(
   expiresAtCeiling?: string,
   controllerId: string | null = null,
   parentTokenId: string | null = null,
+  scriptRun = false,
 ): Promise<{ tokenId: string; plaintext: string }> {
   const plaintext = `${SESSION_TOKEN_PREFIX}${base62(randomBytes(24))}`;
   const tokenId = randomUUID().replace(/-/g, "");
@@ -636,8 +654,8 @@ export async function insertSessionToken(
 
   await getDbClient().run(
     `INSERT INTO session_tokens
-     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt, controllerId, parentTokenId)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt, controllerId, parentTokenId, scriptRun)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       tokenId,
       hash,
@@ -650,6 +668,7 @@ export async function insertSessionToken(
       now.toISOString(),
       controllerId,
       parentTokenId,
+      scriptRun ? 1 : 0,
     ],
   );
 
@@ -713,9 +732,14 @@ export async function revokeRuntimeTokensForRuntime(runtimeId: string): Promise<
 // Agent tokens (long-lived, one agent, no runtime)
 // ---------------------------------------------------------------------------
 
-/** SQL predicate for an agent token: bound to its agent and nothing else. */
+/**
+ * SQL predicate for an agent (worker) token: bound to its agent and nothing
+ * else. `scriptRun = 0` excludes a script run's ephemeral token, which shares
+ * the same all-null binding shape but has its own lifecycle (see migration 233
+ * and `mintScriptRunToken`).
+ */
 const AGENT_TOKEN_BINDING =
-  "taskId IS NULL AND runtimeId IS NULL AND controllerId IS NULL AND parentRuntimeId IS NULL";
+  "taskId IS NULL AND runtimeId IS NULL AND controllerId IS NULL AND parentRuntimeId IS NULL AND scriptRun = 0";
 
 /** Stored expiry of a token that does not expire. `expiresAt` is NOT NULL. */
 export const AGENT_TOKEN_NO_EXPIRY = "9999-12-31T23:59:59.999Z";

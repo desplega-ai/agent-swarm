@@ -10,12 +10,12 @@ import {
   restoreScratchScriptLastUsedIfUnchanged,
   touchScratchScriptLastUsed,
 } from "../../be/scripts/db";
+import { runScriptWithRunCredential } from "../../be/scripts/run-credential";
 import {
   DEFAULT_SCRIPT_RESOURCES,
   MAX_SCRIPT_WALL_CLOCK_MS,
   MIN_SCRIPT_WALL_CLOCK_MS,
 } from "../../scripts-runtime/executors/types";
-import { runScript } from "../../scripts-runtime/loader";
 import type { ExecutorMeta } from "../../types";
 import { getMcpBaseUrl } from "../../utils/constants";
 import { findInterpolationTokens } from "../../utils/template";
@@ -119,7 +119,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
     const credentials = await buildScriptCredentialBindingsWithFailures({
       agentId: agentId ?? undefined,
     });
-    const output = await runScript({
+    const output = await runScriptWithRunCredential({
       source: resolved.source,
       args: config.args,
       fsMode: "none",

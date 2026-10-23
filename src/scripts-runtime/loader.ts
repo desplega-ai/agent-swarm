@@ -40,6 +40,13 @@ export type RunScriptInput = {
   args?: unknown;
   fsMode?: ScriptFsMode;
   agentId: string;
+  /**
+   * Bearer for the run's `ctx.swarm` SDK calls. Api-side callers pass a
+   * per-run token bound to the executing agent (`runScriptWithRunCredential`
+   * in `src/be/scripts/run-credential.ts`, which also revokes it). Omitted, the
+   * run presents the swarm API key.
+   */
+  apiKey?: string;
   /** Per-boot runtime identity of the invoking worker; system context, never script input. */
   runtimeInstanceId?: string;
   signal?: AbortSignal;
@@ -74,7 +81,7 @@ export function scriptEgressPolicy(env: NodeJS.ProcessEnv = process.env): Egress
 }
 
 async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPayload> {
-  const apiKey = getApiKey();
+  const apiKey = input.apiKey ?? getApiKey();
   if (!apiKey) throw new Error("Swarm API key is required to run scripts");
 
   return {

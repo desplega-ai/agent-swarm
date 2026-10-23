@@ -34,6 +34,7 @@ import {
   updateWorkflowRun,
   upsertKv,
 } from "../be/db";
+import { ensureRbacSeedsSynced, setUserRoles } from "../be/rbac-roles";
 import { fingerprintApiKey, linkIdentity } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
@@ -908,6 +909,43 @@ describe("POST /api/users/:id/merge", () => {
     } finally {
       await getDbClient().run("DROP TRIGGER fail_merge_source_delete");
     }
+  });
+
+  test("409 last_admin when the source is the only admin, and nothing is merged", async () => {
+    ensureRbacSeedsSynced({ quiet: true });
+    const admin = await createUser({ name: "OnlyAdmin" });
+    const viewer = await createUser({ name: "Viewer" });
+    await setUserRoles(admin.id, ["admin"], null);
+    await setUserRoles(viewer.id, ["viewer"], null);
+
+    const r = await authedFetch(`/api/users/${viewer.id}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ sourceUserId: admin.id }),
+    });
+    expect(r.status).toBe(409);
+    expect(
+      (
+        await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM users WHERE id = ?", [
+          admin.id,
+        ])
+      )?.n,
+    ).toBe(1);
+  });
+
+  test("merging an admin source succeeds when another admin remains", async () => {
+    ensureRbacSeedsSynced({ quiet: true });
+    const keeper = await createUser({ name: "KeeperAdmin" });
+    const source = await createUser({ name: "SourceAdmin" });
+    const viewer = await createUser({ name: "Viewer2" });
+    await setUserRoles(keeper.id, ["admin"], null);
+    await setUserRoles(source.id, ["admin"], null);
+    await setUserRoles(viewer.id, ["viewer"], null);
+
+    const r = await authedFetch(`/api/users/${viewer.id}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ sourceUserId: source.id }),
+    });
+    expect(r.status).toBe(200);
   });
 
   test("400 when target == source", async () => {

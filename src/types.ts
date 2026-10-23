@@ -1076,6 +1076,22 @@ export const UserSchema = z
 
 export type User = z.infer<typeof UserSchema>;
 
+export const RbacRoleSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    isBuiltin: z.boolean(),
+    grantsAll: z.boolean(),
+    primary: z.boolean(),
+    verbs: z.array(z.string()),
+  })
+  .openapi("RbacRole");
+
+export const UserRbacRolesSchema = z
+  .object({ userId: z.string(), roles: z.array(RbacRoleSchema) })
+  .openapi("UserRbacRoles");
+
 /**
  * Structured communication preferences read from `users.metadata.comms`.
  * All fields are free-form strings; values render verbatim into the requester
