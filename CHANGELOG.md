@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-10-23
+
+### Fixed
+- GitLab: `GITLAB_BOT_NAME` is read on every mention match instead of at module load, so a name stored in swarm config applies and survives config reloads. Closing or merging an MR now cancels every active task for it, including note tasks, and an MR or issue close only cancels tasks for that entity, not an issue or MR that shares its number (#2343).
+
 ## [2.5.0] - 2026-10-22
 
 ### Added
