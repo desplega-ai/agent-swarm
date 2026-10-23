@@ -1,8 +1,8 @@
 {
   "$schema": "../manifest.schema.json",
   "name": "comms-adherence-gate",
-  "description": "Judges every Slack-facing store-progress completion against the requester's comms preferences and latest request with Jev (TypeSafe or OpenRouter), and in enforce blocks a non-adherent completion once per task",
-  "version": "1.5.0",
+  "description": "Judges every Slack-facing store-progress completion and agent Slack post against the comms preferences of the requester, or of the person it @-mentions, their latest request and a plain-language rubric with Jev (TypeSafe or OpenRouter), and in enforce blocks a failing call once per task",
+  "version": "1.7.0",
   "runtime": "api",
   "assets": { "hooks": "hooks.ts" }
 }

@@ -6,12 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-10-23
+
+### Added
+- RBAC: `GET /api/rbac/roles`, `GET /api/users/{id}/roles` and `PUT /api/users/{id}/roles` let an operator or admin assign a person's RBAC role through the API, and a new read-only `viewer` role joins `admin` and `requester`. Everyone stays `admin` until reassigned; removing the last admin returns 409 (#2304).
+- Sessions: the sessions list shows only sessions you started from a human channel or that were shared with you, with a Mine / All toggle for the rest. Workflow, schedule and system starts move behind All; access is unchanged (#2347).
+
 ### Changed
+- Skills: `skill-search` ranks results by relevance. A new FTS5 index (migration 239, backfilled) scores name, description and content with BM25 weights 3, 2 and 1, and a skill whose name equals the query ranks first. Query words are OR-ed and quoted, so a skill matching only some words still appears and user text cannot inject FTS5 syntax. Queries with no whole-word hit still fall back to the old substring match.
 - Chat SDK on Telegram: the ask shows its task state as one reaction that changes, 👀 when taken (⚡ for `!now`), then 👍 when the answer posts or 👎 for a failed or cancelled task. A steering message gets ✍ instead of the text acknowledgement; a channel can opt back into the text with `{ "textAcks": true }` in the KV namespace `integrations:chat:channel-settings`. A refused reaction (`400 REACTION_INVALID`) is logged and never blocks delivery. Slack, Discord and Teams through the Chat SDK keep the text acknowledgement (#2199).
+- Chat SDK: Telegram answers reply to the message that asked, start with a `#<id8> · <agent>` task tag, fold long bodies behind a summary, and a deferral posts nothing until the real answer. `/start` no longer says "Unknown command" (#2203).
+- Scripts: a script run with a real executing agent presents a short-lived session token bound to that agent instead of the swarm API key, revoked when the run ends. Runs with no real agent keep the API key (#2349).
+- Worker image bumps claude-code to 2.1.309, codex to 0.164.0, copilot to 1.0.103, amp, and agent-browser to 0.39.2 (#2352, #2357).
+- Dependencies: Next.js in `apps/templates-ui` and Next.js plus DOMPurify in `docs-site` move to patched versions, closing nine Dependabot alerts (#2358, #2359).
+- Docs: the `heartbeat` TLA+ spec is synced with main (#2355), and a dreaming-v2 seed patch lets a review clear an evidence-only blocker when the code head is unchanged (#2351).
 
 ### Fixed
 - Approvals: `POST /api/approval-requests` now posts the Slack card for each `slack` entry in `notifications` and stores its `messageTs`, the same card workflow approval steps send. Before, the route stored the targets and posted nothing. Slack targets need a lead agent caller (403 otherwise, the `slack-post` permission), channels shared with another org are skipped when `SLACK_BLOCK_EXTERNAL_CHANNELS` is on, and the card escapes the title. Email targets are still skipped.
 - Workflows: a `foreach` item with an `agent-task` body whose task a deploy drain cuts (`superseded_workflow_task`) now gets the same one-shot retry as a plain `agent-task` node, instead of settling failed into the join. The foreach node's `retry` applies to its items (`maxRetries: 0` opts out). The queued item keeps the join open and its concurrency slot, and the retry's result counts in the aggregate. A queued item never revives a run another branch has failed.
+- Worker image: Node is pinned to 22.23.4 and the build rejects runtime-version drift, so cached builds carry the pinned Node (#2348).
+- CI: `scripts/check-codex-default-model.sh` reads the live Codex default model, checks `CODEX_VERSION` parity, and runs in CI; it had failed on every run since #1691 (#2353).
 
 ## [2.5.1] - 2026-10-23
 

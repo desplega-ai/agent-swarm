@@ -83,6 +83,8 @@ const makeCtx = (
     dbThrows?: boolean;
     /** The caller's agents.isLead; null means no agents row. */
     callerIsLead?: boolean | null;
+    /** user_external_ids x users rows for the mention lookup. */
+    addressees?: Record<string, unknown>[];
   } = {},
 ) => {
   const kv: Record<string, unknown> = {};
@@ -99,6 +101,10 @@ const makeCtx = (
     db_query: async (args: any) => {
       queries.push(args);
       if (opts.dbThrows) throw new Error("db down");
+      if (String(args.sql).includes("user_external_ids")) {
+        const rows = (opts.addressees ?? []).filter((r) => args.params.includes(r.externalId));
+        return { success: true, data: { rows } };
+      }
       if (String(args.sql).includes("FROM agents")) {
         const lead = opts.callerIsLead ?? false;
         return {
@@ -157,6 +163,8 @@ describe("defaults", () => {
       timeoutMs: 4000,
       maxBlocksPerTask: 1,
       provider: "auto",
+      plainMode: "shadow",
+      plainThreshold: 0.25,
     });
   });
 
@@ -198,11 +206,17 @@ describe("pass", () => {
     const call = jevCalls[0]!;
     expect(call.url).toBe("https://api.typesafe.ai/v1/systemone");
     expect(call.auth).toBe("Bearer tsk-test");
-    expect(Object.keys(call.body.questions).sort()).toEqual(["language", "tone", "verbosity"]);
+    expect(Object.keys(call.body.questions).sort()).toEqual([
+      "language",
+      "plain",
+      "tone",
+      "verbosity",
+    ]);
+    expect(call.body.state.plain_language_rules).toEqual(mod.PLAIN_RULES);
     expect(call.body.state.latest_request).toBe("which option did you pick?");
   });
 
-  test("non-Slack tasks, requesters without prefs, non-completions and other agents' tasks skip Jev", async () => {
+  test("with plain off: non-Slack tasks, requesters without prefs, non-completions and other agents' tasks skip Jev", async () => {
     jevScores(0.1);
     const cases: Array<[any, Row]> = [
       [completion("x"), taskRow({ source: "mcp", slackThreadTs: null })],
@@ -220,7 +234,7 @@ describe("pass", () => {
       [completion("x", { taskId: "not-a-uuid" }), taskRow()],
     ];
     for (const [event, row] of cases) {
-      const { ctx } = makeCtx({ mode: "enforce" }, { row });
+      const { ctx } = makeCtx({ mode: "enforce", plainMode: "off" }, { row });
       expect(await handler(event, ctx)).toBeUndefined();
     }
     expect(jevCalls).toHaveLength(0);
@@ -264,9 +278,9 @@ describe("pass", () => {
     expect(queries).toHaveLength(1);
   });
 
-  test("mode off never reads the task", async () => {
+  test("mode off and plainMode off never read the task", async () => {
     jevScores(0.1);
-    const { ctx, queries } = makeCtx({ mode: "off" });
+    const { ctx, queries } = makeCtx({ mode: "off", plainMode: "off" });
     expect(await handler(completion("x"), ctx)).toBeUndefined();
     expect(queries).toHaveLength(0);
   });
@@ -387,13 +401,12 @@ describe("fail open", () => {
 
 describe("self-test", () => {
   test("records both controls without judging real traffic", async () => {
-    mockJev((body) =>
-      Response.json({
-        answers: {
-          verbosity: { noul: String(body.state.agent_message).startsWith("Great") ? 0.1 : 0.9 },
-        },
-      }),
-    );
+    mockJev((body) => {
+      const msg = String(body.state.agent_message);
+      const bad = msg.startsWith("Great") || msg.startsWith("Prompt cache monitor");
+      const [dim] = Object.keys(body.questions);
+      return Response.json({ answers: { [dim!]: { noul: bad ? 0.1 : 0.9 } } });
+    });
     const { ctx, kv, queries, counters } = makeCtx();
     const event = {
       tool: "store-progress",
@@ -405,9 +418,305 @@ describe("self-test", () => {
       positiveControlBadScore: 0.1,
       negativeControlGoodScore: 0.9,
       controlsOk: true,
+      plainPositiveControlBadScore: 0.1,
+      plainNegativeControlGoodScore: 0.9,
+      plainControlsOk: true,
       provider: "typesafe",
     });
+    // Two verbosity calls and two plain calls, each asking one question.
+    expect(jevCalls.map((c) => Object.keys(c.body.questions)[0]).sort()).toEqual([
+      "plain",
+      "plain",
+      "verbosity",
+      "verbosity",
+    ]);
     expect(queries).toHaveLength(0);
     expect(counters.total).toBeUndefined();
+  });
+});
+
+describe("plain", () => {
+  const slackReply = (message: string, extra: Record<string, unknown> = {}) => ({
+    tool: "slack-reply",
+    args: { taskId: TASK_ID, message, ...extra },
+    requestInfo: { callOrigin: "mcp", agentId: "agent-1" },
+  });
+
+  test("a requester without prefs still gets the plain question", async () => {
+    jevScores(0.9);
+    const { ctx, counters } = makeCtx({}, { row: taskRow({ comms: null }) });
+    expect(await handler(completion("Picked B."), ctx)).toBeUndefined();
+    expect(Object.keys(jevCalls[0]!.body.questions)).toEqual(["plain"]);
+    expect(counters).toMatchObject({ total: 1, pass: 1 });
+  });
+
+  test("mode off with plainMode shadow asks only plain", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx({ mode: "off" });
+    await handler(completion("Picked B."), ctx);
+    expect(Object.keys(jevCalls[0]!.body.questions)).toEqual(["plain"]);
+  });
+
+  test("plain uses plainThreshold, not threshold", async () => {
+    jevScores({ plain: 0.3 });
+    const passing = makeCtx({ mode: "enforce", plainMode: "enforce", threshold: 0.75 });
+    expect(await handler(completion("Picked B."), passing.ctx)).toBeUndefined();
+    expect(passing.counters).toMatchObject({ pass: 1 });
+
+    jevScores({ plain: 0.2 });
+    const failing = makeCtx({ mode: "enforce", plainMode: "enforce", threshold: 0.75 });
+    const result = await handler(completion("p50 Δ +120ms (n=37)"), failing.ctx);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("plain (0.20 vs 0.25)");
+  });
+
+  test("plainMode shadow records a plain failure and never blocks, even with mode enforce", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, counters, kv } = makeCtx({ mode: "enforce" });
+    expect(await handler(completion("p50 Δ +120ms (n=37)"), ctx)).toBeUndefined();
+    expect(counters).toMatchObject({ fail: 1, shadowed: 1, "dim:plain": 1 });
+    expect(counters.blocked).toBeUndefined();
+    expect(kv.last).toMatchObject({ failed: ["plain"], plainMode: "shadow" });
+  });
+
+  test("plainMode enforce blocks and points the agent at the comms skill", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, counters } = makeCtx({ mode: "shadow", plainMode: "enforce" });
+    const result = await handler(completion("p50 Δ +120ms (n=37)"), ctx);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("plain (0.05 vs 0.25)");
+    expect(result.reason).toContain("`comms` skill (Simpler mode)");
+    expect(result.reason).toContain("Keep every number, name, link and hedge verbatim");
+    expect(result.reason).toContain("call store-progress again");
+    expect(counters).toMatchObject({ blocked: 1, "dim:plain": 1 });
+  });
+
+  test("a failing preference in shadow is left out of a plain block", async () => {
+    jevScores({ plain: 0.05, verbosity: 0.1 });
+    const { ctx } = makeCtx({ mode: "shadow", plainMode: "enforce" });
+    const result = await handler(completion("x"), ctx);
+    expect(result.reason).toContain("plain (");
+    expect(result.reason).not.toContain("verbosity (");
+  });
+
+  test("structured JSON output skips the plain question", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx({ mode: "enforce", plainMode: "enforce" });
+    await handler(completion('{"prUrl":"https://example.com/pull/1","n":3}'), ctx);
+    expect(Object.keys(jevCalls[0]!.body.questions)).not.toContain("plain");
+    expect(mod.looksLikeJson("{not json")).toBe(false);
+  });
+
+  test("a JSON message on any Slack tool is still judged plain, even with mode off", async () => {
+    const json = '{"p50":"+120ms","n":37}';
+    for (const tool of ["slack-reply", "slack-post", "slack-start-thread", "slack-update"]) {
+      jevCalls = [];
+      jevScores({ plain: 0.05 });
+      const { ctx } = makeCtx({ mode: "off", plainMode: "enforce" });
+      const result = await handler(
+        {
+          tool,
+          args: { taskId: TASK_ID, channelId: "C1", message: json },
+          requestInfo: { callOrigin: "mcp", agentId: "agent-1", sourceTaskId: TASK_ID },
+        },
+        ctx,
+      );
+      expect(jevCalls).toHaveLength(1);
+      expect(Object.keys(jevCalls[0]!.body.questions)).toEqual(["plain"]);
+      expect(result).toMatchObject({ action: "block" });
+    }
+  });
+
+  test("slack-reply is judged on its message with the named task", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, queries } = makeCtx({ plainMode: "enforce" });
+    const result = await handler(slackReply("p50 Δ +120ms (n=37)"), ctx);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("call slack-reply again");
+    expect(queries[0].params).toEqual([TASK_ID]);
+    expect(jevCalls[0]!.body.state.agent_message).toBe("p50 Δ +120ms (n=37)");
+  });
+
+  test("slack-post, slack-start-thread and slack-update use the caller's task context", async () => {
+    for (const tool of ["slack-post", "slack-start-thread", "slack-update"]) {
+      jevCalls = [];
+      jevScores(0.9);
+      const { ctx, queries } = makeCtx();
+      await handler(
+        {
+          tool,
+          args: { channelId: "C1", message: "Deploys take 4 minutes now." },
+          requestInfo: { callOrigin: "mcp", agentId: "agent-1", sourceTaskId: TASK_ID },
+        },
+        ctx,
+      );
+      expect(queries[0].params).toEqual([TASK_ID]);
+      expect(jevCalls).toHaveLength(1);
+    }
+  });
+
+  test("a Slack post from a non-Slack task is still judged", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx({}, { row: taskRow({ source: "mcp", slackThreadTs: null }) });
+    await handler(slackReply("Deploys take 4 minutes now."), ctx);
+    expect(jevCalls).toHaveLength(1);
+  });
+
+  test("a Slack post without a task, or on another agent's task, skips Jev", async () => {
+    jevScores(0.05);
+    const noTask = makeCtx({ plainMode: "enforce" });
+    expect(
+      await handler(
+        {
+          tool: "slack-post",
+          args: { channelId: "C1", message: "x" },
+          requestInfo: { callOrigin: "mcp", agentId: "agent-1" },
+        },
+        noTask.ctx,
+      ),
+    ).toBeUndefined();
+    const other = makeCtx({ plainMode: "enforce" }, { row: taskRow({ agentId: "agent-2" }) });
+    expect(await handler(slackReply("x"), other.ctx)).toBeUndefined();
+    expect(jevCalls).toHaveLength(0);
+  });
+
+  test("a Slack post on an unassigned task the caller did not create skips Jev", async () => {
+    // slack-reply itself rejects this task, so nothing from it may reach the judge,
+    // even though store-progress may write to an unassigned task.
+    jevScores(0.05);
+    const unassigned = makeCtx({ plainMode: "enforce" }, { row: taskRow({ agentId: null }) });
+    expect(await handler(slackReply("x"), unassigned.ctx)).toBeUndefined();
+    const lead = makeCtx(
+      { plainMode: "enforce" },
+      { row: taskRow({ agentId: "agent-2" }), callerIsLead: true },
+    );
+    expect(await handler(slackReply("x"), lead.ctx)).toBeUndefined();
+    expect(jevCalls).toHaveLength(0);
+  });
+
+  test("the task's creator may post and is judged", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx(
+      {},
+      { row: taskRow({ agentId: "agent-2", creatorAgentId: "agent-1" }) },
+    );
+    await handler(slackReply("Deploys take 4 minutes now."), ctx);
+    expect(jevCalls).toHaveLength(1);
+  });
+
+  test("store-progress and slack-reply share one block budget per task", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, counters } = makeCtx({ plainMode: "enforce" });
+    expect(await handler(slackReply("p50 Δ"), ctx)).toMatchObject({ action: "block" });
+    expect(await handler(completion("p50 Δ"), ctx)).toBeUndefined();
+    expect(counters).toMatchObject({ blocked: 1, escaped: 1 });
+  });
+
+  test("a script SDK call is recorded and never blocked", async () => {
+    jevScores({ plain: 0.05 });
+    const { ctx, counters } = makeCtx({ mode: "enforce", plainMode: "enforce" });
+    const event = {
+      ...slackReply("p50 Δ"),
+      requestInfo: { callOrigin: "script-sdk", agentId: "agent-1" },
+    };
+    expect(await handler(event, ctx)).toBeUndefined();
+    expect(counters).toMatchObject({ fail: 1, shadowed: 1 });
+    expect(counters.blocked).toBeUndefined();
+  });
+});
+
+describe("multi-person threads", () => {
+  const BOB_PREFS = { language: "Spanish", tone: "warm" };
+  const bob = { externalId: "UBOB", id: "user-2", name: "Bob", comms: JSON.stringify(BOB_PREFS) };
+  const post = (message: string) => ({
+    tool: "slack-reply",
+    args: { taskId: TASK_ID, message },
+    requestInfo: { callOrigin: "mcp", agentId: "agent-1" },
+  });
+
+  test("mentionedSlackIds keeps first-appearance order and drops duplicates", () => {
+    expect(mod.mentionedSlackIds("<@UBOB|bob> and <@U1> then <@UBOB>")).toEqual(["UBOB", "U1"]);
+    expect(mod.mentionedSlackIds("no mentions, @bob")).toEqual([]);
+  });
+
+  test("a message that mentions another person is judged against that person's prefs", async () => {
+    jevScores({ language: 0.1 });
+    const { ctx, kv } = makeCtx({ mode: "enforce" }, { addressees: [bob] });
+    const result = await handler(post("<@UBOB> hola, el deploy tarda 4 minutos."), ctx);
+    const state = jevCalls[0]!.body.state;
+    expect(state.requester).toBe("Bob");
+    expect(state.requester_preferences).toEqual(BOB_PREFS);
+    expect(Object.keys(jevCalls[0]!.body.questions).sort()).toEqual(["language", "plain", "tone"]);
+    expect(result).toMatchObject({ action: "block" });
+    expect(result.reason).toContain("Bob's stated preferences");
+    expect(kv.last).toMatchObject({
+      judgedFor: "mention",
+      audienceId: "user-2",
+      requester: "Alice",
+    });
+  });
+
+  test("the first mentioned person with prefs wins; one without prefs is skipped", async () => {
+    jevScores(0.9);
+    const carol = { externalId: "UCAROL", id: "user-3", name: "Carol", comms: null };
+    const { ctx } = makeCtx({}, { addressees: [carol, bob] });
+    await handler(post("<@UCAROL> <@UBOB> deploys take 4 minutes."), ctx);
+    expect(jevCalls[0]!.body.state.requester).toBe("Bob");
+  });
+
+  test("no mention, or an unknown one, falls back to the requester", async () => {
+    for (const message of ["Deploys take 4 minutes.", "<@UNOBODY> deploys take 4 minutes."]) {
+      jevCalls = [];
+      jevScores(0.9);
+      const { ctx, kv } = makeCtx({}, { addressees: [bob] });
+      await handler(post(message), ctx);
+      expect(jevCalls[0]!.body.state.requester_preferences).toEqual(PREFS);
+      expect(kv.last).toMatchObject({ judgedFor: "requester", audience: "Alice" });
+    }
+  });
+
+  test("mentioning the requester keeps the requester's prefs", async () => {
+    jevScores(0.9);
+    const alice = {
+      externalId: "U1",
+      id: "user-1",
+      name: "Alice",
+      comms: JSON.stringify(BOB_PREFS),
+    };
+    const { ctx } = makeCtx({}, { addressees: [alice] });
+    await handler(post("<@U1> deploys take 4 minutes."), ctx);
+    expect(jevCalls[0]!.body.state.requester_preferences).toEqual(PREFS);
+  });
+
+  test.each([
+    null,
+    "{}",
+  ])("a self-mention without requester prefs (%s) skips to the next mentioned person with prefs", async (comms) => {
+    jevScores(0.9);
+    const alice = { externalId: "U1", id: "user-1", name: "Alice", comms };
+    const { ctx, kv } = makeCtx(
+      { mode: "enforce", plainMode: "off" },
+      { row: taskRow({ comms }), addressees: [alice, bob] },
+    );
+    await handler(post("<@U1> <@UBOB> deploys take 4 minutes."), ctx);
+    expect(jevCalls).toHaveLength(1);
+    expect(jevCalls[0]!.body.state.requester).toBe("Bob");
+    expect(jevCalls[0]!.body.state.requester_preferences).toEqual(BOB_PREFS);
+    expect(kv.last).toMatchObject({ judgedFor: "mention", audienceId: "user-2" });
+  });
+
+  test("a completion that mentions someone is judged for them too", async () => {
+    jevScores(0.9);
+    const { ctx } = makeCtx({}, { addressees: [bob] });
+    await handler(completion("<@UBOB> done, PR #12."), ctx);
+    expect(jevCalls[0]!.body.state.requester).toBe("Bob");
+  });
+
+  test("with mode off, plain alone skips the mention lookup", async () => {
+    jevScores(0.9);
+    const { ctx, queries } = makeCtx({ mode: "off" }, { addressees: [bob] });
+    await handler(post("<@UBOB> deploys take 4 minutes."), ctx);
+    expect(queries.some((q) => String(q.sql).includes("user_external_ids"))).toBe(false);
+    expect(jevCalls).toHaveLength(1);
   });
 });
