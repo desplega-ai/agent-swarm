@@ -186,14 +186,14 @@ describe("searchSkills", () => {
   });
 });
 
-test("migration 237 backfills skills that existed before it ran", async () => {
+test("migration 238 backfills skills that existed before it ran", async () => {
   const db = new Database(":memory:");
   try {
     db.exec(await Bun.file("src/be/migrations/019_skills.sql").text());
     db.run(
       "INSERT INTO skills (id, name, description, content, type, scope, createdAt, lastUpdatedAt) VALUES ('s1', 'legacy-skill', 'Old description', 'old body', 'remote', 'swarm', '2026-01-01', '2026-01-01')",
     );
-    db.exec(await Bun.file("src/be/migrations/237_skills_fts.sql").text());
+    db.exec(await Bun.file("src/be/migrations/238_skills_fts.sql").text());
 
     const rows = db
       .query<{ skill_id: string }, [string]>(
@@ -203,7 +203,7 @@ test("migration 237 backfills skills that existed before it ran", async () => {
     expect(rows.map((row) => row.skill_id)).toEqual(["s1"]);
 
     // Re-running the migration does not duplicate backfilled rows.
-    db.exec(await Bun.file("src/be/migrations/237_skills_fts.sql").text());
+    db.exec(await Bun.file("src/be/migrations/238_skills_fts.sql").text());
     expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM skills_fts").get()?.n).toBe(1);
   } finally {
     db.close();
