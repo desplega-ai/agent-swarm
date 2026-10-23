@@ -138,7 +138,7 @@ Use these shapes as a starting point, then confirm them against the current exec
    { "id": "typesafe_key", "type": "config", "config": { "key": "TYPESAFE_API_KEY", "scope": "global" } }
    ```
 
-   The person enters the value on the dashboard card, which already shows whether the key is set. A secret goes straight into encrypted config. You get back only `{ key, scope, scopeId, isSecret, status, updatedAt }`, never a secret value. For a non-secret value such as `LAYA_URL`, set `"isSecret": false`; add `options` or `defaultValue` when you know the valid values. When `status` is `set`, rerun step 3. Never ask them to paste a key into chat, a task, or a definition, and never write a key into a definition.
+   The person enters the value on the dashboard card, which already shows whether the key is set. A secret goes straight into encrypted config. You get back `{ key, scope, scopeId, isSecret, status, updatedAt }`; non-secret results may also include `value`. A secret value is never returned. For a non-secret value such as `LAYA_URL`, set `"isSecret": false`; add `options` or `defaultValue` when you know the valid values. When `status` is `set`, rerun step 3. Never ask them to paste a key into chat, a task, or a definition, and never write a key into a definition.
 
 Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the key went missing since you checked. Treat it as step 4.
 
