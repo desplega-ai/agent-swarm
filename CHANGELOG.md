@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Workflows: a `foreach` item with an `agent-task` body whose task a deploy drain cuts (`superseded_workflow_task`) now gets the same one-shot retry as a plain `agent-task` node, instead of settling failed into the join. The foreach node's `retry` applies to its items (`maxRetries: 0` opts out). The queued item keeps the join open and its concurrency slot, and the retry's result counts in the aggregate. A queued item never revives a run another branch has failed (#2370).
+
 ## [2.5.2] - 2026-10-23
 
 ### Added
@@ -22,8 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Docs: the `heartbeat` TLA+ spec is synced with main (#2355), and a dreaming-v2 seed patch lets a review clear an evidence-only blocker when the code head is unchanged (#2351).
 
 ### Fixed
-- Approvals: `POST /api/approval-requests` now posts the Slack card for each `slack` entry in `notifications` and stores its `messageTs`, the same card workflow approval steps send. Before, the route stored the targets and posted nothing. Slack targets need a lead agent caller (403 otherwise, the `slack-post` permission), channels shared with another org are skipped when `SLACK_BLOCK_EXTERNAL_CHANNELS` is on, and the card escapes the title. Email targets are still skipped.
-- Workflows: a `foreach` item with an `agent-task` body whose task a deploy drain cuts (`superseded_workflow_task`) now gets the same one-shot retry as a plain `agent-task` node, instead of settling failed into the join. The foreach node's `retry` applies to its items (`maxRetries: 0` opts out). The queued item keeps the join open and its concurrency slot, and the retry's result counts in the aggregate. A queued item never revives a run another branch has failed.
+- Approvals: `POST /api/approval-requests` now posts the Slack card for each `slack` entry in `notifications` and stores its `messageTs`, the same card workflow approval steps send. Before, the route stored the targets and posted nothing. Slack targets need a lead agent caller (403 otherwise, the `slack-post` permission), channels shared with another org are skipped when `SLACK_BLOCK_EXTERNAL_CHANNELS` is on, and the card escapes the title. Email targets are still skipped (#2356).
 - Worker image: Node is pinned to 22.23.4 and the build rejects runtime-version drift, so cached builds carry the pinned Node (#2348).
 - CI: `scripts/check-codex-default-model.sh` reads the live Codex default model, checks `CODEX_VERSION` parity, and runs in CI; it had failed on every run since #1691 (#2353).
 
