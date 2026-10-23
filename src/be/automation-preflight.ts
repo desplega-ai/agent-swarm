@@ -347,8 +347,9 @@ function utcDayBounds(now: Date): { start: string; end: string } {
 
 /**
  * True when `runId` is the workflow's only setup-failure run so far this UTC
- * day, top-level or child, so a child's failure alerts at most once a day
- * like the top-level run.
+ * day, top-level or child. Call it in the transaction that inserted `runId`:
+ * transactions serialize on the write lock, so of several concurrent failures
+ * exactly one sees no other and alerts.
  */
 export async function isFirstWorkflowPreflightFailureToday(
   workflowId: string,
@@ -398,7 +399,11 @@ export async function recordSchedulePreflightFailure(
   });
 }
 
-/** Create and finish at most one failed preflight run per workflow and UTC day. */
+/**
+ * Create and finish at most one failed top-level preflight run per workflow
+ * and UTC day. `recorded` is true when the caller should alert: this call
+ * inserted the run and no child failure run of the workflow came first today.
+ */
 export async function recordWorkflowPreflightFailure(input: {
   workflowId: string;
   triggerType: "schedule" | "manual" | "event" | "api";
@@ -441,6 +446,11 @@ export async function recordWorkflowPreflightFailure(input: {
         timestamp,
       ],
     );
-    return { runId, recorded: true };
+    // Claimed in this transaction, which also sees every child failure run
+    // committed before it: concurrent failures alert exactly once a day.
+    return {
+      runId,
+      recorded: await isFirstWorkflowPreflightFailureToday(input.workflowId, runId, now),
+    };
   });
 }

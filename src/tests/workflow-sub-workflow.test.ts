@@ -854,4 +854,69 @@ describe("sub-workflow attempts", () => {
       notify.mockRestore();
     }
   });
+
+  test("concurrent child setup failures alert exactly once", async () => {
+    const notify = spyOn(preflightAlerts, "notifyAutomationPreflightFailure").mockResolvedValue(
+      undefined,
+    );
+    try {
+      const child = await createWorkflow({
+        name: `wf-${crypto.randomUUID()}`,
+        definition: instantChild,
+        requiredParams: ["REPO_URL"],
+      });
+      // Two entry nodes run in parallel, so both failures race for the alert.
+      const parent = await makeWorkflow({
+        nodes: ["a", "b"].map((id) => ({
+          id,
+          type: "sub-workflow",
+          config: { workflowId: child.id, inputs: { n: 1 } },
+        })),
+      });
+
+      const runId = await startWorkflowExecution(parent, {}, registry);
+
+      expect((await waitForRun(runId, isDone)).status).toBe("failed");
+      expect(await childRunsOf(child.id)).toHaveLength(2);
+      expect(notify).toHaveBeenCalledTimes(1);
+    } finally {
+      notify.mockRestore();
+    }
+  });
+
+  test("a legacy child started on a later attempt survives the upgrade", () =>
+    withoutListener(async () => {
+      // On main before migration 236: attempt 0 failed before starting a child
+      // (say, the child workflow was disabled), attempt 1 started it and parked.
+      const child = await makeWorkflow(waitingChild);
+      const parent = await makeWorkflow(parentOf(child.id));
+      const { runId, stepId } = await parentStepRow(parent);
+      await db.updateWorkflowRunStep(stepId, { retryCount: 1 });
+      await executeChildStep(parent, child.id, runId, stepId);
+      await setStatus("workflow_run_steps", stepId, "waiting");
+      await setStatus("workflow_runs", runId, "waiting");
+      const childRun = await childRunOf(child.id, "waiting");
+      // The column default the upgrade gives every legacy child.
+      await getDbClient().run("UPDATE workflow_runs SET parentStepAttempt = 0 WHERE id = ?", [
+        childRun.id,
+      ]);
+
+      // The backfill statement of migration 236, scoped to this child: the
+      // shared test database also holds post-migration multi-attempt children,
+      // which a real legacy database cannot have.
+      const migration = await Bun.file(
+        "src/be/migrations/236_workflow_run_parent_step_attempt.sql",
+      ).text();
+      const start = migration.indexOf("UPDATE workflow_runs");
+      const backfill = migration.slice(start, migration.indexOf(";", start));
+      await getDbClient().run(`${backfill} AND workflow_runs.id = ?`, [childRun.id]);
+      await recoverIncompleteRuns(registry);
+
+      expect((await getWorkflowRun(runId))?.status).toBe("waiting");
+      expect((await db.getWorkflowRunStep(stepId))?.status).toBe("waiting");
+      await fireChildWait(childRun.id);
+      expect(await resumeFromChildRun(stepId, registry)).toBe(true);
+      expect((await getWorkflowRun(runId))?.status).toBe("completed");
+      expect(await childRunsOf(child.id)).toHaveLength(1);
+    }));
 });

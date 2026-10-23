@@ -118,10 +118,7 @@ export async function startWorkflowExecution(
       failureReason: preflight.failureReason!,
       createdBy: options.requestedByUserId,
     });
-    // A child of this workflow may have alerted today already.
-    if (recorded && (await isFirstWorkflowPreflightFailureToday(workflow.id, runId))) {
-      await notifyAutomationPreflightFailure(preflight);
-    }
+    if (recorded) await notifyAutomationPreflightFailure(preflight);
     return runId;
   }
 
@@ -130,16 +127,15 @@ export async function startWorkflowExecution(
   // right after the commit leaves a run that recovery can walk, never a
   // `running` row with an empty context.
   let initial: InitialRunState;
-  let preflightFailed = false;
   if (preflight.state === "needs_setup") {
     // A child keeps its parent link and attempt even when it cannot start:
     // the day-deduped top-level failure run is shared and unlinked, so a
     // retry or recovery of the step would never find it.
-    preflightFailed = true;
     initial = {
       status: "failed",
       error: preflight.failureReason!,
       finishedAt: new Date().toISOString(),
+      preflight: true,
     };
   } else {
     // Templates can consume install params outside the graph definition (most
@@ -167,7 +163,7 @@ export async function startWorkflowExecution(
   const newRunId = crypto.randomUUID();
   const release = holdWorkflowRun(newRunId);
   try {
-    const { runId, created } = await createRunWithInitialState(
+    const { runId, created, preflightAlert } = await createRunWithInitialState(
       workflow,
       triggerData,
       options,
@@ -175,11 +171,8 @@ export async function startWorkflowExecution(
       newRunId,
     );
     if (!created) return runId;
-    if (preflightFailed) {
-      // Same once-a-day alert as the top-level failure run.
-      if (await isFirstWorkflowPreflightFailureToday(workflow.id, runId)) {
-        await notifyAutomationPreflightFailure(preflight);
-      }
+    if (initial.status === "failed" && initial.preflight) {
+      if (preflightAlert) await notifyAutomationPreflightFailure(preflight);
       return runId;
     }
     if (initial.status === "skipped") return runId;
@@ -226,9 +219,12 @@ export class ParentStepNotCurrentError extends Error {
   }
 }
 
-/** A new run's first committed state: a terminal status, or the context it walks from. */
+/**
+ * A new run's first committed state: a terminal status, or the context it
+ * walks from. `preflight` marks a setup failure, which alerts once a day.
+ */
 type InitialRunState =
-  | { status: "skipped" | "failed"; error: string; finishedAt: string }
+  | { status: "skipped" | "failed"; error: string; finishedAt: string; preflight?: true }
   | { status?: undefined; context: Record<string, unknown> };
 
 async function buildInitialRunState(
@@ -279,7 +275,8 @@ async function buildInitialRunState(
  * the same transaction checks that the parent step's attempt is still
  * executing and returns the child that attempt already started instead of a
  * second one; the unique (parentStepId, parentStepAttempt) index backs this
- * across processes.
+ * across processes. A setup failure claims the day's alert in the same
+ * transaction, so concurrent failures alert exactly once.
  */
 async function createRunWithInitialState(
   workflow: Workflow,
@@ -287,7 +284,7 @@ async function createRunWithInitialState(
   options: WorkflowExecutionOptions,
   initial: InitialRunState,
   runId: string,
-): Promise<{ runId: string; created: boolean }> {
+): Promise<{ runId: string; created: boolean; preflightAlert?: boolean }> {
   return getDbClient().transaction(async () => {
     const { parentStepId } = options;
     const attempt = options.parentStepAttempt ?? 0;
@@ -313,7 +310,11 @@ async function createRunWithInitialState(
         ? { status: initial.status, error: initial.error, finishedAt: initial.finishedAt }
         : { context: initial.context },
     );
-    return { runId, created: true };
+    const preflightAlert =
+      initial.status === "failed" && initial.preflight
+        ? await isFirstWorkflowPreflightFailureToday(workflow.id, runId)
+        : undefined;
+    return { runId, created: true, preflightAlert };
   });
 }
 
