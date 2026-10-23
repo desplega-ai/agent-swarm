@@ -1,7 +1,7 @@
 import { getDbClient } from "./runtime";
 
 // bm25() takes one weight per skills_fts column, in declaration order
-// (migration 236): skill_id (UNINDEXED), name, description, content.
+// (migration 237): skill_id (UNINDEXED), name, description, content.
 const SKILLS_FTS_BM25 = "bm25(skills_fts, 0.0, 3.0, 2.0, 1.0)";
 
 /**
