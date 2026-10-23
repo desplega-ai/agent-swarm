@@ -266,6 +266,39 @@ describe("list-endpoint slimming", () => {
     }
   });
 
+  test("getAllTasks — the preview starts after a leading sibling block", async () => {
+    // `prependSiblingBlock` output: a long block, a blank line, then the ask.
+    const agentId = "preview-sibling-agent";
+    const sibling = (n: number) =>
+      `- [in_progress] task:${n} — agent:Picateclas — started 2m ago, last active 10s ago\n  "${"é".repeat(190)}"`;
+    const block = `<sibling_tasks_in_progress>\nThe following tasks are already running in the same context (contextKey: slack:C1:1.2). The user has submitted new input while they were in flight — coordinate with them, do not duplicate:\n\n${[1, 2, 3].map(sibling).join("\n")}\n</sibling_tasks_in_progress>`;
+    const ask = `also bump the version ${"v".repeat(400)}`;
+    const texts = [
+      `${block}\n\n${ask}`,
+      `${block}\nno blank line`,
+      // No closing tag: nothing to skip.
+      `<sibling_tasks_in_progress>\n${"x".repeat(400)}`,
+      // Not at the start: nothing to skip.
+      `lead in\n\n${block}\n\nask`,
+    ];
+    for (const text of texts) await createTaskExtended(text, { agentId });
+
+    const expected = [
+      `${ask.slice(0, 300)}…`,
+      "\nno blank line",
+      `<sibling_tasks_in_progress>\n${"x".repeat(272)}…`,
+      `${`lead in\n\n${block}\n\nask`.slice(0, 300)}…`,
+    ].sort();
+    for (const opts of [{ slim: true }, { fields: "timeline" as const }]) {
+      const rows = await getAllTasks({ agentId, limit: 50 }, opts);
+      expect(rows.map((t) => t.task).sort()).toEqual(expected);
+    }
+    // Session roots map the full text, so the JS skip must agree with the SQL one.
+    const sessions = await listRecentSessions({ limit: 200, slim: true });
+    const roots = sessions.filter((s) => s.root.agentId === agentId).map((s) => s.root.task);
+    expect(roots.sort()).toEqual(expected);
+  });
+
   test("getAllTasks — slim and full pages hold the same rows in the same order", async () => {
     for (let i = 0; i < 12; i++) {
       await createTaskExtended(`page-parity ${i}`, { agentId: "slim-agent-1" });

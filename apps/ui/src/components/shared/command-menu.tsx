@@ -225,7 +225,8 @@ export function CommandMenu() {
   }
 
   function taskLabel(task: AgentTask) {
-    return task.task.length > 80 ? `${task.task.slice(0, 80)}...` : task.task;
+    const label = taskListTitle(task);
+    return label.length > 80 ? `${label.slice(0, 80)}...` : label;
   }
 
   return (
