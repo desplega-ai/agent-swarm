@@ -480,7 +480,10 @@ const extension: SwarmExtension = (api) => {
       const prefs: Prefs = parsed && typeof parsed === "object" ? parsed : {};
 
       const questions: Record<string, unknown> = cfg.mode === "off" ? {} : buildQuestions(prefs);
-      if (cfg.plainMode !== "off" && !looksLikeJson(text)) questions.plain = PLAIN_QUESTION;
+      // Only a store-progress outputSchema answer is machine JSON; a Slack post is
+      // always read by a human, JSON or not.
+      if (cfg.plainMode !== "off" && (event.tool !== "store-progress" || !looksLikeJson(text)))
+        questions.plain = PLAIN_QUESTION;
       if (Object.keys(questions).length === 0) return;
 
       const transport = resolveTransport(cfg);

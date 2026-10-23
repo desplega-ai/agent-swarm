@@ -501,6 +501,26 @@ describe("plain", () => {
     expect(mod.looksLikeJson("{not json")).toBe(false);
   });
 
+  test("a JSON message on any Slack tool is still judged plain, even with mode off", async () => {
+    const json = '{"p50":"+120ms","n":37}';
+    for (const tool of ["slack-reply", "slack-post", "slack-start-thread", "slack-update"]) {
+      jevCalls = [];
+      jevScores({ plain: 0.05 });
+      const { ctx } = makeCtx({ mode: "off", plainMode: "enforce" });
+      const result = await handler(
+        {
+          tool,
+          args: { taskId: TASK_ID, channelId: "C1", message: json },
+          requestInfo: { callOrigin: "mcp", agentId: "agent-1", sourceTaskId: TASK_ID },
+        },
+        ctx,
+      );
+      expect(jevCalls).toHaveLength(1);
+      expect(Object.keys(jevCalls[0]!.body.questions)).toEqual(["plain"]);
+      expect(result).toMatchObject({ action: "block" });
+    }
+  });
+
   test("slack-reply is judged on its message with the named task", async () => {
     jevScores({ plain: 0.05 });
     const { ctx, queries } = makeCtx({ plainMode: "enforce" });
