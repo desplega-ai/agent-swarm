@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { getSessionsHiddenSources, getSessionsShow } from "@/lib/sessions-show";
+import { getSessionsShow, getSessionsShownSources } from "@/lib/sessions-show";
 import { plural, SESSIONS_TOAST_POSITION, sidebarListParams } from "@/lib/sessions-v2";
 import { api } from "../client";
 import type { InboxItemStatus } from "../types";
@@ -173,7 +173,7 @@ const LIST_ACTION_DONE: Record<SessionListAction, string> = {
 /**
  * "Select all N": one action on every session of a sidebar list, loaded or
  * not (`POST /api/session-triage`, with the list's filter: Mine / All and
- * the hidden sources). No optimistic patch and no Undo: the rows were never
+ * the shown sources). No optimistic patch and no Undo: the rows were never
  * loaded. The tree, the lists, and the open details refetch when it lands.
  */
 export function useSessionListTriage() {
@@ -181,14 +181,13 @@ export function useSessionListTriage() {
   const mutation = useMutation({
     mutationFn: ({ container, action }: { container: string; action: SessionListAction }) => {
       const { triage, noGroup, groupKey } = sidebarListParams(container);
-      const hidden = getSessionsHiddenSources();
       return api.triageSessionList({
         action,
         ...(triage === "inbox" || triage === "later" || triage === "done" ? { triage } : {}),
         ...(noGroup ? { noGroup } : {}),
         ...(groupKey ? { groupKey } : {}),
         ...(getSessionsShow() === "all" ? { show: "all" as const } : {}),
-        ...(hidden.length > 0 ? { hideSource: [...hidden] } : {}),
+        showSource: [...getSessionsShownSources()],
       });
     },
     onSuccess: ({ updated }, { action }) => {

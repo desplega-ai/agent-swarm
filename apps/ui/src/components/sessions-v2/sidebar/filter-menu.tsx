@@ -1,9 +1,9 @@
 /**
  * The filter menu at the end of the search row: Show (Mine or All) and one
- * checkbox per root source. A cleared source leaves every list and count,
- * the Inbox included. Both choices are stored in this browser
- * (`lib/sessions-show.ts`). The icon shows a dot while the filter differs
- * from the default (Mine, every source on).
+ * checkbox per root source. Only ticked sources stay in the lists and counts,
+ * the Inbox included; a source never seen before starts unticked. Both
+ * choices are stored in this browser (`lib/sessions-show.ts`). The icon shows
+ * a dot while the filter differs from the default (Mine, only `ui` on).
  */
 
 import { ListFilter } from "lucide-react";
@@ -22,10 +22,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+  DEFAULT_SHOWN_SOURCES,
   type SessionsShow,
   sessionsFilterActive,
-  useSessionsHiddenSources,
   useSessionsShow,
+  useSessionsShownSources,
 } from "@/lib/sessions-show";
 import { cn } from "@/lib/utils";
 
@@ -50,17 +51,17 @@ export function FilterMenu({
   phone?: boolean;
 }) {
   const [show, setShow] = useSessionsShow();
-  const [hidden, setHidden] = useSessionsHiddenSources();
-  const active = sessionsFilterActive(canShow ? show : "mine", hidden);
-  // A hidden source with no sessions left still shows, so it can come back.
+  const [shown, setShown] = useSessionsShownSources();
+  const active = sessionsFilterActive(canShow ? show : "mine", shown);
+  // A shown source with no sessions still has a row, so it can be turned off.
   const rows = [
     ...sources,
-    ...hidden
+    ...shown
       .filter((source) => !sources.some((row) => row.source === source))
       .map((source) => ({ source, total: 0 })),
   ];
   const toggle = (source: string, on: boolean) =>
-    setHidden(on ? hidden.filter((s) => s !== source) : [...hidden, source]);
+    setShown(on ? [...shown, source] : shown.filter((s) => s !== source));
   const label = active ? "Filter sessions, filtered" : "Filter sessions";
 
   return (
@@ -120,7 +121,7 @@ export function FilterMenu({
             {rows.map(({ source, total }) => (
               <DropdownMenuCheckboxItem
                 key={source}
-                checked={!hidden.includes(source)}
+                checked={shown.includes(source)}
                 onCheckedChange={(on) => toggle(source, on)}
                 onSelect={keepOpen}
               >
@@ -141,7 +142,7 @@ export function FilterMenu({
             <DropdownMenuItem
               onSelect={() => {
                 setShow("mine");
-                setHidden([]);
+                setShown(DEFAULT_SHOWN_SOURCES);
               }}
             >
               Reset filter
