@@ -9,7 +9,14 @@
  */
 
 import { Hash } from "lucide-react";
-import { type KeyboardEvent, type MouseEvent, type RefObject, useEffect, useState } from "react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useState,
+} from "react";
 import { useUsers } from "@/api/hooks/use-users";
 import { SearchBox } from "@/components/shared/search-box";
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -50,6 +57,7 @@ export function MobileSearch({
   onLeave,
   groups,
   onSearchMode,
+  action,
 }: {
   text: string;
   /** Change the text (the search runs after a short pause). */
@@ -64,6 +72,8 @@ export function MobileSearch({
   /** My groups, for `in:`. */
   groups: SearchGroup[];
   onSearchMode?: (on: boolean) => void;
+  /** At the end of the row, out of search mode: the filter menu. */
+  action?: ReactNode;
 }) {
   // Search mode: the field has the focus or holds text.
   const [focused, setFocused] = useState(false);
@@ -119,7 +129,9 @@ export function MobileSearch({
           >
             Cancel
           </Button>
-        ) : null}
+        ) : (
+          action
+        )}
       </div>
       {searching ? (
         // The row pads 4 px above and below, so each chip's 44 px touch area fits in it.

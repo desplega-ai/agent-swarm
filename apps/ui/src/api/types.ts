@@ -855,6 +855,8 @@ export interface SessionTreeResponse {
   later: SessionSectionCounts;
   done: SessionSectionCounts;
   noGroup: SessionSectionCounts;
+  /** Each root source in this view with its session count, hidden sources included. */
+  sources?: { source: string; total: number }[];
 }
 
 /** A pending approval request in a session chain (`GET /api/sessions/:rootTaskId`). */

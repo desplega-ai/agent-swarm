@@ -10,10 +10,14 @@ import { buildSessionGroupTree } from "../../../lib/session-groups";
 import {
   buildTreeRows,
   foldIds,
+  fullListOf,
   isNavRow,
   type ListState,
+  listSelectState,
+  listSessionIds,
   openByDefault,
   sessionRange,
+  wholeListTotal,
 } from "./tree-rows";
 
 const ME = "me-1";
@@ -272,5 +276,59 @@ describe("sessionRange", () => {
     expect(sessionRange(rows, null, "s:inbox:s1")).toEqual(["s1"]);
     expect(sessionRange(rows, "s:gone", "s:inbox:s1")).toEqual(["s1"]);
     expect(sessionRange(rows, "s:inbox:s0", "s:gone")).toEqual([]);
+  });
+});
+
+describe("list selection", () => {
+  const { rows } = build(tree([], { inbox: counts(3), noGroup: counts(2) }), {
+    open: { nogroup: true },
+    lists: {
+      inbox: { data: page(3), failed: false },
+      nogroup: {
+        data: { sessions: [session("n0"), session("n1")], total: 2, limit: 20, offset: 0 },
+        failed: false,
+      },
+    },
+  });
+  const byList = listSessionIds(rows);
+
+  test("listSessionIds holds each list's loaded sessions in row order", () => {
+    expect([...byList]).toEqual([
+      ["inbox", ["s0", "s1", "s2"]],
+      ["nogroup", ["n0", "n1"]],
+    ]);
+  });
+
+  test("listSelectState: all, some, none, or null with no loaded rows", () => {
+    const ids = byList.get("inbox");
+    expect(listSelectState(ids, new Set(["s0", "s1", "s2", "n0"]))).toBe("all");
+    expect(listSelectState(ids, new Set(["s1", "n0"]))).toBe("some");
+    expect(listSelectState(ids, new Set(["n0"]))).toBe("none");
+    expect(listSelectState(byList.get("later"), new Set(["s0"]))).toBeNull();
+    expect(listSelectState([], new Set())).toBeNull();
+  });
+
+  test("fullListOf: the list only when its loaded rows are exactly the selection", () => {
+    const ids = byList.get("inbox");
+    expect(fullListOf("inbox", ids, new Set(["s0", "s1", "s2"]))).toBe("inbox");
+    expect(fullListOf("inbox", ids, new Set(["s0", "s1"]))).toBeNull();
+    expect(fullListOf("inbox", ids, new Set(["s0", "s1", "s2", "n0"]))).toBeNull();
+    expect(fullListOf(null, ids, new Set(["s0", "s1", "s2"]))).toBeNull();
+  });
+
+  test("wholeListTotal: the View all N total only while the list has unloaded sessions", () => {
+    const longer = build(tree([], { inbox: counts(50) }), {
+      lists: { inbox: { data: page(20, 50), failed: false } },
+    }).rows;
+    expect(wholeListTotal(longer, "inbox")).toBe(50);
+    // Show 10 more loaded all 15: the View all row stays, but nothing is left to select.
+    const loaded = build(tree([], { inbox: counts(15) }), {
+      expanded: ["inbox"],
+      lists: { inbox: { data: page(15), failed: false } },
+    }).rows;
+    expect(loaded.some((row) => row.type === "all")).toBe(true);
+    expect(wholeListTotal(loaded, "inbox")).toBeNull();
+    // No View all row: the list fits in 10.
+    expect(wholeListTotal(rows, "inbox")).toBeNull();
   });
 });

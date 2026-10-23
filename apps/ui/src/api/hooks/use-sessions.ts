@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { sessionSharesMutationOptions } from "@/lib/session-shares-mutation";
 import { sharesInput } from "@/lib/session-sharing";
-import { useSessionsShow } from "@/lib/sessions-show";
+import { useSessionsFilter } from "@/lib/sessions-show";
 import { sessionRefetchInterval } from "@/lib/task-activity";
 import { api } from "../client";
 import {
@@ -52,7 +52,7 @@ export function sessionsQueryOptions(userId: string | null, options?: UseSession
 
 export function useSessions(options?: UseSessionsOptions) {
   const { userId } = useCurrentUser();
-  useSessionsShow();
+  useSessionsFilter();
   return useQuery(sessionsQueryOptions(userId ?? null, options));
 }
 

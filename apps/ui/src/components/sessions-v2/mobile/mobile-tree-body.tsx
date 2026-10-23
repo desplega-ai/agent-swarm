@@ -85,7 +85,7 @@ export function MobileTreeBody({
   const onTap = useStableHandler((key: string, event: MouseEvent) => {
     const row = rowsByKey.get(key);
     if (row?.type === "session" && selection.selectionMode) {
-      selection.toggle(row.session.root.id);
+      selection.toggle(row.session.root.id, key);
       return;
     }
     onRowClick(key, event);
@@ -100,7 +100,7 @@ export function MobileTreeBody({
   const onLongPress = useStableHandler((key: string) => {
     const row = rowsByKey.get(key);
     if (row?.type === "session") {
-      if (!selection.selected.has(row.session.root.id)) selection.toggle(row.session.root.id);
+      if (!selection.selected.has(row.session.root.id)) selection.toggle(row.session.root.id, key);
     } else openGroupMenu(key, { x: 0, y: 0 });
   });
   const onRename = useStableHandler(onRenameDone);

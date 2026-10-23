@@ -24,8 +24,10 @@ import type { SessionSectionCounts } from "@/api/types";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { modKeyLabel } from "@/lib/approval-shortcuts";
 import type { SessionSection } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import {
@@ -36,7 +38,7 @@ import {
   TipKey,
   TreeRow,
 } from "./tree-row";
-import type { TreeRow as TreeRowModel } from "./tree-rows";
+import type { ListSelectState, TreeRow as TreeRowModel } from "./tree-rows";
 import { useGroupDroppable } from "./use-row-drag";
 
 export const SECTION_META: Record<SessionSection, { label: string; icon: LucideIcon }> = {
@@ -201,6 +203,12 @@ interface GroupNodeProps {
   renaming?: boolean;
   /** The rename ended: the group key, and the typed name or null to cancel. */
   onRenameDone?: (groupKey: string, name: string | null) => void;
+  /** The list's checkbox state. Missing: no loaded session rows under this row. */
+  listSelect?: ListSelectState | null;
+  /** Some sessions are selected: every list shows its checkbox. */
+  selecting?: boolean;
+  /** The list's checkbox: select its loaded rows, or unselect them. */
+  onToggleList?: (rowKey: string) => void;
 }
 
 /**
@@ -329,6 +337,9 @@ function GroupNodeView({
   dropKey,
   renaming,
   onRenameDone,
+  listSelect,
+  selecting = false,
+  onToggleList,
 }: GroupNodeProps) {
   const { name, searchMatch, hasChildren, plain, onlyYou, label } = containerFacts(row, ownerName);
   const { dropRef, isOver } = useGroupDroppable(row.key, dropKey);
@@ -350,7 +361,39 @@ function GroupNodeView({
       className="h-7 text-data data-[drop-over=true]:bg-primary/10 data-[drop-over=true]:ring-1 data-[drop-over=true]:ring-primary/60 data-[drop-over=true]:ring-inset"
     >
       <span className="grid size-4 shrink-0 place-items-center">
-        <RowIcon row={row} ownerName={ownerName} />
+        {listSelect ? (
+          // The icon turns into the list's checkbox on hover and while sessions are selected.
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Checkbox
+                tabIndex={-1}
+                aria-hidden
+                checked={
+                  listSelect === "all" ? true : listSelect === "some" ? "indeterminate" : false
+                }
+                onCheckedChange={() => onToggleList?.(row.key)}
+                onClick={(event) => event.stopPropagation()}
+                onMouseDown={keepTreeFocus}
+                className={cn(
+                  "col-start-1 row-start-1",
+                  selecting ? "flex" : "hidden group-hover/row:flex",
+                )}
+              />
+            </TooltipTrigger>
+            <TooltipContent className="flex items-center gap-1.5">
+              Select all shown
+              <TipKey>{`${modKeyLabel()}A`}</TipKey>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
+        <span
+          className={cn(
+            "col-start-1 row-start-1 grid place-items-center",
+            listSelect && (selecting ? "hidden" : "group-hover/row:hidden"),
+          )}
+        >
+          <RowIcon row={row} ownerName={ownerName} />
+        </span>
       </span>
       {renaming && row.type === "group" ? (
         <GroupNameField

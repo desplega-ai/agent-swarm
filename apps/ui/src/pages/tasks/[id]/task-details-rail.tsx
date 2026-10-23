@@ -17,6 +17,7 @@ import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-sour
 import { EffortMark } from "@/components/shared/effort-mark";
 import { SessionId } from "@/components/shared/session-id";
 import type { EndSummary } from "@/components/shared/session-log-messages";
+import { taskSourceLabel } from "@/components/shared/task-source-mark";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,7 +31,6 @@ import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
 import { taskDisplayEffort } from "@/lib/task-model-resolution";
 import { cn, formatElapsed, formatRelativeTime, formatSmartTime, parseUTCDate } from "@/lib/utils";
-import { taskSourceLabel } from "./task-source-line";
 import { NARROW_ICON_TARGET, NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
 
 // Below this, harness-vs-recomputed divergence is rounding noise; above it,
