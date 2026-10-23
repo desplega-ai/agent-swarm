@@ -642,8 +642,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "235_chat_relay_defer.sql");
       // 237 reads approval_requests and inbox_item_state, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "237_session_inbox_cleanup.sql");
-      // 238 indexes skills, which this migration-112-only fixture does not create.
-      markMigrationApplied(database, "238_skills_fts.sql");
+      // 240 indexes skills, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "240_skills_fts.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
