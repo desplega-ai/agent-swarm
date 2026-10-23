@@ -262,6 +262,10 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
  * driver to claim, and clears the cut's error: the join reads `error` on a
  * completed child as a failed item, so a stale one would count the retry's
  * success as a failure.
+ *
+ * A queued child never revives a failed run: its retry does not settle, so
+ * something else failed the run. The queued retry is retired instead, leaving
+ * the item `failed` with the cut's error for a run retry to give a new attempt.
  */
 async function claimRetry(
   runId: string,
@@ -271,6 +275,14 @@ async function claimRetry(
   return getDbClient().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || !RETRYABLE_RUN_STATUSES.has(run.status)) return false;
+    if (options.requeueForeachChild && run.status === "failed") {
+      await getDbClient().run(
+        `UPDATE workflow_run_steps SET nextRetryAt = NULL, finishedAt = ?
+          WHERE id = ? AND runId = ? AND status = 'failed' AND nextRetryAt IS NOT NULL`,
+        [new Date().toISOString(), stepId, runId],
+      );
+      return false;
+    }
     const set = options.requeueForeachChild
       ? "status = 'pending', nextRetryAt = NULL, error = NULL"
       : "status = 'running', nextRetryAt = NULL";

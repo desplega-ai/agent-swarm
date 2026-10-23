@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import * as db from "../be/db";
 import {
@@ -9,6 +9,7 @@ import {
   failTask,
   getTaskByWorkflowRunStepId,
   getWorkflowRun,
+  getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
   initDb,
   updateWorkflowRunStep,
@@ -26,7 +27,11 @@ import type { ExecutorDependencies } from "../workflows/executors/base";
 import type { ForeachOutput } from "../workflows/executors/foreach";
 import { createExecutorRegistry } from "../workflows/executors/registry";
 import { drainForeachDrives } from "../workflows/foreach-driver";
-import { setupWorkflowResumeListener } from "../workflows/resume";
+import {
+  cancelWorkflowRun,
+  retryFailedRun,
+  setupWorkflowResumeListener,
+} from "../workflows/resume";
 import { startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
 
 const TEST_DB_PATH = "./test-workflow-foreach-supersede-retry.sqlite";
@@ -185,6 +190,122 @@ describe("supersede retry for a foreach agent-task child", () => {
   });
 });
 
+describe("a queued item retry never revives a failed run", () => {
+  test("another branch failing the run retires the queued retry", async () => {
+    const runId = await startParallelRun();
+    const cut = await boundTask(runId, "fan#i0");
+
+    await failTask(cut.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+    const queued = await waitForQueuedRetry(runId, "fan#i0");
+    await failTask((await boundTask(runId, "other")).id, "parallel branch crashed");
+    await waitForRun(runId, (r) => r.status === "failed");
+
+    startRetryPoller(registry, 10);
+    const retired = await waitFor(async () => {
+      const step = await getWorkflowRunStep(queued.id);
+      return step?.nextRetryAt == null ? step : null;
+    }, "queued retry retired");
+    stopRetryPoller();
+    await drainForeachDrives();
+
+    expect(retired.status).toBe("failed");
+    expect(retired.error).toBe(SUPERSEDED_WORKFLOW_TASK_REASON);
+    expect((await getWorkflowRun(runId))!.status).toBe("failed");
+    expect(await getTaskByWorkflowRunStepId(queued.id)).toBeNull();
+
+    await expectRunRetryStartsItemOnce(runId, queued.id, cut);
+  });
+
+  test("a run retry supersedes an item retry still queued when the run failed", async () => {
+    const runId = await startParallelRun();
+    const cut = await boundTask(runId, "fan#i0");
+
+    await failTask(cut.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+    const queued = await waitForQueuedRetry(runId, "fan#i0");
+    await failTask((await boundTask(runId, "other")).id, "parallel branch crashed");
+    await waitForRun(runId, (r) => r.status === "failed");
+
+    // No poller tick between the failure and the run retry: the item's
+    // queued retry is still due when the run goes live again.
+    await expectRunRetryStartsItemOnce(runId, queued.id, cut);
+  });
+
+  test("a cancelled run keeps its queued item retry inert", async () => {
+    const runId = await startRun(2, {});
+    const cut = await boundTask(runId, "fan#i0");
+
+    await failTask(cut.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+    const queued = await waitForQueuedRetry(runId, "fan#i0");
+    await cancelWorkflowRun(runId);
+
+    startRetryPoller(registry, 10);
+    await Bun.sleep(50);
+    stopRetryPoller();
+    await drainForeachDrives();
+    expect((await getWorkflowRun(runId))!.status).toBe("cancelled");
+    expect((await getWorkflowRunStep(queued.id))!.status).toBe("failed");
+    expect(await getTaskByWorkflowRunStepId(queued.id)).toBeNull();
+  });
+
+  test("a sibling failing the run while the cut handler awaits records the cut", async () => {
+    const runId = await startRun(2, {});
+    const cut = await boundTask(runId, "fan#i0");
+    const cutStep = (await stepByNodeId(runId, "fan#i0"))!;
+    const sibling = await boundTask(runId, "fan#i1");
+    const { workflowId } = (await getWorkflowRun(runId))!;
+
+    // Hold the cut's task.failed handler at its getWorkflow read, after it
+    // saw a live run, until the sibling's fail-fast has failed the run.
+    let release!: () => void;
+    let reached!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const paused = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const realGetWorkflow = db.getWorkflow;
+    let held = false;
+    const spy = spyOn(db, "getWorkflow").mockImplementation(async (id) => {
+      const workflow = await realGetWorkflow(id);
+      if (id === workflowId && !held) {
+        held = true;
+        reached();
+        await gate;
+      }
+      return workflow;
+    });
+    try {
+      await failTask(cut.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      await paused;
+      await failTask(sibling.id, "sibling crashed");
+      await waitForRun(runId, (r) => r.status === "failed");
+      release();
+
+      const settled = await waitFor(async () => {
+        const step = await stepByNodeId(runId, "fan#i0");
+        return step?.status === "failed" && step.nextRetryAt == null ? step : null;
+      }, "cut recorded as the item's outcome");
+      expect(settled.error).toBe(SUPERSEDED_WORKFLOW_TASK_REASON);
+      expect(settled.retryCount).toBe(0);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+
+    startRetryPoller(registry, 10);
+    await Bun.sleep(50);
+    stopRetryPoller();
+    await drainForeachDrives();
+    const run = (await getWorkflowRun(runId))!;
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("sibling crashed");
+    expect(await children(runId)).toHaveLength(2);
+
+    await expectRunRetryStartsItemOnce(runId, cutStep.id, cut);
+  });
+});
+
 /** `fan`, an agent-task foreach over the trigger items, then `after`. */
 function fanOut(
   extra: Record<string, unknown>,
@@ -226,6 +347,58 @@ async function startRun(
   const runId = await startWorkflowExecution(workflow, { items }, registry);
   await drainForeachDrives();
   return runId;
+}
+
+/** `fanOut` over two items, next to an independent `other` agent-task branch. */
+async function startParallelRun(): Promise<string> {
+  const definition = fanOut({});
+  definition.nodes.push({
+    id: "other",
+    type: "agent-task",
+    config: { agentId, template: "other" },
+  });
+  const workflow = await createWorkflow({
+    name: `foreach-supersede-parallel-${crypto.randomUUID()}`,
+    definition,
+  });
+  const runId = await startWorkflowExecution(
+    workflow,
+    { items: [{ id: "i0" }, { id: "i1" }] },
+    registry,
+  );
+  await drainForeachDrives();
+  return runId;
+}
+
+/**
+ * Retry the failed run and give the poller time to act: `fan#i0` gets exactly
+ * one new attempt with one fresh task, and the earlier row stays failed.
+ */
+async function expectRunRetryStartsItemOnce(
+  runId: string,
+  earlierStepId: string,
+  cut: AgentTask,
+): Promise<void> {
+  await retryFailedRun(runId, registry);
+  await drainForeachDrives();
+  startRetryPoller(registry, 10);
+  await Bun.sleep(50);
+  stopRetryPoller();
+  await drainForeachDrives();
+
+  const attempts = (await children(runId)).filter((step) => step.nodeId === "fan#i0");
+  expect(attempts).toHaveLength(2);
+  expect(attempts[0]!.id).toBe(earlierStepId);
+  expect(attempts[0]!.status).toBe("failed");
+  expect(attempts[0]!.nextRetryAt).toBeFalsy();
+  const fresh = await boundTask(runId, "fan#i0");
+  expect(fresh.id).not.toBe(cut.id);
+  const bound = await db
+    .getDbClient()
+    .query<{ id: string }>("SELECT id FROM agent_tasks WHERE workflowRunStepId = ?", [
+      attempts[1]!.id,
+    ]);
+  expect(bound).toHaveLength(1);
 }
 
 async function children(runId: string): Promise<WorkflowRunStep[]> {

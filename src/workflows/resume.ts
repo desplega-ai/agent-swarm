@@ -45,6 +45,7 @@ import { startForeachDrive } from "./foreach-driver";
 import {
   FOREACH_TERMINAL_STEP_STATUSES,
   type ForeachChildOutcome,
+  isRetryPending,
   parseSyntheticNodeId,
   resolveForeachParent,
   settleForeachChild,
@@ -528,6 +529,13 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
     ]);
     const capError = foreachRetryCapError(currentSteps.length, attempts);
     if (capError) throw new Error(`Retry not started, run left failed: ${capError}`);
+    // An item retry still queued when the run failed gets a new attempt row
+    // below. Retire the queued one, or the poller starts the old row beside it.
+    for (const step of currentSteps) {
+      if (isRetryPending(step) && resolveForeachParent(workflow.definition, step.nodeId)) {
+        await updateWorkflowRunStep(step.id, { nextRetryAt: null });
+      }
+    }
     // A foreach item retries as a new attempt row instead of a reset: a fresh
     // step id is a fresh invocation identity for every body type, and the
     // failed row stays as history.

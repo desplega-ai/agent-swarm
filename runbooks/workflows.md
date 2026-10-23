@@ -333,7 +333,10 @@ A deploy drain or heartbeat remediation fails an in-flight workflow-step task wi
   When the retry is due, the retry poller (`src/workflows/retry-poller.ts`) flips the item back to
   `pending` and drives the fan-out, which starts it with a fresh task; its result settles into the
   join like any other item. A fail-fast failure of a sibling cancels a queued item with the rest of
-  the queue. Exhausted retries and every other failure follow the fan-out's failure policy as before.
+  the queue. A queued item never revives a failed run: a cut whose run already failed is recorded as
+  the item's failure, and when another branch fails the run the poller retires the queued retry
+  instead of running it. `retry-workflow-run` then gives the item one new attempt. Exhausted
+  retries and every other failure follow the fan-out's failure policy as before.
 
 ## Script node types
 
