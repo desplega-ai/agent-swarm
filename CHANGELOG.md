@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Skills: `skill-search` ranks results by relevance. A new FTS5 index (migration 236, backfilled) scores name, description and content with BM25 weights 3, 2 and 1, and a skill whose name equals the query ranks first. Query words are OR-ed and quoted, so a skill matching only some words still appears and user text cannot inject FTS5 syntax. Queries with no whole-word hit still fall back to the old substring match.
+
 ### Fixed
 - Approvals: `POST /api/approval-requests` now posts the Slack card for each `slack` entry in `notifications` and stores its `messageTs`, the same card workflow approval steps send. Before, the route stored the targets and posted nothing. Slack targets need a lead agent caller (403 otherwise, the `slack-post` permission), channels shared with another org are skipped when `SLACK_BLOCK_EXTERNAL_CHANNELS` is on, and the card escapes the title. Email targets are still skipped.
 

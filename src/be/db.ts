@@ -208,6 +208,7 @@ import {
   sessionPageFields,
   sessionSummaryQuery,
 } from "./db/session-tree";
+import { searchSkillRowsRanked } from "./db/skill-search";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -10989,11 +10990,22 @@ export async function listSkills(filters?: SkillFilters): Promise<Skill[]> {
   return rows.map(rowToSkill);
 }
 
+/**
+ * Ranked skill search (see searchSkillRowsRanked). Falls back to the unranked
+ * substring match when the ranked query finds nothing, e.g. a partial word.
+ */
 export async function searchSkills(
   query: string,
   limit = 20,
   includeContent = true,
 ): Promise<Skill[]> {
+  const ranked = await searchSkillRowsRanked<SkillRow>(
+    query,
+    limit,
+    includeContent === false ? SKILL_SLIM_COLUMNS : "skills.*",
+  );
+  if (ranked.length > 0) return ranked.map(rowToSkill);
+
   const tokens = query.split(/\s+/).filter(Boolean);
   const columns = includeContent === false ? SKILL_SLIM_COLUMNS : "*";
   const searchClauses = tokens.map(() => "(name LIKE ? OR description LIKE ? OR content LIKE ?)");
