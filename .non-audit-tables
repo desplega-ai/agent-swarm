@@ -41,6 +41,12 @@ skills_fts_content     # FTS5 shadow table of skills_fts (239)
 skills_fts_data        # FTS5 shadow table of skills_fts (239)
 skills_fts_docsize     # FTS5 shadow table of skills_fts (239)
 skills_fts_idx         # FTS5 shadow table of skills_fts (239)
+skills_meta_fts        # FTS5 index over skills name+description, written only by triggers; attribution lives on skills (241)
+skills_meta_fts_config # FTS5 shadow table of skills_meta_fts (241)
+skills_meta_fts_content # FTS5 shadow table of skills_meta_fts (241)
+skills_meta_fts_data   # FTS5 shadow table of skills_meta_fts (241)
+skills_meta_fts_docsize # FTS5 shadow table of skills_meta_fts (241)
+skills_meta_fts_idx    # FTS5 shadow table of skills_meta_fts (241)
 task_context_snapshots
 task_steering_messages # attribution via created_by_kind/created_by_user_id/created_by_agent_id (121)
 tracker_agent_mapping

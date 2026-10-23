@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Skills: `skill-search` finds the obvious skill for natural-language queries. English stopwords such as "a", "how" and "do" no longer match the whole catalog, and a second FTS5 index over name and description (migration 241, backfilled) adds its BM25 score three times over, so a long SKILL.md body no longer buries a name or description hit. A query of only stopwords uses the substring match.
+
 ## [2.5.2] - 2026-10-23
 
 ### Added

@@ -644,6 +644,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "237_session_inbox_cleanup.sql");
       // 239 indexes skills, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "239_skills_fts.sql");
+      // 241 indexes skills, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "241_skills_meta_fts.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
