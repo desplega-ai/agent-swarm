@@ -75,6 +75,8 @@ describe("runtime identity header in OpenAPI", () => {
       "GET /api/poll",
       "POST /api/mcp-bridge",
       "POST /api/scripts/run",
+      "POST /api/workflows",
+      "POST /api/workflows/{id}/trigger",
       "POST /close",
       "POST /ping",
       "PUT /api/agents/{id}/credential-status",

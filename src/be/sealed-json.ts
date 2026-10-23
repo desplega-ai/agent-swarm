@@ -30,6 +30,7 @@ export const SEALED_REPLAY_COLUMNS: readonly { table: string; column: string }[]
   { table: "workflow_run_steps", column: "output_replay" },
   { table: "workflow_runs", column: "context_replay" },
   { table: "approval_requests", column: "responses" },
+  { table: "workflow_idempotency_keys", column: "responseBody" },
 ];
 
 /** SQL `EXISTS` arms matching a sealed value in each `SEALED_REPLAY_COLUMNS` entry. */

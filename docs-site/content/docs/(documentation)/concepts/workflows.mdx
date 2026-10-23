@@ -410,6 +410,26 @@ Workflows support a cooldown period to prevent rapid re-triggering:
 
 A second trigger within the cooldown window results in a run with `skipped` status.
 
+### Safe retries (`Idempotency-Key`)
+
+`POST /api/workflows` and `POST /api/workflows/{id}/trigger` accept an optional `Idempotency-Key` header. Generate one key per logical operation (a UUID works) and send the same key with the same body on every retry of it, including after a network timeout. The server accepts the operation once: a retry gets the original status and body, with `Idempotent-Replayed: true`, and creates no second workflow or run. A concurrent duplicate, a lost response and a server restart are all covered.
+
+```bash
+curl -X POST "$MCP_BASE_URL/api/workflows/$WORKFLOW_ID/trigger" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  -H "Idempotency-Key: 6f1c2a9e-4f0b-4d55-9a57-2c7f3c1d8e10" \
+  -H "Content-Type: application/json" \
+  -d '{"pr": {"number": 42}}'
+```
+
+- The key is scoped to the authenticated caller, the operation and (for trigger) the workflow. Another caller's identical key is a separate operation. It is not a credential.
+- The same key with a different body returns `409`. A request rejected before it is accepted (validation, trigger schema, disabled workflow) does not use up the key.
+- A retry of a trigger returns the original `runId` and `skipped`, even if the workflow was disabled or edited since. It never starts, resumes or waits for the run.
+- If the workflow is deleted, a retry returns `410`. The key is never reused, and nothing is created again.
+- Accepted keys do not expire.
+
+This guarantees the server accepts a request once. It does not make the nodes of a run exactly-once: a run's external side effects follow the usual retry and recovery rules. It is separate from cooldown, which skips runs by time for every caller. See [runbooks/workflows.md § Idempotent create and trigger](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/workflows.md#idempotent-create-and-trigger).
+
 ### Trigger payload validation (`triggerSchema`)
 
 Workflows can attach an optional JSON Schema to validate the `triggerData` payload across every trigger path — manual `/trigger`, webhooks, schedules, and the `trigger-workflow` MCP tool. When set, mismatched payloads are rejected with HTTP 400 (or an MCP error) **before** the workflow starts: no run is created, no nodes execute. When unset, any payload is accepted (current default).

@@ -3856,5 +3856,46 @@
     "updated_by": {
       "exempt": "identifier"
     }
+  },
+  "workflow_idempotency_keys": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "principal": {
+      "exempt": "identifier (user:/agent:/controller:<id> or operator)"
+    },
+    "operation": {
+      "exempt": "enum or fixed-format value"
+    },
+    "targetId": {
+      "exempt": "identifier"
+    },
+    "keyHash": {
+      "exempt": "hash or digest"
+    },
+    "requestFingerprint": {
+      "exempt": "hash or digest"
+    },
+    "workflowId": {
+      "exempt": "identifier"
+    },
+    "runId": {
+      "exempt": "identifier"
+    },
+    "responseBody": {
+      "sealed": "recordAcceptedWorkflowOperation seals the original HTTP response of an Idempotency-Key create or trigger (a create's workflow snapshot can hold literal inputs); tombstoneWorkflowIdempotencyKeys clears it when the workflow is deleted. Reader: findAcceptedWorkflowOperation, replaying that exact response to the same caller"
+    },
+    "resourceDeletedAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
   }
 }

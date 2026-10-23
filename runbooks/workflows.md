@@ -724,6 +724,49 @@ Each workflow run persists the trusted human requester in `workflow_runs.created
 
 Retry, resume, and recovery reconstruct requester context from the workflow run. Agent-task nodes created after a restart therefore keep the original `requestedByUserId` instead of losing attribution at the checkpoint boundary. Historical runs with `created_by = NULL` are not backfilled because no trustworthy requester can be recovered.
 
+## Idempotent create and trigger
+
+`POST /api/workflows` and `POST /api/workflows/{id}/trigger` take an optional `Idempotency-Key` header (1-255 visible ASCII characters). Without it, nothing changes. With it, the server accepts one operation per key and answers every retry with that operation's original status and body, plus `Idempotent-Replayed: true`.
+
+Guarantee boundary: the server accepts the request once. Node side effects inside the run are not made exactly-once by this.
+
+| Request | Result |
+|---|---|
+| No key | Same as before; nothing recorded |
+| New key | Normal handling; the key is recorded if the operation is accepted |
+| Same key, equivalent body | Original status and body; nothing created, started or resumed |
+| Same key, different body | `409`, nothing runs |
+| Same key, its workflow was deleted | `410`; the key stays taken and nothing is re-created |
+| Concurrent identical requests | One workflow or run; the others get its result |
+
+### Scope and fingerprint
+
+The scope is `(principal, operation, targetId, sha256(key))`, unique in `workflow_idempotency_keys`:
+
+- `principal`: `user:<id>` for user tokens, `agent:<id>` for agent session tokens, `controller:<id>`, and for the swarm API key `agent:<X-Agent-ID>` or `operator`. It never contains a bearer value, so rotating a token keeps the scope. Under the shared swarm key, X-Agent-ID only keeps workers' keys apart; it is not an access boundary. Guest page sessions get `400`.
+- `operation`: `workflow.create` or `workflow.trigger`. `targetId` is the workflow id for trigger, empty for create.
+- The fingerprint is a SHA-256 of the canonical body: object keys sorted (code-unit order), array order kept, nothing redacted first. For create it is the zod-parsed body, so unknown fields are ignored as the route schema ignores them. Workflow state (definition, status) is not part of it.
+
+### Transaction boundaries
+
+- Create: one transaction checks the scope, inserts the workflow, and inserts the record with the response snapshot (workflow plus `warnings`, computed before the transaction).
+- Trigger: the record is inserted by the `accept` hook of `startWorkflowExecution` (`src/workflows/engine.ts`), inside the transaction that commits the run and its initial state (`createRunWithInitialState`), or inside the transaction around the day's setup-failure run. Cooldown skips, readiness and input failures, and setup failures are all accepted runs.
+- A concurrent request blocks on `BEGIN IMMEDIATE`, then finds the winner's record in its own transaction, throws `IdempotencyKeyTakenError`, rolls back and replays. The unique index backs this across processes. The loser never walks the graph, alerts or emits telemetry.
+- Nothing is held open across network calls: readiness warnings, input resolution and the graph walk run outside the transaction.
+- After the commit, a crash before the walk leaves a `running` run with its context; recovery walks it, and a retry replays the stored result. A failure after the commit (walk error, lost response) never deletes the record.
+
+### Order of checks
+
+Authentication runs first on every request; a revoked token gets `401` and no replay. Then the record is looked up, before definition validation (create) and before the existence, enabled, cooldown, readiness and trigger-schema checks (trigger). Errors before acceptance (`400`, `403`, `404`, trigger schema) do not record the key.
+
+### Storage and lifecycle
+
+- `responseBody` is sealed with `sealJson` (registered in `SEALED_REPLAY_COLUMNS`). The key and the request are stored only as hashes.
+- Deleting a workflow (`deleteWorkflowRows`) clears `responseBody` and sets `resourceDeletedAt` on every record naming it. That removes the extra copy of the definition and keeps the key taken.
+- No TTL: records are never reused or pruned automatically.
+
+Code: `src/be/db/workflow-idempotency.ts`, `src/http/idempotency-key.ts`, `src/http/workflows.ts`. Tests: `src/tests/workflow-idempotency.test.ts`.
+
 ## Trigger schema
 
 `triggerSchema` is an optional JSON Schema attached to a workflow that validates the `triggerData` payload for every trigger path — manual `/trigger`, webhooks, schedules, and MCP `trigger-workflow`. When set, mismatched payloads are rejected before the workflow starts (no run is created, no nodes execute). When unset (the default), any payload is accepted.

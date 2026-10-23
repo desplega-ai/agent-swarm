@@ -5,6 +5,7 @@ import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
   createWorkflow,
   deleteWorkflow,
+  getDbClient,
   getWorkflow,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
@@ -15,6 +16,13 @@ import {
   type updateWorkflow,
   withFavoriteFlags,
 } from "../be/db";
+import {
+  assertWorkflowIdempotencyKeyUnused,
+  IdempotencyKeyTakenError,
+  recordAcceptedWorkflowOperation,
+  type WorkflowIdempotencyClaim,
+  workflowRequestFingerprint,
+} from "../be/db/workflow-idempotency";
 import { getWorkflowRunParent } from "../be/db/workflow-runs";
 import {
   AssetKeySchema,
@@ -46,6 +54,11 @@ import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
+import {
+  idempotencyKeyHeader,
+  readIdempotencyKey,
+  replayAcceptedOperation,
+} from "./idempotency-key";
 import { route } from "./route-def";
 import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
 
@@ -142,6 +155,7 @@ const createWorkflowRoute = route({
   pattern: ["api", "workflows"],
   summary: "Create a new workflow",
   tags: ["Workflows"],
+  headers: idempotencyKeyHeader("creates one workflow"),
   body: z.object({
     name: z.string().min(1),
     key: AssetKeySchema.optional(),
@@ -159,7 +173,9 @@ const createWorkflowRoute = route({
   }),
   responses: {
     201: { description: "Workflow created", schema: WorkflowSaveResponseSchema },
-    400: { description: "Invalid definition" },
+    400: { description: "Invalid definition, or a malformed Idempotency-Key" },
+    409: { description: "Idempotency-Key was already used for a different request" },
+    410: { description: "The workflow created under this Idempotency-Key was deleted" },
   },
 });
 
@@ -272,16 +288,21 @@ const triggerWorkflowRoute = route({
   path: "/api/workflows/{id}/trigger",
   pattern: ["api", "workflows", null, "trigger"],
   summary: "Trigger a workflow execution",
+  description:
+    "With an `Idempotency-Key`, a retry returns the accepted run's `runId` and `skipped` without starting, resuming or waiting for anything, even after the workflow was disabled or edited and whatever state the run is in now.",
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
+  headers: idempotencyKeyHeader("starts one run"),
   responses: {
     201: {
       description: "Workflow run started (or skipped if cooldown active)",
       schema: z.object({ runId: z.string(), skipped: z.boolean() }),
     },
-    400: { description: "Workflow is disabled" },
+    400: { description: "Workflow is disabled, or a malformed Idempotency-Key" },
     401: { description: "Unauthorized" },
     404: { description: "Workflow not found" },
+    409: { description: "Idempotency-Key was already used for a different request" },
+    410: { description: "The workflow triggered under this Idempotency-Key was deleted" },
   },
 });
 
@@ -574,8 +595,21 @@ export async function handleWorkflows(
   }
 
   if (createWorkflowRoute.match(req.method, pathSegments)) {
+    const idempotency = readIdempotencyKey(req, res, myAgentId);
+    if (idempotency === null) return true;
     const parsed = await createWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const claim: WorkflowIdempotencyClaim | undefined = idempotency && {
+      ...idempotency,
+      operation: "workflow.create",
+      targetId: "",
+      fingerprint: workflowRequestFingerprint("workflow.create", parsed.body),
+    };
+    const replayCreate = (body: unknown) =>
+      createWorkflowRoute.respond(res, 201, body as z.input<typeof WorkflowSaveResponseSchema>);
+    // Before validation: a retry gets the original result even if the same
+    // definition would no longer validate.
+    if (claim && (await replayAcceptedOperation(res, claim, replayCreate))) return true;
 
     // Validate definition structure
     const validation = validateDefinition(parsed.body.definition, getExecutorRegistry());
@@ -603,27 +637,55 @@ export async function handleWorkflows(
       throw error;
     }
 
-    const workflow = await createWorkflow(
-      {
-        key,
-        name: parsed.body.name,
-        description: parsed.body.description,
-        definition: parsed.body.definition,
-        triggers: parsed.body.triggers,
-        cooldown: parsed.body.cooldown,
-        input: parsed.body.input,
-        triggerSchema: parsed.body.triggerSchema,
-        params: parsed.body.params,
-        requiredParams: parsed.body.requiredParams,
-        requires: parsed.body.requires,
-        dir: parsed.body.dir,
-        vcsRepo: parsed.body.vcsRepo,
-        createdByAgentId: myAgentId ?? undefined,
-        createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
-      },
-      "api",
-    );
-    createWorkflowRoute.respond(res, 201, await withSaveWarnings(workflow));
+    const data: Parameters<typeof createWorkflow>[0] = {
+      key,
+      name: parsed.body.name,
+      description: parsed.body.description,
+      definition: parsed.body.definition,
+      triggers: parsed.body.triggers,
+      cooldown: parsed.body.cooldown,
+      input: parsed.body.input,
+      triggerSchema: parsed.body.triggerSchema,
+      params: parsed.body.params,
+      requiredParams: parsed.body.requiredParams,
+      requires: parsed.body.requires,
+      dir: parsed.body.dir,
+      vcsRepo: parsed.body.vcsRepo,
+      createdByAgentId: myAgentId ?? undefined,
+      createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
+    };
+    if (!claim) {
+      const workflow = await createWorkflow(data, "api");
+      createWorkflowRoute.respond(res, 201, await withSaveWarnings(workflow));
+      return true;
+    }
+
+    // Warnings are computed before the transaction (a readiness check may
+    // call out) and stored with the workflow, so a retry gets this snapshot,
+    // not the workflow as it is by then.
+    const warnings = await workflowSaveWarnings(parsed.body.definition, getExecutorRegistry());
+    let saved: z.input<typeof WorkflowSaveResponseSchema>;
+    try {
+      saved = await getDbClient().transaction(async () => {
+        // Before the insert: a concurrent winner's workflow holds the same name.
+        await assertWorkflowIdempotencyKeyUnused(claim);
+        const workflow = await createWorkflow(data, "api");
+        const body = warnings.length > 0 ? { ...workflow, warnings } : workflow;
+        await recordAcceptedWorkflowOperation(claim, {
+          workflowId: workflow.id,
+          status: 201,
+          body,
+        });
+        return body;
+      });
+    } catch (err) {
+      // A concurrent request with this key committed first; nothing of this one did.
+      if (err instanceof IdempotencyKeyTakenError) {
+        if (await replayAcceptedOperation(res, claim, replayCreate)) return true;
+      }
+      throw err;
+    }
+    createWorkflowRoute.respond(res, 201, saved);
     return true;
   }
 
@@ -858,8 +920,26 @@ export async function handleWorkflows(
   }
 
   if (triggerWorkflowRoute.match(req.method, pathSegments)) {
+    const idempotency = readIdempotencyKey(req, res, myAgentId);
+    if (idempotency === null) return true;
     const parsed = await triggerWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    let claim: WorkflowIdempotencyClaim | undefined;
+    let keyedBody: Record<string, unknown> | undefined;
+    const replayTrigger = (body: unknown) =>
+      triggerWorkflowRoute.respond(res, 201, body as { runId: string; skipped: boolean });
+    if (idempotency) {
+      keyedBody = await parseBody<Record<string, unknown>>(req);
+      claim = {
+        ...idempotency,
+        operation: "workflow.trigger",
+        targetId: parsed.params.id,
+        fingerprint: workflowRequestFingerprint("workflow.trigger", keyedBody),
+      };
+      // Before the enabled, cooldown, readiness and trigger-schema checks: an
+      // accepted trigger replays even after the workflow changed.
+      if (await replayAcceptedOperation(res, claim, replayTrigger)) return true;
+    }
     const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
@@ -870,19 +950,42 @@ export async function handleWorkflows(
       jsonError(res, "Workflow is disabled", 400);
       return true;
     }
-    const body = await parseBody<Record<string, unknown>>(req);
+    const body = keyedBody ?? (await parseBody<Record<string, unknown>>(req));
     let runId: string;
+    let accepted: { runId: string; skipped: boolean } | undefined;
     try {
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
         triggerType: "api",
         requestedByUserId: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
+        // Recorded in the run's own transaction, before the walk starts.
+        accept: claim
+          ? async (run) => {
+              const response = { runId: run.runId, skipped: run.skipped };
+              await recordAcceptedWorkflowOperation(claim, {
+                workflowId: workflow.id,
+                runId: run.runId,
+                status: 201,
+                body: response,
+              });
+              accepted = response;
+            }
+          : undefined,
       });
     } catch (err) {
       if (err instanceof TriggerSchemaError) {
         triggerSchemaErrorResponse(res, err.message, err.validationErrors);
         return true;
       }
+      // A concurrent request with this key committed its run first; this one
+      // created none and walks nothing.
+      if (claim && err instanceof IdempotencyKeyTakenError) {
+        if (await replayAcceptedOperation(res, claim, replayTrigger)) return true;
+      }
       throw err;
+    }
+    if (accepted) {
+      triggerWorkflowRoute.respond(res, 201, accepted);
+      return true;
     }
 
     // Check if skipped due to cooldown

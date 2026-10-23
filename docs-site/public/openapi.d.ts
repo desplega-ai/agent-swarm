@@ -25075,7 +25075,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one workflow; a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire. */
+                    "Idempotency-Key"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -25183,8 +25186,26 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid definition */
+                /** @description Invalid definition, or a malformed Idempotency-Key */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Idempotency-Key was already used for a different request */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The workflow created under this Idempotency-Key was deleted */
+                410: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25560,11 +25581,17 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Trigger a workflow execution */
+        /**
+         * Trigger a workflow execution
+         * @description With an `Idempotency-Key`, a retry returns the accepted run's `runId` and `skipped` without starting, resuming or waiting for anything, even after the workflow was disabled or edited and whatever state the run is in now.
+         */
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key starts one run; a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire. */
+                    "Idempotency-Key"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -25584,7 +25611,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Workflow is disabled */
+                /** @description Workflow is disabled, or a malformed Idempotency-Key */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -25604,6 +25631,24 @@ export interface paths {
                 };
                 /** @description Workflow not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Idempotency-Key was already used for a different request */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The workflow triggered under this Idempotency-Key was deleted */
+                410: {
                     headers: {
                         [name: string]: unknown;
                     };

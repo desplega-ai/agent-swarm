@@ -222,6 +222,7 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
+import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import { emitChildRunFinished, wakeParentsOfDeletedRuns } from "./db/workflow-runs";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
@@ -7790,7 +7791,9 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
   await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
-  // 5. Delete workflow
+  // 5. Keep Idempotency-Keys that created or triggered it taken, without the stored response
+  await tombstoneWorkflowIdempotencyKeys(id);
+  // 6. Delete workflow
   const result = await client.run("DELETE FROM workflows WHERE id = ?", [id]);
   const deleted = result.changes > 0;
   if (deleted) {

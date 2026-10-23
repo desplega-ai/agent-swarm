@@ -61334,6 +61334,19 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[\\x21-\\x7E]{1,255}$",
+              "description": "Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one workflow; a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire."
+            },
+            "required": false,
+            "description": "Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one workflow; a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire.",
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -61635,7 +61648,27 @@
             }
           },
           "400": {
-            "description": "Invalid definition",
+            "description": "Invalid definition, or a malformed Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency-Key was already used for a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The workflow created under this Idempotency-Key was deleted",
             "content": {
               "application/json": {
                 "schema": {
@@ -62341,6 +62374,7 @@
     "/api/workflows/{id}/trigger": {
       "post": {
         "summary": "Trigger a workflow execution",
+        "description": "With an `Idempotency-Key`, a retry returns the accepted run's `runId` and `skipped` without starting, resuming or waiting for anything, even after the workflow was disabled or edited and whatever state the run is in now.",
         "tags": [
           "Workflows"
         ],
@@ -62357,6 +62391,17 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[\\x21-\\x7E]{1,255}$",
+              "description": "Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key starts one run; a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire."
+            },
+            "required": false,
+            "description": "Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key starts one run; a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire.",
+            "name": "Idempotency-Key",
+            "in": "header"
           }
         ],
         "responses": {
@@ -62383,7 +62428,7 @@
             }
           },
           "400": {
-            "description": "Workflow is disabled",
+            "description": "Workflow is disabled, or a malformed Idempotency-Key",
             "content": {
               "application/json": {
                 "schema": {
@@ -62404,6 +62449,26 @@
           },
           "404": {
             "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency-Key was already used for a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The workflow triggered under this Idempotency-Key was deleted",
             "content": {
               "application/json": {
                 "schema": {
