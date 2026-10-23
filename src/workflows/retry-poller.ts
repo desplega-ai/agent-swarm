@@ -6,7 +6,7 @@ import {
   getWorkflowRunStepsByRunId,
   updateWorkflowRun,
 } from "../be/db";
-import { disarmWorkflowRunRetries, getRunLineageBlock } from "../be/db/workflow-runs";
+import { disarmWorkflowTreeRetries, getRunLineageBlock } from "../be/db/workflow-runs";
 import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { getSuccessors, resolveValidationPort } from "./definition";
@@ -300,7 +300,7 @@ async function claimRetry(
     const run = await getWorkflowRun(runId);
     if (!run || !RETRYABLE_RUN_STATUSES.has(run.status)) return false;
     if (await getRunLineageBlock(runId)) {
-      await disarmWorkflowRunRetries(runId, new Date().toISOString());
+      await disarmWorkflowTreeRetries([runId], new Date().toISOString());
       return false;
     }
     if (options.requeueForeachChild && run.status === "failed") {

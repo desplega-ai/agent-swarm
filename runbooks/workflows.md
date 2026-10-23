@@ -333,14 +333,20 @@ approval cancel and the approval auto-cancel sweep cancel their run through the 
 - One `BEGIN IMMEDIATE` transaction reads the tree and, for each run, cancels its open tasks
   (found by the indexed `agent_tasks.workflowRunId`; a retry detaches only the step link, so tasks
   of earlier attempts are included), its non-terminal steps, its pending approvals and its queued
-  step retries (`nextRetryAt` is cleared). Every non-terminal
-  run becomes `cancelled` with the reason. A completed, failed or skipped descendant keeps its
-  status, error and output; only its leftover open work is cancelled.
+  step retries (`nextRetryAt` is cleared). Every non-terminal run becomes `cancelled` with the
+  reason. A completed, failed or skipped descendant keeps its status, error and output; only its
+  leftover open work is cancelled.
+- Steps, retries and descendant runs are written with one `UPDATE` per 500 runs, and dependents of
+  the cancelled tasks are looked up in one scan. Only the root goes through `updateWorkflowRun`, so
+  a root that is itself a child still wakes its parent step. Measured on a laptop: 2017 runs in
+  about 0.3 s, 10k runs in about 1.4 s, about 140 µs per run (mostly the per-task `cancelTask`).
 - A root that is completed, failed or skipped is refused, as before. A `cancelled` root is walked
   again, so a repeat cancel finishes descendants an earlier cancel (or an older release) left open.
   Reasons already written are kept.
-- A cycle in the links, a tree deeper than `WORKFLOW_RUN_TREE_MAX_DEPTH` (32) or larger than
-  `WORKFLOW_RUN_TREE_MAX_RUNS` (2000) throws, and nothing commits. Any other error rolls back the
+- There is no size limit: the engine admits any number of children per run, and every tree it
+  admitted stays cancellable. The walk goes level by level and stops at the first run it reaches
+  twice. A cycle in the links or a chain deeper than `WORKFLOW_RUN_TREE_MAX_DEPTH` (32, twice the
+  engine's `MAX_SUB_WORKFLOW_DEPTH`) throws, and nothing commits. Any other error rolls back the
   whole tree too.
 - After commit: worker nudges and task lifecycle events (queued with `afterCommit`), then the Slack
   update of every cancelled approval in the tree. A failed Slack post is logged; it does not undo

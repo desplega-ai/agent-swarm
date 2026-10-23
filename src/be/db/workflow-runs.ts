@@ -16,15 +16,12 @@ const TERMINAL_STATUSES = new Set<WorkflowRunStatus>([
 
 /**
  * Deepest run tree the lineage guard and the cascade cancel walk. Twice the
- * sub-workflow nesting cap (16), so any tree the engine can build fits; a
- * deeper chain is corrupt and fails closed.
+ * sub-workflow nesting cap (MAX_SUB_WORKFLOW_DEPTH, 16), so any tree the
+ * engine admits fits; a deeper chain is corrupt and fails closed.
  */
 export const WORKFLOW_RUN_TREE_MAX_DEPTH = 32;
 
-/** Most runs one cascade cancel covers. A larger tree is refused whole, never cut. */
-export const WORKFLOW_RUN_TREE_MAX_RUNS = 2_000;
-
-/** Thrown when a run's stored parent links cannot be walked: a cycle, or a tree past its bounds. */
+/** Thrown when a run's stored parent links cannot be walked: a cycle, or a chain past the depth bound. */
 export class WorkflowRunTreeError extends Error {
   constructor(message: string) {
     super(message);
@@ -98,50 +95,54 @@ export async function getRunLineageBlock(runId: string): Promise<string | null> 
  * The run and every run below it, root first: children of every attempt of
  * every step, through terminal runs too, since a run that ended can still have
  * a live child of an earlier attempt. The tree comes from stored links only
- * (child.parentStepId → step → run). Throws WorkflowRunTreeError on a cycle or
- * past the bounds, so the caller's transaction rolls back whole.
+ * (child.parentStepId → step → run). There is no size limit: the engine admits
+ * any number of children per run, and a tree it admitted must stay
+ * cancellable. Throws WorkflowRunTreeError on a cycle or past `maxDepth`, so
+ * the caller's transaction rolls back whole.
  */
 export async function getWorkflowRunTreeIds(
   rootId: string,
-  bounds: { maxDepth?: number; maxRuns?: number } = {},
+  bounds: { maxDepth?: number } = {},
 ): Promise<string[]> {
   const maxDepth = bounds.maxDepth ?? WORKFLOW_RUN_TREE_MAX_DEPTH;
-  const maxRuns = bounds.maxRuns ?? WORKFLOW_RUN_TREE_MAX_RUNS;
-  // One level past maxDepth is read, so a row there proves the tree is too
-  // deep; LIMIT stops a cycle once the run budget is spent.
-  const rows = await getDbClient().query<{ id: string; depth: number }>(
-    `WITH RECURSIVE tree(id, depth) AS (
-       SELECT id, 0 FROM workflow_runs WHERE id = ?
-       UNION ALL
-       SELECT c.id, t.depth + 1
-         FROM tree t
-         JOIN workflow_run_steps s ON s.runId = t.id
-         JOIN workflow_runs c ON c.parentStepId = s.id
-        WHERE t.depth <= ?
-     )
-     SELECT id, depth FROM tree LIMIT ?`,
-    [rootId, maxDepth, maxRuns + 1],
-  );
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    // Each run has one parent link, so reaching a run twice means a cycle.
-    if (seen.has(row.id)) {
-      throw new WorkflowRunTreeError(`Workflow run tree of ${rootId} has a cycle at run ${row.id}`);
+  const ids = [rootId];
+  const seen = new Set(ids);
+  // One level per pass, so a cycle stops at its first repeated run instead of
+  // unrolling down to the depth bound.
+  let level = [rootId];
+  for (let depth = 1; level.length > 0; depth++) {
+    const next: string[] = [];
+    for (let i = 0; i < level.length; i += TREE_QUERY_CHUNK) {
+      const chunk = level.slice(i, i + TREE_QUERY_CHUNK);
+      const rows = await getDbClient().query<{ id: string }>(
+        `SELECT c.id
+           FROM workflow_run_steps s
+           JOIN workflow_runs c ON c.parentStepId = s.id
+          WHERE s.runId IN (${chunk.map(() => "?").join(", ")})`,
+        chunk,
+      );
+      for (const { id } of rows) {
+        // Each run has one parent link, so reaching a run twice means a cycle.
+        if (seen.has(id)) {
+          throw new WorkflowRunTreeError(`Workflow run tree of ${rootId} has a cycle at run ${id}`);
+        }
+        seen.add(id);
+        next.push(id);
+      }
     }
-    if (row.depth > maxDepth) {
+    if (next.length > 0 && depth > maxDepth) {
       throw new WorkflowRunTreeError(
         `Workflow run tree of ${rootId} is nested deeper than ${maxDepth} levels`,
       );
     }
-    seen.add(row.id);
-    ids.push(row.id);
-  }
-  if (ids.length > maxRuns) {
-    throw new WorkflowRunTreeError(`Workflow run tree of ${rootId} has more than ${maxRuns} runs`);
+    ids.push(...next);
+    level = next;
   }
   return ids;
 }
+
+/** Parent runs per children query, well under SQLite's bound-parameter limit. */
+const TREE_QUERY_CHUNK = 500;
 
 /** A run's status alone, without opening its sealed context. Null when the run is missing. */
 export async function getWorkflowRunStatus(runId: string): Promise<WorkflowRunStatus | null> {
@@ -152,40 +153,104 @@ export async function getWorkflowRunStatus(runId: string): Promise<WorkflowRunSt
   return row?.status ?? null;
 }
 
-/** Ids of a run's steps that are not terminal (pending, running, waiting). */
-export async function getOpenWorkflowRunStepIds(runId: string): Promise<string[]> {
-  const rows = await getDbClient().query<{ id: string }>(
-    `SELECT id FROM workflow_run_steps
-      WHERE runId = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'skipped')`,
-    [runId],
-  );
-  return rows.map((row) => row.id);
+/** Run `fn` over `ids` in chunks small enough for one statement's bound parameters. */
+async function forEachChunk(
+  ids: string[],
+  fn: (chunk: string[], placeholders: string) => Promise<void>,
+): Promise<void> {
+  for (let i = 0; i < ids.length; i += TREE_QUERY_CHUNK) {
+    const chunk = ids.slice(i, i + TREE_QUERY_CHUNK);
+    await fn(chunk, chunk.map(() => "?").join(", "));
+  }
 }
 
 /**
- * Ids of the run's non-terminal tasks, including tasks of earlier attempts
- * that a retry detached from their step: the run link stays on them.
+ * Ids of the non-terminal tasks of the given runs, including tasks of earlier
+ * attempts: a retry detaches a task from its step, but the run link stays.
  */
-export async function getOpenWorkflowRunTaskIds(runId: string): Promise<string[]> {
-  const rows = await getDbClient().query<{ id: string }>(
-    `SELECT id FROM agent_tasks
-      WHERE workflowRunId = ? AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})`,
-    [runId, ...TERMINAL_TASK_STATUSES],
-  );
-  return rows.map((row) => row.id);
+export async function getOpenWorkflowTreeTaskIds(runIds: string[]): Promise<string[]> {
+  const ids: string[] = [];
+  const terminal = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
+  await forEachChunk(runIds, async (chunk, placeholders) => {
+    const rows = await getDbClient().query<{ id: string }>(
+      `SELECT id FROM agent_tasks
+        WHERE workflowRunId IN (${placeholders}) AND status NOT IN (${terminal})`,
+      [...chunk, ...TERMINAL_TASK_STATUSES],
+    );
+    for (const row of rows) ids.push(row.id);
+  });
+  return ids;
 }
 
 /**
- * Drop the pending retries of a run's failed steps. The step keeps its
- * status, error, output and retryCount; only the queued next attempt goes.
+ * Ids of tasks some other task lists in `dependsOn`. One scan, so a cancel of
+ * many tasks looks for dependents once instead of once per task.
  */
-export async function disarmWorkflowRunRetries(runId: string, finishedAt: string): Promise<void> {
-  await getDbClient().run(
-    `UPDATE workflow_run_steps
-        SET nextRetryAt = NULL, finishedAt = COALESCE(finishedAt, ?)
-      WHERE runId = ? AND status = 'failed' AND nextRetryAt IS NOT NULL`,
-    [finishedAt, runId],
+export async function getTaskIdsWithDependents(): Promise<Set<string>> {
+  const rows = await getDbClient().query<{ id: string }>(
+    `SELECT DISTINCT dep.value AS id
+       FROM agent_tasks t, json_each(t.dependsOn) AS dep
+      WHERE t.dependsOn IS NOT NULL AND t.dependsOn != '[]'`,
   );
+  return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * Cancel the pending, running and waiting steps of the given runs. The
+ * migration-140 trigger closes each cancelled step's pending approval.
+ */
+export async function cancelOpenWorkflowTreeSteps(
+  runIds: string[],
+  reason: string,
+  finishedAt: string,
+): Promise<void> {
+  await forEachChunk(runIds, async (chunk, placeholders) => {
+    await getDbClient().run(
+      `UPDATE workflow_run_steps
+          SET status = 'cancelled', error = ?, finishedAt = ?
+        WHERE runId IN (${placeholders}) AND status IN ('pending', 'running', 'waiting')`,
+      [scrubSecrets(reason), finishedAt, ...chunk],
+    );
+  });
+}
+
+/**
+ * Drop the pending retries of the failed steps of the given runs. The step
+ * keeps its status, error, output and retryCount; only the queued next
+ * attempt goes.
+ */
+export async function disarmWorkflowTreeRetries(
+  runIds: string[],
+  finishedAt: string,
+): Promise<void> {
+  await forEachChunk(runIds, async (chunk, placeholders) => {
+    await getDbClient().run(
+      `UPDATE workflow_run_steps
+          SET nextRetryAt = NULL, finishedAt = COALESCE(finishedAt, ?)
+        WHERE runId IN (${placeholders}) AND status = 'failed' AND nextRetryAt IS NOT NULL`,
+      [finishedAt, ...chunk],
+    );
+  });
+}
+
+/**
+ * Mark the given runs that are still running or waiting `cancelled`, without
+ * the per-run `workflow.child.finished` wake-up: it is for runs whose parent
+ * step the same cancel closes. A terminal run keeps its status and reason.
+ */
+export async function cancelLiveWorkflowTreeRuns(
+  runIds: string[],
+  reason: string,
+  finishedAt: string,
+): Promise<void> {
+  await forEachChunk(runIds, async (chunk, placeholders) => {
+    await getDbClient().run(
+      `UPDATE workflow_runs
+          SET status = 'cancelled', error = ?, finishedAt = ?, lastUpdatedAt = ?
+        WHERE id IN (${placeholders}) AND status IN ('running', 'waiting')`,
+      [scrubSecrets(reason), finishedAt, finishedAt, ...chunk],
+    );
+  });
 }
 
 /** The id of the child run a `sub-workflow` step started on `attempt`, if any. */

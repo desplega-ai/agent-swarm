@@ -18,12 +18,14 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import {
+  cancelLiveWorkflowTreeRuns,
+  cancelOpenWorkflowTreeSteps,
   createForeachAttemptSteps,
-  disarmWorkflowRunRetries,
+  disarmWorkflowTreeRetries,
   getChildWorkflowRunId,
-  getOpenWorkflowRunStepIds,
-  getOpenWorkflowRunTaskIds,
+  getOpenWorkflowTreeTaskIds,
   getRunLineageBlock,
+  getTaskIdsWithDependents,
   getWorkflowRunStatus,
   getWorkflowRunTreeIds,
 } from "../be/db/workflow-runs";
@@ -709,28 +711,24 @@ export async function cancelWorkflowRunRows(
     }
 
     const runIds = await getWorkflowRunTreeIds(runId);
-    for (const id of runIds) await cancelOpenRunRows(id, cancelReason, now);
+    // Every step task carries the run link (indexed), and a retry detaches
+    // only the step link, so this covers current and earlier attempts' tasks.
+    // Dependents are looked up once for the whole tree.
+    const withDependents = await getTaskIdsWithDependents();
+    for (const taskId of await getOpenWorkflowTreeTaskIds(runIds)) {
+      await cancelTask(taskId, cancelReason, { cascadeDependents: withDependents.has(taskId) });
+    }
+    await cancelOpenWorkflowTreeSteps(runIds, cancelReason, now);
+    await disarmWorkflowTreeRetries(runIds, now);
+    for (const id of runIds) await cancelPendingApprovalRequestsForRun(id, cancelReason);
+    // Descendants' parent steps were just cancelled, so only the root's own
+    // parent (when the root is a child) needs the child-finished wake-up.
+    await cancelLiveWorkflowTreeRuns(runIds.slice(1), cancelReason, now);
+    if (rootStatus !== "cancelled") {
+      await updateWorkflowRun(runId, { status: "cancelled", error: cancelReason, finishedAt: now });
+    }
     return { cancelled: rootStatus !== "cancelled", runIds };
   });
-}
-
-/** Cancel one run's open work, and the run itself unless it is terminal. */
-async function cancelOpenRunRows(runId: string, reason: string, now: string): Promise<void> {
-  // Every step task carries the run link (indexed), and a retry detaches only
-  // the step link, so this covers current and earlier attempts' tasks.
-  for (const taskId of await getOpenWorkflowRunTaskIds(runId)) {
-    await cancelTask(taskId, reason);
-  }
-  for (const stepId of await getOpenWorkflowRunStepIds(runId)) {
-    await updateWorkflowRunStep(stepId, { status: "cancelled", error: reason, finishedAt: now });
-  }
-  await disarmWorkflowRunRetries(runId, now);
-  await cancelPendingApprovalRequestsForRun(runId, reason);
-
-  const status = await getWorkflowRunStatus(runId);
-  if (status && !TERMINAL_RUN_STATUSES.has(status)) {
-    await updateWorkflowRun(runId, { status: "cancelled", error: reason, finishedAt: now });
-  }
 }
 
 /**

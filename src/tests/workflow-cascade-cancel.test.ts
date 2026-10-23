@@ -19,6 +19,7 @@ import {
 import {
   getRunLineageBlock,
   getWorkflowRunTreeIds,
+  WORKFLOW_RUN_TREE_MAX_DEPTH,
   WorkflowRunTreeError,
   WorkflowStepNotExecutableError,
 } from "../be/db/workflow-runs";
@@ -29,7 +30,7 @@ import { workflowEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
 import { createExecutorRegistry } from "../workflows/executors/registry";
-import { SubWorkflowExecutor } from "../workflows/executors/sub-workflow";
+import { MAX_SUB_WORKFLOW_DEPTH, SubWorkflowExecutor } from "../workflows/executors/sub-workflow";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 import {
   cancelWorkflowRun,
@@ -294,6 +295,28 @@ describe("cascade cancel", () => {
     expect(await startTask(task!.id)).toBeNull();
   });
 
+  test("fails tasks that depend on a cancelled tree task, and only those", async () => {
+    const child = await makeWorkflow(taskDef);
+    const root = await makeWorkflow(parentOf(child.id));
+    const rootId = await startWorkflowExecution(root, {}, registry);
+    const childRun = await runOf(child.id, "waiting");
+    const [task] = await waitFor(
+      () => tasksOfRun(childRun.id),
+      (tasks) => tasks.length === 1,
+    );
+    const dependent = await createTaskExtended("after the step task", {
+      source: "mcp",
+      dependsOn: [task!.id],
+    });
+    const unrelated = await createTaskExtended("unrelated", { source: "mcp" });
+
+    await cancelWorkflowRun(rootId);
+
+    expect((await getTaskById(task!.id))?.status).toBe("cancelled");
+    expect((await getTaskById(dependent.id))?.status).toBe("failed");
+    expect((await getTaskById(unrelated.id))?.status).toBe(unrelated.status);
+  });
+
   test("cancels every sibling child and leaves independent runs alone", async () => {
     const childA = await makeWorkflow(waitingDef);
     const childB = await makeWorkflow(waitingDef);
@@ -494,7 +517,8 @@ describe("cascade cancel atomicity", () => {
     expect(await getRunLineageBlock(b)).toContain("cycle");
   });
 
-  test("a tree past its bounds is refused whole", async () => {
+  test("a chain past the depth bound is refused whole; the bound covers every admitted depth", async () => {
+    expect(WORKFLOW_RUN_TREE_MAX_DEPTH).toBeGreaterThanOrEqual(MAX_SUB_WORKFLOW_DEPTH);
     const wf = await makeWorkflow({ nodes: [] });
     const rootId = await linkedRun({ workflowId: wf.id, status: "waiting" });
     let parentId = rootId;
@@ -508,11 +532,52 @@ describe("cascade cancel atomicity", () => {
     }
 
     expect(await getWorkflowRunTreeIds(rootId)).toHaveLength(4);
-    await expect(getWorkflowRunTreeIds(rootId, { maxRuns: 3 })).rejects.toBeInstanceOf(
+    await expect(getWorkflowRunTreeIds(rootId, { maxDepth: 2 })).rejects.toBeInstanceOf(
       WorkflowRunTreeError,
     );
     await expect(getWorkflowRunTreeIds(rootId, { maxDepth: 2 })).rejects.toThrow("deeper than 2");
   });
+
+  test(
+    "a wide tree the engine admitted (21 children x 95 grandchildren) is cancelled whole",
+    async () => {
+      const grandchild = await makeWorkflow(waitingDef);
+      const child = await makeWorkflow(parentOf(...Array(95).fill(grandchild.id)));
+      const root = await makeWorkflow(parentOf(...Array(21).fill(child.id)));
+      const workflowIds = [root.id, child.id, grandchild.id];
+      const count = async (where: string, params: string[] = []) =>
+        (
+          await getDbClient().get<{ n: number }>(
+            `SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId IN (?, ?, ?) AND ${where}`,
+            [...workflowIds, ...params],
+          )
+        )?.n;
+
+      const rootId = await startWorkflowExecution(root, {}, registry);
+      // Every child walks on its own; wait until all grandchildren parked.
+      await waitFor(
+        () => count("workflowId = ? AND status = 'waiting'", [grandchild.id]),
+        (n) => n === 21 * 95,
+      );
+      const tree = await getWorkflowRunTreeIds(rootId);
+      expect(tree).toHaveLength(1 + 21 + 21 * 95);
+
+      await cancelWorkflowRun(rootId, "stop the wide tree");
+
+      expect(await count("status IN ('running', 'waiting')")).toBe(0);
+      expect(await count("status = 'cancelled' AND error = 'stop the wide tree'")).toBe(
+        tree.length,
+      );
+      const openSteps = await getDbClient().get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM workflow_run_steps s
+           JOIN workflow_runs r ON r.id = s.runId
+          WHERE r.workflowId IN (?, ?, ?) AND s.status IN ('pending', 'running', 'waiting')`,
+        workflowIds,
+      );
+      expect(openSteps?.n).toBe(0);
+    },
+    { timeout: 60_000 },
+  );
 
   test("a failed notification after commit does not undo the cancel", async () => {
     const child = await makeWorkflow(approvalDef);

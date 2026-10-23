@@ -657,7 +657,15 @@ export async function overwriteTerminalTaskResultText(
   return row ? rowToAgentTask(row) : task;
 }
 
-export async function cancelTask(id: string, reason?: string): Promise<AgentTask | null> {
+/**
+ * `cascadeDependents: false` skips the dependents sweep for a caller that
+ * already knows no task depends on this one (a bulk cancel looks once).
+ */
+export async function cancelTask(
+  id: string,
+  reason?: string,
+  options: { cascadeDependents?: boolean } = {},
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
@@ -736,10 +744,12 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
       );
     }
 
-    try {
-      await dependencies.cascadeFailDependents(id, "cancelled");
-    } catch (err) {
-      console.error("[cancelTask] cascade-fail dependents error:", err);
+    if (options.cascadeDependents !== false) {
+      try {
+        await dependencies.cascadeFailDependents(id, "cancelled");
+      } catch (err) {
+        console.error("[cancelTask] cascade-fail dependents error:", err);
+      }
     }
   }
 
