@@ -7,8 +7,8 @@
 
 import type { QueryKey } from "@tanstack/react-query";
 import {
-  getSessionsHiddenSources,
   getSessionsShow,
+  getSessionsShownSources,
   type SessionsShow,
 } from "../../lib/sessions-show";
 import type { SessionStatusFilter, SessionTriageFilter } from "../types";
@@ -31,8 +31,11 @@ export interface UseSessionsOptions {
   scope?: "mine" | "shared" | "tree";
   /** Mine (default) or All, with `scope=tree`. `sessionsQueryOptions` fills it in. */
   show?: "all";
-  /** Hidden root sources, comma-joined, with `scope=tree`. `sessionsQueryOptions` fills it in. */
-  hideSource?: string;
+  /**
+   * Shown root sources, comma-joined (empty shows none), with `scope=tree`.
+   * `sessionsQueryOptions` fills it in.
+   */
+  showSource?: string;
   /** Asset key prefix, subgroups included (sessions v2). */
   keyPrefix?: string;
   /** Exactly this group, not its subgroups (sessions v2). */
@@ -63,18 +66,18 @@ export type SessionListParams = Omit<UseSessionsOptions, "enabled"> & { limit: n
 
 /**
  * The params of one session list page. A tree list follows the filter menu:
- * the Mine / All view (`show`) and the hidden sources, default the current
+ * the Mine / All view (`show`) and the shown sources, default the current
  * ones, so its key and total match the tree's.
  */
 export function sessionListParams(
   options?: UseSessionsOptions,
   show: SessionsShow = getSessionsShow(),
-  hidden: readonly string[] = getSessionsHiddenSources(),
+  shown: readonly string[] = getSessionsShownSources(),
 ): SessionListParams {
   const { enabled: _enabled, ...rest } = options ?? {};
   const params: SessionListParams = { ...rest, limit: rest.limit ?? 50 };
   if (rest.scope === "tree" && show === "all") params.show = "all";
-  if (rest.scope === "tree" && hidden.length > 0) params.hideSource = hidden.join(",");
+  if (rest.scope === "tree") params.showSource = shown.join(",");
   return params;
 }
 
@@ -99,13 +102,13 @@ export function sessionListView(params: SessionListParams | undefined): Sessions
   return params.show === "all" ? "all" : "mine";
 }
 
-/** The tree key: its counts are per viewer, per Mine / All view, and per hidden sources. */
+/** The tree key: its counts are per viewer, per Mine / All view, and per shown sources. */
 export function sessionTreeKey(
   userId: string | null,
   show: SessionsShow,
-  hidden: readonly string[] = getSessionsHiddenSources(),
+  shown: readonly string[] = getSessionsShownSources(),
 ) {
-  return [...SESSION_TREE_KEY, userId, show, hidden.join(",")] as const;
+  return [...SESSION_TREE_KEY, userId, show, shown.join(",")] as const;
 }
 
 /** The session detail query: `["session", rootTaskId, userId]`. */

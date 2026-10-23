@@ -16,8 +16,13 @@ export type SessionReadState = "unread" | "read" | "later" | "done";
 export interface SessionFilters {
   /** Restrict roots to these task sources. */
   source?: string[];
-  /** Leave out roots of these task sources (the sessions v2 source filter). */
+  /** Leave out roots of these task sources (the older sessions v2 source filter). */
   hideSource?: string[];
+  /**
+   * Keep only roots of these task sources (the sessions v2 source filter).
+   * Unlike `source`, an empty list matches no root.
+   */
+  showSource?: string[];
   /** Match root task text or title with a case-insensitive substring. */
   q?: string;
   /** Match the root requester, excluding NULL requester rows. */
@@ -50,13 +55,17 @@ export interface SessionFilters {
 
 type SqlFragment = { sql: string; params: (string | number | null)[] };
 
-/** Shared read-state rule with bound ISO timestamps for the list and tree. */
+/**
+ * Shared read-state rule with bound ISO timestamps for the list and tree.
+ * Done holds through agent activity (progress, status changes, child tasks):
+ * only `a.reopensDone`, counted in `sessionSummaryQuery`, brings it back.
+ */
 function sessionReadStateSql(now = new Date().toISOString()): SqlFragment {
   return {
     sql: `CASE
       WHEN s.id IS NULL THEN CASE WHEN a.lastActivityAt > ? THEN 'unread' ELSE 'read' END
       WHEN s.status = 'dismissed' THEN 'done'
-      WHEN s.status = 'done' THEN CASE WHEN a.lastActivityAt > s.lastUpdatedAt THEN 'unread' ELSE 'done' END
+      WHEN s.status = 'done' THEN CASE WHEN a.reopensDone > 0 THEN 'unread' ELSE 'done' END
       WHEN s.status = 'snoozed' THEN CASE WHEN s.snoozeUntil > ? THEN 'later' ELSE 'unread' END
       WHEN a.lastActivityAt > COALESCE(s.lastReadAt, s.lastUpdatedAt) THEN 'unread'
       ELSE 'read'
@@ -100,6 +109,14 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   const hidden = opts.hideSource?.filter(Boolean) ?? [];
   if (hidden.length)
     add({ sql: `r.source NOT IN (${hidden.map(() => "?").join(",")})`, params: hidden });
+  if (opts.showSource) {
+    const shown = opts.showSource.filter(Boolean);
+    add(
+      shown.length
+        ? { sql: `r.source IN (${shown.map(() => "?").join(",")})`, params: shown }
+        : { sql: "0", params: [] },
+    );
+  }
   if (opts.q?.trim()) {
     const like = `%${opts.q.trim().toLowerCase()}%`;
     add({
@@ -153,6 +170,29 @@ function hasSessionChainFilter(opts: SessionFilters): boolean {
 const runningSql = `latestStatus NOT IN (${TERMINAL_TASK_STATUSES.map((s) => `'${s}'`).join(",")})`;
 
 /**
+ * Sources of tasks that agents and the server create: delegation and scripts
+ * (`mcp`), follow-ups (`system`), deferred wake-ups (`schedule`) and workflow
+ * steps. Agents also set `requestedByUserId` explicitly on these, so a requester
+ * alone does not mark a human message.
+ */
+const AGENT_TASK_SOURCES = ["mcp", "system", "schedule", "workflow"] as const;
+
+/**
+ * Per chain row, over `chain` and the viewer's Done row `d`: whether the row
+ * needs the user since they marked the session Done. That is a human message
+ * (a task attributed to a person directly, not copied from its parent, from a
+ * human channel) or a pending approval, created after the Done mark.
+ */
+const reopensDoneSql = `(d.id IS NOT NULL AND (
+        (chain.createdAt > d.lastUpdatedAt
+          AND chain.requestedByUserId IS NOT NULL
+          AND chain.requestedByUserIdInherited = 0
+          AND COALESCE(chain.source, '') NOT IN (${AGENT_TASK_SOURCES.map((s) => `'${s}'`).join(",")}))
+        OR EXISTS (SELECT 1 FROM approval_requests ar
+          WHERE ar.sourceTaskId = chain.id AND ar.status = 'pending' AND ar.createdAt > d.lastUpdatedAt)
+      ))`;
+
+/**
  * A session starts at a parentTaskId IS NULL root. One recursive CTE computes
  * chain-wide latest activity for list ordering. Root filters precede recursion.
  * Read state and chain filters follow aggregation.
@@ -162,7 +202,7 @@ export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
   const read = opts.viewer?.userId ? sessionReadStateSql(opts.now) : { sql: "NULL", params: [] };
   const params = [...root.params];
   if (opts.withUserId) params.push(opts.withUserId);
-  params.push(...read.params, opts.viewer?.userId ?? null);
+  params.push(opts.viewer?.userId ?? null, ...read.params, opts.viewer?.userId ?? null);
   const filters: string[] = [];
   if (opts.triage === "unread") filters.push("readState = 'unread'");
   else if (opts.triage === "later" || opts.triage === "done") {
@@ -182,19 +222,27 @@ export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
   return {
     // SQLite takes the bare status from the row with MAX(lastUpdatedAt).
     // Keep this as the only MIN/MAX aggregate so status follows activity.
-    sql: `WITH RECURSIVE chain(root_id, id, lastUpdatedAt, status, requestedByUserId) AS (
-      SELECT r.id, r.id, r.lastUpdatedAt, r.status, r.requestedByUserId
+    // `d` is the viewer's Done row, so `reopensDone` can compare chain rows
+    // against the Done mark (SUM keeps MAX the only MIN/MAX aggregate).
+    sql: `WITH RECURSIVE chain(root_id, id, lastUpdatedAt, status, requestedByUserId,
+        createdAt, source, requestedByUserIdInherited) AS (
+      SELECT r.id, r.id, r.lastUpdatedAt, r.status, r.requestedByUserId,
+        r.createdAt, r.source, r.requestedByUserIdInherited
       FROM agent_tasks r WHERE ${root.sql}
       UNION ALL
-      SELECT c.root_id, t.id, t.lastUpdatedAt, t.status, t.requestedByUserId
+      SELECT c.root_id, t.id, t.lastUpdatedAt, t.status, t.requestedByUserId,
+        t.createdAt, t.source, t.requestedByUserIdInherited
       FROM chain c JOIN agent_tasks t ON t.parentTaskId = c.id
     ), agg AS (
-      SELECT root_id, COUNT(*) AS chainCount,
-        status AS latestStatus, MAX(lastUpdatedAt) AS lastActivityAt,
-        ${opts.withUserId ? "SUM(requestedByUserId = ?) AS withUser," : ""}
+      SELECT chain.root_id, COUNT(*) AS chainCount,
+        chain.status AS latestStatus, MAX(chain.lastUpdatedAt) AS lastActivityAt,
+        ${opts.withUserId ? "SUM(chain.requestedByUserId = ?) AS withUser," : ""}
         SUM(EXISTS (SELECT 1 FROM approval_requests ar
-          WHERE ar.sourceTaskId = chain.id AND ar.status = 'pending')) AS pendingApproval
-      FROM chain GROUP BY root_id
+          WHERE ar.sourceTaskId = chain.id AND ar.status = 'pending')) AS pendingApproval,
+        SUM(${reopensDoneSql}) AS reopensDone
+      FROM chain LEFT JOIN inbox_item_state d
+        ON d.userId = ? AND d.itemType = 'to_read' AND d.itemId = chain.root_id AND d.status = 'done'
+      GROUP BY chain.root_id
     ), state AS (
       SELECT a.*, ${read.sql} AS readState, s.snoozeUntil
       FROM agg a LEFT JOIN inbox_item_state s
@@ -341,7 +389,7 @@ export interface SessionTree {
 export async function getSessionTree(
   actor: { kind: "bypass" } | { kind: "user"; userId: string | null },
   now?: string,
-  opts: { mine?: boolean; hideSource?: string[] } = {},
+  opts: { mine?: boolean; hideSource?: string[]; showSource?: string[] } = {},
 ): Promise<SessionTree> {
   // No source filter in SQL: the source counts must include hidden sources,
   // so the filter menu can offer them back. The loop skips them instead.
@@ -373,6 +421,7 @@ export async function getSessionTree(
     sources: [],
   };
   const hidden = new Set(opts.hideSource);
+  const shown = opts.showSource ? new Set(opts.showSource) : null;
   const sources = new Map<string, number>();
   const groups = new Map<string, SessionTreeGroup>();
   const add = (section: SessionSectionCounts, row: (typeof rows)[number]) => {
@@ -383,7 +432,7 @@ export async function getSessionTree(
   };
   for (const row of rows) {
     sources.set(row.source, (sources.get(row.source) ?? 0) + 1);
-    if (hidden.has(row.source)) continue;
+    if (hidden.has(row.source) || (shown && !shown.has(row.source))) continue;
     const key = sessionGroupKey(row.key);
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);
@@ -425,7 +474,10 @@ const UNREAD_CURSOR = "1970-01-01T00:00:00.000Z";
  */
 export async function triageSessionList(
   userId: string,
-  filters: Pick<SessionFilters, "triage" | "noGroup" | "groupKey" | "mine" | "hideSource" | "now">,
+  filters: Pick<
+    SessionFilters,
+    "triage" | "noGroup" | "groupKey" | "mine" | "hideSource" | "showSource" | "now"
+  >,
   action: SessionListTriage,
 ): Promise<number> {
   const now = filters.now ?? new Date().toISOString();

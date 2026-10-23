@@ -19036,8 +19036,10 @@ export interface paths {
                     scope?: "mine" | "shared" | "tree";
                     /** @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged. */
                     show?: "mine" | "all";
-                    /** @description Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`. */
+                    /** @description Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it. */
                     hideSource?: string;
+                    /** @description Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source. */
+                    showSource?: string;
                 };
                 header?: never;
                 path?: never;
@@ -19160,8 +19162,10 @@ export interface paths {
                 query?: {
                     /** @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged. */
                     show?: "mine" | "all";
-                    /** @description Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`. */
+                    /** @description Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it. */
                     hideSource?: string;
+                    /** @description Comma-separated root sources to keep (the sessions v2 source filter), e.g. `ui,slack`. Present and empty keeps none; omit to keep every source. */
+                    showSource?: string;
                 };
                 header?: never;
                 path?: never;
@@ -19270,6 +19274,7 @@ export interface paths {
                          */
                         show?: "mine" | "all";
                         hideSource?: string[];
+                        showSource?: string[];
                     };
                 };
             };

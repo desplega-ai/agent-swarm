@@ -3342,8 +3342,8 @@ class ApiClient {
     scope?: "mine" | "shared" | "tree";
     /** With `scope=tree`: `all` adds machine-started runs to the Mine default (sessions v2). */
     show?: "all";
-    /** With `scope=tree`: comma-joined root sources to leave out (sessions v2). */
-    hideSource?: string;
+    /** With `scope=tree`: comma-joined root sources to keep, empty for none (sessions v2). */
+    showSource?: string;
     /** Asset key prefix, subgroups included (sessions v2). */
     keyPrefix?: string;
     /** Exactly this group, not its subgroups (sessions v2). */
@@ -3366,7 +3366,7 @@ class ApiClient {
     if (opts?.contextKeyPrefix) params.set("contextKeyPrefix", opts.contextKeyPrefix);
     if (opts?.scope) params.set("scope", opts.scope);
     if (opts?.show) params.set("show", opts.show);
-    if (opts?.hideSource) params.set("hideSource", opts.hideSource);
+    if (opts?.showSource !== undefined) params.set("showSource", opts.showSource);
     if (opts?.keyPrefix) params.set("keyPrefix", opts.keyPrefix);
     if (opts?.groupKey) params.set("groupKey", opts.groupKey);
     if (opts?.noGroup) params.set("noGroup", "true");
@@ -3381,10 +3381,10 @@ class ApiClient {
   }
 
   /** Every visible session group with its counts, plus the Inbox, Later, Done, and No group counts. */
-  async getSessionTree(opts?: { show?: "all"; hideSource?: string }): Promise<SessionTreeResponse> {
+  async getSessionTree(opts?: { show?: "all"; showSource?: string }): Promise<SessionTreeResponse> {
     const params = new URLSearchParams();
     if (opts?.show) params.set("show", opts.show);
-    if (opts?.hideSource) params.set("hideSource", opts.hideSource);
+    if (opts?.showSource !== undefined) params.set("showSource", opts.showSource);
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/session-tree${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -3403,7 +3403,7 @@ class ApiClient {
     noGroup?: boolean;
     groupKey?: string;
     show?: "all";
-    hideSource?: string[];
+    showSource?: string[];
   }): Promise<{ updated: number }> {
     const url = `${this.getBaseUrl()}/api/session-triage`;
     const res = await fetch(url, {
