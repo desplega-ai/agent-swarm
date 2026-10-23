@@ -228,8 +228,11 @@ type AnyQuestion = { id: string; type: string; label?: string; config?: ConfigQu
 export async function normalizeApprovalQuestions<Q extends AnyQuestion>(
   questions: Q[],
   ctx: { approvers: ApproversLike; callerAgentId?: string },
-): Promise<{ ok: true; questions: (Q & { label: string })[] } | { ok: false; error: string }> {
-  const out: (Q & { label: string })[] = [];
+): Promise<
+  | { ok: true; questions: ((Q & { label: string }) | NormalizedConfigQuestion<Q>)[] }
+  | { ok: false; error: string }
+> {
+  const out: ((Q & { label: string }) | NormalizedConfigQuestion<Q>)[] = [];
   for (const question of questions) {
     if (question.type !== "config") {
       if (question.config !== undefined) {
@@ -241,12 +244,12 @@ export async function normalizeApprovalQuestions<Q extends AnyQuestion>(
       if (typeof question.label !== "string") {
         return { ok: false, error: `question "${question.id}": label is required` };
       }
-      out.push(question as Q & { label: string });
+      out.push({ ...question, label: question.label });
       continue;
     }
     const normalized = await normalizeConfigQuestion(question, ctx);
     if (!normalized.ok) return normalized;
-    out.push(normalized.question as unknown as Q & { label: string });
+    out.push(normalized.question);
   }
   return { ok: true, questions: out };
 }
