@@ -89,7 +89,7 @@ turso db list   # verify
 
 Do NOT use `turso auth login` — it needs a browser. Always feed the config token in.
 
-If `turso db list` returns 401, the platform JWT has expired — refresh `TURSO_API_TOKEN` in swarm config or ask the configured token owner.
+If `turso db list` returns 401, the platform JWT has expired — refresh `TURSO_API_TOKEN` in swarm config. If you cannot mint a new one, ask the token owner with a `request-human-input` question of type `config` (`config: { key: "TURSO_API_TOKEN", scope: "global" }`) and share the returned URL. They paste the new token into the dashboard card; you get back only whether it was set, never the value. Never ask for the token in chat.
 
 ## CLI database operations
 

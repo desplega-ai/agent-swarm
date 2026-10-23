@@ -132,7 +132,13 @@ Use these shapes as a starting point, then confirm them against the current exec
    ```
 
    A `completed` run means the key works. A `failed` run carries the reason: `<KEY> is not configured` (missing; for `laya` it can name `LAYA_URL` or `LAYA_API_KEY`, or both), or `<KEY> was rejected by <host> (HTTP 401)` (present but refused). To probe `laya`, set `"provider": "laya"` in the ping node. If `create-workflow` says `system-one-decision` is an unregistered executor type, the node is not deployed on this swarm yet: stop and say so.
-4. If the key is missing or was rejected, **do not build the node.** Ask a human for the key with `request-human-input` or in the thread. Name the exact key and where it goes: the Secrets page (Settings > Secrets), or for `LAYA_URL` a global config value (`set-config`, scope `global`). Never ask them to paste it into chat, a task, or a definition, and never write a key into a definition.
+4. If the key is missing or was rejected, **do not build the node.** Ask a human for it with a `request-human-input` question of type `config`, one question per key, and share the returned URL in the thread:
+
+   ```json
+   { "id": "typesafe_key", "type": "config", "config": { "key": "TYPESAFE_API_KEY", "scope": "global" } }
+   ```
+
+   The person enters the value on the dashboard card, which already shows whether the key is set. A secret goes straight into encrypted config. You get back only `{ key, scope, scopeId, isSecret, status, updatedAt }`, never a secret value. For a non-secret value such as `LAYA_URL`, set `"isSecret": false`; add `options` or `defaultValue` when you know the valid values. When `status` is `set`, rerun step 3. Never ask them to paste a key into chat, a task, or a definition, and never write a key into a definition.
 
 Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the key went missing since you checked. Treat it as step 4.
 
@@ -217,6 +223,7 @@ The same rules apply to a standalone `request-human-input` call.
 
 - **Dashboard card.** `title` is plain text. Each question's `label` is its heading and renders as markdown. `description` renders as full markdown and is the only field that shows images, so put drafts, diffs, and logs there.
 - **Code.** Fence code, logs, and JSON with a language (```` ```json ````): the block keeps its lines and scrolls. Fence a prose draft with no language: it wraps. A single newline outside a fence becomes a paragraph break.
+- **Config questions.** A `config` question (`config: { key, scope }`) renders the key, whether it is already set, and a password field for secrets or a select for non-secret `options`. The value is written only when the request resolves approved, and the response holds only the result (`status` `set`, `kept`, or `skipped`), never a secret value. It needs `approvers.policy: "any"`. Use it whenever you need a person to supply a config value or secret.
 - **Images.** Put an `http(s)` URL ending in `.png`, `.jpg`, `.jpeg`, `.gif`, or `.webp` alone on its own line in `description`, or use `![alt](url)`. The link must outlive the request: an expired presigned URL shows an "image unavailable" note.
 - **Slack.** A node's `notifications` post the title, the question labels (each collapsed to one line, capped at 3000 characters in total), a Review button, and the timeout. Descriptions, options, code, and images are not shown, so the title and labels must make sense alone. `request-human-input` posts nothing to Slack: share the returned URL yourself.
 
