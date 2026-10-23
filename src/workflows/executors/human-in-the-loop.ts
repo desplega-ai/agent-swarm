@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  ConfigQuestionSettingsSchema,
+  normalizeApprovalQuestions,
+} from "../../be/approval-config-question";
 import type { ExecutorMeta } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { dispatchApprovalNotifications } from "../approval-notifications";
@@ -55,6 +59,15 @@ const QuestionSchema = z.discriminatedUnion("type", [
     required: z.boolean().default(true),
     description: z.string().optional(),
     defaultValue: z.boolean().optional(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("config"),
+    // Defaults to the config key during normalization in `run`.
+    label: z.string().optional(),
+    required: z.boolean().default(true),
+    description: z.string().optional(),
+    config: ConfigQuestionSettingsSchema,
   }),
 ]);
 
@@ -207,7 +220,18 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
   override async run(input: ExecutorInput): Promise<ExecutorResult<HITLOutput>> {
     const resolved = resolveHitlQuestions(input.config?.questions);
     if (!resolved.ok) return { status: "failed", error: resolved.error };
-    return super.run({ ...input, config: { ...input.config, questions: resolved.questions } });
+    // Config questions: the same create-time rules as the tool and REST paths.
+    const approvers = input.config?.approvers as { policy?: unknown } | undefined;
+    const normalized = await normalizeApprovalQuestions(resolved.questions, {
+      approvers: { policy: approvers?.policy },
+    });
+    if (!normalized.ok) {
+      return {
+        status: "failed",
+        error: `human-in-the-loop questions are invalid: ${normalized.error}`,
+      };
+    }
+    return super.run({ ...input, config: { ...input.config, questions: normalized.questions } });
   }
 
   protected async execute(
