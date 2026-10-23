@@ -12446,7 +12446,8 @@
                         "channel",
                         "target"
                       ]
-                    }
+                    },
+                    "description": "Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Email is not supported yet and is skipped."
                   }
                 },
                 "required": [

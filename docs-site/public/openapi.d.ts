@@ -3376,6 +3376,7 @@ export interface paths {
                         sourceTaskId?: string;
                         /** @description Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). */
                         timeoutSeconds?: number;
+                        /** @description Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Email is not supported yet and is skipped. */
                         notifications?: {
                             /** @enum {string} */
                             channel: "slack" | "email";

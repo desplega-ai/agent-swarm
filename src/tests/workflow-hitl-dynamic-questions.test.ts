@@ -11,6 +11,7 @@ import {
   initDb,
 } from "../be/db";
 import type { WorkflowDefinition } from "../types";
+import { buildSlackQuestionsSummary } from "../workflows/approval-notifications";
 import { validateDefinition } from "../workflows/definition";
 import { interpolateNodeConfig, startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
@@ -20,7 +21,6 @@ import {
   type ExecutorResult,
 } from "../workflows/executors/base";
 import {
-  buildSlackQuestionsSummary,
   HumanInTheLoopExecutor,
   MAX_HITL_QUESTIONS,
   resolveHitlQuestions,

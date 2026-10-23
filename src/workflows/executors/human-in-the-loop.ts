@@ -1,8 +1,7 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
-import { getAppUrl } from "../../utils/constants";
 import { scrubSecrets } from "../../utils/secret-scrubber";
-import { postApprovalCancellationUpdates } from "../approval-notifications";
+import { dispatchApprovalNotifications } from "../approval-notifications";
 import type { ExecutorInput, ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 
@@ -87,9 +86,6 @@ const DYNAMIC_QUESTIONS_TOKEN_RE = /^\{\{[^}]+\}\}$/;
  * fails instead of silently dropping items.
  */
 export const MAX_HITL_QUESTIONS = 100;
-
-/** Slack Block Kit caps a section block's text at 3000 characters. */
-const SLACK_SECTION_TEXT_LIMIT = 3000;
 
 const MAX_REPORTED_ISSUES = 5;
 
@@ -197,38 +193,6 @@ export function resolveHitlQuestions(
   return { ok: true, questions };
 }
 
-function escapeSlackMrkdwn(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-/**
- * Render the Slack "Questions" section text within Block Kit's 3000-character
- * section limit. Labels are escaped so upstream text cannot inject mentions or
- * links. When the list does not fit, the tail is replaced by a count; every
- * question stays answerable on the dashboard page the card's button opens.
- */
-export function buildSlackQuestionsSummary(
-  questions: ReadonlyArray<{ label: string }>,
-  timeoutText = "",
-): string {
-  const header = "*Questions:*\n";
-  const lines = questions.map((q) => `• ${escapeSlackMrkdwn(q.label.replace(/\s+/g, " ").trim())}`);
-  const fits = (shown: string[], omitted: number) => {
-    const tail =
-      omitted > 0 ? `\n_…and ${omitted} more. Answer all of them on the dashboard._` : "";
-    const text = `${header}${shown.join("\n")}${tail}${timeoutText}`;
-    return text.length <= SLACK_SECTION_TEXT_LIMIT ? text : null;
-  };
-
-  const full = fits(lines, 0);
-  if (full) return full;
-  for (let count = lines.length - 1; count >= 0; count--) {
-    const text = fits(lines.slice(0, count), lines.length - count);
-    if (text) return text;
-  }
-  return `${header}_${questions.length} questions. Answer them on the dashboard._`;
-}
-
 // ─── Executor ───────────────────────────────────────────────
 
 export class HumanInTheLoopExecutor extends BaseExecutor<
@@ -319,7 +283,16 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
 
     // 3. Dispatch notifications (fire-and-forget — failures must not block the workflow)
     if (config.notifications?.length) {
-      this.dispatchNotifications(requestId, config, db).catch((err) => {
+      dispatchApprovalNotifications(
+        {
+          requestId,
+          title: config.title,
+          questions: config.questions,
+          timeoutSeconds: config.timeout?.seconds,
+          notifications: config.notifications,
+        },
+        db,
+      ).catch((err) => {
         console.error(
           "[HITL] Unexpected error dispatching notifications:",
           scrubSecrets(err instanceof Error ? err.message : String(err)),
@@ -335,138 +308,4 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
       correlationId: requestId,
     } as ExecutorResult<HITLOutput>;
   }
-
-  /** Dispatch notifications for each configured channel. Updates DB with messageTs on success. */
-  private async dispatchNotifications(
-    requestId: string,
-    config: z.infer<typeof HITLConfigSchema>,
-    db: typeof import("../../be/db"),
-  ): Promise<void> {
-    if (!config.notifications?.length) return;
-
-    const approvalUrl = `${getAppUrl()}/approval-requests/${requestId}`;
-    const updatedChannels = [...config.notifications] as Array<
-      z.infer<typeof NotificationConfigSchema> & { messageTs?: string }
-    >;
-    let updated = false;
-
-    for (let i = 0; i < config.notifications.length; i++) {
-      const notification = config.notifications[i]!;
-
-      if (notification.channel === "email") {
-        console.warn(
-          `[HITL] Email notifications not yet supported (target: ${notification.target})`,
-        );
-        continue;
-      }
-
-      if (notification.channel === "slack") {
-        try {
-          const { getSlackApp } = await import("../../slack/app");
-          const slackApp = getSlackApp();
-          if (!slackApp) {
-            console.warn("[HITL] Slack not initialized — cannot send notification");
-            continue;
-          }
-
-          const questions = Array.isArray(config.questions) ? config.questions : [];
-          const questionsText = buildSlackQuestionsSummary(questions);
-
-          // The deadline is a caption under the button, not part of the ask.
-          const timeoutCaption = config.timeout
-            ? [
-                {
-                  type: "context",
-                  elements: [
-                    {
-                      type: "mrkdwn",
-                      text: `⏱ Timeout: ${formatTimeout(config.timeout.seconds)} — times out if not responded`,
-                    },
-                  ],
-                },
-              ]
-            : [];
-
-          const blocks = [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: `🔔 *Approval Required: ${config.title}*`,
-              },
-            },
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: questionsText,
-              },
-            },
-            {
-              type: "actions",
-              elements: [
-                {
-                  type: "button",
-                  text: { type: "plain_text", text: "Review & Respond" },
-                  url: approvalUrl,
-                  style: "primary",
-                },
-              ],
-            },
-            ...timeoutCaption,
-          ];
-
-          const result = await slackApp.client.chat.postMessage({
-            channel: notification.target,
-            text: `Approval Required: ${config.title} — ${approvalUrl}`,
-            unfurl_links: false,
-            unfurl_media: false,
-            // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
-            blocks: blocks as any,
-          });
-
-          if (result.ts) {
-            updatedChannels[i] = { ...notification, messageTs: result.ts };
-            updated = true;
-          }
-
-          console.log(
-            `[HITL] Slack notification sent to ${notification.target} for request ${requestId}`,
-          );
-        } catch (err) {
-          console.error(
-            `[HITL] Failed to send Slack notification to ${notification.target}:`,
-            scrubSecrets(err instanceof Error ? err.message : String(err)),
-          );
-        }
-      }
-    }
-
-    // Persist messageTs values back to DB
-    if (updated) {
-      try {
-        await db.updateApprovalRequestNotifications(requestId, updatedChannels);
-        const latest = await db.getApprovalRequestById(requestId);
-        if (latest?.status === "cancelled") {
-          await postApprovalCancellationUpdates(
-            [latest],
-            latest.resolutionReason ?? "Workflow run cancelled",
-          );
-        }
-      } catch (err) {
-        console.error(
-          "[HITL] Failed to update notification channels in DB:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        );
-      }
-    }
-  }
-}
-
-function formatTimeout(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.round((seconds % 3600) / 60);
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }

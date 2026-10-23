@@ -20,8 +20,12 @@ import { findUserById } from "../be/users";
 import { can, type RbacPrincipal } from "../rbac";
 import type { User } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { cancelApprovalRequest } from "../workflows/approval-cancel";
-import { createApprovalFollowUpTask } from "../workflows/approval-notifications";
+import {
+  createApprovalFollowUpTask,
+  dispatchApprovalNotifications,
+} from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
 import { bodyTask, route } from "./route-def";
 import { jsonError } from "./utils";
@@ -288,7 +292,10 @@ const createRoute = route({
           target: z.string(),
         }),
       )
-      .optional(),
+      .optional()
+      .describe(
+        "Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Email is not supported yet and is skipped.",
+      ),
   }),
   responses: {
     201: {
@@ -641,6 +648,24 @@ export async function handleApprovalRequests(
       notificationChannels: parsed.body.notifications,
       createdBy,
     });
+
+    // Fire-and-forget: Slack must not delay or fail the 201. Workflow HITL
+    // requests are created by the executor directly, so they never post here.
+    const notifications = parsed.body.notifications;
+    if (notifications?.length && request.status === "pending") {
+      dispatchApprovalNotifications({
+        requestId: request.id,
+        title: request.title,
+        questions: parsed.body.questions,
+        timeoutSeconds: parsed.body.timeoutSeconds,
+        notifications,
+      }).catch((err) => {
+        console.error(
+          "[approval-requests] Unexpected error dispatching notifications:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
+      });
+    }
 
     createRoute.respond(res, 201, {
       approvalRequest: await toApprovalRequestResponse(request),
