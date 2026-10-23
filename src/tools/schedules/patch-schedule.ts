@@ -15,6 +15,7 @@ import {
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
 import { getScript } from "@/be/scripts/db";
+import { can } from "@/rbac";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import {
@@ -172,6 +173,23 @@ export const registerPatchScheduleTool = (server: McpServer) => {
       const caller = await getAgentById(requestInfo.agentId);
       if (!caller) {
         return toolErr("Agent not found.");
+      }
+
+      // A deferral continues its owner's task, in that task's chat thread when
+      // it has one (src/scheduler/schedule-task.ts). Only the owner or a lead
+      // may change it.
+      if (
+        schedule.taskType === "deferred" &&
+        !can({
+          principal: { kind: "agent", agentId: caller.id, isLead: caller.isLead },
+          verb: "schedule.deferral.update.any",
+          resource: { kind: "owned", ownerAgentId: schedule.createdByAgentId },
+          source: "mcp",
+        }).allow
+      ) {
+        return toolErr(
+          `Schedule "${schedule.name}" defers another agent's task. Only that agent or a lead can change it.`,
+        );
       }
 
       // Reject updates on completed one-time schedules

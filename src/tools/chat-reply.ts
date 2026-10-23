@@ -70,6 +70,8 @@ export const registerChatReplyTool = (server: McpServer) => {
           text,
           taskId: task.id,
           files: resolved.files,
+          // Same anchor as the final answer: the message that started this task.
+          replyToMessageId: task.mentionMessageId,
         });
         return toolOk(
           `Posted to ${thread.adapter} thread ${sent.threadId}.${unsentFilesSummary(sent.unsentFiles)}`,

@@ -25,7 +25,11 @@ import {
 import { recordTaskAttachmentUpload } from "../be/task-attachment-store";
 import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
 import { formatUnsentFilesNote, telegramAttachmentType } from "../integrations/chat-sdk/outbound";
-import { processPendingChatRelays, stopChatRelayWatcher } from "../integrations/chat-sdk/relay";
+import {
+  formatChatTaskTag,
+  processPendingChatRelays,
+  stopChatRelayWatcher,
+} from "../integrations/chat-sdk/relay";
 import { chatSdkContextKey } from "../tasks/context-key";
 import { registerChatPostTool } from "../tools/chat-post";
 import { registerChatReplyTool } from "../tools/chat-reply";
@@ -646,7 +650,10 @@ describe("relay of output attachments", () => {
       expect.stringMatching(/^send(Rich)?Message$/),
       "sendDocument",
     ]);
-    expect(textOf(calls[0]!.body)).toBe("Done, report attached.");
+    // The line-leading tag is escaped so Telegram does not render it as a heading.
+    expect(textOf(calls[0]!.body)).toBe(
+      `\\${formatChatTaskTag(task, lead.name)}\n\nDone, report attached.`,
+    );
     expect((calls[1]!.body.document as TelegramMockFilePart).filename).toBe("result.pdf");
   });
 });

@@ -19,6 +19,7 @@ import {
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
 import { getScript } from "../be/scripts/db";
+import { can } from "../rbac";
 import { calculateNextRun, dispatchScheduleTarget } from "../scheduler/scheduler";
 import {
   AgentTaskSchema,
@@ -30,6 +31,7 @@ import {
   splitLegacyModelAlias,
 } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
+import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -219,6 +221,7 @@ const updateSchedule = route({
   responses: {
     200: { description: "Schedule updated", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
+    403: { description: "Deferral owned by another agent" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
   },
@@ -237,6 +240,7 @@ const patchSchedule = route({
   responses: {
     200: { description: "Schedule patched", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
+    403: { description: "Deferral owned by another agent" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
   },
@@ -558,6 +562,28 @@ export async function handleSchedules(
     if (!existing) {
       jsonError(res, "Schedule not found", 404);
       return true;
+    }
+    // A deferral continues its owner's task, in that task's chat thread when
+    // it has one (src/scheduler/schedule-task.ts). An agent may change it only
+    // as its owner or a lead, as in the patch-schedule and update-schedule tools.
+    if (existing.taskType === "deferred") {
+      const principal = await agentFirstPrincipal(req, myAgentId);
+      if (
+        principal.kind === "agent" &&
+        !can({
+          principal,
+          verb: "schedule.deferral.update.any",
+          resource: { kind: "owned", ownerAgentId: existing.createdByAgentId },
+          source: "http",
+        }).allow
+      ) {
+        jsonError(
+          res,
+          `Schedule "${existing.name}" defers another agent's task. Only that agent or a lead can change it.`,
+          403,
+        );
+        return true;
+      }
     }
     // A move to another agent re-judges the stored model against the new harness.
     const agentChanged =

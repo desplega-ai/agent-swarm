@@ -1,11 +1,52 @@
-import { createTaskExtended, getDbClient } from "@/be/db";
+import { createTaskExtended, getAgentById, getDbClient, getTaskById } from "@/be/db";
 import { carryUnhandledSteering } from "@/be/steering";
-import { scheduleContextKey } from "@/tasks/context-key";
+import { chatThreadOfContextKey, scheduleContextKey } from "@/tasks/context-key";
 import {
   type PreparedTaskCreate,
   prepareTaskWithSiblingAwareness,
 } from "@/tasks/sibling-awareness";
 import type { AgentTask, ScheduledTask } from "@/types";
+
+/**
+ * Whether the task's own answer is posted to its chat thread. Mirrors the
+ * relay triggers (migration 235): a delegated worker task, or its resume,
+ * reports through the Lead follow-up instead.
+ */
+async function answersInChat(task: AgentTask): Promise<boolean> {
+  if (task.source === "chat") return true;
+  if (task.source === "system" && task.taskType === "follow-up") return true;
+  // Only a wake-up that passed `scheduleTaskContextKey` has a chat key.
+  if (task.source === "schedule" && task.taskType === "deferred") return true;
+  if (task.source === "system" && task.taskType === "resume" && task.agentId) {
+    return (await getAgentById(task.agentId))?.isLead === true;
+  }
+  return false;
+}
+
+/**
+ * A defer-task wake-up of a chat task stays in its chat thread, so the chat
+ * relay posts the real answer there (and `/status` and `/cancel` see it).
+ * Only the deferring agent continuing its own task gets the thread: a schedule
+ * re-targeted or re-owned after the deferral, or the deferral of a task that
+ * never answered in chat, fires like any other schedule. Every other firing
+ * gets the schedule's own key.
+ */
+async function scheduleTaskContextKey(schedule: ScheduledTask): Promise<string> {
+  if (schedule.taskType === "deferred" && schedule.parentTaskId) {
+    const parent = await getTaskById(schedule.parentTaskId);
+    if (
+      parent?.contextKey &&
+      chatThreadOfContextKey(parent.contextKey) &&
+      parent.agentId &&
+      schedule.targetAgentId === parent.agentId &&
+      schedule.createdByAgentId === parent.agentId &&
+      (await answersInChat(parent))
+    ) {
+      return parent.contextKey;
+    }
+  }
+  return scheduleContextKey({ scheduleId: schedule.id });
+}
 
 /**
  * Run the `pre.task.create` extension hooks for a schedule firing. Call this OUTSIDE
@@ -35,7 +76,7 @@ export async function prepareStandaloneScheduleTask(
       scheduleId: schedule.id,
       source: "schedule",
       requestedByUserId: schedule.createdBy,
-      contextKey: scheduleContextKey({ scheduleId: schedule.id }),
+      contextKey: await scheduleTaskContextKey(schedule),
       // Set only by `defer-task`. An explicit parent wins over the sibling-awareness
       // auto-wiring (see withSiblingAwareness in src/tasks/sibling-awareness.ts), so
       // the wake-up run continues the deferred task rather than a random sibling.

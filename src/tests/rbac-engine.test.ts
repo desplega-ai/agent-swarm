@@ -123,6 +123,7 @@ const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "mcp-server.delete.any",
   "mcp-server.update.any",
   "page.delete.any",
+  "schedule.deferral.update.any",
 ];
 
 const LEAD_OR_TASK_CREATOR_VERBS: PermissionVerb[] = ["task.cancel.any", "task.steer.any"];

@@ -358,6 +358,10 @@ export const PERMISSIONS = {
     description: "Delete an external script API endpoint.",
     namespace: "script",
   },
+  "schedule.deferral.update.any": {
+    description: "Change a defer-task schedule the caller did not create.",
+    namespace: "schedule",
+  },
   "runtime_pool.write": {
     description: "Create, update, or delete runtime pools (image, provider kind, placement).",
     namespace: "runtime_pool",
