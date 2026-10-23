@@ -16,6 +16,7 @@ import {
   initDb,
   startTask,
 } from "../be/db";
+import * as workflowRuns from "../be/db/workflow-runs";
 import {
   getRunLineageBlock,
   getWorkflowRunTreeIds,
@@ -394,6 +395,61 @@ describe("cascade cancel", () => {
     expect((await getWorkflowRunStep(oldChildStep))?.status).toBe("cancelled");
     expect((await getWorkflowRunStep(doneStep))?.status).toBe("completed");
     expect((await getWorkflowRunStep(parentStep))?.retryCount).toBe(1);
+  });
+
+  test("a repeat cancel of a settled tree only reads: no write transaction, scan or task cancel", async () => {
+    const grandchild = await makeWorkflow(taskDef);
+    const child = await makeWorkflow(parentOf(grandchild.id));
+    const root = await makeWorkflow(parentOf(child.id));
+    const rootId = await startWorkflowExecution(root, {}, registry);
+    const grandchildRun = await runOf(grandchild.id, "waiting");
+    await waitFor(
+      () => tasksOfRun(grandchildRun.id),
+      (tasks) => tasks.length === 1,
+    );
+    await cancelWorkflowRun(rootId, "first");
+
+    const client = getDbClient();
+    const realTransaction = client.transaction.bind(client);
+    const writeTransactions: unknown[] = [];
+    const txSpy = spyOn(client, "transaction").mockImplementation(((fn, opts) => {
+      if (!opts?.readOnly) writeTransactions.push(fn);
+      return realTransaction(fn, opts);
+    }) as typeof client.transaction);
+    const scanSpy = spyOn(workflowRuns, "getTaskIdsWithDependents");
+    const cancelSpy = spyOn(db, "cancelTask");
+    try {
+      for (let i = 0; i < 3; i++) await cancelWorkflowRun(rootId, `repeat ${i}`);
+    } finally {
+      txSpy.mockRestore();
+      scanSpy.mockRestore();
+      cancelSpy.mockRestore();
+    }
+
+    expect(writeTransactions).toHaveLength(0);
+    expect(scanSpy).not.toHaveBeenCalled();
+    expect(cancelSpy).not.toHaveBeenCalled();
+    expect((await getWorkflowRun(grandchildRun.id, "display"))?.error).toBe("first");
+  });
+
+  test("concurrent repeat cancels of one run share a single tree walk", async () => {
+    const child = await makeWorkflow(waitingDef);
+    const root = await makeWorkflow(parentOf(child.id));
+    const rootId = await startWorkflowExecution(root, {}, registry);
+    await runOf(child.id, "waiting");
+    await cancelWorkflowRun(rootId);
+
+    const walkSpy = spyOn(workflowRuns, "getWorkflowRunTreeIds");
+    try {
+      await Promise.all(Array.from({ length: 5 }, () => cancelWorkflowRun(rootId)));
+      // The settled probe walks the tree once for all five calls.
+      expect(walkSpy).toHaveBeenCalledTimes(1);
+      // A later call is a new cancel, not the finished one.
+      await cancelWorkflowRun(rootId);
+      expect(walkSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      walkSpy.mockRestore();
+    }
   });
 
   test("a repeat cancel of a cancelled root finishes descendants an older cancel left", async () => {

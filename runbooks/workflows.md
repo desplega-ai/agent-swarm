@@ -337,12 +337,16 @@ approval cancel and the approval auto-cancel sweep cancel their run through the 
   reason. A completed, failed or skipped descendant keeps its status, error and output; only its
   leftover open work is cancelled.
 - Steps, retries and descendant runs are written with one `UPDATE` per 500 runs, and dependents of
-  the cancelled tasks are looked up in one scan. Only the root goes through `updateWorkflowRun`, so
+  the cancelled tasks are looked up in one scan over open tasks, only when the tree has open tasks. Only the root goes through `updateWorkflowRun`, so
   a root that is itself a child still wakes its parent step. Measured on a laptop: 2017 runs in
   about 0.3 s, 10k runs in about 1.4 s, about 140 µs per run (mostly the per-task `cancelTask`).
 - A root that is completed, failed or skipped is refused, as before. A `cancelled` root is walked
   again, so a repeat cancel finishes descendants an earlier cancel (or an older release) left open.
   Reasons already written are kept.
+- A repeat cancel of a tree with nothing left open (no live run, open step, queued retry, open
+  task or pending approval) is answered in a read-only transaction: no write lock, no dependents
+  scan, no writes. The guards below keep a cancelled tree from gaining work, so that answer holds.
+  Concurrent `cancelWorkflowRun` calls for one run in the API process share one cancel.
 - There is no size limit: the engine admits any number of children per run, and every tree it
   admitted stays cancellable. The walk goes level by level and stops at the first run it reaches
   twice. A cycle in the links or a chain deeper than `WORKFLOW_RUN_TREE_MAX_DEPTH` (32, twice the

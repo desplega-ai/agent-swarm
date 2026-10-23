@@ -183,16 +183,63 @@ export async function getOpenWorkflowTreeTaskIds(runIds: string[]): Promise<stri
 }
 
 /**
- * Ids of tasks some other task lists in `dependsOn`. One scan, so a cancel of
- * many tasks looks for dependents once instead of once per task.
+ * Ids of tasks that a non-terminal task lists in `dependsOn`: the only
+ * dependents a cancel can fail. One scan over open tasks, so a cancel of many
+ * tasks looks for dependents once instead of once per task.
  */
 export async function getTaskIdsWithDependents(): Promise<Set<string>> {
   const rows = await getDbClient().query<{ id: string }>(
     `SELECT DISTINCT dep.value AS id
        FROM agent_tasks t, json_each(t.dependsOn) AS dep
-      WHERE t.dependsOn IS NOT NULL AND t.dependsOn != '[]'`,
+      WHERE t.status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
+        AND t.dependsOn IS NOT NULL AND t.dependsOn != '[]'`,
+    [...TERMINAL_TASK_STATUSES],
   );
   return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * True when any of the given runs still has work a cancel would close: a live
+ * run, a pending, running or waiting step, a queued retry, an open task or a
+ * pending approval. Reads only, with a LIMIT 1 probe per chunk.
+ */
+export async function workflowRunTreeHasOpenWork(runIds: string[]): Promise<boolean> {
+  const terminal = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
+  const probes: Array<{ sql: (ids: string) => string; params: string[] }> = [
+    {
+      sql: (ids) =>
+        `SELECT 1 FROM workflow_runs WHERE id IN (${ids}) AND status IN ('running', 'waiting') LIMIT 1`,
+      params: [],
+    },
+    {
+      sql: (ids) => `SELECT 1 FROM workflow_run_steps
+        WHERE runId IN (${ids})
+          AND (status IN ('pending', 'running', 'waiting')
+               OR (status = 'failed' AND nextRetryAt IS NOT NULL))
+        LIMIT 1`,
+      params: [],
+    },
+    {
+      sql: (ids) =>
+        `SELECT 1 FROM agent_tasks WHERE workflowRunId IN (${ids}) AND status NOT IN (${terminal}) LIMIT 1`,
+      params: [...TERMINAL_TASK_STATUSES],
+    },
+    {
+      sql: (ids) =>
+        `SELECT 1 FROM approval_requests WHERE workflowRunId IN (${ids}) AND status = 'pending' LIMIT 1`,
+      params: [],
+    },
+  ];
+  let open = false;
+  await forEachChunk(runIds, async (chunk, placeholders) => {
+    for (const probe of probes) {
+      if (open) return;
+      if (await getDbClient().get(probe.sql(placeholders), [...chunk, ...probe.params])) {
+        open = true;
+      }
+    }
+  });
+  return open;
 }
 
 /**

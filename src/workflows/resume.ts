@@ -28,6 +28,7 @@ import {
   getTaskIdsWithDependents,
   getWorkflowRunStatus,
   getWorkflowRunTreeIds,
+  workflowRunTreeHasOpenWork,
 } from "../be/db/workflow-runs";
 import {
   type RetryPolicy,
@@ -700,6 +701,17 @@ export async function cancelWorkflowRunRows(
 ): Promise<WorkflowRunCancelResult> {
   const now = new Date().toISOString();
 
+  // A repeat cancel of a tree with nothing left open is answered by reads
+  // alone, without the write lock. The guards keep a cancelled tree from
+  // gaining new work, so the answer still holds when this returns.
+  const settled = await getDbClient().transaction(
+    async () =>
+      (await getWorkflowRunStatus(runId)) === "cancelled" &&
+      !(await workflowRunTreeHasOpenWork(await getWorkflowRunTreeIds(runId))),
+    { readOnly: true },
+  );
+  if (settled) return { cancelled: false, runIds: [] };
+
   // The tree snapshot and every write commit together. A child run, task or
   // step that commits first is in the snapshot; one that commits after sees
   // the cancelled rows in its own guard (getRunLineageBlock and the step
@@ -713,9 +725,11 @@ export async function cancelWorkflowRunRows(
     const runIds = await getWorkflowRunTreeIds(runId);
     // Every step task carries the run link (indexed), and a retry detaches
     // only the step link, so this covers current and earlier attempts' tasks.
-    // Dependents are looked up once for the whole tree.
-    const withDependents = await getTaskIdsWithDependents();
-    for (const taskId of await getOpenWorkflowTreeTaskIds(runIds)) {
+    // Dependents are looked up once for the whole tree, and only when needed.
+    const openTaskIds = await getOpenWorkflowTreeTaskIds(runIds);
+    const withDependents =
+      openTaskIds.length > 0 ? await getTaskIdsWithDependents() : new Set<string>();
+    for (const taskId of openTaskIds) {
       await cancelTask(taskId, cancelReason, { cascadeDependents: withDependents.has(taskId) });
     }
     await cancelOpenWorkflowTreeSteps(runIds, cancelReason, now);
@@ -731,12 +745,27 @@ export async function cancelWorkflowRunRows(
   });
 }
 
+// Cancels in flight in this process, by run id. The API process owns the
+// database, so this bounds concurrent walks of one tree.
+const inFlightCancels = new Map<string, Promise<void>>();
+
 /**
  * Cancel a workflow run and its child tree (see `cancelWorkflowRunRows`), then
  * post the Slack updates for every approval the cancel closed. The posts run
  * after COMMIT, and a failed post is logged without undoing the cancel.
+ * Concurrent calls for the same run share one cancel and its result.
  */
-export async function cancelWorkflowRun(runId: string, reason?: string): Promise<void> {
+export function cancelWorkflowRun(runId: string, reason?: string): Promise<void> {
+  const inFlight = inFlightCancels.get(runId);
+  if (inFlight) return inFlight;
+  const cancel = cancelWorkflowRunOnce(runId, reason).finally(() => {
+    inFlightCancels.delete(runId);
+  });
+  inFlightCancels.set(runId, cancel);
+  return cancel;
+}
+
+async function cancelWorkflowRunOnce(runId: string, reason?: string): Promise<void> {
   const run = await getWorkflowRun(runId, "display");
   if (!run) throw new Error("Workflow run not found");
 
