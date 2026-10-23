@@ -1,9 +1,11 @@
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskSource } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
+import { PromptContext } from "@/components/shared/prompt-context";
 import { TaskPromptAttachments } from "@/components/shared/task-attachments-section";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { parsePromptDisplay } from "@/lib/prompt-display";
 import { userName } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { MessageCopyButton, MessageTime } from "./swarm-reply";
@@ -35,8 +37,10 @@ export function PersonBubble({
   const { data: users } = useUsers();
   const personId = task.requestedByUserId;
   const mine = !!personId && personId === userId;
-  const name = personId ? userName(users, personId) : "Someone";
   const text = stripContextFooter(task.task);
+  // Slack and chat prompts carry their thread as a wrapper block before the ask.
+  const prompt = parsePromptDisplay(text);
+  const name = personId ? userName(users, personId) : (prompt.speaker ?? "Someone");
   const via = viaNote(task, rootSource);
   const external = task.source !== "ui";
   return (
@@ -61,7 +65,8 @@ export function PersonBubble({
             external && "border border-dashed bg-surface text-muted-foreground",
           )}
         >
-          {text}
+          <PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />
+          {prompt.ask}
         </div>
         <div
           className={cn(

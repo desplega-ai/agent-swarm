@@ -33,6 +33,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseJsonOutput } from "@/lib/json-output";
 import { taskIsRunning } from "@/lib/task-activity";
+import { taskListTitle } from "@/lib/task-title";
 import { normalizeNewlines } from "@/lib/utils";
 
 export interface TaskDetailSheetProps {
@@ -74,7 +75,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
           <div className="flex items-start gap-3 min-w-0">
             <div className="flex flex-col gap-1 min-w-0 flex-1">
               <SheetTitle className="text-sm font-medium truncate min-w-0">
-                {task?.task ?? `Task ${taskId.slice(0, 8)}…`}
+                {task ? taskListTitle(task) : `Task ${taskId.slice(0, 8)}…`}
               </SheetTitle>
               <SheetDescription className="text-xs font-mono text-muted-foreground truncate">
                 {taskId}

@@ -114,7 +114,7 @@ export default function SessionDetailPage({ newView }: { newView?: NewViewLink }
                   <Input
                     autoFocus
                     value={draftTitle}
-                    placeholder={detail.root.task}
+                    placeholder={sessionDisplayTitle({ task: detail.root.task })}
                     onChange={(e) => setDraftTitle(e.target.value)}
                     onBlur={saveTitle}
                     onKeyDown={(e) => {
