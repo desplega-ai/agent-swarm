@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.1.3
+ARG OPENCODE_VERSION=2.1.4
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -558,8 +558,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.1-rc.2
-ARG DSH_SHA512=b6f63eca17ca4627ed85ba8f7bf38ad00631339664bea7d8abf8cc62025c114c624512f5570adadd38b94c1e805e049641d88f1d887f569e9225af721f030dbb
+ARG DSH_VERSION=0.2.1-rc.3
+ARG DSH_SHA512=1fe13d1cb9c77fb7c9ab37a7f3867d06af2081be716eb71bca16635d324b13d35a6c7af7ced786bd346f76f1a4c4f978a2ff348ace162e0945992a3efe89498e
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1792728062-g40cf3f
-ARG AMP_SHA512_AMD64=04c7b3a8cba9bc48e3d5e7f3d81c1132c676b2fdf545100dd7d9e1e430b48519866d2924fcd82a81c9436858a6b57b6725e109ab0591d892a670adae9a1cde72
-ARG AMP_SHA512_ARM64=95c7ead7f638bc5f52f356c44eca1244c87f2fc5b50de63ecb19586d1f6c5c4688ce151b6fa108889028afc114a09e1e27f5f6324be0785a71e0675ae1069c07
+ARG AMP_VERSION=0.0.1792756861-g6187a2
+ARG AMP_SHA512_AMD64=27a126cecdfded86033f601f37f55b8c42c5e5b6dfe5ebb79f95e809c865b1e8adfea67013e4bd93c66d52257f6a191263dcdc91022d625056c3d8e7791d62d5
+ARG AMP_SHA512_ARM64=d3900869ee6d76ee6877d406bc81683498656a8c5be58853023d1408d519a5856832bd1a92a7936b160b0ced5bd12b2777c6fa43750469ea548ee49976e72e45
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
