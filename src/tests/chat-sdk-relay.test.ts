@@ -463,6 +463,51 @@ describe("chat relay watcher", () => {
     expect(sentText(send ?? {})).toContain("Here is your answer.");
   });
 
+  test("the answer turns the ask's reaction into 👍, or 👎 for a failed task", async () => {
+    const reactionsTo = (chatId: number) =>
+      harness.mock.calls
+        .filter((call) => call.method === "setMessageReaction")
+        .map((call) => call.body as Record<string, unknown>)
+        .filter((body) => String(body.chat_id) === String(chatId));
+    const doneChat = nextChatId;
+    const done = await createChatTask(doneChat, { askMessageId: 51 });
+    await completeTask(done.id, "Done.");
+    const failedChat = nextChatId + 2_000;
+    const failed = await createChatTask(failedChat, { askMessageId: 52 });
+    await failTask(failed.id, "the build broke");
+    await processPendingChatRelays();
+
+    expect(reactionsTo(doneChat)).toEqual([
+      expect.objectContaining({ message_id: 51, reaction: [{ type: "emoji", emoji: "👍" }] }),
+    ]);
+    expect(reactionsTo(failedChat)).toEqual([
+      expect.objectContaining({ message_id: 52, reaction: [{ type: "emoji", emoji: "👎" }] }),
+    ]);
+  });
+
+  test("a REACTION_INVALID answer never fails the delivery", async () => {
+    const chatId = nextChatId;
+    const task = await createChatTask(chatId, { askMessageId: 61 });
+    await completeTask(task.id, "Still delivered.");
+    harness.mock.failReactions(1);
+    try {
+      await processPendingChatRelays();
+    } finally {
+      harness.mock.failReactions(0);
+    }
+    expect(sentText(sendsTo(chatId)[0] ?? {})).toContain("Still delivered.");
+    const row = await obligation(task.id);
+    expect(row?.delivered_at).not.toBeNull();
+    expect(row?.last_error).toBeNull();
+    expect(
+      harness.mock.calls.some(
+        (call) =>
+          call.method === "setMessageReaction" &&
+          String((call.body as Record<string, unknown>).chat_id) === String(chatId),
+      ),
+    ).toBe(true);
+  });
+
   test("a chunked answer anchors only its first message", async () => {
     const chatId = nextChatId;
     const task = await createChatTask(chatId, { askMessageId: 42 });

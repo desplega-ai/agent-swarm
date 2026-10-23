@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Chat SDK on Telegram: the ask shows its task state as one reaction that changes, 👀 when taken (⚡ for `!now`), then 👍 when the answer posts or 👎 for a failed or cancelled task. A steering message gets ✍ instead of the text acknowledgement; a channel can opt back into the text with `{ "textAcks": true }` in the KV namespace `integrations:chat:channel-settings`. A refused reaction (`400 REACTION_INVALID`) is logged and never blocks delivery. Slack, Discord and Teams through the Chat SDK keep the text acknowledgement (#2199).
+
 ### Fixed
 - Approvals: `POST /api/approval-requests` now posts the Slack card for each `slack` entry in `notifications` and stores its `messageTs`, the same card workflow approval steps send. Before, the route stored the targets and posted nothing. Slack targets need a lead agent caller (403 otherwise, the `slack-post` permission), channels shared with another org are skipped when `SLACK_BLOCK_EXTERNAL_CHANNELS` is on, and the card escapes the title. Email targets are still skipped.
 
