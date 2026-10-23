@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
-- Skills: `skill-search` ranks results by relevance. A new FTS5 index (migration 240, backfilled) scores name, description and content with BM25 weights 3, 2 and 1, and a skill whose name equals the query ranks first. Query words are OR-ed and quoted, so a skill matching only some words still appears and user text cannot inject FTS5 syntax. Queries with no whole-word hit still fall back to the old substring match.
+- Skills: `skill-search` ranks results by relevance. A new FTS5 index (migration 239, backfilled) scores name, description and content with BM25 weights 3, 2 and 1, and a skill whose name equals the query ranks first. Query words are OR-ed and quoted, so a skill matching only some words still appears and user text cannot inject FTS5 syntax. Queries with no whole-word hit still fall back to the old substring match.
 - Chat SDK on Telegram: the ask shows its task state as one reaction that changes, 👀 when taken (⚡ for `!now`), then 👍 when the answer posts or 👎 for a failed or cancelled task. A steering message gets ✍ instead of the text acknowledgement; a channel can opt back into the text with `{ "textAcks": true }` in the KV namespace `integrations:chat:channel-settings`. A refused reaction (`400 REACTION_INVALID`) is logged and never blocks delivery. Slack, Discord and Teams through the Chat SDK keep the text acknowledgement (#2199).
 
 ### Fixed
