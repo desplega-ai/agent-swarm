@@ -674,11 +674,48 @@ The `human-in-the-loop` executor pauses a workflow until a human responds via th
 }
 ```
 
-Question types supported: `approval` (yes/no), `text`, `single-select`, `multi-select`, and `boolean`.
+Question types supported: `approval` (yes/no), `text`, `single-select`, `multi-select`, `boolean`, and `config` (set a swarm config key or secret; see below).
 
 When the node executes, it creates an approval request accessible at `/approval-requests/{id}` in the dashboard. The workflow run pauses until a human responds. Upon resolution, a follow-up task is created for the requesting agent and the workflow resumes via the appropriate `next` port. Cancelling the run or its human-in-the-loop step marks the pending request as cancelled, rejects later responses, and updates any linked Slack approval thread so reviewers do not act on a stale gate.
 
 The dashboard validates every required response before submission. Missing or invalid approval, text, select, and boolean answers are marked inline and keep **Submit Response** disabled; if the server rejects a response, its error is shown directly so the user can correct it.
+
+### Config questions
+
+A `config` question asks a person to set one swarm config key from the dashboard, for example a token a new integration needs. Its settings sit in a nested `config` object:
+
+```json
+{
+  "id": "bitbucket_token",
+  "type": "config",
+  "config": { "key": "BITBUCKET_TOKEN", "scope": "global" }
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `config.key` | Yes | The swarm config key. Any key `PUT /api/config` accepts; reserved and internal keys are refused when the request is created. |
+| `config.scope` | Yes | `global`, `agent` or `repo`. |
+| `config.scopeId` | For `agent` / `repo` | Agent or repo id. From `request-human-input`, agent scope defaults to the calling agent. |
+| `config.isSecret` | No | Default `true`. An existing secret row always stays secret. |
+| `config.helpUrl` | No | Link shown next to the field. Integration keys get their docs link by default. |
+| `config.options` | No | Allowed values. Non-secret keys only. |
+| `config.defaultValue` | No | Prefilled value. Non-secret keys only; must be one of `options` when both are set. |
+
+`label` is optional and defaults to the key; the dashboard shows the integration's field label when it knows the key. The card shows whether the key is already set and when it was last updated, never a secret value. The person can keep the current value, replace it, or skip an optional question.
+
+Rules:
+
+- A request with a `config` question needs `approvers.policy: "any"`.
+- The value is written to `swarm_config` (encrypted for secrets) only when the request resolves approved. A rejection skips every config question.
+- Answering needs the same permission as `PUT /api/config`.
+- The request, the workflow step output and the follow-up task store only the result, never a secret:
+
+```json
+{ "key": "BITBUCKET_TOKEN", "scope": "global", "scopeId": null, "isSecret": true, "status": "set", "updatedAt": "2026-10-23T16:40:12.000Z" }
+```
+
+`status` is `set`, `kept` or `skipped`. Non-secret results also carry `value`.
 
 `questions` can also be built at run time: set it to one exact token such as `"{{plan.questions}}"` (with a matching `inputs` mapping) and the upstream array becomes the card's questions, for example one `single-select` per item. The array is validated when the node runs; a missing, empty, or malformed value (or more than 100 questions) fails the node without creating a card.
 

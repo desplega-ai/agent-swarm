@@ -1,5 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import {
+  ConfigQuestionSettingsSchema,
+  normalizeApprovalQuestions,
+} from "@/be/approval-config-question";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createApprovalRequest, getAgentCurrentTask } from "@/be/db";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -8,9 +12,14 @@ import { getAppUrl } from "@/utils/constants";
 const QuestionSchema = z.object({
   id: z.string().describe("Unique ID for the question (used as key in responses)"),
   type: z
-    .enum(["approval", "text", "single-select", "multi-select", "boolean"])
+    .enum(["approval", "text", "single-select", "multi-select", "boolean", "config"])
     .describe("Question type"),
-  label: z.string().describe("The question text displayed to the user"),
+  label: z
+    .string()
+    .optional()
+    .describe(
+      "The question text displayed to the user (required except for config, which defaults to the key)",
+    ),
   required: z.boolean().optional().describe("Whether this question is required (default: true)"),
   description: z
     .string()
@@ -31,6 +40,9 @@ const QuestionSchema = z.object({
   minSelections: z.number().int().min(0).optional().describe("Min selections (for multi-select)"),
   maxSelections: z.number().int().min(1).optional().describe("Max selections (for multi-select)"),
   defaultValue: z.boolean().optional().describe("Default value (for boolean type)"),
+  config: ConfigQuestionSettingsSchema.optional().describe(
+    "Settings for a config question: the key and scope to set, plus options or defaultValue for non-secret keys",
+  ),
 });
 
 export const registerRequestHumanInputTool = (server: McpServer) => {
@@ -42,7 +54,8 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       description:
         "Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. " +
         "Supports multiple question types: approval (yes/no), text, single-select, " +
-        "multi-select, and boolean. Returns the request ID and URL for the human to respond. " +
+        "multi-select, boolean, and config. Returns the request ID and URL for the human to respond. " +
+        "config asks a person to set one swarm config key on the dashboard; secrets are stored encrypted and you receive only {key, scope, isSecret, status, updatedAt}, never the value. " +
         "The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. " +
         "No Slack message is sent; share the URL yourself.",
       inputSchema: z.object({
@@ -90,12 +103,21 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
         }
       }
 
+      const approvers = { policy: "any" as const };
+      const normalized = await normalizeApprovalQuestions(questions, {
+        approvers,
+        callerAgentId: requestInfo.agentId,
+      });
+      if (!normalized.ok) {
+        return toolErr(normalized.error, { data: { yourAgentId: requestInfo.agentId } });
+      }
+
       const id = crypto.randomUUID();
       const request = await createApprovalRequest({
         id,
         title,
-        questions,
-        approvers: { policy: "any" },
+        questions: normalized.questions,
+        approvers,
         sourceTaskId: sourceTaskId ?? undefined,
         timeoutSeconds,
         createdBy: (await resolveTaskAuditUserId(sourceTaskId, requestInfo.agentId)) ?? undefined,

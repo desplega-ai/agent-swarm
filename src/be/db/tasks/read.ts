@@ -196,12 +196,39 @@ type AgentTaskTimelineRow = Pick<
  * past it).
  */
 const TASK_PREVIEW_BYTES = 4 * (TASK_PREVIEW_LENGTH + 1);
-const TASK_PREVIEW_SQL = `substr(CAST(agent_tasks.task AS BLOB), 1, ${TASK_PREVIEW_BYTES}) AS task`;
+/**
+ * A leading `<sibling_tasks_in_progress>` block (`src/tasks/sibling-block.ts`)
+ * is generated context that can fill the whole preview, so the list row never
+ * reaches the ask. The preview starts after the block and the `\n\n`
+ * `prependSiblingBlock` puts after it. A block with no closing tag stays.
+ */
+const SIBLING_OPEN = "<sibling_tasks_in_progress>";
+const SIBLING_CLOSE = "</sibling_tasks_in_progress>";
+const TASK_BLOB = "CAST(agent_tasks.task AS BLOB)";
+const SIBLING_CLOSE_AT = `instr(${TASK_BLOB}, CAST('${SIBLING_CLOSE}' AS BLOB))`;
+const SIBLING_END = `(${SIBLING_CLOSE_AT} + ${SIBLING_CLOSE.length})`;
+const TASK_PREVIEW_START = `CASE
+    WHEN substr(${TASK_BLOB}, 1, ${SIBLING_OPEN.length}) = CAST('${SIBLING_OPEN}' AS BLOB)
+      AND ${SIBLING_CLOSE_AT} > 0
+    THEN ${SIBLING_END} + (substr(${TASK_BLOB}, ${SIBLING_END}, 2) = x'0a0a') * 2
+    ELSE 1 END`;
+const TASK_PREVIEW_SQL = `substr(${TASK_BLOB}, ${TASK_PREVIEW_START}, ${TASK_PREVIEW_BYTES}) AS task`;
 // ignoreBOM keeps a leading U+FEFF, which the full-text preview keeps too.
 const taskPreviewDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
+/** What `TASK_PREVIEW_START` does in SQL, for a full-text row. */
+function skipSiblingBlock(text: string): string {
+  if (!text.startsWith(SIBLING_OPEN)) return text;
+  const close = text.indexOf(SIBLING_CLOSE);
+  if (close === -1) return text;
+  const end = close + SIBLING_CLOSE.length;
+  return text.slice(text.startsWith("\n\n", end) ? end + 2 : end);
+}
+
 function taskPreview(task: TaskPreviewSource["task"]): string {
-  const text = task instanceof Uint8Array ? taskPreviewDecoder.decode(task) : task;
+  // Bytes come from `TASK_PREVIEW_SQL`, which already skipped the block.
+  const text =
+    task instanceof Uint8Array ? taskPreviewDecoder.decode(task) : skipSiblingBlock(task ?? "");
   return dependencies.previewText(text, TASK_PREVIEW_LENGTH);
 }
 

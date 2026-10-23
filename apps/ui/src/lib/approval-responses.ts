@@ -31,6 +31,15 @@ export function hasRequiredResponse(question: ApprovalQuestion, response: unknow
     }
     case "boolean":
       return typeof response === "boolean";
+    case "config": {
+      // Mirrors the server's shape check; `skip` never satisfies a required question.
+      if (typeof response !== "object" || response === null) return false;
+      const answer = response as { action?: unknown; value?: unknown };
+      if (answer.action === "keep") return true;
+      return (
+        answer.action === "set" && typeof answer.value === "string" && answer.value.trim() !== ""
+      );
+    }
   }
 }
 

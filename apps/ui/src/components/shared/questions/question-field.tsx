@@ -1,11 +1,12 @@
 import { Check, CircleCheck, CircleX } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
-import type { ApprovalQuestion } from "@/api/types";
+import type { ApprovalConfigState, ApprovalQuestion } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { WRAP } from "./answer-view";
+import { ConfigQuestionField } from "./config-question-field";
 import { KeyHint, MOD } from "./keyboard";
 
 type Options = NonNullable<ApprovalQuestion["options"]>;
@@ -34,7 +35,7 @@ export function optionValues(question: ApprovalQuestion): string[] {
  * the control itself only knows the amber pill. Each radio gets its
  * `aria-keyshortcuts` after render (the control does not forward props).
  */
-function DecisionSegments<T extends string>({
+export function DecisionSegments<T extends string>({
   value,
   onValueChange,
   options,
@@ -79,7 +80,7 @@ function DecisionSegments<T extends string>({
   );
 }
 
-function SegmentLabel({
+export function SegmentLabel({
   icon,
   text,
   keyName,
@@ -106,7 +107,7 @@ function SegmentLabel({
 }
 
 /** Option chips (few, short) or option rows (with descriptions), single or multi. */
-function OptionChoices({
+export function OptionChoices({
   question,
   options,
   selected,
@@ -195,10 +196,13 @@ export function QuestionField({
   cursor,
   showKeys,
   onSubmitShortcut,
+  configState,
 }: {
   question: ApprovalQuestion;
   value: unknown;
   onChange: (value: unknown) => void;
+  /** Live state of a config question's key (from `request.configState`). */
+  configState?: ApprovalConfigState;
   disabled: boolean;
   /** Multi-select highlight for Space (−1: none). */
   cursor: number;
@@ -380,6 +384,19 @@ export function QuestionField({
         </div>
       );
     }
+
+    case "config":
+      return (
+        <ConfigQuestionField
+          question={question}
+          state={configState}
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          showKeys={showKeys}
+          onSubmitShortcut={onSubmitShortcut}
+        />
+      );
 
     default:
       return <span className="text-sm text-muted-foreground">Unsupported question type</span>;

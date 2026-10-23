@@ -765,7 +765,9 @@ Partially update a single node in a workflow definition. Merges the provided fie
 
 ### request-human-input
 
-Create an approval request and return at once with the request ID and URL. The answer arrives later as a `hitl-follow-up` task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean.
+Create an approval request and return at once with the request ID and URL. The answer arrives later as a `hitl-follow-up` task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, boolean, and config.
+
+A `config` question asks a person to set one swarm config key on the dashboard, such as an integration token: `{ "id": "bb", "type": "config", "config": { "key": "BITBUCKET_TOKEN", "scope": "global" } }`. Secrets are stored encrypted, and the follow-up task carries only `{ key, scope, isSecret, status, updatedAt }`, never the value. `isSecret` defaults to `true`; `options` and `defaultValue` are for non-secret keys. See [Config questions](/docs/concepts/workflows#config-questions) for every field and rule.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

@@ -25,6 +25,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
+import { taskListTitle } from "@/lib/task-title";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 300;
@@ -191,9 +192,9 @@ function taskEndMs(task: TimelineTask, nowMs: number): number {
   return new Date(task.lastUpdatedAt || task.createdAt).getTime();
 }
 
-/** Prefer the task's short authored title; fall back to the collapsed prompt. */
+/** Prefer the task's short authored title; fall back to the prompt's ask. */
 function taskTitle(task: TimelineTask): string {
-  return task.title?.trim() || task.task.replace(/\s+/g, " ").trim() || task.id;
+  return taskListTitle(task) || task.id;
 }
 
 function shortId(id: string): string {

@@ -61,3 +61,30 @@ describe("missingRequiredResponseIds", () => {
     ).toEqual(["approve", "boolean", "single", "multi"]);
   });
 });
+
+describe("config questions", () => {
+  const question = (required: boolean): ApprovalQuestion => ({
+    id: "cfg",
+    type: "config",
+    label: "Token",
+    required,
+    config: { key: "BITBUCKET_TOKEN", scope: "global", isSecret: true },
+  });
+
+  test("a required config question needs set with a value, or keep", () => {
+    const questions = [question(true)];
+    expect(missingRequiredResponseIds(questions, {})).toEqual(["cfg"]);
+    expect(missingRequiredResponseIds(questions, { cfg: { action: "skip" } })).toEqual(["cfg"]);
+    expect(missingRequiredResponseIds(questions, { cfg: { action: "set", value: " " } })).toEqual([
+      "cfg",
+    ]);
+    expect(missingRequiredResponseIds(questions, { cfg: { action: "set", value: "v" } })).toEqual(
+      [],
+    );
+    expect(missingRequiredResponseIds(questions, { cfg: { action: "keep" } })).toEqual([]);
+  });
+
+  test("an optional config question never blocks", () => {
+    expect(missingRequiredResponseIds([question(false)], { cfg: { action: "skip" } })).toEqual([]);
+  });
+});
