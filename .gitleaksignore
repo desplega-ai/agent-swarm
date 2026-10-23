@@ -8,3 +8,5 @@ f96877b9c709d3a4080c8466cc700217e89c65a5:src/tests/runtime-token-auth.test.ts:ge
 d3278a2a25c12bcea63157ff4d8b561ed7862a40:apps/ui/src/lib/configuration-catalog.ts:generic-api-key:555
 # Synthetic GitLab PAT fixture in the credential-helper test. The current line carries an inline gitleaks:allow.
 04441aa7e80f77bfb7b9c053fac73d140be06496:src/tests/entrypoint-gitlab-credential-helper.test.ts:gitlab-pat:30
+# Example Idempotency-Key UUID in the workflows concept doc, not a secret. The current example uses $(uuidgen).
+4b225fe28726fc515431ff2a3063df6639d21322:docs-site/content/docs/(documentation)/concepts/workflows.mdx:generic-api-key:420

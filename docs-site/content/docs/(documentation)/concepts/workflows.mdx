@@ -415,9 +415,11 @@ A second trigger within the cooldown window results in a run with `skipped` stat
 `POST /api/workflows` and `POST /api/workflows/{id}/trigger` accept an optional `Idempotency-Key` header. Generate one key per logical operation (a UUID works) and send the same key with the same body on every retry of it, including after a network timeout. The server accepts the operation once: a retry gets the original status and body, with `Idempotent-Replayed: true`, and creates no second workflow or run. A concurrent duplicate, a lost response and a server restart are all covered.
 
 ```bash
+# One key per logical trigger; resend the same $KEY on every retry of it.
+KEY=$(uuidgen)
 curl -X POST "$MCP_BASE_URL/api/workflows/$WORKFLOW_ID/trigger" \
   -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
-  -H "Idempotency-Key: 6f1c2a9e-4f0b-4d55-9a57-2c7f3c1d8e10" \
+  -H "Idempotency-Key: $KEY" \
   -H "Content-Type: application/json" \
   -d '{"pr": {"number": 42}}'
 ```

@@ -687,6 +687,23 @@ describe("POST /api/workflows/{id}/trigger with Idempotency-Key", () => {
     expect(await listWorkflowRuns(workflow.id)).toHaveLength(1);
   });
 
+  test("a keyed trigger with a null body is accepted and replays, like the no-key control", async () => {
+    const workflow = await makeWorkflow();
+    const key = newKey();
+    const path = `/api/workflows/${workflow.id}/trigger`;
+
+    const control = await call("POST", path, { rawBody: "null" });
+    const first = await call("POST", path, { key, rawBody: "null" });
+    const retry = await call("POST", path, { key, rawBody: "null" });
+
+    expect(control.status).toBe(201);
+    expect(first.status).toBe(201);
+    expect(first.replayed).toBe(false);
+    expect(retry.replayed).toBe(true);
+    expect(retry.body).toEqual(first.body);
+    expect(await listWorkflowRuns(workflow.id)).toHaveLength(2);
+  });
+
   test("a trigger-schema rejection does not use up the key", async () => {
     const workflow = await makeWorkflow({
       triggerSchema: { type: "object", required: ["pr"] },

@@ -950,7 +950,9 @@ export async function handleWorkflows(
       jsonError(res, "Workflow is disabled", 400);
       return true;
     }
-    const body = keyedBody ?? (await parseBody<Record<string, unknown>>(req));
+    // Not `??`: a JSON `null` body is a parsed body too, and reading the
+    // already-ended stream again would wait forever.
+    const body = idempotency ? keyedBody : await parseBody<Record<string, unknown>>(req);
     let runId: string;
     let accepted: { runId: string; skipped: boolean } | undefined;
     try {
