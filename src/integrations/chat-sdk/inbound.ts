@@ -188,9 +188,10 @@ export async function handleChatInbound(
   }
 
   if (text || attachments.length > 0) {
-    // Subscribed-thread messages may be dropped by the router at flush time;
-    // they get typing and a reaction once a task exists (see flushChatThread).
-    const acknowledge = kind !== "subscribed";
+    // An unaddressed subscribed-thread message may be dropped by the router at
+    // flush time; it gets typing and a reaction once a task exists (see
+    // flushChatThread). A mention, reply to the bot, or DM is acknowledged now.
+    const acknowledge = kind !== "subscribed" || isDirectMessage || mentioned || facts.replyToBot;
     bufferChatMessage(thread.id, {
       messageId: message.id,
       channelId: thread.channelId,
@@ -580,7 +581,7 @@ export async function flushChatThread(
   if (created > 0) {
     await rememberChatThreadRequester(threadId, requester.userId);
     await subscribe(thread);
-    // Subscribed-thread messages start typing only here, once a task exists.
+    // Unaddressed subscribed-thread messages start typing only here, once a task exists.
     startTypingKeepalive(adapter, threadId);
     await clearChatMessageReactions(
       adapter,
