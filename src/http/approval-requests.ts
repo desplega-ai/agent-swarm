@@ -294,7 +294,7 @@ const createRoute = route({
       )
       .optional()
       .describe(
-        "Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Email is not supported yet and is skipped.",
+        "Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Slack targets need a lead agent caller (403 otherwise). Email is not supported yet and is skipped.",
       ),
   }),
   responses: {
@@ -303,6 +303,7 @@ const createRoute = route({
       schema: z.object({ approvalRequest: ApprovalRequestSchema }),
     },
     400: { description: "Validation error" },
+    403: { description: "Slack notifications require a lead agent" },
   },
   auth: { apiKey: true },
 });
@@ -585,7 +586,7 @@ export async function handleApprovalRequests(
     const parsed = await cancelRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { principal, resolvedBy } = await approvalCancelPrincipal(req);
+    const { principal, resolvedBy } = await approvalCallerPrincipal(req);
     const result = await cancelApprovalRequest({
       id: parsed.params.id,
       reason: parsed.body.reason,
@@ -625,6 +626,17 @@ export async function handleApprovalRequests(
   if (createRoute.match(req.method, pathSegments)) {
     const parsed = await createRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+
+    // Posting to Slack is lead-only everywhere else (slack-post); a caller that
+    // may not post must not reach an arbitrary channel through this route.
+    if (parsed.body.notifications?.some((notification) => notification.channel === "slack")) {
+      const { principal } = await approvalCallerPrincipal(req);
+      const decision = can({ principal, verb: "integration.slack.post", source: "http" });
+      if (!decision.allow) {
+        jsonError(res, SLACK_NOTIFICATION_REFUSED, 403);
+        return true;
+      }
+    }
 
     const id = crypto.randomUUID();
     // Prefer a trusted authenticated user (never client-controlled); else fall
@@ -701,11 +713,14 @@ export async function handleApprovalRequests(
   return false;
 }
 
+const SLACK_NOTIFICATION_REFUSED =
+  "Slack notifications require lead privileges (integration.slack.post). Create the request without them, or ask the lead to post the link.";
+
 /**
- * The caller of the cancel route. The shared API key with an `X-Agent-ID`
- * header identifies that agent, as on the create route.
+ * The caller of the create and cancel routes. The shared API key with an
+ * `X-Agent-ID` header identifies that agent.
  */
-async function approvalCancelPrincipal(
+async function approvalCallerPrincipal(
   req: IncomingMessage,
 ): Promise<{ principal: RbacPrincipal; resolvedBy: string | null }> {
   const auth = getRequestAuth(req);

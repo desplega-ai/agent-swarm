@@ -10,6 +10,12 @@ import {
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { getSlackApp } from "../slack/app";
+import { resolveSlackConversationId } from "../slack/dm";
+import {
+  externalChannelToolError,
+  getChannelBlockReason,
+  isBlockExternalEnabled,
+} from "../slack/external-channel";
 import { TERMINAL_TASK_STATUSES } from "../types";
 import { getAppUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -79,8 +85,9 @@ export interface ApprovalNotificationsDb {
 /**
  * Post the "Approval Required" card for each notification channel and store
  * the Slack `messageTs` on the request. Used by the workflow HITL executor and
- * by `POST /api/approval-requests`. Callers fire and forget: a Slack failure is
- * logged and never fails the request. Email is not supported yet and is skipped.
+ * by `POST /api/approval-requests`, which checks the caller may post to Slack.
+ * Callers fire and forget: a Slack failure is logged and never fails the
+ * request. Email is not supported yet and is skipped.
  */
 export async function dispatchApprovalNotifications(
   input: ApprovalNotificationsInput,
@@ -111,6 +118,19 @@ export async function dispatchApprovalNotifications(
           continue;
         }
 
+        // Same guard as the Slack tools: never post into a channel shared with another org.
+        if (isBlockExternalEnabled()) {
+          const conversationId = await resolveSlackConversationId(
+            slackApp.client,
+            notification.target,
+          );
+          const blockReason = await getChannelBlockReason(slackApp.client, conversationId);
+          if (blockReason) {
+            console.warn(`[HITL] ${externalChannelToolError(conversationId, blockReason)}`);
+            continue;
+          }
+        }
+
         const questionsText = buildSlackQuestionsSummary(questions);
 
         // The deadline is a caption under the button, not part of the ask.
@@ -134,7 +154,7 @@ export async function dispatchApprovalNotifications(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `🔔 *Approval Required: ${title}*`,
+              text: `🔔 *Approval Required: ${escapeSlackMrkdwn(title)}*`,
             },
           },
           {
@@ -160,7 +180,7 @@ export async function dispatchApprovalNotifications(
 
         const result = await slackApp.client.chat.postMessage({
           channel: notification.target,
-          text: `Approval Required: ${title} — ${approvalUrl}`,
+          text: `Approval Required: ${escapeSlackMrkdwn(title)} — ${approvalUrl}`,
           unfurl_links: false,
           unfurl_media: false,
           // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects

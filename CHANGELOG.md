@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
-- Approvals: `POST /api/approval-requests` now posts the Slack card for each `slack` entry in `notifications` and stores its `messageTs`, the same card workflow approval steps send. Before, the route stored the targets and posted nothing. Email targets are still skipped.
+- Approvals: `POST /api/approval-requests` now posts the Slack card for each `slack` entry in `notifications` and stores its `messageTs`, the same card workflow approval steps send. Before, the route stored the targets and posted nothing. Slack targets need a lead agent caller (403 otherwise, the `slack-post` permission), channels shared with another org are skipped when `SLACK_BLOCK_EXTERNAL_CHANNELS` is on, and the card escapes the title. Email targets are still skipped.
 
 ## [2.5.1] - 2026-10-23
 

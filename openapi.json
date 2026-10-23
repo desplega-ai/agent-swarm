@@ -12447,7 +12447,7 @@
                         "target"
                       ]
                     },
-                    "description": "Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Email is not supported yet and is skipped."
+                    "description": "Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Slack targets need a lead agent caller (403 otherwise). Email is not supported yet and is skipped."
                   }
                 },
                 "required": [
@@ -12790,6 +12790,16 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Slack notifications require a lead agent",
             "content": {
               "application/json": {
                 "schema": {
