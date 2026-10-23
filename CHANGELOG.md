@@ -9,9 +9,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Approvals: a `config` question type asks a person to set one swarm config key or secret on the dashboard. The card shows whether the key is already set, offers keep, replace or skip, and takes non-secret values from options. Secrets go straight into encrypted swarm config; the request, workflow output and follow-up task carry only `{ key, scope, isSecret, status, updatedAt }`.
 
-### Fixed
-- Workflows: a `foreach` item with an `agent-task` body whose task a deploy drain cuts (`superseded_workflow_task`) now gets the same one-shot retry as a plain `agent-task` node, instead of settling failed into the join. The foreach node's `retry` applies to its items (`maxRetries: 0` opts out). The queued item keeps the join open and its concurrency slot, and the retry's result counts in the aggregate. A queued item never revives a run another branch has failed (#2370).
-
 ## [2.5.2] - 2026-10-23
 
 ### Added
