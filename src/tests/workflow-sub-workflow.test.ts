@@ -886,7 +886,7 @@ describe("sub-workflow attempts", () => {
 
   test("a legacy child started on a later attempt survives the upgrade", () =>
     withoutListener(async () => {
-      // On main before migration 236: attempt 0 failed before starting a child
+      // On main before migration 240: attempt 0 failed before starting a child
       // (say, the child workflow was disabled), attempt 1 started it and parked.
       const child = await makeWorkflow(waitingChild);
       const parent = await makeWorkflow(parentOf(child.id));
@@ -901,11 +901,11 @@ describe("sub-workflow attempts", () => {
         childRun.id,
       ]);
 
-      // The backfill statement of migration 236, scoped to this child: the
+      // The backfill statement of migration 240, scoped to this child: the
       // shared test database also holds post-migration multi-attempt children,
       // which a real legacy database cannot have.
       const migration = await Bun.file(
-        "src/be/migrations/236_workflow_run_parent_step_attempt.sql",
+        "src/be/migrations/240_workflow_run_parent_step_attempt.sql",
       ).text();
       const start = migration.indexOf("UPDATE workflow_runs");
       const backfill = migration.slice(start, migration.indexOf(";", start));

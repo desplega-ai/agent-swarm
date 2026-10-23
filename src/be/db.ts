@@ -7843,7 +7843,7 @@ type WorkflowRunRow = {
   finishedAt: string | null;
   /** The `sub-workflow` step that started this run (migration 203). */
   parentStepId?: string | null;
-  /** That step's attempt (`retryCount`) when it started this run (migration 236). */
+  /** That step's attempt (`retryCount`) when it started this run (migration 240). */
   parentStepAttempt?: number | null;
 };
 
@@ -7880,7 +7880,7 @@ export async function createWorkflowRun(data: {
   triggerData?: unknown;
   createdBy?: string;
   parentStepId?: string;
-  /** The parent step's `retryCount` when it started this run (migration 236). */
+  /** The parent step's `retryCount` when it started this run (migration 240). */
   parentStepAttempt?: number;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();

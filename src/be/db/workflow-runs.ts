@@ -5,7 +5,7 @@ import { getDbClient } from "./runtime";
 
 // Parent/child links between workflow runs (migration 203): a `sub-workflow`
 // step starts a child run that records the step in `parentStepId`, and the
-// step's `retryCount` at that time in `parentStepAttempt` (migration 236).
+// step's `retryCount` at that time in `parentStepAttempt` (migration 240).
 
 const TERMINAL_STATUSES = new Set<WorkflowRunStatus>([
   "completed",

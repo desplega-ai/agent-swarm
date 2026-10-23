@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 
-test("migration 236 hands each legacy child to the attempt that owns it now", async () => {
+test("migration 240 hands each legacy child to the attempt that owns it now", async () => {
   const db = new Database(":memory:");
   try {
     db.exec("CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, workflowId TEXT, status TEXT)");
@@ -30,7 +30,7 @@ test("migration 236 hands each legacy child to the attempt that owns it now", as
     run.run("child-orphan", "completed", "missing-step");
     run.run("top-level", "completed", null);
 
-    db.exec(await Bun.file("src/be/migrations/236_workflow_run_parent_step_attempt.sql").text());
+    db.exec(await Bun.file("src/be/migrations/240_workflow_run_parent_step_attempt.sql").text());
 
     expect(
       db.prepare("SELECT id, parentStepAttempt AS attempt FROM workflow_runs ORDER BY id").all(),
