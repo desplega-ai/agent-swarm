@@ -35,8 +35,7 @@ Parse the first argument to determine the flow:
      - Use **AskUserQuestion**: "Which qmd collections should be searched for learnings? (enter comma-separated names, e.g., 'ai-toolbox, my-notes')"
    - If agent-fs selected, walk through configuration step by step:
      - Use **AskUserQuestion**: "Do you have an agent-fs API key configured?" with options: `["Yes, it's set in my environment (AGENT_FS_API_KEY)", "Yes, I'll provide it now", "No, I need to set one up first"]`
-     - If providing now inside an agent swarm: never take the key in chat. Ask with a `request-human-input` question of type `config` (`config: { key: "AGENT_FS_API_KEY", scope: "agent" }`), share the returned URL, and leave `apiKey` empty in the config file. The key lands in encrypted agent config and reaches your env on the next task.
-     - If providing now outside a swarm: use **AskUserQuestion**: "Enter your agent-fs API key"
+     - If providing now: use **AskUserQuestion**: "Enter your agent-fs API key"
      - If needs setup: explain how to get one and pause
      - Use **AskUserQuestion**: "Which agent-fs organization should learnings be stored in?" with options: `["Use existing org (I'll provide the name)", "Create a new org for learnings"]`
      - If existing: use **AskUserQuestion**: "Enter the organization name"
