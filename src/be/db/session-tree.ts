@@ -16,6 +16,8 @@ export type SessionReadState = "unread" | "read" | "later" | "done";
 export interface SessionFilters {
   /** Restrict roots to these task sources. */
   source?: string[];
+  /** Leave out roots of these task sources (the sessions v2 source filter). */
+  hideSource?: string[];
   /** Match root task text or title with a case-insensitive substring. */
   q?: string;
   /** Match the root requester, excluding NULL requester rows. */
@@ -95,6 +97,9 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   const sources = opts.source?.filter(Boolean) ?? [];
   if (sources.length)
     add({ sql: `r.source IN (${sources.map(() => "?").join(",")})`, params: sources });
+  const hidden = opts.hideSource?.filter(Boolean) ?? [];
+  if (hidden.length)
+    add({ sql: `r.source NOT IN (${hidden.map(() => "?").join(",")})`, params: hidden });
   if (opts.q?.trim()) {
     const like = `%${opts.q.trim().toLowerCase()}%`;
     add({
@@ -329,13 +334,17 @@ export interface SessionTree {
   later: SessionSectionCounts;
   done: SessionSectionCounts;
   noGroup: SessionSectionCounts;
+  /** Each root source in this view with its session count, hidden sources included, most first. */
+  sources: { source: string; total: number }[];
 }
 
 export async function getSessionTree(
   actor: { kind: "bypass" } | { kind: "user"; userId: string | null },
   now?: string,
-  opts: { mine?: boolean } = {},
+  opts: { mine?: boolean; hideSource?: string[] } = {},
 ): Promise<SessionTree> {
+  // No source filter in SQL: the source counts must include hidden sources,
+  // so the filter menu can offer them back. The loop skips them instead.
   const query = sessionSummaryQuery({
     ...(actor.kind === "user" ? { viewer: { userId: actor.userId, scope: "all" } as const } : {}),
     now,
@@ -344,12 +353,13 @@ export async function getSessionTree(
   });
   const rows = await getDbClient().query<{
     key: string;
+    source: string;
     lastActivityAt: string;
     latestStatus: string;
     readState: SessionReadState | null;
     needsYou: number;
   }>(
-    `SELECT r."key", a.lastActivityAt, a.latestStatus, a.readState, a.needsYou
+    `SELECT r."key", r.source, a.lastActivityAt, a.latestStatus, a.readState, a.needsYou
     FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id`,
     query.params,
   );
@@ -360,7 +370,10 @@ export async function getSessionTree(
     later: counts(),
     done: counts(),
     noGroup: counts(),
+    sources: [],
   };
+  const hidden = new Set(opts.hideSource);
+  const sources = new Map<string, number>();
   const groups = new Map<string, SessionTreeGroup>();
   const add = (section: SessionSectionCounts, row: (typeof rows)[number]) => {
     section.total++;
@@ -369,6 +382,8 @@ export async function getSessionTree(
     if (row.needsYou) section.needsYou++;
   };
   for (const row of rows) {
+    sources.set(row.source, (sources.get(row.source) ?? 0) + 1);
+    if (hidden.has(row.source)) continue;
     const key = sessionGroupKey(row.key);
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);
@@ -389,5 +404,68 @@ export async function getSessionTree(
     }
   }
   result.groups = [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
+  result.sources = [...sources]
+    .map(([source, total]) => ({ source, total }))
+    .sort((a, b) => b.total - a.total || a.source.localeCompare(b.source));
   return result;
+}
+
+/** Triage actions on a whole list: the bulk bar's "Select all N". */
+export type SessionListTriage = "done" | "inbox" | "read" | "unread";
+
+/** The read cursor of "unread". The dashboard and the my-swarm app write the same value. */
+const UNREAD_CURSOR = "1970-01-01T00:00:00.000Z";
+
+/**
+ * Apply one triage action to every session a sidebar list shows `userId`
+ * (the same filters as `GET /api/sessions?scope=tree`), in one statement.
+ * The rows match what the dashboard writes for one session: Done, back to
+ * the Inbox, read up to the newest activity, or unread. Returns the number
+ * of sessions written.
+ */
+export async function triageSessionList(
+  userId: string,
+  filters: Pick<SessionFilters, "triage" | "noGroup" | "groupKey" | "mine" | "hideSource" | "now">,
+  action: SessionListTriage,
+): Promise<number> {
+  const now = filters.now ?? new Date().toISOString();
+  const query = sessionSummaryQuery({
+    ...filters,
+    now,
+    viewer: { userId, scope: "all" },
+    tree: true,
+  });
+  const status = action === "done" ? "done" : "open";
+  // `read` moves the cursor to each session's newest activity, `unread` to the epoch.
+  const lastReadAt =
+    action === "read" ? "a.lastActivityAt" : action === "unread" ? `'${UNREAD_CURSOR}'` : "NULL";
+  const setsLastRead = action === "read" || action === "unread";
+  // The conflict rules copy `upsertInboxState` in src/be/db.ts (sticky readAt,
+  // lastReadAt only when the action sets it, snooze and dismiss cleared). Keep
+  // the two in step. `WHERE true` is required: SQLite cannot parse
+  // INSERT ... SELECT ... ON CONFLICT when the SELECT has no WHERE clause.
+  const result = await getDbClient().run(
+    `INSERT INTO inbox_item_state
+      (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, lastReadAt, createdAt, lastUpdatedAt)
+    SELECT ?, 'to_read', a.root_id, ?, NULL, NULL, ?, ?, ${lastReadAt}, ?, ?
+    FROM (${query.sql}) a WHERE true
+    ON CONFLICT(userId, itemType, itemId) DO UPDATE SET
+      status = excluded.status,
+      snoozeUntil = NULL,
+      dismissedAt = NULL,
+      doneAt = excluded.doneAt,
+      readAt = COALESCE(inbox_item_state.readAt, excluded.readAt),
+      lastReadAt = ${setsLastRead ? "excluded.lastReadAt" : "inbox_item_state.lastReadAt"},
+      lastUpdatedAt = excluded.lastUpdatedAt`,
+    [
+      userId,
+      status,
+      action === "done" ? now : null,
+      action === "read" ? now : null,
+      now,
+      now,
+      ...query.params,
+    ],
+  );
+  return result.changes;
 }

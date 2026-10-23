@@ -21,6 +21,7 @@ import {
 import { linkIdentity } from "../be/users";
 import { resetFileStorageProviderForTests } from "../fs/registry";
 import { drainBackground } from "../integrations/chat-sdk/background";
+import { CHAT_CHANNEL_SETTINGS_NAMESPACE } from "../integrations/chat-sdk/reactions";
 import { formatChatRelayText, formatChatTaskTag } from "../integrations/chat-sdk/relay";
 import { CHAT_CHANNELS_NAMESPACE, routeChatMessage } from "../integrations/chat-sdk/router";
 import { getChatInstance } from "../integrations/chat-sdk/runtime";
@@ -146,6 +147,25 @@ function buildDeferTaskTool(): DeferTaskTool {
 const dm = (id: number): TelegramChat => ({ id, type: "private" });
 const group = (id: number): TelegramChat => ({ id, type: "group" });
 
+const messageIdOf = (update: Record<string, unknown>) =>
+  (update.message as { message_id: number }).message_id;
+
+/** Every `setMessageReaction` call on one message, as the emoji it set (`""` = cleared). */
+function reactionsOn(chatId: number, update: Record<string, unknown>): string[] {
+  return harness.mock.calls
+    .filter((call) => call.method === "setMessageReaction")
+    .map((call) => call.body as { chat_id: unknown; message_id: unknown; reaction: unknown })
+    .filter(
+      (body) =>
+        String(body.chat_id) === String(chatId) && Number(body.message_id) === messageIdOf(update),
+    )
+    .map((body) => {
+      const reaction =
+        typeof body.reaction === "string" ? JSON.parse(body.reaction) : body.reaction;
+      return (reaction as Array<{ emoji?: string }>).map((r) => r.emoji ?? "").join("");
+    });
+}
+
 describe("Chat SDK inbound pipeline", () => {
   test("two messages inside the buffer window become one task", async () => {
     await postTelegramUpdate(telegramUpdate(dm(2001), "first part of the request"));
@@ -235,9 +255,9 @@ describe("Chat SDK inbound pipeline", () => {
       first!.id,
     ]);
 
-    const acksBefore = harness.mock.calls.filter((call) =>
-      /^send(Rich)?Message$/.test(call.method),
-    ).length;
+    const sendCount = () =>
+      harness.mock.calls.filter((call) => /^send(Rich)?Message$/.test(call.method)).length;
+    const sendsBefore = sendCount();
     const steer = telegramUpdate(group(-2005), "also add the charts");
     await postTelegramUpdate(steer);
     await flushChatBuffers();
@@ -246,13 +266,70 @@ describe("Chat SDK inbound pipeline", () => {
     expect(await steeringRows(first!.id)).toEqual([
       { body: "also add the charts", source: "chat" },
     ]);
+    // A reaction acknowledges the steering message; no text reply.
+    expect(reactionsOn(-2005, steer)).toEqual(["✍"]);
+    expect(sendCount()).toBe(sendsBefore);
+  });
+
+  test("a channel that opts into text acks also gets the steering reply", async () => {
+    await upsertKv({
+      namespace: CHAT_CHANNEL_SETTINGS_NAMESPACE,
+      key: "telegram:-2015",
+      value: { textAcks: true },
+      valueType: "json",
+    });
+    await postTelegramUpdate(telegramUpdate(group(-2015), "@swarm_test_bot draft the report"));
+    await flushChatBuffers();
+    const [first] = await chatTasks(-2015);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+      first!.id,
+    ]);
+
+    const steer = telegramUpdate(group(-2015), "also add the charts");
+    await postTelegramUpdate(steer);
+
+    expect(reactionsOn(-2015, steer)).toEqual(["✍"]);
     const sends = harness.mock.calls.filter((call) => /^send(Rich)?Message$/.test(call.method));
-    expect(sends.length).toBe(acksBefore + 1);
     // The acknowledgement replies to the steering message.
     expect(sends.at(-1)?.body.reply_parameters).toEqual({
-      message_id: (steer.message as { message_id: number }).message_id,
+      message_id: messageIdOf(steer),
       allow_sending_without_reply: true,
     });
+  });
+
+  test("an ask gets one reaction at a time; earlier buffered messages are cleared at flush", async () => {
+    const firstPart = telegramUpdate(dm(2016), "first part");
+    const secondPart = telegramUpdate(dm(2016), "second part");
+    await postTelegramUpdate(firstPart);
+    expect(reactionsOn(2016, firstPart)).toEqual(["👀"]);
+    await postTelegramUpdate(secondPart);
+    await flushChatBuffers();
+
+    expect(await chatTasks(2016)).toHaveLength(1);
+    // The task answers the newest message, which keeps 👀; the earlier one is cleared.
+    expect(reactionsOn(2016, secondPart)).toEqual(["👀"]);
+    expect(reactionsOn(2016, firstPart)).toEqual(["👀", ""]);
+
+    const quick = telegramUpdate(dm(2017), "!now ship it");
+    await postTelegramUpdate(quick);
+    expect(reactionsOn(2017, quick)).toEqual(["⚡"]);
+  });
+
+  test("a REACTION_INVALID answer is logged and the ask still becomes a task", async () => {
+    const warn = spyOn(console, "warn");
+    harness.mock.failReactions(1);
+    try {
+      const ask = telegramUpdate(dm(2018), "!now plan the sprint");
+      await postTelegramUpdate(ask);
+      expect(await chatTasks(2018)).toHaveLength(1);
+      expect(reactionsOn(2018, ask)).toHaveLength(1);
+      expect(
+        warn.mock.calls.some((args) => String(args[0]).includes("Could not set the now reaction")),
+      ).toBe(true);
+    } finally {
+      harness.mock.failReactions(0);
+      warn.mockRestore();
+    }
   });
 
   test("two asks back to back each anchor to their own message, not the parent's", async () => {

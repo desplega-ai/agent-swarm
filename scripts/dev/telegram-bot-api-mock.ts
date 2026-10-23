@@ -34,6 +34,8 @@ export interface TelegramBotApiMock {
   failUploads: (count: number) => void;
   /** While on, `setWebhook` answers HTTP 401 with a description that contains the bot token. */
   failSetWebhook: (on: boolean) => void;
+  /** Answer the next `count` `setMessageReaction` calls with HTTP 400 `REACTION_INVALID`. */
+  failReactions: (count: number) => void;
   stop: () => void;
 }
 
@@ -156,6 +158,7 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
   let failingSends = 0;
   let failingUploads = 0;
   let failingSetWebhook = false;
+  let failingReactions = 0;
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
@@ -182,6 +185,13 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
         return Response.json(
           { ok: false, error_code: 500, description: "Internal Server Error" },
           { status: 500 },
+        );
+      }
+      if (failingReactions > 0 && method === "setMessageReaction") {
+        failingReactions -= 1;
+        return Response.json(
+          { ok: false, error_code: 400, description: "Bad Request: REACTION_INVALID" },
+          { status: 400 },
         );
       }
       if (failingUploads > 0 && UPLOAD_METHODS.test(method)) {
@@ -212,6 +222,9 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
     },
     failUploads: (count) => {
       failingUploads = count;
+    },
+    failReactions: (count) => {
+      failingReactions = count;
     },
     failSetWebhook: (on) => {
       failingSetWebhook = on;

@@ -1,5 +1,6 @@
 import type { WebClient } from "@slack/web-api";
 import { getLogsByTaskIdChronological, getSlackTasksInThread, getTaskById } from "../be/db";
+import { terminalReactionEvent } from "../integrations/reaction-events";
 import { recordSlackReactionInvalidName } from "../otel";
 import { type AgentTask, isTerminalTaskStatus } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -143,7 +144,7 @@ export type SlackReactionChoice = { name: string; event?: SlackReactionEvent };
 
 /** The reaction choice for a task's terminal outcome, honouring operator config. */
 export function terminalReactionChoice(task: AgentTask): SlackReactionChoice {
-  const event: SlackReactionEvent = task.status === "completed" ? "completed" : "failed";
+  const event = terminalReactionEvent(task.status);
   return { name: reactionName(event), event };
 }
 

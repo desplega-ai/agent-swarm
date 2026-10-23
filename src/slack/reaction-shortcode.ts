@@ -1,10 +1,7 @@
-export type SlackReactionEvent =
-  | "accepted"
-  | "buffered"
-  | "now"
-  | "steered"
-  | "completed"
-  | "failed";
+import type { ReactionEvent } from "@/integrations/reaction-events";
+
+/** The shared lifecycle events; Slack maps each one to a shortcode below. */
+export type SlackReactionEvent = ReactionEvent;
 
 export const SLACK_REACTION_DEFAULTS: Record<SlackReactionEvent, string> = {
   accepted: "eyes",

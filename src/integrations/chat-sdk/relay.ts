@@ -7,6 +7,7 @@ import {
   markChatRelayGivenUp,
   recordChatRelayError,
 } from "@/be/db";
+import { terminalReactionEvent } from "@/integrations/reaction-events";
 import { chatThreadOfContextKey } from "@/tasks/context-key";
 import type { AgentTask } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
@@ -16,6 +17,7 @@ import { chatMessageLimit, splitChatMessage } from "./limits";
 import { errorMessage } from "./logger";
 import { postChatMessage } from "./outbound";
 import { taskOutputChatFiles } from "./outbound-files";
+import { setChatMessageReaction } from "./reactions";
 import { getChatInstance, getChatSdkHealth } from "./runtime";
 import { sweepExpired } from "./state";
 import { stopTypingKeepalive } from "./typing";
@@ -163,6 +165,15 @@ export async function processPendingChatRelays(
       stopTypingKeepalive(target.threadId);
       await markChatRelayDelivered(task.id, now);
       console.log(`[chat-sdk] Relayed ${task.status} task ${task.id} to ${target.adapter}`);
+      // The ask's reaction ends with the answer. Never throws: delivery already landed.
+      if (task.mentionMessageId) {
+        await setChatMessageReaction(
+          target.adapter,
+          target.threadId,
+          task.mentionMessageId,
+          terminalReactionEvent(task.status),
+        );
+      }
     } catch (error) {
       const message = errorMessage(error);
       await recordChatRelayError(task.id, message, now);

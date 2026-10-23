@@ -2,7 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
+import { getSessionsHiddenSources, getSessionsShow } from "@/lib/sessions-show";
+import { plural, SESSIONS_TOAST_POSITION, sidebarListParams } from "@/lib/sessions-v2";
 import { api } from "../client";
 import type { InboxItemStatus } from "../types";
 import { SESSION_LIST_KEY, SESSION_TREE_KEY, sessionDetailKey } from "./session-query-keys";
@@ -157,4 +158,62 @@ export function useSessionTriage() {
       backToInbox: (targets: TriageTarget | TriageTarget[]) => run(targets, { kind: "inbox" }),
     };
   }, [mutate, isPending, userId]);
+}
+
+/** A whole-list action of "Select all N". */
+export type SessionListAction = "done" | "inbox" | "read" | "unread";
+
+const LIST_ACTION_DONE: Record<SessionListAction, string> = {
+  done: "marked Done",
+  inbox: "moved back to the Inbox",
+  read: "marked read",
+  unread: "marked unread",
+};
+
+/**
+ * "Select all N": one action on every session of a sidebar list, loaded or
+ * not (`POST /api/session-triage`, with the list's filter: Mine / All and
+ * the hidden sources). No optimistic patch and no Undo: the rows were never
+ * loaded. The tree, the lists, and the open details refetch when it lands.
+ */
+export function useSessionListTriage() {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: ({ container, action }: { container: string; action: SessionListAction }) => {
+      const { triage, noGroup, groupKey } = sidebarListParams(container);
+      const hidden = getSessionsHiddenSources();
+      return api.triageSessionList({
+        action,
+        ...(triage === "inbox" || triage === "later" || triage === "done" ? { triage } : {}),
+        ...(noGroup ? { noGroup } : {}),
+        ...(groupKey ? { groupKey } : {}),
+        ...(getSessionsShow() === "all" ? { show: "all" as const } : {}),
+        ...(hidden.length > 0 ? { hideSource: [...hidden] } : {}),
+      });
+    },
+    onSuccess: ({ updated }, { action }) => {
+      toast(`${plural(updated, "session")} ${LIST_ACTION_DONE[action]}.`, {
+        position: SESSIONS_TOAST_POSITION,
+      });
+    },
+    onError: (error) => {
+      toast.error(error.message || "Couldn't update the sessions", {
+        position: SESSIONS_TOAST_POSITION,
+      });
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["session"] });
+      void queryClient.invalidateQueries({ queryKey: ["inbox-state"] });
+    },
+  });
+  const { mutate, isPending } = mutation;
+  return useMemo(
+    () => ({
+      isPending,
+      run: (container: string, action: SessionListAction) => mutate({ container, action }),
+    }),
+    [mutate, isPending],
+  );
 }

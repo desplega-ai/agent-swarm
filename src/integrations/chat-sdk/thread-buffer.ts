@@ -17,6 +17,8 @@ export interface ChatBufferedMessage {
   isDirectMessage: boolean;
   /** Why the message was taken; `none` when it is unaddressed. */
   addressed: ChatAddressedReason;
+  /** The message got the `accepted` reaction when it was buffered. */
+  reacted?: boolean;
   facts: ChatMessageFacts;
   attachments: Attachment[];
 }

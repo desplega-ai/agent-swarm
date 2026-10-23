@@ -18820,6 +18820,8 @@ export interface paths {
                     scope?: "mine" | "shared" | "tree";
                     /** @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged. */
                     show?: "mine" | "all";
+                    /** @description Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`. */
+                    hideSource?: string;
                 };
                 header?: never;
                 path?: never;
@@ -18942,6 +18944,8 @@ export interface paths {
                 query?: {
                     /** @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged. */
                     show?: "mine" | "all";
+                    /** @description Comma-separated root sources to leave out (the sessions v2 source filter), e.g. `slack,chat`. */
+                    hideSource?: string;
                 };
                 header?: never;
                 path?: never;
@@ -18988,6 +18992,11 @@ export interface paths {
                                 running: number;
                                 needsYou: number;
                             };
+                            /** @description Each root source in this view with its session count, hidden sources included. */
+                            sources: {
+                                source: string;
+                                total: number;
+                            }[];
                         };
                     };
                 };
@@ -19004,6 +19013,82 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session-triage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Triage every session of one sidebar list
+         * @description The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "done" | "inbox" | "read" | "unread";
+                        /** @enum {string} */
+                        triage?: "inbox" | "later" | "done";
+                        noGroup?: boolean;
+                        groupKey?: string;
+                        /**
+                         * @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged.
+                         * @enum {string}
+                         */
+                        show?: "mine" | "all";
+                        hideSource?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description The number of sessions written */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            updated: number;
+                        };
+                    };
+                };
+                /** @description Validation error, or no picked user */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
