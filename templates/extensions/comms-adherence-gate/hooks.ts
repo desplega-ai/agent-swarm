@@ -15,8 +15,8 @@ import { z } from "zod";
  * answer is not a verbosity failure.
  *
  * Threads with several people: a message that @-mentions someone is judged
- * against the first mentioned person with stored preferences; otherwise against
- * the task requester. `plain` applies to everyone.
+ * against the first mentioned person with stored preferences, skipping a
+ * requester without preferences; otherwise against the requester. `plain` applies to everyone.
  *
  * Transport (config.provider): Jev is served by TypeSafe directly and by
  * OpenRouter's Decisions endpoint. Both take the same {model, state, questions}
@@ -412,7 +412,8 @@ type Audience = { id: string; name: string; prefs: Prefs; via: "mention" | "requ
 /**
  * Whose preferences a message is judged against. In a thread with several
  * people, the message is for whoever it @-mentions: the first mentioned person
- * with stored preferences wins. Without such a mention, the task requester (the
+ * with stored preferences wins, including the requester only if they have prefs.
+ * Without such a mention, the task requester (the
  * person whose message created this task). One SQL read, only when the text
  * mentions someone; no judge call.
  */
@@ -429,8 +430,11 @@ const resolveAudience = async (
     const row = rows.find((r) => String(cell(r, 0, "externalId")) === slackId);
     if (!row) continue;
     const userId = String(cell(row, 1, "id") ?? "");
-    // The requester mentioned by name keeps their own task context.
-    if (userId && userId === requester.id) return requester;
+    // A requester with stored preferences keeps their own task context.
+    if (userId && userId === requester.id) {
+      if (Object.keys(requester.prefs).length > 0) return requester;
+      continue;
+    }
     const prefs = parsePrefs(cell(row, 3, "comms"));
     if (!prefs) continue;
     return { id: userId, name: String(cell(row, 2, "name") ?? userId), prefs, via: "mention" };

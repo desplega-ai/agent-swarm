@@ -688,6 +688,23 @@ describe("multi-person threads", () => {
     expect(jevCalls[0]!.body.state.requester_preferences).toEqual(PREFS);
   });
 
+  test.each([
+    null,
+    "{}",
+  ])("a self-mention without requester prefs (%s) skips to the next mentioned person with prefs", async (comms) => {
+    jevScores(0.9);
+    const alice = { externalId: "U1", id: "user-1", name: "Alice", comms };
+    const { ctx, kv } = makeCtx(
+      { mode: "enforce", plainMode: "off" },
+      { row: taskRow({ comms }), addressees: [alice, bob] },
+    );
+    await handler(post("<@U1> <@UBOB> deploys take 4 minutes."), ctx);
+    expect(jevCalls).toHaveLength(1);
+    expect(jevCalls[0]!.body.state.requester).toBe("Bob");
+    expect(jevCalls[0]!.body.state.requester_preferences).toEqual(BOB_PREFS);
+    expect(kv.last).toMatchObject({ judgedFor: "mention", audienceId: "user-2" });
+  });
+
   test("a completion that mentions someone is judged for them too", async () => {
     jevScores(0.9);
     const { ctx } = makeCtx({}, { addressees: [bob] });
