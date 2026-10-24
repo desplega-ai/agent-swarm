@@ -8,11 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { getIntegrationFields, type IntegrationDef } from "@/lib/integrations-catalog";
-import {
-  deriveIntegrationStatus,
-  type EnvPresence,
-  findConfigForKey,
-} from "@/lib/integrations-status";
+import { deriveIntegrationStatus, type EnvPresence } from "@/lib/integrations-status";
 
 // ---------------------------------------------------------------------------
 // Claude Managed Agents — special-flow section
@@ -37,6 +33,8 @@ interface ClaudeManagedSectionProps {
   def: IntegrationDef;
   configs: SwarmConfig[];
   envPresence: EnvPresence;
+  /** `dataUpdatedAt` of the env-presence query; bumps on every response. */
+  envPresenceRevision?: number;
 }
 
 const SETUP_SNIPPET = "bunx @desplega.ai/agent-swarm claude-managed-setup";
@@ -48,35 +46,67 @@ interface TestResult {
   error?: string;
 }
 
+// Each env-presence object gets an id, so a caller that hands over a new
+// snapshot retires results even when the booleans are equal.
+const envSnapshotIds = new WeakMap<EnvPresence, number>();
+let nextEnvSnapshotId = 0;
+function envSnapshotId(envPresence: EnvPresence): number {
+  let id = envSnapshotIds.get(envPresence);
+  if (id === undefined) {
+    id = ++nextEnvSnapshotId;
+    envSnapshotIds.set(envPresence, id);
+  }
+  return id;
+}
+
 /**
- * Identifies the config a test ran against: each required row's update time,
- * or "env" when the value comes from the deploy env. Editing any of them
- * makes an earlier result stale.
+ * Identifies the config a test ran against: the update time of every row the
+ * test endpoint resolves for a required key (it accepts the key, lowercase and
+ * uppercase; the setup CLI writes lowercase). Env-backed values are invisible
+ * here, only their presence is, so any fresh env-presence response makes an
+ * earlier result stale.
  */
 export function claudeManagedFingerprint(
   def: IntegrationDef,
   configs: SwarmConfig[],
   envPresence: EnvPresence,
+  envPresenceRevision = 0,
 ): string {
-  return getIntegrationFields(def)
+  let envBacked = false;
+  const parts = getIntegrationFields(def)
     .filter((field) => field.required)
     .map((field) => {
-      const row = findConfigForKey(configs, field.key);
-      if (row) return `${field.key}=${row.lastUpdatedAt}`;
-      return `${field.key}=${envPresence[field.key] ? "env" : ""}`;
-    })
-    .join("|");
+      const variants = new Set([field.key, field.key.toLowerCase(), field.key.toUpperCase()]);
+      const rows = configs.filter((c) => c.scope === "global" && variants.has(c.key));
+      const fromRows = rows.map((c) => `${c.key}@${c.lastUpdatedAt}`).join(",");
+      const fromEnv = !rows.some((c) => c.value.length > 0) && envPresence[field.key] === true;
+      if (fromEnv) envBacked = true;
+      return `${field.key}=${fromRows}${fromEnv ? "env" : ""}`;
+    });
+  if (envBacked) parts.push(`env@${envPresenceRevision}#${envSnapshotId(envPresence)}`);
+  return parts.join("|");
 }
 
-export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManagedSectionProps) {
+export function ClaudeManagedSection({
+  def,
+  configs,
+  envPresence,
+  envPresenceRevision,
+}: ClaudeManagedSectionProps) {
   const status = deriveIntegrationStatus(def, configs, envPresence);
   const testConnection = useTestClaudeManagedConnection();
 
   const { copied, copy } = useCopyToClipboard();
-  const [tested, setTested] = useState<{ fingerprint: string; result: TestResult } | null>(null);
-  const fingerprint = claudeManagedFingerprint(def, configs, envPresence);
-  // A result for values that have since changed says nothing about the current ones.
+  const [tested, setTested] = useState<{
+    fingerprint: string;
+    testedAt: Date;
+    result: TestResult;
+  } | null>(null);
+  const fingerprint = claudeManagedFingerprint(def, configs, envPresence, envPresenceRevision);
+  // A result for values that may have changed says nothing about the current
+  // ones: it loses its badge and shows as history.
   const lastResult = tested?.fingerprint === fingerprint ? tested.result : null;
+  const staleResult = tested && !lastResult ? tested : null;
 
   const handleCopy = () => copy(SETUP_SNIPPET);
 
@@ -85,10 +115,14 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
     const testedFingerprint = fingerprint;
     try {
       const result = await testConnection.mutateAsync();
-      setTested({ fingerprint: testedFingerprint, result });
+      setTested({ fingerprint: testedFingerprint, testedAt: new Date(), result });
     } catch {
       // mutation hook surfaces its own error toast
-      setTested({ fingerprint: testedFingerprint, result: { ok: false, error: "Request failed" } });
+      setTested({
+        fingerprint: testedFingerprint,
+        testedAt: new Date(),
+        result: { ok: false, error: "Request failed" },
+      });
     }
   }
 
@@ -226,6 +260,13 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
                   </div>
                 </div>
               )}
+            </div>
+          )}
+          {staleResult && (
+            <div className="text-xs text-muted-foreground">
+              Last test at {staleResult.testedAt.toLocaleTimeString()}:{" "}
+              {staleResult.result.ok ? "passed" : "failed"}. The config may have changed since; test
+              again to confirm.
             </div>
           )}
         </div>

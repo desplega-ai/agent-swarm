@@ -14,6 +14,8 @@ export interface SpecialFlowSectionProps {
   def: IntegrationDef;
   configs: SwarmConfig[];
   envPresence: EnvPresenceMap;
+  /** `dataUpdatedAt` of the env-presence query, for flows that cache results. */
+  envPresenceRevision?: number;
 }
 
 /**

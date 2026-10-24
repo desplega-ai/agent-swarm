@@ -125,7 +125,7 @@ export default function IntegrationDetailPage() {
     if (!def) return [];
     return getPresenceKeys(def);
   }, [def]);
-  const { data: envPresence } = useEnvPresence(envPresenceKeys);
+  const { data: envPresence, dataUpdatedAt: envPresenceRevision } = useEnvPresence(envPresenceKeys);
 
   // Compute initial state only when configs/def land. We intentionally keep
   // local form state keyed by the catalog def id so navigating between
@@ -164,6 +164,7 @@ export default function IntegrationDetailPage() {
       deleteBatch={deleteBatch}
       reloadConfig={reloadConfig}
       envPresence={envPresence ?? {}}
+      envPresenceRevision={envPresenceRevision}
     />
   );
 }
@@ -176,6 +177,7 @@ interface InnerProps {
   deleteBatch: ReturnType<typeof useDeleteConfigsBatch>;
   reloadConfig: ReturnType<typeof useReloadConfig>;
   envPresence: EnvPresenceMap;
+  envPresenceRevision: number;
 }
 
 function IntegrationDetailInner({
@@ -186,6 +188,7 @@ function IntegrationDetailInner({
   deleteBatch,
   reloadConfig,
   envPresence,
+  envPresenceRevision,
 }: InnerProps) {
   const Icon = resolveIcon(def.iconKey);
   // A provider glyph (`ProviderIcon`) wins, then a logo file, then the lucide icon.
@@ -419,7 +422,12 @@ function IntegrationDetailInner({
 
             {/* Special flow (OAuth card, CLI explainer, embeddings form) — ABOVE the generic form. */}
             {specialFlow && (
-              <specialFlow.Section def={def} configs={configs} envPresence={envPresence} />
+              <specialFlow.Section
+                def={def}
+                configs={configs}
+                envPresence={envPresence}
+                envPresenceRevision={envPresenceRevision}
+              />
             )}
 
             {/* Body */}
