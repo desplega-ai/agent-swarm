@@ -148,6 +148,10 @@ export function runContext(event: keyof SwarmEventMap, payload: unknown): RunCon
       agentId = requestAgent ?? stringField(payload, "options", "agentId");
       subject = `${stringField(payload, "origin") ?? "?"}: ${snippet(field(payload, "description"))}`;
       break;
+    case "post.task.blocked":
+      agentId = stringField(payload, "requester", "agentId");
+      subject = `${stringField(payload, "origin") ?? "?"}: ${stringField(payload, "extension", "name") ?? "?"}`;
+      break;
     case "pre.task.followUp":
       agentId = stringField(payload, "workerAgentId");
       subject =

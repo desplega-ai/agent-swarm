@@ -210,6 +210,7 @@ The Slack post event fires after authorization and before routing.
 | `pre.heartbeat.remediate` | Stalled-task remediation | `{ task, session?, classification, proposedAction, reason, taskAgeMs, sessionHeartbeatAgeMs? }` | `{ proposedAction }` | The sweep records the finding but performs no remediation. |
 | `pre.tool.call` | Agent-facing MCP call | `{ tool, args, requestInfo }` | `{ args }` | The tool returns an error and does not run. |
 | `post.task.created` | Task event bus after commit | `{ task }` | None | None |
+| `post.task.blocked` | A `pre.task.create` block or rejected model/agent rewrite | `{ extension, reason, origin, source?, requester, context?, description }` | None | None |
 | `post.task.completed` | Task event bus after commit | `{ task, output }` | None | None |
 | `post.task.failed` | Task event bus after commit | `{ task, failureReason }` | None | None |
 | `post.task.cancelled` | Task event bus after commit | `{ task }` | None | None |
@@ -226,6 +227,7 @@ The Slack post event fires after authorization and before routing.
 
 `post.approval.resolved` fires when a person answers an approval request, for workflow and standalone requests alike. `workflowRunId` and `workflowRunStepId` are absent for a standalone request. A request that times out or is cancelled does not fire it.
 `post.task.budgetRefused` carries the refused `task`. `cause` is `agent`, `global`, or `user`, and the spend and budget fields for that cause are set. Like the other `post.task.*` events, it skips the extension that created the task.
+`post.task.blocked` has no task or task id. It carries the blocking extension, the original attempt's source, requester and correlation fields, and a scrubbed reason and description (at most 500 characters). It skips the creating extension, while the blocking extension can receive it. Workflows can subscribe to `task.create_blocked` on the event bus. There is one event per blocked attempt: workflow retries, schedule backoff and deferred-wake retries each emit again. Consumers can use `origin` plus `context` as a stable key to deduplicate with `ctx.state`.
 `pre.chat.route` runs once per buffer flush, so `text` joins every message the thread collected. `threadId` is the Chat SDK thread id, prefixed with the adapter name. `post.chat.message` has `direction` `inbound` for a message the swarm received and `outbound` for one it sent.
 `post.email.received` carries the first 500 characters of the body. `post.kapso.message` carries the text, or a placeholder naming the type for a non-text message.
 `post.vcs.event` fires once per webhook event. `kind` is the provider's own object: `pull_request`, `merge_request`, `issue`, `issue_comment`, `note`, `pull_request_review`, or `pipeline`. `action` is the provider's own value, such as `opened`, `synchronize`, `merge`, or `created`; for a pipeline it is the status, such as `success` or `failed`. The event carries parsed fields, not the raw webhook body, and a field a kind does not have is absent.

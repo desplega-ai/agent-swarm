@@ -22,9 +22,12 @@ import * as dbClient from "../be/db-client";
 import type { InstallExtensionArgs as ExtensionInstallBody } from "../be/extensions/db";
 import { installExtension, listExtensionRuns } from "../be/extensions/db";
 import { getCatalogEntry } from "../extensions/catalog";
+import type { TaskBlockedEvent } from "../extensions/contract";
 import { disableExtension, enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
+import { initExtensionPostBridge, teardownExtensionPostBridge } from "../extensions/post-bridge";
 import { handleTasks } from "../http/tasks";
 import { dispatchScheduleTarget } from "../scheduler/scheduler";
+import { bufferThreadMessage, instantFlush } from "../slack/thread-buffer";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { registerSendTaskTool, sendTaskHandler } from "../tools/send-task";
@@ -143,6 +146,276 @@ describe("extension task boundaries", () => {
     await client.run("DELETE FROM extensions");
     await client.run("DELETE FROM users");
     await client.run("DELETE FROM agents");
+  });
+
+  describe("post.task.blocked", () => {
+    const events: unknown[] = [];
+    const capture = (event: unknown) => {
+      events.push(event);
+    };
+
+    beforeAll(() => {
+      initExtensionPostBridge();
+      workflowEventBus.on("task.create_blocked", capture);
+    });
+
+    afterAll(() => {
+      workflowEventBus.off("task.create_blocked", capture);
+      teardownExtensionPostBridge();
+    });
+
+    beforeEach(() => {
+      events.length = 0;
+    });
+
+    async function waitForCounter(
+      extension: Awaited<ReturnType<typeof installAndEnable>>,
+      key: string,
+      count = 1,
+    ): Promise<void> {
+      const deadline = Date.now() + 3_000;
+      while (Date.now() < deadline) {
+        const entry = await getKv(`task:agent:${extension.agentId}`, key);
+        if (entry?.value === count) return;
+        await Bun.sleep(10);
+      }
+      throw new Error(`post.task.blocked was not recorded ${count} time(s)`);
+    }
+
+    async function recordedBlock(
+      extension: Awaited<ReturnType<typeof installAndEnable>>,
+      count = 1,
+    ): Promise<TaskBlockedEvent> {
+      await waitForCounter(extension, "ext:record-blocks:count", count);
+      return (await getKv(`task:agent:${extension.agentId}`, "ext:record-blocks:last"))
+        ?.value as TaskBlockedEvent;
+    }
+
+    test.each([
+      "rest",
+      "mcp",
+      "slack",
+      "schedule",
+    ] as const)("%s delivers one blocked event with its source and requester", async (origin) => {
+      const blocker = await installAndEnable("block-tasks-from-source", { source: origin });
+      const recorder = await installAndEnable("record-blocks");
+      let requester: TaskBlockedEvent["requester"] = {};
+      let scheduleId: string | undefined;
+
+      if (origin === "rest") {
+        const user = await createUser({ name: "Blocked REST requester" });
+        requester = { userId: user.id };
+        expect(
+          (await postTask({ task: "blocked REST task", requestedByUserId: user.id })).status,
+        ).toBe(422);
+      } else if (origin === "mcp") {
+        const caller = await createAgent({ name: "blocked-mcp-caller", status: "idle" });
+        requester = { agentId: caller.id };
+        const server = new McpServer({ name: "blocked-event-send", version: "1.0.0" });
+        registerSendTaskTool(server);
+        const result = await registeredSendTask(server).handler(sendTaskArgs("blocked MCP task"), {
+          sessionId: "blocked-event",
+          requestInfo: { headers: { "x-agent-id": caller.id } },
+        });
+        expect(result.isError).toBe(true);
+      } else if (origin === "slack") {
+        requester = { slackUserId: "U_BLOCKED_EVENT" };
+        await createAgent({ name: "blocked-slack-lead", isLead: true, status: "idle" });
+        bufferThreadMessage(
+          "C_BLOCKED_EVENT",
+          "1000.0001",
+          "blocked Slack task",
+          "U_BLOCKED_EVENT",
+          "1000.0002",
+        );
+        await instantFlush("C_BLOCKED_EVENT:1000.0001");
+      } else {
+        const schedule = await createScheduledTask({
+          name: "blocked-event-schedule",
+          taskTemplate: "blocked schedule task",
+          intervalMs: 60_000,
+        });
+        scheduleId = schedule.id;
+        await expect(dispatchScheduleTarget(schedule)).rejects.toThrow(
+          "Task source schedule is blocked",
+        );
+      }
+
+      const event = await recordedBlock(recorder);
+      expect(events).toHaveLength(1);
+      expect(event).toMatchObject({
+        extension: { id: blocker.id, name: "block-tasks-from-source" },
+        origin,
+        source: origin === "rest" ? "api" : origin,
+        requester,
+      });
+      expect(event.requester).toEqual(requester);
+      if (scheduleId) expect(event.context?.scheduleId).toBe(scheduleId);
+      expect(event).not.toHaveProperty("task");
+      expect(event).not.toHaveProperty("taskId");
+    });
+
+    test("scrubs and bounds the payload, preserving correlation on each retry", async () => {
+      const secret = `ghp_${"Z".repeat(36)}`;
+      await installSource(
+        "secret-blocker",
+        `
+import { block, type SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => block(${JSON.stringify(`Ticket required: ${secret}`)}));
+};
+export default extension;
+`,
+      );
+      const recorder = await installAndEnable("record-blocks");
+      const context = {
+        contextKey: "github:acme/project:7",
+        scheduleId: crypto.randomUUID(),
+        workflowRunId: crypto.randomUUID(),
+        workflowRunStepId: crypto.randomUUID(),
+        parentTaskId: crypto.randomUUID(),
+        vcsRepo: "acme/project",
+        vcsNumber: 7,
+        slackChannelId: "C_CORRELATED_BLOCK",
+        slackThreadTs: "2000.0001",
+      };
+      const requester = {
+        userId: crypto.randomUUID(),
+        agentId: crypto.randomUUID(),
+        slackUserId: "U_CORRELATED_BLOCK",
+      };
+      for (const attempt of [1, 2]) {
+        await expect(
+          createTaskWithSiblingAwareness(
+            `${"x".repeat(480)} ${secret}`,
+            {
+              ...context,
+              source: "github",
+              requestedByUserId: requester.userId,
+              creatorAgentId: requester.agentId,
+              slackUserId: requester.slackUserId,
+            },
+            { origin: "webhook" },
+          ),
+        ).rejects.toThrow("Ticket required:");
+        const event = await recordedBlock(recorder, attempt);
+        expect(events).toHaveLength(attempt);
+        expect(event.reason).toContain("[REDACTED:");
+        expect(event.reason).not.toContain(secret);
+        expect(event.description).toHaveLength(500);
+        expect(event.description).not.toContain("ghp_");
+        expect(event.context).toEqual(context);
+        expect(event.requester).toEqual(requester);
+      }
+    });
+
+    test("a rejected model rewrite emits a block attributed to its editor", async () => {
+      const codex = await createAgent({
+        name: "blocked-rewrite-codex",
+        harnessProvider: "codex",
+        status: "idle",
+      });
+      const editor = await installSource(
+        "incompatible-model",
+        `
+import { modify, type SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => modify({ model: "claude-opus-5-5" }));
+};
+export default extension;
+`,
+      );
+      const recorder = await installAndEnable("record-blocks");
+      const result = await postTask({
+        task: "incompatible rewrite",
+        agentId: codex.id,
+        routingReason: "human_pinned",
+      });
+      expect(result.status).toBe(422);
+      const event = await recordedBlock(recorder);
+      expect(events).toHaveLength(1);
+      expect(event.extension).toEqual({ id: editor.id, name: "incompatible-model" });
+      expect(event.reason).toContain("rewrite");
+      expect(event.reason).toContain("codex");
+    });
+
+    test("the creator is skipped while the blocking extension receives its own block", async () => {
+      const creator = await installAndEnable("record-blocks");
+      const blocker = await installSource(
+        "blocking-recorder",
+        `
+import { block, type SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => block("blocked by recorder"));
+  api.on("post.task.blocked", async (_event, ctx) => { await ctx.state.incr("count"); });
+};
+export default extension;
+`,
+      );
+      const observerBundle = await loadBundleFixture("record-blocks");
+      const installedObserver = await installExtension({
+        ...observerBundle,
+        manifest: { ...observerBundle.manifest, name: "last-block-observer" },
+        priority: 1_000,
+      });
+      const observer = await enableExtension(installedObserver.extension.id);
+      const server = new McpServer({ name: "extension-blocked-event", version: "1.0.0" });
+      registerSendTaskTool(server);
+      const result = await registeredSendTask(server).handler(
+        sendTaskArgs("extension task"),
+        markExtensionRequestOrigin({
+          sessionId: "blocked-extension",
+          requestInfo: { headers: { "x-agent-id": creator.agentId! } },
+        }),
+      );
+      expect(result.isError).toBe(true);
+      // The final subscriber acknowledges only after every earlier recipient has finished.
+      await waitForCounter(observer, "ext:last-block-observer:count");
+      expect(
+        (await getKv(`task:agent:${blocker.agentId}`, "ext:blocking-recorder:count"))?.value,
+      ).toBe(1);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ origin: "extension:record-blocks" });
+      expect(await getKv(`task:agent:${creator.agentId}`, "ext:record-blocks:count")).toBeNull();
+      expect(await listExtensionRuns(creator.id)).toEqual([]);
+      const runs = await listExtensionRuns(blocker.id);
+      expect(runs).toContainEqual(
+        expect.objectContaining({
+          event: "post.task.blocked",
+          agentId: creator.agentId,
+          subject: "extension:record-blocks: blocking-recorder",
+        }),
+      );
+    });
+
+    test("continue and valid rewrites emit no blocked event", async () => {
+      const recorder = await installAndEnable("record-blocks");
+      expect((await postTask({ task: "continued task" })).status).toBe(201);
+      await installAndEnable("rewrite-task-priority");
+      const modified = await postTask({ task: "rewritten task" });
+      expect(modified.status).toBe(201);
+      expect(modified.body.priority).toBe(1);
+      expect(events).toEqual([]);
+      expect(await getKv(`task:agent:${recorder.agentId}`, "ext:record-blocks:count")).toBeNull();
+    });
+
+    test("a throwing bus observer does not replace the blocked response", async () => {
+      await installAndEnable("block-tasks-from-source", { source: "rest" });
+      let calls = 0;
+      const observer = () => {
+        calls++;
+        throw new Error("broken block observer");
+      };
+      const error = spyOn(console, "error").mockImplementation(() => {});
+      workflowEventBus.on("task.create_blocked", observer);
+      try {
+        expect((await postTask({ task: "still blocked" })).status).toBe(422);
+        expect(calls).toBe(1);
+      } finally {
+        workflowEventBus.off("task.create_blocked", observer);
+        error.mockRestore();
+      }
+    });
   });
 
   test("REST task creation applies rewrites and reports blocks as 422", async () => {

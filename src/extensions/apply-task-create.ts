@@ -2,7 +2,8 @@ import { explicitModelErrorForAgent } from "../be/model-validation";
 import type { RequestInfo } from "../tools/utils";
 import { type CreateTaskOptions, CreateTaskOptionsSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import type { TaskCreateModify, TaskCreateOrigin } from "./contract";
+import { workflowEventBus } from "../workflows/event-bus";
+import type { TaskBlockedEvent, TaskCreateModify, TaskCreateOrigin } from "./contract";
 import { dispatchPre, extensionIdForAgent, listRegistered } from "./dispatcher";
 
 const MODIFIABLE_OPTION_KEYS = [
@@ -69,6 +70,14 @@ function warnDroppedKey(extensionName: string, key: string): void {
   );
 }
 
+function scrubFields<T extends object>(fields: T): T {
+  return Object.fromEntries(
+    Object.entries(fields)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [key, typeof value === "string" ? scrubSecrets(value) : value]),
+  ) as T;
+}
+
 export async function applyPreTaskCreate(
   args: ApplyPreTaskCreateArgs,
 ): Promise<ApplyPreTaskCreateResult> {
@@ -79,6 +88,48 @@ export async function applyPreTaskCreate(
   const origin = creatingExtension
     ? (`extension:${creatingExtension.record.name}` as const)
     : args.origin;
+
+  const blocked = (
+    reason: string,
+    extension: TaskBlockedEvent["extension"],
+  ): ApplyPreTaskCreateResult => {
+    const { options, requestInfo } = args;
+    const event: TaskBlockedEvent = {
+      extension,
+      reason: scrubSecrets(reason),
+      origin,
+      source: options.source,
+      requester: scrubFields({
+        userId: options.requestedByUserId,
+        agentId: requestInfo?.agentId ?? options.creatorAgentId,
+        slackUserId: options.slackUserId,
+      }),
+      context: scrubFields({
+        contextKey: options.contextKey ?? requestInfo?.contextKey,
+        scheduleId: options.scheduleId,
+        workflowRunId: options.workflowRunId,
+        workflowRunStepId: options.workflowRunStepId,
+        parentTaskId: options.parentTaskId,
+        vcsRepo: options.vcsRepo,
+        vcsNumber: options.vcsNumber,
+        slackChannelId: options.slackChannelId,
+        slackThreadTs: options.slackThreadTs,
+      }),
+      description: scrubSecrets(args.description).slice(0, 500),
+    };
+    try {
+      workflowEventBus.emit("task.create_blocked", {
+        ...event,
+        skipExtensionId: creatingExtensionId,
+      });
+    } catch (error) {
+      console.error(
+        "[extensions] task.create_blocked event not emitted:",
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+      );
+    }
+    return { kind: "blocked", reason: event.reason, extension };
+  };
 
   // The last extension that rewrote `model` or `agentId`. The final pair is re-checked
   // against the assignee's harness, because the caller validated the pre-hook pair only.
@@ -125,11 +176,7 @@ export async function applyPreTaskCreate(
   );
 
   if (result.action === "block") {
-    return {
-      kind: "blocked",
-      reason: result.reason,
-      extension: result.extension,
-    };
+    return blocked(result.reason, result.extension);
   }
   if (result.action === "continue") {
     return { kind: "proceed", description: args.description, options: args.options };
@@ -146,11 +193,10 @@ export async function applyPreTaskCreate(
       agentId: options.agentId,
     });
     if (modelError) {
-      return {
-        kind: "blocked",
-        reason: `pre.task.create rewrite from extension "${modelEditor.name}" is invalid: ${modelError}`,
-        extension: modelEditor,
-      };
+      return blocked(
+        `pre.task.create rewrite from extension "${modelEditor.name}" is invalid: ${modelError}`,
+        modelEditor,
+      );
     }
   }
   return {

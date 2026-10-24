@@ -268,7 +268,9 @@ flowchart TD
     M -- Continue --> N[Run core operation]
     M -- Modify --> O[Validate change]
     O --> N
-    M -- Block --> P[Return blocked result]
+    M -- Block --> Y[Blocked attempt event]
+    Y --> P[Return blocked result]
+    Y --> X[Dispatch post handlers]
     N --> Q[Task event after commit]
     N --> R[Tool event after finalization]
     V[Authorized Slack message] --> W[Post Slack message]
@@ -299,8 +301,10 @@ Each valid modification becomes the next handler's input.
 The first block result stops the chain.
 Each boundary validates a modification against a schema before it applies the change (`validateModify`). An invalid modification is recorded as an extension error and ignored, and the core operation continues.
 
-Task event bus handlers run after commit.
+Events for existing tasks run after commit.
 The post bridge reads the current task and then calls `dispatchPost`.
+Blocked task creation emits `task.create_blocked` once per attempt, without a task row.
+The bridge forwards it as `post.task.blocked` and skips the creating extension.
 Tool post events run after tool result finalization.
 The Slack post event runs after authorization and before route dispatch.
 `pre.chat.route` runs after the Chat SDK thread buffer flushes and before task creation, outside any transaction. `post.chat.message` is bridged from the `chat.message.received` and `chat.message.sent` bus events.

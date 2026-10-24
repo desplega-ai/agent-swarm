@@ -1,0 +1,7 @@
+{
+  "name": "record-blocks",
+  "description": "Records blocked task attempts",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}
