@@ -16,6 +16,7 @@ handlers, user cancel, user retry, crash). Code map: `ACTIONS.md`. Calibration: 
 | Closed by #1832 (CX11) | **1** |
 | Open counterexamples on `main` @ `eaf5d0cc1` (CX12 from #1832, CX13 pre-existing) | **2**, no repro test yet |
 | Open counterexamples on `main` @ `7912fff73` (CX14 from #1926) | **1**, no repro test yet |
+| Open counterexamples on `main` @ `77039db51` (CX15 from #2364) | **1**, no repro test yet |
 | Dropped as model drift | **0** (false-positive rate 0 / 7) |
 
 CX1-CX7 each have a repro in `src/tests/workflow-tla-races.test.ts`. The tests call the
@@ -529,3 +530,72 @@ Re-run with tla2tools 2.19, BFS, `-workers 4`. Every config gives the same verdi
 | `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,066 / 13,005 | 20 / - |
 | `Probe-child-run.cfg` / control | holds / CX12 found | 13,564 / 338,173 | - / 34 |
 | `Probe-child-run-unreadable.cfg` (new) | CX14 found | 1,151 | 19 |
+
+## Sync with #2364 (`main` @ `77039db51`)
+
+#2364 keeps one child run per `sub-workflow` invocation across crashes and retries. New fix
+flag F8 `FixStepFence` models it (ACTIONS.md, "Fix flags"); it is `TRUE` in the current-code
+configs and `FALSE` in the calibration, `Fix-*`, `Ctl-*`, `Probe-cancel-finalize` and
+`Probe-input-await` configs, which give the same verdicts and, where they hold, the same
+distinct-state counts as on `92fc18110`. What changed in the model:
+
+- Every executor result write is fenced on the claim (step `running` with the claimed
+  `retryCount`, run `running`/`waiting`): `XCkOk`, `XFail`, `P6`, `P7`. A stale execution writes
+  nothing and its walk sees `failed`. An exhausted failure writes the step and the run in one
+  transaction, so `P10` is pre-F8 only.
+- With `ChildRunResume`: an orphaned `running` sub-workflow row is re-claimed instead of getting a
+  new row (`XDedup`, `XChild`); a child is started only while its attempt still runs and is
+  reused by a second call of the same attempt (`ChildStart`); `resumeFromChildRun` settles in one
+  transaction on the current attempt's child and retries a failed child (`EC`, `HC`); the poller
+  re-arms the resume after its park (`P8`); and heartbeat Case 7 re-walks orphaned rows
+  (`H14`-`H17`). `AtMostOneExecuting` counts the child, not the executor call, for these nodes.
+- Run creation commits the run with its context while the run is already held, after the inputs
+  resolve, so the `IWalk` window (`InputAwait`) and the readiness-preflight window no longer
+  exist on `main`. `Probe-input-await.cfg` now models older code.
+
+New probes: `Probe-child-run-crash.cfg` (one sub-workflow branch, one crash, boot sweep only)
+holds; its control (F8 off) finds the bug #2364 fixes, a second row and a second child after a
+crash (`… XRun (A child started) → Crash → H1 → H2 → H3 → … → XDedup (second A row)`).
+`Probe-child-run.cfg` still holds with the larger F8 state space. `src/tests/workflow-tla-races.test.ts`
++ `src/tests/workflow-sub-workflow.test.ts`: 40 pass / 0 fail / 0 `test.failing`.
+
+### CX15 (opened by #2364): the Case 7 sweep re-walks a row that parked and was queued for retry
+
+Leaf `A` is a `sub-workflow` step. A periodic sweep's Case 7 query snapshots `A` while its
+executor is still running. `A` then parks, its child fails, and the resume schedules a retry
+(`A` failed, `nextRetryAt` set). The sweep re-checks only `isWorkflowRunActive`,
+`isStepExecuting` and the run status, all of which pass, and walks `A`. `executeStep` re-claims
+only a `running` row, so it inserts a second `A` row and starts a child for it, while the retry
+poller claims the first row and starts that attempt's child: two children for one node.
+
+- Invariant: `AtMostOneExecuting` (Inv2). `Probe-orphan-sweep.cfg` (one branch, no crash, one
+  sweep), 4,651 distinct states, depth 35.
+- Trace: `… XRun (A child started) → H14 (A running) → XCkWait (A waiting) → WRet → H15 → TaskFinish(A fail) → E1 → H16 → H17 (walk [A]) → WStart → EC (A retry pending) → XDedup (second A row) → XRun → P1 → P4 → P5 (retry child)`
+- `Probe-child-run.cfg` does not reach it: `MaxSteps = 3` leaves no room for a second `A` row.
+- Re-checking that the row is still the node's latest `running` row right before the walk, or
+  dropping retry-pending nodes as Case 1 does (F4), would close it. Not fixed here: this PR
+  changes the spec only.
+
+Re-run with tla2tools 2.19, BFS, `-workers 8` (`-workers 4` for the three one-branch probes).
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 33,463 | 26 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 14,590 | 19 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 305 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 3,933 / 3,031 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,511 / 2,419 / 34,638 / 7,453 / 661 / 1,043 | 22 / 18 / 29 / 32 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 686 | - / 20 |
+| `Probe-task-retry.cfg` | CX12 found | 1,009,160 | 34 |
+| `Probe-cancel-finalize.cfg` | CX13 found | 826 | 17 |
+| `Probe-input-await.cfg` | CX6 found | 370 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,284 / 12,899 | 20 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 4,063,408 / 392,025 | - / 34 |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,615 | 18 |
+| `Probe-child-run-crash.cfg` / control (new) | holds / #2364 bug found | 9,444 / 485 | - / 18 |
+| `Probe-orphan-sweep.cfg` (new) | CX15 found | 4,651 | 35 |
+
+`Probe-replay-unreadable-control.cfg` drops from 13,005 to 12,899 distinct states: with F8 a
+stale executor write no longer lands, so fewer states are reachable. It still holds.
+
