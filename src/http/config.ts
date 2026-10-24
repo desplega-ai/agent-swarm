@@ -23,8 +23,9 @@ import {
   isInternalConfigKey,
   validateConfigEntry,
 } from "../be/swarm-config-guard";
+import { isScriptRunToken } from "../be/users";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
-import { SwarmConfigSchema } from "../types";
+import { type SwarmConfig, SwarmConfigSchema } from "../types";
 import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
@@ -109,6 +110,49 @@ async function resolveSecretsRead(
     includeRepoSecrets: !(auth?.kind === "agent" && auth.tokenKind !== "task" && scope !== "all"),
     secretsNote: includeSecrets && scope === "none" ? SECRETS_FORCE_MASK_NOTE : "",
   };
+}
+
+/**
+ * Ids of the rows a script run's token reads unmasked on its own
+ * `/api/config/resolved` (its agent over global, no repo secrets). The run
+ * already holds these values in `ctx.swarm.config`. `undefined` for any other
+ * caller.
+ */
+async function scriptRunHeldConfigIds(req: IncomingMessage): Promise<Set<string> | undefined> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "agent" || auth.tokenKind !== "agent") return undefined;
+  if (!(await isScriptRunToken(auth.tokenId))) return undefined;
+  const held = stripApiOnlyKeys(
+    await getResolvedConfig(auth.agentId, undefined, { includeRepoSecrets: false }),
+  );
+  return new Set(held.map((config) => config.id));
+}
+
+/**
+ * Mask a raw list or by-id read for this caller. A script run's token gets
+ * the rows it holds (see {@link scriptRunHeldConfigIds}) unmasked, so
+ * `config_list` and `ctx.swarm.config` agree; every other secret row stays
+ * masked. Unmasked secret values are registered with the scrubber.
+ */
+async function maskConfigRead(
+  req: IncomingMessage,
+  configs: SwarmConfig[],
+  includeSecrets: boolean,
+): Promise<{ result: SwarmConfig[]; secretsNote: string }> {
+  const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
+  const held =
+    includeSecrets && !effectiveIncludeSecrets ? await scriptRunHeldConfigIds(req) : undefined;
+  const reveal = (config: SwarmConfig) => effectiveIncludeSecrets || !!held?.has(config.id);
+  const result = configs.map((config) =>
+    config.isSecret && !reveal(config) ? maskSecrets([config])[0]! : config,
+  );
+  for (const config of result) {
+    if (config.isSecret && config.value && reveal(config)) {
+      registerVolatileSecret(config.value, `config:${config.key}`);
+    }
+  }
+  const anyMasked = result.some((config) => config.isSecret && !reveal(config));
+  return { result, secretsNote: held && !anyMasked ? "" : secretsNote };
 }
 
 /**
@@ -455,13 +499,9 @@ export async function handleConfig(
       jsonError(res, "Config not found", 404);
       return true;
     }
-    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
-    const singleResult = effectiveIncludeSecrets ? config : maskSecrets([config])[0]!;
-    if (effectiveIncludeSecrets && singleResult.isSecret && singleResult.value) {
-      registerVolatileSecret(singleResult.value, `config:${singleResult.key}`);
-    }
+    const { result, secretsNote } = await maskConfigRead(req, [config], includeSecrets);
     getConfigById.respond(res, 200, {
-      ...singleResult,
+      ...result[0]!,
       ...(secretsNote ? { message: `Found 1 config(s).${secretsNote}` } : {}),
     });
     return true;
@@ -471,7 +511,6 @@ export async function handleConfig(
     const parsed = await listConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const configs = stripApiOnlyKeys(
       await getSwarmConfigs({
         scope: parsed.query.scope || undefined,
@@ -479,14 +518,7 @@ export async function handleConfig(
         key: parsed.query.key,
       }),
     );
-    const listResult = effectiveIncludeSecrets ? configs : maskSecrets(configs);
-    if (effectiveIncludeSecrets) {
-      for (const c of listResult) {
-        if (c.isSecret && c.value) {
-          registerVolatileSecret(c.value, `config:${c.key}`);
-        }
-      }
-    }
+    const { result: listResult, secretsNote } = await maskConfigRead(req, configs, includeSecrets);
     listConfig.respond(res, 200, {
       configs: listResult,
       ...(secretsNote ? { message: `Found ${listResult.length} config(s).${secretsNote}` } : {}),

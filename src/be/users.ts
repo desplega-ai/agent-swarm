@@ -632,6 +632,15 @@ export async function mintScriptRunToken(
   return await insertSessionToken(agentId, null, null, ttlMs, null, undefined, null, null, true);
 }
 
+/** Whether a session token was minted by `mintScriptRunToken`. */
+export async function isScriptRunToken(tokenId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ scriptRun: number }>(
+    "SELECT scriptRun FROM session_tokens WHERE id = ?",
+    [tokenId],
+  );
+  return row?.scriptRun === 1;
+}
+
 export async function insertSessionToken(
   agentId: string,
   taskId: string | null,
