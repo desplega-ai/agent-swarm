@@ -139,6 +139,31 @@ async function nudge(kind: WorkerNudge["kind"], taskId?: string) {
   expect((await waiting)?.kind).toBe(kind);
 }
 
+test("shutdown stops an open poll window before it can claim a resume", async () => {
+  let shuttingDown = false;
+  // The second poll would claim the resume created during shutdown.
+  pollTriggerAfter = 2;
+  const sleep = spyOn(Bun, "sleep").mockImplementation(async () => {
+    expect(requests.filter((r) => r === "GET /api/poll")).toHaveLength(1);
+    shuttingDown = true;
+  });
+  try {
+    const trigger = await pollForTrigger({
+      apiUrl,
+      apiKey,
+      agentId,
+      pollInterval: 2,
+      pollTimeout: 5000,
+      shouldStop: () => shuttingDown,
+    });
+    expect(shuttingDown).toBe(true);
+    expect(trigger).toBeNull();
+    expect(requests.filter((r) => r === "GET /api/poll")).toHaveLength(1);
+  } finally {
+    sleep.mockRestore();
+  }
+});
+
 async function poll(now: number, mode: DeliveryMode = "push") {
   const checks = delivery.checks(mode, now);
   const schedule = delivery.schedule({

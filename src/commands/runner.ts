@@ -3352,6 +3352,8 @@ export interface PollOptions {
   pollTimeout: number;
   /** Push scheduling fetches once, then returns control to the runner. */
   singlePoll?: boolean;
+  /** Stop an open poll window before its next claim request. */
+  shouldStop?: () => boolean;
   /** Distinguishes a failed fetch from an empty successful response. */
   onPollFailure?: () => void;
   since?: string; // Optional: for filtering finished tasks
@@ -3669,6 +3671,7 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
   }
 
   while (Date.now() - startTime < opts.pollTimeout) {
+    if (opts.shouldStop?.()) return null;
     try {
       // Build URL with optional since parameter
       let url = `${opts.apiUrl}/api/poll`;
@@ -7099,7 +7102,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
     }
 
-    // Only poll if we have capacity and the API is not draining
+    // Only poll if we have capacity and neither the API nor worker is draining
     const schedule = pushDelivery.schedule({
       mode: state.deliveryMode ?? "poll",
       push: deliveryChecks.push,
@@ -7108,7 +7111,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         exitAfterTasks === null
           ? state.maxConcurrent
           : Math.min(state.maxConcurrent, Math.max(0, exitAfterTasks - state.tasksProcessed)),
-      draining: state.apiDraining,
+      draining: state.apiDraining || shuttingDown,
       lastPushPingAt,
       pollInterval: PollIntervalMs,
     });
@@ -7146,6 +7149,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           runtimeInstanceId,
           pollTimeout: effectiveTimeout,
           singlePoll: schedule.singlePoll,
+          shouldStop: () => shuttingDown,
           onPollFailure,
           harnessProvider: state.harnessProvider,
           onApiDrainSignal: (draining) => applyApiDrainSignal(state, role, draining),
