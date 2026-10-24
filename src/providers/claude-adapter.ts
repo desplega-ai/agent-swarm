@@ -18,6 +18,11 @@ import { promisify } from "node:util";
 import { deriveDefaultRoute, routeCredentialStatus, routeUnsetEnv } from "@desplega/model-routing";
 import { type Span, trace } from "@opentelemetry/api";
 import {
+  contextBoundNoteMarkerPath,
+  contextStatePath,
+  recordContextState,
+} from "../hooks/context-bound-note";
+import {
   type RunStopHookSessionSummaryOpts,
   runStopHookSessionSummarySubprocess,
 } from "../hooks/hook";
@@ -130,10 +135,17 @@ async function writeTaskFile(key: string | number, data: TaskFileData): Promise<
 }
 
 export async function cleanupTaskFile(key: string | number): Promise<void> {
-  try {
-    await unlink(getTaskFilePath(key));
-  } catch {
-    // File might already be deleted or never created
+  const taskFilePath = getTaskFilePath(key);
+  for (const path of [
+    taskFilePath,
+    contextStatePath(taskFilePath),
+    contextBoundNoteMarkerPath(taskFilePath),
+  ]) {
+    try {
+      await unlink(path);
+    } catch {
+      // File might already be deleted or never created
+    }
   }
 }
 
@@ -909,6 +921,8 @@ class ClaudeSession implements ProviderSession {
   private appliedReasoningEffort: ReasoningEffort | null;
   /** Last non-empty assistant text seen; surfaced as ProviderResult.output — same pattern as pi-mono/claude-managed. */
   private lastAssistantText = "";
+  /** Last value written to the context state file read by the context-bound note hook. */
+  private lastContextTokens: number | undefined;
   /** Per-session stream-json transcript used by the parent-owned session summarizer. */
   private transcript: string[];
   /** Keeps the session heartbeat fresh while Claude idles on background tasks. */
@@ -1263,6 +1277,13 @@ class ClaudeSession implements ProviderSession {
       if (normalized.contextWindowSize) this.contextWindowSize = normalized.contextWindowSize;
       if (normalized.cost) setCost(normalized.cost);
       if (normalized.assistantText) this.lastAssistantText = normalized.assistantText;
+      if (
+        normalized.requestContextTokens !== undefined &&
+        normalized.requestContextTokens !== this.lastContextTokens
+      ) {
+        this.lastContextTokens = normalized.requestContextTokens;
+        recordContextState(getTaskFilePath(this.taskFileKey), normalized.requestContextTokens);
+      }
       this.transcript.push(...normalized.transcriptEntries);
       for (const event of normalized.events) this.emit(event);
 

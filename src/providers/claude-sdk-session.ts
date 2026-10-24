@@ -9,6 +9,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
+import { recordContextState } from "../hooks/context-bound-note";
 import type { RunStopHookSessionSummaryOpts } from "../hooks/hook";
 import { getContextWindowSize } from "../utils/context-window";
 import {
@@ -316,6 +317,8 @@ class ClaudeSdkSession implements ProviderSession {
   private contextWindowSize: number;
   private transcript: string[];
   private lastAssistantText = "";
+  /** Last value written to the context state file read by the context-bound note hook. */
+  private lastContextTokens: number | undefined;
   private lastCost: CostData | undefined;
   private aborted = false;
   private abortReason = "cancelled";
@@ -434,6 +437,13 @@ class ClaudeSdkSession implements ProviderSession {
     if (normalized.contextWindowSize) this.contextWindowSize = normalized.contextWindowSize;
     if (normalized.cost) this.lastCost = normalized.cost;
     if (normalized.assistantText) this.lastAssistantText = normalized.assistantText;
+    if (
+      normalized.requestContextTokens !== undefined &&
+      normalized.requestContextTokens !== this.lastContextTokens
+    ) {
+      this.lastContextTokens = normalized.requestContextTokens;
+      recordContextState(this.options.taskFilePath, normalized.requestContextTokens);
+    }
     this.transcript.push(...normalized.transcriptEntries);
     for (const event of normalized.events) this.emit(event);
     trackErrorFromJson(json, this.errorTracker);

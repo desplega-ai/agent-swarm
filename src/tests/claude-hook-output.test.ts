@@ -82,7 +82,11 @@ afterAll(async () => {
   await rm(projectDir, { recursive: true, force: true });
 });
 
-async function runHook(event: Record<string, unknown>, taskId: string) {
+async function runHook(
+  event: Record<string, unknown>,
+  taskId: string,
+  extraEnv: Record<string, string> = {},
+) {
   const taskFile = join(projectDir, `task-${taskId}.json`);
   await Bun.write(
     taskFile,
@@ -92,6 +96,8 @@ async function runHook(event: Record<string, unknown>, taskId: string) {
     ...process.env,
     CLAUDE_PROJECT_DIR: projectDir,
     TASK_FILE: taskFile,
+    CONTEXT_BOUND_NOTE_TOKENS: undefined,
+    ...extraEnv,
   };
   return runChild(["bun", HOOK_PATH], {
     cwd: projectDir,
@@ -229,5 +235,54 @@ describe("claude hook stdout", () => {
       expect(out.hookSpecificOutput.additionalContext).toContain("Task ID: task-123.");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "worker context-bound note fires once as PostToolUse additionalContext",
+    async () => {
+      Object.assign(state, { isLead: false, cancelledTaskId: null, shouldBlockPolling: false });
+      const taskId = crypto.randomUUID();
+      await Bun.write(
+        join(projectDir, `task-${taskId}.json.context.json`),
+        JSON.stringify({ contextTokens: 250_000 }),
+      );
+      const event = { hook_event_name: "PostToolUse", ...bashTouch, tool_response: {} };
+
+      const first = await runHook(event, taskId);
+      const out = parseSoleJson(first.stdout) as { hookSpecificOutput: Record<string, string> };
+      expect(out.hookSpecificOutput.hookEventName).toBe("PostToolUse");
+      expect(out.hookSpecificOutput.additionalContext).toStartWith(
+        "Context is 250,000 tokens. Keep this task bounded",
+      );
+
+      const second = await runHook(event, taskId);
+      expect(second.exitCode).toBe(0);
+      expect(second.stdout.trim()).toBe("");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS * 2,
+  );
+
+  test(
+    "a subagent tool call does not consume the context-bound note",
+    async () => {
+      Object.assign(state, { isLead: false, cancelledTaskId: null, shouldBlockPolling: false });
+      const taskId = crypto.randomUUID();
+      await Bun.write(
+        join(projectDir, `task-${taskId}.json.context.json`),
+        JSON.stringify({ contextTokens: 250_000 }),
+      );
+      const event = { hook_event_name: "PostToolUse", ...bashTouch, tool_response: {} };
+
+      const child = await runHook({ ...event, agent_id: "child" }, taskId);
+      expect(child.exitCode).toBe(0);
+      expect(child.stdout.trim()).toBe("");
+
+      const main = await runHook(event, taskId);
+      const out = parseSoleJson(main.stdout) as { hookSpecificOutput: Record<string, string> };
+      expect(out.hookSpecificOutput.additionalContext).toStartWith(
+        "Context is 250,000 tokens. Keep this task bounded",
+      );
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS * 2,
   );
 });

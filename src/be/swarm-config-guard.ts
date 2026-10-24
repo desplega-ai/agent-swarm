@@ -610,6 +610,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
   // the cap exists to prevent (see context-preamble.ts).
   ...boundedIntegerValidators(["CONTEXT_PREAMBLE_MAX_TOKENS"], 100, 20000),
+  // 0 turns the one-time context-bound note off; no model window reaches 10M.
+  ...boundedIntegerValidators(["CONTEXT_BOUND_NOTE_TOKENS"], 0, 10_000_000),
   MEMORY_MIN_SIMILARITY: (value) =>
     validateFloatRange("MEMORY_MIN_SIMILARITY", value, 0, 1, "between 0 and 1 inclusive"),
   MEMORY_ACCESS_BOOST_MAX: (value) =>
