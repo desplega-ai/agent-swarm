@@ -3,9 +3,9 @@
 # codex-exec.sh — invoke `codex exec` (non-interactive) for delegated
 # implementation work. This is the SINGLE SOURCE OF TRUTH for the invocation
 # flags. The delegate-work skill calls only this script; its routing matrix
-# decides WHICH gpt-5.6 variant (-m) and effort (-e) each task gets:
-#   luna  = mechanical/bounded     terra = everyday frozen-spec slice
-#   sol   = hard/long-horizon      effort: medium|high|xhigh|max (never ultra)
+# decides WHICH gpt-6 variant (-m) and effort (-e) each task gets:
+#   gpt-6-luna  = trivial/mechanical   gpt-6.1-sol = default (medium) to hard (high/xhigh)
+#   gpt-6-astra = escalation only      effort: medium|high|xhigh|max (never ultra)
 #
 # Usage:
 #   codex-exec.sh [-m <model>] [-e <effort>] -C <workdir> -o <last-message-file> [-l <log-file>] "PROMPT"
@@ -24,7 +24,7 @@
 # parallel worktree runs from clobbering each other or the main tree.
 #
 # Env overrides (flags -m/-e take precedence):
-#   CODEX_MODEL   default: gpt-5.6-sol          gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna
+#   CODEX_MODEL   default: gpt-6.1-sol          gpt-6.1-sol | gpt-6-astra | gpt-6-luna
 #   CODEX_EFFORT  default: high                 reasoning effort (never "fast"/low)
 #   CODEX_SANDBOX default: workspace-write (passed to codex's -s option)
 #   CODEX_BYPASS  set to 1 to use --dangerously-bypass-approvals-and-sandbox
@@ -52,7 +52,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-MODEL="${MODEL_FLAG:-${CODEX_MODEL:-gpt-5.6-sol}}"
+MODEL="${MODEL_FLAG:-${CODEX_MODEL:-gpt-6.1-sol}}"
 EFFORT="${EFFORT_FLAG:-${CODEX_EFFORT:-high}}"
 SANDBOX="${CODEX_SANDBOX:-workspace-write}"
 

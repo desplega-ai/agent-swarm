@@ -1,6 +1,6 @@
 # delegate-work
 
-Claude (Fable 5) is the **orchestrator**: it thinks, designs, schedules, reviews, commits, and talks to the user. Everything else is delegated to the **cheapest executor that clears the quality bar**. Codex types; Claude judges.
+Claude (Opus 5.5 by default; Fable 5.1 only for hard problems) is the **orchestrator**: it thinks, designs, schedules, reviews, commits, and talks to the user. Everything else is delegated to the **cheapest executor that clears the quality bar**. Codex types; Claude judges.
 
 This skill applies in BOTH modes:
 - **Ad-hoc**: any time you'd spawn an `Agent`/Task, pick its model from the matrix below instead of the default.
@@ -12,15 +12,15 @@ Rankings 1–10, higher = better. Cost = subscription quota burned — both Clau
 
 | executor                | cost | code | taste | speed | role |
 |-------------------------|------|------|-------|-------|------|
-| fable-5                 | 2    | 9    | 9     | 4     | orchestration, deep reasoning, architecture, final judgment |
-| opus-5                  | 4    | 7    | 8     | 5     | UI implementation, complex review, browser E2E |
-| sonnet-5                | 5    | 5    | 7     | 7     | routine review, API QA agents, standard sub-agent work |
-| haiku-4.5               | 9    | 3    | 4     | 9     | search, locate, digest, mechanical sweeps — NEVER for writing code |
-| codex gpt-5.6-sol       | 8    | 10   | 6     | 6     | hard/long-horizon implementation, gnarly debugging |
-| codex gpt-5.6-terra     | 9    | 8    | 5     | 8     | everyday implementation from a frozen spec |
-| codex gpt-5.6-luna      | 10   | 6    | 4     | 10    | mechanical code: migrations, renames, test fills, dep bumps |
+| fable-5.1               | 2    | 8    | 9     | 4     | hard problems only: deep long-horizon reasoning, novel architecture, high-stakes judgment |
+| opus-5.5                | 5    | 9    | 9     | 6     | default orchestrator; UI implementation, complex review, browser E2E |
+| sonnet-5.5              | 6    | 8    | 7     | 7     | routine review, API QA agents, standard sub-agent work |
+| haiku-5.5               | 10   | 5    | 5     | 9     | search, locate, digest, sweeps, structure checks, bounded mechanical edits |
+| codex gpt-6-astra       | 5    | 10   | 6     | 4     | escalation only: hardest long-horizon or research-grade work |
+| codex gpt-6.1-sol       | 8    | 9    | 6     | 7     | default implementation, from everyday slices to gnarly debugging |
+| codex gpt-6-luna        | 10   | 4    | 3     | 10    | trivial mechanical code: renames, dep bumps, formatting sweeps |
 
-(Context for the Codex rows, from the 5.6 release: Sol-max is SOTA on the AA Coding Agent Index, ~3 pts above Fable 5 at ~⅓ the cost; Terra lands just above Fable 5; Luna outperforms Opus 5 — each in ~⅓ the time. Claude keeps the edge on taste and judgment; that's why review and UI stay Claude-side.)
+(Context, from the Sept/Oct 2026 launches. Terminal-Bench 4.0 public board: Opus 5.5 64.8%, Sonnet 5.5 61.8%, GPT-6 Astra and GPT-6.1 Sol both 58.2%, GPT-6 Sol 49.4%, GPT-6 Luna 16.4%. Haiku 5.5 launch figure: 39.2%. GPT-6.1 Sol matches Astra on DeepSWE at ⅕ the price and uses far fewer output tokens per task than Claude models. Opus 5.5 beats Fable 5.1 on most coding evals at 40% of the price, but Fable keeps the edge on long-horizon reasoning. Sonnet 5.5 sits within a few points of Opus 5.5, but at `max` effort it burns more tokens than Opus: if a Sonnet task needs `max`, use Opus instead. Haiku 5.5 beats GPT-6 Luna on every published row, at the same price. Claude keeps the edge on taste and judgment; that's why review and UI stay Claude-side.)
 
 **Defaults, not limits.** Standing permission to override: if a cheaper executor's output doesn't meet the bar, rerun or redo with a smarter one without asking. Judge the output, not the price tag. Escalating costs less than shipping mediocre work.
 
@@ -28,22 +28,26 @@ Rankings 1–10, higher = better. Cost = subscription quota burned — both Clau
 
 | work | executor | how |
 |------|----------|-----|
-| orchestration, deep reasoning, spec-writing, architecture | **Fable 5** | stay in the main session; never delegated |
-| UI implementation (pages, components, styles, UX flows) | **Opus 5** | `Agent` with `model: "opus"`, background |
-| code review — routine / per-phase | **Sonnet 5** | `Agent` with `model: "sonnet"` |
-| code review — complex, security-sensitive, cross-cutting, or reviewing Sol output | **Opus 5** (+ optional parallel Codex review, see Verify ↓) | `Agent` with `model: "opus"` |
-| API-level QA / E2E agents, plan-verification agents | **Sonnet 5** | `Agent` with `model: "sonnet"` |
-| browser E2E / driving the real UI | **Opus 5** | `Agent` with `model: "opus"`; use a browser-automation agent for local URLs unless stated differently |
-| search, locate, pattern-find, doc digests | **Haiku 4.5** | `Explore` / locator agents with `model: "haiku"` |
+| orchestration, spec-writing, architecture | **Opus 5.5** (default session model) | stay in the main session; never delegated |
+| hard problems: long-horizon reasoning, novel architecture with many unknowns, high-stakes design calls, or anything Opus 5.5 already got wrong twice | **Fable 5.1** | if the session runs on Opus, recommend the user switch with `/model`, or spawn a focused `Agent` with `model: "fable"` and judge its answer in the main session |
+| UI implementation (pages, components, styles, UX flows) | **Opus 5.5** | `Agent` with `model: "opus"`, background |
+| code review — routine / per-phase | **Sonnet 5.5** | `Agent` with `model: "sonnet"` |
+| code review — complex, security-sensitive, cross-cutting, or reviewing Sol/Astra output | **Opus 5.5** (+ optional parallel Codex review, see Verify ↓) | `Agent` with `model: "opus"` |
+| API-level QA / E2E agents, plan-verification agents | **Sonnet 5.5** | `Agent` with `model: "sonnet"` |
+| browser E2E / driving the real UI | **Opus 5.5** | `Agent` with `model: "opus"`; use a browser-automation agent for local URLs unless stated differently |
+| search, locate, pattern-find, doc digests, plan-structure validation, log/test-output triage | **Haiku 5.5** | `Explore` / locator agents with `model: "haiku"` |
+| bounded mechanical edits that need session tools (MCP, browser, secrets), so Codex can't take them | **Haiku 5.5** | `Agent` with `model: "haiku"` and an exact edit list; escalate to Sonnet on the first miss. No feature code, no design calls |
 | bulk mechanical call-sequences (~10+ similar tool/API calls, any fan-out over a list) | **a script** | `desplega:script-builder` — cheapest executor of all; one summary re-enters context, raw payloads never do |
 | raw code implementation from a frozen spec | **Codex** | variant by scope ↓, via `codex-exec.sh` |
 
 **Codex variant by scope** (effort in parentheses):
 
-- `gpt-5.6-luna` (`medium`→`high`) — mechanical & bounded: renames, mechanical migrations, test/coverage fills, CI fixes, dep bumps, single-file bug fix with known repro.
-- `gpt-5.6-terra` (`high`) — the default for a well-specified phase/step: single vertical slice, clear verification, few unknowns.
-- `gpt-5.6-sol` (`high`; `xhigh` for hard, `max` only for the gnarliest long-horizon work) — multi-file backend phases, cross-package changes, subtle debugging, anything where the spec has known-unknowns.
-- Never use Codex `ultra` (its own multi-agent mode) — parallelism is the orchestrator's job, via worktrees.
+- `gpt-6-luna` (`high`): trivial and mechanical only. Renames, dep bumps, formatting, codemod-style sweeps. It is weak at agentic terminal work, so escalate to `gpt-6.1-sol` on the first miss. Anything with judgment (test fills, CI fixes, bug fixes) starts at `gpt-6.1-sol` `medium`.
+- `gpt-6.1-sol` (`medium`): the default for a well-specified phase/step. Single vertical slice, clear verification, few unknowns. Also test/coverage fills, CI fixes, single-file bug fixes with a known repro.
+- `gpt-6.1-sol` (`high`; `xhigh` for hard): multi-file backend phases, cross-package changes, subtle debugging, anything where the spec has known-unknowns.
+- `gpt-6-astra` (`high`/`xhigh`; `max` only for the gnarliest long-horizon work): escalation rung. Use it after `gpt-6.1-sol` `xhigh` fails, or for research-grade work (hard science, theorem-style reasoning). It costs 5× Sol per token and does not beat 6.1 Sol on coding evals.
+- Older `gpt-5.6-*` and `gpt-6-sol` still appear in the model list. Don't route to them.
+- Never use Codex `ultra` (its own multi-agent mode). Parallelism is the orchestrator's job, via worktrees.
 
 **Keep in Claude regardless of matrix**: tasks where writing the spec IS the work (ambiguity = design); tiny edits (<~20 lines) where delegation overhead loses; anything needing session tools (MCP, browser, secrets); destructive/irreversible ops, pushes, GitHub mutations; judging delegated output — executors may contribute reviews, but the join and final verdict are never delegated, never skipped.
 
@@ -53,7 +57,7 @@ Heuristic: if the prompt reads as a work order → delegate; if writing it force
 
 When the harness exposes the `Workflow` tool AND the user has opted in (the desplega skills ask during setup — that answer IS the explicit opt-in the tool requires), fan-out runs as a workflow script instead of ad-hoc `Agent` calls. The matrix above still routes every executor; it just maps onto `agent()` opts:
 
-- **Model tiers** → `model: "haiku" | "sonnet" | "opus"`; omit `model` for work that must stay at orchestrator quality (it inherits the session model). `effort` follows the same logic: `low` for mechanical stages, higher tiers only for verify/judge stages.
+- **Model tiers** → `model: "haiku" | "sonnet" | "opus" | "fable"` (aliases resolve to the latest version of each family; `"fable"` only for hard-problem stages, per the routing table); omit `model` for work that must stay at orchestrator quality (it inherits the session model). `effort` follows the same logic: `low` for mechanical stages, higher tiers only for verify/judge stages.
 - **Named agents** (locators, analyzers, pattern-finders) → the `agentType` opt.
 - **Codex rows** still apply inside a workflow: an `agent()` can drive `codex-exec.sh` in its own worktree. Plan bookkeeping and commits stay orchestrator-side, as always.
 - **The join stays Claude-side**: the workflow returns data (findings, reports, file lists) — reading the diff, deduping findings, and the final verdict happen in the main session, never inside the script.
@@ -61,16 +65,16 @@ When the harness exposes the `Workflow` tool AND the user has opted in (the desp
 
 ## Codex: the one primitive
 
-> **Prerequisite**: the `codex` CLI on PATH, authenticated, with access to the gpt-5.6 models. If it's missing, the Codex rows of the matrix are unavailable — route implementation work to Claude executors instead (Opus for hard slices, Sonnet for routine ones) and tell the user why.
+> **Prerequisite**: the `codex` CLI on PATH, authenticated, with access to the gpt-6 models (check `~/.codex/models_cache.json` for the live slug list). If it's missing, the Codex rows of the matrix are unavailable. Route implementation work to Claude executors instead (Opus for hard slices, Sonnet for routine ones) and tell the user why.
 
 `bash ~/.claude/skills/delegate-work/scripts/codex-exec.sh`
 
 ```
-printf '%s' "$PROMPT" | bash ~/.claude/skills/delegate-work/scripts/codex-exec.sh -m gpt-5.6-terra -e high \
+printf '%s' "$PROMPT" | bash ~/.claude/skills/delegate-work/scripts/codex-exec.sh -m gpt-6.1-sol -e medium \
   -C <workdir> -o <report-file> -l <log-file>
 ```
 
-- `-m` model / `-e` reasoning effort — from the scope table above (script defaults: `gpt-5.6-sol` + `high`; env overrides `CODEX_MODEL`/`CODEX_EFFORT` still work).
+- `-m` model / `-e` reasoning effort — from the scope table above (script defaults: `gpt-6.1-sol` + `high`; env overrides `CODEX_MODEL`/`CODEX_EFFORT` still work).
 - `-C` working root — a **git worktree** for parallel work, repo root for sequential.
 - `-o` report file — Codex's final message; read THIS back, not the log.
 - `-l` log file — for monitoring only; keep raw logs out of the session.
@@ -101,7 +105,7 @@ Codex starts with zero session context. Every prompt: goal, exact repo/paths (ab
 - After web service-layer changes: probe the running dev server — unit tests miss RSC import crashes.
 - UI touched by anything non-Opus (or by Codex at all): hands-on polish pass — drive the real UI, screenshot, fix spacing/copy/empty-states yourself.
 - Then the per-phase review round before closing the phase: `desplega:code-reviewing` — two axes (Standards per `desplega:engineering-standards`, Spec against the phase body), parallel sub-agents Sonnet/Opus per the table, reported separately and never merged.
-- **Codex can review too**: for complex/high-stakes phases, add a Codex review (`codex exec review`, or a sol review prompt via `codex-exec.sh`) in parallel with the two Claude axes, then join — dedupe findings, discard false positives, rank the rest. The JOIN and the final verdict stay Claude-side; a review is never delegated to a single executor and never skipped.
+- **Codex can review too**: for complex/high-stakes phases, add a Codex review (`codex exec review`, or a `gpt-6.1-sol` review prompt via `codex-exec.sh`) in parallel with the two Claude axes, then join — dedupe findings, discard false positives, rank the rest. The JOIN and the final verdict stay Claude-side; a review is never delegated to a single executor and never skipped.
 
 ## Failure & mismatch handling
 

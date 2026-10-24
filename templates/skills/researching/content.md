@@ -8,6 +8,8 @@ You are conducting comprehensive research across the codebase to answer question
 
 **All read/research work goes through sub-agents** — keep raw tool output out of the main session. Default to `run_in_background: true`.
 
+A graceful shutdown kills background sub-agents and loses every finding they have not returned. Write each sub-agent's findings (source URL or file:line plus a verbatim quote) into the research doc as they arrive, and save a v1 doc after the first round. On a long task, prefer one narrow gap-filling sub-agent at a time over an early wide fan-out. For web sources use the WebSearch and WebFetch tools: scraped search-engine result pages return captcha walls from worker containers.
+
 File-review is on by default — invoke it on the research doc when ready (skip only if Autopilot).
 
 ## When to Use

@@ -1,5 +1,5 @@
 {
-  "commit": "77abe63716623f28177ebe29679c37b5859ef40e",
+  "commit": "a1e33bc1a6eab0ce975c36bdf99ee176925d5283",
   "excludedSkills": [
     "feedback"
   ],
@@ -16,8 +16,8 @@
     "templates/skills/comms/files/references/ste-rules.md": "6ee2ed5d6b49d2e421b6c9d22310a5b589fa1abe81de06213e4b89fbc1271e74",
     "templates/skills/comms/files/references/visual-shapes.md": "5e07e9250ad4cdc877af2281525185f0de89c01f90a077463a2c77c8a7b998e8",
     "templates/skills/delegate-work/config.json": "5b1542eb0be359bb8a17117fcf87917e0607d1b939ae3266ddffacdc14efb281",
-    "templates/skills/delegate-work/content.md": "c9562bd17846d3595d40172ecfdc6f85bb99eaf23597eb9d5aa9635d5c14d079",
-    "templates/skills/delegate-work/files/scripts/codex-exec.sh": "be9b33ba111afc8b38c20a4190eae19099025474d4ed3278d944ee0e6b6621af",
+    "templates/skills/delegate-work/content.md": "1046da2fbc5603c4deed92beb6d98c443df21e87cf83a7d7b3ce58dbc9d01997",
+    "templates/skills/delegate-work/files/scripts/codex-exec.sh": "4524a224fe0657d2e2872d97a70357c4a3ce84d2241bd935ed83febf1fac6e37",
     "templates/skills/design-docs/config.json": "b78141763541486d67a105e8fa23873c9ffee6a682832c4b7266b8320d55ead7",
     "templates/skills/design-docs/content.md": "fc860031defbd192c1b8e1c024b46509d78dcf10dbf1b8c93cc4d62396153a52",
     "templates/skills/design-docs/files/template.md": "72d2cdcf8713c08d525d69892c5fed536107594522e3e799ae44f51df7015a36",
@@ -44,7 +44,7 @@
     "templates/skills/questioning/content.md": "66f826a191e96d0041adca00a7c197a458de8e6fe164c1599b8708098d4109ab",
     "templates/skills/questioning/files/template.md": "a68d72801a0b10380bf773b07e9d2f8d4c5b4b1c609ce954289e38ffc78cc223",
     "templates/skills/researching/config.json": "921c062cab599097cc7677d2dad4797ec4d5844d2ee73607fbd417ec3fa487d4",
-    "templates/skills/researching/content.md": "0e8f98a7a5c75059fba6cd2c908b8268efce13192c1220ba594f2a9e3bf1e60a",
+    "templates/skills/researching/content.md": "92951142327415696726a2577defdb2379cc611cdafa9cdac92431a5e60f618f",
     "templates/skills/researching/files/template.md": "411d34b98c610ef715edf0f24d09f828ba2d0f65f688e7879ef33a9453007949",
     "templates/skills/reviewing/config.json": "09c40bb098e9738c60a848995fa9fe7568d158631a089c76ba02c0dd955445c7",
     "templates/skills/reviewing/content.md": "1bbc285c9ad8cc3312f1ee2c558b04ffee914ffb6f5c63fb3741fcbb3e300fa5",
@@ -130,13 +130,13 @@
       },
       {
         "from": "`${CLAUDE_PLUGIN_ROOT}/skills/delegate-work/scripts/codex-exec.sh`",
-        "line": 66,
+        "line": 70,
         "skill": "delegate-work",
         "to": "`bash ~/.claude/skills/delegate-work/scripts/codex-exec.sh`"
       },
       {
         "from": "| codex-exec.sh -m",
-        "line": 69,
+        "line": 73,
         "skill": "delegate-work",
         "to": "| bash ~/.claude/skills/delegate-work/scripts/codex-exec.sh -m"
       },
@@ -178,7 +178,7 @@
       },
       {
         "from": "cc-plugin/base/skills/researching/template.md",
-        "line": 113,
+        "line": 115,
         "skill": "researching",
         "to": "template.md"
       },
