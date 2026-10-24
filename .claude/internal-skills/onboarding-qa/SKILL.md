@@ -10,12 +10,12 @@ Find what stops a new user before they do. Each run is one persona on one fresh 
 | Mode | Tests | Entry point | Typical time |
 |---|---|---|---|
 | `install` (test 1) | Landing prompt, operator skill, docs, Compose, first task | `Read https://agent-swarm.dev/skill.md ...` given to a headless Claude Code on the box | 30-90 min |
-| `ui` (test 2) | Dashboard `/setup` on a clean swarm | `install.sh --tunnel`, then the printed `/setup` link | 15-30 min |
+| `ui` (test 2) | Dashboard `/setup` on a clean swarm | `install.sh --preset full --tunnel` (the documented command), then the printed `/setup` link | 15-30 min |
 | `stack` | Compose example + HTTPS on a real subdomain: lead, workers, agent-fs, MinIO, Caddy. Also the way to make a demo swarm | `stack.sh up` | 5 min to ready |
 
 An `install` run can continue into `ui` on the same box: the inner agent's install is then the "pre-deployed" swarm. A `stack` run can also feed `ui` mode (step 3 on): the `/setup` link then points at a real HTTPS domain instead of a tunnel.
 
-Status: `ui` mode ran live on 2026-10-21 (report `thoughts/taras/qa/2026-10-21-onboarding-qa-ui-U1.md`, about 17 min of box time). `stack` mode ran live on 2026-10-22 (by hand, a demo) and 2026-10-23 (`stack.sh`, 278 s to ready on v2.5.1). `install` mode has not had a live run yet: its turn summarizer is self-tested, the inner-agent loop is not. Fix this skill when the first install run finds a gap.
+Status: `ui` mode ran live on 2026-10-21 (report `thoughts/taras/qa/2026-10-21-onboarding-qa-ui-U1.md`, about 17 min of box time) and on 2026-10-24 (two passes, bare and `--preset full`, report on branch `fix/onboarding-polish`). `stack` mode ran live on 2026-10-22 (by hand, a demo) and 2026-10-23 (`stack.sh`, 278 s to ready on v2.5.1). `install` mode has not had a live run yet: its turn summarizer is self-tested, the inner-agent loop is not. Fix this skill when the first install run finds a gap.
 
 ## Hard rules
 
@@ -104,7 +104,7 @@ export AGENT_BROWSER_SESSION=onboarding-qa-$RUN   # own browser; never the share
 1. **Create the box with Docker:** `bash $S/box.sh up $RUN docker-ce`.
 2. **Install a clean swarm the documented way** (Bash timeout 600000, or `run_in_background`):
    ```bash
-   bash $S/ui-install.sh $RUN                 # = install.sh --tunnel, then tag + restart + org id
+   bash $S/ui-install.sh $RUN                 # = install.sh --preset full --tunnel, then tag + restart + org id. Bare default (solo, no lead): pass --tunnel only
    bash $S/ui-install.sh $RUN --reset         # next pass on the same box: wipe and reinstall
    ```
    No credentials go in here: like the docs path, workers wait for credentials until `/setup` adds them. To test a branch installer, set `ONBOARDING_QA_INSTALL_URL` to its raw `install.sh`.
@@ -171,6 +171,7 @@ rm -rf "$D"                       # holds box.env and setup-url (secrets); delet
 - `agent-browser fill` does not fire a paste event, and secret fields save on paste or when focus leaves the field group. `secrets.sh fill` blurs the field after it fills. The browser clipboard is denied in headless mode, so a real paste is not possible.
 - Agent tasks finish fast on a fresh swarm (16 s for the welcome task). Poll `box-api.sh $RUN GET '/api/tasks?limit=5'` for the status.
 - A fresh localtunnel URL can hang on the first request. `install.sh` warms it up. If the dashboard spins at connect, record it as friction (a real user sees the same).
+- Each `*.lt.desplega.ai` name waits for its own certificate (Caddy on host `desplega-main` asks ZeroSSL on demand). In the 14 days to 2026-10-24 the p90 was 138 s. On 2026-10-24 ZeroSSL was down and the TLS handshake hung for more than 10 min (`curl -v` stops after "Client hello"). Record it as friction, then keep the run going with a Cloudflare quick tunnel and log that as a rescue: `ssh -F $D/ssh_config box 'docker run -d --name qa-cloudflared --network host cloudflare/cloudflared tunnel --no-autoupdate --url http://localhost:3013'`. Read the `trycloudflare.com` URL from `docker logs qa-cloudflared`, and change `apiUrl` in `$D/setup-url` to it. An SSH port forward to `localhost` does not work: headless Chromium blocks the hosted dashboard from calling `http://localhost`.
 - The hosted dashboard keeps connections in localStorage. Run `agent-browser close` (same session) between passes, or the old box connection comes back.
 - Hetzner runs out of server types. On 2026-10-23 the whole `cx` line had no stock in any EU location. `box.sh` checks stock and falls back through the type and location lists. A create can still fail with `resource_unavailable`: run it again.
 - The Compose example ships the MinIO login `minioadmin/minioadmin`, and its `tls` profile makes the MinIO S3 API public through Caddy at `https://<fs host>/agentfs/*`. A request signed with the root login gets 200 there (checked 2026-10-23), so a stock `tls` install exposes every agent-fs file. `stack.sh` replaces the login. This is an open product finding.

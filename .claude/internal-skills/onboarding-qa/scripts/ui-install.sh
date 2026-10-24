@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Test 2 prep: a clean, tagged swarm on the QA box, installed the way the docs say.
 #
-#   ui-install.sh <run> [--reset] [install.sh args...]   (default args: --tunnel)
+#   ui-install.sh <run> [--reset] [install.sh args...]   (default args: --preset full --tunnel, as in the README and docs)
 #
 # 1. --reset first removes a previous install (compose down -v, tunnel, ~/agent-swarm).
 # 2. Runs the one-shot installer as root: curl install.sh | bash -s -- <args>, log in ~/install.log.
@@ -33,7 +33,7 @@ rm -rf ~/agent-swarm ~/install.log
 echo "previous install removed"
 REMOTE
 fi
-[ $# -gt 0 ] || set -- --tunnel
+[ $# -gt 0 ] || set -- --preset full --tunnel
 
 started=$(date +%s)
 echo "installing with $url $* ($(TZ=Europe/Madrid date '+%H:%M:%S') BCN)"
