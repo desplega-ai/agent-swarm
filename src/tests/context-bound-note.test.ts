@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import * as fsPromises from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,8 +87,16 @@ describe("claimContextBoundNote", () => {
   });
 
   test("fails open when the marker cannot be written", async () => {
-    const taskFile = join(dir, "missing-dir", "task.json");
-    expect(await claimContextBoundNote(taskFile, 200_000)).toBeNull();
+    const taskFile = taskFileWith(300_000);
+    const writeFile = spyOn(fsPromises, "writeFile").mockRejectedValue(
+      Object.assign(new Error("EIO: i/o error"), { code: "EIO" }),
+    );
+    try {
+      expect(await claimContextBoundNote(taskFile, 200_000)).toBeNull();
+      expect(writeFile).toHaveBeenCalledTimes(1);
+    } finally {
+      writeFile.mockRestore();
+    }
   });
 });
 

@@ -80,6 +80,8 @@ interface HookMessage {
   tool_input?: Record<string, unknown>;
   tool_response?: Record<string, unknown>;
   tool_use_id?: string;
+  /** Set only when the hook fires inside a subagent. */
+  agent_id?: string;
   prompt?: string;
   stop_hook_active?: boolean;
 }
@@ -1341,8 +1343,9 @@ export async function handleHook(): Promise<void> {
               `Task sent successfully.${maybeTaskId ? ` Task ID: ${maybeTaskId}.` : ""} Monitor progress using the get-task-details tool periodically.`,
             );
           }
-        } else {
+        } else if (!msg.agent_id) {
           // One-time nudge once the session's context crosses the threshold.
+          // Main thread only: a subagent call must not consume the marker.
           // Any failure means no note; it never blocks the tool call.
           try {
             const contextTokens = await claimContextBoundNote(

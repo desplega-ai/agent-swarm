@@ -261,4 +261,28 @@ describe("claude hook stdout", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS * 2,
   );
+
+  test(
+    "a subagent tool call does not consume the context-bound note",
+    async () => {
+      Object.assign(state, { isLead: false, cancelledTaskId: null, shouldBlockPolling: false });
+      const taskId = crypto.randomUUID();
+      await Bun.write(
+        join(projectDir, `task-${taskId}.json.context.json`),
+        JSON.stringify({ contextTokens: 250_000 }),
+      );
+      const event = { hook_event_name: "PostToolUse", ...bashTouch, tool_response: {} };
+
+      const child = await runHook({ ...event, agent_id: "child" }, taskId);
+      expect(child.exitCode).toBe(0);
+      expect(child.stdout.trim()).toBe("");
+
+      const main = await runHook(event, taskId);
+      const out = parseSoleJson(main.stdout) as { hookSpecificOutput: Record<string, string> };
+      expect(out.hookSpecificOutput.additionalContext).toStartWith(
+        "Context is 250,000 tokens. Keep this task bounded",
+      );
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS * 2,
+  );
 });
