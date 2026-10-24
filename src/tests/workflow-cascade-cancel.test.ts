@@ -209,6 +209,23 @@ async function linkedStep(
   return id;
 }
 
+/** How many write (non read-only) transactions `fn` opened. */
+async function writeTransactionsDuring(fn: () => Promise<unknown>): Promise<number> {
+  const client = getDbClient();
+  const realTransaction = client.transaction.bind(client);
+  let writes = 0;
+  const txSpy = spyOn(client, "transaction").mockImplementation(((txFn, opts) => {
+    if (!opts?.readOnly) writes++;
+    return realTransaction(txFn, opts);
+  }) as typeof client.transaction);
+  try {
+    await fn();
+  } finally {
+    txSpy.mockRestore();
+  }
+  return writes;
+}
+
 type Barrier = ReturnType<typeof barrier>;
 
 /**
@@ -410,27 +427,76 @@ describe("cascade cancel", () => {
     );
     await cancelWorkflowRun(rootId, "first");
 
-    const client = getDbClient();
-    const realTransaction = client.transaction.bind(client);
-    const writeTransactions: unknown[] = [];
-    const txSpy = spyOn(client, "transaction").mockImplementation(((fn, opts) => {
-      if (!opts?.readOnly) writeTransactions.push(fn);
-      return realTransaction(fn, opts);
-    }) as typeof client.transaction);
     const scanSpy = spyOn(workflowRuns, "getTaskIdsWithDependents");
     const cancelSpy = spyOn(db, "cancelTask");
+    let writes: number;
     try {
-      for (let i = 0; i < 3; i++) await cancelWorkflowRun(rootId, `repeat ${i}`);
+      writes = await writeTransactionsDuring(async () => {
+        for (let i = 0; i < 3; i++) await cancelWorkflowRun(rootId, `repeat ${i}`);
+      });
     } finally {
-      txSpy.mockRestore();
       scanSpy.mockRestore();
       cancelSpy.mockRestore();
     }
 
-    expect(writeTransactions).toHaveLength(0);
+    expect(writes).toBe(0);
     expect(scanSpy).not.toHaveBeenCalled();
     expect(cancelSpy).not.toHaveBeenCalled();
     expect((await getWorkflowRun(grandchildRun.id, "display"))?.error).toBe("first");
+  });
+
+  test("an approval linked to a cancelled tree is born cancelled, so a repeat cancel stays read-only", async () => {
+    const grandchild = await makeWorkflow(waitingDef);
+    const child = await makeWorkflow(parentOf(grandchild.id));
+    const root = await makeWorkflow(parentOf(child.id));
+    const rootId = await startWorkflowExecution(root, {}, registry);
+    const childRun = await runOf(child.id, "waiting");
+    await runOf(grandchild.id, "waiting");
+    await cancelWorkflowRun(rootId, "stop");
+    // A run an older release left live under the cancelled root.
+    const legacy = await linkedRun({
+      workflowId: child.id,
+      status: "waiting",
+      parentStepId: (await getWorkflowRunStepsByRunId(childRun.id))[0]!.id,
+      parentStepAttempt: 7,
+    });
+    const ask = (workflowRunId: string) =>
+      db.createApprovalRequest({
+        id: crypto.randomUUID(),
+        title: "Late ask",
+        questions: [{ id: "q1", type: "approval", label: "Approve?" }],
+        approvers: { policy: "any" },
+        workflowRunId,
+      });
+
+    // As POST /api/approval-requests does: a run link, no step, no HITL flag.
+    const onCancelled = await ask(childRun.id);
+    const onLegacy = await ask(legacy);
+
+    expect(onCancelled.status).toBe("cancelled");
+    expect(onCancelled.resolutionReason).toBe("stop");
+    expect(onLegacy.status).toBe("cancelled");
+    // The nearest cancelled ancestor is named.
+    expect(onLegacy.resolutionReason).toBe(`Ancestor workflow run ${childRun.id} is cancelled`);
+
+    // The legacy live run is open work: one cancel closes it, then repeats only read.
+    await cancelWorkflowRun(rootId);
+    expect(await status(legacy)).toBe("cancelled");
+    await ask(childRun.id);
+    expect(await writeTransactionsDuring(() => cancelWorkflowRun(rootId))).toBe(0);
+  });
+
+  test("an approval linked to a live run without a step stays pending", async () => {
+    const run = await makeWorkflow(waitingDef);
+    const runId = await startWorkflowExecution(run, {}, registry);
+    const created = await db.createApprovalRequest({
+      id: crypto.randomUUID(),
+      title: "Ask",
+      questions: [{ id: "q1", type: "approval", label: "Approve?" }],
+      approvers: { policy: "any" },
+      workflowRunId: runId,
+    });
+    expect(created.status).toBe("pending");
   });
 
   test("concurrent repeat cancels of one run share a single tree walk", async () => {

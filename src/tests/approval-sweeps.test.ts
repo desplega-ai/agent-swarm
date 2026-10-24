@@ -302,8 +302,10 @@ describe("approval sweeps", () => {
     });
 
     test("leaves a failed run as it is", async () => {
-      const { runId, stepId } = await makeRun("failed");
+      // The request was asked while the run was live; the run failed after.
+      const { runId, stepId } = await makeRun("waiting");
       const id = await makeRequest({ ageDays: 8, workflowRunId: runId, workflowRunStepId: stepId });
+      await updateWorkflowRun(runId, { status: "failed" });
 
       const result = await autoCancelStaleApprovalRequests();
 
@@ -417,13 +419,15 @@ describe("approval sweeps", () => {
     });
 
     test("times out a request on a completed run", async () => {
-      const { runId, stepId } = await makeRun("completed");
+      // The request was asked while the run was live; the run completed after.
+      const { runId, stepId } = await makeRun("waiting");
       const id = await makeRequest({
         ageDays: 0,
         expiresInMs: -60_000,
         workflowRunId: runId,
         workflowRunStepId: stepId,
       });
+      await updateWorkflowRun(runId, { status: "completed" });
       await timeoutExpiredApprovalRequests();
       expect((await getApprovalRequestById(id))!.status).toBe("timeout");
     });

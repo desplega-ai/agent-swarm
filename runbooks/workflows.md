@@ -369,7 +369,7 @@ cancel either commits first and is seen there, or sees the new row and cancels i
 |---|---|
 | Child run insert | `isParentStepAttemptCurrent`: step attempt `running`, run live, lineage clear |
 | Workflow task insert (`createTaskExtended` with `workflowRunStepId`) | `getStepExecutionBlock`; throws `WorkflowStepNotExecutableError` |
-| Approval request (`requireActionableWorkflow`) | created `cancelled` |
+| Approval request linked to an existing run (HITL executor, `POST /api/approval-requests`), with or without a step | created `cancelled` |
 | Step claim (`executeStep`), foreach item claim | no step is claimed |
 | Checkpoint fences, `checkpointStepWaiting` | nothing is written |
 | Task / approval / wait / child-run callbacks, `scheduleTaskStepRetry` | the step is not claimed and nothing routes |

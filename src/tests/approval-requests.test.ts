@@ -418,7 +418,7 @@ describe("Approval Requests", () => {
       expect(result).toBeNull();
     });
 
-    test("does not resolve a workflow approval after its run and HITL step are cancelled", async () => {
+    test("does not resolve a workflow approval after its run is cancelled", async () => {
       const workflow = await createWorkflow({
         name: `approval-cancel-${crypto.randomUUID()}`,
         definition: { nodes: [] },
@@ -432,11 +432,12 @@ describe("Approval Requests", () => {
         nodeId: "approval",
         nodeType: "human-in-the-loop",
       });
-      await updateWorkflowRun(runId, { status: "cancelled" });
-      await updateWorkflowRunStep(stepId, { status: "cancelled" });
+      // Asked while the run was live; the run was cancelled after, leaving
+      // the request pending (a cancelled step's trigger would close it).
       const approval = await createApprovalRequest(
         makeApprovalData({ workflowRunId: runId, workflowRunStepId: stepId }),
       );
+      await updateWorkflowRun(runId, { status: "cancelled" });
 
       const result = await resolveApprovalRequest(
         approval.id,
