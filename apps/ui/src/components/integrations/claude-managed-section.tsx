@@ -7,8 +7,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
-import type { IntegrationDef } from "@/lib/integrations-catalog";
-import { deriveIntegrationStatus, type EnvPresence } from "@/lib/integrations-status";
+import { getIntegrationFields, type IntegrationDef } from "@/lib/integrations-catalog";
+import {
+  deriveIntegrationStatus,
+  type EnvPresence,
+  findConfigForKey,
+} from "@/lib/integrations-status";
 
 // ---------------------------------------------------------------------------
 // Claude Managed Agents — special-flow section
@@ -19,9 +23,10 @@ import { deriveIntegrationStatus, type EnvPresence } from "@/lib/integrations-st
 //   1. An explainer + copyable CLI snippet
 //   2. A "Test connection" button that hits
 //      POST /api/integrations/claude-managed/test (calls beta.agents.retrieve)
-//   3. A connection status pill driven by `deriveIntegrationStatus` against the
+//   3. A presence pill driven by `deriveIntegrationStatus` against the
 //      catalog's required fields (ANTHROPIC_API_KEY, MANAGED_AGENT_ID,
-//      MANAGED_ENVIRONMENT_ID, MCP_BASE_URL).
+//      MANAGED_ENVIRONMENT_ID, MCP_BASE_URL). It says "Configured", never
+//      "Connected": only a passing test for the current values earns that.
 //
 // Unlike `codex-oauth`, the catalog DOES expose editable fields — so the
 // generic form still renders BELOW this section. This component only adds the
@@ -36,38 +41,77 @@ interface ClaudeManagedSectionProps {
 
 const SETUP_SNIPPET = "bunx @desplega.ai/agent-swarm claude-managed-setup";
 
+interface TestResult {
+  ok: boolean;
+  agentName?: string | null;
+  model?: string | null;
+  error?: string;
+}
+
+/**
+ * Identifies the config a test ran against: each required row's update time,
+ * or "env" when the value comes from the deploy env. Editing any of them
+ * makes an earlier result stale.
+ */
+export function claudeManagedFingerprint(
+  def: IntegrationDef,
+  configs: SwarmConfig[],
+  envPresence: EnvPresence,
+): string {
+  return getIntegrationFields(def)
+    .filter((field) => field.required)
+    .map((field) => {
+      const row = findConfigForKey(configs, field.key);
+      if (row) return `${field.key}=${row.lastUpdatedAt}`;
+      return `${field.key}=${envPresence[field.key] ? "env" : ""}`;
+    })
+    .join("|");
+}
+
 export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManagedSectionProps) {
   const status = deriveIntegrationStatus(def, configs, envPresence);
   const testConnection = useTestClaudeManagedConnection();
 
   const { copied, copy } = useCopyToClipboard();
-  const [lastResult, setLastResult] = useState<{
-    ok: boolean;
-    agentName?: string | null;
-    model?: string | null;
-    error?: string;
-  } | null>(null);
+  const [tested, setTested] = useState<{ fingerprint: string; result: TestResult } | null>(null);
+  const fingerprint = claudeManagedFingerprint(def, configs, envPresence);
+  // A result for values that have since changed says nothing about the current ones.
+  const lastResult = tested?.fingerprint === fingerprint ? tested.result : null;
 
   const handleCopy = () => copy(SETUP_SNIPPET);
 
   async function handleTest() {
+    // Pin the values the request was sent with, not the ones it returns to.
+    const testedFingerprint = fingerprint;
     try {
       const result = await testConnection.mutateAsync();
-      setLastResult(result);
+      setTested({ fingerprint: testedFingerprint, result });
     } catch {
       // mutation hook surfaces its own error toast
-      setLastResult({ ok: false, error: "Request failed" });
+      setTested({ fingerprint: testedFingerprint, result: { ok: false, error: "Request failed" } });
     }
   }
 
-  const statusBadge =
-    status === "configured" ? (
+  const testBadge = lastResult ? (
+    lastResult.ok ? (
       <Badge
         variant="outline"
         size="tag"
         className="border-status-success/30 text-status-success-strong"
       >
         Connected
+      </Badge>
+    ) : (
+      <Badge variant="outline" size="tag" className="border-status-error/30 text-status-error-strong">
+        Test failed
+      </Badge>
+    )
+  ) : null;
+
+  const statusBadge =
+    status === "configured" ? (
+      <Badge variant="outline" size="tag" className="border-status-info/30 text-status-info-strong">
+        Configured
       </Badge>
     ) : status === "partial" ? (
       <Badge
@@ -96,7 +140,7 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
           <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{SETUP_SNIPPET}</code>{" "}
           once to create the managed agent + environment. The CLI writes the IDs to{" "}
           <code className="font-mono">swarm_config</code>; this page will show the connection as
-          connected once the CLI completes.
+          configured once the CLI completes. Test the connection to confirm it works.
         </AlertDescription>
       </Alert>
 
@@ -130,6 +174,7 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">Status:</span>
               {statusBadge}
+              {testBadge}
             </div>
             <Button
               type="button"

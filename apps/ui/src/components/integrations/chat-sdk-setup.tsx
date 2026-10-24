@@ -1,5 +1,5 @@
 import { Check, ChevronRight, Copy } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import { isValidElement, type ReactNode, useState } from "react";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -247,26 +247,38 @@ interface ChatSdkSetupProps {
 
 const COPY_TOOLTIP = "Send this to Exty or your agent with computer use to set it up for you.";
 
+function nodeText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (!isValidElement<{ children?: ReactNode; href?: unknown }>(node)) return "";
+  const text = nodeText(node.props.children);
+  // "label (https://...)" so the link survives the copy.
+  return typeof node.props.href === "string" ? `${text} (${node.props.href})` : text;
+}
+
 /**
- * The steps as plain text for an agent: the rendered list (one source for
- * what a human and an agent read), with the links spelled out, plus the
- * values the agent must bring back to this card.
+ * Plain text of one setup step: text, chips and bold labels as written, links
+ * spelled out as "label (href)". Reads the React nodes, not the DOM, so it
+ * works while the list is collapsed and unmounted.
  */
-function agentBrief(
+export function stepText(node: ReactNode): string {
+  return nodeText(node).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The steps as plain text for an agent: the same step nodes the list renders
+ * (one source for what a human and an agent read), plus the values the agent
+ * must bring back to this card.
+ */
+export function agentBrief(
   adapter: ChatSdkAdapterName,
-  list: HTMLOListElement | null,
+  stepNodes: ReactNode[],
   webhookUrl: string | undefined,
   docsUrl: string | undefined,
 ): string {
   const def = CHAT_SDK_ADAPTER_DEFS.find((candidate) => candidate.name === adapter);
-  const steps = Array.from(list?.querySelectorAll("li") ?? []).map((item, index) => {
-    const clone = item.cloneNode(true) as HTMLElement;
-    // "label (https://...)" so the link survives the copy.
-    for (const anchor of Array.from(clone.querySelectorAll("a[href]"))) {
-      anchor.textContent = `${anchor.textContent} (${anchor.getAttribute("href")})`;
-    }
-    return `${index + 1}. ${clone.textContent?.replace(/\s+/g, " ").trim()}`;
-  });
+  const steps = stepNodes.map((step, index) => `${index + 1}. ${stepText(step)}`);
   const fields = (def?.fields ?? [])
     .map((field) => `- ${field.label} (${field.key})${field.required ? ", required" : ""}`)
     .join("\n");
@@ -292,9 +304,9 @@ export function ChatSdkSetup({
   inviteUrl,
   webhookUrl,
 }: ChatSdkSetupProps) {
-  const listRef = useRef<HTMLOListElement>(null);
   const { copied, copy } = useCopyToClipboard();
   const [open, setOpen] = useState(defaultOpen);
+  const stepNodes = steps(adapter, { docsUrl, inviteUrl });
   // The same header as CollapsibleSection (plain variant), with the copy
   // button beside the toggle: a button cannot sit inside the toggle button.
   return (
@@ -325,7 +337,7 @@ export function ChatSdkSetup({
               size="xs"
               variant="ghost"
               className="text-muted-foreground"
-              onClick={() => void copy(agentBrief(adapter, listRef.current, webhookUrl, docsUrl))}
+              onClick={() => void copy(agentBrief(adapter, stepNodes, webhookUrl, docsUrl))}
               aria-label={copied ? "Copied" : "Copy the setup steps for an agent"}
             >
               {copied ? <Check className="text-status-success-strong" /> : <Copy />}
@@ -337,11 +349,9 @@ export function ChatSdkSetup({
       </div>
       <AnimatedReveal open={open}>
         <div className="space-y-2 pt-1">
-          <ol
-            ref={listRef}
-            className="list-decimal space-y-1.5 pl-5 text-xs leading-5 text-muted-foreground marker:text-muted-foreground"
+          <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-5 text-muted-foreground marker:text-muted-foreground"
           >
-            {steps(adapter, { docsUrl, inviteUrl }).map((step, index) => (
+            {stepNodes.map((step, index) => (
               // The step list is static per adapter, so the index is a stable key.
               <li key={index} className="pl-1">
                 {step}
