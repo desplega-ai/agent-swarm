@@ -65,7 +65,7 @@ How:
 
 Deliver to agent-fs thoughts/<maker-agent-id>/videos/<slug>/: <1920x1080 [+ 1080x1350]> h264 yuv420p mp4,
 contact sheet(s), facts.json, reel.html.
-Output: agent-fs paths, a share-create link per mp4 (url + share id), ffprobe line, model you ran on,
+Output: agent-fs paths, a live app link per mp4, ffprobe line, model you ran on,
 each on-screen number with its source, music attribution (source link, license link, changes made).
 ```
 

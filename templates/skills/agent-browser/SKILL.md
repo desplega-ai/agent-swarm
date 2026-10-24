@@ -70,18 +70,18 @@ Add `--contact-sheet` to the start command for a timestamped PNG summary of visu
 
 ## Step 3: share the screenshot through agent-fs
 
-Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention: that copy is the durable original. Use `share-create` when a person needs to open the file. `--file` is binary-safe. `--content` is text-only and mangles PNGs.
+Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention: that copy is the durable original. A person opens it through the live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`. `--file` is binary-safe. `--content` is text-only and mangles PNGs.
 
 ```bash
 agent-fs write thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png \
   --file /tmp/<name>.png -m "<what it shows>"
 agent-fs stat thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json        # confirm size > 0
-agent-fs share-create thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json
 ```
 
 - **GitHub PR body or comment**: upload the PNG, GIF or mp4 as a GitHub user attachment with the `github-attach` skill and embed `![caption](https://github.com/user-attachments/assets/<uuid>)`. Attachments never expire and mp4s play inline. A UI PR puts a before (main) and after pair in the `## Before / after` table. Fallback for images only, when the GitHub token is an App token (`ghu_`/`ghs_`): `agent-fs signed-url <path> --inline --json` (expires in 7 days). Never a presigned URL for an mp4 or a doc: it downloads.
-- **Linear comment or Slack message**: paste the `share-create` link.
-- In `store-progress`, list the upload in the `attachments` field with `kind: "agent-fs"` and the path, and paste the `share-create` link for people who need to open the file.
+- **Linear comment or Slack message**: paste the live app link.
+- In `store-progress`, list the upload in the `attachments` field with `kind: "agent-fs"` and the path, and paste the live app link for people who need to open the file.
+- Make an `agent-fs share-create <path> --json` link only when the requester asks for one or the reader has no agent-fs login (customer, public post, email, named outsider). Never make one in case the file gets forwarded.
 - If `agent-fs auth whoami` fails, report the local path, say the upload was skipped, and continue.
 
 The `agent-fs` skill holds the full agent-fs recipe.

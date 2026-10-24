@@ -15,7 +15,7 @@ description: Make design-led motion-graphics videos with an agent swarm from one
       { "@type": "HowToStep", name: "Install the skills and set model and effort", text: "Create the open-prompt-showreel, video-generation, motion-design-video-analysis and motion-design-replication skills, and send each maker task with model claude-opus-5-5 and effort max." },
       { "@type": "HowToStep", name: "Brief the maker with one open prompt", text: "Use the brief template in lead-prompt.md. Give hard content rules (every number from a named source, the real logo, CC0 or CC BY music) and no storyboard." },
       { "@type": "HowToStep", name: "Let the maker read facts, build, and critique", text: "The maker writes facts.ts, builds a frame-addressable canvas reel, and looks at a contact sheet at least three times, fixing what looks weak each round." },
-      { "@type": "HowToStep", name: "Review and relay", text: "The Lead checks the contact sheet, the end card, every number against facts.json and the ffprobe line, then relays the agent-fs share link and the music attribution (source link, license link and the changes made to the track)." }
+      { "@type": "HowToStep", name: "Review and relay", text: "The Lead checks the contact sheet, the end card, every number against facts.json and the ffprobe line, then relays the agent-fs live app link and the music attribution (source link, license link and the changes made to the track)." }
     ]
   }}
 />
@@ -45,7 +45,7 @@ Music: ["Mist City"](https://opengameart.org/content/mist-city) by Section7, lic
   SH --> RN["render.mjs + music cut<br/>mp4 16:9 + 4:5"]
   RN --> FS["agent-fs<br/>mp4, sheets, facts.json"]
   FS --> LR["Lead review<br/>frames, end card, numbers"]
-  LR --> RY["Relay<br/>share link + credit"]
+  LR --> RY["Relay<br/>live link + credit"]
 `} />
 
 ## What it does
@@ -55,7 +55,7 @@ Music: ["Mist City"](https://opengameart.org/content/mist-city) by Section7, lic
 - **The real brand.** The end card uses the real Agent Swarm logo, never a redrawn mark.
 - **Music you may use.** CC0 or CC BY only, cut to the beat, credited on the end card, and in the post with the source link, the license link and the changes made.
 - **A visible critique loop.** At least three contact-sheet rounds, each one looked at, with the sheets kept.
-- **Delivery through agent-fs**, with a share link per mp4, and a Lead review before anything is relayed.
+- **Delivery through agent-fs**, with a live app link per mp4, and a Lead review before anything is relayed.
 
 ## Agents
 
@@ -69,7 +69,7 @@ Music: ["Mist City"](https://opengameart.org/content/mist-city) by Section7, lic
 - **`[Built-in]` `send-task`** — carries `model: claude-opus-5-5` and `effort: max` per task, plus `agentId` to pin the maker.
 - **`[Built-in]` `store-progress`** — the maker records its scratch directory in the first minute and the final artifacts at the end.
 - **`[Built-in]` `defer-task`** with `wakeOn:{event:"settled",taskIds:[...]}` — waits for a source that is not ready (PRs still merging, an eval still running) so no draft number ships.
-- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — the shared drive: deliveries, `share-create` links, `download` for byte-exact copies.
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — the shared drive: deliveries, live app links, `share-create` links for readers without a login, `download` for byte-exact copies.
 - **`skill-create` / `skill-install`** — put the four skills below into the swarm.
 
 ### Custom (swarm-managed skills, shipped as copies in the template)
@@ -185,10 +185,9 @@ The maker uploads to `thoughts/<maker-agent-id>/videos/<slug>/` and never overwr
 
 ```bash
 agent-fs --org <ORG_ID> --drive <DRIVE_ID> write thoughts/<maker-agent-id>/videos/<slug>/<file>.mp4 --file ./out/<file>.mp4
-agent-fs --org <ORG_ID> --drive <DRIVE_ID> share-create thoughts/<maker-agent-id>/videos/<slug>/<file>.mp4 --expires-in 604800 --json
 ```
 
-A share link opens a player with no login and lasts 7 days at most. Report the URL, the share id and the expiry. A raw signed URL downloads instead of playing, and a raw `.mp4` is served as `application/octet-stream`. Use `agent-fs download <path> -o <file>` for a byte-exact copy (`cat` is paginated and truncates).
+Hand each mp4 over as its live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`: the viewer plays it for a signed-in teammate. Make a `share-create` link only when the brief asks for one or names a reader without an agent-fs login (a customer, a public post, an outsider). Then run `agent-fs --org <ORG_ID> --drive <DRIVE_ID> share-create <path> --expires-in 604800 --json`; the share page plays with no login for 7 days at most. Report the URL, the share id and the expiry. A raw signed URL downloads instead of playing, and a raw `.mp4` is served as `application/octet-stream`. Use `agent-fs download <path> -o <file>` for a byte-exact copy (`cat` is paginated and truncates).
 
 **Not run**: `write` to a real drive and `share-create`, which publishes a link. The flags were checked against the CLI's `--help`, and `download` was run on the example master.
 
@@ -282,8 +281,8 @@ Before the Lead relays anything, it:
 2. Opens the end-card frame: real logo, credit line present and readable.
 3. Checks every on-screen number against `facts.json`, and `facts.json` against the source in the brief.
 4. Checks the ffprobe line: `h264`, `yuv420p`, exact size, duration as briefed, and an `aac` audio stream when the video has music.
-5. Plays the share link once.
-6. Relays the share link, share id, expiry and the `attribution` string from `music/current.json`: source link, license link and the changes made.
+5. Plays the live app link once.
+6. Relays the live app link (plus the share URL, id and expiry when one was asked for) and the `attribution` string from `music/current.json`: source link, license link and the changes made.
 
 ## Known gotchas
 
@@ -295,7 +294,7 @@ Before the Lead relays anything, it:
 | PNG frames encoded without `-pix_fmt` | `yuv444p`, which many players and uploaders reject | Always `-pix_fmt yuv420p`; `render.mjs` does |
 | Full-range `yuvj420p` | `remotion render` writes `yuvj420p(pc)` by default | `--color-space=bt709`, or `tools/x-reencode.sh` before posting to X |
 | Remotion's bundled ffmpeg is stripped | no `fps`, `tile`, `hstack` | Use the image's ffmpeg for analysis and sheets |
-| agent-fs serves `.mp4` as `application/octet-stream` | A content-type check on a raw link fails | Use a `share-create` link; do not retry the check |
+| agent-fs serves `.mp4` as `application/octet-stream` | A content-type check on a raw link fails | Open it through the live app link, or a `share-create` link for a reader without a login; do not retry the check |
 | Signed URLs expire and default to attachment | A `<video>` pointing at one downloads, then stops working | Never use one as a public URL. `signed-url --inline` renders in a tab but still expires |
 | `agent-fs cat` truncates | The tail of a big file is hidden | `agent-fs download <path> -o <file>` |
 | Container restart mid-render | Only the scratch directory survives | Work in `/workspace/personal/<slug>`, name it in the first progress note, upload an interim cut before the long render |

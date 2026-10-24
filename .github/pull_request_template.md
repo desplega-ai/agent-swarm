@@ -18,7 +18,7 @@ Risk is how deep to read. Urgency is when. Set Risk yourself; copy Urgency from 
 Links:
 - Image or GIF: GitHub user attachment (github-attach skill). Fallback only: agent-fs signed-url --inline (expires in 7 days).
 - Video (mp4): GitHub user attachment, else an agent-fs share-create link. Never a presigned link: it downloads.
-- Doc (plan, research, report): agent-fs share-create link.
+- Doc (plan, research, report): the agent-fs live app link, under ## Swarm provenance. A share-create link only when the requester asks for one or a reader has no agent-fs login.
 - Swarm task, session and workflow-run links, durable agent-fs paths and Slack permalinks: only under ## Swarm provenance.
 -->
 
@@ -83,4 +83,4 @@ When the PR Body check passes: "asap" requests a review from tarasyarema and pos
 - Task: <dashboard task link> · tree: <dashboard session link of the root task>
 - Ask: <Slack thread permalink>
 - Workflow run: <dashboard workflow-run link> (if any)
-- Plan / research: <agent-fs share-create link> (durable: <live agent-fs path>) -->
+- Plan / research: <agent-fs live app link> -->

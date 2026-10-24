@@ -498,8 +498,8 @@ agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --file /tmp/
 |---|---|
 | Image or GIF | GitHub user attachment. Fallback only when the token is a GitHub App token: `agent-fs signed-url <path> --inline --json` (expires in 7 days) |
 | Video (mp4) | GitHub user attachment on its own line, else an `agent-fs share-create` link. Never a presigned link |
-| Doc (plan, research, report) | `agent-fs share-create <path> --expires-in 604800` |
-| Durable `live.agent-fs.dev` path, swarm task links | Only under `## Swarm provenance` |
+| Doc (plan, research, report) | The live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`, under `## Swarm provenance`. `agent-fs share-create <path> --expires-in 604800` only when the requester asks for one or a reader has no agent-fs login |
+| `live.agent-fs.dev` links, swarm task links | Only under `## Swarm provenance` |
 
 **PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must fill `## Before / after` with `agent-browser` screenshots of the change running locally: a before (main) and after table of `![caption](<attachment-url>)`. Interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow) also need a recording, as an attachment mp4 on its own line. The PR Body check requires the section for those paths; the media itself is a reviewer convention.
 

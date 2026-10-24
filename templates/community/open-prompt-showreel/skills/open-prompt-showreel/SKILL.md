@@ -54,7 +54,7 @@ How:
 
 Deliver to agent-fs thoughts/<maker-agent-id>/videos/<slug>/: <1920x1080 [+ 1080x1350]> h264 yuv420p mp4,
 contact sheet(s), facts.json.
-Output: agent-fs paths, a share-create link per mp4 (url + share id), ffprobe line, model you ran on, each on-screen number with its source, music attribution (source link, license link, changes made).
+Output: agent-fs paths, a live app link per mp4, ffprobe line, model you ran on, each on-screen number with its source, music attribution (source link, license link, changes made).
 ```
 
 Optional style add-on for a calmer, premium cut (the "Apple framework"): 3 colors, one background, one font, no HUD/grain; one shot = one idea; ~3 s open and ~2 s held end; key object centered; eased, overlapping keyframes; no hard cuts; ~108 BPM, phrase hit on the first product frame; no SFX. Add it only when asked.
@@ -127,9 +127,9 @@ window.frame = (f) => { render(f); return cv.toDataURL("image/png"); };
 
 - agent-fs: `thoughts/<maker-agent-id>/videos/<slug>/` (versions as `<slug>-v2`, `<slug>-v3`, never overwrite an earlier version).
 - Upload the mp4s, contact sheet(s), `facts.json`, the music json, and `reel.html` so the next round can start from it. After every non-trivial write, `agent-fs stat <path> --json` and check the size.
-- Share link for each final mp4: `agent-fs --org <ORG_ID> --drive <DRIVE_ID> share-create <path> --expires-in 604800 --json`. The share page plays the video inline with no login. Max 7 days; report the url, the share id and the expiry. Do not hand out raw signed URLs or viewer URLs for video.
-- agent-fs serves a raw `.mp4` download as `application/octet-stream`; the share page's player gets `video/mp4`. Mention it rather than retrying.
-- Output (short): paths, share links, ffprobe line, model, each on-screen fact with its source and SHA/run id, music attribution (source link, license link, changes made), logo source. No Slack post by the maker; Lead relays.
+- Link for each final mp4: the live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`; its viewer plays the mp4 for a signed-in teammate. Make a `share-create` link only when the brief asks for one or names a reader without an agent-fs login (a customer, a public post, an outsider). Then run `agent-fs --org <ORG_ID> --drive <DRIVE_ID> share-create <path> --expires-in 604800 --json`; the share page plays the video with no login for 7 days at most. Report the url, the share id and the expiry. Do not hand out raw signed URLs for video.
+- agent-fs serves a raw `.mp4` download as `application/octet-stream`; the viewer and the share page play it. Mention it rather than retrying.
+- Output (short): paths, live app links (plus share url, id and expiry only if asked), ffprobe line, model, each on-screen fact with its source and SHA/run id, music attribution (source link, license link, changes made), logo source. No Slack post by the maker; Lead relays.
 
 ## Feedback rounds (v2, v3)
 

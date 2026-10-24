@@ -94,7 +94,7 @@ Write all test cases into the QA document's `## Test Cases` section.
 2. `agent-browser snapshot -i` to read the page state and its `@eN` refs
 3. Act on refs (`click @eN`, `fill @eN "text"`, `type`, `press`) and re-snapshot after every navigation or state change; refs are only valid for the snapshot that produced them
 4. `agent-browser screenshot /tmp/<name>.png` for evidence, then `agent-browser close`
-5. To share a screenshot outside the machine, upload it to agent-fs with `agent-fs write <path> --file /tmp/<name>.png -m "<what it shows>"` (binary-safe; `--content` mangles PNGs), keep it there as the original, and embed it in a PR or GitHub comment as a GitHub user attachment (`github-attach` skill): `![caption](https://github.com/user-attachments/assets/<uuid>)`. Use `agent-fs share-create <path>` for Slack or Linear. If agent-fs is not configured, report the local path and say the upload was skipped
+5. To share a screenshot outside the machine, upload it to agent-fs with `agent-fs write <path> --file /tmp/<name>.png -m "<what it shows>"` (binary-safe; `--content` mangles PNGs), keep it there as the original, and embed it in a PR or GitHub comment as a GitHub user attachment (`github-attach` skill): `![caption](https://github.com/user-attachments/assets/<uuid>)`. For Slack or Linear, paste the live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`; make an `agent-fs share-create <path>` link only when the requester asks for one or the reader has no agent-fs login. If agent-fs is not configured, report the local path and say the upload was skipped
 
 **For manual testing**:
 1. Present each test case's steps to the user
@@ -117,7 +117,7 @@ For each test case, record the actual result and pass/fail status.
 ### Step 4: Capture Evidence
 
 Gather evidence for the QA report:
-- **Screenshots**: Via `agent-browser screenshot` (kept on agent-fs; GitHub user attachments in a PR, `share-create` links elsewhere) or user-provided
+- **Screenshots**: Via `agent-browser screenshot` (kept on agent-fs; GitHub user attachments in a PR, live app links elsewhere) or user-provided
 - **Videos**: Session recording URLs (Loom, etc.)
 - **Logs**: Console output, error messages, relevant log lines
 - **External links**: Sentry issues, CI/CD runs, Grafana dashboards, PR URLs

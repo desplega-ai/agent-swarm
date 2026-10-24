@@ -10,7 +10,7 @@ The worked example is a 24-second video about a model checker finding race condi
 - Every number on screen read live from a named source into `facts.json` right before render.
 - The real Agent Swarm logo on the end card, never a redrawn one.
 - A contact sheet per critique round, so a reviewer sees what the maker saw.
-- Delivery to agent-fs, with a share link per mp4.
+- Delivery to agent-fs, with a live app link per mp4.
 
 ## Template Files
 
@@ -120,10 +120,9 @@ The maker uploads to `thoughts/<maker-agent-id>/videos/<slug>/` (versions as `<s
 
 ```bash
 agent-fs --org <ORG_ID> --drive <DRIVE_ID> write thoughts/<maker-agent-id>/videos/<slug>/<file>.mp4 --file ./out/<file>.mp4
-agent-fs --org <ORG_ID> --drive <DRIVE_ID> share-create thoughts/<maker-agent-id>/videos/<slug>/<file>.mp4 --expires-in 604800 --json
 ```
 
-A share link opens a player with no login and expires in 7 days at most. Report the url, the share id and the expiry. A raw signed URL downloads instead of playing, and agent-fs serves a raw `.mp4` as `application/octet-stream`. For a byte-exact copy back down: `agent-fs download <path> -o <file>` (`cat` is paginated and truncates).
+Hand each mp4 over as its live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`: the viewer plays it for a signed-in teammate. Make a `share-create` link only when the brief asks for one or names a reader without an agent-fs login (a customer, a public post, an outsider). Then run `agent-fs --org <ORG_ID> --drive <DRIVE_ID> share-create <path> --expires-in 604800 --json`; the share page plays with no login for 7 days at most. Report the url, the share id and the expiry. A raw signed URL downloads instead of playing, and agent-fs serves a raw `.mp4` as `application/octet-stream`. For a byte-exact copy back down: `agent-fs download <path> -o <file>` (`cat` is paginated and truncates).
 
 **Not run** for this playbook: `write` to a real drive and `share-create` (it publishes a public link). `write --file`, `share-create` and `signed-url --inline` flags were checked against the CLI's `--help`. `agent-fs download` was run on the example master.
 
@@ -261,8 +260,8 @@ The maker's output is not the finish line. Before relaying, the Lead:
 2. Opens the end-card frame: real logo, credit line present and readable.
 3. Checks every on-screen number against the maker's `facts.json`, and `facts.json` against the source named in the brief.
 4. Checks the ffprobe line: `h264`, `yuv420p`, exactly 1920x1080 (and 1080x1350), duration as briefed, and an `aac` audio stream when the video has music. (`ffprobe` after `setup.sh`, or `ffmpeg -i` stderr in the stock image.)
-5. Plays the share link once.
-6. Relays the share link, the share id and the expiry, plus the `attribution` string from `music/current.json` (source link, license link, changes made). The maker never posts.
+5. Plays the live app link once.
+6. Relays the live app link (plus the share url, id and expiry when one was asked for) and the `attribution` string from `music/current.json` (source link, license link, changes made). The maker never posts.
 
 ## Known Gotchas
 
@@ -274,7 +273,7 @@ The maker's output is not the finish line. Before relaying, the Lead:
 | PNG frames encoded by libx264 without `-pix_fmt` | The output is `yuv444p` (High 4:4:4 Predictive), which many players and uploaders reject | Always `-pix_fmt yuv420p`. `render.mjs` does. |
 | Full-range `yuvj420p` | Rendered by `remotion render` by default | `--color-space=bt709`, or `x-reencode.sh` |
 | Remotion's bundled ffmpeg is stripped | no `fps`, `tile`, `hstack` filters | Use the image's `/usr/local/bin/ffmpeg` for analysis and sheets |
-| agent-fs serves `.mp4` as `application/octet-stream` | A content-type check on a raw link fails | Use a `share-create` link. Do not retry the content-type check. |
+| agent-fs serves `.mp4` as `application/octet-stream` | A content-type check on a raw link fails | Open it through the live app link, or a `share-create` link for a reader without a login. Do not retry the content-type check. |
 | Signed URLs expire and default to attachment | A `<video src>` pointing at one downloads instead of playing, and stops working at the expiry | Never use one as a public URL. For a page, commit a compressed copy. `signed-url --inline` renders in a browser tab but still expires. |
 | `agent-fs cat` truncates | Pagination hides the tail of a big file | `agent-fs download <path> -o <file>` for exact bytes |
 | Container restart mid-render | The scratch dir is the only thing that survives | Keep it in `/workspace/personal/<slug>`, name it in the first progress note, upload an interim cut before the long render |
