@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { createServer } from "node:http";
 import * as db from "../be/db";
 import {
   closeDb,
@@ -24,6 +25,7 @@ import {
   WorkflowRunTreeError,
   WorkflowStepNotExecutableError,
 } from "../be/db/workflow-runs";
+import { handleApprovalRequests } from "../http/approval-requests";
 import * as slackApp from "../slack/app";
 import type { AgentTask, Workflow, WorkflowDefinition, WorkflowRun } from "../types";
 import * as approvalNotifications from "../workflows/approval-notifications";
@@ -48,6 +50,7 @@ import {
   completeTaskStepAndResolveSuccessors,
   scheduleTaskStepRetry,
 } from "../workflows/task-step-routing";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-workflow-cascade-cancel.sqlite";
 
@@ -483,6 +486,61 @@ describe("cascade cancel", () => {
     await cancelWorkflowRun(rootId);
     expect(await status(legacy)).toBe("cancelled");
     await ask(childRun.id);
+    expect(await writeTransactionsDuring(() => cancelWorkflowRun(rootId))).toBe(0);
+  });
+
+  test("POST /api/approval-requests on a cancelled tree creates no open work (HTTP)", async () => {
+    const grandchild = await makeWorkflow(waitingDef);
+    const child = await makeWorkflow(parentOf(grandchild.id));
+    const root = await makeWorkflow(parentOf(child.id));
+    const rootId = await startWorkflowExecution(root, {}, registry);
+    const childRun = await runOf(child.id, "waiting");
+    const grandchildRun = await runOf(grandchild.id, "waiting");
+    await cancelWorkflowRun(rootId, "stop");
+
+    const server = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const handled = await handleApprovalRequests(
+        req,
+        res,
+        url.pathname.split("/").filter(Boolean),
+        url.searchParams,
+      );
+      if (!handled) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Not found" }));
+      }
+    });
+    const port = await listenOnFreePort(server);
+    try {
+      // A run link and no step, as an agent or script asks through the API.
+      for (const workflowRunId of [rootId, childRun.id, grandchildRun.id]) {
+        const response = await fetch(`http://127.0.0.1:${port}/api/approval-requests`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: "Late ask",
+            questions: [{ id: "q1", type: "approval", label: "Approve?", required: true }],
+            approvers: { policy: "any" },
+            workflowRunId,
+          }),
+        });
+        expect(response.status).toBe(201);
+        const { approvalRequest } = (await response.json()) as {
+          approvalRequest: { status: string; resolutionReason: string | null };
+        };
+        expect(approvalRequest.status).toBe("cancelled");
+        expect(approvalRequest.resolutionReason).toBe("stop");
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+
+    const pending = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM approval_requests WHERE workflowRunId IN (?, ?, ?) AND status = 'pending'",
+      [rootId, childRun.id, grandchildRun.id],
+    );
+    expect(pending?.n).toBe(0);
     expect(await writeTransactionsDuring(() => cancelWorkflowRun(rootId))).toBe(0);
   });
 
