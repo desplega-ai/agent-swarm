@@ -2,9 +2,11 @@
 //
 // Status semantics (see Plan: thoughts/taras/plans/2026-04-21-integrations-ui.md):
 //   - "disabled"   — `<disableKey>` is set to a truthy value ("true" | "1" | "yes").
-//   - "configured" — all required fields have a non-empty value present.
-//   - "partial"    — at least one required field is present but not all.
-//   - "none"       — no required fields are present.
+//   - "configured" — all required fields, or every key of one declared
+//                    alternative, have a non-empty value present.
+//   - "partial"    — a required or advanced field, or an alternative key, is
+//                    present, but not a complete set.
+//   - "none"       — none of those is present.
 //
 // Reserved keys (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) are filtered out
 // defensively — they should never land in `swarm_config`, but if somehow a row
@@ -61,17 +63,30 @@ export function findConfigForKey(configs: SwarmConfig[], key: string): SwarmConf
  * Precedence:
  *   1. If `disableKey` resolves to a truthy value → "disabled".
  *   2. If all required fields are present → "configured".
- *   3. If some (but not all) required fields are present → "partial".
- *   4. Otherwise → "none".
+ *   3. If every key of one declared alternative is present → "configured".
+ *   4. If a required or advanced field, or any alternative key, is present →
+ *      "partial".
+ *   5. Otherwise → "none".
  *
- * An integration with zero required fields is considered "configured" when at
- * least one non-required field is set, otherwise "none". This handles cases
- * like `codex-oauth` where the only signal is the presence of the row.
+ * Optional metadata (a bot name, a base URL) never makes an integration
+ * "configured" on its own. Credential sets used instead of the required
+ * fields, like GitHub App mode or the Codex OAuth row, are declared as
+ * `alternatives` on the def.
  */
-function isFieldPresent(key: string, configs: SwarmConfig[], envPresence: EnvPresence): boolean {
+function isKeyPresent(key: string, configs: SwarmConfig[], envPresence: EnvPresence): boolean {
   if (isReservedKey(key)) return false;
   if (findConfigForKey(configs, key) !== undefined) return true;
   return envPresence[key] === true;
+}
+
+function isFieldPresent(
+  field: IntegrationField,
+  configs: SwarmConfig[],
+  envPresence: EnvPresence,
+): boolean {
+  return [field.key, ...(field.aliasKeys ?? [])].some((key) =>
+    isKeyPresent(key, configs, envPresence),
+  );
 }
 
 export function deriveIntegrationStatus(
@@ -95,8 +110,8 @@ export function deriveIntegrationStatus(
     if (!configuredMode && envPresence.SLACK_MODE) return "partial";
     const mode = configuredMode ?? "socket";
     if (mode !== "socket" && mode !== "http") return "partial";
-    const bot = isFieldPresent("SLACK_BOT_TOKEN", configs, envPresence);
-    const credential = isFieldPresent(
+    const bot = isKeyPresent("SLACK_BOT_TOKEN", configs, envPresence);
+    const credential = isKeyPresent(
       mode === "http" ? "SLACK_SIGNING_SECRET" : "SLACK_APP_TOKEN",
       configs,
       envPresence,
@@ -118,31 +133,36 @@ export function deriveIntegrationStatus(
   }
 
   const fields = getIntegrationFields(def);
-  const requiredFields: IntegrationField[] = fields.filter((f) => f.required === true);
-  const advancedFields: IntegrationField[] = fields.filter((f) => f.advanced === true);
+  const requiredFields = fields.filter((f) => f.required === true);
+  const alternatives = def.alternatives ?? [];
 
-  const allFieldsPresent = fields.some((f) => isFieldPresent(f.key, configs, envPresence));
-
-  if (requiredFields.length === 0) {
-    return allFieldsPresent ? "configured" : "none";
+  if (
+    requiredFields.length > 0 &&
+    requiredFields.every((f) => isFieldPresent(f, configs, envPresence))
+  ) {
+    return "configured";
+  }
+  if (
+    alternatives.some(
+      (alt) =>
+        alt.keys.length > 0 && alt.keys.every((key) => isKeyPresent(key, configs, envPresence)),
+    )
+  ) {
+    return "configured";
   }
 
-  const requiredPresentCount = requiredFields.reduce(
-    (acc, f) => acc + (isFieldPresent(f.key, configs, envPresence) ? 1 : 0),
-    0,
-  );
-  const advancedPresentCount = advancedFields.reduce(
-    (acc, f) => acc + (isFieldPresent(f.key, configs, envPresence) ? 1 : 0),
-    0,
-  );
+  // Only optional fields and no alternatives: any value set is the whole setup.
+  if (requiredFields.length === 0 && alternatives.length === 0) {
+    return fields.some((f) => isFieldPresent(f, configs, envPresence)) ? "configured" : "none";
+  }
 
-  if (requiredPresentCount === requiredFields.length) return "configured";
-  // Alt-mode: no required set but an advanced path is in use (e.g. GitHub App
-  // mode sets GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY instead of GITHUB_TOKEN).
-  // Count the integration as configured as long as SOMETHING is set.
-  if (requiredPresentCount === 0 && advancedPresentCount > 0) return "configured";
-  if (requiredPresentCount === 0) return "none";
-  return "partial";
+  // Started but incomplete: a required or advanced field, or part of an
+  // alternative. Advanced metadata alone (a bot name) is never "configured".
+  const started =
+    fields.some(
+      (f) => (f.required === true || f.advanced === true) && isFieldPresent(f, configs, envPresence),
+    ) || alternatives.some((alt) => alt.keys.some((key) => isKeyPresent(key, configs, envPresence)));
+  return started ? "partial" : "none";
 }
 
 function deriveGroupedStatus(
@@ -161,11 +181,11 @@ function deriveGroupedStatus(
       hasAnyRequiredGroup = true;
     }
     const requiredPresentCount = requiredFields.reduce(
-      (acc, f) => acc + (isFieldPresent(f.key, configs, envPresence) ? 1 : 0),
+      (acc, f) => acc + (isFieldPresent(f, configs, envPresence) ? 1 : 0),
       0,
     );
 
-    if (fields.some((f) => isFieldPresent(f.key, configs, envPresence))) {
+    if (fields.some((f) => isFieldPresent(f, configs, envPresence))) {
       hasAnyFieldPresent = true;
     }
     if (requiredPresentCount > 0) {

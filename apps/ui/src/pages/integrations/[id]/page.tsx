@@ -77,6 +77,7 @@ import {
 } from "@/lib/integration-form-state";
 import {
   getIntegrationFields,
+  getPresenceKeys,
   INTEGRATIONS,
   type IntegrationConfigGroup,
   type IntegrationDef,
@@ -122,10 +123,7 @@ export default function IntegrationDetailPage() {
 
   const envPresenceKeys = useMemo(() => {
     if (!def) return [];
-    const keys = getIntegrationFields(def).map((f) => f.key);
-    keys.push(...(def.presenceKeys ?? []));
-    if (def.disableKey) keys.push(def.disableKey);
-    return keys;
+    return getPresenceKeys(def);
   }, [def]);
   const { data: envPresence } = useEnvPresence(envPresenceKeys);
 

@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import {
   getIntegrationFields,
+  getPresenceKeys,
   INTEGRATIONS,
   type IntegrationCategory,
 } from "@/lib/integrations-catalog";
@@ -49,9 +50,7 @@ export default function IntegrationsPage() {
   const allCatalogKeys = useMemo(() => {
     const keys = new Set<string>();
     for (const def of INTEGRATIONS) {
-      for (const f of getIntegrationFields(def)) keys.add(f.key);
-      for (const key of def.presenceKeys ?? []) keys.add(key);
-      if (def.disableKey) keys.add(def.disableKey);
+      for (const key of getPresenceKeys(def)) keys.add(key);
     }
     return Array.from(keys);
   }, []);

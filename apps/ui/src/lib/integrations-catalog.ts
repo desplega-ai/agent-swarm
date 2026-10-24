@@ -40,6 +40,19 @@ export interface IntegrationField {
   credentialPool?: boolean;
   /** Shows restart hint when true. */
   affectsRestart?: boolean;
+  /** Other env keys accepted in place of `key` (e.g. `HELMCODE_API_NAN` for NaN). */
+  aliasKeys?: string[];
+}
+
+/**
+ * A credential set accepted in place of the required fields, such as GitHub
+ * App mode instead of a personal access token. Status is `configured` when
+ * every key of one alternative is present.
+ */
+export interface IntegrationAlternative {
+  id: string;
+  label: string;
+  keys: string[];
 }
 
 export interface IntegrationConfigGroup {
@@ -155,6 +168,8 @@ export interface IntegrationDef {
    * such as another integration's API key it reuses.
    */
   presenceKeys?: readonly string[];
+  /** Credential sets accepted in place of the required fields. */
+  alternatives?: IntegrationAlternative[];
 }
 
 export function getIntegrationFields(def: IntegrationDef): IntegrationField[] {
@@ -169,6 +184,24 @@ export function getIntegrationFields(def: IntegrationDef): IntegrationField[] {
     fields.push(field);
   }
   return fields;
+}
+
+/**
+ * Every env key whose presence can feed this integration's status: field keys
+ * and their aliases, alternative keys, `presenceKeys` and the disable key.
+ */
+export function getPresenceKeys(def: IntegrationDef): string[] {
+  const keys = new Set<string>();
+  for (const field of getIntegrationFields(def)) {
+    keys.add(field.key);
+    for (const alias of field.aliasKeys ?? []) keys.add(alias);
+  }
+  for (const alternative of def.alternatives ?? []) {
+    for (const key of alternative.keys) keys.add(key);
+  }
+  for (const key of def.presenceKeys ?? []) keys.add(key);
+  if (def.disableKey) keys.add(def.disableKey);
+  return Array.from(keys);
 }
 
 /**
@@ -222,6 +255,7 @@ function openAICompatibleIntegrations(): IntegrationDef[] {
             p.keyNote ? ` ${p.keyNote}` : ""
           } Comma-separate multiple keys to form a credential pool.`,
           credentialPool: true,
+          aliasKeys: [...p.aliasEnvVars],
         },
         // A locked provider has one endpoint: no field, so no wrong URL to type.
         ...(p.baseUrlLocked
@@ -442,6 +476,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/github",
     disableKey: "GITHUB_DISABLE",
     restartRequired: true,
+    alternatives: [
+      { id: "github-app", label: "GitHub App", keys: ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"] },
+    ],
     fields: [
       {
         key: "GITHUB_TOKEN",
@@ -1059,6 +1096,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     iconKey: "brain",
     docsUrl: "https://docs.agent-swarm.dev/docs/architecture/memory",
     specialFlow: "memory-embeddings",
+    alternatives: [{ id: "openai-fallback", label: "OpenAI API key", keys: ["OPENAI_API_KEY"] }],
     fields: [
       {
         key: "EMBEDDING_API_KEY",
@@ -1362,6 +1400,8 @@ export const INTEGRATIONS: IntegrationDef[] = [
     specialFlow: "codex-cli",
     restartRequired: true,
     fields: [],
+    // The OAuth flow stores its credentials as a global `codex_oauth` row.
+    alternatives: [{ id: "oauth", label: "ChatGPT OAuth", keys: ["codex_oauth"] }],
   },
 
   // -------------------------------------------------- Claude Managed Agents
@@ -1433,6 +1473,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
     iconKey: "chart-line",
     docsUrl:
       "https://docs.agent-swarm.dev/docs/reference/environment-variables#google-search-console",
+    alternatives: [
+      { id: "json", label: "Service account JSON (plain)", keys: ["GSC_SERVICE_ACCOUNT_JSON"] },
+    ],
     fields: [
       {
         key: "GSC_SERVICE_ACCOUNT_BASE64",
