@@ -574,14 +574,14 @@ export default async function compoundInsights(args: any, ctx: any) {
     const rows = rowsToObjects(
       await ctx.swarm.db_query({
         sql: `WITH raw AS (
-                 SELECT sessionId, iteration, lineNumber, content,
+                 SELECT rowid AS seq, sessionId, iteration, lineNumber, content,
                         json_extract(content, '$.tool_name') as jsonToolName
                  FROM session_logs
                  WHERE createdAt > ${w}
                    AND (content LIKE '%"type":"tool_use"%' OR json_extract(content, '$.tool_name') IS NOT NULL)
                )
                SELECT sessionId, iteration, lineNumber, jsonToolName, content
-               FROM raw ORDER BY sessionId, iteration, lineNumber LIMIT 100`,
+               FROM raw ORDER BY sessionId, iteration, seq LIMIT 100`,
       }),
     );
     const bySession = new Map<string, string[]>();

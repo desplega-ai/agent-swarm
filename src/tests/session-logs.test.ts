@@ -5,6 +5,7 @@ import {
   closeDb,
   createSessionLogs,
   createTaskExtended,
+  getDbClient,
   getSessionLogsBySession,
   getSessionLogsByTaskId,
   getTaskById,
@@ -225,6 +226,75 @@ describe("Session Logs API", () => {
       expect(logs[3]?.content).toBe("line2-iter2");
       expect(logs[3]?.iteration).toBe(2);
       expect(logs[3]?.lineNumber).toBe(1);
+    });
+
+    test("keeps write order across many flushes of one iteration", async () => {
+      const task = await createTaskExtended("Task for multi-flush ordering");
+      // The runner flushes every 50 lines or 5s, so one iteration arrives as
+      // many POSTs. Each POST used to restart lineNumber at 0.
+      const written: string[] = [];
+      for (let flush = 0; flush < 3; flush++) {
+        const lines = [0, 1, 2, 3].map((i) => `flush${flush}-line${i}`);
+        written.push(...lines);
+        await createSessionLogs({
+          taskId: task.id,
+          sessionId: "multi-flush-session",
+          iteration: 1,
+          cli: "claude",
+          lines,
+        });
+      }
+
+      const all = await getSessionLogsByTaskId(task.id);
+      expect(all.map((l) => l.content)).toEqual(written);
+      expect(all.map((l) => l.lineNumber)).toEqual(written.map((_, i) => i));
+
+      const tail = await getSessionLogsByTaskId(task.id, 5);
+      expect(tail.map((l) => l.content)).toEqual(written.slice(-5));
+
+      const bySession = await getSessionLogsBySession("multi-flush-session", 1);
+      expect(bySession.map((l) => l.content)).toEqual(written);
+    });
+
+    test("reads rows stored with per-flush lineNumbers in write order", async () => {
+      const task = await createTaskExtended("Task with legacy session log rows");
+      // Rows written before the fix: lineNumber restarts per POST, and
+      // createdAt ties inside one POST.
+      const legacy = [
+        ["a0", 0],
+        ["a1", 1],
+        ["a2", 2],
+        ["b0", 0],
+        ["b1", 1],
+        ["c0", 0],
+      ] as const;
+      await getDbClient().transaction(async (tx) => {
+        for (const [content, lineNumber] of legacy) {
+          await tx.run(
+            `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
+             VALUES (?, ?, 'legacy-session', 1, 'claude', ?, ?, '2026-10-01T00:00:00.000Z')`,
+            [crypto.randomUUID(), task.id, content, lineNumber],
+          );
+        }
+      });
+      // A flush after deploy lands behind the legacy rows.
+      await createSessionLogs({
+        taskId: task.id,
+        sessionId: "legacy-session",
+        iteration: 1,
+        cli: "claude",
+        lines: ["d0", "d1"],
+      });
+
+      const written = ["a0", "a1", "a2", "b0", "b1", "c0", "d0", "d1"];
+      const all = await getSessionLogsByTaskId(task.id);
+      expect(all.map((l) => l.content)).toEqual(written);
+
+      const tail = await getSessionLogsByTaskId(task.id, 4);
+      expect(tail.map((l) => l.content)).toEqual(["b1", "c0", "d0", "d1"]);
+
+      const bySession = await getSessionLogsBySession("legacy-session", 1);
+      expect(bySession.map((l) => l.content)).toEqual(written);
     });
   });
 

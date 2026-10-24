@@ -4739,7 +4739,7 @@ export async function createSessionLogs(logs: {
   for (let start = 0; start < logs.lines.length; start += BATCH_SIZE) {
     // Yield to the event loop between batches.
     if (start > 0) await new Promise<void>((r) => setTimeout(r, 5));
-    const batch: { content: string; lineNumber: number }[] = [];
+    const batch: string[] = [];
     const end = Math.min(start + BATCH_SIZE, logs.lines.length);
     for (let i = start; i < end; i++) {
       const line = logs.lines[i];
@@ -4748,10 +4748,22 @@ export async function createSessionLogs(logs: {
       // content that is already scrubbed at the adapter emit site. We scrub
       // again here so any future write path that bypasses the adapter still
       // lands clean text in the persistent session_logs table.
-      batch.push({ content: scrubSecrets(line), lineNumber: i });
+      batch.push(scrubSecrets(line));
     }
     await getDbClient().transaction(async (tx) => {
-      for (const { content, lineNumber } of batch) {
+      // The worker flushes one (sessionId, iteration) in many POSTs, so the
+      // lineNumber continues from the newest stored row instead of restarting
+      // at the POST's index. Reading the newest row by rowid walks the
+      // sessionId index backwards and stops at the first hit, where MAX()
+      // would scan the whole session. Rows written here are monotonic in
+      // rowid, so this equals MAX + 1 for them.
+      const last = await tx.get<{ lineNumber: number }>(
+        `SELECT lineNumber FROM session_logs WHERE sessionId = ? AND iteration = ?
+         ORDER BY rowid DESC LIMIT 1`,
+        [logs.sessionId, logs.iteration],
+      );
+      let lineNumber = last ? last.lineNumber + 1 : 0;
+      for (const content of batch) {
         await tx.run(
           `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
            VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
@@ -4762,7 +4774,7 @@ export async function createSessionLogs(logs: {
             logs.iteration,
             logs.cli,
             content,
-            lineNumber,
+            lineNumber++,
           ],
         );
       }
@@ -4770,6 +4782,10 @@ export async function createSessionLogs(logs: {
   }
 }
 
+// Session log reads order by rowid, which is insert order. Rows written before
+// lineNumber was assigned server-side restart at 0 on every worker flush, so
+// only rowid orders them. The API never runs VACUUM (runbooks/db-retention.md);
+// a manual VACUUM may renumber rowids but copies rows in rowid order.
 export async function getSessionLogsByTaskId(
   taskId: string,
   limit?: number,
@@ -4777,16 +4793,16 @@ export async function getSessionLogsByTaskId(
   if (typeof limit === "number" && limit > 0) {
     const rows = await getDbClient().query<SessionLogRow>(
       `SELECT * FROM (
-         SELECT * FROM session_logs WHERE taskId = ?
-         ORDER BY iteration DESC, lineNumber DESC
+         SELECT rowid AS seq, * FROM session_logs WHERE taskId = ?
+         ORDER BY rowid DESC
          LIMIT ?
-       ) ORDER BY iteration ASC, lineNumber ASC`,
+       ) ORDER BY seq ASC`,
       [taskId, limit],
     );
     return rows.map(rowToSessionLog);
   }
   const rows = await getDbClient().query<SessionLogRow>(
-    "SELECT * FROM session_logs WHERE taskId = ? ORDER BY iteration ASC, lineNumber ASC",
+    "SELECT * FROM session_logs WHERE taskId = ? ORDER BY rowid ASC",
     [taskId],
   );
   return rows.map(rowToSessionLog);
@@ -4797,7 +4813,7 @@ export async function getSessionLogsBySession(
   iteration: number,
 ): Promise<SessionLog[]> {
   const rows = await getDbClient().query<SessionLogRow>(
-    "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY lineNumber ASC",
+    "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY rowid ASC",
     [sessionId, iteration],
   );
   return rows.map(rowToSessionLog);
