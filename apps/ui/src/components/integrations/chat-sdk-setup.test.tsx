@@ -68,8 +68,8 @@ async function mount(adapter: (typeof ADAPTERS)[number], defaultOpen: boolean) {
       button.click();
     });
   };
-  const unmount = () => {
-    act(() => root.unmount());
+  const unmount = async () => {
+    await act(async () => root.unmount());
     host.remove();
   };
   return { host, click, unmount };
@@ -79,8 +79,8 @@ describe("stepText", () => {
   test("keeps chip and bold text and spells out links", () => {
     const text = stepText(
       <>
-        Open <a href="https://t.me/BotFather">BotFather</a> and send <code>/newbot</code>. Copy
-        the token into <b>Bot token</b>.
+        Open <a href="https://t.me/BotFather">BotFather</a> and send <code>/newbot</code>. Copy the
+        token into <b>Bot token</b>.
       </>,
     );
     expect(text).toBe(
@@ -102,7 +102,7 @@ describe("Copy for your agent", () => {
       await view.click("copy");
       await view.click("toggle");
       await view.click("copy");
-      view.unmount();
+      await view.unmount();
 
       expect(written).toHaveLength(3);
       const [collapsed, expanded, recollapsed] = written;
@@ -127,7 +127,7 @@ describe("Copy for your agent", () => {
   test("telegram brief names the BotFather link and the last step", async () => {
     const view = await mount("telegram", false);
     await view.click("copy");
-    view.unmount();
+    await view.unmount();
     expect(written[0]).toContain("1. In Telegram, open BotFather (https://t.me/BotFather)");
     expect(written[0]).toContain("8. The bot answers /help, /status, /cancel and /reset.");
     expect(written[0]).toContain("Webhook URL of this swarm");

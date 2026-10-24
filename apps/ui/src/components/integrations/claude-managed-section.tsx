@@ -102,7 +102,11 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
         Connected
       </Badge>
     ) : (
-      <Badge variant="outline" size="tag" className="border-status-error/30 text-status-error-strong">
+      <Badge
+        variant="outline"
+        size="tag"
+        className="border-status-error/30 text-status-error-strong"
+      >
         Test failed
       </Badge>
     )

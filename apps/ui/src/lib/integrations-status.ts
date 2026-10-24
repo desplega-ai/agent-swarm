@@ -160,8 +160,10 @@ export function deriveIntegrationStatus(
   // alternative. Advanced metadata alone (a bot name) is never "configured".
   const started =
     fields.some(
-      (f) => (f.required === true || f.advanced === true) && isFieldPresent(f, configs, envPresence),
-    ) || alternatives.some((alt) => alt.keys.some((key) => isKeyPresent(key, configs, envPresence)));
+      (f) =>
+        (f.required === true || f.advanced === true) && isFieldPresent(f, configs, envPresence),
+    ) ||
+    alternatives.some((alt) => alt.keys.some((key) => isKeyPresent(key, configs, envPresence)));
   return started ? "partial" : "none";
 }
 

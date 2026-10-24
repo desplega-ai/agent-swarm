@@ -349,8 +349,7 @@ export function ChatSdkSetup({
       </div>
       <AnimatedReveal open={open}>
         <div className="space-y-2 pt-1">
-          <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-5 text-muted-foreground marker:text-muted-foreground"
-          >
+          <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-5 text-muted-foreground marker:text-muted-foreground">
             {stepNodes.map((step, index) => (
               // The step list is static per adapter, so the index is a stable key.
               <li key={index} className="pl-1">

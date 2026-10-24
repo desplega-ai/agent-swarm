@@ -11,6 +11,7 @@ import { Streamdown } from "streamdown";
 import { renderTaskCitations } from "../../../../../src/utils/task-citations";
 import "streamdown/styles.css";
 import type { AgentTask } from "@/api/types";
+import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code";
 import { JsonTree } from "@/components/shared/json-tree";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -77,6 +78,9 @@ export function TaskOutcome({
   );
 }
 
+// Env-var names in inline code get a copy button; other inline code is unchanged.
+const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode };
+
 /**
  * Successful output — renders inline as plain prose, no border. Hover surfaces
  * a single Copy action top-right so the chrome is invisible until needed.
@@ -86,7 +90,7 @@ function OutcomeProse({ text, hideCopy }: { text: string; hideCopy: boolean }) {
   return (
     <OutcomeCopyShell copyText={trimmed} hideCopy={hideCopy}>
       <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
-        <Streamdown>{normalizeNewlines(trimmed)}</Streamdown>
+        <Streamdown components={STREAMDOWN_COMPONENTS}>{normalizeNewlines(trimmed)}</Streamdown>
       </div>
     </OutcomeCopyShell>
   );
@@ -173,7 +177,7 @@ function OutcomeFrame({ label, text, tone }: { label: string; text: string; tone
         </Tooltip>
       </div>
       <div className="text-xs min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full text-status-error-strong">
-        <Streamdown>{normalizeNewlines(trimmed)}</Streamdown>
+        <Streamdown components={STREAMDOWN_COMPONENTS}>{normalizeNewlines(trimmed)}</Streamdown>
       </div>
     </div>
   );

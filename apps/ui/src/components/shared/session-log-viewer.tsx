@@ -40,6 +40,7 @@ import "streamdown/styles.css";
 
 import type { AgentTaskStatus, ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code";
 import { JsonTree } from "@/components/shared/json-tree";
 import {
   type EndSummary,
@@ -1108,10 +1109,11 @@ const LOG_MD_COMPONENTS = {
     // markdown code is always single-line). Everything else is an inline chip
     // styled by the .prose-* rules.
     if (!m && !raw.includes("\n")) {
+      // Env-var names get a copy button; other inline code renders unchanged.
       return (
-        <code className={className} {...rest}>
+        <InlineIdentifierCode className={className} {...rest}>
           {children}
-        </code>
+        </InlineIdentifierCode>
       );
     }
     return <LogCodeBlock language={m?.[1] ?? ""} value={raw.replace(/\n$/, "")} />;
