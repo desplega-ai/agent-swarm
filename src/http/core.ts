@@ -41,6 +41,8 @@ import { restartChatSdkIfConfigChanged } from "../integrations/chat-sdk/runtime"
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { can, decideAdmission, isRbacEnabled } from "../rbac";
+import { peekNativeSandboxStatus } from "../scripts-runtime/executors/native";
+import { nativeSeccompPolicy, SCRIPT_SANDBOX_SCOPE } from "../scripts-runtime/sandbox-probe";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
@@ -476,11 +478,22 @@ export async function handleCore(
     res.writeHead(200, { "Content-Type": "application/json" });
     // NOTE: /health is unauthenticated — never expose server configuration
     // here (feature flags, capabilities, integration state). `steeringEnabled`
-    // lives on the authenticated /api/stats payload instead.
+    // lives on the authenticated /api/stats payload instead. The one
+    // exception is the measured native script isolation level and the
+    // exec-deny policy it ran under: operators and orchestrators (Helm,
+    // Dokploy) read them without a key, under `meta.scripts`. `scope` says
+    // which entrypoint the level covers (the native executor only).
     res.end(
       JSON.stringify({
         status: "ok",
         version,
+        meta: {
+          scripts: {
+            sandbox: peekNativeSandboxStatus()?.level ?? "pending",
+            scope: SCRIPT_SANDBOX_SCOPE,
+            execDeny: nativeSeccompPolicy(),
+          },
+        },
       }),
     );
 

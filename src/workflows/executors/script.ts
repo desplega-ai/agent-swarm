@@ -6,6 +6,7 @@ import {
   registerProcessGroup,
   terminateProcessGroup,
 } from "../../utils/process-group";
+import { chownForSandbox, leaseSharedSandboxUid } from "../../utils/sandbox-uid";
 import {
   buildSandboxedCommand,
   createCappedStreamState,
@@ -190,18 +191,23 @@ export class ScriptExecutor extends BaseExecutor<
       : `${process.env.TMPDIR ?? "/tmp"}/workflow-script-${crypto.randomUUID()}`;
     if (scopedTmpdir) await Bun.$`mkdir -p ${scopedTmpdir}`;
     const workdir = cwd ?? scopedTmpdir;
+    // Drops to the shared workflow sandbox uid when the API runs as root (see
+    // `leaseSharedSandboxUid`). A pinned `cwd` is not chowned: it must already
+    // be usable by that uid.
+    const uidLease = await leaseSharedSandboxUid();
 
     const env = {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
-      HOME: process.env.HOME ?? "/tmp",
+      HOME: uidLease ? (scopedTmpdir ?? "/tmp") : (process.env.HOME ?? "/tmp"),
       LANG: process.env.LANG ?? "C.UTF-8",
       LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
       TMPDIR: workdir ?? process.env.TMPDIR ?? "/tmp",
     };
 
     try {
+      if (uidLease && scopedTmpdir) await chownForSandbox(scopedTmpdir, uidLease.user);
       const proc = registerProcessGroup(
-        Bun.spawn(buildSandboxedCommand(cmd, env), {
+        Bun.spawn(buildSandboxedCommand(cmd, env, undefined, { user: uidLease?.user }), {
           stdout: "pipe",
           stderr: "pipe",
           cwd: workdir,
@@ -276,6 +282,7 @@ export class ScriptExecutor extends BaseExecutor<
         stderr: (stderr.truncated ? `${stderr.text}\n…[stderr truncated]` : stderr.text).trimEnd(),
       };
     } finally {
+      await uidLease?.release();
       // Reached only after `await proc.exited` above, so the scoped dir is never
       // deleted while a live child is still using it as its cwd/TMPDIR.
       if (scopedTmpdir) await Bun.$`rm -rf ${scopedTmpdir}`.catch(() => {});

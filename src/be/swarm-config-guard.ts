@@ -419,6 +419,22 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
   ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
+  // Native script sandbox uids. The base must stay clear of system uids, so
+  // the shared workflow uid (base - 1) is 1000 or above, never root or a system uid.
+  SCRIPT_SANDBOX_UID_BASE: (value) => {
+    const str = String(value).trim();
+    if (!/^\d+$/.test(str) || Number(str) < 1001 || Number(str) > 4_000_000_000) {
+      return "Invalid SCRIPT_SANDBOX_UID_BASE (must be a whole uid from 1001 to 4000000000)";
+    }
+    return null;
+  },
+  SCRIPT_SANDBOX_UID_POOL_SIZE: (value) => {
+    const str = String(value).trim();
+    if (!/^\d+$/.test(str) || Number(str) < 1 || Number(str) > 1024) {
+      return "Invalid SCRIPT_SANDBOX_UID_POOL_SIZE (must be a whole number from 1 to 1024)";
+    }
+    return null;
+  },
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
   SCRIPT_EGRESS_ALLOWLIST: (value) =>
     typeof value === "string" ? validateEgressAllowlist(value) : "Invalid SCRIPT_EGRESS_ALLOWLIST",
@@ -520,6 +536,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "DB_RETENTION_DRY_RUN",
     "MODEL_AUTO_UPGRADE",
     "COMB_ENABLED",
+    "SCRIPT_NATIVE_REQUIRE_ISOLATION",
+    "SCRIPT_NATIVE_EXEC_DENY",
   ]),
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),

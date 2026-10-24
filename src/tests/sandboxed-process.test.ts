@@ -115,6 +115,24 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
     expect(prelude).toContain(`ulimit -u ${DEFAULT_SANDBOX_LIMITS.maxProcs}`);
   });
 
+  // The drop itself needs root, so CI's API image smoke covers it end to end;
+  // here we pin the command shape.
+  test("drops to the leased uid after the ulimits and before env -i", () => {
+    const prelude =
+      buildSandboxedCommand(["bun", "run", "harness.js"], TEST_ENV, DEFAULT_SANDBOX_LIMITS, {
+        user: { uid: 61003, gid: 61003 },
+      })[2] ?? "";
+    const drop =
+      "exec 'setpriv' '--reuid=61003' '--regid=61003' '--clear-groups' '--no-new-privs' env -i ";
+    expect(prelude).toContain(drop);
+    expect(prelude.indexOf("ulimit -u")).toBeLessThan(prelude.indexOf(drop));
+  });
+
+  test("renders no setpriv without a leased uid", () => {
+    expect(sandboxPrelude(["bun", "run", "harness.js"])).not.toContain("setpriv");
+    expect(sandboxPrelude(["bun", "run", "harness.js"])).toContain("; exec env -i ");
+  });
+
   test.skipIf(SKIP_SANDBOX_SPAWN_TESTS)(
     "the raised profile starts a shell-wrapped Bun process with real nproc enforcement",
     async () => {
