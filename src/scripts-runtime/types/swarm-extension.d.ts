@@ -402,6 +402,36 @@ declare module "swarm-extension" {
     origin: TaskCreateOrigin;
     requestInfo?: RequestInfo;
   }
+  /** A pre.task.create hook blocked a task before it was created. */
+  export interface TaskBlockedEvent {
+    /** The extension that blocked, or whose model/agent rewrite was rejected. */
+    extension: {
+      id: string;
+      name: string;
+    };
+    /** The scrubbed block reason. */
+    reason: string;
+    origin: TaskCreateOrigin;
+    source?: AgentTask["source"];
+    requester: {
+      userId?: string;
+      agentId?: string;
+      slackUserId?: string;
+    };
+    context?: {
+      contextKey?: string;
+      scheduleId?: string;
+      workflowRunId?: string;
+      workflowRunStepId?: string;
+      parentTaskId?: string;
+      vcsRepo?: string;
+      vcsNumber?: number;
+      slackChannelId?: string;
+      slackThreadTs?: string;
+    };
+    /** The original task description, scrubbed and cut to 500 characters. */
+    description: string;
+  }
   export type TaskCreateModify = Partial<
     Pick<
       CreateTaskOptions,
@@ -701,6 +731,11 @@ declare module "swarm-extension" {
     };
     "post.task.created": {
       event: TaskEvent;
+      modify: never;
+      result: void;
+    };
+    "post.task.blocked": {
+      event: TaskBlockedEvent;
       modify: never;
       result: void;
     };

@@ -5,6 +5,7 @@ import type {
   ApprovalResolvedEvent,
   ChatMessageEvent,
   KapsoMessageEvent,
+  TaskBlockedEvent,
   TaskBudgetRefusedEvent,
   VcsEvent,
   VcsEventKind,
@@ -42,6 +43,11 @@ const onTaskCreated = observed("task.created", async (data) => {
       { task },
       { skipExtensionId: extensionIdForAgent(task.creatorAgentId) },
     );
+});
+
+const onTaskBlocked = observed("task.create_blocked", async (data) => {
+  const { skipExtensionId, ...event } = data as TaskBlockedEvent & { skipExtensionId?: string };
+  await dispatchPost("post.task.blocked", event, { skipExtensionId });
 });
 
 const onTaskCompleted = observed("task.completed", async (data) => {
@@ -358,6 +364,7 @@ export function initExtensionPostBridge(): void {
   if (subscribed) return;
   subscribed = true;
   workflowEventBus.on("task.created", onTaskCreated);
+  workflowEventBus.on("task.create_blocked", onTaskBlocked);
   workflowEventBus.on("task.completed", onTaskCompleted);
   workflowEventBus.on("task.failed", onTaskFailed);
   workflowEventBus.on("task.cancelled", onTaskCancelled);
@@ -377,6 +384,7 @@ export function teardownExtensionPostBridge(): void {
   if (!subscribed) return;
   subscribed = false;
   workflowEventBus.off("task.created", onTaskCreated);
+  workflowEventBus.off("task.create_blocked", onTaskBlocked);
   workflowEventBus.off("task.completed", onTaskCompleted);
   workflowEventBus.off("task.failed", onTaskFailed);
   workflowEventBus.off("task.cancelled", onTaskCancelled);
