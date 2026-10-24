@@ -102,10 +102,15 @@ describe("claimContextBoundNote", () => {
 });
 
 describe("createContextBoundNote", () => {
-  function observer(threshold: number, inject: (note: string) => unknown = () => {}) {
+  function observer(
+    threshold: number,
+    inject: (note: string) => unknown = () => {},
+    canDeliver: () => boolean = () => true,
+  ) {
     const notes: string[] = [];
     const observe = createContextBoundNote({
       threshold,
+      canDeliver,
       inject: (note) => {
         notes.push(note);
         return inject(note);
@@ -149,6 +154,35 @@ describe("createContextBoundNote", () => {
     await expect(observe(300_000)).resolves.toBeUndefined();
     await observe(300_000);
     expect(notes).toHaveLength(1);
+  });
+
+  test("holds a note rendered after its window closed, then delivers it on the next call", async () => {
+    let open = false;
+    const { observe, notes } = observer(200_000, undefined, () => open);
+    await observe(300_000);
+    expect(notes).toEqual([]);
+    open = true;
+    await observe(500_000);
+    // The held note, not a re-render at the later size.
+    expect(notes).toEqual([await renderContextBoundNote(300_000)]);
+    await observe(600_000);
+    expect(notes).toHaveLength(1);
+  });
+
+  test("never delivers when the window stays closed", async () => {
+    const { observe, notes } = observer(200_000, undefined, () => false);
+    await observe(300_000);
+    await observe(400_000);
+    expect(notes).toEqual([]);
+  });
+
+  test("checks the window after rendering, not before", async () => {
+    let open = true;
+    const { observe, notes } = observer(200_000, undefined, () => open);
+    const pending = observe(300_000);
+    open = false;
+    await pending;
+    expect(notes).toEqual([]);
   });
 });
 

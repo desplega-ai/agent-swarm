@@ -34,6 +34,7 @@ import {
   resolveCodexModel,
 } from "../providers/codex-models";
 import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
+import { HELD_NOTE_TEXT, holdTemplateRender } from "./fixtures/held-template-render";
 
 /**
  * Build a tiny fake `Thread` whose `runStreamed` returns a fixed sequence of
@@ -2645,6 +2646,7 @@ describe("CodexSession context-bound note", () => {
     events: ThreadEvent[],
     env: Record<string, string>,
     steer: (input: string) => Promise<void> = async () => {},
+    beforeTurnCompleted: () => Promise<unknown> = () => Bun.sleep(50),
   ): Promise<{ steers: string[]; result: ProviderResult }> {
     const steers: string[] = [];
     const thread = {
@@ -2660,7 +2662,7 @@ describe("CodexSession context-bound note", () => {
           yield { type: "thread.started", thread_id: "thread-bound-note" };
           yield { type: "turn.started" };
           for (const event of events) yield event;
-          await Bun.sleep(50);
+          await beforeTurnCompleted();
           yield {
             type: "turn.completed",
             usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 },
@@ -2719,5 +2721,31 @@ describe("CodexSession context-bound note", () => {
     );
     expect(steers).toHaveLength(1);
     expect(result.isError).toBe(false);
+  });
+
+  test("a note rendered after the turn completed is dropped", async () => {
+    const lateSteers = async (releaseInTurn: boolean) => {
+      const held = holdTemplateRender();
+      try {
+        const run = await runWithSteers(
+          requestEvents([5_000]),
+          { CONTEXT_BOUND_NOTE_TOKENS: "1000" },
+          undefined,
+          async () => {
+            await held.requested;
+            if (releaseInTurn) held.release();
+            await Bun.sleep(50);
+          },
+        );
+        held.release();
+        await Bun.sleep(50);
+        return run.steers;
+      } finally {
+        held.stop();
+      }
+    };
+    expect(await lateSteers(false)).toEqual([]);
+    // Control: ready while the turn is still open.
+    expect(await lateSteers(true)).toEqual([HELD_NOTE_TEXT]);
   });
 });

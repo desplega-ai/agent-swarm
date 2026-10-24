@@ -1022,6 +1022,12 @@ export class PiMonoSession implements ProviderSession {
   private disposeModels: () => Promise<void>;
   /** Fed each assistant request's prompt size; steers the one-time context-bound note. */
   private readonly observeContextBound: (contextTokens: number | undefined) => Promise<void>;
+  /**
+   * From a tool-call reply until its turn ends. Pi reads steering after the
+   * turn's tool results; a steer queued later waits for the next reply, and
+   * when that is the final one it starts another turn.
+   */
+  private toolTurnOpen = false;
 
   constructor(
     agentSession: AgentSession,
@@ -1040,6 +1046,7 @@ export class PiMonoSession implements ProviderSession {
     this.sessionStartedAt = Date.now();
     this.observeContextBound = createContextBoundNote({
       threshold: contextBoundNoteThreshold(config.env ?? process.env),
+      canDeliver: () => this.toolTurnOpen && !this.sessionEnded && !this.abortRequested,
       inject: (note) => this.deliverSteering({ mode: "steer", text: note }),
     });
 
@@ -1119,6 +1126,7 @@ export class PiMonoSession implements ProviderSession {
           // Only on tool-call turns: a steer after the final reply would start
           // another turn.
           if (turn.hasToolCall) {
+            this.toolTurnOpen = true;
             void this.observeContextBound(requestContextTokens(event.message));
           }
           if (!turn.hasText && !turn.hasToolCall) {
@@ -1175,6 +1183,9 @@ export class PiMonoSession implements ProviderSession {
         }
         break;
       }
+      case "turn_end":
+        this.toolTurnOpen = false;
+        break;
       case "tool_execution_start": {
         const status = (event.args as { status?: unknown } | null)?.status;
         if (

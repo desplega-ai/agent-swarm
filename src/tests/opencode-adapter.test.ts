@@ -23,6 +23,7 @@ import {
 import { createSkillInvokeTracker, type SkillInvoke } from "../providers/skill-invoke";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
+import { HELD_NOTE_TEXT, holdTemplateRender } from "./fixtures/held-template-render";
 
 const SESSION_ID = "ses_test";
 
@@ -891,6 +892,31 @@ describe("OpencodeSession — context-bound note", () => {
     await waitFor(() => host.synthetics.length > 0);
     session.handleOpencodeEvent(succeeded);
     expect((await session.waitForCompletion()).isError).toBe(false);
+  });
+
+  test("a note rendered after the session completed is dropped", async () => {
+    const lateSynthetics = async (releaseInSession: boolean) => {
+      const held = holdTemplateRender();
+      try {
+        const { session, host } = await startSession([], boundConfig("1000"));
+        session.handleOpencodeEvent(step(SESSION_ID, 5_000));
+        await held.requested;
+        if (releaseInSession) {
+          held.release();
+          await waitFor(() => host.synthetics.length > 0);
+        }
+        session.handleOpencodeEvent(succeeded);
+        expect((await session.waitForCompletion()).isError).toBe(false);
+        held.release();
+        await Bun.sleep(50);
+        return host.synthetics.map((s) => s.text);
+      } finally {
+        held.stop();
+      }
+    };
+    expect(await lateSynthetics(false)).toEqual([]);
+    // Control: ready while the session runs.
+    expect(await lateSynthetics(true)).toEqual([HELD_NOTE_TEXT]);
   });
 });
 

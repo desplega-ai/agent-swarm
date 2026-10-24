@@ -273,6 +273,8 @@ async function main() {
     if (mode === "success-child") await startDetachedChild();
     // A turn that thinks for a while with no tool call.
     if (mode === "steer-no-tool") await Bun.sleep(600);
+    // `AMP_TEST_POST_RESULT_DELAY_MS`: the final reply takes this long after the last tool result.
+    await Bun.sleep(Number(process.env.AMP_TEST_POST_RESULT_DELAY_MS) || 0);
     lastText = mode.startsWith("steer") ? `DONE${index + 1}` : "Done ✓";
     assistant([{ type: "text", text: lastText }], "end_turn");
   };

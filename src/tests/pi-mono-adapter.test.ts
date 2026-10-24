@@ -25,6 +25,7 @@ import {
   writeSessionModelsJson,
 } from "../providers/pi-mono-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
+import { HELD_NOTE_TEXT, holdTemplateRender } from "./fixtures/held-template-render";
 
 describe("PiMonoAdapter", () => {
   test("name is 'pi'", () => {
@@ -1777,10 +1778,14 @@ describe("PiMonoSession context-bound note", () => {
 
   const usage = (input: number) => ({ input, cacheRead: 300, cacheWrite: 200, output: 50 });
 
-  async function steersFor(threshold: string, events: AgentSessionEvent[]): Promise<string[]> {
+  async function steersFor(
+    threshold: string,
+    events: AgentSessionEvent[],
+    afterEvents: () => Promise<unknown> = () => Bun.sleep(50),
+  ): Promise<string[]> {
     const steerCalls: string[] = [];
     const session = new PiMonoSession(
-      makeMockAgentSession({ events, steerCalls, afterEvents: () => Bun.sleep(50) }),
+      makeMockAgentSession({ events, steerCalls, afterEvents }),
       {
         ...makeSessionConfig(join(tmpLogDir, `bound-note-${crypto.randomUUID()}.log`)),
         env: { CONTEXT_BOUND_NOTE_TOKENS: threshold },
@@ -1819,5 +1824,24 @@ describe("PiMonoSession context-bound note", () => {
 
   test("never steers after the final reply, which would start another turn", async () => {
     expect(await steersFor("1", [assistantTurn(usage(5000), true)])).toEqual([]);
+  });
+
+  test("a note rendered after its tool turn ended is dropped", async () => {
+    const turnEnd = { type: "turn_end" } as unknown as AgentSessionEvent;
+    const lateSteers = async (events: AgentSessionEvent[]) => {
+      const held = holdTemplateRender();
+      try {
+        return await steersFor("1", events, async () => {
+          held.release();
+          await Bun.sleep(50);
+        });
+      } finally {
+        held.stop();
+      }
+    };
+    // Pi already read steering for that turn; the next reply could be the final one.
+    expect(await lateSteers([assistantTurn(usage(5000)), turnEnd])).toEqual([]);
+    // Control: ready while the tool turn is still running.
+    expect(await lateSteers([assistantTurn(usage(5000))])).toEqual([HELD_NOTE_TEXT]);
   });
 });

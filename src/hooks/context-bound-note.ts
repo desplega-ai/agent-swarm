@@ -16,7 +16,8 @@ import { renderContextBoundNote } from "../prompts/context-bound-note";
  *   (`claimContextBoundNote`) and returns the note as tool context.
  * - In-process harnesses (codex, pi, opencode, amp, claude-managed): the session
  *   feeds each request's size to `createContextBoundNote`, which injects the
- *   note through the harness's own mid-turn input.
+ *   note through the harness's own mid-turn input, and only while that input
+ *   still lands inside the current turn.
  *
  * Every failure path means "no note": nothing here throws into a session or
  * blocks a tool call.
@@ -127,17 +128,50 @@ export async function injectClaimedContextBoundNote(
 /**
  * In-process path. Returns an observer the session calls with each
  * main-thread request's prompt size. The first size at or above `threshold`
- * claims the note for this session (one session runs one task) and injects
- * it; later calls are no-ops. The returned promise never rejects.
+ * claims the note for this session (one session runs one task) and renders
+ * it; later sizes are ignored. The returned promise never rejects.
+ *
+ * Rendering is async (HTTP on workers), so the session may have moved on by
+ * the time the note is ready. `canDeliver` decides then: true injects it;
+ * false holds it, and each later call retries the held note instead of
+ * rendering a new one. A session that settles, aborts or ends its last turn
+ * first never gets it.
  */
 export function createContextBoundNote(options: {
   threshold: number;
   inject: (note: string) => unknown;
+  /** True while a note injected now reaches the model inside the current turn. */
+  canDeliver: () => boolean;
 }): (contextTokens: number | undefined) => Promise<void> {
-  let claimed = false;
+  let state: "idle" | "rendering" | "held" | "done" = "idle";
+  let held = "";
+  const tryDeliver = async (note: string): Promise<void> => {
+    try {
+      if (!options.canDeliver()) {
+        held = note;
+        state = "held";
+        return;
+      }
+      state = "done";
+      await options.inject(note);
+    } catch {
+      // Fail open.
+    }
+  };
   return async (contextTokens) => {
-    if (claimed || !reachesThreshold(contextTokens, options.threshold)) return;
-    claimed = true;
-    await deliverContextBoundNote(contextTokens, options.inject);
+    if (state === "held") return tryDeliver(held);
+    if (state !== "idle" || !reachesThreshold(contextTokens, options.threshold)) return;
+    state = "rendering";
+    let note = "";
+    try {
+      note = await renderContextBoundNote(contextTokens);
+    } catch {
+      // Fail open.
+    }
+    if (!note) {
+      state = "done";
+      return;
+    }
+    await tryDeliver(note);
   };
 }

@@ -32,6 +32,7 @@ import { getModelAwareCredentialVars } from "../utils/credentials";
 import { resolveHarnessProvider } from "../utils/harness-provider";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 import { ampPricingLookup } from "./amp-pricing-helpers";
+import { holdTemplateRender } from "./fixtures/held-template-render";
 
 const KEY = "sgamp_test_credential_value";
 
@@ -816,6 +817,34 @@ describe("amp context-bound note", () => {
     expect(results).toEqual([]);
     expect(result).toMatchObject({ isError: false, output: "DONE1" });
     expect(result.cost?.numTurns).toBe(1);
+  });
+
+  test("a note rendered after the last tool result is dropped, not replayed as a new turn", async () => {
+    const held = holdTemplateRender();
+    try {
+      const { config } = await fixture(
+        "steer",
+        {},
+        {
+          CONTEXT_BOUND_NOTE_TOKENS: "1204",
+          AMP_TEST_POST_RESULT_DELAY_MS: "150",
+        },
+      );
+      const session = await new AmpAdapter().createSession(config);
+      const results: unknown[] = [];
+      session.onEvent((event) => {
+        if (event.type !== "tool_end") return;
+        results.push(event.result);
+        // Ready while the final reply is pending.
+        held.release();
+      });
+      const result = await session.waitForCompletion();
+      expect(results).toEqual(["2"]);
+      expect(result).toMatchObject({ isError: false, output: "DONE1" });
+      expect(result.cost?.numTurns).toBe(1);
+    } finally {
+      held.stop();
+    }
   });
 });
 

@@ -14,6 +14,7 @@ import {
   getClaudeManagedModelPricing,
 } from "../providers/claude-managed-models";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import { HELD_NOTE_TEXT, holdTemplateRender } from "./fixtures/held-template-render";
 
 // Stash + restore env vars so this file plays nicely with the rest of the
 // suite (other tests don't expect MANAGED_AGENT_ID / MANAGED_ENVIRONMENT_ID
@@ -1663,5 +1664,95 @@ describe("ClaudeManagedAdapter — one-time context-bound note", () => {
     expect(result.isError).toBe(false);
     // One attempt only: a failed send does not re-arm the note.
     expect(notes).toHaveLength(1);
+  });
+
+  describe("note rendered late", () => {
+    const toolResult = (toolUseId: string) => ({
+      type: "agent.tool_result",
+      id: `tr-${++seq}`,
+      processed_at: "2026-01-01T00:00:00Z",
+      tool_use_id: toolUseId,
+      content: [],
+    });
+
+    /**
+     * Holds the render until the stream reaches `releaseAt`. Returns the
+     * `user.message` events sent after the prompt, read once the late render
+     * had time to land.
+     */
+    async function lateNotes(
+      releaseAt: "tool-open" | "tool-returned" | "idle" | "abort",
+    ): Promise<{ notes: unknown[]; isError: boolean }> {
+      const held = holdTemplateRender();
+      const tool = toolUse();
+      let unblock!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        unblock = resolve;
+      });
+      const spy = makeFakeClient({
+        streamEvents: async function* () {
+          yield requestEnd(300_000);
+          yield tool;
+          await held.requested;
+          if (releaseAt === "tool-open") {
+            held.release();
+            await Bun.sleep(50);
+          }
+          yield toolResult(tool.id);
+          if (releaseAt === "tool-returned") {
+            held.release();
+            await Bun.sleep(50);
+          }
+          if (releaseAt === "abort") await blocked;
+          yield idle();
+        },
+      });
+      try {
+        const session = await new ClaudeManagedAdapter({ client: spy.client }).createSession(
+          tConfig({
+            logFile: join(tmpLogDir, `late-${++seq}.log`),
+            env: { CONTEXT_BOUND_NOTE_TOKENS: "200000" },
+          }),
+        );
+        if (releaseAt === "abort") {
+          await held.requested;
+          await session.abort();
+          unblock();
+        }
+        const result = await session.waitForCompletion();
+        held.release();
+        await Bun.sleep(100);
+        const notes = spy.sent
+          .slice(1)
+          .filter((sent) => sent.events[0]?.type === "user.message")
+          .map((sent) => sent.events[0]);
+        return { notes, isError: result.isError };
+      } finally {
+        unblock();
+        held.stop();
+      }
+    }
+
+    test("control: a note ready while its tool call is open is sent", async () => {
+      const { notes, isError } = await lateNotes("tool-open");
+      expect(isError).toBe(false);
+      expect(notes).toEqual([
+        { type: "user.message", content: [{ type: "text", text: HELD_NOTE_TEXT }] },
+      ]);
+    });
+
+    test("dropped once the tool result is back and the final reply is pending", async () => {
+      expect((await lateNotes("tool-returned")).notes).toEqual([]);
+    });
+
+    test("dropped after the session went idle", async () => {
+      const { notes, isError } = await lateNotes("idle");
+      expect(isError).toBe(false);
+      expect(notes).toEqual([]);
+    });
+
+    test("dropped after abort", async () => {
+      expect((await lateNotes("abort")).notes).toEqual([]);
+    });
   });
 });
