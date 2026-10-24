@@ -583,7 +583,9 @@ export async function handleWorkflows(
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
     }
-    const modelErrors = await workflowModelErrors(parsed.body.definition);
+    const modelErrors = await workflowModelErrors(parsed.body.definition, {
+      vcsRepo: parsed.body.vcsRepo,
+    });
     if (modelErrors.length > 0) {
       jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
       return true;
@@ -762,7 +764,16 @@ export async function handleWorkflows(
         jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
         return true;
       }
-      const modelErrors = await workflowModelErrors(body.definition);
+    }
+    // A stored definition moving to another repo is judged again: its static
+    // profiles now check against that repo's credential pool.
+    const repoChanged =
+      body.vcsRepo !== undefined && (body.vcsRepo ?? null) !== (existing.vcsRepo ?? null);
+    const judged = body.definition ?? (repoChanged ? existing.definition : undefined);
+    if (judged) {
+      const modelErrors = await workflowModelErrors(judged, {
+        vcsRepo: body.vcsRepo === undefined ? existing.vcsRepo : body.vcsRepo,
+      });
       if (modelErrors.length > 0) {
         jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
         return true;

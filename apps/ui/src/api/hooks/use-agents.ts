@@ -150,9 +150,10 @@ export function useUpdateAgentRuntime() {
         | "cursor"
         | "amp"
         | "grok";
-      model: string | null;
+      model?: string | null;
       allowCustomModel?: boolean;
       reasoningEffort?: ReasoningEffortLevel | null;
+      profile?: string;
       acp?: AcpRuntimeConfig;
       claude?: ClaudeRuntimeConfig;
     }) => api.updateAgentRuntime(data),
@@ -161,6 +162,7 @@ export function useUpdateAgentRuntime() {
       queryClient.invalidateQueries({ queryKey: ["agent"] });
       queryClient.invalidateQueries({ queryKey: ["configs"] });
       queryClient.invalidateQueries({ queryKey: ["agent-runtime"] });
+      queryClient.invalidateQueries({ queryKey: ["model-profiles"] });
     },
   });
 }

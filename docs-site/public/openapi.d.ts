@@ -2495,7 +2495,7 @@ export interface paths {
         head?: never;
         /**
          * Update an agent's runtime harness and default model
-         * @description Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist and run on `harness_provider`, and it cannot be sent with `model`. Sending `model`, or changing the model or effort override by any path, clears the default profile.
+         * @description Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist, run on `harness_provider` and pass the profile check (`GET /api/agents/{id}/profile-check`) against it, and it cannot be sent with `model`. A failing check is a 400 `{ error, check }`; a passing one returns the result as `profileCheck`. Sending `model`, or changing the model or effort override by any path, clears the default profile.
          */
         patch: {
             parameters: {
@@ -2538,7 +2538,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Updated agent row */
+                /** @description Updated agent row. `profileCheck` is set when the body set `profile`, so warnings show. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2550,10 +2550,11 @@ export interface paths {
                                 max: number;
                                 available: number;
                             };
+                            profileCheck?: components["schemas"]["ProfileCheckResult"];
                         };
                     };
                 };
-                /** @description Validation error */
+                /** @description Validation error, or `{ error, check }` when the profile check fails */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -3139,6 +3140,58 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/profile-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check whether an agent can run a model profile
+         * @description Read-only. Judges the profile's harness, model, the agent's credential report and the profile's credential allowlist. Each row is pass, warn, fail or unverified; `ok` is false only when a row fails. Never returns a secret value.
+         */
+        get: {
+            parameters: {
+                query: {
+                    profile: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The check result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProfileCheckResult"];
+                    };
+                };
+                /** @description Agent or profile not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -10583,6 +10636,9 @@ export interface paths {
                                 allowCustomModel: boolean;
                                 description: string | null;
                                 seededFrom: string | null;
+                                credentials: {
+                                    [key: string]: string[];
+                                } | null;
                                 createdAt: string;
                                 lastUpdatedAt: string;
                             }[];
@@ -10594,7 +10650,7 @@ export interface paths {
         put?: never;
         /**
          * Create a model profile
-         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. Operator only (the shared API key).
+         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). Operator only (the shared API key).
          */
         post: {
             parameters: {
@@ -10615,6 +10671,9 @@ export interface paths {
                         /** @default false */
                         allowCustomModel?: boolean;
                         description?: string | null;
+                        credentials?: {
+                            [key: string]: string[];
+                        } | null;
                     };
                 };
             };
@@ -10636,6 +10695,9 @@ export interface paths {
                             allowCustomModel: boolean;
                             description: string | null;
                             seededFrom: string | null;
+                            credentials: {
+                                [key: string]: string[];
+                            } | null;
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -10712,6 +10774,9 @@ export interface paths {
                             allowCustomModel: boolean;
                             description: string | null;
                             seededFrom: string | null;
+                            credentials: {
+                                [key: string]: string[];
+                            } | null;
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -10732,7 +10797,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model profile
-         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
+         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
          */
         delete: {
             parameters: {
@@ -10790,7 +10855,7 @@ export interface paths {
         head?: never;
         /**
          * Update a model profile
-         * @description Changes the model, effort, custom-model flag or description; the name and harness are fixed. Omit a field to keep it; `effort: null` clears it. Applies to tasks claimed after the change. Operator only (the shared API key).
+         * @description Changes the model, effort, custom-model flag, description or credential allowlist; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it. Applies to tasks claimed after the change. Operator only (the shared API key).
          */
         patch: {
             parameters: {
@@ -10809,6 +10874,9 @@ export interface paths {
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
                         allowCustomModel?: boolean;
                         description?: string | null;
+                        credentials?: {
+                            [key: string]: string[];
+                        } | null;
                     };
                 };
             };
@@ -10830,6 +10898,9 @@ export interface paths {
                             allowCustomModel: boolean;
                             description: string | null;
                             seededFrom: string | null;
+                            credentials: {
+                                [key: string]: string[];
+                            } | null;
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -12847,6 +12918,8 @@ export interface paths {
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                profile?: string;
+                                resolvedProfile?: string;
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                 requestedByUserId?: string;
@@ -13779,6 +13852,8 @@ export interface paths {
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                profile?: string;
+                                resolvedProfile?: string;
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                 requestedByUserId?: string;
@@ -14027,6 +14102,9 @@ export interface paths {
                                     role?: string;
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                credentialAllowlist?: {
+                                    [key: string]: string[];
                                 };
                             })[];
                         };
@@ -15754,6 +15832,9 @@ export interface paths {
                                         mimeType?: string;
                                         sizeBytes?: number;
                                     }[];
+                                    credentialAllowlist?: {
+                                        [key: string]: string[];
+                                    };
                                 };
                                 requestedBy?: {
                                     id?: string;
@@ -16944,6 +17025,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -17010,6 +17092,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -17073,6 +17156,7 @@ export interface paths {
                         model?: string;
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
+                        profile?: string;
                         allowCustomModel?: boolean;
                         /** @enum {string} */
                         scheduleType?: "recurring" | "one_time";
@@ -17138,6 +17222,7 @@ export interface paths {
                             model?: string;
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
+                            profile?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -17260,6 +17345,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -17382,6 +17468,7 @@ export interface paths {
                             model?: string;
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
+                            profile?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -17453,6 +17540,7 @@ export interface paths {
                         model?: string | null;
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
+                        profile?: string | null;
                         allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
@@ -17515,6 +17603,7 @@ export interface paths {
                             model?: string;
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
+                            profile?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -17654,6 +17743,7 @@ export interface paths {
                         model?: string | null;
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
+                        profile?: string | null;
                         allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
@@ -17716,6 +17806,7 @@ export interface paths {
                             model?: string;
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
+                            profile?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -21830,6 +21921,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -21894,6 +21986,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -26673,6 +26766,21 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             lastUpdatedAt: string;
+        };
+        ProfileCheckResult: {
+            agentId: string;
+            ok: boolean;
+            profiles: {
+                name: string;
+                ok: boolean;
+                checks: {
+                    /** @enum {string} */
+                    check: "harness" | "model" | "harness-credentials" | "credential-allowlist";
+                    /** @enum {string} */
+                    state: "pass" | "warn" | "fail" | "unverified";
+                    detail?: string;
+                }[];
+            }[];
         };
         SwarmConfig: {
             /** Format: uuid */

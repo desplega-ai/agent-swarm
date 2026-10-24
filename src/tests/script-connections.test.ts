@@ -648,6 +648,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "240_workflow_run_parent_step_attempt.sql");
       // 241 indexes skills, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "241_skills_meta_fts.sql");
+      // 243 alters model_profiles (made by the skipped 220) and scheduled_tasks.
+      markMigrationApplied(database, "243_model_profiles_pr2.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

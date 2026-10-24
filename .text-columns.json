@@ -2145,6 +2145,9 @@
     },
     "requestedRunAt": {
       "exempt": "timestamp"
+    },
+    "profile": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "script_apis": {
@@ -3855,6 +3858,9 @@
     },
     "updated_by": {
       "exempt": "identifier"
+    },
+    "credentialAllowlist": {
+      "exempt": "JSON of credential var names to 5-character key suffixes"
     }
   }
 }

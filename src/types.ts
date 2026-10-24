@@ -439,6 +439,16 @@ export const ModelProfileNameSchema = z
   .trim()
   .regex(/^[a-z0-9][a-z0-9._-]{0,99}$/, "lowercase letters, digits, '.', '_' or '-', max 100");
 
+/**
+ * The pooled keys a profile may use, per credential var: the last 5
+ * characters of each allowed key. A var with no entry keeps its whole pool.
+ */
+export const ModelProfileCredentialsSchema = z.record(
+  z.string(),
+  z.array(z.string().length(5)).min(1),
+);
+export type ModelProfileCredentials = z.infer<typeof ModelProfileCredentialsSchema>;
+
 export const ModelProfileSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -449,10 +459,43 @@ export const ModelProfileSchema = z.object({
   description: z.string().nullable(),
   /** `tier:<tier>` (boot seed), `agent-config` (made from an agent's MODEL_OVERRIDE), or null. */
   seededFrom: z.string().nullable(),
+  /** Pooled-key allowlist (column `credentialAllowlist`); null uses the whole pool. */
+  credentials: ModelProfileCredentialsSchema.nullable(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
 });
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
+
+/** One check's verdict: only `fail` blocks; `unverified` means nothing to judge yet. */
+export const ProfileCheckStateSchema = z.enum(["pass", "warn", "fail", "unverified"]);
+export type ProfileCheckState = z.infer<typeof ProfileCheckStateSchema>;
+
+export const ProfileCheckRowSchema = z.object({
+  check: z.enum(["harness", "model", "harness-credentials", "credential-allowlist"]),
+  state: ProfileCheckStateSchema,
+  /** Why, in words. Names vars and key suffixes, never a secret value. */
+  detail: z.string().optional(),
+});
+export type ProfileCheckRow = z.infer<typeof ProfileCheckRowSchema>;
+
+/**
+ * Whether an agent can run a profile. `profiles[0]` is the primary; `ok` is
+ * true when it has no `fail` row.
+ */
+export const ProfileCheckResultSchema = z
+  .object({
+    agentId: z.string(),
+    ok: z.boolean(),
+    profiles: z.array(
+      z.object({
+        name: z.string(),
+        ok: z.boolean(),
+        checks: z.array(ProfileCheckRowSchema),
+      }),
+    ),
+  })
+  .openapi("ProfileCheckResult");
+export type ProfileCheckResult = z.infer<typeof ProfileCheckResultSchema>;
 
 // ============================================================================
 // Session sharing
@@ -732,7 +775,7 @@ export const AgentTaskSchema = z
 
     // Model selection (optional — provider-specific; can be "opus", "gpt-4o",
     // "openrouter/openai/gpt-5-nano", etc. depending on HARNESS_PROVIDER).
-    // Prefer modelTier for portable task intent; model is a concrete override
+    // Prefer `profile` (below) for named intent; model is a concrete override
     // interpreted by the claiming worker's harness and never switches provider.
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
@@ -1874,6 +1917,8 @@ export const ScheduledTaskSchema = z
     lastErrorMessage: z.string().optional(),
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
+    /** Model profile copied onto every fired task; exclusive with model/modelTier. */
+    profile: z.string().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
     targetType: ScheduledTaskTargetTypeSchema.default("agent-task"),
     workflowId: z.uuid().optional(),
@@ -2748,6 +2793,8 @@ export type AgentTaskSummary = Pick<
   | "modelAlias"
   | "effort"
   | "resolvedEffort"
+  | "profile"
+  | "resolvedProfile"
   | "provider"
   | "requestedByUserId"
   | "progress"

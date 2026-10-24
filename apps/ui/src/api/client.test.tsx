@@ -149,6 +149,25 @@ describe("updateAgentRuntime", () => {
     });
   });
 
+  test("sends a model profile without the model, custom flag or effort", async () => {
+    globalThis.fetch = async (_url, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({
+        harness_provider: "claude",
+        profile: "claude-smart",
+      });
+      return Response.json({ id: "agent-claude" });
+    };
+
+    await api.updateAgentRuntime({
+      id: "agent-claude",
+      harnessProvider: "claude",
+      model: "claude-haiku-4-5",
+      allowCustomModel: true,
+      reasoningEffort: "high",
+      profile: "claude-smart",
+    });
+  });
+
   test("sends ACP target configuration with its model knob", async () => {
     globalThis.fetch = async (url, init) => {
       expect(url).toBe("https://api.example.test/api/agents/agent-acp/runtime");

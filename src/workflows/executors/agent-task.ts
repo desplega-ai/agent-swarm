@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { modelProfileRefError, taskProfileError } from "../../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../../be/model-validation";
 import { applyPreTaskCreate } from "../../extensions/apply-task-create";
 import { workflowContextKey } from "../../tasks/context-key";
@@ -33,6 +34,8 @@ export const AgentTaskConfigSchema = z.object({
   /** Accept a `model` the catalog does not list (a custom id). Without it an unknown id fails the node. */
   allowCustomModel: z.boolean().optional(),
   effort: ReasoningEffortSchema.optional(),
+  /** Model profile name (see list-model-profiles). Exclusive with model/modelTier; checked against `agentId` at run. */
+  profile: z.string().min(1).optional(),
   parentTaskId: z.string().uuid().optional(),
   requestedByUserId: z.string().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
@@ -106,6 +109,14 @@ export class AgentTaskExecutor extends BaseExecutor<
       agentId: config.agentId,
     });
     if (modelError) return { status: "failed", error: modelError };
+    const profileError = await taskProfileError({
+      profile: config.profile,
+      model: config.model,
+      modelTier: config.modelTier,
+      agentId: config.agentId,
+      vcsRepo: effectiveVcsRepo,
+    });
+    if (profileError) return { status: "failed", error: profileError };
     const preCreate = await applyPreTaskCreate({
       description: config.template,
       options: {
@@ -129,6 +140,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         vcsRepo: effectiveVcsRepo,
         ...splitLegacyModelAlias({ model: config.model, modelTier: config.modelTier }),
         effort: config.effort,
+        profile: config.profile?.trim() || undefined,
         parentTaskId: config.parentTaskId,
         requestedByUserId: config.requestedByUserId ?? meta.requestedByUserId,
         outputSchema: config.outputSchema,
@@ -146,7 +158,14 @@ export class AgentTaskExecutor extends BaseExecutor<
     // block handed each child its siblings' task ids, and one child completed
     // a sibling's task with its own report. It would also wire parentTaskId to
     // a concurrent same-agent sibling's session.
-    const task = await db.createTaskExtended(preCreate.description, preCreate.options);
+    let task: Awaited<ReturnType<typeof db.createTaskExtended>>;
+    try {
+      task = await db.createTaskExtended(preCreate.description, preCreate.options);
+    } catch (error) {
+      // The profile was deleted between taskProfileError and the insert.
+      if (modelProfileRefError(error) !== "missing") throw error;
+      return { status: "failed", error: `Unknown model profile "${config.profile}".` };
+    }
 
     // 4. Return async result — engine will pause the workflow
     return {

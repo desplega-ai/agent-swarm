@@ -47,7 +47,7 @@ export const modelHarnessGuard: Scenario = {
       "Codex poll did not return the tier task",
     );
     expect(
-      task.resolvedModel === "gpt-5.6-sol" && task.modelSource === "tier-default",
+      task.resolvedModel === "gpt-5.6-sol" && task.modelSource === "profile:tier-alias",
       `Tier task resolved to ${String(task.resolvedModel)} (${String(task.modelSource)})`,
     );
     response = await ctx.api("POST", `/api/tasks/${tierTaskId}/finish`, {

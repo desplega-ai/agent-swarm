@@ -6,12 +6,18 @@
  */
 import {
   type ModelProfile,
+  type ModelProfileCredentials,
+  ModelProfileCredentialsSchema,
   type ProviderName,
   ProviderNameSchema,
   type ReasoningEffort,
   ReasoningEffortSchema,
 } from "../../types";
-import { vcsRepoName, vcsRepoUrlMatches } from "../../utils/vcs-repo-match";
+import {
+  checkProfileForAgent,
+  formatProfileCheckFailures,
+  vcsRepoId,
+} from "../model-profile-check";
 import { getDbClient } from "./runtime";
 import { SUPERSEDED_RESUME_REPAIR_WINDOW_MS } from "./tasks/read";
 
@@ -27,9 +33,27 @@ type ModelProfileRow = {
   allowCustomModel: number;
   description: string | null;
   seededFrom: string | null;
+  credentialAllowlist: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
+
+/** The stored allowlist JSON as a map, or null when unset or unreadable. */
+function parseCredentialAllowlist(value: string | null): ModelProfileCredentials | null {
+  if (!value) return null;
+  try {
+    const parsed = ModelProfileCredentialsSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function serializeCredentialAllowlist(
+  value: ModelProfileCredentials | null | undefined,
+): string | null {
+  return value && Object.keys(value).length > 0 ? JSON.stringify(value) : null;
+}
 
 function rowToModelProfile(row: ModelProfileRow): ModelProfile {
   return {
@@ -43,6 +67,7 @@ function rowToModelProfile(row: ModelProfileRow): ModelProfile {
     allowCustomModel: row.allowCustomModel === 1,
     description: row.description,
     seededFrom: row.seededFrom,
+    credentials: parseCredentialAllowlist(row.credentialAllowlist),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -78,6 +103,8 @@ export interface ModelProfileInput {
   allowCustomModel?: boolean;
   description?: string | null;
   seededFrom?: string | null;
+  /** Pooled-key allowlist, stored as `credentialAllowlist`; null uses the whole pool. */
+  credentials?: ModelProfileCredentials | null;
 }
 
 /** Insert a profile. Returns null when the name is taken. */
@@ -88,8 +115,8 @@ export async function createModelProfile(
   const now = new Date().toISOString();
   const row = await getDbClient().get<ModelProfileRow>(
     `INSERT INTO model_profiles
-       (id, name, harness, model, effort, allowCustomModel, description, seededFrom, createdAt, lastUpdatedAt, created_by, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, name, harness, model, effort, allowCustomModel, description, seededFrom, credentialAllowlist, createdAt, lastUpdatedAt, created_by, updated_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(name) DO NOTHING
      RETURNING *`,
     [
@@ -101,6 +128,7 @@ export async function createModelProfile(
       input.allowCustomModel ? 1 : 0,
       input.description ?? null,
       input.seededFrom ?? null,
+      serializeCredentialAllowlist(input.credentials),
       now,
       now,
       audit.userId ?? null,
@@ -111,10 +139,13 @@ export async function createModelProfile(
 }
 
 export type ModelProfilePatch = Partial<
-  Pick<ModelProfileInput, "model" | "effort" | "allowCustomModel" | "description">
+  Pick<ModelProfileInput, "model" | "effort" | "allowCustomModel" | "description" | "credentials">
 >;
 
-/** Update a profile's model, effort or description. The name and harness are fixed. */
+/**
+ * Update a profile's model, effort, description or credential allowlist
+ * (`credentials: null` clears it). The name and harness are fixed.
+ */
 export async function updateModelProfile(
   name: string,
   patch: ModelProfilePatch,
@@ -137,6 +168,10 @@ export async function updateModelProfile(
   if (patch.description !== undefined) {
     sets.push("description = ?");
     params.push(patch.description);
+  }
+  if (patch.credentials !== undefined) {
+    sets.push("credentialAllowlist = ?");
+    params.push(serializeCredentialAllowlist(patch.credentials));
   }
   sets.push("lastUpdatedAt = ?", "updated_by = ?");
   params.push(new Date().toISOString(), audit.userId ?? null);
@@ -167,24 +202,36 @@ function repairWindowStart(): string {
   return new Date(Date.now() - SUPERSEDED_RESUME_REPAIR_WINDOW_MS).toISOString();
 }
 
-/** Who still points at a profile: agents with it as default, and tasks that still hold it. */
+/**
+ * Who still points at a profile: agents with it as default, tasks that still
+ * hold it, and schedules that fire tasks with it.
+ */
 export async function modelProfileReferences(
   name: string,
-): Promise<{ agentIds: string[]; openTaskCount: number }> {
+): Promise<{ agentIds: string[]; openTaskCount: number; scheduleIds: string[] }> {
   const agents = await getDbClient().query<{ scopeId: string }>(
     "SELECT scopeId FROM swarm_config WHERE scope = 'agent' AND key = ? AND value = ?",
     [MODEL_PROFILE_CONFIG_KEY, name],
   );
   const tasks = await getDbClient().get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM agent_tasks t WHERE t.profile = ? AND ${TASK_HOLDS_PROFILE_SQL}`,
-    [name, repairWindowStart()],
+    `SELECT COUNT(*) AS n FROM agent_tasks t
+      WHERE (t.profile = ? OR t.resolvedProfile = ?) AND ${TASK_HOLDS_PROFILE_SQL}`,
+    [name, name, repairWindowStart()],
   );
-  return { agentIds: agents.map((a) => a.scopeId), openTaskCount: tasks?.n ?? 0 };
+  const schedules = await getDbClient().query<{ id: string }>(
+    "SELECT id FROM scheduled_tasks WHERE profile = ? ORDER BY id",
+    [name],
+  );
+  return {
+    agentIds: agents.map((a) => a.scopeId),
+    openTaskCount: tasks?.n ?? 0,
+    scheduleIds: schedules.map((s) => s.id),
+  };
 }
 
 /**
- * Which migration-220 reference trigger refused a write: `missing` when a task
- * or an agent default names a profile that does not exist.
+ * Which reference trigger (migrations 220, 240) refused a write: `missing` when
+ * a task, a schedule or an agent default names a profile that does not exist.
  */
 export function modelProfileRefError(error: unknown): "missing" | null {
   const message = error instanceof Error ? error.message : "";
@@ -192,11 +239,13 @@ export function modelProfileRefError(error: unknown): "missing" | null {
 }
 
 /**
- * Delete a profile unless a task still holds it (`TASK_HOLDS_PROFILE_SQL`) or
- * an agent default names it. The check is part of the DELETE statement, so a
- * reference written after the caller's own count still makes it `in-use`; the
- * triggers in migration 220 refuse the opposite order (a reference written
- * after this delete).
+ * Delete a profile unless a task still holds it (`TASK_HOLDS_PROFILE_SQL`) as
+ * its ask or as the profile claim applied (`resolvedProfile`, which a paused
+ * task's resume re-reads for its credential allowlist), an
+ * agent default names it, or a schedule names it. The check is part of the
+ * DELETE statement, so a reference written after the caller's own count still
+ * makes it `in-use`; the triggers in migrations 220 and 240 refuse the
+ * opposite order (a reference written after this delete).
  */
 export async function deleteModelProfile(name: string): Promise<"deleted" | "missing" | "in-use"> {
   const row = await getDbClient().get<{ id: string }>(
@@ -204,10 +253,13 @@ export async function deleteModelProfile(name: string): Promise<"deleted" | "mis
       WHERE name = ?
         AND NOT EXISTS (
           SELECT 1 FROM agent_tasks t
-           WHERE t.profile = model_profiles.name AND ${TASK_HOLDS_PROFILE_SQL})
+           WHERE (t.profile = model_profiles.name OR t.resolvedProfile = model_profiles.name)
+             AND ${TASK_HOLDS_PROFILE_SQL})
         AND NOT EXISTS (
           SELECT 1 FROM swarm_config
            WHERE scope = 'agent' AND key = ? AND trim(value) = model_profiles.name)
+        AND NOT EXISTS (
+          SELECT 1 FROM scheduled_tasks s WHERE s.profile = model_profiles.name)
       RETURNING id`,
     [name, repairWindowStart(), MODEL_PROFILE_CONFIG_KEY],
   );
@@ -237,33 +289,31 @@ export async function repoModelOverrideKeys(
   vcsRepo: string | null | undefined,
   { includeSecrets = true }: { includeSecrets?: boolean } = {},
 ): Promise<Set<string>> {
-  if (!vcsRepo?.trim()) return new Set();
-  const repos = await getDbClient().query<{ id: string; url: string }>(
-    "SELECT id, url FROM swarm_repos WHERE name = ? ORDER BY name ASC",
-    [vcsRepoName(vcsRepo)],
-  );
-  const repo = repos.find((r) => vcsRepoUrlMatches(r.url, vcsRepo));
-  if (!repo) return new Set();
+  const repoId = await vcsRepoId(vcsRepo);
+  if (!repoId) return new Set();
   const rows = await getDbClient().query<{ key: string }>(
     `SELECT key FROM swarm_config
       WHERE scope = 'repo' AND scopeId = ? AND key IN ('MODEL_OVERRIDE', 'REASONING_EFFORT_OVERRIDE')
         ${includeSecrets ? "" : "AND isSecret = 0"}`,
-    [repo.id],
+    [repoId],
   );
   return new Set(rows.map((row) => row.key));
 }
 
 /**
- * Why a task cannot ask for `profile`, or null when it can. PR 1 validity is
- * the harness only: the profile must exist and, when the target agent is known
- * and has a harness, run on that harness. `profile` is exclusive with `model`
- * and `modelTier`, which pick the model another way.
+ * Why a task cannot ask for `profile`, or null when it can. The profile must
+ * exist and, when the target agent is known, pass `checkProfileForAgent`
+ * (harness, model, credentials, allowlist). A pooled task (no agent) is judged
+ * per agent at claim instead. `profile` is exclusive with `model` and
+ * `modelTier`, which pick the model another way.
  */
 export async function taskProfileError(check: {
   profile?: string | null;
   model?: string | null;
   modelTier?: string | null;
   agentId?: string | null;
+  /** The task's repo; its scoped credentials count, as on the worker. */
+  vcsRepo?: string | null;
 }): Promise<string | null> {
   const name = check.profile?.trim();
   if (!name) return null;
@@ -275,14 +325,51 @@ export async function taskProfileError(check: {
     return `Unknown model profile "${name}". List profiles with list-model-profiles.`;
   }
   if (!check.agentId) return null;
-  const agent = await getDbClient().get<{ harness: string | null }>(
-    "SELECT COALESCE(harness_provider, provider) AS harness FROM agents WHERE id = ?",
-    [check.agentId],
-  );
-  if (agent?.harness && agent.harness !== profile.harness) {
-    return `Model profile "${name}" runs on the ${profile.harness} harness; the target agent runs ${agent.harness}.`;
+  const result = await checkProfileForAgent(check.agentId, name, { vcsRepo: check.vcsRepo });
+  if (!result || result.ok) return null;
+  return formatProfileCheckFailures(result);
+}
+
+/**
+ * The profile half of a schedule update. `profile` and `model`/`modelTier`
+ * pick the model two ways, so setting one clears the other, and sending both
+ * is an error. A new profile, or a move of a profiled schedule to another
+ * agent, is judged by `taskProfileError`. Returns the columns to write.
+ */
+export async function scheduleProfileUpdate(
+  existing: { profile?: string | null; targetAgentId?: string | null },
+  patch: {
+    profile?: string | null;
+    model?: string | null;
+    modelTier?: string | null;
+    targetAgentId?: string | null;
+  },
+): Promise<
+  | { error: string }
+  | { error?: undefined; fields: { profile?: string | null; model?: null; modelTier?: null } }
+> {
+  const profile = patch.profile === undefined ? undefined : patch.profile?.trim() || null;
+  const agentId = patch.targetAgentId !== undefined ? patch.targetAgentId : existing.targetAgentId;
+  if (profile) {
+    const error = await taskProfileError({
+      profile,
+      model: patch.model,
+      modelTier: patch.modelTier,
+      agentId,
+    });
+    if (error) return { error };
+    return { fields: { profile, model: null, modelTier: null } };
   }
-  return null;
+  if (patch.model?.trim() || patch.modelTier?.trim() || profile === null) {
+    return { fields: { profile: null } };
+  }
+  const agentChanged =
+    patch.targetAgentId !== undefined && patch.targetAgentId !== existing.targetAgentId;
+  if (agentChanged && existing.profile) {
+    const error = await taskProfileError({ profile: existing.profile, agentId });
+    if (error) return { error };
+  }
+  return { fields: {} };
 }
 
 type OverrideRowState = { value: string; exportToEnv?: number } | null;
