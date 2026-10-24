@@ -5,7 +5,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --tunnel
 #
 # It checks Docker and Compose v2, installs Bun when missing, runs
-# `agent-swarm onboard --yes` to write and start a Docker Compose stack, waits
+# `agent-swarm onboard --yes --preset full` (a lead and 10 workers) to write
+# and start a Docker Compose stack, waits
 # for the API, and prints a dashboard link to /setup, where the rest of the
 # configuration (harness credentials, integrations) happens.
 #
@@ -17,7 +18,7 @@
 set -euo pipefail
 
 DEFAULT_DIR="${HOME}/agent-swarm"
-DEFAULT_PRESET="solo"
+DEFAULT_PRESET="full"
 DEFAULT_CLI_VERSION="latest"
 DEFAULT_LT_VERSION="2.2.0"
 DASHBOARD_BASE="https://app.agent-swarm.dev"
@@ -25,6 +26,7 @@ DOCKER_INSTALL_URL="https://docs.docker.com/get-started/get-docker/"
 COMPOSE_INSTALL_URL="https://docs.docker.com/compose/install/"
 BUN_INSTALL_URL="https://bun.sh/install"
 HEALTH_TIMEOUT_SECONDS=180
+TUNNEL_WARMUP_SECONDS=240
 
 DRY_RUN=0
 TUNNEL=0
@@ -45,7 +47,6 @@ Usage:
 
 Options:
   --dir <path>       Install directory (default: \$AGENT_SWARM_DIR, else ~/agent-swarm)
-  --preset <name>    Onboard preset: solo, dev, content, research, full (default: solo)
   --version <ver>    @desplega.ai/agent-swarm npm version to run (default: latest)
   --tunnel           Expose the API publicly with localtunnel (lt.desplega.ai) and
                      set PUBLIC_MCP_BASE_URL. Off by default. See "Tunnel" below.
@@ -54,7 +55,6 @@ Options:
 
 Environment:
   AGENT_SWARM_DIR          Same as --dir
-  AGENT_SWARM_PRESET       Same as --preset
   AGENT_SWARM_CLI_VERSION  Same as --version
   AGENT_SWARM_CLI_PACKAGE  Full package spec for the CLI instead of the npm release:
                            a tarball path or URL from \`bun pm pack\` (testing unreleased builds)
@@ -68,8 +68,8 @@ Environment:
 What it does:
   1. Checks for Docker and Docker Compose v2 (exits with an install link if missing).
   2. Installs Bun from ${BUN_INSTALL_URL} if bun is not on PATH.
-  3. Runs \`bunx @desplega.ai/agent-swarm@<version> onboard --yes --preset <preset>\`
-     in the install directory. That writes docker-compose.yml and .env and runs
+  3. Runs \`bunx @desplega.ai/agent-swarm@<version> onboard --yes --preset full\`
+     in the install directory: a lead and 10 workers. That writes docker-compose.yml and .env and runs
      \`docker compose up -d\`. If docker-compose.yml already exists, it skips
      onboarding and only runs \`docker compose up -d\`.
   4. Waits for http://localhost:<port>/health.
@@ -87,7 +87,7 @@ Tunnel (--tunnel):
 
 Examples:
   curl -fsSL .../install.sh | bash
-  curl -fsSL .../install.sh | ANTHROPIC_API_KEY=sk-ant-... bash -s -- --preset dev
+  curl -fsSL .../install.sh | ANTHROPIC_API_KEY=sk-ant-... bash
   bash install.sh --dry-run --tunnel
 EOF
 }
@@ -110,11 +110,27 @@ run() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# The install command for a package on this host's package manager.
+install_hint() {
+  local sudo=""
+  [ "$(id -u)" -eq 0 ] || sudo="sudo "
+  if have apt-get; then echo "${sudo}apt-get update && ${sudo}apt-get install -y $1"
+  elif have dnf; then echo "${sudo}dnf install -y $1"
+  elif have yum; then echo "${sudo}yum install -y $1"
+  elif have apk; then echo "${sudo}apk add $1"
+  elif have pacman; then echo "${sudo}pacman -S --noconfirm $1"
+  elif have brew; then echo "brew install $1"
+  else echo "install $1 with your package manager"
+  fi
+}
+
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) [ $# -ge 2 ] || die "--dir needs a value"; INSTALL_DIR="$2"; shift 2 ;;
       --dir=*) INSTALL_DIR="${1#*=}"; shift ;;
+      # Not in --help: the installer offers one stack (full). The flag stays so
+      # existing `--preset full` commands keep working, and for testing.
       --preset) [ $# -ge 2 ] || die "--preset needs a value"; PRESET="$2"; shift 2 ;;
       --preset=*) PRESET="${1#*=}"; shift ;;
       --version) [ $# -ge 2 ] || die "--version needs a value"; CLI_VERSION="$2"; shift 2 ;;
@@ -168,6 +184,10 @@ ensure_bun() {
   fi
   # The onboard CLI uses Bun APIs, so Node alone cannot run it.
   say "Bun not found; installing from ${BUN_INSTALL_URL}"
+  # The Bun installer unzips its download, and some server images lack unzip.
+  if ! have unzip; then
+    missing "unzip is required to install Bun. Install it, then retry: $(install_hint unzip)"
+  fi
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '+ curl -fsSL %s | bash\n' "$BUN_INSTALL_URL"
   else
@@ -339,22 +359,33 @@ YAML
   compose_up swarm-api
   wait_for_health "http://localhost:${port}"
 
-  # The first request through a fresh lt tunnel can hang for 10-25s; send a
-  # few with a generous timeout so the user's first click does not.
-  say "Warming up the tunnel"
+  # A fresh tunnel name has no TLS certificate yet. The tunnel server gets one
+  # on the first request, which usually takes 30s but can take minutes. Wait
+  # here, so the user's first click works.
+  say "Warming up the tunnel (a new tunnel needs a TLS certificate; up to ${TUNNEL_WARMUP_SECONDS}s)"
   if [ "$DRY_RUN" -eq 1 ]; then
-    printf '+ curl -s --max-time 20 %s/health  # up to 8 tries until 200\n' "$url"
+    printf '+ curl -s --max-time 20 %s/health  # retried until 200, up to %ss\n' "$url" "$TUNNEL_WARMUP_SECONDS"
   else
+    local start next_note now
     code=000
-    for ((i = 0; i < 8; i++)); do
+    start=$(date +%s)
+    next_note=$((start + 30))
+    while :; do
       code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${url}/health" || true)"
       [ "$code" = "200" ] && break
+      now=$(date +%s)
+      [ "$now" -ge $((start + TUNNEL_WARMUP_SECONDS)) ] && break
+      if [ "$now" -ge "$next_note" ]; then
+        say "Still waiting for the tunnel ($((now - start))s)"
+        next_note=$((now + 30))
+      fi
       sleep 2
     done
     if [ "$code" = "200" ]; then
       say "Tunnel is serving ${url}/health"
     else
-      warn "tunnel warm-up did not get a 200 (last: ${code}). It may need a minute; see .agent-swarm/tunnel.log"
+      warn "the tunnel did not answer in ${TUNNEL_WARMUP_SECONDS}s (last HTTP status: ${code}). Its TLS certificate is probably not ready yet."
+      warn "Wait a few minutes, then open the dashboard link below. If it still fails, run the installer again with --tunnel to get a new tunnel. Log: ${INSTALL_DIR}/.agent-swarm/tunnel.log"
     fi
   fi
   TUNNEL_URL="$url"

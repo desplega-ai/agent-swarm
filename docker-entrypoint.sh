@@ -1055,14 +1055,10 @@ elif [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
         done
 
         # Install legacy complex remote skills via npx. DB-backed complex skills
-        # are synced through /api/skills/sync-filesystem; this remains a safe
-        # fallback for sourceRepo-only skills.
-        echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == true) | [.id, (.sourceRepo // "")] | @tsv' 2>/dev/null | while IFS=$'\t' read -r skill_id repo; do
-            if [ -n "$repo" ]; then
-                npx skills add "$repo" -a claude-code -a pi -a codex -g -y 2>&1 || echo "[entrypoint] Warning: failed to install complex skill from $repo" >&2
-            else
-                echo "[entrypoint] Warning: complex skill ${skill_id:-unknown} has no sourceRepo; skipping npx install" >&2
-            fi
+        # (no sourceRepo, such as every seeded skill) are synced through
+        # /api/skills/sync-filesystem, so they need nothing here.
+        echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == true) | (.sourceRepo // "") | select(. != "")' 2>/dev/null | while read -r repo; do
+            npx skills add "$repo" -a claude-code -a pi -a codex -g -y 2>&1 || echo "[entrypoint] Warning: failed to install complex skill from $repo" >&2
         done
 
         echo "[entrypoint] Skill sync complete"
