@@ -345,7 +345,9 @@ approval cancel and the approval auto-cancel sweep cancel their run through the 
   Reasons already written are kept.
 - A repeat cancel of a tree with nothing left open (no live run, open step, queued retry, open
   task or pending approval) is answered in a read-only transaction: no write lock, no dependents
-  scan, no writes. The guards below keep a cancelled tree from gaining work, so that answer holds.
+  scan, no cancel writes. The guards below keep a cancelled tree from gaining work, so that answer
+  holds. It still returns the tree's run ids, so Slack posts an earlier cancel could not deliver
+  (an outage releases the claim) are retried; a delivered post is never sent again.
   Concurrent `cancelWorkflowRun` calls for one run in the API process share one cancel.
 - There is no size limit: the engine admits any number of children per run, and every tree it
   admitted stays cancellable. The walk goes level by level and stops at the first run it reaches
@@ -353,8 +355,9 @@ approval cancel and the approval auto-cancel sweep cancel their run through the 
   engine's `MAX_SUB_WORKFLOW_DEPTH`) throws, and nothing commits. Any other error rolls back the
   whole tree too.
 - After commit: worker nudges and task lifecycle events (queued with `afterCommit`), then the Slack
-  update of every cancelled approval in the tree. A failed Slack post is logged; it does not undo
-  the cancel.
+  update of every cancelled approval in the tree whose post is not delivered yet
+  (`listUndeliveredCancelledApprovalRequestsForRuns`, one query per 500 runs). A failed Slack post
+  is logged; it does not undo the cancel, and the next cancel of the tree retries it.
 
 After the commit, nothing in the tree starts new engine work. The guard is
 `getRunLineageBlock(runId)` (`src/be/db/workflow-runs.ts`): it blocks a run that is cancelled, has a

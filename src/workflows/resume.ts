@@ -11,8 +11,8 @@ import {
   getWorkflowRun,
   getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
-  listCancelledApprovalRequestsForRun,
   listCancelledApprovalRequestsForStep,
+  listUndeliveredCancelledApprovalRequestsForRuns,
   resolveWaitState,
   updateWorkflowRun,
   updateWorkflowRunStep,
@@ -673,7 +673,12 @@ const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled", "skip
 export interface WorkflowRunCancelResult {
   /** True when this call moved the root run to `cancelled`. */
   cancelled: boolean;
-  /** The root and every run below it, root first. Empty when nothing was cancelled. */
+  /**
+   * The root and every run below it, root first, for the caller's Slack
+   * posts. Also set for a repeat cancel that found nothing open, so posts a
+   * failed earlier cancel left undelivered are retried. Empty when the root
+   * is missing or completed, failed or skipped.
+   */
   runIds: string[];
 }
 
@@ -704,13 +709,17 @@ export async function cancelWorkflowRunRows(
   // A repeat cancel of a tree with nothing left open is answered by reads
   // alone, without the write lock. The guards keep a cancelled tree from
   // gaining new work, so the answer still holds when this returns.
-  const settled = await getDbClient().transaction(
-    async () =>
-      (await getWorkflowRunStatus(runId)) === "cancelled" &&
-      !(await workflowRunTreeHasOpenWork(await getWorkflowRunTreeIds(runId))),
+  // Its run ids still go back, so the caller retries Slack posts an earlier
+  // cancel could not deliver.
+  const settledTree = await getDbClient().transaction(
+    async () => {
+      if ((await getWorkflowRunStatus(runId)) !== "cancelled") return null;
+      const ids = await getWorkflowRunTreeIds(runId);
+      return (await workflowRunTreeHasOpenWork(ids)) ? null : ids;
+    },
     { readOnly: true },
   );
-  if (settled) return { cancelled: false, runIds: [] };
+  if (settledTree) return { cancelled: false, runIds: settledTree };
 
   // The tree snapshot and every write commit together. A child run, task or
   // step that commits first is in the snapshot; one that commits after sees
@@ -787,9 +796,11 @@ async function cancelWorkflowRunOnce(runId: string, reason?: string): Promise<vo
 }
 
 /**
- * Post the cancellation update of every cancelled approval in the given runs.
- * Re-read after commit: the migration trigger also cancels the approvals of a
- * directly cancelled step. Each post is claimed, so a repeat is a no-op.
+ * Post the cancellation update of every cancelled approval in the given runs
+ * whose Slack post is not delivered yet. Re-read after commit: the migration
+ * trigger also cancels the approvals of a directly cancelled step. Each post
+ * is claimed, and a failed post releases its claim, so the next cancel of the
+ * tree retries it and a delivered post is never repeated.
  */
 export async function postTreeApprovalCancellations(
   runIds: string[],
@@ -797,12 +808,10 @@ export async function postTreeApprovalCancellations(
   options: { exceptRequestId?: string } = {},
 ): Promise<void> {
   try {
-    for (const id of runIds) {
-      const approvals = (await listCancelledApprovalRequestsForRun(id)).filter(
-        (row) => row.id !== options.exceptRequestId,
-      );
-      await postApprovalCancellationUpdates(approvals, reason);
-    }
+    const approvals = (await listUndeliveredCancelledApprovalRequestsForRuns(runIds)).filter(
+      (row) => row.id !== options.exceptRequestId,
+    );
+    if (approvals.length > 0) await postApprovalCancellationUpdates(approvals, reason);
   } catch (err) {
     console.error(
       "[workflows] approval cancellation updates not posted:",

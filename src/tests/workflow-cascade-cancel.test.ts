@@ -24,6 +24,7 @@ import {
   WorkflowRunTreeError,
   WorkflowStepNotExecutableError,
 } from "../be/db/workflow-runs";
+import * as slackApp from "../slack/app";
 import type { AgentTask, Workflow, WorkflowDefinition, WorkflowRun } from "../types";
 import * as approvalNotifications from "../workflows/approval-notifications";
 import { startWorkflowExecution } from "../workflows/engine";
@@ -635,6 +636,53 @@ describe("cascade cancel atomicity", () => {
     { timeout: 60_000 },
   );
 
+  test("a repeat cancel retries a Slack post an outage dropped, and never repeats a delivered one", async () => {
+    const child = await makeWorkflow(approvalDef);
+    const root = await makeWorkflow(parentOf(child.id));
+    const rootId = await startWorkflowExecution(root, {}, registry);
+    const childRun = await runOf(child.id, "waiting");
+    const [approval] = await waitFor(
+      () =>
+        getDbClient().query<{ id: string }>(
+          "SELECT id FROM approval_requests WHERE workflowRunId = ?",
+          [childRun.id],
+        ),
+      (rows) => rows.length === 1,
+    );
+    // The approval card was posted to a Slack thread.
+    await getDbClient().run("UPDATE approval_requests SET notificationChannels = ? WHERE id = ?", [
+      JSON.stringify([{ channel: "slack", target: "C_REVIEW", messageTs: "1700000000.000100" }]),
+      approval!.id,
+    ]);
+
+    let slackUp = false;
+    const posts: string[] = [];
+    const postMessage = async (input: { channel: string; thread_ts: string; text: string }) => {
+      if (!slackUp) throw new Error("slack outage");
+      posts.push(`${input.channel}:${input.thread_ts}:${input.text}`);
+      return { ok: true };
+    };
+    const slackSpy = spyOn(slackApp, "getSlackApp").mockReturnValue({
+      client: { chat: { postMessage } },
+    } as unknown as ReturnType<typeof slackApp.getSlackApp>);
+    try {
+      await cancelWorkflowRun(rootId, "stop");
+      expect(posts).toHaveLength(0);
+      expect(await status(childRun.id)).toBe("cancelled");
+
+      slackUp = true;
+      await cancelWorkflowRun(rootId, "again");
+      expect(posts).toEqual([
+        "C_REVIEW:1700000000.000100:This approval is no longer actionable: stop",
+      ]);
+
+      await cancelWorkflowRun(rootId, "third");
+      expect(posts).toHaveLength(1);
+    } finally {
+      slackSpy.mockRestore();
+    }
+  });
+
   test("a failed notification after commit does not undo the cancel", async () => {
     const child = await makeWorkflow(approvalDef);
     const root = await makeWorkflow(parentOf(child.id));
@@ -648,6 +696,10 @@ describe("cascade cancel atomicity", () => {
         ),
       (rows) => rows.length === 1,
     );
+    await getDbClient().run("UPDATE approval_requests SET notificationChannels = ? WHERE id = ?", [
+      JSON.stringify([{ channel: "slack", target: "C_REVIEW", messageTs: "1700000000.000200" }]),
+      approval!.id,
+    ]);
 
     const postSpy = spyOn(approvalNotifications, "postApprovalCancellationUpdates");
     postSpy.mockRejectedValue(new Error("slack is down"));

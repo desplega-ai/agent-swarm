@@ -1,6 +1,7 @@
 import { formatConfigResult } from "../be/approval-config-question";
 import {
   type ApprovalRequest,
+  approvalCancellationNotificationKey,
   claimApprovalCancellationNotification,
   completeApprovalCancellationNotificationClaim,
   createTaskExtended,
@@ -263,7 +264,10 @@ export async function postApprovalCancellationUpdates(
 
     for (const notification of slackThreads) {
       if (notification.channel !== "slack" || !notification.messageTs) continue;
-      const notificationKey = `${notification.target}:${notification.messageTs}`;
+      const notificationKey = approvalCancellationNotificationKey(
+        notification.target,
+        notification.messageTs,
+      );
       const claim = await claimApprovalCancellationNotification(approval.id, notificationKey);
       if (!claim) continue;
       try {
