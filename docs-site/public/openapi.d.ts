@@ -27992,7 +27992,7 @@ export interface components {
         RuntimePool: {
             name: string;
             /** @enum {string} */
-            kind: "static" | "docker" | "e2b" | "k8s";
+            kind: "static" | "docker" | "e2b" | "boxd" | "k8s";
             placements: string[];
             image?: string | null;
             /**
@@ -28069,7 +28069,7 @@ export interface components {
         RuntimeController: {
             name: string;
             /** @enum {string} */
-            kind: "static" | "docker" | "e2b" | "k8s";
+            kind: "static" | "docker" | "e2b" | "boxd" | "k8s";
             /**
              * @default remote
              * @enum {string}
@@ -32016,7 +32016,7 @@ export interface operations {
                 "application/json": {
                     name: string;
                     /** @enum {string} */
-                    kind: "static" | "docker" | "e2b" | "k8s";
+                    kind: "static" | "docker" | "e2b" | "boxd" | "k8s";
                     placements: string[];
                     image?: string | null;
                     /**
@@ -32232,7 +32232,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     /** @enum {string} */
-                    kind?: "static" | "docker" | "e2b" | "k8s";
+                    kind?: "static" | "docker" | "e2b" | "boxd" | "k8s";
                     placements?: string[];
                     image?: string | null;
                     /** @enum {string} */
@@ -32488,7 +32488,7 @@ export interface operations {
                 "application/json": {
                     name: string;
                     /** @enum {string} */
-                    kind: "static" | "docker" | "e2b" | "k8s";
+                    kind: "static" | "docker" | "e2b" | "boxd" | "k8s";
                     /**
                      * @default remote
                      * @enum {string}
@@ -32680,7 +32680,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     /** @enum {string} */
-                    kind?: "static" | "docker" | "e2b" | "k8s";
+                    kind?: "static" | "docker" | "e2b" | "boxd" | "k8s";
                     /** @enum {string} */
                     placement?: "builtin" | "remote";
                     config?: {

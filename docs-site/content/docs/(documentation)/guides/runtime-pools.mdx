@@ -15,7 +15,7 @@ With pools disabled, existing workers keep their registration and poll behavior.
 | --- | --- |
 | Agent | Durable identity, profile, credentials, task queue, and logical `maxTasks` limit. |
 | Pool | Infrastructure kind, controller placement, worker image, delivery mode, lifecycle, and capacity limits. |
-| Controller | Starts and stops runtimes through Docker or E2B. A built-in controller runs inside the API. A remote controller runs elsewhere. |
+| Controller | Starts and stops runtimes through Docker, E2B, or boxd. A built-in controller runs inside the API. A remote controller runs elsewhere. |
 | Runtime | One worker process serving an agent. It has its own identity, slots, liveness record, and scoped credential. |
 
 An agent binds to one pool. A pool has one controller placement in this release.
@@ -25,7 +25,7 @@ Workspace files remain local to each runtime. Save durable results in Git, share
 ## Recommended topology
 
 Keep one Lead on a `static` pool with `delivery: "poll"`. Operators manage static workers themselves.
-Put coding agents on a `docker` or `e2b` pool with `delivery: "push"` and on-demand capacity.
+Put coding agents on a `docker`, `e2b`, or `boxd` pool with `delivery: "push"` and on-demand capacity.
 Use `minRuntimes: 0` to permit an agent to sleep when no work remains.
 
 The router first selects an eligible live worker with free capacity.
@@ -138,6 +138,32 @@ Busy runtimes finish their tasks while draining. Tasks longer than the limit can
 Automatic idle pause is not available in this release.
 Use an idle lifecycle or warm floor to reduce repeated sandbox boot cost for frequent tasks.
 
+## boxd pools
+
+Choose `kind: "boxd"` with a boxd controller and an HTTPS API URL reachable by the machine.
+Each runtime is one isolated [boxd](https://boxd.sh) microVM that runs the pool `image` in its own Docker daemon.
+Use the same worker images as Docker pools.
+Set `BOXD_API_KEY` on the API and restart it to seed an online `builtin-boxd` controller. Other controllers store the key in their encrypted secret configuration.
+An org API key selects its org. Set `BOXD_ORG` in controller configuration for a personal key.
+
+| Controller setting | Behavior |
+| --- | --- |
+| `BOXD_SNAPSHOT` | Restore this snapshot instead of booting a fresh machine. The snapshot's size applies. |
+| `BOXD_DELETE_AFTER_SEC` | Delete each machine this many seconds after creation, in any state. A safety net for per-task pools. |
+| `BOXD_BASE_URL` | Another boxd API endpoint. |
+
+Pool `resources` select the smallest size that covers them: 1 vCPU and 4 GiB, 2 and 8, 4 and 16, or 8 and 32.
+Machines have no lease. They run until the supervisor terminates them, so keep the API running or set `BOXD_DELETE_AFTER_SEC`.
+A fresh machine pulls the image on each provision. With the slim worker image, provision took about 40 seconds.
+A snapshot with the image already pulled provisions in about 3 seconds. Bake one and set `BOXD_SNAPSHOT`:
+
+```bash
+boxd machine new swarm-base --isolated
+boxd machine exec swarm-base -- docker pull ghcr.io/desplega-ai/agent-swarm-worker:slim
+boxd snapshots save swarm-base swarm-worker-slim
+boxd machine remove swarm-base --confirm
+```
+
 ## Remote controllers
 
 Use a remote controller when the API cannot reach the infrastructure that starts workers.
@@ -205,6 +231,7 @@ docker compose logs -f swarm-controller
 ```
 
 For an E2B controller, set `--kind e2b`, remove the Docker flags and the socket volume, and add `E2B_API_KEY` to `environment`.
+For a boxd controller, set `--kind boxd` and add `BOXD_API_KEY` instead. Like E2B, the controller checks for an HTTPS worker URL in its own environment, so also set `MCP_BASE_URL` to the public API URL.
 
 **systemd.** Run the CLI with Bun under a dedicated user in the `docker` group.
 Membership in the `docker` group gives root-equivalent access to the host, so keep this user for the controller only.

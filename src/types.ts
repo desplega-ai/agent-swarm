@@ -2093,7 +2093,7 @@ export const RuntimeInstanceStatusSchema = z.enum(["active", "offline", "provisi
  * Infrastructure kind a runtime pool provisions on. `k8s` is reserved: write
  * paths reject it until its adapter exists.
  */
-export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "k8s"]);
+export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "boxd", "k8s"]);
 export type RuntimeProviderKind = z.infer<typeof RuntimeProviderKindSchema>;
 
 export const DeliveryModeSchema = z.enum(["poll", "push"]);

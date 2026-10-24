@@ -497,6 +497,10 @@ Custom images must extend the slim or full Agent Swarm worker image. Changing th
 Per-task pools pay for the boot sequence on every sandbox start.
 See the [runtime provider runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/runtime-providers.md#e2b) for details.
 
+boxd requires `BOXD_API_KEY` and an HTTPS worker URL. A deployment `BOXD_API_KEY` seeds the `builtin-boxd` controller; without it, seeding creates no boxd controller.
+boxd machines have no lease, so `BOXD_DELETE_AFTER_SEC` in controller configuration is the safety net when the API stops.
+See the [runtime provider runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/runtime-providers.md#boxd) for details.
+
 The routing and wake settings accept nonnegative integers. Zero permits an immediate wake or reroute.
 For the routing interval, zero uses the default. Positive values below 500 use 500 milliseconds.
 Negative or invalid deployment values use the default interval.

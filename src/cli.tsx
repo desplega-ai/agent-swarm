@@ -167,7 +167,8 @@ const COMMAND_HELP: Record<
     options: [
       "  --api-url <url>        Swarm API URL (default: MCP_BASE_URL)",
       "  Token: AGENT_SWARM_CONTROLLER_TOKEN environment variable",
-      "  --kind <kind>         Runtime provider (default: docker)",
+      "  --kind <kind>         Runtime provider: docker, e2b, boxd (default: docker)",
+      "  Keys: E2B_API_KEY or BOXD_API_KEY environment variable",
       "  --docker-host <url>   Docker Unix socket (or DOCKER_HOST)",
       "  --docker-network <n>  Worker network (or DOCKER_NETWORK)",
       "  -h, --help            Show this help",
