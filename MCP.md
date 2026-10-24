@@ -1563,7 +1563,7 @@ Send a state and typed questions (noul, choice, score) to a SystemOne decision h
 
 **Request human input**
 
-Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond. The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. No Slack message is sent; share the URL yourself.
+Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, boolean, and config. Returns the request ID and URL for the human to respond. config asks a person to set one swarm config key on the dashboard; secrets are stored encrypted and you receive only {key, scope, isSecret, status, updatedAt}, never the value. The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. No Slack message is sent; share the URL yourself.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
