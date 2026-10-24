@@ -4,6 +4,8 @@ import { keyPrefixRange, sessionGroupKey } from "../assets/key";
 import {
   closeDb,
   countSessions,
+  createAgent,
+  createSessionCost,
   createSteeringMessage,
   createTaskExtended,
   createUser,
@@ -603,6 +605,41 @@ test("session detail carries the viewer's read state with the list rule", async 
   const bypass = await detail(root.id);
   expect(bypass.readState).toBeUndefined();
   expect(bypass.lastActivityAt).toBeUndefined();
+});
+
+test("session detail carries each chain task's cost, so the header can total the whole session", async () => {
+  const agent = await createAgent({ name: "cost-agent", isLead: false, status: "idle" });
+  const root = await task();
+  const child = await task("shared/a/", { parentTaskId: root.id });
+  const grandchild = await task("shared/a/", { parentTaskId: child.id });
+  const followUp = await task("shared/a/", { parentTaskId: root.id });
+  const noCost = await task("shared/a/", { parentTaskId: root.id });
+  const spend = async (taskId: string, totalCostUsd: number) =>
+    createSessionCost({
+      sessionId: crypto.randomUUID(),
+      taskId,
+      agentId: agent.id,
+      totalCostUsd,
+      durationMs: 1_000,
+      numTurns: 1,
+      model: "test-model",
+    });
+  await spend(root.id, 0.2);
+  await spend(root.id, 0.0051);
+  await spend(child.id, 0.5);
+  await spend(grandchild.id, 0.25);
+  await spend(followUp.id, 0.335);
+
+  const res = await fetch(`${baseUrl}/api/sessions/${root.id}`);
+  const body = (await res.json()) as { chain: { id: string; totalCostUsd?: number }[] };
+  const costs = Object.fromEntries(body.chain.map((t) => [t.id, t.totalCostUsd]));
+  expect(costs[root.id]).toBeCloseTo(0.2051, 6);
+  expect(costs[child.id]).toBeCloseTo(0.5, 6);
+  expect(costs[grandchild.id]).toBeCloseTo(0.25, 6);
+  expect(costs[followUp.id]).toBeCloseTo(0.335, 6);
+  expect(costs[noCost.id]).toBeUndefined();
+  const total = body.chain.reduce((sum, t) => sum + (t.totalCostUsd ?? 0), 0);
+  expect(total).toBeCloseTo(1.2901, 6);
 });
 
 test("limit clamps to 200 and count without chain filters does not recurse", async () => {

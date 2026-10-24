@@ -259,6 +259,19 @@ export function userName(
 }
 
 /**
+ * The session's cost: every task in the chain (root, delegated children and
+ * follow-ups), not the root alone. Null when no task has a cost row, or the
+ * server predates per-task costs on the chain.
+ */
+export function sessionCostUsd(chain: readonly Pick<AgentTask, "totalCostUsd">[]): number | null {
+  let total: number | null = null;
+  for (const task of chain) {
+    if (task.totalCostUsd != null) total = (total ?? 0) + task.totalCostUsd;
+  }
+  return total;
+}
+
+/**
  * The task the server reads `latestStatus` from (`src/be/db/session-tree.ts`):
  * the one with the latest `lastUpdatedAt`. On a tie the first one in the
  * server's walk wins: SQLite keeps the first row with the maximum, and the

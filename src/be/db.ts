@@ -12939,7 +12939,8 @@ export async function listTaskTemplates(opts?: {
 /**
  * Walk the chain rooted at `rootTaskId`, ordered by `createdAt` (root first; `rowid` breaks
  * ties as idx_agent_tasks_created did). `CROSS JOIN` keeps the chain as the outer loop: with
- * a plain JOIN, SQLite scanned all of agent_tasks to skip the sort.
+ * a plain JOIN, SQLite scanned all of agent_tasks to skip the sort. Each task carries its
+ * `totalCostUsd`, so the session header can total the whole chain, not only the root.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -12949,7 +12950,9 @@ export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]>
          SELECT t.id FROM agent_tasks t
          JOIN chain c ON t.parentTaskId = c.id
        )
-       SELECT t.* FROM chain
+       SELECT t.*,
+         (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = t.id) AS totalCostUsd
+       FROM chain
        CROSS JOIN agent_tasks t ON t.id = chain.id
        ORDER BY t.createdAt, t.rowid`,
     [rootTaskId],

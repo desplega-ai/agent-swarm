@@ -14,6 +14,7 @@ import {
   parseView,
   replaceTab,
   serializeTabs,
+  sessionCostUsd,
   splitTo,
   tabPath,
   tabsWithFocus,
@@ -179,6 +180,22 @@ describe("sessions v2 URL state", () => {
     expect(isSessionTab("a")).toBe(true);
     expect(isSessionTab(GROUP_TAB)).toBe(false);
     expect(isSessionTab(NEW_SESSION_TAB)).toBe(false);
+  });
+});
+
+describe("sessionCostUsd", () => {
+  const task = (totalCostUsd?: number) => ({ totalCostUsd }) as AgentTask;
+
+  test("totals every task in the chain, not only the root", () => {
+    // The lead's root, two delegated worker tasks and a follow-up.
+    const chain = [task(0.2051), task(0.5), task(0.25), task(0.335)];
+    expect(sessionCostUsd(chain)).toBeCloseTo(1.2901, 6);
+  });
+
+  test("skips tasks without a cost and is null when none has one", () => {
+    expect(sessionCostUsd([task(), task(0.1), task()])).toBeCloseTo(0.1, 6);
+    expect(sessionCostUsd([task(), task()])).toBeNull();
+    expect(sessionCostUsd([task(0)])).toBe(0);
   });
 });
 

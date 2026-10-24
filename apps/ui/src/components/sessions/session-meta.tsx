@@ -6,7 +6,6 @@
 
 import { type ComponentProps, type ReactNode, useMemo } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
-import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionDetailResponse } from "@/api/types";
 import { AvatarStack } from "@/components/kibo-ui/avatar-stack";
@@ -14,6 +13,7 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { deriveSessionStatus } from "@/lib/session-status";
+import { sessionCostUsd } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 
 const usdFormatter = new Intl.NumberFormat("en-US", {
@@ -30,7 +30,6 @@ export interface SessionMetaProps {
 
 export function SessionMeta({ detail, children }: SessionMetaProps) {
   const { data: users } = useUsers();
-  const { data: costs } = useSessionCosts({ taskId: detail.root.id, enabled: true });
 
   const requestedByUserName = useMemo(() => {
     if (!detail.root.requestedByUserId || !users) return null;
@@ -47,7 +46,7 @@ export function SessionMeta({ detail, children }: SessionMetaProps) {
     return [...new Set(ids)];
   }, [detail]);
 
-  const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
+  const totalCost = sessionCostUsd(detail.chain) ?? 0;
 
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground min-w-0 [&>span]:whitespace-nowrap">

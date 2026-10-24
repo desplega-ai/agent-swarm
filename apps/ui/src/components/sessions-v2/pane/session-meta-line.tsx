@@ -11,7 +11,6 @@
 
 import { AlarmClock, Archive, ListTree } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
-import { useSessionCosts } from "@/api/hooks/use-costs";
 import type { SessionDetailResponse, SessionListItem } from "@/api/types";
 import { SessionAgents } from "@/components/sessions/session-meta";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -20,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatCost } from "@/lib/cost-format";
 import { sessionChipStatus } from "@/lib/session-status";
 import { buildTurns, hasHandoffs } from "@/lib/session-turns";
-import { latestTask, plural } from "@/lib/sessions-v2";
+import { latestTask, plural, sessionCostUsd } from "@/lib/sessions-v2";
 import { formatRelativeTime } from "@/lib/utils";
 import { formatWakeShort } from "../sidebar/snooze-times";
 import { sessionWorkers } from "./people-popover";
@@ -52,11 +51,11 @@ export function TriageNote({ session }: { session: SessionListItem }) {
 
 /**
  * What the meta lines show (the pane header and the phone detail screen):
- * the status chip, "12 tasks", the cost once it loads, and whether the turn
+ * the status chip, "12 tasks", the whole chain's cost, and whether the turn
  * timeline has internal handoffs (the Handoffs toggle shows only then).
  */
 export function useSessionMeta(detail: SessionDetailResponse) {
-  const { data: costs } = useSessionCosts({ taskId: detail.root.id, enabled: true });
+  const totalCost = sessionCostUsd(detail.chain);
   // The server's latest-task rule (`latestTask`), which the sidebar row and
   // the tab also follow, so the three agree. On a rare tie of update times
   // the server takes the row SQLite meets first, and the client's walk order
@@ -66,7 +65,7 @@ export function useSessionMeta(detail: SessionDetailResponse) {
   return {
     status,
     tasks: plural(detail.chain.length, "task"),
-    cost: costs ? formatCost(costs.reduce((sum, row) => sum + row.totalCostUsd, 0)) : null,
+    cost: totalCost == null ? null : formatCost(totalCost),
     handoffRows,
   };
 }
