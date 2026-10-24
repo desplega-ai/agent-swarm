@@ -1,8 +1,9 @@
 /**
  * Pure-JS web globals that the QuickJS build lacks: `URL`, `URLSearchParams`,
- * `TextEncoder`, `TextDecoder` (UTF-8 only), `atob` and `btoa`. The quickjs runner evaluates
- * this before `SANDBOX_PRELUDE`, so the prelude's fetch can serialize a
- * `URLSearchParams` body. Nothing here calls the host.
+ * `TextEncoder`, `TextDecoder` (UTF-8 only), `atob`, `btoa`, and
+ * `structuredClone`. The quickjs runner evaluates this before
+ * `SANDBOX_PRELUDE`, so the prelude's fetch can serialize a `URLSearchParams`
+ * body. Nothing here calls the host.
  *
  * `URL` follows the WHATWG URL parser for what scripts use: special and
  * non-special schemes, relative resolution, dot segments, percent-encoding,
@@ -1029,6 +1030,124 @@ function atob(data) {
   return out;
 }
 
+const dataCloneError = (message) => {
+  const error = new Error(message);
+  error.name = "DataCloneError";
+  return error;
+};
+const defineCloneProperty = (target, key, value) =>
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+function structuredClone(value, options) {
+  if (options !== undefined && (options === null || typeof options !== "object")) {
+    throw new TypeError("structuredClone options must be an object");
+  }
+  if (options && options.transfer !== undefined) {
+    if (!Array.isArray(options.transfer)) {
+      throw new TypeError("structuredClone transfer must be an array");
+    }
+    if (options.transfer.length > 0) {
+      throw dataCloneError("Transfer lists are not supported by the quickjs executor");
+    }
+  }
+
+  const seen = new Map();
+  const clone = (input) => {
+    const kind = typeof input;
+    if (input === null || (kind !== "object" && kind !== "function")) {
+      if (kind === "symbol") throw dataCloneError("Symbols cannot be cloned");
+      return input;
+    }
+    if (kind === "function") throw dataCloneError("Functions cannot be cloned");
+    if (seen.has(input)) return seen.get(input);
+
+    let result;
+    if (input instanceof Date) {
+      result = new Date(input.getTime());
+      seen.set(input, result);
+      return result;
+    }
+    if (input instanceof RegExp) {
+      result = new RegExp(input.source, input.flags);
+      seen.set(input, result);
+      return result;
+    }
+    if (input instanceof ArrayBuffer) {
+      result = input.slice(0);
+      seen.set(input, result);
+      return result;
+    }
+    if (ArrayBuffer.isView(input)) {
+      const buffer = clone(input.buffer);
+      result = input instanceof DataView
+        ? new DataView(buffer, input.byteOffset, input.byteLength)
+        : new input.constructor(buffer, input.byteOffset, input.length);
+      seen.set(input, result);
+      return result;
+    }
+    if (input instanceof Map) {
+      result = new Map();
+      seen.set(input, result);
+      for (const [key, item] of input) result.set(clone(key), clone(item));
+      return result;
+    }
+    if (input instanceof Set) {
+      result = new Set();
+      seen.set(input, result);
+      for (const item of input) result.add(clone(item));
+      return result;
+    }
+    if (input instanceof WeakMap || input instanceof WeakSet || input instanceof Promise) {
+      throw dataCloneError("This value cannot be cloned");
+    }
+    if (input instanceof Symbol) throw dataCloneError("Symbol objects cannot be cloned");
+    if (input instanceof Error) {
+      result = new Error(input.message);
+      result.name = input.name;
+      seen.set(input, result);
+      return result;
+    }
+    if (input instanceof Number) {
+      result = new Number(input.valueOf());
+      seen.set(input, result);
+      return result;
+    }
+    if (input instanceof String) {
+      result = new String(input.valueOf());
+      seen.set(input, result);
+      return result;
+    }
+    if (input instanceof Boolean) {
+      result = new Boolean(input.valueOf());
+      seen.set(input, result);
+      return result;
+    }
+    if (Object.prototype.toString.call(input) === "[object BigInt]") {
+      result = Object(input.valueOf());
+      seen.set(input, result);
+      return result;
+    }
+
+    const prototype = Object.getPrototypeOf(input);
+    if (!Array.isArray(input) && prototype !== Object.prototype && prototype !== null) {
+      throw dataCloneError("This object type cannot be cloned");
+    }
+
+    result = Array.isArray(input) ? new Array(input.length) : {};
+    seen.set(input, result);
+    for (const key of Object.keys(input)) {
+      defineCloneProperty(result, key, clone(input[key]));
+    }
+    return result;
+  };
+
+  return clone(value);
+}
+
 const define = (name, value) =>
   Object.defineProperty(globalThis, name, { value, writable: true, configurable: true, enumerable: false });
 define("atob", atob);
@@ -1037,5 +1156,6 @@ define("URL", URL);
 define("URLSearchParams", URLSearchParams);
 define("TextEncoder", TextEncoder);
 define("TextDecoder", TextDecoder);
+define("structuredClone", structuredClone);
 })();
 `;
