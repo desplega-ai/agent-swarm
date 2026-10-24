@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { renderContextBoundNote } from "../prompts/context-bound-note";
 import type {
   AgentMessageItem,
   CommandExecutionItem,
@@ -2609,5 +2610,114 @@ describe("CodexSession — rate-limit error preservation", () => {
     expect(result.failureReason).toBe("unexpected network failure");
     expect(result.isError).toBe(true);
     expect(result.rateLimitResetAt).toBeUndefined();
+  });
+});
+
+describe("CodexSession context-bound note", () => {
+  let prevSkipEnv: string | undefined;
+
+  beforeAll(() => {
+    prevSkipEnv = process.env.SKIP_SESSION_SUMMARY;
+    process.env.SKIP_SESSION_SUMMARY = "1";
+  });
+
+  afterAll(() => {
+    if (prevSkipEnv === undefined) delete process.env.SKIP_SESSION_SUMMARY;
+    else process.env.SKIP_SESSION_SUMMARY = prevSkipEnv;
+  });
+
+  /** One `context.updated` per request; each request's input tokens in order. */
+  function requestEvents(inputs: unknown[]): ThreadEvent[] {
+    return inputs.map(
+      (input_tokens) =>
+        ({
+          type: "context.updated",
+          usage: { input_tokens, cached_input_tokens: 0, output_tokens: 1 },
+        }) as ThreadEvent,
+    );
+  }
+
+  /**
+   * Runs the session over `events` and records every `thread.steer` call. The
+   * turn stays open briefly after the requests so the async note can land.
+   */
+  async function runWithSteers(
+    events: ThreadEvent[],
+    env: Record<string, string>,
+    steer: (input: string) => Promise<void> = async () => {},
+  ): Promise<{ steers: string[]; result: ProviderResult }> {
+    const steers: string[] = [];
+    const thread = {
+      id: null,
+      async steer(input: string) {
+        steers.push(input);
+        await steer(input);
+      },
+      async interrupt() {},
+      async close() {},
+      async runStreamed() {
+        async function* generate(): AsyncGenerator<ThreadEvent> {
+          yield { type: "thread.started", thread_id: "thread-bound-note" };
+          yield { type: "turn.started" };
+          for (const event of events) yield event;
+          await Bun.sleep(50);
+          yield {
+            type: "turn.completed",
+            usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 },
+          };
+        }
+        return { events: generate() };
+      },
+    };
+    const adapter = new CodexAdapter({
+      bypassSubprocess: true,
+      threadFactory: () => thread as never,
+    });
+    const session = await adapter.createSession(testConfig({ env }));
+    const result = await session.waitForCompletion();
+    return { steers, result };
+  }
+
+  test("steers the note once at the threshold, not again on a larger request", async () => {
+    const { steers, result } = await runWithSteers(requestEvents([400, 1_200, 5_000]), {
+      CONTEXT_BOUND_NOTE_TOKENS: "1000",
+    });
+    expect(result.isError).toBe(false);
+    expect(steers).toEqual([await renderContextBoundNote(1_200)]);
+    expect(steers[0]).toContain("1,200");
+  });
+
+  test("no-op below the threshold", async () => {
+    const { steers } = await runWithSteers(requestEvents([400, 999]), {
+      CONTEXT_BOUND_NOTE_TOKENS: "1000",
+    });
+    expect(steers).toEqual([]);
+  });
+
+  test("off at 0", async () => {
+    const { steers } = await runWithSteers(requestEvents([250_000, 500_000]), {
+      CONTEXT_BOUND_NOTE_TOKENS: "0",
+    });
+    expect(steers).toEqual([]);
+  });
+
+  test("fails open on missing or corrupt usage", async () => {
+    const { steers, result } = await runWithSteers(requestEvents([undefined, "lots", null]), {
+      CONTEXT_BOUND_NOTE_TOKENS: "1000",
+    });
+    expect(steers).toEqual([]);
+    expect(result.isError).toBe(false);
+  });
+
+  test("a rejected steer still lets the session complete", async () => {
+    const { steers, result } = await runWithSteers(
+      requestEvents([5_000]),
+      { CONTEXT_BOUND_NOTE_TOKENS: "1000" },
+      async () => {
+        throw new Error("steer refused");
+      },
+    );
+    expect(steers).toHaveLength(1);
+    expect(result.isError).toBe(false);
   });
 });

@@ -1,14 +1,25 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import { renderContextBoundNote } from "../prompts/context-bound-note";
 
 /**
- * One-time "keep this turn bounded" note for long Claude worker sessions.
+ * One-time "keep this turn bounded" note for long worker sessions, on every
+ * harness.
  *
- * The Claude session (CLI adapter or SDK transport) writes the prompt size of
- * its latest main-thread request next to the task file. The PostToolUse hook
- * reads it and, the first time it reaches the threshold, claims a marker file
- * and injects the note. Every failure path means "no note": the hook never
- * blocks a tool call over this.
+ * This module owns the threshold, the once-per-task claim and the rendering.
+ * A harness supplies only two things: the prompt size of its latest
+ * main-thread request (input + cache read + cache write tokens) and a way to
+ * put text in front of the model mid-session.
+ *
+ * - Claude: the session writes the size next to the task file
+ *   (`recordContextState`); the PostToolUse hook claims a marker file
+ *   (`claimContextBoundNote`) and returns the note as tool context.
+ * - In-process harnesses (codex, pi, opencode, amp, claude-managed): the session
+ *   feeds each request's size to `createContextBoundNote`, which injects the
+ *   note through the harness's own mid-turn input.
+ *
+ * Every failure path means "no note": nothing here throws into a session or
+ * blocks a tool call.
  */
 
 export const CONTEXT_BOUND_NOTE_DEFAULT_TOKENS = 200_000;
@@ -24,6 +35,29 @@ export function contextBoundNoteThreshold(
     return CONTEXT_BOUND_NOTE_DEFAULT_TOKENS;
   }
   return parsed;
+}
+
+/** True when a valid token count reaches an enabled (> 0) threshold. */
+function reachesThreshold(contextTokens: unknown, threshold: number): contextTokens is number {
+  return (
+    threshold > 0 &&
+    typeof contextTokens === "number" &&
+    Number.isFinite(contextTokens) &&
+    contextTokens >= threshold
+  );
+}
+
+/** Render the note and hand it to `inject`. Fails open. */
+async function deliverContextBoundNote(
+  contextTokens: number,
+  inject: (note: string) => unknown,
+): Promise<void> {
+  try {
+    const note = await renderContextBoundNote(contextTokens);
+    if (note) await inject(note);
+  } catch {
+    // Fail open.
+  }
 }
 
 export function contextStatePath(taskFilePath: string): string {
@@ -69,8 +103,7 @@ export async function claimContextBoundNote(
   } catch {
     return null;
   }
-  if (typeof contextTokens !== "number" || !Number.isFinite(contextTokens)) return null;
-  if (contextTokens < threshold) return null;
+  if (!reachesThreshold(contextTokens, threshold)) return null;
   try {
     await writeFile(contextBoundNoteMarkerPath(taskFilePath), new Date().toISOString(), {
       flag: "wx",
@@ -79,4 +112,32 @@ export async function claimContextBoundNote(
     return null;
   }
   return contextTokens;
+}
+
+/** Claude PostToolUse path: claim from the task file, then hand the note to `inject`. */
+export async function injectClaimedContextBoundNote(
+  taskFilePath: string | undefined,
+  threshold: number,
+  inject: (note: string) => unknown,
+): Promise<void> {
+  const contextTokens = await claimContextBoundNote(taskFilePath, threshold).catch(() => null);
+  if (contextTokens !== null) await deliverContextBoundNote(contextTokens, inject);
+}
+
+/**
+ * In-process path. Returns an observer the session calls with each
+ * main-thread request's prompt size. The first size at or above `threshold`
+ * claims the note for this session (one session runs one task) and injects
+ * it; later calls are no-ops. The returned promise never rejects.
+ */
+export function createContextBoundNote(options: {
+  threshold: number;
+  inject: (note: string) => unknown;
+}): (contextTokens: number | undefined) => Promise<void> {
+  let claimed = false;
+  return async (contextTokens) => {
+    if (claimed || !reachesThreshold(contextTokens, options.threshold)) return;
+    claimed = true;
+    await deliverContextBoundNote(contextTokens, options.inject);
+  };
 }

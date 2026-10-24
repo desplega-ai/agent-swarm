@@ -104,12 +104,19 @@ async function main() {
   );
 
   const sessionId = "T-fake-session";
-  const usage = {
-    input_tokens: 4,
-    output_tokens: 5,
-    cache_creation_input_tokens: 1000,
-    cache_read_input_tokens: 200,
-  };
+  // `AMP_TEST_REQUEST_USAGE`: "missing" drops per-request usage, "corrupt" sends non-numbers.
+  const requestUsage = process.env.AMP_TEST_REQUEST_USAGE;
+  const usage =
+    requestUsage === "missing"
+      ? undefined
+      : requestUsage === "corrupt"
+        ? { input_tokens: "lots", cache_creation_input_tokens: null, cache_read_input_tokens: {} }
+        : {
+            input_tokens: 4,
+            output_tokens: 5,
+            cache_creation_input_tokens: 1000,
+            cache_read_input_tokens: 200,
+          };
   // Amp runs shell commands in a session of its own, outside the process group.
   // Return only once the child has left: a group kill that lands before its
   // setsid() would take it down and hide a leak.
@@ -217,8 +224,13 @@ async function main() {
       session_id: sessionId,
     });
     turns += 1;
-    const steerTool = mode === "steer" || mode.startsWith("steer-crash");
-    if (mode === "tool" || (steerTool && index === 0)) {
+    const steerTool = mode === "steer" || mode === "steer-twice" || mode.startsWith("steer-crash");
+    const toolCalls = mode === "steer-twice" ? 2 : 1;
+    for (
+      let call = 0;
+      call < toolCalls && (mode === "tool" || (steerTool && index === 0));
+      call++
+    ) {
       assistant(
         [{ type: "tool_use", id: "TU-1", name: "code_exec", input: { code: "1+1" } }],
         "tool_use",

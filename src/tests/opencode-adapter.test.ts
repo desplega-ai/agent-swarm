@@ -10,6 +10,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import type { OpenCodeEvent } from "@opencode/sdk";
 import { normalizeSessionLogs, type SessionLogRecord } from "../../apps/ui/src/logs-parser";
+import { renderContextBoundNote } from "../prompts/context-bound-note";
 import {
   _setOpencodeSdkLoaderForTests,
   _setOpencodeSessionHooksForTests,
@@ -68,6 +69,7 @@ type FakeHostOptions = {
   tools?: string[];
   /** Model responses handed to the plugin's `http.response` hook at startup. */
   responses?: Response[];
+  syntheticError?: Error;
 };
 
 /**
@@ -85,6 +87,7 @@ function makeFakeHost(events: OpenCodeEvent[], opts: FakeHostOptions = {}) {
     createOptions: undefined as unknown as Record<string, unknown>,
     created: [] as unknown[],
     prompts: [] as Array<Record<string, unknown>>,
+    synthetics: [] as Array<Record<string, unknown>>,
     interrupts: [] as unknown[],
     closeCalls: 0,
     mcpListCalls: 0,
@@ -114,6 +117,11 @@ function makeFakeHost(events: OpenCodeEvent[], opts: FakeHostOptions = {}) {
       },
       interrupt: async (input: unknown) => {
         host.interrupts.push(input);
+        return {};
+      },
+      synthetic: async (input: Record<string, unknown>) => {
+        host.synthetics.push(input);
+        if (opts.syntheticError) throw opts.syntheticError;
         return {};
       },
     },
@@ -812,6 +820,77 @@ describe("OpencodeSession — abort and steering", () => {
       delivered: false,
       reason: "opencode session already completed",
     });
+  });
+});
+
+describe("OpencodeSession — context-bound note", () => {
+  const boundConfig = (threshold: string) =>
+    testConfig({ env: { CONTEXT_BOUND_NOTE_TOKENS: threshold } });
+  const step = (sessionID: string, input: number, read = 0, write = 0) =>
+    ev("session.step.ended", { sessionID, tokens: tokens(input, 10, read, write) });
+
+  test("steers the note once at the threshold, not again on a larger step", async () => {
+    const { session, host } = await startSession([], boundConfig("1000"));
+    // 600 input + 300 cache read + 100 cache write = 1,000 (output does not count).
+    session.handleOpencodeEvent(step(SESSION_ID, 500, 300, 100));
+    session.handleOpencodeEvent(step(SESSION_ID, 600, 300, 100));
+    session.handleOpencodeEvent(step(SESSION_ID, 5_000));
+    await waitFor(() => host.synthetics.length > 0);
+    await Bun.sleep(20);
+    expect(host.synthetics).toEqual([
+      {
+        sessionID: SESSION_ID,
+        text: await renderContextBoundNote(1_000),
+        delivery: "steer",
+        resume: false,
+      },
+    ]);
+    expect(host.synthetics[0]?.text).toContain("1,000");
+    session.handleOpencodeEvent(succeeded);
+    expect((await session.waitForCompletion()).isError).toBe(false);
+  });
+
+  test("no-op below the threshold and for a child session's steps", async () => {
+    const { session, host } = await startSession([], boundConfig("1000"));
+    session.handleOpencodeEvent(step(SESSION_ID, 999));
+    session.handleOpencodeEvent(step("ses_child", 50_000));
+    await Bun.sleep(20);
+    expect(host.synthetics).toEqual([]);
+    session.handleOpencodeEvent(succeeded);
+    await session.waitForCompletion();
+  });
+
+  test("off at 0", async () => {
+    const { session, host } = await startSession([], boundConfig("0"));
+    session.handleOpencodeEvent(step(SESSION_ID, 250_000));
+    await Bun.sleep(20);
+    expect(host.synthetics).toEqual([]);
+    session.handleOpencodeEvent(succeeded);
+    await session.waitForCompletion();
+  });
+
+  test("fails open on corrupt step tokens", async () => {
+    const { session, host } = await startSession([], boundConfig("1000"));
+    session.handleOpencodeEvent(
+      ev("session.step.ended", {
+        sessionID: SESSION_ID,
+        tokens: { input: "lots", output: 1, reasoning: 0, cache: { read: null, write: {} } },
+      }),
+    );
+    await Bun.sleep(20);
+    expect(host.synthetics).toEqual([]);
+    session.handleOpencodeEvent(succeeded);
+    expect((await session.waitForCompletion()).isError).toBe(false);
+  });
+
+  test("a rejected steer still lets the session complete", async () => {
+    const { session, host } = await startSession([], boundConfig("1000"), {
+      syntheticError: new Error("synthetic refused"),
+    });
+    session.handleOpencodeEvent(step(SESSION_ID, 5_000));
+    await waitFor(() => host.synthetics.length > 0);
+    session.handleOpencodeEvent(succeeded);
+    expect((await session.waitForCompletion()).isError).toBe(false);
   });
 });
 

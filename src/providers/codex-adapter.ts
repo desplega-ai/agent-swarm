@@ -31,6 +31,7 @@
 import { existsSync as nodeExistsSync } from "node:fs";
 import { join } from "node:path";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
+import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import { getApiKey } from "../utils/api-key";
 import {
   CONTEXT_FORMULA,
@@ -995,6 +996,8 @@ export class CodexSession implements ProviderSession {
    * summary path which materially relies on this ordering for testability.
    */
   private pendingResult: ProviderResult | null = null;
+  /** Fed each main-thread request's prompt size; steers the one-time context-bound note. */
+  private readonly observeContextBound: (contextTokens: number | undefined) => Promise<void>;
 
   constructor(
     thread: CodexThread,
@@ -1015,6 +1018,10 @@ export class CodexSession implements ProviderSession {
       skillsDir ?? process.env.CODEX_SKILLS_DIR ?? join(codexUserHome(), ".codex", "skills");
     this.summarizeDeps = summarizeDeps;
     this.logFileHandle = Bun.file(config.logFile).writer();
+    this.observeContextBound = createContextBoundNote({
+      threshold: contextBoundNoteThreshold(config.env ?? process.env),
+      inject: (note) => this.deliverSteering({ mode: "steer", text: note }),
+    });
     // Mirrors the resolution `buildCodexConfig` already applied when
     // constructing `mergedConfig` — cheap, pure, and keeps the applied-level
     // feedback co-located with `settle()` rather than threading an extra
@@ -1425,6 +1432,8 @@ export class CodexSession implements ProviderSession {
         break;
       case "context.updated":
         this.emitContextUsage(event.usage, event.contextWindow ?? this.contextWindow);
+        // Codex input tokens already include the cached read and write subsets.
+        void this.observeContextBound(event.usage.input_tokens);
         break;
       case "error": {
         const { message } = this.formatTerminalError(event.message, event.codexErrorInfo);

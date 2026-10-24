@@ -354,9 +354,9 @@ Task: {{task}}{{progressLine}}
 });
 
 /**
- * One-time note injected by the Claude PostToolUse hook once a worker
- * session's latest request crosses CONTEXT_BOUND_NOTE_TOKENS
- * (`renderContextBoundNote`).
+ * One-time note injected into a worker session once its latest main-thread
+ * request crosses CONTEXT_BOUND_NOTE_TOKENS (`renderContextBoundNote`, via
+ * `src/hooks/context-bound-note.ts`).
  */
 registerTemplate({
   eventType: "system.agent.context.bound_note",

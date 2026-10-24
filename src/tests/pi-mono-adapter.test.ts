@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPENAI_COMPATIBLE_PROVIDERS } from "@desplega/model-catalog";
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
+import { renderContextBoundNote } from "../prompts/context-bound-note";
 import { configureHttpResolver, resetHttpResolver } from "../prompts/resolver";
 import {
   checkPiMonoCredentials,
@@ -1187,6 +1188,8 @@ function makeMockAgentSession(opts: {
   steerCalls?: string[];
   followUpCalls?: string[];
   steeringError?: string;
+  /** Awaited after each call's events, as a real turn keeps running its tools. */
+  afterEvents?: () => Promise<unknown>;
 }): AgentSession {
   const listeners: Array<(event: AgentSessionEvent) => void> = [];
   const scripts = opts.turns ?? [opts.events ?? []];
@@ -1210,6 +1213,7 @@ function makeMockAgentSession(opts: {
       for (const event of scripts[call] ?? []) {
         for (const l of listeners) l(event);
       }
+      await opts.afterEvents?.();
       if (opts.throwError) throw new Error(opts.throwError);
     },
     getContextUsage: () => null,
@@ -1752,5 +1756,68 @@ describe("classifyAwsSdkError — all 4 categories (quick summary)", () => {
       const r = classifyAwsSdkError(msg);
       expect(r?.category).toBe(expected);
     }
+  });
+});
+
+describe("PiMonoSession context-bound note", () => {
+  /** An assistant `message_end` with this request usage; a tool call unless `final`. */
+  function assistantTurn(usage: unknown, final = false): AgentSessionEvent {
+    return {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: final
+          ? [{ type: "text", text: "Done" }]
+          : [{ type: "toolCall", id: "call-1", name: "bash", arguments: {} }],
+        stopReason: final ? "stop" : "toolUse",
+        usage,
+      },
+    } as unknown as AgentSessionEvent;
+  }
+
+  const usage = (input: number) => ({ input, cacheRead: 300, cacheWrite: 200, output: 50 });
+
+  async function steersFor(threshold: string, events: AgentSessionEvent[]): Promise<string[]> {
+    const steerCalls: string[] = [];
+    const session = new PiMonoSession(
+      makeMockAgentSession({ events, steerCalls, afterEvents: () => Bun.sleep(50) }),
+      {
+        ...makeSessionConfig(join(tmpLogDir, `bound-note-${crypto.randomUUID()}.log`)),
+        env: { CONTEXT_BOUND_NOTE_TOKENS: threshold },
+      },
+      false,
+    );
+    await session.waitForCompletion();
+    return steerCalls;
+  }
+
+  test("steers the note once when a tool-call request reaches the threshold", async () => {
+    const steers = await steersFor("1000", [
+      assistantTurn(usage(400)),
+      assistantTurn(usage(500)),
+      assistantTurn(usage(900)),
+      assistantTurn(usage(1500), true),
+    ]);
+    // 500 + 300 + 200 reaches 1000; the larger later request does not steer again.
+    expect(steers).toEqual([await renderContextBoundNote(1000)]);
+  });
+
+  test("no-op below the threshold and when disabled at 0", async () => {
+    const events = [assistantTurn(usage(400)), assistantTurn(usage(400), true)];
+    expect(await steersFor("1000", events)).toEqual([]);
+    expect(await steersFor("0", events)).toEqual([]);
+  });
+
+  test("fails open on missing or corrupt usage", async () => {
+    const events = [
+      assistantTurn(undefined),
+      assistantTurn({ input: "lots", cacheRead: {}, cacheWrite: null }),
+      assistantTurn(undefined, true),
+    ];
+    expect(await steersFor("1", events)).toEqual([]);
+  });
+
+  test("never steers after the final reply, which would start another turn", async () => {
+    expect(await steersFor("1", [assistantTurn(usage(5000), true)])).toEqual([]);
   });
 });

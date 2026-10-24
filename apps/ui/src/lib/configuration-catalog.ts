@@ -833,7 +833,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "CONTEXT_BOUND_NOTE_TOKENS",
         label: "Context-bound note threshold (tokens)",
         description:
-          "When a Claude worker session's latest request reaches this many tokens (input + cache read + cache write), the PostToolUse hook tells it once per task to finish the current step, store progress, and complete or defer instead of starting new exploration. The note never blocks a tool call. 0 turns it off. Applies to new Claude sessions.",
+          "When a worker session's latest main-thread request reaches this many tokens (input + cache read + cache write), the session gets one note per task telling it to finish the current step, store progress, and complete or defer instead of starting new exploration. Claude, Codex, pi, OpenCode, Amp and Claude Managed sessions get it. The note never blocks a tool call. 0 turns it off. Applies to new sessions.",
         kind: "number",
         defaultValue: "200000",
         placeholder: "200000",

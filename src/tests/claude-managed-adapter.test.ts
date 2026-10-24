@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { renderContextBoundNote } from "../prompts/context-bound-note";
 import { createProviderAdapter } from "../providers";
 import {
   ClaudeManagedAdapter,
@@ -1411,6 +1412,9 @@ describe("ClaudeManagedAdapter (Phase 6) — full happy-path integration", () =>
       tConfig({
         model: "claude-sonnet-4-6",
         logFile: join(tmpLogDir, "e2e.log"),
+        // The 1M-token request would otherwise earn the context-bound note,
+        // a second send this test does not count.
+        env: { CONTEXT_BOUND_NOTE_TOKENS: "0" },
       }),
     );
 
@@ -1501,5 +1505,163 @@ describe("ClaudeManagedAdapter (Phase 6) — full happy-path integration", () =>
     expect(result.sessionId).toBe("sesn_test_123");
     expect(result.cost?.totalCostUsd).toBeGreaterThan(0);
     expect(result.output).toBe("Read the file and here's what I found.");
+  });
+});
+
+describe("ClaudeManagedAdapter — one-time context-bound note", () => {
+  const tmpLogDir = `/tmp/claude-managed-adapter-bound-note-${Date.now()}`;
+  let seq = 0;
+
+  beforeAll(() => {
+    mkdirSync(tmpLogDir, { recursive: true });
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    process.env.MANAGED_AGENT_ID = "agent_x";
+    process.env.MANAGED_ENVIRONMENT_ID = "env_x";
+  });
+
+  afterAll(() => {
+    rmSync(tmpLogDir, { recursive: true, force: true });
+  });
+
+  /** A main-thread model request whose prompt is `input + cacheRead + cacheWrite`. */
+  function requestEnd(input: unknown, cacheRead: unknown = 0, cacheWrite: unknown = 0) {
+    seq += 1;
+    return {
+      type: "span.model_request_end",
+      id: `req-${seq}`,
+      processed_at: "2026-01-01T00:00:00Z",
+      is_error: false,
+      model_request_start_id: `start-${seq}`,
+      model_usage: {
+        input_tokens: input,
+        output_tokens: 10,
+        cache_read_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheWrite,
+      },
+    };
+  }
+
+  function toolUse(kind: "agent.tool_use" | "agent.mcp_tool_use" = "agent.tool_use") {
+    seq += 1;
+    return {
+      type: kind,
+      id: `tu-${seq}`,
+      processed_at: "2026-01-01T00:00:00Z",
+      name: "read_file",
+      ...(kind === "agent.mcp_tool_use" ? { mcp_server_name: "agent-swarm" } : {}),
+      input: { path: `/tmp/${seq}` },
+    };
+  }
+
+  const idle = () => ({
+    type: "session.status_idle",
+    id: `idle-${++seq}`,
+    processed_at: "2026-01-01T00:00:00Z",
+    stop_reason: { type: "end_turn" },
+  });
+
+  /** Run a session over `events` and return the texts of every message sent after the prompt. */
+  async function runNotes(
+    events: Array<Record<string, unknown>>,
+    threshold: string,
+    onSend?: Parameters<typeof makeFakeClient>[0]["onSend"],
+  ) {
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        for (const e of events) yield e;
+      },
+      onSend,
+    });
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({
+        logFile: join(tmpLogDir, `note-${++seq}.log`),
+        env: { CONTEXT_BOUND_NOTE_TOKENS: threshold },
+      }),
+    );
+    const result = await session.waitForCompletion();
+    // The note is rendered and sent off the event loop; let it land.
+    await Bun.sleep(150);
+    const notes = spy.sent.slice(1).map((sent) => {
+      const content = sent.events[0]?.content as Array<{ text?: string }> | undefined;
+      return { type: sent.events[0]?.type, text: content?.[0]?.text };
+    });
+    return { result, notes };
+  }
+
+  test("fires once when a tool call follows a request at the threshold, not again", async () => {
+    const { result, notes } = await runNotes(
+      [
+        requestEnd(150_000, 40_000, 10_000),
+        toolUse(),
+        requestEnd(240_000, 10_000, 0),
+        toolUse("agent.mcp_tool_use"),
+        requestEnd(260_000),
+        toolUse(),
+        idle(),
+      ],
+      "200000",
+    );
+    expect(result.isError).toBe(false);
+    expect(notes).toEqual([{ type: "user.message", text: await renderContextBoundNote(200_000) }]);
+  });
+
+  test("no-op below the threshold, then fires once it is crossed", async () => {
+    const { notes } = await runNotes(
+      [requestEnd(199_999), toolUse(), requestEnd(205_000), toolUse(), idle()],
+      "200000",
+    );
+    expect(notes).toEqual([{ type: "user.message", text: await renderContextBoundNote(205_000) }]);
+  });
+
+  test("off at 0", async () => {
+    const events = () => [requestEnd(500_000), toolUse(), idle()];
+    expect((await runNotes(events(), "0")).notes).toEqual([]);
+    // Control: the same session with the default threshold gets the note.
+    expect((await runNotes(events(), "")).notes).toHaveLength(1);
+  });
+
+  test("no note when the request ends the turn without a tool call", async () => {
+    expect((await runNotes([requestEnd(300_000), idle()], "200000")).notes).toEqual([]);
+    // Control: a tool call after the same request carries the note.
+    expect((await runNotes([requestEnd(300_000), toolUse(), idle()], "200000")).notes).toHaveLength(
+      1,
+    );
+  });
+
+  test("fails open on missing or corrupt usage", async () => {
+    const { result, notes } = await runNotes(
+      [
+        // Missing: a tool call before any request reported usage.
+        toolUse(),
+        // Corrupt: non-numeric usage fields.
+        requestEnd("lots", null, {}),
+        toolUse(),
+        requestEnd(Number.NaN),
+        toolUse(),
+        // Control: a valid request afterwards still gets the note.
+        requestEnd(210_000),
+        toolUse(),
+        idle(),
+      ],
+      "200000",
+    );
+    expect(result.isError).toBe(false);
+    expect(notes).toEqual([{ type: "user.message", text: await renderContextBoundNote(210_000) }]);
+  });
+
+  test("fails open when sending the note rejects", async () => {
+    let sends = 0;
+    const { result, notes } = await runNotes(
+      [requestEnd(300_000), toolUse(), requestEnd(310_000), toolUse(), idle()],
+      "200000",
+      () => {
+        sends += 1;
+        if (sends > 1) throw new Error("send failed");
+      },
+    );
+    expect(result.isError).toBe(false);
+    // One attempt only: a failed send does not re-arm the note.
+    expect(notes).toHaveLength(1);
   });
 });

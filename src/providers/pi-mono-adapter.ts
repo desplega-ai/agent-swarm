@@ -61,6 +61,7 @@ import { type TSchema, Type } from "typebox";
 import "./pi-codemode-runtime";
 // Registers the reprompt template in the code registry (the runner loads it too).
 import "../commands/templates";
+import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import { resolveTemplateAsync } from "../prompts/resolver";
 import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
@@ -907,6 +908,17 @@ function safeLabel(value: unknown): string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(value) ? value : "other";
 }
 
+/** Prompt size of the request behind an assistant message: input + cache read + cache write. */
+function requestContextTokens(message: unknown): number | undefined {
+  const usage = (
+    message as { usage?: { input?: unknown; cacheRead?: unknown; cacheWrite?: unknown } }
+  )?.usage;
+  if (typeof usage?.input !== "number") return undefined;
+  const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
+  const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
+  return usage.input + cacheRead + cacheWrite;
+}
+
 function describeAssistantTurn(message: unknown): AssistantTurnShape {
   const msg = (message ?? {}) as {
     content?: unknown;
@@ -1008,6 +1020,8 @@ export class PiMonoSession implements ProviderSession {
   private abortRequested = false;
   /** Removes this session's own models.json once the session ends. */
   private disposeModels: () => Promise<void>;
+  /** Fed each assistant request's prompt size; steers the one-time context-bound note. */
+  private readonly observeContextBound: (contextTokens: number | undefined) => Promise<void>;
 
   constructor(
     agentSession: AgentSession,
@@ -1024,6 +1038,10 @@ export class PiMonoSession implements ProviderSession {
     this.logFileHandle = Bun.file(config.logFile).writer();
     this._sessionId = agentSession.sessionId;
     this.sessionStartedAt = Date.now();
+    this.observeContextBound = createContextBoundNote({
+      threshold: contextBoundNoteThreshold(config.env ?? process.env),
+      inject: (note) => this.deliverSteering({ mode: "steer", text: note }),
+    });
 
     // Emit session_init immediately
     const piVersion = readPkgVersion("@earendil-works/pi-coding-agent");
@@ -1098,6 +1116,11 @@ export class PiMonoSession implements ProviderSession {
           }
           // A successful assistant turn means any prior error has recovered.
           this.terminalError = null;
+          // Only on tool-call turns: a steer after the final reply would start
+          // another turn.
+          if (turn.hasToolCall) {
+            void this.observeContextBound(requestContextTokens(event.message));
+          }
           if (!turn.hasText && !turn.hasToolCall) {
             // Nothing else records these turns: no text and no tool call leaves
             // no trace in session logs. Block types only, never content.

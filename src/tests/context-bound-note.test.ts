@@ -8,6 +8,7 @@ import {
   claimContextBoundNote,
   contextBoundNoteThreshold,
   contextStatePath,
+  createContextBoundNote,
   recordContextState,
 } from "../hooks/context-bound-note";
 import { renderContextBoundNote } from "../prompts/context-bound-note";
@@ -97,6 +98,57 @@ describe("claimContextBoundNote", () => {
     } finally {
       writeFile.mockRestore();
     }
+  });
+});
+
+describe("createContextBoundNote", () => {
+  function observer(threshold: number, inject: (note: string) => unknown = () => {}) {
+    const notes: string[] = [];
+    const observe = createContextBoundNote({
+      threshold,
+      inject: (note) => {
+        notes.push(note);
+        return inject(note);
+      },
+    });
+    return { observe, notes };
+  }
+
+  test("fires once at the threshold, not again on later requests", async () => {
+    const { observe, notes } = observer(200_000);
+    await observe(200_000);
+    await observe(400_000);
+    expect(notes).toEqual([await renderContextBoundNote(200_000)]);
+  });
+
+  test("no-op below the threshold, then fires once it is crossed", async () => {
+    const { observe, notes } = observer(200_000);
+    await observe(199_999);
+    expect(notes).toEqual([]);
+    await observe(210_000);
+    expect(notes).toEqual([await renderContextBoundNote(210_000)]);
+  });
+
+  test("disabled at 0", async () => {
+    const { observe, notes } = observer(0);
+    await observe(900_000);
+    expect(notes).toEqual([]);
+  });
+
+  test("fails open on missing or corrupt sizes", async () => {
+    const { observe, notes } = observer(200_000);
+    await observe(undefined);
+    await observe(Number.NaN);
+    await observe(Number.POSITIVE_INFINITY);
+    await observe("300000" as unknown as number);
+    expect(notes).toEqual([]);
+  });
+
+  test("never rejects when injection fails, and does not retry", async () => {
+    const { observe, notes } = observer(200_000, () => Promise.reject(new Error("closed")));
+    await expect(observe(300_000)).resolves.toBeUndefined();
+    await observe(300_000);
+    expect(notes).toHaveLength(1);
   });
 });
 

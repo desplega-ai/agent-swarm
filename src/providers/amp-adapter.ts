@@ -2,6 +2,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "nod
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import {
   type AmpMode,
   type AmpModelSelection,
@@ -486,6 +487,8 @@ class AmpSession implements ProviderSession {
   private steeringSeq = 0;
   /** Accepted steering not yet consumed, by inbox file name. Each settles exactly once. */
   private steers = new Map<string, QueuedSteer>();
+  /** Fed each top-level request's prompt size; queues the one-time context-bound note. */
+  private readonly observeContextBound: (contextTokens: number | undefined) => Promise<void>;
 
   constructor(
     private proc: Bun.Subprocess<"pipe", "pipe", "pipe">,
@@ -523,6 +526,11 @@ class AmpSession implements ProviderSession {
         });
       }
     };
+    // The plugin's `tool.result` hook carries queued steering mid-turn.
+    this.observeContextBound = createContextBoundNote({
+      threshold: contextBoundNoteThreshold(run.env),
+      inject: (note) => this.deliverSteering({ mode: "queue", text: note }),
+    });
     this.completion = this.runSession(prompt);
   }
 
@@ -817,6 +825,9 @@ class AmpSession implements ProviderSession {
       });
       // The window is not in the stream; the final snapshot after the export carries it.
       if (used > 0) this.emitContext(used, output, null);
+      // Only when a tool result follows to carry the note; otherwise the turn
+      // end would replay it over stdin as a new turn.
+      if (topLevel && calledTool) void this.observeContextBound(input + cacheRead + cacheCreation);
     }
     if (topLevel && !calledTool && message.stop_reason !== "tool_use") this.onTurnEnd();
   }

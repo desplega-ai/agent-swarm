@@ -21,6 +21,7 @@ import {
   providerKeyVars,
 } from "@desplega/model-catalog";
 import type { OpenCode, OpenCodeEvent } from "@opencode/sdk";
+import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -534,6 +535,8 @@ export class OpencodeSession implements ProviderSession {
   // Assistant text by message, in part order; the runner keeps the last emit.
   private textByMessage = new Map<string, string[]>();
   private transcript: string[] = [];
+  /** Fed each step's prompt size; steers the one-time context-bound note. */
+  private readonly observeContextBound: (contextTokens: number | undefined) => Promise<void>;
 
   constructor(
     private readonly host: OpenCode.Interface,
@@ -546,6 +549,18 @@ export class OpencodeSession implements ProviderSession {
   ) {
     this.completionPromise = new Promise<ProviderResult>((resolve) => {
       this.completionResolve = resolve;
+    });
+    this.observeContextBound = createContextBoundNote({
+      threshold: contextBoundNoteThreshold(swarm.env ?? process.env),
+      // A steer is promoted at the next step boundary mid-work; `resume: false`
+      // leaves an idle session idle. Same route as OpenCode's own Plan reminder.
+      inject: (note) =>
+        host.sessions.synthetic({
+          sessionID: _sessionId,
+          text: note,
+          delivery: "steer",
+          resume: false,
+        }),
     });
   }
 
@@ -685,6 +700,7 @@ export class OpencodeSession implements ProviderSession {
         // Per-step usage drives the dashboard's context gauge.
         const t = ev.data.tokens;
         const contextUsed = t.input + t.cache.read + t.cache.write + t.output;
+        void this.observeContextBound(t.input + t.cache.read + t.cache.write);
         const contextTotal = getContextWindowSize(this.model || "default");
         if (contextTotal > 0 && contextUsed > 0) {
           this.emit({
