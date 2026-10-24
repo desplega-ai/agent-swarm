@@ -49,6 +49,7 @@ Other commands have a 60-second timeout. A timeout fails only that command and p
 The remote protocol includes renewal, pause, and resume for E2B lease management.
 The CLI accepts static, Docker, and E2B providers. It rejects the reserved `k8s` kind.
 The API pings every 15 seconds and checks token validity.
+The CLI client also pings every 15 seconds. It drops a socket that receives no frame (message, ping, or pong) for 45 seconds and reconnects, so a network cut is detected within 60 seconds.
 A new authenticated session replaces the previous session for that controller.
 Reconnect uses jittered exponential backoff between 1 and 30 seconds.
 Auth close code 1008 stops the process with a non-zero exit and a token diagnostic.

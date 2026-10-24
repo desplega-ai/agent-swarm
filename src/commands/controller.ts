@@ -1,6 +1,7 @@
 import { createRuntimeProvider } from "../runtime-providers";
 import { BuiltinController } from "../runtime-providers/controller";
 import {
+  CONTROLLER_PING_INTERVAL_MS,
   CONTROLLER_PROTOCOL_VERSION,
   type ControllerCommand,
   ControllerServerMessageSchema,
@@ -37,13 +38,21 @@ async function executeCommand(
   }
 }
 
+// A network cut never closes the socket on this side, so the client watches inbound
+// traffic. The API pings every CONTROLLER_PING_INTERVAL_MS and the client pings on
+// each check; Bun surfaces both as `ping` / `pong` events. Three ping intervals
+// without any frame means the link is half-open.
+export const CONTROLLER_LIVENESS_TIMEOUT_MS = 3 * CONTROLLER_PING_INTERVAL_MS;
+
 export function startControllerClient(options: {
   apiUrl: string;
   token: string;
   provider: RuntimeProvider;
   target: RuntimeTargetConfig;
   onFatal?: () => void;
+  livenessTimeoutMs?: number;
 }): { stop: () => void } {
+  const livenessTimeoutMs = options.livenessTimeoutMs ?? CONTROLLER_LIVENESS_TIMEOUT_MS;
   const url = new URL("/api/controllers/connect", options.apiUrl);
   if (url.protocol !== "http:" && url.protocol !== "https:")
     throw new Error("Controller API URL must use HTTP or HTTPS");
@@ -52,6 +61,7 @@ export function startControllerClient(options: {
   let stopped = false;
   let socket: WebSocket | undefined;
   let reconnect: ReturnType<typeof setTimeout> | undefined;
+  let liveness: ReturnType<typeof setInterval> | undefined;
   let attempts = 0;
   const log = (message: string) => console.log(scrubSecrets(`[runtime-controller] ${message}`));
 
@@ -63,7 +73,28 @@ export function startControllerClient(options: {
     socket = ws;
     let controller: BuiltinController | undefined;
     let connectedAt = 0;
+    let lastTrafficAt = Date.now();
+    const markAlive = () => {
+      lastTrafficAt = Date.now();
+    };
+    ws.addEventListener("ping", markAlive);
+    ws.addEventListener("pong", markAlive);
+    clearInterval(liveness);
+    liveness = setInterval(
+      () => {
+        if (socket !== ws) return;
+        if (Date.now() - lastTrafficAt > livenessTimeoutMs) {
+          log(`No traffic for ${livenessTimeoutMs}ms. Dropping the connection`);
+          clearInterval(liveness);
+          ws.terminate();
+          return;
+        }
+        if (ws.readyState === WebSocket.OPEN) ws.ping();
+      },
+      Math.ceil(livenessTimeoutMs / 3),
+    );
     ws.onmessage = (event) => {
+      markAlive();
       void (async () => {
         const message = ControllerServerMessageSchema.parse(JSON.parse(String(event.data)));
         if (message.type === "welcome") {
@@ -106,6 +137,7 @@ export function startControllerClient(options: {
     ws.onerror = () => log("Connection failed");
     ws.onclose = (event) => {
       if (stopped || socket !== ws) return;
+      clearInterval(liveness);
       if (event.code === 1008) {
         stopped = true;
         log("Controller access rejected or token revoked. Mint a token and restart this process.");
@@ -129,6 +161,7 @@ export function startControllerClient(options: {
     stop: () => {
       stopped = true;
       if (reconnect) clearTimeout(reconnect);
+      clearInterval(liveness);
       socket?.close(1000, "Controller stopped");
     },
   };

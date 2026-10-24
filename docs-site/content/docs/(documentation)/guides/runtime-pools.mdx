@@ -171,7 +171,7 @@ After grace expiry, the API revokes their tokens and recovers active tasks.
 ### Run the controller as a service
 
 Run the controller under a supervisor so it restarts after a crash or a host reboot.
-The controller reconnects by itself after network loss. A revoked token makes it exit, so mint a new token and restart it.
+The controller reconnects by itself after network loss. It detects a silent link within 60 seconds and then retries with backoff. A revoked token makes it exit, so mint a new token and restart it.
 Pass each flag and its value as two separate arguments. The CLI rejects the `--flag=value` form.
 
 **Docker Compose.** The worker image contains the `agent-swarm` binary, so the host needs no Bun install.
