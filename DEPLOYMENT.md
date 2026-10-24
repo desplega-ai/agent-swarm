@@ -256,13 +256,13 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.309)
+# Override the pinned Claude Code version (default: 2.1.310)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.309`
+- `CLAUDE_CODE_VERSION=2.1.310`
 - `PI_CODING_AGENT_VERSION=1.4.0`
 - `CODEX_VERSION=0.164.0`
 - `OPENCODE_VERSION=2.1.4` (installs `@opencode/cli` and `@opencode/sdk`)

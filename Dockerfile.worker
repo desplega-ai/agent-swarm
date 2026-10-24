@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.309
+ARG CLAUDE_CODE_VERSION=2.1.310
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -574,9 +574,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1792756861-g6187a2
-ARG AMP_SHA512_AMD64=27a126cecdfded86033f601f37f55b8c42c5e5b6dfe5ebb79f95e809c865b1e8adfea67013e4bd93c66d52257f6a191263dcdc91022d625056c3d8e7791d62d5
-ARG AMP_SHA512_ARM64=d3900869ee6d76ee6877d406bc81683498656a8c5be58853023d1408d519a5856832bd1a92a7936b160b0ced5bd12b2777c6fa43750469ea548ee49976e72e45
+ARG AMP_VERSION=0.0.1792814442-g8ccdc4
+ARG AMP_SHA512_AMD64=fa7141a4d82241b76156e8088e50e7fd4a2354a66828760ec0e8d96a3dc63092308a41495e1d765d8b1bf168c0b316e237d45703e62feb08b1ade14aa873f36d
+ARG AMP_SHA512_ARM64=b0d4f3ad122a1ae9298720d2766357660f0f85bfa9652e07f395c95a35fa636a9d65b4c24d683653cf00c7ba109d86ec827c91210b1ee308254621557bf581d0
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -645,9 +645,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.55.0
-ARG GOOSE_SHA256_AMD64=fd3932908328fac850ca7ad2a8289c744e0c2ddaf4c5a2338709fb17a00b3a4c
-ARG GOOSE_SHA256_ARM64=ea83f59bb165a3d999dd00edf69a58028747f31e404b96f0153452c6b1651188
+ARG GOOSE_VERSION=1.56.0
+ARG GOOSE_SHA256_AMD64=225a929b35b5130fb691eafdb50be236f2c0a150019b53973775938f8f19c281
+ARG GOOSE_SHA256_ARM64=26bcb7d3f55aac485a91d81cbdecd8d90e5af1acadeca6e580b4d58b64a888e4
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -664,9 +664,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.33.1
-ARG KIRO_CLI_SHA256_AMD64=5993158abeb1a3086a591d5c7dd77e3db3c889a3c0d8b41418bc6a1af79400fb
-ARG KIRO_CLI_SHA256_ARM64=b0e002b8fb512cbeb697a224ebe8ee9e0f15b3ab0427062205422c0b37b35f66
+ARG KIRO_CLI_VERSION=2.34.0
+ARG KIRO_CLI_SHA256_AMD64=1a703c4e5a0cdfb4990d9476a0b0d4255a7802946f01220edaa717e8d7bdca05
+ARG KIRO_CLI_SHA256_ARM64=cec3271921f47e692edf7f8454e8130abaa75894a3d09e0bcd60f6bb7c71b30f
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -684,9 +684,9 @@ RUN case "$TARGETARCH" in \
 # pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
 # the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
 # and both pins together.
-ARG GROK_VERSION=1.0.67
-ARG GROK_SHA512_AMD64=5e893f8193e1152ef2f0b9ca7ce1cd2014523def3b837fa862e16ae6a75ca3849a1a3549ca5abb182a76e705847d602c1f24f8c7279e20385a4ea0ea09a722d0
-ARG GROK_SHA512_ARM64=4c587aa54571e9e0d0f57083c23ca3ababac616f1bebbadc3bf03b3765d831f1c2d39a6ebaa821e64dc8012a65bc8f8f3ddd720a79c385367d861708607e016e
+ARG GROK_VERSION=1.0.70
+ARG GROK_SHA512_AMD64=ac496c872733ffa4a03d2922146b4a1c0e2f495388f2a43a7748c57aee08f7685708c7efc603223af352cee0619b63fc25dfb8acd180b72db35b45709a01d278
+ARG GROK_SHA512_ARM64=ac7d137d6393fc26bfb0132d00927e189f54c9996bfd3913a881eaf052fba3e653cc93015af0afe34242e13fd7bb0119dd6326c4e1c688f6a9ec7f41e126c34b
 RUN case "$TARGETARCH" in \
       amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
       arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \
