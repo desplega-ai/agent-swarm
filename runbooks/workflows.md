@@ -356,7 +356,7 @@ approval cancel and the approval auto-cancel sweep cancel their run through the 
   whole tree too.
 - After commit: worker nudges and task lifecycle events (queued with `afterCommit`), then the Slack
   update of every cancelled approval in the tree whose post is not delivered yet
-  (`listUndeliveredCancelledApprovalRequestsForRuns`, one query per 500 runs). A failed Slack post
+  (`listUndeliveredCancelledApprovalRequestIds` in `src/be/db/approvals.ts`, one query per 500 runs). A failed Slack post
   is logged; it does not undo the cancel, and the next cancel of the tree retries it.
 
 After the commit, nothing in the tree starts new engine work. The guard is

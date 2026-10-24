@@ -1,6 +1,8 @@
 import {
+  type ApprovalRequest,
   cancelPendingApprovalRequestsForRun,
   cancelTask,
+  getApprovalRequestById,
   getCompletedStepNodeIds,
   getDbClient,
   getPendingEventWaitNames,
@@ -12,11 +14,11 @@ import {
   getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
   listCancelledApprovalRequestsForStep,
-  listUndeliveredCancelledApprovalRequestsForRuns,
   resolveWaitState,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { listUndeliveredCancelledApprovalRequestIds } from "../be/db/approvals";
 import {
   cancelLiveWorkflowTreeRuns,
   cancelOpenWorkflowTreeSteps,
@@ -808,9 +810,12 @@ export async function postTreeApprovalCancellations(
   options: { exceptRequestId?: string } = {},
 ): Promise<void> {
   try {
-    const approvals = (await listUndeliveredCancelledApprovalRequestsForRuns(runIds)).filter(
-      (row) => row.id !== options.exceptRequestId,
-    );
+    const approvals: ApprovalRequest[] = [];
+    for (const id of await listUndeliveredCancelledApprovalRequestIds(runIds)) {
+      if (id === options.exceptRequestId) continue;
+      const approval = await getApprovalRequestById(id);
+      if (approval) approvals.push(approval);
+    }
     if (approvals.length > 0) await postApprovalCancellationUpdates(approvals, reason);
   } catch (err) {
     console.error(

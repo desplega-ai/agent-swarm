@@ -1,7 +1,6 @@
 import { formatConfigResult } from "../be/approval-config-question";
 import {
   type ApprovalRequest,
-  approvalCancellationNotificationKey,
   claimApprovalCancellationNotification,
   completeApprovalCancellationNotificationClaim,
   createTaskExtended,
@@ -10,6 +9,7 @@ import {
   releaseApprovalCancellationNotificationClaim,
   updateApprovalRequestNotifications,
 } from "../be/db";
+import { approvalCancellationNotificationKey } from "../be/db/approvals";
 import { resolveTemplate } from "../prompts/resolver";
 import { getSlackApp } from "../slack/app";
 import { resolveSlackConversationId } from "../slack/dm";

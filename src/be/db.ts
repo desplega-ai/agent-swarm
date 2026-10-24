@@ -9973,51 +9973,6 @@ export async function listCancelledApprovalRequestsForRun(
   return rows.map(rowToApprovalRequest);
 }
 
-/** The claim key of one Slack thread's cancellation post: `<channel>:<messageTs>`. */
-export function approvalCancellationNotificationKey(target: string, messageTs: string): string {
-  return `${target}:${messageTs}`;
-}
-
-/**
- * Cancelled requests of the given runs with a Slack cancellation post not yet
- * delivered (never claimed, or a claim a failed post released). A delivered
- * post never comes back, so a repeat cancel of a settled tree retries only
- * what failed. One query per 500 runs.
- */
-export async function listUndeliveredCancelledApprovalRequestsForRuns(
-  runIds: string[],
-): Promise<ApprovalRequest[]> {
-  const requests: ApprovalRequest[] = [];
-  for (let i = 0; i < runIds.length; i += 500) {
-    const chunk = runIds.slice(i, i + 500);
-    const rows = await getDbClient().query<ApprovalRequestRow>(
-      `SELECT * FROM approval_requests
-        WHERE workflowRunId IN (${chunk.map(() => "?").join(", ")})
-          AND status = 'cancelled' AND notificationChannels IS NOT NULL`,
-      chunk,
-    );
-    for (const row of rows) {
-      const claims = row.cancellationNotificationClaims
-        ? (JSON.parse(row.cancellationNotificationClaims) as Record<string, unknown>)
-        : {};
-      const channels = JSON.parse(row.notificationChannels!) as Array<{
-        channel?: string;
-        target?: string;
-        messageTs?: string;
-      }>;
-      const undelivered = channels.some(
-        (n) =>
-          n.channel === "slack" &&
-          n.target &&
-          n.messageTs &&
-          claims[approvalCancellationNotificationKey(n.target, n.messageTs)] !== "delivered",
-      );
-      if (undelivered) requests.push(rowToApprovalRequest(row));
-    }
-  }
-  return requests;
-}
-
 export async function listCancelledApprovalRequestsForStep(
   workflowRunStepId: string,
 ): Promise<ApprovalRequest[]> {
