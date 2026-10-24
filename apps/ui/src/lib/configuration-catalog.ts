@@ -830,6 +830,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
+        key: "CONTEXT_BOUND_NOTE_TOKENS",
+        label: "Context-bound note threshold (tokens)",
+        description:
+          "When a Claude worker session's latest request reaches this many tokens (input + cache read + cache write), the PostToolUse hook tells it once per task to finish the current step, store progress, and complete or defer instead of starting new exploration. The note never blocks a tool call. 0 turns it off. Applies to new Claude sessions.",
+        kind: "number",
+        defaultValue: "200000",
+        placeholder: "200000",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
         key: "MODEL_WINDOW_EXHAUSTED_POLICY",
         label: "Model window exhausted policy",
         description:

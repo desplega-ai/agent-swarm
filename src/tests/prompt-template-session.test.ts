@@ -22,6 +22,7 @@ const SYSTEM_TEMPLATES = [
   "system.agent.communication",
   "system.agent.communication.remote",
   "system.agent.compaction.goal_reminder",
+  "system.agent.context.bound_note",
   "system.agent.cursor.first_message",
   "system.agent.lead",
   "system.agent.memory",
@@ -117,11 +118,11 @@ describe("Session templates: registration", () => {
     expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
   });
 
-  test("registers 31 system and session templates in total", () => {
+  test("registers 32 system and session templates in total", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 26 system blocks + 5 session composites.
-    expect(sessionSystem.length).toBe(31);
+    // 27 system blocks + 5 session composites.
+    expect(sessionSystem.length).toBe(32);
   });
 
   test("drops the v1 blocks that prompt v2 deleted", () => {

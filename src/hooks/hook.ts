@@ -18,12 +18,14 @@ import {
   readIdentityBaselines,
   warnProfileFileTooLarge,
 } from "../commands/profile-sync";
+import { renderContextBoundNote } from "../prompts/context-bound-note";
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { isSessionSummarySkipped } from "../utils/env-flag";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { claimContextBoundNote, contextBoundNoteThreshold } from "./context-bound-note";
 import { guardGhPrBody } from "./pr-body-guard";
 import { guardGhPrRoom } from "./pr-room-guard";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
@@ -1338,6 +1340,21 @@ export async function handleHook(): Promise<void> {
               "PostToolUse",
               `Task sent successfully.${maybeTaskId ? ` Task ID: ${maybeTaskId}.` : ""} Monitor progress using the get-task-details tool periodically.`,
             );
+          }
+        } else {
+          // One-time nudge once the session's context crosses the threshold.
+          // Any failure means no note; it never blocks the tool call.
+          try {
+            const contextTokens = await claimContextBoundNote(
+              process.env.TASK_FILE,
+              contextBoundNoteThreshold(),
+            );
+            if (contextTokens !== null) {
+              const note = await renderContextBoundNote(contextTokens);
+              if (note) outputToolContext("PostToolUse", note);
+            }
+          } catch {
+            // Fail open.
           }
         }
       }

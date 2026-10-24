@@ -60,6 +60,11 @@ export type NormalizedClaudeMessage = {
   contextWindowSize?: number;
   cost?: CostData;
   assistantText?: string;
+  /**
+   * Prompt size of the latest main-thread request: input + cache read + cache
+   * write tokens. Unset for subagent messages and messages without usage.
+   */
+  requestContextTokens?: number;
   isResult: boolean;
 };
 
@@ -150,6 +155,7 @@ export function normalizeClaudeMessage(
   let model: string | undefined;
   let contextWindowSize: number | undefined;
   let assistantText: string | undefined;
+  let requestContextTokens: number | undefined;
 
   if (json.type === "system" && json.subtype === "init" && json.session_id) {
     sessionId = json.session_id;
@@ -227,6 +233,12 @@ export function normalizeClaudeMessage(
         outputTokens: usage.output_tokens ?? 0,
         contextFormula: CONTEXT_FORMULA,
       });
+      if (!json.parent_tool_use_id) {
+        requestContextTokens =
+          (usage.input_tokens ?? 0) +
+          (usage.cache_read_input_tokens ?? 0) +
+          (usage.cache_creation_input_tokens ?? 0);
+      }
     }
   }
 
@@ -247,6 +259,7 @@ export function normalizeClaudeMessage(
     contextWindowSize,
     cost,
     assistantText,
+    requestContextTokens,
     isResult: json.type === "result",
   };
 }
