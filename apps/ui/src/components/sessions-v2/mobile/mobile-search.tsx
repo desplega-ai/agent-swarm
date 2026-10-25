@@ -98,7 +98,11 @@ export function MobileSearch({
   return (
     <search
       className="shrink-0 px-4 pt-1 pb-2"
-      onFocus={() => setFocused(true)}
+      // Only the field starts search mode. A focused filter button would turn
+      // into Cancel before its click lands (Chromium focuses a tapped button).
+      onFocus={(event) => {
+        if (event.target === inputRef.current) setFocused(true);
+      }}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
       }}

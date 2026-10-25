@@ -279,4 +279,16 @@ test.describe("phone", () => {
     await expect(detail).toBeHidden();
     await clean.assertClean();
   });
+
+  test("a tap on the filter button opens the filter menu, not search", async ({ page, clean }) => {
+    await page.goto("/sessions");
+    await page.getByRole("button", { name: /^Filter sessions/ }).tap();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitemcheckbox", { name: /^Dashboard/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await clean.assertClean();
+  });
 });

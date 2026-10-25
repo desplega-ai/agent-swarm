@@ -62,6 +62,7 @@ A group is a prefix of the session's [asset namespace key](/docs/guides/asset-na
 | `personal/<your-user-id>/drafts/` | **drafts**, in My groups |
 | `personal/<other-user-id>/drafts/` | **drafts** under that person's name, in Shared with me |
 | `shared/slack/c0ar967k0kz/thread:<ts>/` | The channel group (**#swarm-dev-2**), in the Slack section |
+| The same key, with 2 or more sessions in the thread | A [thread group](#thread-groups) under **#swarm-dev-2** |
 
 Groups nest by `/`. A group shows a chevron only when it has subgroups. When one of your personal groups has the same path as a `shared/` group, the personal group shows a lock ("Only you").
 
@@ -89,7 +90,13 @@ A source section holds the sessions that came in from that source, and the agent
 | Telegram | The group title, or `DM · Lena` for a private chat |
 | Discord | `DM · Lena` for a direct message. A channel shows its id. |
 
-The names come from Slack, Telegram, and Discord. Until a name arrives, a Slack channel shows its id (`#C0AR967K0KZ`), a Slack DM shows **DM**, and a Telegram or Discord chat shows its id. Telegram and Discord send the name with the next message. In Inbox, Later, and Done, a source session names its group (`#eng`). The hover card and the session header show the source and the group: `Slack › #eng`.
+The names come from Slack, Telegram, and Discord. Until a name arrives, a Slack channel shows its id (`#C0AR967K0KZ`), a Slack DM shows **DM**, and a Telegram or Discord chat shows its id. Telegram and Discord send the name with the next message. In Inbox, Later, and Done, a source session names its group (`#eng`). The hover card and the session header show the source and the group: `Slack › #eng`. Click the group in the session header to open it in the sidebar.
+
+#### Thread groups
+
+A Slack, Telegram, or Discord thread with 2 or more sessions gets its own group under its channel, DM, or chat. Its name is the title of the thread's oldest session that you can see. The hover card and the session header then show the thread: `Slack › <thread title>`.
+
+A thread with one session stays a row in its channel group. The count includes sessions of other people that you cannot see. So a thread group can show only one session to you. When a move leaves one session in the thread, the thread group goes away.
 
 Source groups are read-only:
 
@@ -358,6 +365,8 @@ Touch gestures on a session row:
 Menus open as sheets from the bottom of the screen: Later, People, Share, Move to group, Start in, **⋯**, and the group menu. Drag a sheet down to close it.
 
 In the search field, chips add `with:`, `in:`, `is:unread`, and `is:running`. After `with:` or `in:`, the field suggests matching people or groups.
+
+The filter button at the end of the search row opens the same filter menu as on a desktop. Tick Slack, Telegram, or Discord there to show its section.
 
 The phone layout has no tabs, no split, no status bar, and no keys.
 

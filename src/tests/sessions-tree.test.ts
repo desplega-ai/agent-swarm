@@ -312,12 +312,45 @@ describe("nested source thread groups", () => {
     await rememberSessionLabel(channel, "#engineering");
     expect((await read()).labels).toEqual({
       [channel]: "#engineering",
-      [thread]: text.slice(0, 80),
+      [thread]: text.trim(),
     });
     await rememberSessionLabel(thread, "Cached thread label");
     const result = await read();
     expect(result.labels[thread]).toBe("Cached thread label");
     expect(result.sourceGroups).toBeUndefined();
+  });
+
+  test("a title fallback skips the thread context and keeps the list preview shape", async () => {
+    const root = await task(thread);
+    await task(thread);
+    const label = async (prompt: string) => {
+      await getDbClient().run(
+        "UPDATE agent_tasks SET task = ?, title = '', createdAt = ? WHERE id = ?",
+        [prompt, OLD, root.id],
+      );
+      return (await getSessionTree(actor(), NOW)).threadLabels[thread];
+    };
+    const ask = "<@U1|Lena>: Fix the release notes";
+    expect(await label(`<thread_context>\nT: earlier message\n</thread_context>\n\n${ask}`)).toBe(
+      ask,
+    );
+    // A Chat SDK prompt puts its header line before the block.
+    const chat = await label(
+      "[chat] from: Lena\n\n<thread_context>\nLena: hi\n</thread_context>\n\nShip it",
+    );
+    expect(chat).toStartWith("[chat] from: Lena");
+    expect(chat).toEndWith("Ship it");
+    expect(chat).not.toContain("Lena: hi");
+    // A tag inside a line is text, not a block.
+    expect(await label("Explain the <thread_context> tag")).toBe(
+      "Explain the <thread_context> tag",
+    );
+    // 300 characters and "…": the list preview the UI repairs (`isListPreview`).
+    expect(await label(`<thread_context>\nT: hi\n</thread_context>\n\n${"a".repeat(400)}`)).toBe(
+      `${"a".repeat(300)}…`,
+    );
+    // A prompt that is only thread context has no label: the UI shows `Thread · <ts>`.
+    expect(await label("<thread_context>\nT: hi\n</thread_context>")).toBe("");
   });
 
   test("only source thread leaves nest, including Telegram and Discord", async () => {

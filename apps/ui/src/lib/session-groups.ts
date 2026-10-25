@@ -5,6 +5,7 @@
 // Relative imports only: `bun:test` runs this from the repo root.
 
 import type { AgentTask, SessionSectionCounts, SessionTreeGroup } from "../api/types";
+import { promptTitle } from "./prompt-display";
 
 /** The external sources with their own sidebar section. Mirrors `src/assets/source-key.ts`. */
 export const SESSION_SOURCES = ["slack", "telegram", "discord"] as const;
@@ -246,14 +247,16 @@ function isThreadGroupKey(key: string): boolean {
  * The name of a source group: its label from the tree (`#eng`, `DM · Lena`,
  * a Telegram chat title), else a name from its id: `#<ID>` for a Slack
  * channel (`c…`, `g…`, in Slack's upper case), `DM` for a Slack DM (`d…`),
- * `Thread · <id>` for a nested thread, and the raw id otherwise.
+ * `Thread · <id>` for a nested thread, and the raw id otherwise. A thread
+ * label can be a prompt preview, so it reads as one title line, without
+ * wrapper blocks or Slack tokens.
  */
 export function sourceGroupLabel(
   key: string,
   labels: Readonly<Record<string, string>> = {},
 ): string {
   const label = labels[key];
-  if (label) return label;
+  if (label) return (isThreadGroupKey(key) && promptTitle(label)) || label;
   const ids = sourceIds(key);
   const id = ids[ids.length - 1] ?? "";
   if (isThreadGroupKey(key)) return `Thread · ${id.slice("thread:".length)}`;

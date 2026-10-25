@@ -458,8 +458,39 @@ export interface SessionTree {
   sourceGroups: string[];
   /** Slack channel ids backed by visible roots with matching Slack fields, including hidden sources. */
   slackChannels: string[];
-  /** Titles of the oldest visible roots in nested source threads, including hidden sources. */
+  /**
+   * The oldest visible root of each nested source thread, including hidden
+   * sources: its title, else a preview of its prompt without the thread context.
+   */
   threadLabels: Record<string, string>;
+}
+
+/**
+ * The first `<thread_context>` block of a prompt, as the Slack and Chat SDK
+ * templates write it (each tag alone on its line). It holds the earlier thread
+ * messages, so a label cut from the start of the prompt never reaches the ask.
+ */
+const THREAD_OPEN = "<thread_context>";
+const THREAD_CLOSE = "</thread_context>";
+const THREAD_OPEN_AT = `instr(r.task, '${THREAD_OPEN}' || char(10))`;
+const THREAD_CLOSE_AT = `instr(r.task, char(10) || '${THREAD_CLOSE}')`;
+/**
+ * The task list preview length. The UI reads this length plus "…" as a list
+ * preview and repairs a Slack token or a block that the cut splits
+ * (`isListPreview` in `apps/ui/src/lib/prompt-display.ts`).
+ */
+const THREAD_LABEL_LENGTH = 300;
+/** Extra characters for the blank lines that `threadPromptPreview` trims, so the preview stays full. */
+const THREAD_LABEL_TRIM_MARGIN = 100;
+/** The prompt of `r` without its first thread context block, cut for `threadPromptPreview`. */
+const THREAD_PROMPT_SQL = `substr(CASE
+    WHEN ${THREAD_OPEN_AT} > 0 AND ${THREAD_CLOSE_AT} > ${THREAD_OPEN_AT}
+    THEN substr(r.task, 1, ${THREAD_OPEN_AT} - 1) || substr(r.task, ${THREAD_CLOSE_AT} + ${THREAD_CLOSE.length + 1})
+    ELSE r.task END, 1, ${THREAD_LABEL_LENGTH + THREAD_LABEL_TRIM_MARGIN})`;
+
+function threadPromptPreview(prompt: string): string {
+  const text = prompt.trim();
+  return text.length > THREAD_LABEL_LENGTH ? `${text.slice(0, THREAD_LABEL_LENGTH)}…` : text;
 }
 
 export async function getSessionTree(
@@ -557,16 +588,18 @@ export async function getSessionTree(
   result.sourceGroups = [...sourceGroups].sort();
   result.slackChannels = [...slackChannels].sort();
   if (threadRootIds.length) {
-    // A missing or empty title falls back to the first 80 task characters.
-    const labels = await getDbClient().query<{ key: string; label: string }>(
-      `SELECT "key", label FROM (
-        SELECT r."key", COALESCE(NULLIF(r.title, ''), substr(r.task, 1, 80)) AS label,
+    // A missing or empty title falls back to a preview of the prompt without its thread context.
+    const labels = await getDbClient().query<{ key: string; title: string | null; prompt: string }>(
+      `SELECT "key", title, prompt FROM (
+        SELECT r."key", NULLIF(trim(r.title), '') AS title, ${THREAD_PROMPT_SQL} AS prompt,
           ROW_NUMBER() OVER (PARTITION BY r."key" ORDER BY r.createdAt, r.rowid) AS ordinal
         FROM agent_tasks r WHERE r.id IN (${threadRootIds.map(() => "?").join(",")})
       ) WHERE ordinal = 1`,
       threadRootIds,
     );
-    result.threadLabels = Object.fromEntries(labels.map((row) => [row.key, row.label]));
+    result.threadLabels = Object.fromEntries(
+      labels.map((row) => [row.key, row.title ?? threadPromptPreview(row.prompt)]),
+    );
   }
   return result;
 }

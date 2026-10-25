@@ -338,6 +338,29 @@ describe("source sections (sources Phase 5)", () => {
     }
   });
 
+  test("a thread label that is a prompt preview reads as its title line", () => {
+    const channel = "shared/slack/c1/";
+    const thread = `${channel}thread:1.2/`;
+    const labels = {
+      [channel]: "#eng",
+      [thread]:
+        "[Thread follow-up — 2 message(s) buffered]\n\n<@U1|Lena>: Ship the release\nDetails",
+    };
+    const tree = buildSessionGroupTree(
+      [group(channel, at(8)), group(thread, at(9), { total: 2 })],
+      ME,
+      labels,
+    );
+    expect(tree.sources[0].nodes[0].children[0].name).toBe("Ship the release");
+    expect(groupCrumb(thread, ME, () => "", labels)).toBe("Slack › Ship the release");
+    // A channel label is a name, not a prompt.
+    expect(sourceGroupLabel(channel, labels)).toBe("#eng");
+    // A custom title or a cached topic name reads as it is.
+    for (const name of ["Release thread: first ask", "#Review the release", "Q4 · launch topic"]) {
+      expect(sourceGroupLabel(thread, { [thread]: name })).toBe(name);
+    }
+  });
+
   test("no source groups: no sections", () => {
     expect(buildSessionGroupTree([group("shared/a/", at(8))], ME).sources).toEqual([]);
   });
