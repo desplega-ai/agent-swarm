@@ -6,6 +6,7 @@ import {
   normalizeAssetKey,
   parseAssetKey,
 } from "../assets/key";
+import { SOURCE_GROUPS_READ_ONLY, sourceMoveError, sourceOfKey } from "../assets/source-key";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
@@ -738,7 +739,7 @@ async function checkSessionMove(
   actor: SessionActor,
   req: IncomingMessage,
   myAgentId: string | undefined,
-  options: { ownerOnly?: boolean } = {},
+  options: { ownerOnly?: boolean; destination?: string | null } = {},
 ): Promise<{ reason: string } | { taskIds: string[] }> {
   const root = await getTaskById(rootTaskId);
   if (!root) return { reason: SESSION_MOVE_UNAVAILABLE };
@@ -752,6 +753,8 @@ async function checkSessionMove(
     if (!hasSessionAccess(access, "write")) return { reason: "Session write access required" };
   }
   if (root.parentTaskId) return { reason: "Task is not a session root" };
+  const sourceError = sourceMoveError(options.destination ?? null, root);
+  if (sourceError) return { reason: sourceError };
   const tasks = await getRootTaskChain(root.id);
   for (const task of tasks) {
     if (!(await canMutateTaskNamespace(task, myAgentId, req))) {
@@ -1054,7 +1057,9 @@ export async function handleSessions(
         const skipped: { rootTaskId: string; reason: string }[] = [];
         const moves: SessionKeyMove[] = [];
         for (const rootId of new Set(parsed.body.rootTaskIds)) {
-          const checked = await checkSessionMove(rootId, actor, req, myAgentId);
+          const checked = await checkSessionMove(rootId, actor, req, myAgentId, {
+            destination: key,
+          });
           if ("reason" in checked) {
             skipped.push({ rootTaskId: rootId, reason: checked.reason });
           } else {
@@ -1076,6 +1081,10 @@ export async function handleSessions(
     const parsed = await moveSessionPrefix.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const from = normalizeAssetKey(parsed.body.from);
+    if (sourceOfKey(from) || (parsed.body.to && sourceOfKey(normalizeAssetKey(parsed.body.to)))) {
+      jsonError(res, SOURCE_GROUPS_READ_ONLY, 400);
+      return true;
+    }
     if (parseAssetKey(from).relativeSegments.length === 0) {
       jsonError(res, "Cannot move a namespace root", 400);
       return true;
@@ -1126,6 +1135,7 @@ export async function handleSessions(
             }
             const checked = await checkSessionMove(root.id, actor, req, myAgentId, {
               ownerOnly: true,
+              destination: nextKey,
             });
             if ("reason" in checked) {
               skipped.push({ rootTaskId: root.id, reason: checked.reason });

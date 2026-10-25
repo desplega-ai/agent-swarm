@@ -16,6 +16,7 @@ import { getSessionTree, type SessionFilters } from "../be/db/session-tree";
 import { setSessionShares } from "../be/session-shares";
 import { handleSessions } from "../http/sessions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { chatSdkContextKey } from "../tasks/context-key";
 import { beginRequestAuthScope, setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
 
@@ -168,7 +169,9 @@ describe("session groups and prefix bounds", () => {
     const query = spyOn(client, "query");
     let call: (typeof query.mock.calls)[number];
     try {
-      await listRecentSessions(filters({ groupKey: "shared/a/" }));
+      await listRecentSessions(
+        filters({ groupKey: "shared/a/", showSource: ["slack"], hideSource: ["ui"] }),
+      );
       call = query.mock.calls[0]!;
     } finally {
       query.mockRestore();
@@ -702,6 +705,67 @@ describe("source filter and list triage", () => {
       headers: withUser ? asOwner() : { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
+
+  test("effective sources agree across lists, tree facets and triage", async () => {
+    const slack = await task("shared/slack/c1/thread:1/", { source: "slack" });
+    const mcpSlack = await task("shared/slack/c1/thread:2/", { source: "mcp" });
+    const telegram = await task("shared/telegram/-100/thread:42/", {
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:-100:42"),
+    });
+    const discord = await task("shared/discord/c1/task:root/", { source: "chat" });
+    const ui = await task("shared/", { source: "ui" });
+    const mcp = await task("shared/research/", { source: "mcp" });
+    const chat = await task("shared/research/", { source: "chat" });
+    const facets = (await treeOf("show=all")).sources;
+    expect(facets).toEqual([
+      { source: "slack", total: 2 },
+      { source: "chat", total: 1 },
+      { source: "discord", total: 1 },
+      { source: "mcp", total: 1 },
+      { source: "telegram", total: 1 },
+      { source: "ui", total: 1 },
+    ]);
+    const cases = [
+      ["slack", [slack.id, mcpSlack.id]],
+      ["telegram", [telegram.id]],
+      ["discord", [discord.id]],
+      ["mcp", [mcp.id]],
+      ["ui", [ui.id]],
+      ["chat", [chat.id]],
+    ] as const;
+    for (const [source, expected] of cases) {
+      const query = `show=all&showSource=${source}`;
+      const list = await listOf(`triage=inbox&${query}`);
+      expect(list.sessions.map((row) => row.root.id).sort()).toEqual([...expected].sort());
+      expect(list.total).toBe(expected.length);
+      const tree = await treeOf(query);
+      expect(tree.inbox.total).toBe(expected.length);
+      expect(tree.sources).toEqual(facets);
+      const res = await triage({
+        action: "done",
+        triage: "inbox",
+        show: "all",
+        showSource: [source],
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ updated: expected.length });
+      const done = await listOf("triage=done&show=all");
+      expect(done.sessions.map((row) => row.root.id).sort()).toEqual([...expected].sort());
+      expect((await treeOf(query)).done.total).toBe(expected.length);
+      const reset = await triage({ action: "inbox", triage: "done", show: "all" });
+      expect(await reset.json()).toEqual({ updated: expected.length });
+    }
+    const hidden = await listOf("triage=inbox&show=all&hideSource=slack");
+    expect(hidden.total).toBe(5);
+    expect(hidden.sessions.map((row) => row.root.id)).not.toContain(mcpSlack.id);
+    const hiddenTree = await treeOf("show=all&hideSource=slack");
+    expect(hiddenTree.inbox.total).toBe(5);
+    expect(hiddenTree.sources).toEqual(facets);
+    expect(await ids({ source: ["mcp"] })).toEqual([mcp.id, mcpSlack.id].sort());
+    expect(await ids({ showSource: ["slack"], hideSource: ["slack"] })).toEqual([]);
+    expect((await treeOf("show=all&showSource=slack&hideSource=slack")).inbox.total).toBe(0);
+  });
 
   test("hideSource leaves a source out of sections and lists, and sources still count it", async () => {
     const slackA = await task("shared/", { source: "slack" });

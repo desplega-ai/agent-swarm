@@ -58,3 +58,24 @@ export function sessionSourceKey({
 export function sourceOfKey(key: string): SessionSource | null {
   return SESSION_SOURCES.find((source) => key.startsWith(`shared/${source}/`)) ?? null;
 }
+
+export const SOURCE_GROUPS_READ_ONLY = "Source groups are read-only.";
+
+/** The source a filter matches: the source of the key prefix, else the raw task source. */
+export function effectiveSource(key: string, source: string): string {
+  return sourceOfKey(key) ?? source;
+}
+
+/**
+ * Why a session root may not move to `destination` (a normalized key), or null.
+ * Source groups are read-only: only a move back to the root's own source key
+ * (Undo after a move out) may land under a source prefix. Null is No group.
+ */
+export function sourceMoveError(
+  destination: string | null,
+  root: Parameters<typeof sessionSourceKey>[0],
+): string | null {
+  return destination !== null && sourceOfKey(destination) && destination !== sessionSourceKey(root)
+    ? SOURCE_GROUPS_READ_ONLY
+    : null;
+}

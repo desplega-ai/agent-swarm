@@ -1,11 +1,49 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { defaultAssetKey } from "../assets/key";
-import { SESSION_SOURCES, sessionSourceKey, sourceOfKey } from "../assets/source-key";
+import {
+  effectiveSource,
+  SESSION_SOURCES,
+  sessionSourceKey,
+  sourceMoveError,
+  sourceOfKey,
+} from "../assets/source-key";
 import { closeDb, createAgent, createTask, createTaskExtended, initDb } from "../be/db";
 import { chatSdkContextKey } from "../tasks/context-key";
+import { registerSendTaskTool } from "../tools/send-task";
 
 const slack = { slackChannelId: "C0AR967K0KZ", slackThreadTs: "1729000000.123456" };
 const slackKey = "shared/slack/c0ar967k0kz/thread:1729000000.123456/";
+
+test("effective source uses a complete source prefix or retains the raw source", () => {
+  for (const source of SESSION_SOURCES) {
+    expect(effectiveSource(`shared/${source}/channel/thread:1/`, "mcp")).toBe(source);
+    expect(effectiveSource(`shared/${source}-other/`, "chat")).toBe("chat");
+  }
+  expect(effectiveSource("shared/research/", "slack")).toBe("slack");
+  expect(effectiveSource("shared/research/", "chat")).toBe("chat");
+});
+
+test("source move guard permits only exact own source keys under source prefixes", () => {
+  const root = { id: "root", ...slack };
+  for (const destination of [null, "shared/research/", "shared/slack-other/", slackKey]) {
+    expect(sourceMoveError(destination, root)).toBeNull();
+  }
+  for (const destination of [
+    "shared/slack/",
+    "shared/slack/c0ar967k0kz/",
+    "shared/slack/c0ar967k0kz/thread:other/",
+    "shared/telegram/123/",
+    "shared/discord/c1/",
+  ]) {
+    expect(sourceMoveError(destination, root)).toBe("Source groups are read-only.");
+  }
+  expect(sourceMoveError(slackKey, { id: "other" })).toBe("Source groups are read-only.");
+  const chatRoot = { id: "root", contextKey: chatSdkContextKey("telegram:-100") };
+  expect(sourceMoveError("shared/telegram/-100/task:root/", chatRoot)).toBeNull();
+  expect(sourceMoveError("shared/telegram/-100/", chatRoot)).toBe("Source groups are read-only.");
+});
 
 describe("session source key shapes", () => {
   test("Slack fields produce a lowercase channel key", () => {
@@ -100,6 +138,43 @@ describe("session source keys at insert", () => {
     const root = await createTaskExtended("Slack root", { source: "slack", ...slack });
     const child = await createTaskExtended("Child", { parentTaskId: root.id });
     expect(child.key).toBe(root.key);
+  });
+
+  test("send-task permits a child to inherit its Slack root key", async () => {
+    const agent = await createAgent({ name: "Source caller", status: "idle", maxTasks: 10 });
+    const target = await createAgent({ name: "Source target", status: "idle", maxTasks: 10 });
+    const root = await createTaskExtended("Slack root", {
+      agentId: agent.id,
+      source: "slack",
+      ...slack,
+    });
+    const server = new McpServer({ name: "source-key-test", version: "1.0.0" });
+    registerSendTaskTool(server);
+    const tools = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            handler: (args: unknown, extra: unknown) => Promise<CallToolResult>;
+          }
+        >;
+      }
+    )._registeredTools;
+    const result = await tools["send-task"]!.handler(
+      {
+        agentId: target.id,
+        routingReason: "human_pinned",
+        routingNote: "The test selects the target worker.",
+        task: "Child in a Slack source group",
+        parentTaskId: root.id,
+        allowDuplicate: true,
+      },
+      { requestInfo: { headers: { "x-agent-id": agent.id, "x-source-task-id": root.id } } },
+    );
+    expect(result.structuredContent).toMatchObject({
+      success: true,
+      task: { key: slackKey, parentTaskId: root.id },
+    });
   });
 
   test("a child with different Slack fields keeps its parent's custom key", async () => {

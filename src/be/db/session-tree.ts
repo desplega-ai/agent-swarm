@@ -4,6 +4,7 @@ import {
   SESSION_LEAF_KINDS,
   sessionGroupKey,
 } from "../../assets/key";
+import { effectiveSource, SESSION_SOURCES } from "../../assets/source-key";
 import { isTerminalTaskStatus, TERMINAL_TASK_STATUSES } from "../../types";
 import { getDbClient, literalPrefixPattern } from "../db";
 import {
@@ -14,13 +15,17 @@ import {
 
 export type SessionReadState = "unread" | "read" | "later" | "done";
 export interface SessionFilters {
-  /** Restrict roots to these task sources. */
+  /** Restrict roots to these raw task sources (`agent_tasks.source`). */
   source?: string[];
-  /** Leave out roots of these task sources (the older sessions v2 source filter). */
+  /**
+   * Leave out roots of these effective sources (the older sessions v2 source
+   * filter). The effective source of a root under a source key prefix such as
+   * `shared/slack/` is that source, else its raw task source.
+   */
   hideSource?: string[];
   /**
-   * Keep only roots of these task sources (the sessions v2 source filter).
-   * Unlike `source`, an empty list matches no root.
+   * Keep only roots of these effective sources (the sessions v2 source filter,
+   * see `hideSource`). Unlike `source`, an empty list matches no root.
    */
   showSource?: string[];
   /** Match root task text or title with a case-insensitive substring. */
@@ -95,6 +100,17 @@ function groupCondition(group: string): SqlFragment {
   };
 }
 
+/** `effectiveSource` of the root `r` in SQL, with key ranges so the key index still serves it. */
+function effectiveSourceSql(): SqlFragment {
+  return {
+    sql: `(CASE ${SESSION_SOURCES.map(() => `WHEN r."key" >= ? AND r."key" < ? THEN ?`).join(" ")} ELSE r.source END)`,
+    params: SESSION_SOURCES.flatMap((source) => {
+      const { lo, hi } = keyPrefixRange(`shared/${source}/`);
+      return [lo, hi, source];
+    }),
+  };
+}
+
 export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   const conditions = ["r.parentTaskId IS NULL"];
   const params: SqlFragment["params"] = [];
@@ -107,13 +123,22 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   if (sources.length)
     add({ sql: `r.source IN (${sources.map(() => "?").join(",")})`, params: sources });
   const hidden = opts.hideSource?.filter(Boolean) ?? [];
-  if (hidden.length)
-    add({ sql: `r.source NOT IN (${hidden.map(() => "?").join(",")})`, params: hidden });
+  if (hidden.length) {
+    const source = effectiveSourceSql();
+    add({
+      sql: `${source.sql} NOT IN (${hidden.map(() => "?").join(",")})`,
+      params: [...source.params, ...hidden],
+    });
+  }
   if (opts.showSource) {
     const shown = opts.showSource.filter(Boolean);
+    const source = effectiveSourceSql();
     add(
       shown.length
-        ? { sql: `r.source IN (${shown.map(() => "?").join(",")})`, params: shown }
+        ? {
+            sql: `${source.sql} IN (${shown.map(() => "?").join(",")})`,
+            params: [...source.params, ...shown],
+          }
         : { sql: "0", params: [] },
     );
   }
@@ -388,7 +413,7 @@ export interface SessionTree {
   later: SessionSectionCounts;
   done: SessionSectionCounts;
   noGroup: SessionSectionCounts;
-  /** Each root source in this view with its session count, hidden sources included, most first. */
+  /** Each effective root source in this view with its session count, hidden sources included, most first. */
   sources: { source: string; total: number }[];
 }
 
@@ -437,8 +462,9 @@ export async function getSessionTree(
     if (row.needsYou) section.needsYou++;
   };
   for (const row of rows) {
-    sources.set(row.source, (sources.get(row.source) ?? 0) + 1);
-    if (hidden.has(row.source) || (shown && !shown.has(row.source))) continue;
+    const source = effectiveSource(row.key, row.source);
+    sources.set(source, (sources.get(source) ?? 0) + 1);
+    if (hidden.has(source) || (shown && !shown.has(source))) continue;
     const key = sessionGroupKey(row.key);
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);

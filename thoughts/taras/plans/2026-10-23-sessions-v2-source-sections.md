@@ -218,15 +218,15 @@ The source filter (`showSource`, and the older `hideSource`) matches every root 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Session tests pass: `bun run test:root -- src/tests/sessions-tree.test.ts src/tests/sessions-move.test.ts src/tests/session-source-keys.test.ts`
-- [ ] Route posture and sharing tests pass: `bun run test:root -- src/tests/session-route-posture.test.ts src/tests/session-sharing-routes.test.ts`
-- [ ] Type check passes: `bun run tsc:check:tsc`
-- [ ] Lint passes: `bun run lint && bun run lint:slop`
-- [ ] Promise checks pass: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] RBAC and response coverage pass: `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
+- [x] Session tests pass: `bun run test:root -- src/tests/sessions-tree.test.ts src/tests/sessions-move.test.ts src/tests/session-source-keys.test.ts`
+- [x] Route posture and sharing tests pass: `bun run test:root -- src/tests/session-route-posture.test.ts src/tests/session-sharing-routes.test.ts`
+- [x] Type check passes: `bun run tsc:check:tsc`
+- [x] Lint passes: `bun run lint && bun run lint:slop`
+- [x] Promise checks pass: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] RBAC and response coverage pass: `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
 
 #### Automated QA:
-- [ ] Boot an API on the probe DB (`DATABASE_PATH=/tmp/sss-qa/p1.sqlite PORT=3133 DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true bun run start:http`). `curl -s -X POST http://localhost:3133/api/session-moves/prefix -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"from":"shared/slack/c0ar967k0kz/","to":"shared/research/"}'` returns 400 with "Source groups are read-only."
+- [x] Boot an API on the probe DB (`DATABASE_PATH=/tmp/sss-qa/p1.sqlite PORT=3133 DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true bun run start:http`). `curl -s -X POST http://localhost:3133/api/session-moves/prefix -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"from":"shared/slack/c0ar967k0kz/","to":"shared/research/"}'` returns 400 with "Source groups are read-only."
 
 #### Manual Verification:
 - [ ] None.
@@ -559,3 +559,4 @@ _Reviewed: 2026-10-24 by Claude (automated review, auto-apply, against main dd1a
 _Implementation run started 2026-10-25 in worktree `~/worktrees/agent-swarm/2026-10-25-sessions-source-sections` (branch `feat/sessions-source-sections`). Taras switched to "keep going till the end" after Phase 1._
 
 - Phase 1: an id that contains `/` gives no source key (it would add key segments). Taras chose a fallback for Slack through chat-sdk with no ts (`slack:<D…>:`, a top-level DM in the legacy assistant view): `shared/slack/<channel>/task:<id>/`, like Telegram with no topic. The `task-action` tool's `key` description (and `MCP.md`) now names the source key default.
+- Phase 2: the move guard allows only `sessionSourceKey(root)`. A root an agent created with an explicit `shared/slack/...` key that differs from its own fields can move out, but its Undo is refused (the UI ignores the Undo result). Accepted as an edge case. The PATCH route falls back to "no source key allowed" when it cannot load the session root.
