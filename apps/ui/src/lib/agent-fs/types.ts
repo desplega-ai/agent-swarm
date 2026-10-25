@@ -233,6 +233,36 @@ export interface CommentNotificationReadResult {
   markedRead: number;
 }
 
+/** Result of the core `find` op (fuzzy file names, agent-fs 0.18.5+). Best first. */
+export interface FindResult {
+  matches: Array<{ path: string; size: number; modifiedAt?: string; score: number }>;
+  /** Matching files before the `limit` cap. */
+  total: number;
+}
+
+/** Result of the core `fts` op. `snippet` marks matches with `<b>` and `</b>`. */
+export interface FtsResult {
+  matches: Array<{ path: string; snippet: string; rank: number }>;
+  hint?: string;
+  tookMs?: number;
+}
+
+/** Result of the core `search` op (vector and keyword results merged by rank). */
+export interface SearchResult {
+  results: Array<{
+    path: string;
+    score: number;
+    snippet: string;
+    /** PDF chunks only. */
+    page?: number;
+    kind?: string;
+    author?: string;
+    modifiedAt?: string;
+  }>;
+  hint?: string;
+  tookMs?: number;
+}
+
 /** Mirrors the `disposition` param of the core `signed-url` op. */
 export type SignedUrlDisposition = "inline" | "attachment";
 

@@ -36,10 +36,13 @@ import type {
   CommentUpdateResult,
   DiffResult,
   DriveMembersResult,
+  FindResult,
+  FtsResult,
   LogResult,
   LsResult,
   RevertParams,
   RevertResult,
+  SearchResult,
   StatResult,
 } from "@/lib/agent-fs/types";
 import {
@@ -59,6 +62,14 @@ import {
 } from "@/lib/comb/media";
 import { markMentionsRead } from "@/lib/comb/mentions";
 import type { DrivePath } from "@/lib/comb/paths";
+import {
+  isSearchable,
+  SEARCH_OPS,
+  type SearchMode,
+  type SearchOutcome,
+  searchOutcome,
+  searchParams,
+} from "@/lib/comb/search";
 import { type AgentFsText, COMB_TEXT_MAX_BYTES, readDriveText } from "@/lib/comb/text-content";
 
 export { agentFsKey, agentFsRetry };
@@ -647,6 +658,50 @@ export function useRevertFile(file: DrivePath) {
       ),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: drivePathKey(access, file, "stat") }),
+  });
+}
+
+// --- Search ------------------------------------------------------------------
+
+/**
+ * Search the drive by name (`find`), full text (`fts`), or meaning (`search`).
+ * Key: `(..., "search", mode, query)`. A query too short for its mode does not
+ * run. Results do not poll: a new query or mode is a new search.
+ */
+export function useCombSearch(
+  drive: { orgId: string; driveId: string },
+  mode: SearchMode,
+  query: string,
+) {
+  const access = useAgentFsAccess();
+  const trimmed = query.trim();
+  const modeKey = agentFsKey(
+    access.endpoint,
+    access.userId,
+    drive.orgId,
+    drive.driveId,
+    "search",
+    mode,
+  );
+  return useQuery({
+    queryKey: [...modeKey, trimmed] as const,
+    queryFn: async ({ signal }): Promise<SearchOutcome> => {
+      const result = await connectedClient(access).callOp<FindResult | FtsResult | SearchResult>(
+        drive.orgId,
+        SEARCH_OPS[mode],
+        searchParams(mode, trimmed),
+        drive.driveId,
+        { signal },
+      );
+      return searchOutcome(mode, result);
+    },
+    enabled: access.client !== null && isSearchable(mode, trimmed),
+    retry: agentFsRetry,
+    staleTime: 30_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    // The previous answer of the same mode stays on screen while the next query runs.
+    placeholderData: keepSameFile(modeKey),
   });
 }
 
