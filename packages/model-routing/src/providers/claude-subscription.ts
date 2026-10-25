@@ -22,7 +22,9 @@ export const claudeSubscriptionProvider = defineRouteProvider({
   harnesses: ["claude"],
   defaultBaseUrl: ANTHROPIC_API_BASE_URL,
   requiredEnv: () => ["CLAUDE_CODE_OAUTH_TOKEN"],
-  // `GET /api/oauth/profile` runs no inference. A `claude setup-token` token
+  // `GET /api/oauth/profile` runs no inference. It is an undocumented account
+  // endpoint, so workers call it once per token value (boot or change), never
+  // in the 10 min recheck (see `recheckableFailures`). A `claude setup-token` token
   // has only the `user:inference` scope, so it gets 403 `permission_error`:
   // the token authenticated but cannot read the profile. A rejected or expired
   // token gets 401. Claude Code cannot refresh a token that comes from the
@@ -38,6 +40,14 @@ export const claudeSubscriptionProvider = defineRouteProvider({
     const body = await res.text().catch(() => "");
     if (res.status === 403 && errorType(body) === "permission_error") {
       return { status: "verified" };
+    }
+    // Anthropic throttles its account endpoints (429). A throttle or an
+    // outage says nothing about the token: report it as not tested.
+    if (res.status === 429 || res.status >= 500) {
+      return {
+        status: "configured",
+        reason: `Anthropic did not answer the token check (HTTP ${res.status}), so it was not tested.`,
+      };
     }
     if (res.status === 401) {
       return {

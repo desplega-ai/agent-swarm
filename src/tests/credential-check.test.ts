@@ -1410,7 +1410,10 @@ describe("buildCredStatusReport", () => {
           expect(failure.liveTest?.ok).toBe(false);
           expect(failure.liveTest?.error).toContain("HTTP 401");
           expect(fetchMock).toHaveBeenCalledTimes(2);
-          expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/models$/);
+          // OpenRouter's /models is public, so its key is checked on /key.
+          expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
+            key === "OPENROUTER_API_KEY" ? /\/key$/ : /\/models$/,
+          );
         } finally {
           globalThis.fetch = realFetch;
         }
@@ -1671,5 +1674,54 @@ describe("runBedrockSdkProbeAndEnumerate — intersection logic", () => {
     expect(usable.find((m) => m.id === profileModel.id)?.name).toBe(profileModel.name);
 
     mock.restore();
+  });
+});
+
+describe("OpenRouter and DeepSeek live checks", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  /** Answers by path; records every URL. */
+  function stubByPath(statusFor: (url: string) => number) {
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : String(input);
+      urls.push(url);
+      return new Response("{}", { status: statusFor(url) });
+    }) as typeof fetch;
+    return urls;
+  }
+
+  test("OpenRouter checks the key on /key, not the public /models", async () => {
+    const urls = stubByPath((url) => (url.endsWith("/key") ? 401 : 200));
+    const result = await validateProviderCredentials("pi", { OPENROUTER_API_KEY: "or-bad" });
+    expect(result).toMatchObject({ ok: false, httpStatus: 401 });
+    expect(urls).toEqual(["https://openrouter.ai/api/v1/key"]);
+  });
+
+  test("a base URL without /key falls back to /models", async () => {
+    const urls = stubByPath((url) => (url.endsWith("/key") ? 404 : 200));
+    const result = await validateProviderCredentials("pi", { OPENROUTER_API_KEY: "or-key" });
+    expect(result.ok).toBe(true);
+    expect(urls).toEqual([
+      "https://openrouter.ai/api/v1/key",
+      "https://openrouter.ai/api/v1/models",
+    ]);
+  });
+
+  test("dsh checks DEEPSEEK_API_KEY on DeepSeek /models, else OpenRouter", async () => {
+    const urls = stubByPath(() => 401);
+    const deepseek = await validateProviderCredentials("dsh", {
+      DEEPSEEK_API_KEY: "ds-bad",
+      OPENROUTER_API_KEY: "or-key",
+    });
+    expect(deepseek).toMatchObject({ ok: false, httpStatus: 401 });
+    expect(urls).toEqual(["https://api.deepseek.com/models"]);
+
+    const openrouter = await validateProviderCredentials("dsh", { OPENROUTER_API_KEY: "or-key" });
+    expect(openrouter).toMatchObject({ ok: false, httpStatus: 401 });
+    expect(urls.at(-1)).toBe("https://openrouter.ai/api/v1/key");
   });
 });

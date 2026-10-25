@@ -4,6 +4,7 @@ import {
   type CredentialRefreshState,
   credentialFingerprint,
   KEY_RECHECK_INTERVAL_MS,
+  recheckableFailures,
   refreshCredentialStatus,
   reportKeyValidation,
 } from "../commands/credential-refresh";
@@ -252,5 +253,34 @@ describe("runner credential refresh", () => {
     expect(build).toHaveBeenCalledTimes(1);
     await refreshCredentialStatus(api, state, "pi", env, 300_002);
     expect(build).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("recheckableFailures", () => {
+  const key = (keyType: string, ok: boolean) => ({
+    keyType,
+    index: 0,
+    suffix: "abcde",
+    ok,
+    latency_ms: 1,
+  });
+
+  test("a Claude subscription token never joins the periodic recheck", () => {
+    const liveTest = {
+      ok: false,
+      error: "rejected",
+      latency_ms: 1,
+      testedAt: 1,
+      keys: [key("CLAUDE_CODE_OAUTH_TOKEN", false), key("ANTHROPIC_API_KEY", false)],
+    };
+    expect(recheckableFailures(liveTest)).toBe(1);
+    expect(
+      recheckableFailures({ ...liveTest, keys: [key("CLAUDE_CODE_OAUTH_TOKEN", false)] }),
+    ).toBe(0);
+  });
+
+  test("a failed test without per-key results counts once", () => {
+    expect(recheckableFailures({ ok: false, error: "x", latency_ms: 1, testedAt: 1 })).toBe(1);
+    expect(recheckableFailures(null)).toBe(0);
   });
 });

@@ -410,12 +410,9 @@ async function checkXaiApiKey(apiKey: string): Promise<LiveValidationResult> {
   };
 }
 
-async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
-  const url = `${getOpenRouterBaseUrl()}/models`;
-  const r = await timedFetch(url, {
-    method: "GET",
-    headers: { ...getOpenRouterAttributionHeaders(url), Authorization: `Bearer ${apiKey}` },
-  });
+/** Fetch a key-authenticated GET and normalize it into a `LiveValidationResult`. */
+async function checkBearerGet(url: string, init: RequestInit): Promise<LiveValidationResult> {
+  const r = await timedFetch(url, { method: "GET", ...init });
   if (r.ok) return { ok: true, latency_ms: r.latency_ms };
   return {
     ok: false,
@@ -423,6 +420,29 @@ async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
     httpStatus: r.status,
     latency_ms: r.latency_ms,
   };
+}
+
+/**
+ * OpenRouter's `/models` is public and answers 200 for any key, so the check
+ * reads `GET /key` (the key's own info, 401 for a bad key). A custom
+ * `OPENROUTER_BASE_URL` without `/key` (404/405) falls back to `/models`.
+ */
+async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
+  const base = getOpenRouterBaseUrl();
+  const get = (url: string) =>
+    checkBearerGet(url, {
+      headers: { ...getOpenRouterAttributionHeaders(url), Authorization: `Bearer ${apiKey}` },
+    });
+  const keyResult = await get(`${base}/key`);
+  if (keyResult.httpStatus === 404 || keyResult.httpStatus === 405) return get(`${base}/models`);
+  return keyResult;
+}
+
+/** `GET /models` on the official DeepSeek API: lists models, runs no inference. */
+function checkDeepSeekApiKey(apiKey: string): Promise<LiveValidationResult> {
+  return checkBearerGet("https://api.deepseek.com/models", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
 }
 
 /**
@@ -491,11 +511,12 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `claude`         | default route: Foundry / Bedrock / Vertex → gateway (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`) → `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | the route's own `/v1/models`; OAuth: `/api/oauth/profile` (403 scope = ok); cloud routes skipped |
  * | `claude-managed` | `ANTHROPIC_API_KEY` (managed agents always use API key + managed envs)  | Anthropic `/v1/models`         |
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
- * | `opencode`       | auth.json (file) → `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → each registry provider key (`NAN_API_KEY` or `HELMCODE_API_NAN`, `HELMCODE_API_KEY`) | file presence-only, otherwise provider's `/v1/models` |
+ * | `opencode`       | auth.json (file) → `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → each registry provider key (`NAN_API_KEY` or `HELMCODE_API_NAN`, `HELMCODE_API_KEY`) | file presence-only, otherwise OpenRouter `/key` or the provider's `/v1/models` |
  * | `pi`             | auth.json (file) → provider API keys, including model-specific keys   | file/model-specific key presence-only, otherwise provider's `/v1/models` |
  * | `acp`            | target-specific (the ACP target process owns its own auth)              | presence-only (validated by the target process) |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v3/self`            |
+ * | `dsh`            | `DEEPSEEK_API_KEY` → `OPENROUTER_API_KEY`                               | DeepSeek `/models`, or OpenRouter `/key` |
  * | `amp`            | `AMP_API_KEY`                                                           | `amp usage` (credit balance, no inference; 5s timeout) |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
@@ -672,14 +693,19 @@ export async function validateProviderCredentials(
           };
         });
       }
-      case "dsh":
-        return checkDshCredentials(env).ready
-          ? presenceCheckOk()
-          : {
-              ok: false,
-              error: "Set DEEPSEEK_API_KEY or OPENROUTER_API_KEY for dsh.",
-              latency_ms: Date.now() - startedAt,
-            };
+      case "dsh": {
+        // Same precedence as `checkDshCredentials`: the DeepSeek key, then OpenRouter.
+        const deepseekKey = env.DEEPSEEK_API_KEY?.trim();
+        if (deepseekKey) return checkEachKey("DEEPSEEK_API_KEY", deepseekKey, checkDeepSeekApiKey);
+        const openRouterKey = env.OPENROUTER_API_KEY?.trim();
+        if (openRouterKey)
+          return checkEachKey("OPENROUTER_API_KEY", openRouterKey, checkOpenRouter);
+        return {
+          ok: false,
+          error: "Set DEEPSEEK_API_KEY or OPENROUTER_API_KEY for dsh.",
+          latency_ms: Date.now() - startedAt,
+        };
+      }
       case "amp": {
         if (!checkAmpCredentials(env).ready) {
           return {

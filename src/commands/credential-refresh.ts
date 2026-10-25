@@ -1,3 +1,4 @@
+import type { AgentCredStatus } from "../types";
 import { CREDENTIAL_POOL_VARS } from "../utils/credentials";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
@@ -31,6 +32,20 @@ export function credentialFingerprint(env: Record<string, string | undefined>): 
       ),
     ),
   ).toString();
+}
+
+/**
+ * Failed keys worth the periodic recheck. A Claude subscription token is left
+ * out: its check calls an undocumented Anthropic account endpoint, so it runs
+ * only once per token value (boot or change). A failed test with no per-key
+ * results counts as one.
+ */
+export function recheckableFailures(liveTest: AgentCredStatus["liveTest"] | undefined): number {
+  const keys = liveTest?.keys;
+  if (keys?.length) {
+    return keys.filter((key) => !key.ok && key.keyType !== "CLAUDE_CODE_OAUTH_TOKEN").length;
+  }
+  return liveTest?.ok === false ? 1 : 0;
 }
 
 /** Report each pool separately. A telemetry failure must not stop credential checks. */
@@ -118,12 +133,8 @@ export async function refreshCredentialStatus(
     if (state.harnessProvider === harnessProvider) {
       state.ready = snapshot.ready;
       state.fingerprint = fingerprint;
+      state.rejectedKeys = recheckableFailures(snapshot.liveTest);
       const keys = snapshot.liveTest?.keys;
-      state.rejectedKeys = keys?.length
-        ? keys.filter((key) => !key.ok).length
-        : snapshot.liveTest?.ok === false
-          ? 1
-          : 0;
       if (keys?.length) await reportKeyValidation(api, keys);
     }
   } finally {

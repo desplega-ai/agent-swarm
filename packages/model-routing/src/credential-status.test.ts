@@ -130,7 +130,15 @@ describe("validateRoute", () => {
     expect(await validateRoute(route(env), env)).toEqual({ status: "verified" });
   });
 
-  test("subscription: 401, other 403s and 5xx fail with the HTTP status", async () => {
+  test("subscription: a 429 or 5xx is not tested, not failed", async () => {
+    const env = { CLAUDE_CODE_OAUTH_TOKEN: "oauth" };
+    for (const status of [429, 503]) {
+      stubFetch(status);
+      expect((await validateRoute(route(env), env)).status).toBe("configured");
+    }
+  });
+
+  test("subscription: 401 and other 403s fail with the HTTP status", async () => {
     const env = { CLAUDE_CODE_OAUTH_TOKEN: "oauth" };
     stubFetch(
       401,
@@ -147,12 +155,6 @@ describe("validateRoute", () => {
     expect(await validateRoute(route(env), env)).toMatchObject({
       status: "failed",
       httpStatus: 403,
-    });
-
-    stubFetch(503, "unavailable");
-    expect(await validateRoute(route(env), env)).toMatchObject({
-      status: "failed",
-      httpStatus: 503,
     });
   });
 

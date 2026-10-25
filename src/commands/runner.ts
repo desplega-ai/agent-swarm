@@ -121,6 +121,7 @@ import { reportCredentialOutcomeThenFinish } from "./credential-outcome-report.t
 import {
   type CredentialRefreshState,
   credentialFingerprint,
+  recheckableFailures,
   refreshCredentialStatus,
   reportKeyValidation,
 } from "./credential-refresh.ts";
@@ -6425,12 +6426,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       credentialRefreshState.ready = bootCredSnapshot?.ready ?? true;
       credentialRefreshState.lastRefreshAt = Date.now();
       credentialRefreshState.fingerprint = credentialFingerprint(process.env);
+      credentialRefreshState.rejectedKeys = recheckableFailures(bootCredSnapshot?.liveTest);
       const keys = bootCredSnapshot?.liveTest?.keys;
-      credentialRefreshState.rejectedKeys = keys?.length
-        ? keys.filter((key) => !key.ok).length
-        : bootCredSnapshot?.liveTest?.ok === false
-          ? 1
-          : 0;
       if (keys?.length) await reportKeyValidation(apiConfig, keys);
     } catch (error) {
       console.error(`[${role}] Failed to report credential readiness after recovery: ${error}`);
