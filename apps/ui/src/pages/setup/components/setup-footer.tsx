@@ -154,6 +154,8 @@ const OPEN_OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"], [rol
 /** Enter already activates a focused control. */
 const CONTROL_TARGET =
   'button, a[href], summary, [role="button"], [role="link"], [role="tab"], [role="radio"], [role="checkbox"], [role="switch"]';
+/** A step form whose text fields submit with Continue (step 1's "Who are you?"). */
+const ENTER_CONTINUES = "[data-enter-continues] input";
 
 function shortcutBlocked(event: KeyboardEvent): boolean {
   if (event.defaultPrevented || event.isComposing || event.repeat) return true;
@@ -162,6 +164,7 @@ function shortcutBlocked(event: KeyboardEvent): boolean {
   // Escape closes an open tooltip first.
   if (event.key === "Escape" && document.querySelector('[role="tooltip"]')) return true;
   const target = event.target instanceof Element ? event.target : null;
+  if (event.key === "Enter" && target?.matches(ENTER_CONTINUES)) return false;
   if (target?.closest(TYPING_TARGET)) return true;
   return event.key === "Enter" && Boolean(target?.closest(CONTROL_TARGET));
 }

@@ -56,9 +56,9 @@ function IdentityGate() {
  * `history.replaceState`, which React Router never sees. Its location still
  * holds them, and any page that copies the search params (a session tab, a
  * filter) would put the key back in the address bar. Drop them from the
- * router's copy too.
+ * router's copy too. `/setup` (outside this layout) mounts it as well.
  */
-function ConnectionParamsCleanup() {
+export function ConnectionParamsCleanup() {
   const location = useLocation();
   const navigate = useNavigate();
   const stripped = withoutConnectionParams(location.search, CREDENTIAL_URL_PARAMS);

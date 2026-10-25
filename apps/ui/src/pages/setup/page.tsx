@@ -22,6 +22,7 @@ import {
   useOnboardingAction,
 } from "@/api/hooks/use-onboarding";
 import type { OnboardingResponse, OnboardingStepId, OnboardingStepStatus } from "@/api/types";
+import { ConnectionParamsCleanup } from "@/components/layout/root-layout";
 import { markSetupVisited, setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { stepNumber } from "@/components/onboarding/step-status";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
@@ -234,6 +235,8 @@ export default function SetupPage() {
   if (pendingConnection) return <Navigate to="/" replace />;
   return (
     <ErrorBoundary>
+      {/* The `?step=` sync copies the router's search params: drop a setup link's key first. */}
+      <ConnectionParamsCleanup />
       <SetupFlow />
     </ErrorBoundary>
   );
@@ -512,7 +515,7 @@ function SetupFlow() {
                   onboarding={data ?? null}
                   onConnected={() => void handleConnected()}
                   act={data ? act : undefined}
-                  setContinueBlocker={setters.connect.setContinueBlocker}
+                  {...setters.connect}
                 />
               ) : data ? (
                 // A failing step must not take the shell (navigation, Minimize) down with it.

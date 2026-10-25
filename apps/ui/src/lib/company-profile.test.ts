@@ -61,6 +61,8 @@ describe("email domain helpers", () => {
   test("nameFromEmail guesses a person's name", () => {
     expect(nameFromEmail("ada.lovelace@acme.com")).toBe("Ada Lovelace");
     expect(nameFromEmail("grace_hopper@acme.com")).toBe("Grace Hopper");
+    expect(nameFromEmail("ada.lovelace+qa@acme.com")).toBe("Ada Lovelace");
+    expect(nameFromEmail("qa+1024-2104-ui@desplega.ai")).toBe("Qa");
   });
 });
 

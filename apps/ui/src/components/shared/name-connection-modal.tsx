@@ -12,12 +12,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useConfig } from "@/hooks/use-config";
-import { generateSlug } from "@/lib/slugs";
+import { connectionName } from "@/lib/config";
 
 export function NameConnectionModal() {
   const { pendingConnection, clearPendingConnection, addConnection, switchConnection } =
     useConfig();
-  const [name, setName] = useState(() => generateSlug());
+  // Named after the API host by default, like a connection from `/setup`.
+  const [name, setName] = useState(() =>
+    pendingConnection ? connectionName(pendingConnection.apiUrl) : "",
+  );
   const [status, setStatus] = useState<"idle" | "saving">("idle");
 
   if (!pendingConnection) return null;
@@ -27,7 +30,7 @@ export function NameConnectionModal() {
     setStatus("saving");
     try {
       const created = addConnection({
-        name: name.trim() || generateSlug(),
+        name: name.trim() || connectionName(pendingConnection.apiUrl),
         apiUrl: pendingConnection.apiUrl,
         apiKey: pendingConnection.apiKey,
       });
