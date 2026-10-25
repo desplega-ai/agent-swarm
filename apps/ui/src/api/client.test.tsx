@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
+const TEST_CONNECTION = { id: "test", apiUrl: "https://api.example.test", apiKey: "" };
+// The client sends no request before a connection exists. A test sets this to null.
+let activeConnection: typeof TEST_CONNECTION | null = TEST_CONNECTION;
+
 mock.module("@/lib/config", () => ({
   getConfig: () => ({ apiUrl: "https://api.example.test", apiKey: "" }),
-  // The client sends no request before a connection exists.
-  getActiveConnection: () => ({ id: "test", apiUrl: "https://api.example.test", apiKey: "" }),
+  getActiveConnection: () => activeConnection,
 }));
 
 const { api, ApprovalRespondError } = await import("./client");
@@ -13,6 +16,23 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  activeConnection = TEST_CONNECTION;
+});
+
+describe("before a connection exists", () => {
+  test("rejects without sending a request", async () => {
+    activeConnection = null;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(api.cancelApprovalRequest("request-id")).rejects.toThrow(
+      "Not connected to an API yet",
+    );
+    expect(calls).toBe(0);
+  });
 });
 
 describe("respondToApprovalRequest", () => {
