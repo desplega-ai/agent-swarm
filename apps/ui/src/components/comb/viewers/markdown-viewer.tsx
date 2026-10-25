@@ -7,6 +7,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { browserStorage } from "@/lib/comb/drafts";
 import { readPropertiesOpen, writePropertiesOpen } from "@/lib/comb/panels";
 import { cn } from "@/lib/utils";
+import { AssetFrame } from "./asset-frame";
 import { CombMarkdown, type DriveImageProps } from "./comb-markdown";
 import type { ViewerProps } from "./file-viewer";
 import { TextGate } from "./text-gate";
@@ -35,6 +36,7 @@ export default function MarkdownViewer({ file, stat }: ViewerProps) {
             text={text}
             doc={file}
             DriveImage={DriveImage}
+            AssetFrame={AssetFrame}
             liveUrl={liveUrl}
             codeTheme={theme}
             propertiesOpen={propertiesOpen}
@@ -64,18 +66,20 @@ function usePropertiesOpen(): [boolean, (open: boolean) => void] {
  * A relative image in the markdown, loaded like the image viewer loads it
  * (`useAgentFsMediaUrl`, so blob-mode bytes go through `blobUrlPlan`).
  */
-function DriveImage({ file, alt, fallback }: DriveImageProps) {
+function DriveImage({ file, alt, fallback, lines }: DriveImageProps) {
   const media = useAgentFsMediaUrl(file, "image");
   // The URL that the element could not show. A new URL (a new version) tries again.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   if (media.url === null || media.url === failedUrl) return fallback;
   const url = media.url;
   return (
-    <img
-      src={url}
-      alt={alt}
-      onError={() => setFailedUrl(url)}
-      className="my-4 inline-block max-w-full rounded-lg"
-    />
+    <AssetFrame asset={{ kind: "image", src: url, alt, file }} lines={lines}>
+      <img
+        src={url}
+        alt={alt}
+        onError={() => setFailedUrl(url)}
+        className="my-4 inline-block max-w-full rounded-lg"
+      />
+    </AssetFrame>
   );
 }

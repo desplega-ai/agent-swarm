@@ -681,6 +681,20 @@ button[data-slot="sidebar-rail"] {
 .comb-comment-fallback-active {
   background-color: color-mix(in oklch, var(--color-primary) 22%, transparent);
 }
+/* A comment on an image or a diagram has no text to paint: its asset frame gets an outline. */
+[data-comb-asset-comment] {
+  outline: 2px solid color-mix(in oklch, var(--color-primary) 45%, transparent);
+  outline-offset: 4px;
+}
+[data-comb-asset-comment="flagged"] {
+  outline-style: dashed;
+  outline-color: var(--color-status-info-strong);
+}
+[data-comb-asset-comment="active"],
+[data-comb-asset-pending] {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 4px;
+}
 
 /* Comb presence: other people's selections in their color
  * (components/comb/presence-layer.tsx). One highlight per palette slot. */

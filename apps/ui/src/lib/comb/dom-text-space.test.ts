@@ -6,10 +6,10 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-const { anchorFromRange, buildDomTextSpace, isSkippedElement, withBlockLineEnd } = await import(
-  "./dom-text-space"
-);
+const { anchorFromRange, assetTargets, buildDomTextSpace, isSkippedElement, withBlockLineEnd } =
+  await import("./dom-text-space");
 const { resolveAnchor } = await import("./comment-anchor");
+const { assetCommentAnchor } = await import("./assets");
 
 function mount(html: string): HTMLElement {
   const root = document.createElement("div");
@@ -496,5 +496,41 @@ describe("dom-text-space over highlighted code (one text node per token)", () =>
     expect(anchor).toEqual(onPlain);
     const resolved = resolveAnchor(space, { quote: onPlain?.quote });
     expect(space.toRange(resolved.start ?? 0, resolved.end ?? 0)?.toString()).toBe("1;\nle");
+  });
+});
+
+describe("comments on assets", () => {
+  // A paragraph with text, an image alone in its paragraph, and a diagram.
+  const root = mount(
+    [
+      '<p data-line-start="1" data-line-end="1">Intro text.</p>',
+      '<p data-line-start="3" data-line-end="3"><span data-comb-asset=""><img alt="Chart" /><span data-comb-skip=""><button>Comment</button></span></span></p>',
+      '<div data-line-start="5" data-line-end="9"><div data-comb-asset=""><div data-comb-skip="">svg</div></div></div>',
+      '<p data-line-start="11" data-line-end="11">Outro.</p>',
+    ].join(""),
+  );
+  const space = buildDomTextSpace(root);
+  const image = root.querySelectorAll("[data-comb-asset]")[0] as HTMLElement;
+  const diagram = root.querySelectorAll("[data-comb-asset]")[1] as HTMLElement;
+
+  test("a comment on an asset anchors on its block's source lines, with no quote", () => {
+    expect(assetCommentAnchor(image)).toEqual({ lineStart: 3, lineEnd: 3, quotedContent: "" });
+    expect(assetCommentAnchor(diagram)).toEqual({ lineStart: 5, lineEnd: 9, quotedContent: "" });
+    expect(assetCommentAnchor(root)).toBeNull();
+  });
+
+  test("its lines resolve to an empty range, and the asset is found by its lines", () => {
+    const resolved = resolveAnchor(space, { lineStart: 5, lineEnd: 9 });
+    expect(resolved.status).toBe("anchored");
+    expect(resolved.start).toBe(resolved.end);
+    expect(assetTargets(space, resolved)).toEqual([diagram]);
+    expect(assetTargets(space, resolveAnchor(space, { lineStart: 3, lineEnd: 3 }))).toEqual([
+      image,
+    ]);
+  });
+
+  test("a text anchor is not an asset", () => {
+    const text = resolveAnchor(space, { quote: { exact: "Intro" }, lineStart: 1, lineEnd: 1 });
+    expect(assetTargets(space, text)).toEqual([]);
   });
 });

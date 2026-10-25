@@ -1,7 +1,7 @@
 import { type RefObject, useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { AnchorResolution } from "@/lib/comb/comment-anchor";
-import type { DomTextSpace } from "@/lib/comb/dom-text-space";
+import { assetTargets, type DomTextSpace } from "@/lib/comb/dom-text-space";
 import { ProcessingDot } from "./swarm-state";
 
 interface PassageMarkersProps {
@@ -38,6 +38,13 @@ export function PassageMarkers({ rootRef, space, anchors, ids }: PassageMarkersP
       const anchor = anchors.get(id);
       const element = elements.current.get(id);
       if (!element || anchor?.start == null || anchor.end == null) return [];
+      // A comment on an image or a diagram has no text: its dot sits level with the asset.
+      const asset = assetTargets(space, anchor)[0];
+      if (asset) {
+        const range = document.createRange();
+        range.selectNode(asset);
+        return [{ element, range, block: asset }];
+      }
       const range = space.toRange(anchor.start, anchor.end);
       if (!range) return [];
       return [{ element, range, block: space.blocksFor(anchor.start, anchor.end)[0] ?? null }];

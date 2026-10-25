@@ -44,7 +44,7 @@ import type {
 } from "@/lib/agent-fs/types";
 import type { AnchorResolution } from "@/lib/comb/comment-anchor";
 import { COMMENT_LIST_MAX, commentAuthorNames } from "@/lib/comb/comments";
-import type { DomTextSpace } from "@/lib/comb/dom-text-space";
+import { assetTargets, type DomTextSpace } from "@/lib/comb/dom-text-space";
 import { browserStorage, type OutboxEntry, sweepExpiredDrafts } from "@/lib/comb/drafts";
 import { getFileKind } from "@/lib/comb/file-kinds";
 import { hasSwarmMarker } from "@/lib/comb/markers";
@@ -99,6 +99,7 @@ function scrollToPassage(
 ) {
   if (!space || anchor?.start == null || anchor.end == null) return false;
   const target =
+    assetTargets(space, anchor)[0] ??
     space.blocksFor(anchor.start, anchor.end)[0] ??
     space.toRange(anchor.start, anchor.end)?.startContainer.parentElement;
   target?.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });

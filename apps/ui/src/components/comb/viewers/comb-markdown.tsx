@@ -74,6 +74,46 @@ export interface DriveImageProps {
   file: DrivePath;
   alt: string;
   fallback: ReactNode;
+  /** The image's source lines, for its frame (`AssetFrameProps.lines`). */
+  lines?: SourceLines;
+}
+
+/** An asset the markdown shows: an image (a drive file or a web URL), or a rendered diagram. */
+export type AssetSource =
+  | { kind: "image"; src: string; alt: string; file: DrivePath | null }
+  | { kind: "diagram"; svg: string; svgId: string };
+
+/**
+ * Props of the frame around an asset (Maximize and Comment on hover). The
+ * caller passes the component in (`asset-frame.tsx`): this module keeps
+ * relative imports only. `block`: the asset takes its own row (a diagram).
+ */
+export interface AssetFrameProps {
+  asset: AssetSource;
+  block?: boolean;
+  /**
+   * The asset's source lines. Streamdown takes an image alone in its
+   * paragraph out of the `<p>`, so the frame carries the lines itself: a
+   * comment on the asset anchors on them.
+   */
+  lines?: SourceLines;
+  children: ReactNode;
+}
+
+/** First and last source line of a markdown element. */
+export interface SourceLines {
+  start: number;
+  end: number;
+}
+
+/** The source lines of a hast node (`node.position`), when it has them. */
+function sourceLines(node: unknown): SourceLines | undefined {
+  const position = (node as { position?: { start?: { line?: number }; end?: { line?: number } } })
+    ?.position;
+  const start = position?.start?.line;
+  if (typeof start !== "number") return undefined;
+  const end = position?.end?.line;
+  return { start, end: typeof end === "number" && end >= start ? end : start };
 }
 
 /**
@@ -85,6 +125,7 @@ export interface DriveImageProps {
 const CombDocContext = createContext<{
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
+  AssetFrame?: ComponentType<AssetFrameProps>;
   liveUrl: string | null;
   codeTheme: CodeTheme;
 } | null>(null);
@@ -142,18 +183,27 @@ function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
 /** Web images (http, https, protocol-relative). Any other `src` is a drive path. */
 const WEB_IMAGE_RE = /^(?:https?:)?\/\//i;
 
-function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
+function CombImage({ node, src, alt, ...rest }: ElementProps<"img">) {
   const ctx = useContext(CombDocContext);
   const doc = ctx?.doc;
+  const lines = sourceLines(node);
   if (typeof src !== "string" || !src) return null;
   if (WEB_IMAGE_RE.test(src)) {
-    return (
+    const image = (
       <img
         src={src}
         alt={alt ?? ""}
         className="my-4 inline-block max-w-full rounded-lg"
         {...rest}
       />
+    );
+    const Frame = ctx?.AssetFrame;
+    return Frame ? (
+      <Frame asset={{ kind: "image", src, alt: alt ?? "", file: null }} lines={lines}>
+        {image}
+      </Frame>
+    ) : (
+      image
     );
   }
   // A drive image. `DriveImage` loads it through a media URL. The placeholder
@@ -179,7 +229,14 @@ function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
   );
   const DriveImage = ctx?.DriveImage;
   if (!doc || !target || !DriveImage || isFolderPath(target.path)) return placeholder;
-  return <DriveImage file={{ ...doc, path: target.path }} alt={alt ?? ""} fallback={placeholder} />;
+  return (
+    <DriveImage
+      file={{ ...doc, path: target.path }}
+      alt={alt ?? ""}
+      fallback={placeholder}
+      lines={lines}
+    />
+  );
 }
 
 /**
@@ -233,7 +290,8 @@ function mermaidSource(children: ReactNode): string | null {
 }
 
 function CombPre({ node: _node, children, ...rest }: ElementProps<"pre">) {
-  const codeTheme = useContext(CombDocContext)?.codeTheme ?? "dark";
+  const ctx = useContext(CombDocContext);
+  const codeTheme = ctx?.codeTheme ?? "dark";
   const block = isValidElement(children)
     ? cloneElement(children as React.ReactElement<Record<string, unknown>>, {
         "data-block": "true",
@@ -246,6 +304,7 @@ function CombPre({ node: _node, children, ...rest }: ElementProps<"pre">) {
       <MermaidBlock
         source={mermaid}
         theme={codeTheme}
+        frame={ctx?.AssetFrame}
         fallback={<pre className={PRE_CLASS}>{block}</pre>}
         {...(rest as ComponentProps<"div">)}
       />
@@ -286,6 +345,7 @@ export function CombMarkdown({
   text,
   doc,
   DriveImage,
+  AssetFrame,
   liveUrl = null,
   codeTheme = "dark",
   propertiesOpen,
@@ -294,6 +354,8 @@ export function CombMarkdown({
   text: string;
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
+  /** The frame around images and diagrams (Maximize, Comment). None: bare assets. */
+  AssetFrame?: ComponentType<AssetFrameProps>;
   liveUrl?: string | null;
   codeTheme?: CodeTheme;
   propertiesOpen?: boolean;
@@ -301,8 +363,8 @@ export function CombMarkdown({
 }): ReactNode {
   const { orgId, driveId, path } = doc;
   const ctx = useMemo(
-    () => ({ doc: { orgId, driveId, path }, DriveImage, liveUrl, codeTheme }),
-    [orgId, driveId, path, DriveImage, liveUrl, codeTheme],
+    () => ({ doc: { orgId, driveId, path }, DriveImage, AssetFrame, liveUrl, codeTheme }),
+    [orgId, driveId, path, DriveImage, AssetFrame, liveUrl, codeTheme],
   );
   // A leading YAML block shows as a key/value table. Its lines stay in the
   // body as blank lines, so the blocks below keep the file's line numbers.
