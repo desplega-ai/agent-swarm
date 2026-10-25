@@ -25936,6 +25936,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflow-runs/{id}/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a workflow run and every sub-workflow run below it
+         * @description Follows stored parent links (`parentStepId` → step → run) through every attempt of every step, terminal runs included. `runs` holds list rows without `context`, root first. `hasOpenWork` is true while any run in the tree is live, has a pending, running or waiting step, a queued retry, an open task or a pending approval; after a cancel it turns false once the tree has settled. Both come from one read snapshot. The tree is not paginated. Links that form a cycle or nest deeper than 32 levels return 409.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The run tree */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            rootRunId: string;
+                            runs: components["schemas"]["WorkflowRunSummary"][];
+                            hasOpenWork: boolean;
+                        };
+                    };
+                };
+                /** @description Run not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Stored parent links form a cycle or nest past the depth bound */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflow-runs/{id}/retry": {
         parameters: {
             query?: never;

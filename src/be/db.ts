@@ -229,8 +229,10 @@ import {
   emitChildRunFinished,
   getRunLineageBlock,
   getStepExecutionBlock,
+  getWorkflowRunTreeIds,
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
+  workflowRunTreeHasOpenWork,
 } from "./db/workflow-runs";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
@@ -8144,6 +8146,48 @@ export async function listWorkflowRunsPage(
       ...(hasMore ? { nextOffset } : {}),
     },
   };
+}
+
+export type WorkflowRunTree = {
+  rootRunId: string;
+  /** Root first, in `getWorkflowRunTreeIds` order. List rows: no `context`. */
+  runs: WorkflowRun[];
+  hasOpenWork: boolean;
+};
+
+/** Run ids per summary query, well under SQLite's bound-parameter limit. */
+const RUN_SUMMARY_QUERY_CHUNK = 500;
+
+/**
+ * The run and every run below it, with whether any of them still has open
+ * work (see `workflowRunTreeHasOpenWork`). One read transaction, so `runs` and
+ * `hasOpenWork` come from the same snapshot. Null when the root is missing.
+ * Throws WorkflowRunTreeError on a cycle or a chain past the depth bound.
+ */
+export async function getWorkflowRunTree(rootRunId: string): Promise<WorkflowRunTree | null> {
+  return getDbClient().transaction(
+    async () => {
+      const root = await getDbClient().get<{ id: string }>(
+        "SELECT id FROM workflow_runs WHERE id = ?",
+        [rootRunId],
+      );
+      if (!root) return null;
+      const ids = await getWorkflowRunTreeIds(rootRunId);
+      const byId = new Map<string, WorkflowRun>();
+      for (let i = 0; i < ids.length; i += RUN_SUMMARY_QUERY_CHUNK) {
+        const chunk = ids.slice(i, i + RUN_SUMMARY_QUERY_CHUNK);
+        const rows = await getDbClient().query<WorkflowRunRow>(
+          `SELECT ${WORKFLOW_RUN_SUMMARY_COLUMNS} FROM workflow_runs
+            WHERE id IN (${chunk.map(() => "?").join(", ")})`,
+          chunk,
+        );
+        for (const row of rows) byId.set(row.id, rowToWorkflowRun(row, "display"));
+      }
+      const runs = ids.flatMap((id) => byId.get(id) ?? []);
+      return { rootRunId, runs, hasOpenWork: await workflowRunTreeHasOpenWork(ids) };
+    },
+    { readOnly: true },
+  );
 }
 
 // ============================================================================

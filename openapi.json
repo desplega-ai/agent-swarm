@@ -63040,6 +63040,81 @@
         }
       }
     },
+    "/api/workflow-runs/{id}/tree": {
+      "get": {
+        "summary": "Get a workflow run and every sub-workflow run below it",
+        "description": "Follows stored parent links (`parentStepId` → step → run) through every attempt of every step, terminal runs included. `runs` holds list rows without `context`, root first. `hasOpenWork` is true while any run in the tree is live, has a pending, running or waiting step, a queued retry, an open task or a pending approval; after a cancel it turns false once the tree has settled. Both come from one read snapshot. The tree is not paginated. Links that form a cycle or nest deeper than 32 levels return 409.",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run tree",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rootRunId": {
+                      "type": "string"
+                    },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WorkflowRunSummary"
+                      }
+                    },
+                    "hasOpenWork": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "rootRunId",
+                    "runs",
+                    "hasOpenWork"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stored parent links form a cycle or nest past the depth bound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workflow-runs/{id}/retry": {
       "post": {
         "summary": "Retry a failed workflow run",
