@@ -1,7 +1,7 @@
 ---
 date: 2026-10-25T22:30:00Z
 topic: "Comb parity with the agent-fs live UI (search, share, viewers, uploads, Send to swarm)"
-status: in-progress
+status: done
 branch: feat/comb-parity
 worktree: ~/worktrees/agent-swarm/2026-10-25-comb-parity
 inputs:
@@ -170,8 +170,8 @@ Then walk Phases 1 to 5 at 1440x900 and 390x844 with agent-browser, upload the s
 - [x] Docs (e1d2b2b56)
 - [x] QA walk + screenshots + recording (agent-fs `qa/agent-swarm/2026-10-25-comb-parity/`)
 - [x] Code review (Standards + Spec, Opus): fixes in the review commit
-- [ ] Gates
-- [ ] PR + cleanup
+- [x] Gates: all green except `script-executor-quickjs` ("caps the binary bodies"), which fails on clean main too (macOS)
+- [x] PR #2406, local stack stopped, /tmp cleaned
 
 ## Review notes (Minor, not fixed)
 
