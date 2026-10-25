@@ -14,7 +14,7 @@ import { openSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { getFreePort } from "./test-net";
+import { getFreePort, PORT_IN_USE_LOG, PortInUseError, startOnFreePort } from "./test-net";
 
 // Re-exported for the suites that imported it from here before test-net.ts existed.
 export { getFreePort };
@@ -50,6 +50,9 @@ export async function removeScratchDir(dir: string): Promise<void> {
  * Spawn `bun src/http.ts` against `dbPath` on a free port. Integrations are
  * disabled; both API-key env vars are pinned so a developer's shell env can't
  * leak in (AGENT_SWARM_API_KEY takes precedence in getApiKey()).
+ *
+ * With waitForListen, a child that exits because another process took its
+ * port during boot is started again on a new port (startOnFreePort).
  */
 export async function spawnSwarmServer(opts: {
   dbPath: string;
@@ -57,9 +60,38 @@ export async function spawnSwarmServer(opts: {
   env?: Record<string, string>;
   /** Poll /docs until the server accepts requests (default true). */
   waitForListen?: boolean;
+  /** Port source for each attempt (default getFreePort). Tests use it to force a taken port. */
+  getPort?: () => Promise<number>;
 }): Promise<SwarmServer> {
-  const port = await getFreePort();
   const logFd = openSync(opts.logPath, "a");
+  return startOnFreePort(
+    async (port) => {
+      const log = Bun.file(opts.logPath);
+      const logStart = (await log.exists()) ? log.size : 0;
+      const server = launchSwarmServer(opts, port, logFd);
+      if (opts.waitForListen === false) return server;
+      try {
+        await waitForListen(server);
+      } catch (error) {
+        if (server.proc.exitCode !== null) {
+          const attemptLog = await Bun.file(opts.logPath).slice(logStart).text();
+          if (PORT_IN_USE_LOG.test(attemptLog)) {
+            throw new PortInUseError((error as Error).message, { cause: error });
+          }
+        }
+        throw error;
+      }
+      return server;
+    },
+    { getPort: opts.getPort },
+  );
+}
+
+function launchSwarmServer(
+  opts: { dbPath: string; logPath: string; env?: Record<string, string> },
+  port: number,
+  logFd: number,
+): SwarmServer {
   const proc = Bun.spawn(["bun", "src/http.ts"], {
     cwd: REPO_ROOT,
     stdout: logFd,
@@ -93,12 +125,10 @@ export async function spawnSwarmServer(opts: {
       ...opts.env,
     },
   });
-  const base = `http://localhost:${port}`;
-
-  const server: SwarmServer = {
+  return {
     proc,
     port,
-    base,
+    base: `http://localhost:${port}`,
     dbPath: opts.dbPath,
     logPath: opts.logPath,
     async stop() {
@@ -107,11 +137,6 @@ export async function spawnSwarmServer(opts: {
       return proc.exitCode;
     },
   };
-
-  if (opts.waitForListen !== false) {
-    await waitForListen(server);
-  }
-  return server;
 }
 
 export async function waitForListen(server: SwarmServer, deadlineMs = 90_000): Promise<void> {
