@@ -15,6 +15,8 @@ mock.module("@/components/ui/select", () => require("../../components/ui/select"
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/config", () => ({
   getConfig: () => ({ apiUrl: "https://api.example.test", apiKey: "" }),
+  // The client sends no request before a connection exists.
+  getActiveConnection: () => ({ id: "test", apiUrl: "https://api.example.test", apiKey: "" }),
 }));
 
 const { ListPager } = await import("../../components/shared/list-pager");

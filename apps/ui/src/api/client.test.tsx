@@ -2,6 +2,8 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 
 mock.module("@/lib/config", () => ({
   getConfig: () => ({ apiUrl: "https://api.example.test", apiKey: "" }),
+  // The client sends no request before a connection exists.
+  getActiveConnection: () => ({ id: "test", apiUrl: "https://api.example.test", apiKey: "" }),
 }));
 
 const { api, ApprovalRespondError } = await import("./client");
