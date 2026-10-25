@@ -197,3 +197,14 @@ export function readFullWidth(storage: DraftStorage | null, apiUrl: string): boo
 export function writeFullWidth(storage: DraftStorage | null, apiUrl: string, on: boolean) {
   writeJson(storage, deriveStorageKey(apiUrl, FULL_WIDTH_KEY), { on });
 }
+
+/** The markdown frontmatter block ("Properties"): open until the person collapses it. */
+export const PROPERTIES_OPEN_KEY = "comb:properties-open";
+
+export function readPropertiesOpen(storage: DraftStorage | null, apiUrl: string): boolean {
+  return readJson(storage, deriveStorageKey(apiUrl, PROPERTIES_OPEN_KEY))?.open !== false;
+}
+
+export function writePropertiesOpen(storage: DraftStorage | null, apiUrl: string, open: boolean) {
+  writeJson(storage, deriveStorageKey(apiUrl, PROPERTIES_OPEN_KEY), { open });
+}

@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useAgentFsMediaUrl } from "@/api/hooks/use-agent-fs";
 import { useCombLayout } from "@/components/comb/comb-layout";
 import { useAgentFs } from "@/contexts/agent-fs-context";
+import { useConfig } from "@/hooks/use-config";
 import { useTheme } from "@/hooks/use-theme";
+import { browserStorage } from "@/lib/comb/drafts";
+import { readPropertiesOpen, writePropertiesOpen } from "@/lib/comb/panels";
 import { cn } from "@/lib/utils";
 import { CombMarkdown, type DriveImageProps } from "./comb-markdown";
 import type { ViewerProps } from "./file-viewer";
@@ -18,6 +21,7 @@ export default function MarkdownViewer({ file, stat }: ViewerProps) {
   const { theme } = useTheme();
   // Full width drops the reading measure: the text runs as wide as the pane.
   const fullWidth = useCombLayout()?.fullWidth ?? false;
+  const [propertiesOpen, setPropertiesOpen] = usePropertiesOpen();
   return (
     <TextGate file={file} stat={stat}>
       {(text) => (
@@ -33,11 +37,27 @@ export default function MarkdownViewer({ file, stat }: ViewerProps) {
             DriveImage={DriveImage}
             liveUrl={liveUrl}
             codeTheme={theme}
+            propertiesOpen={propertiesOpen}
+            onPropertiesOpenChange={setPropertiesOpen}
           />
         </article>
       )}
     </TextGate>
   );
+}
+
+/** The frontmatter block's open state, stored in this browser for every file. */
+function usePropertiesOpen(): [boolean, (open: boolean) => void] {
+  const { apiUrl } = useConfig().config;
+  const [open, setOpen] = useState(() => readPropertiesOpen(browserStorage(), apiUrl));
+  const update = useCallback(
+    (next: boolean) => {
+      setOpen(next);
+      writePropertiesOpen(browserStorage(), apiUrl, next);
+    },
+    [apiUrl],
+  );
+  return [open, update];
 }
 
 /**

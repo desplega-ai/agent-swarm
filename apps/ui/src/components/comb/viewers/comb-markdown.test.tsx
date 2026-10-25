@@ -257,10 +257,12 @@ describe("Comb markdown source lines", () => {
       "---\ntitle: Notes\npath: thoughts/a/b.md\n---\n\nBody text.\n\n---\n\nAfter.",
     );
     expect(withYaml).toContain('data-frontmatter="table"');
-    expect(openingTag(withYaml, "dl", ">title</dt>")).toContain("data-comb-skip");
+    expect(openingTag(withYaml, "section", ">title</dt>")).toContain("data-comb-skip");
+    expect(withYaml).toContain('aria-expanded="true"');
+    expect(withYaml).toContain(">Properties</span>");
     expect(withYaml).toContain(">title</dt>");
-    expect(withYaml).toContain(">Notes</dd>");
-    expect(withYaml).toContain(">thoughts/a/b.md</dd>");
+    expect(withYaml).toContain(">Notes</span>");
+    expect(withYaml).toContain(">thoughts/a/b.md</span>");
     expect(withYaml).not.toMatch(/<h2/);
     expect(openingTag(withYaml, "p", "Body text.")).toContain('data-line-start="6"');
     // A later `---` is still a rule.
@@ -268,10 +270,17 @@ describe("Comb markdown source lines", () => {
     expect(openingTag(withYaml, "p", "After.")).toContain('data-line-start="10"');
   });
 
-  test("malformed frontmatter shows the raw block", () => {
-    const bad = render("---\ntitle: [unclosed\n---\nBody.");
+  test("YAML that does not parse is read line by line, with a note", () => {
+    const loose = render("---\ntopic: Seed deck ($5M raise): companies\nstatus: v3\n---\nBody.");
+    expect(loose).toContain('data-frontmatter="table"');
+    expect(loose).toContain(">Seed deck ($5M raise): companies</span>");
+    expect(loose).toContain("Not valid YAML");
+    expect(openingTag(loose, "p", "Body.")).toContain('data-line-start="5"');
+  });
+
+  test("frontmatter with no key at all shows the raw block", () => {
+    const bad = render("---\n: : [\n---\nBody.");
     expect(bad).toContain('data-frontmatter="raw"');
-    expect(bad).toContain("title: [unclosed");
     expect(bad).toContain("Frontmatter could not be parsed");
     expect(openingTag(bad, "p", "Body.")).toContain('data-line-start="4"');
   });

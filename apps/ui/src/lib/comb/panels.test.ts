@@ -8,10 +8,12 @@ import {
   leftPanelView,
   readFullWidth,
   readLeftPanel,
+  readPropertiesOpen,
   readRightPanel,
   rightPanelOpen,
   writeFullWidth,
   writeLeftPanel,
+  writePropertiesOpen,
   writeRightPanel,
 } from "./panels";
 
@@ -260,6 +262,15 @@ describe("panel storage", () => {
     expect(readFullWidth(storage, apiUrl)).toBe(false);
     storage.map.set(`swarm:v1:${apiUrl}:comb:full-width`, '{"on":"yes"}');
     expect(readFullWidth(storage, apiUrl)).toBe(false);
+  });
+
+  test("Properties is open until collapsed, and round-trips per API URL", () => {
+    const storage = memoryStorage();
+    expect(readPropertiesOpen(storage, apiUrl)).toBe(true);
+    writePropertiesOpen(storage, apiUrl, false);
+    expect(readPropertiesOpen(storage, apiUrl)).toBe(false);
+    expect(readPropertiesOpen(storage, "http://other")).toBe(true);
+    expect(readPropertiesOpen(null, apiUrl)).toBe(true);
   });
 
   test("no choice yet stores only the tab", () => {
