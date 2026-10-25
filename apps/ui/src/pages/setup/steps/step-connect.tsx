@@ -318,16 +318,6 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
     onConnected();
   }
 
-  // A setup link connects on its own. When the browser asks first, the notice
-  // explains the prompt, and Connect opens it.
-  const autoConnect = useRef(Boolean(setupLink) && !asksPermission);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once, on mount
-  useEffect(() => {
-    if (!autoConnect.current) return;
-    autoConnect.current = false;
-    void handleTest();
-  }, []);
-
   return (
     <SetupCard
       icon={<Plug className="size-4" />}
@@ -399,6 +389,16 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
         </div>
 
         {asksPermission && probe.phase !== "error" ? <LocalNetworkNotice apiUrl={url} /> : null}
+
+        {/* A link can carry any host, so it never connects on its own: the
+            person sees the address and chooses to connect. */}
+        {setupLink && urlValid ? (
+          <p className="text-sm text-muted-foreground">
+            Your install link fills in{" "}
+            <span className="font-mono text-foreground">{connectionName(url)}</span>. Connect only
+            to a swarm you started.
+          </p>
+        ) : null}
 
         <div>
           <Button type="submit" disabled={!urlValid || !apiKey || running}>

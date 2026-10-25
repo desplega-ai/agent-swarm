@@ -67,7 +67,7 @@ ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=fu
 
 Available presets: `full`, `dev`, `content`, `research`, `solo`. Use `full` by default: it deploys the same official templates as the Compose example, with one coder where the example runs two. The interactive wizard preselects it. Use `--max-concurrent-tasks` to set each generated agent's task capacity from 1 to 100 (defaults: lead 2, worker 1), or `--dry-run` to preview without writing files.
 `--yes` no longer requires a Claude, OpenAI or OpenRouter credential: without one, workers wait in credential-wait until you add a credential on `/setup` (Bedrock settings stay required). It stops after the health check instead of opening the post-deploy prompts.
-When the wizard finishes, it prints a dashboard URL that already includes the generated `apiUrl` and `apiKey`, so the first dashboard session auto-connects to the new swarm.
+When the wizard finishes, it prints a dashboard URL that already includes the generated `apiUrl` and `apiKey`, so the dashboard opens with the connection filled in. Check the address, then click Connect.
 
 Fresh self-hosted installs also seed a disabled starter catalog of schedules and workflows. Each bundled automation declares the parameters and integrations it needs. When you enable one with missing setup, Agent Swarm marks it `needs_setup`, shows the missing fields in the dashboard, and does not dispatch it until configuration is complete.
 
