@@ -106,8 +106,18 @@ describe("searchOutcome", () => {
         folder: "/docs/",
         snippet: [],
         chip: null,
+        size: 10,
+        modifiedAt: undefined,
       },
-      { path: "/notes.md", name: "notes.md", folder: "/", snippet: [], chip: null },
+      {
+        path: "/notes.md",
+        name: "notes.md",
+        folder: "/",
+        snippet: [],
+        chip: null,
+        size: 5,
+        modifiedAt: undefined,
+      },
     ]);
   });
 

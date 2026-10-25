@@ -106,6 +106,9 @@ export interface SearchHit {
   snippet: SnippetPart[];
   /** "Page 3" (a PDF chunk), "Image", or null. */
   chip: string | null;
+  /** Name search only: the file's size and last change. */
+  size?: number;
+  modifiedAt?: string;
 }
 
 /** What a search answered, mapped for the list. */
@@ -151,7 +154,11 @@ export function searchOutcome(
   let hint: string | null = null;
   if (mode === "name") {
     const found = result as FindResult;
-    hits = found.matches.map((match) => hitFor(match.path, undefined, null));
+    hits = found.matches.map((match) => ({
+      ...hitFor(match.path, undefined, null),
+      size: match.size,
+      modifiedAt: match.modifiedAt,
+    }));
     serverTotal = found.total;
   } else if (mode === "text") {
     const found = result as FtsResult;

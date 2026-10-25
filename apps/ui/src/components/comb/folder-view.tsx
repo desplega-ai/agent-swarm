@@ -1,8 +1,8 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { AlertCircle, FolderOpen } from "lucide-react";
+import { AlertCircle, FolderOpen, Search, X } from "lucide-react";
 import { useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAgentFsLs } from "@/api/hooks/use-agent-fs";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAgentFsLs, useCombSearch } from "@/api/hooks/use-agent-fs";
 import { CombHome } from "@/components/comb/comb-home";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileKindIcon } from "@/components/comb/file-icon";
@@ -20,10 +20,14 @@ import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { AlertCallout } from "@/components/ui/alert-callout";
+import { Input } from "@/components/ui/input";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { PageHeader } from "@/components/ui/page-header";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { FILTER_PARAM, matchesName, nestedMatches } from "@/lib/comb/folder-filter";
 import { childPath, combPath, type DrivePath } from "@/lib/comb/paths";
+import { MIN_NAME_QUERY_LENGTH } from "@/lib/comb/search";
 import { sortEntries } from "@/lib/comb/tree";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatRelative } from "@/lib/relative-time";
@@ -37,6 +41,8 @@ interface FolderRow {
   size: number;
   modifiedAt?: string;
   author: string;
+  /** A filter match in a subfolder: `name` is its path below this folder. */
+  nested?: boolean;
 }
 
 function typeLabel(name: string, isFolder: boolean): string {
@@ -47,10 +53,24 @@ function typeLabel(name: string, isFolder: boolean): string {
 
 function NameCell({ data }: ICellRendererParams<FolderRow>) {
   if (!data) return null;
+  // A subfolder match: the file name first, then its subfolder, muted.
+  const cut = data.nested ? data.name.lastIndexOf("/") : -1;
+  const name = cut === -1 ? data.name : data.name.slice(cut + 1);
   return (
     <span className="flex w-full min-w-0 items-center gap-2">
-      <FileKindIcon name={data.name} isFolder={data.isFolder} />
-      <MiddleTruncation>{data.name}</MiddleTruncation>
+      <FileKindIcon name={name} isFolder={data.isFolder} />
+      {cut === -1 ? (
+        <MiddleTruncation>{name}</MiddleTruncation>
+      ) : (
+        <>
+          <span className="max-w-[70%] shrink-0 truncate" title={name}>
+            {name}
+          </span>
+          <MiddleTruncation className="text-xs text-muted-foreground">
+            {data.name.slice(0, cut + 1)}
+          </MiddleTruncation>
+        </>
+      )}
     </span>
   );
 }
@@ -65,7 +85,33 @@ export function FolderView({ folder }: { folder: DrivePath }) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
 
-  const rows = useMemo<FolderRow[]>(
+  // `?filter=`: the folder's own entries whose names hold every typed word,
+  // then deeper files from `find` scoped to this folder. The filter is part of
+  // the URL, so it can be shared and Back brings it back.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filter = searchParams.get(FILTER_PARAM) ?? "";
+  const setFilter = useCallback(
+    (value: string) =>
+      setSearchParams(
+        (params) => {
+          const next = new URLSearchParams(params);
+          if (value) next.set(FILTER_PARAM, value);
+          else next.delete(FILTER_PARAM);
+          return next;
+        },
+        { replace: true },
+      ),
+    [setSearchParams],
+  );
+  const deepQuery = useDebouncedValue(filter.trim(), 200);
+  const deep = useCombSearch(
+    folder,
+    "name",
+    deepQuery.length >= MIN_NAME_QUERY_LENGTH ? deepQuery : "",
+    folder.path,
+  );
+
+  const allRows = useMemo<FolderRow[]>(
     () =>
       sortEntries(listing.data?.entries ?? []).map((entry) => {
         const isFolder = entry.type === "directory";
@@ -81,6 +127,27 @@ export function FolderView({ folder }: { folder: DrivePath }) {
       }),
     [listing.data, folder.path, authorLabel],
   );
+  const rows = useMemo<FolderRow[]>(() => {
+    const query = filter.trim();
+    if (!query) return allRows;
+    const own = allRows.filter((row) => matchesName(row.name, query));
+    const below =
+      deepQuery === query && deepQuery.length >= MIN_NAME_QUERY_LENGTH
+        ? nestedMatches(deep.data?.hits ?? [], folder.path).map(
+            (match): FolderRow => ({
+              id: match.path,
+              name: match.relative,
+              isFolder: false,
+              type: typeLabel(match.relative, false),
+              size: match.size ?? 0,
+              modifiedAt: match.modifiedAt,
+              author: "",
+              nested: true,
+            }),
+          )
+        : [];
+    return [...own, ...below];
+  }, [allRows, filter, deepQuery, deep.data, folder.path]);
 
   const { orgId, driveId } = folder;
   const columnDefs = useMemo<ColDef<FolderRow>[]>(
@@ -143,7 +210,13 @@ export function FolderView({ folder }: { folder: DrivePath }) {
     );
   }
 
-  const count = listing.data ? `${rows.length} ${rows.length === 1 ? "item" : "items"}` : "";
+  const items = (count: number) => `${count} ${count === 1 ? "item" : "items"}`;
+  const nestedCount = rows.filter((row) => row.nested).length;
+  const count = !listing.data
+    ? ""
+    : filter.trim()
+      ? `${rows.length - nestedCount} of ${items(allRows.length)}${nestedCount ? `, ${nestedCount} in subfolders` : ""}`
+      : items(allRows.length);
 
   return (
     <UploadDropZone folder={folder}>
@@ -152,6 +225,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         description={count}
         action={
           <>
+            <FolderFilter value={filter} onChange={setFilter} />
             <NewEntryButton folder={folder} />
             <UploadButton folder={folder} />
             {/* The root is the Comb item, so no pin. */}
@@ -164,7 +238,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
       <UploadList />
       {/* The drive root is the Comb home: favorites, recently viewed, recently changed. */}
       {folder.path === "/" ? <CombHome drive={folder} /> : null}
-      {listing.data && rows.length === 0 ? (
+      {listing.data && allRows.length === 0 ? (
         <EmptyState
           icon={FolderOpen}
           title={folder.path === "/" ? "The drive is empty" : "This folder is empty"}
@@ -175,7 +249,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         <MobileList
           label="Folder contents"
           loading={listing.isPending}
-          emptyMessage="Empty folder"
+          emptyMessage={filter ? "No items match the filter" : "Empty folder"}
           // Full height: the folder scrolls as one page on a phone.
           className="flex-none overflow-visible"
         >
@@ -207,7 +281,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
               columnDefs={columnDefs}
               onRowClicked={onRowClicked}
               loading={listing.isPending}
-              emptyMessage="Empty folder"
+              emptyMessage={filter ? "No items match the filter" : "Empty folder"}
               pagination={false}
               // The listing keeps room for about six rows. Below that the folder scrolls.
               className="min-h-72"
@@ -218,5 +292,41 @@ export function FolderView({ folder }: { folder: DrivePath }) {
       {/* Open comments below the folder: send to swarm, resolve in bulk. */}
       <FolderComments folder={folder} />
     </UploadDropZone>
+  );
+}
+
+/** The folder header's filter box (`?filter=`). Escape clears it. */
+function FolderFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="relative flex items-center">
+      <Search
+        className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground"
+        aria-hidden
+      />
+      <Input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && value) {
+            event.preventDefault();
+            onChange("");
+          }
+        }}
+        placeholder="Filter this folder"
+        aria-label="Filter this folder"
+        className="h-8 w-40 pr-8 pl-8 sm:w-56 [&::-webkit-search-cancel-button]:hidden"
+      />
+      {value ? (
+        <button
+          type="button"
+          aria-label="Clear filter"
+          onClick={() => onChange("")}
+          className="absolute right-1.5 flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-3.5" />
+        </button>
+      ) : null}
+    </div>
   );
 }
