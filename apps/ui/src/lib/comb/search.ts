@@ -11,6 +11,35 @@ import { baseName, parentFolder } from "./paths";
 
 export type SearchMode = "name" | "text" | "semantic";
 
+/** The modes in the order the dialog lists them: file names, then meaning, then exact words. */
+export const SEARCH_MODES: readonly SearchMode[] = ["name", "semantic", "text"];
+
+/** The query params of an open search: `?q=<query>&mode=<file|semantic|text>`. */
+export const SEARCH_QUERY_PARAM = "q";
+export const SEARCH_MODE_PARAM = "mode";
+
+const MODE_PARAMS: Record<SearchMode, string> = {
+  name: "file",
+  semantic: "semantic",
+  text: "text",
+};
+
+/** The `mode` param of a search mode ("file" for name search). */
+export function searchModeParam(mode: SearchMode): string {
+  return MODE_PARAMS[mode];
+}
+
+/** The search mode of a `mode` param. Missing or unknown: file names. */
+export function searchModeFromParam(value: string | null): SearchMode {
+  return SEARCH_MODES.find((mode) => MODE_PARAMS[mode] === value) ?? "name";
+}
+
+/** The next mode in the dialog's order (`step` -1 goes back), wrapping around. Tab and Shift+Tab. */
+export function nextSearchMode(mode: SearchMode, step: 1 | -1): SearchMode {
+  const at = SEARCH_MODES.indexOf(mode);
+  return SEARCH_MODES[(at + step + SEARCH_MODES.length) % SEARCH_MODES.length] as SearchMode;
+}
+
 /** The agent-fs op behind each mode. */
 export const SEARCH_OPS: Record<SearchMode, "find" | "fts" | "search"> = {
   name: "find",

@@ -5,7 +5,10 @@ import {
   isUnknownOpError,
   literalFtsPattern,
   NAME_RESULT_LIMIT,
+  nextSearchMode,
   SEMANTIC_RESULT_LIMIT,
+  searchModeFromParam,
+  searchModeParam,
   searchOutcome,
   searchParams,
   snippetParts,
@@ -165,5 +168,24 @@ describe("isUnknownOpError", () => {
       false,
     );
     expect(isUnknownOpError(new Error("Unknown operation: find"), "find")).toBe(false);
+  });
+});
+
+describe("search modes in the URL", () => {
+  test("file, semantic, text round-trip, and anything else reads as file", () => {
+    for (const mode of ["name", "semantic", "text"] as const) {
+      expect(searchModeFromParam(searchModeParam(mode))).toBe(mode);
+    }
+    expect(searchModeParam("name")).toBe("file");
+    expect(searchModeFromParam(null)).toBe("name");
+    expect(searchModeFromParam("name")).toBe("name");
+    expect(searchModeFromParam("fts")).toBe("name");
+  });
+
+  test("Tab goes file, semantic, text and wraps. Shift+Tab goes back", () => {
+    expect(nextSearchMode("name", 1)).toBe("semantic");
+    expect(nextSearchMode("semantic", 1)).toBe("text");
+    expect(nextSearchMode("text", 1)).toBe("name");
+    expect(nextSearchMode("name", -1)).toBe("text");
   });
 });

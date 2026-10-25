@@ -16,6 +16,7 @@ import { FolderComments } from "@/components/comb/folder-comments";
 import { PinButton } from "@/components/comb/pin-button";
 import { UploadButton, UploadDropZone, UploadList } from "@/components/comb/upload-zone";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
+import { useUrlDraft } from "@/components/comb/use-url-draft";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
@@ -103,7 +104,8 @@ export function FolderView({ folder }: { folder: DrivePath }) {
       ),
     [setSearchParams],
   );
-  const deepQuery = useDebouncedValue(filter.trim(), 200);
+  const [draft, setDraft] = useUrlDraft(filter, setFilter);
+  const deepQuery = useDebouncedValue(draft.trim(), 200);
   const deep = useCombSearch(
     folder,
     "name",
@@ -128,7 +130,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
     [listing.data, folder.path, authorLabel],
   );
   const rows = useMemo<FolderRow[]>(() => {
-    const query = filter.trim();
+    const query = draft.trim();
     if (!query) return allRows;
     const own = allRows.filter((row) => matchesName(row.name, query));
     const below =
@@ -147,7 +149,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           )
         : [];
     return [...own, ...below];
-  }, [allRows, filter, deepQuery, deep.data, folder.path]);
+  }, [allRows, draft, deepQuery, deep.data, folder.path]);
 
   const { orgId, driveId } = folder;
   const columnDefs = useMemo<ColDef<FolderRow>[]>(
@@ -214,7 +216,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
   const nestedCount = rows.filter((row) => row.nested).length;
   const count = !listing.data
     ? ""
-    : filter.trim()
+    : draft.trim()
       ? `${rows.length - nestedCount} of ${items(allRows.length)}${nestedCount ? `, ${nestedCount} in subfolders` : ""}`
       : items(allRows.length);
 
@@ -225,7 +227,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         description={count}
         action={
           <>
-            <FolderFilter value={filter} onChange={setFilter} />
+            <FolderFilter value={draft} onChange={setDraft} />
             <NewEntryButton folder={folder} />
             <UploadButton folder={folder} />
             {/* The root is the Comb item, so no pin. */}
@@ -249,7 +251,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         <MobileList
           label="Folder contents"
           loading={listing.isPending}
-          emptyMessage={filter ? "No items match the filter" : "Empty folder"}
+          emptyMessage={draft ? "No items match the filter" : "Empty folder"}
           // Full height: the folder scrolls as one page on a phone.
           className="flex-none overflow-visible"
         >
@@ -281,7 +283,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
               columnDefs={columnDefs}
               onRowClicked={onRowClicked}
               loading={listing.isPending}
-              emptyMessage={filter ? "No items match the filter" : "Empty folder"}
+              emptyMessage={draft ? "No items match the filter" : "Empty folder"}
               pagination={false}
               // The listing keeps room for about six rows. Below that the folder scrolls.
               className="min-h-72"

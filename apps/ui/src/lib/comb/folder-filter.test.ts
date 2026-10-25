@@ -19,7 +19,12 @@ describe("nestedMatches", () => {
     ];
     expect(nestedMatches(hits, "/docs/")).toEqual([
       { path: "/docs/sub/b.md", relative: "sub/b.md", size: 2, modifiedAt: "2026-10-25T00:00:00Z" },
-      { path: "/docs/sub/deep/d.md", relative: "sub/deep/d.md", size: undefined, modifiedAt: undefined },
+      {
+        path: "/docs/sub/deep/d.md",
+        relative: "sub/deep/d.md",
+        size: undefined,
+        modifiedAt: undefined,
+      },
     ]);
     expect(nestedMatches(hits, "/").map((match) => match.path)).toEqual([
       "/docs/a.md",
