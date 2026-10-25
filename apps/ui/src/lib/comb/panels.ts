@@ -135,7 +135,7 @@ export function rightPanelOpen(stored: boolean | null, wide: boolean): boolean {
 
 export const LEFT_PANEL_KEY = "comb:panel:left";
 export const RIGHT_PANEL_KEY = "comb:panel:right";
-/** Full width: both side panels hidden, the content as wide as the page. */
+/** Full width: a markdown file's text as wide as its pane. The side panels stay. */
 export const FULL_WIDTH_KEY = "comb:full-width";
 
 function readJson(storage: DraftStorage | null, key: string): Record<string, unknown> | null {

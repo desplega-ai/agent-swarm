@@ -156,12 +156,7 @@ export function LeftPanel({ location }: { location: CombLocation }) {
   return (
     <aside
       aria-label="Files panel"
-      className={cn(
-        "flex shrink-0 flex-col",
-        left.open ? `w-64 ${PANEL_CARD}` : STRIP,
-        // Full width hides the panel. It stays mounted: the tree keeps its open folders.
-        layout.fullWidth && "hidden",
-      )}
+      className={cn("flex shrink-0 flex-col", left.open ? `w-64 ${PANEL_CARD}` : STRIP)}
     >
       {left.open ? null : (
         <>
@@ -359,13 +354,12 @@ export function CommentPanel({
 
   // Only a new link opens the panel: collapsing with a link in the URL stays collapsed.
   const showRight = layout?.showRight;
-  const fullWidth = layout?.fullWidth ?? false;
   const lastLinked = useRef<string | null>(null);
   useEffect(() => {
     if (linkedId === lastLinked.current) return;
     lastLinked.current = linkedId;
-    if (linkedId && (!open || fullWidth)) showRight?.();
-  }, [linkedId, open, fullWidth, showRight]);
+    if (linkedId && !open) showRight?.();
+  }, [linkedId, open, showRight]);
 
   const total = openCount + notSaved;
   const label = `Comments (${openCount} open${notSaved ? `, ${notSaved} not saved` : ""})`;
@@ -377,12 +371,7 @@ export function CommentPanel({
   return (
     <aside
       aria-label="Comments"
-      className={cn(
-        "flex shrink-0 flex-col",
-        open ? `w-72 xl:w-80 ${PANEL_CARD}` : STRIP,
-        // Full width hides the panel. A comment link (a click on a passage) ends it.
-        fullWidth && "hidden",
-      )}
+      className={cn("flex shrink-0 flex-col", open ? `w-72 xl:w-80 ${PANEL_CARD}` : STRIP)}
     >
       {open ? null : (
         <>
@@ -431,16 +420,18 @@ export function CommentPanel({
 }
 
 /**
- * The header's full width toggle (`F`): hides both side panels so the content
- * takes the page. Only where the panels sit beside the content (`md` up).
+ * The header's full width toggle (`F`): a markdown file's text runs as wide
+ * as its pane. The side panels stay. Only on a markdown file, from `md` up
+ * (narrower panes are already under the reading measure).
  */
 export function FullWidthButton() {
   const layout = useCombLayout();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const on = layout?.fullWidth ?? false;
   const setFullWidth = layout?.setFullWidth;
-  usePageShortcut(layout?.inline ? "f" : undefined, buttonRef, () => setFullWidth?.(!on));
-  if (!layout?.inline) return null;
+  const shown = layout?.inline && layout.canWiden;
+  usePageShortcut(shown ? "f" : undefined, buttonRef, () => setFullWidth?.(!on));
+  if (!shown) return null;
   const label = on ? "Exit full width" : "Full width";
   return (
     <Tooltip>

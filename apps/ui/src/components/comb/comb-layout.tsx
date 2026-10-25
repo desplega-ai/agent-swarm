@@ -49,11 +49,13 @@ export interface CombLayoutValue {
   showRight: () => void;
   collapseRight: () => void;
   /**
-   * Full width (`inline` only): both side panels are hidden and the content
-   * takes the page. Opening either panel ends it.
+   * Full width: a markdown file's text runs as wide as its pane, without the
+   * reading measure. The side panels stay. Stored in this browser.
    */
   fullWidth: boolean;
   setFullWidth: (on: boolean) => void;
+  /** The current file is markdown, so full width changes it. */
+  canWiden: boolean;
   /** The current file's headings (empty for a folder and for a file with no outline). */
   headings: readonly OutlineHeading[];
   /** The current file's viewer scroll pane (the outline scrolls it). */
@@ -75,6 +77,7 @@ interface OutlineResult {
   key: string;
   target: PanelTarget;
   headings: readonly OutlineHeading[];
+  markdown: boolean;
 }
 
 function locationKey({ orgId, driveId, path }: DrivePath): string {
@@ -152,14 +155,10 @@ export function CombLayoutProvider({
       inline,
       left: leftPanelView(left, target, leftWide),
       right: { open: rightPanelOpen(rightStored, rightWide) },
-      showLeft: (tab) => {
-        setFullWidth(false);
-        apply({ type: "show", tab, target });
-      },
+      showLeft: (tab) => apply({ type: "show", tab, target }),
       selectLeft: (tab) => apply({ type: "select", tab, target }),
       collapseLeft: () => apply({ type: "collapse" }),
       showRight: () => {
-        setFullWidth(false);
         setRightStored(true);
         writeRightPanel(browserStorage(), apiUrl, true);
       },
@@ -167,8 +166,9 @@ export function CombLayoutProvider({
         setRightStored(false);
         writeRightPanel(browserStorage(), apiUrl, false);
       },
-      fullWidth: inline && fullWidthStored,
+      fullWidth: fullWidthStored,
       setFullWidth,
+      canWiden: outline?.key === key && outline.markdown,
       headings:
         outline?.key === key && outline.target === "outline" ? outline.headings : NO_HEADINGS,
       viewer,
@@ -223,7 +223,7 @@ function OutlineProbe({
       : null;
   useEffect(() => {
     if (kind && kind !== "markdown") {
-      onResult({ key: probeKey, target: "plain", headings: NO_HEADINGS });
+      onResult({ key: probeKey, target: "plain", headings: NO_HEADINGS, markdown: false });
     }
   }, [kind, probeKey, onResult]);
   return kind === "markdown" ? (
@@ -246,7 +246,12 @@ function MarkdownOutlineProbe({
   const headings = useMemo(() => (text === null ? NO_HEADINGS : extractOutline(text)), [text]);
   useEffect(() => {
     if (!settled) return;
-    onResult({ key: probeKey, target: hasOutline(headings) ? "outline" : "plain", headings });
+    onResult({
+      key: probeKey,
+      target: hasOutline(headings) ? "outline" : "plain",
+      headings,
+      markdown: true,
+    });
   }, [settled, headings, probeKey, onResult]);
   return null;
 }
