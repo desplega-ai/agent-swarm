@@ -154,6 +154,71 @@ Manual E2E:
 - Comment on two files, then open a third. The header shows "Send 2". The dialog groups the two
   comments under their files. Send: one task with both.
 
+## Round 2: Taras's PR feedback (2026-10-25, 16:55 BCN)
+
+Feedback: "the full width i meant the content, not all", "what about the grouping of the
+comments by task? no screenshot of that", "in the home having the sidebar and main page showing
+files feels redundant?", "maybe show ongoing tasks related to file comments in home?".
+
+Decisions:
+- Full width widens the content only. The side panels stay as they are. The toggle shows only
+  on a markdown file (the only viewer with a reading measure). (asked: "the content, not all")
+- Home "In progress" card: each unfinished swarm task from Comb, with its comments grouped
+  under it (file and comment, linked), and a link to the task. Covers "grouping by task" and
+  "ongoing tasks". (asked: "Home In progress card")
+- The card follows the "Processing" rule: open comments that were sent and not answered, and
+  whose task is not finished. It hides when nothing is in progress. (assumed)
+- On the drive root the left panel starts collapsed (the icon strip), for that page only. The
+  tree comes back in folders and files. (asked: "Collapse left on home")
+
+### Phase 6: Full width is the content only
+
+- `comb-layout.tsx`: full width no longer hides panels. Showing a panel does not end it. The
+  layout says whether the current file is markdown (`canWiden`).
+- `side-panels.tsx`, `comment-rail.tsx`, `file-view.tsx`: drop the full-width hiding and exits.
+  `FullWidthButton` shows only when `canWiden`.
+
+Verification:
+- `bun run test:root -- apps/ui/src/lib/comb/panels.test.ts`
+- `cd apps/ui && bunx tsc -b && bun run lint`
+
+Manual E2E:
+- Open a markdown file at 1440x900: both panels stay when full width is on, and the text fills
+  the pane. A folder and an image show no toggle.
+
+### Phase 7: Left panel collapsed on the drive root
+
+- `lib/comb/panels.ts`: `PanelTarget` gains `home`. Navigating to it collapses the panel for
+  that page only (like a file without an outline). Tests in `panels.test.ts`.
+- `comb-layout.tsx`: the drive root resolves to `home`.
+
+Verification:
+- `bun run test:root -- apps/ui/src/lib/comb/panels.test.ts`
+
+Manual E2E:
+- Open the drive root at 1440x900: the left panel is the icon strip. Open a folder: the tree is
+  back. Expand the strip on the root: it opens.
+
+### Phase 8: Home "In progress" card
+
+- `lib/comb/thread-status.ts`: `threadsByTask(threads, serviceUserId)`, the open sent and
+  unanswered threads grouped by task. Tests in `thread-status.test.ts`.
+- `components/comb/use-thread-swarm-states.ts`: the task status queries move to
+  `useWatchedTasks(taskIds)`, shared by the rail and the card.
+- `components/comb/comb-home.tsx`: the card (`InProgressCard`, `TaskGroup`). One group per unfinished task, newest
+  first: status, comment count, time, a link to the task, then its comments (file and text,
+  linked to the comment).
+- The card sits above the three list cards, full width.
+
+Verification:
+- `bun run test:root -- apps/ui/src/lib/comb/thread-status.test.ts`
+- `cd apps/ui && bunx tsc -b && bun run lint && bun run check:tokens`
+
+Manual E2E:
+- Send 3 comments on 2 files as one task, and 1 comment as a second task (a lead row registered
+  so the tasks stay pending). The home shows both tasks with their comments. Answer one thread
+  as another user: it leaves the card. Finish the task: the group leaves the card.
+
 ## Docs
 
 - `docs-site/content/docs/(documentation)/ui/comb.mdx`: send rule, note, bulk resolve, Recent,
@@ -196,7 +261,14 @@ note, bulk resolve, full width.
 - [x] QA walk, screenshots, recording (agent-fs `qa/agent-swarm/2026-10-25-comb-review-flow/`)
 - [x] Code review (Standards + Spec, Opus): Important and most Minor findings fixed in a13a093c8
 - [x] Gates: all green except `script-executor-quickjs` ("caps the binary bodies"), which fails on clean main too (macOS). The Comb UI e2e flow passed against the local agent-fs (`E2E_COMB_AGENT_FS_URL`).
-- [ ] PR, cleanup, df -h
+- [x] PR #2420, cleanup, df -h (30 to 29 GiB)
+- [x] Phase 6: Full width is the content only (c31563d56)
+- [x] Phase 7: Left panel collapsed on the drive root (a94703ba1)
+- [x] Phase 8: Home In progress card (259aa9e7c)
+- [x] Round 2 review (Standards + Spec, Sonnet): Minor findings only, fixed in bc8c2b73b
+- [x] Round 2 QA, screenshots, recording (`in-progress-*`, `full-width-*`, `folder-tree-1`, `phone-home-2`, `flow-2.mp4`)
+- [x] Round 2 gates: green except 2 root tests not from this branch (quickjs, the same on clean main on macOS; `helper-credentials` timed out at 5 s under load and passes alone). `e2e`, `e2e:ui` 91 passed, the Comb flow included.
+- [x] Round 2 PR body, cleanup
 
 ## Log
 
@@ -217,12 +289,17 @@ note, bulk resolve, full width.
   viewer (403) bulk resolve stops early and keeps the selection, list tab stays open on a
   plain file. Recently viewed is now keyed per agent-fs user (QA showed two Comb accounts in
   one browser sharing it).
+- 16:58 BCN: round 2 from Taras's PR feedback (full width content only, home tree collapsed,
+  In progress card). Stack rebuilt in `/tmp/comb-flow/` from the recipe. Live: two sends show as
+  two groups, a reply by another user and a cancelled task each leave the card, full width keeps
+  both panels (visible at 1920: at 1440 with both panels open the pane is already under 72ch).
 
 ## Review notes (not fixed)
 
 - An older agent-fs without `recent` shows "This agent-fs does not list changes." in the home
   card and the tab, instead of hiding them. Kept: it says why the list is empty.
-- `useRememberViewed`, the full-width exit, and the send bar count have no automated test. They
-  were checked live.
+- `useRememberViewed` and the send bar count have no automated test. They were checked live.
 - The send bar and the tray both read open comments. The tray counts only your own comments,
   the bar counts everyone's on the file (the old "Send N" rule).
+- Round 2: the In progress card's "hide a finished or unknown task" step has no unit test (it
+  reuses `isTaskUnfinished`). Checked live. The Full width button appears once the markdown loads.
