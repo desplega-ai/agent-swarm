@@ -17,7 +17,7 @@ export function routeAuthHeaders(ctx: {
   return { [auth.header]: secret };
 }
 
-async function readBody(res: Response): Promise<string> {
+export async function readBody(res: Response): Promise<string> {
   try {
     return await res.text();
   } catch {
@@ -25,7 +25,7 @@ async function readBody(res: Response): Promise<string> {
   }
 }
 
-function modelIds(body: string): string[] | undefined {
+export function modelIds(body: string): string[] | undefined {
   try {
     const parsed = JSON.parse(body) as { data?: Array<{ id?: unknown }> };
     if (!Array.isArray(parsed.data)) return undefined;

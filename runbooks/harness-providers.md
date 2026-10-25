@@ -626,6 +626,14 @@ The claude harness credential gate, spawn validator, and live check all derive o
 - **Internal AI** (`resolveCredential`): `ANTHROPIC_API_KEY` is skipped when `ANTHROPIC_BASE_URL` names a gateway, because pi-ai would send it to `api.anthropic.com`.
 - The `claude-subscription` provider declares `harnesses: ["claude"]`; `assertRouteHarness` rejects it elsewhere.
 
+### Codex gateway route
+
+`deriveDefaultRoute("codex", env)` returns an `openai-gateway` route when `CODEX_GATEWAY_BASE_URL` is set to any origin except `https://api.openai.com`, else `null` (the OAuth / `OPENAI_API_KEY` / auth.json checks apply). The route wins over all of them and fails closed: with no `CODEX_GATEWAY_API_KEY` it is not ready.
+
+- **Gate** (`checkCodexCredentials`): `routeCredentialStatus`, before any auth.json or OAuth check.
+- **Live check** (`validateProviderCredentials("codex")`): `GET {CODEX_GATEWAY_BASE_URL}/models` through `createScopedFetch` with `Authorization: Bearer $CODEX_GATEWAY_API_KEY` (2xx verified, 401/403 failed, 404/405 configured).
+- **Session** (`createInProcessCodexSession`): `codexGatewayConfig` adds `model_provider = "swarm-gateway"` plus its `[model_providers]` block (`env_key = "CODEX_GATEWAY_API_KEY"`, `wire_api = "responses"`) to the `thread/start` config; `resolveCodexAuthMode` is skipped; `routeUnsetEnv` removes `CODEX_OAUTH` and `OPENAI_API_KEY` from the CLI env. The runner picks no `codex_oauth_<n>` pool slot. Codex 0.164 ignores `OPENAI_BASE_URL` and env keys for its built-in `openai` provider, so the block is required (verified against a local gateway).
+
 The package is pure (no `src/`, SQLite, or filesystem imports; enforced by the `no-package-imports-src` dep-cruiser rule). Other harnesses return `null` from `deriveDefaultRoute` and keep their own checks.
 
 ## Native session resume is deprecated (2026-05-28)

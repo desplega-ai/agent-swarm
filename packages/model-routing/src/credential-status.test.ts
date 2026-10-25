@@ -186,6 +186,55 @@ describe("validateRoute", () => {
   });
 });
 
+describe("codex gateway", () => {
+  const CODEX_GW = {
+    CODEX_GATEWAY_BASE_URL: "https://sub2api.example.com/v1",
+    CODEX_GATEWAY_API_KEY: "sk-gw",
+    OPENAI_API_KEY: "sk-openai",
+  };
+  const codexRoute = (env: Env) => {
+    const r = deriveDefaultRoute("codex", env);
+    if (!r) throw new Error("no route");
+    return r;
+  };
+
+  test("the gateway URL + key alone is ready; a missing key is named", () => {
+    expect(routeCredentialStatus(codexRoute(CODEX_GW), CODEX_GW).ready).toBe(true);
+    const noKey = { CODEX_GATEWAY_BASE_URL: "http://gw:8080/v1", CODEX_OAUTH: "{}" };
+    expect(routeCredentialStatus(codexRoute(noKey), noKey)).toMatchObject({
+      ready: false,
+      missing: ["CODEX_GATEWAY_API_KEY"],
+    });
+  });
+
+  test("checks GET /v1/models on the gateway with the gateway key, never api.openai.com", async () => {
+    const { calls } = stubFetch(200, JSON.stringify({ data: [{ id: "gpt-5.5" }] }));
+    const result = await validateRoute(codexRoute(CODEX_GW), CODEX_GW);
+    expect(result).toEqual({ status: "verified", models: ["gpt-5.5"] });
+    expect(calls.map((c) => c.url)).toEqual(["https://sub2api.example.com/v1/models"]);
+    expect(calls[0]?.headers.Authorization).toBe("Bearer sk-gw");
+  });
+
+  test("401 fails with the status; 404/405 are configured", async () => {
+    for (const [status, expected] of [
+      [401, "failed"],
+      [404, "configured"],
+      [405, "configured"],
+    ] as const) {
+      stubFetch(status);
+      const result = await validateRoute(codexRoute(CODEX_GW), CODEX_GW);
+      expect(result.status).toBe(expected);
+      if (result.status === "failed") expect(result.httpStatus).toBe(status);
+    }
+  });
+
+  test("the gateway provider is codex-only", () => {
+    const gw = codexRoute(CODEX_GW);
+    expect(assertRouteHarness(gw, "codex")).toBeNull();
+    expect(assertRouteHarness(gw, "claude")).toContain("only available to the codex harness");
+  });
+});
+
 describe("assertRouteHarness", () => {
   test("the Claude subscription is claude-only", () => {
     const sub = route({ CLAUDE_CODE_OAUTH_TOKEN: "o" });

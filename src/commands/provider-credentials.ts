@@ -588,6 +588,22 @@ export async function validateProviderCredentials(
         };
       }
       case "codex": {
+        // A gateway route is checked against the gateway only (scoped fetch
+        // to its own `/models`), never against api.openai.com, and wins over
+        // every OAuth / auth.json / OPENAI_API_KEY check below.
+        const gateway = deriveDefaultRoute("codex", env);
+        if (gateway) {
+          const result = await validateRoute(gateway, env);
+          const latency_ms = Date.now() - startedAt;
+          if (result.status === "verified") return { ok: true, latency_ms };
+          if (result.status === "configured") return { ok: true, skipped: true, latency_ms };
+          return {
+            ok: false,
+            error: scrubSecrets(result.reason),
+            httpStatus: result.httpStatus,
+            latency_ms,
+          };
+        }
         // Resolution order matches `checkCodexCredentials`:
         //   1) `~/.codex/auth.json` on disk (canonical state once `codex login`
         //      has run, or when the entrypoint pre-materialised it from

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { deriveDefaultRoute, isFirstPartyAnthropicUrl, routeUnsetEnv } from "./default-route.ts";
+import {
+  deriveDefaultRoute,
+  isFirstPartyAnthropicUrl,
+  isFirstPartyOpenAiUrl,
+  routeUnsetEnv,
+} from "./default-route.ts";
 
 const OAUTH = { CLAUDE_CODE_OAUTH_TOKEN: "oauth-tok" };
 
@@ -190,7 +195,52 @@ describe("deriveDefaultRoute(claude)", () => {
   });
 });
 
+describe("deriveDefaultRoute(codex)", () => {
+  const CODEX_GW = {
+    CODEX_GATEWAY_BASE_URL: "https://sub2api.example.com/v1",
+    CODEX_GATEWAY_API_KEY: "sk-gw",
+  };
+
+  test("gateway URL + key → openai-gateway bearer, even with OAuth and OPENAI_API_KEY set", () => {
+    const route = deriveDefaultRoute("codex", {
+      ...CODEX_GW,
+      CODEX_OAUTH: '{"access":"a"}',
+      OPENAI_API_KEY: "sk-openai",
+    });
+    expect(route).toMatchObject({
+      id: "default:codex",
+      provider: "openai-gateway",
+      protocol: "openai-responses",
+      baseUrl: "https://sub2api.example.com/v1",
+      auth: { kind: "bearer", secretKey: "CODEX_GATEWAY_API_KEY" },
+    });
+  });
+
+  test("gateway URL without a key still names the gateway", () => {
+    expect(
+      deriveDefaultRoute("codex", { CODEX_GATEWAY_BASE_URL: "http://gw:8080/v1" })?.provider,
+    ).toBe("openai-gateway");
+  });
+
+  test("api.openai.com, a blank URL, or no URL is not a gateway", () => {
+    for (const url of ["https://api.openai.com/v1", "  ", undefined]) {
+      expect(
+        deriveDefaultRoute("codex", { CODEX_GATEWAY_BASE_URL: url, CODEX_GATEWAY_API_KEY: "k" }),
+      ).toBeNull();
+    }
+    expect(deriveDefaultRoute("codex", { OPENAI_API_KEY: "k", CODEX_OAUTH: "{}" })).toBeNull();
+  });
+});
+
 describe("routeUnsetEnv", () => {
+  test("a codex gateway route drops the OAuth blob and OPENAI_API_KEY", () => {
+    const gateway = deriveDefaultRoute("codex", {
+      CODEX_GATEWAY_BASE_URL: "http://gw:8080/v1",
+      CODEX_GATEWAY_API_KEY: "k",
+    });
+    expect(gateway && routeUnsetEnv("codex", gateway)).toEqual(["CODEX_OAUTH", "OPENAI_API_KEY"]);
+  });
+
   test("drops the OAuth token from every claude route except the subscription", () => {
     const gateway = deriveDefaultRoute("claude", {
       ...OAUTH,
@@ -212,5 +262,14 @@ describe("isFirstPartyAnthropicUrl", () => {
     expect(isFirstPartyAnthropicUrl("http://api.anthropic.com")).toBe(false);
     expect(isFirstPartyAnthropicUrl("https://api.anthropic.com.evil.io")).toBe(false);
     expect(isFirstPartyAnthropicUrl("garbage")).toBe(false);
+  });
+});
+
+describe("isFirstPartyOpenAiUrl", () => {
+  test("matches only OpenAI's API origin", () => {
+    expect(isFirstPartyOpenAiUrl("https://api.openai.com/v1")).toBe(true);
+    expect(isFirstPartyOpenAiUrl("http://api.openai.com/v1")).toBe(false);
+    expect(isFirstPartyOpenAiUrl("https://api.openai.com.evil.io/v1")).toBe(false);
+    expect(isFirstPartyOpenAiUrl("garbage")).toBe(false);
   });
 });
