@@ -1,5 +1,5 @@
 {
-  "commit": "5a577022800d9b43ccec5376bfe16c7b24eecd91",
+  "commit": "c81f2bb62f49b45603e9e702558e1ca22e98fcdd",
   "excludedSkills": [
     "feedback"
   ],
@@ -44,7 +44,7 @@
     "templates/skills/questioning/content.md": "66f826a191e96d0041adca00a7c197a458de8e6fe164c1599b8708098d4109ab",
     "templates/skills/questioning/files/template.md": "a68d72801a0b10380bf773b07e9d2f8d4c5b4b1c609ce954289e38ffc78cc223",
     "templates/skills/researching/config.json": "921c062cab599097cc7677d2dad4797ec4d5844d2ee73607fbd417ec3fa487d4",
-    "templates/skills/researching/content.md": "92951142327415696726a2577defdb2379cc611cdafa9cdac92431a5e60f618f",
+    "templates/skills/researching/content.md": "87ced42d15f1fd63d1b4e8d5ed8161537202f5b05a85df38dea273e9e3d6ad08",
     "templates/skills/researching/files/template.md": "411d34b98c610ef715edf0f24d09f828ba2d0f65f688e7879ef33a9453007949",
     "templates/skills/reviewing/config.json": "09c40bb098e9738c60a848995fa9fe7568d158631a089c76ba02c0dd955445c7",
     "templates/skills/reviewing/content.md": "1bbc285c9ad8cc3312f1ee2c558b04ffee914ffb6f5c63fb3741fcbb3e300fa5",

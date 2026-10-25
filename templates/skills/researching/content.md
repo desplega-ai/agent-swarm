@@ -166,3 +166,5 @@ File-review is on by default (unless Autopilot):
 - Research documents should be self-contained
 - **CRITICAL**: You are a documentarian, not an evaluator
 - **REMEMBER**: Document what IS, not what SHOULD BE
+- Single-page-app blogs (Vite/MDX): the HTML and RSS carry only the title and summary. The post text is compiled into the main JS bundle (`/assets/index-<hash>.js`, referenced in the page HTML). Fetch the bundle and extract string literals with a quote-aware tokenizer started at a function boundary; a naive regex desyncs on quotes.
+- YouTube bot-blocks downloads from sandboxed egress. To describe a video, give its URL to a multimodal model. For the bytes of a brand's own product video, grep the brand's site or changelog HTML for `.mp4` URLs first and match the target by duration.
