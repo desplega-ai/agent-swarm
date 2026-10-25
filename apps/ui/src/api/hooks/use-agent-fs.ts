@@ -788,6 +788,8 @@ export function useCombSearch(
   drive: { orgId: string; driveId: string },
   mode: SearchMode,
   query: string,
+  /** A Comb folder: name search only looks below it. */
+  scope?: string,
 ) {
   const access = useAgentFsAccess();
   const trimmed = query.trim();
@@ -798,6 +800,7 @@ export function useCombSearch(
     drive.driveId,
     "search",
     mode,
+    scope ?? "/",
   );
   return useQuery({
     queryKey: [...modeKey, trimmed] as const,
@@ -805,7 +808,7 @@ export function useCombSearch(
       const result = await connectedClient(access).callOp<FindResult | FtsResult | SearchResult>(
         drive.orgId,
         SEARCH_OPS[mode],
-        searchParams(mode, trimmed),
+        searchParams(mode, trimmed, scope),
         drive.driveId,
         { signal },
       );

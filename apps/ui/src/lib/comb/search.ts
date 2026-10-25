@@ -44,12 +44,21 @@ export function literalFtsPattern(query: string): string {
     .join(" AND ");
 }
 
-/** The op params for one search. */
-export function searchParams(mode: SearchMode, query: string): Record<string, unknown> {
+/**
+ * The op params for one search. `scope` (a Comb folder, name search only)
+ * limits `find` to the files below it.
+ */
+export function searchParams(
+  mode: SearchMode,
+  query: string,
+  scope?: string,
+): Record<string, unknown> {
   const trimmed = query.trim();
   switch (mode) {
     case "name":
-      return { query: trimmed, limit: NAME_RESULT_LIMIT };
+      return scope && scope !== "/"
+        ? { query: trimmed, limit: NAME_RESULT_LIMIT, path: scope }
+        : { query: trimmed, limit: NAME_RESULT_LIMIT };
     case "text":
       return { pattern: literalFtsPattern(trimmed) };
     case "semantic":

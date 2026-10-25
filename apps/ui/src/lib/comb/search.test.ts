@@ -45,6 +45,15 @@ describe("literalFtsPattern", () => {
 describe("searchParams", () => {
   test("maps each mode to its op params", () => {
     expect(searchParams("name", " notes ")).toEqual({ query: "notes", limit: NAME_RESULT_LIMIT });
+    expect(searchParams("name", "notes", "/docs/")).toEqual({
+      query: "notes",
+      limit: NAME_RESULT_LIMIT,
+      path: "/docs/",
+    });
+    expect(searchParams("name", "notes", "/")).toEqual({
+      query: "notes",
+      limit: NAME_RESULT_LIMIT,
+    });
     expect(searchParams("text", "road map")).toEqual({ pattern: '"road" AND "map"' });
     expect(searchParams("semantic", "files stored")).toEqual({
       query: "files stored",

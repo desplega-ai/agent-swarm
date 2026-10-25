@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { LsEntry } from "../agent-fs/types";
-import { type FolderListing, flattenTree, sortEntries, visibleFolders } from "./tree";
+import {
+  type FolderListing,
+  flattenTree,
+  matchTree,
+  nameParts,
+  sortEntries,
+  visibleFolders,
+} from "./tree";
 
 const file = (name: string): LsEntry => ({ name, type: "file", size: 1 });
 const dir = (name: string): LsEntry => ({ name, type: "directory", size: 0 });
@@ -59,6 +66,42 @@ describe("flattenTree", () => {
   test("a root that is not listed yet is one status row", () => {
     expect(flattenTree(() => "error", new Set())).toEqual([
       { kind: "status", key: "/:error", folder: "/", level: 1, status: "error" },
+    ]);
+  });
+});
+
+describe("matchTree", () => {
+  test("matched files under their folders, all open, sorted like the drive", () => {
+    const rows = matchTree(["/b/x.md", "/a.md", "/b/c/y.md", "/b/a.md"]);
+    expect(rows.map((row) => (row.kind === "entry" ? `${row.level}:${row.path}` : ""))).toEqual([
+      "1:/b/",
+      "2:/b/c/",
+      "3:/b/c/y.md",
+      "2:/b/a.md",
+      "2:/b/x.md",
+      "1:/a.md",
+    ]);
+    const b = rows[0];
+    expect(b?.kind === "entry" && [b.posinset, b.setsize]).toEqual([1, 2]);
+  });
+
+  test("no matches, no rows", () => {
+    expect(matchTree([])).toEqual([]);
+  });
+});
+
+describe("nameParts", () => {
+  test("marks each query word, case-insensitive, merging touching marks", () => {
+    expect(nameParts("Seed-Deck-v3.md", "deck seed")).toEqual([
+      { text: "Seed", hit: true },
+      { text: "-", hit: false },
+      { text: "Deck", hit: true },
+      { text: "-v3.md", hit: false },
+    ]);
+    expect(nameParts("abc", "  ")).toEqual([{ text: "abc", hit: false }]);
+    expect(nameParts("aaa", "aa")).toEqual([
+      { text: "aa", hit: true },
+      { text: "a", hit: false },
     ]);
   });
 });
