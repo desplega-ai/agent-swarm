@@ -531,6 +531,36 @@ describe("sub-workflow crash recovery", () => {
     for (const result of results) expect(result).toMatchObject({ correlationId: row!.id });
   });
 
+  test("a child deleted before the step reads it back is not retried", async () => {
+    const child = await makeWorkflow(waitingChild);
+    const parent = await makeWorkflow(retryingParentOf(child.id));
+    const { runId, stepId } = await parentStepRow(parent);
+    // Deletes the child's workflow between the start and the read back, as a
+    // concurrent delete would.
+    const racing = new SubWorkflowExecutor(
+      {
+        ...deps,
+        db: {
+          ...db,
+          getWorkflowRun: async (id: string) => {
+            await db.deleteWorkflow(child.id);
+            return db.getWorkflowRun(id);
+          },
+        },
+      },
+      registry,
+    );
+
+    const result = await racing.run({
+      config: { workflowId: child.id, inputs: { n: 1 } },
+      context: {},
+      meta: { runId, stepId, nodeId: "child", workflowId: parent.id, dryRun: false },
+    });
+
+    expect(result).toMatchObject({ status: "failed", retryable: false });
+    expect((result as { error?: string }).error).toContain("not found");
+  });
+
   test("a step that is no longer running starts no child", async () => {
     const child = await makeWorkflow(waitingChild);
     const parent = await makeWorkflow(parentOf(child.id));
