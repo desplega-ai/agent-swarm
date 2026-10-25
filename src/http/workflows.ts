@@ -25,6 +25,8 @@ import {
 } from "../be/db/workflow-idempotency";
 import {
   getWorkflowRunParent,
+  getWorkflowRunStepsSlimByRunId,
+  getWorkflowRunSummary,
   getWorkflowRunTree,
   WORKFLOW_RUN_TREE_MAX_DEPTH,
   WorkflowRunTreeError,
@@ -44,6 +46,7 @@ import {
   WorkflowRunSchema,
   WorkflowRunStatusSchema,
   WorkflowRunStepSchema,
+  WorkflowRunStepSlimSchema,
   WorkflowRunSummarySchema,
   WorkflowSchema,
   WorkflowVersionSchema,
@@ -361,17 +364,30 @@ const getWorkflowRunRoute = route({
   path: "/api/workflow-runs/{id}",
   pattern: ["api", "workflow-runs", null],
   summary: "Get a workflow run with steps (includes retry columns)",
+  description:
+    "Returns the run with its `context` and every step with its `input` by default. A step's `input` is a snapshot of the context when the step started, so in runs with loops (polling, `wait`, iterations) the response grows with steps × context size. Pass `fields=slim` to drop `run.context` and `steps[].input`; outputs, errors, diagnostics, retry fields and `parent` stay.",
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
+  query: z.object({
+    /** `slim` omits `run.context` and `steps[].input`; default is full. */
+    fields: z.enum(["full", "slim"]).optional(),
+  }),
   responses: {
     200: {
       description: "Workflow run details with steps including retry info",
-      schema: z.object({
-        run: WorkflowRunSchema,
-        steps: z.array(WorkflowRunStepSchema),
-        /** Set on a child run: the run and `sub-workflow` step that started it. */
-        parent: WorkflowRunParentSchema.optional(),
-      }),
+      schema: z.union([
+        z.object({
+          run: WorkflowRunSchema,
+          steps: z.array(WorkflowRunStepSchema),
+          /** Set on a child run: the run and `sub-workflow` step that started it. */
+          parent: WorkflowRunParentSchema.optional(),
+        }),
+        z.object({
+          run: WorkflowRunSummarySchema,
+          steps: z.array(WorkflowRunStepSlimSchema),
+          parent: WorkflowRunParentSchema.optional(),
+        }),
+      ]),
     },
     404: { description: "Run not found" },
   },
@@ -1041,13 +1057,19 @@ export async function handleWorkflows(
     const parsed = await getWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     // Display view: the scrubbed context and step outputs, never replay state.
-    const run = await getWorkflowRun(parsed.params.id, "display");
+    // `fields=slim` skips the context and step-input columns in SQL too.
+    const slim = parsed.query.fields === "slim";
+    const run = slim
+      ? await getWorkflowRunSummary(parsed.params.id)
+      : await getWorkflowRun(parsed.params.id, "display");
     if (!run) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const steps = await getWorkflowRunStepsByRunId(parsed.params.id, "display");
+    const steps = slim
+      ? await getWorkflowRunStepsSlimByRunId(parsed.params.id)
+      : await getWorkflowRunStepsByRunId(parsed.params.id, "display");
     const parent = run.parentStepId ? await getWorkflowRunParent(run.parentStepId) : null;
     getWorkflowRunRoute.respond(res, 200, { run, steps, ...(parent ? { parent } : {}) });
     return true;

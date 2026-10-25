@@ -660,7 +660,7 @@ Every workflow update creates a snapshot in the version history table, recording
 | `patch-workflow-node` | Partially update a single node in a workflow with automatic version snapshots |
 | `delete-workflow` | Delete a workflow and its run history |
 | `trigger-workflow` | Manually trigger a workflow execution |
-| `get-workflow-run` | Get details of a specific workflow run |
+| `get-workflow-run` | Get details of a specific workflow run; pass `fields: "slim"` to omit the run context and step inputs |
 | `list-workflow-runs` | List paginated slim run rows (20 by default, 100 max); use `includeContext: true` only when a page needs full contexts |
 | `retry-workflow-run` | Retry a failed workflow run |
 | `cancel-workflow-run` | Cancel a running or waiting workflow run |
@@ -671,6 +671,14 @@ omits full `context` and trigger data to keep routine history queries small.
 Follow `page.hasMore` / `page.nextOffset` for pagination, call
 `get-workflow-run` to retrieve one run with its steps and context, or pass
 `includeContext: true` for an explicitly full page.
+
+`get-workflow-run` (and `GET /api/workflow-runs/{id}`) returns the full run by
+default: the run `context` plus each step's `input`, a snapshot of the context
+when the step started. In runs with loops (polling, `wait`, iterations) that
+grows with steps × context size. Pass `fields: "slim"` (`?fields=slim` over
+HTTP) to drop both and keep statuses, outputs, errors, diagnostics, retry
+fields and the parent link, which is enough for monitoring and deciding what
+to do next.
 
 ## Dashboard UI
 

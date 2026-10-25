@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getWorkflowRun, getWorkflowRunStepsByRunId } from "@/be/db";
+import { getWorkflowRunStepsSlimByRunId, getWorkflowRunSummary } from "@/be/db/workflow-runs";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 const STEP_VALUE_CAP = 400;
@@ -15,7 +16,7 @@ function stepValuePreview(value: unknown): string | undefined {
 }
 
 function renderSteps(
-  steps: Awaited<ReturnType<typeof getWorkflowRunStepsByRunId>>,
+  steps: Awaited<ReturnType<typeof getWorkflowRunStepsSlimByRunId>>,
 ): string | undefined {
   if (steps.length === 0) return undefined;
   return steps
@@ -46,20 +47,29 @@ export const registerGetWorkflowRunTool = (server: McpServer) => {
       description: "Get details of a workflow run by ID, including all steps and their statuses.",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow run ID"),
+        fields: z
+          .enum(["full", "slim"])
+          .optional()
+          .describe(
+            "`slim` omits run.context and each step's input (a context snapshot per step, large in runs with loops). Outputs, errors and retry fields stay. Default: full.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         run: z.unknown().optional(),
         steps: z.array(z.unknown()).optional(),
       }),
     },
-    async ({ id }) => {
+    async ({ id, fields }) => {
       try {
         // Display view: the scrubbed context and step outputs, never replay state.
-        const run = await getWorkflowRun(id, "display");
+        const slim = fields === "slim";
+        const run = slim ? await getWorkflowRunSummary(id) : await getWorkflowRun(id, "display");
         if (!run) {
           return toolErr(`Workflow run not found: ${id}`, { data: { steps: [] } });
         }
-        const steps = await getWorkflowRunStepsByRunId(id, "display");
+        const steps = slim
+          ? await getWorkflowRunStepsSlimByRunId(id)
+          : await getWorkflowRunStepsByRunId(id, "display");
         return toolOk(`Run ${id} status: ${run.status}.`, {
           details: renderSteps(steps),
           data: { run, steps },

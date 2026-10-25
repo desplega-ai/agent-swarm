@@ -20,6 +20,7 @@ import {
   initDb,
   listWorkflowRuns,
   updateWorkflowRun,
+  updateWorkflowRunStep,
 } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
@@ -1006,6 +1007,136 @@ describe("Workflow HTTP API v2", () => {
         headers,
       });
       expect(res.status).toBe(404);
+    });
+
+    type RunDetail = {
+      run: WorkflowRun;
+      steps: WorkflowRunStep[];
+      parent?: { runId: string; workflowId: string; stepId: string; nodeId: string };
+    };
+
+    async function getRunDetail(runId: string, fields?: "full" | "slim"): Promise<RunDetail> {
+      const query = fields ? `?fields=${fields}` : "";
+      const res = await fetch(`${baseUrl}/api/workflow-runs/${runId}${query}`, { headers });
+      expect(res.status).toBe(200);
+      return (await res.json()) as RunDetail;
+    }
+
+    /** A finished run whose `poll` node ran `iterations` times, each step snapshotting the context. */
+    async function createLoopRun(iterations: number) {
+      const workflow = await createTestWorkflow();
+      const runId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      const context = {
+        trigger: { repo: "a/b" },
+        poll: { attempts: iterations },
+        blob: "x".repeat(4_000),
+      };
+      for (let i = 0; i < iterations; i++) {
+        const step = await createWorkflowRunStep({
+          id: crypto.randomUUID(),
+          runId,
+          nodeId: "poll",
+          nodeType: "script",
+          input: { ...context, iteration: i },
+          idempotencyKey: `${runId}:poll:${i}`,
+        });
+        await updateWorkflowRunStep(step.id, {
+          status: i === iterations - 1 ? "completed" : "failed",
+          output: { iteration: i, ready: i === iterations - 1 },
+          error: i === iterations - 1 ? null : `not ready (${i})`,
+          diagnostics: `iteration ${i}`,
+          retryCount: i,
+          nextRetryAt: new Date(Date.now() + 60_000).toISOString(),
+          finishedAt: new Date().toISOString(),
+        });
+      }
+      await updateWorkflowRun(runId, {
+        status: "completed",
+        context,
+        finishedAt: new Date().toISOString(),
+      });
+      return { workflow, runId, context };
+    }
+
+    test("fields=slim omits run.context and steps[].input, keeps every other field", async () => {
+      const { runId, context } = await createLoopRun(3);
+
+      const byDefault = await getRunDetail(runId);
+      const full = await getRunDetail(runId, "full");
+      const slim = await getRunDetail(runId, "slim");
+
+      expect(byDefault).toEqual(full);
+      expect(full.run.context).toEqual(context);
+      expect(full.steps).toHaveLength(3);
+      for (const step of full.steps) expect(step.input).toBeDefined();
+
+      expect(slim.run).not.toHaveProperty("context");
+      expect(slim.steps).toHaveLength(3);
+      for (const step of slim.steps) expect(step).not.toHaveProperty("input");
+
+      const { context: _context, ...fullRunRest } = full.run;
+      expect(slim.run).toEqual(fullRunRest);
+      const fullStepsRest = full.steps.map(({ input: _input, ...rest }) => rest);
+      // Same steps in the same order: both reads break `startedAt` ties by rowid.
+      expect(slim.steps).toEqual(fullStepsRest);
+      // The retry and result fields the slim view exists to serve.
+      const last = slim.steps.at(-1)!;
+      expect(last.output).toEqual({ iteration: 2, ready: true });
+      expect(last.retryCount).toBe(2);
+      expect(last.diagnostics).toBe("iteration 2");
+      expect(last.nextRetryAt).toBeDefined();
+      expect(slim.steps[0]!.error).toBe("not ready (0)");
+
+      expect(JSON.stringify(slim).length).toBeLessThan(JSON.stringify(full).length / 4);
+    });
+
+    test("fields=slim returns 404 for missing run", async () => {
+      const res = await fetch(`${baseUrl}/api/workflow-runs/${crypto.randomUUID()}?fields=slim`, {
+        headers,
+      });
+      expect(res.status).toBe(404);
+    });
+
+    test("rejects an unknown fields value", async () => {
+      const { runId } = await createLoopRun(1);
+      const res = await fetch(`${baseUrl}/api/workflow-runs/${runId}?fields=tiny`, { headers });
+      expect(res.status).toBe(400);
+    });
+
+    test("child run carries parent in both views", async () => {
+      const { workflow: parentWorkflow, runId: parentRunId } = await createLoopRun(1);
+      const parentStep = await createWorkflowRunStep({
+        id: crypto.randomUUID(),
+        runId: parentRunId,
+        nodeId: "child",
+        nodeType: "sub-workflow",
+        input: { large: "y".repeat(1_000) },
+      });
+      const childWorkflow = await createTestWorkflow();
+      const childRunId = crypto.randomUUID();
+      await createWorkflowRun({
+        id: childRunId,
+        workflowId: childWorkflow.id,
+        parentStepId: parentStep.id,
+        parentStepAttempt: 0,
+      });
+
+      const expectedParent = {
+        runId: parentRunId,
+        workflowId: parentWorkflow.id,
+        stepId: parentStep.id,
+        nodeId: "child",
+      };
+      const full = await getRunDetail(childRunId, "full");
+      const slim = await getRunDetail(childRunId, "slim");
+      expect(full.parent).toEqual(expectedParent);
+      expect(slim.parent).toEqual(expectedParent);
+      expect(slim.run.parentStepId).toBe(parentStep.id);
+      expect(slim.run.parentStepAttempt).toBe(0);
+
+      // A top-level run has no parent in either view.
+      expect(await getRunDetail(parentRunId, "slim")).not.toHaveProperty("parent");
     });
   });
 

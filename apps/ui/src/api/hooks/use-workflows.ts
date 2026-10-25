@@ -43,6 +43,18 @@ export function useWorkflowRun(id: string) {
   });
 }
 
+/**
+ * `useWorkflowRun` without the run `context` and step inputs, for views that show statuses.
+ * Its own cache key, so a slim entry never serves the run page, which reads step inputs.
+ */
+export function useWorkflowRunSlim(id: string) {
+  return useQuery({
+    queryKey: ["workflow-run", id, "slim"],
+    queryFn: () => api.fetchWorkflowRunSlim(id),
+    enabled: !!id,
+  });
+}
+
 export function useUpdateWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({

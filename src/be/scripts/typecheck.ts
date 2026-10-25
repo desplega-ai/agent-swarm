@@ -250,7 +250,7 @@ export interface SwarmSdk {
   workflow_list(args?: { enabled?: boolean; includeFull?: boolean; consecutiveErrorsMin?: number; lastRunStatus?: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled" }): Promise<unknown>;
   workflow_get(args: { id: string }): Promise<unknown>;
   workflow_listRuns(args: { workflowId: string; status?: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled"; limit?: number; offset?: number }): Promise<unknown>;
-  workflow_getRun(args: { id: string }): Promise<unknown>;
+  workflow_getRun(args: { id: string; fields?: "full" | "slim" }): Promise<unknown>;
   // --- prompt templates ---
   prompt_list(args?: { eventType?: string; scope?: "global" | "agent" | "repo"; scopeId?: string; isDefault?: boolean }): Promise<unknown>;
   prompt_get(args: { id: string }): Promise<unknown>;

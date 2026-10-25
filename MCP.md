@@ -1522,6 +1522,7 @@ Get details of a workflow run by ID, including all steps and their statuses.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | Workflow run ID |
+| `fields` | `full \| slim` | No | - | `slim` omits run.context and each step's input (a context snapshot per step, large in runs with loops). Outputs, errors and retry fields stay. Default: full. |
 
 ### retry-workflow-run
 

@@ -230,8 +230,10 @@ import {
   getRunLineageBlock,
   getStepExecutionBlock,
   rowToWorkflowRun,
+  rowToWorkflowRunStep,
   WORKFLOW_RUN_SUMMARY_COLUMNS,
   type WorkflowRunRow,
+  type WorkflowRunStepRow,
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
@@ -247,7 +249,7 @@ import {
 } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
 import { publishWorkerConfigNudge, publishWorkerNudge } from "./worker-nudges";
-import { defineWorkflowPayload, type WorkflowPayloadView } from "./workflow-replay";
+import type { WorkflowPayloadView } from "./workflow-replay";
 
 export {
   refreshActiveSessionOnActivity,
@@ -8099,56 +8101,6 @@ export async function listWorkflowRunsPage(
 // ============================================================================
 // Workflow Run Step CRUD
 // ============================================================================
-
-type WorkflowRunStepRow = {
-  id: string;
-  runId: string;
-  nodeId: string;
-  nodeType: string;
-  status: string;
-  input: string | null;
-  output: string | null;
-  /** Sealed exact `output` (migration 201). */
-  output_replay: string | null;
-  error: string | null;
-  startedAt: string;
-  finishedAt: string | null;
-  retryCount: number;
-  maxRetries: number;
-  nextRetryAt: string | null;
-  idempotencyKey: string | null;
-  diagnostics: string | null;
-  nextPort: string | null;
-};
-
-/** `view` picks the `output` copy, as in `rowToWorkflowRun`. */
-function rowToWorkflowRunStep(
-  row: WorkflowRunStepRow,
-  view: WorkflowPayloadView = "replay",
-): WorkflowRunStep {
-  const step: WorkflowRunStep = {
-    id: row.id,
-    runId: row.runId,
-    nodeId: row.nodeId,
-    nodeType: row.nodeType,
-    status: row.status as WorkflowRunStepStatus,
-    input: row.input ? JSON.parse(row.input) : undefined,
-    output: undefined,
-    error: row.error ?? undefined,
-    startedAt: normalizeDateRequired(row.startedAt),
-    finishedAt: normalizeDate(row.finishedAt) ?? undefined,
-    retryCount: row.retryCount,
-    maxRetries: row.maxRetries,
-    nextRetryAt: normalizeDate(row.nextRetryAt) ?? undefined,
-    idempotencyKey: row.idempotencyKey ?? undefined,
-    diagnostics: row.diagnostics ?? undefined,
-    nextPort: row.nextPort ?? undefined,
-  };
-  return defineWorkflowPayload(step, "output", row.output, row.output_replay, view, {
-    runId: row.runId,
-    target: `the output of step ${row.id} (node ${row.nodeId})`,
-  });
-}
 
 export async function createWorkflowRunStep(data: {
   id: string;
