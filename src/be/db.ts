@@ -8284,7 +8284,7 @@ export async function getWorkflowRunStepsByRunId(
   view: WorkflowPayloadView = "replay",
 ): Promise<WorkflowRunStep[]> {
   const rows = await getDbClient().query<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC",
+    "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC, rowid ASC",
     [runId],
   );
   return rows.map((row) => rowToWorkflowRunStep(row, view));
@@ -8400,7 +8400,7 @@ export async function getLatestStepForNode(
   nodeId: string,
 ): Promise<WorkflowRunStep | null> {
   const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1",
+    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC, rowid DESC LIMIT 1",
     [runId, nodeId],
   );
   return row ? rowToWorkflowRunStep(row) : null;
