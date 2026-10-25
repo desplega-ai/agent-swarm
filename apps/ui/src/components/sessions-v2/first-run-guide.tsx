@@ -9,7 +9,9 @@
  * localStorage. Unchecked, it shows again on the next visit. `?guide=1`
  * opens it, and `?guide=0` skips it for that load (a deep link); both leave
  * the URL. A first open waits until a dashboard user is picked and no other
- * dialog is open, so one modal shows at a time. The Keys button and `?`
+ * dialog is open, so one modal shows at a time. It never opens by itself
+ * while the onboarding first task runs, or in a page load that went through
+ * `/setup`: the user watches their own first task. The Keys button and `?`
  * (with Shift, so the key listener allows Shift for this one key) open the
  * keys step. Cmd+K has "Show the guide". Closing it gives the focus back.
  *
@@ -20,6 +22,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { isOnboardingOpen, useOnboarding } from "@/api/hooks/use-onboarding";
+import { wasSetupVisited } from "@/components/onboarding/onboarding-redirect";
 import { MOD, useKeyboardShortcuts } from "@/components/shared/questions/keyboard";
 import {
   ResponsiveOverlay,
@@ -32,6 +36,7 @@ import { DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/di
 import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useConfig } from "@/hooks/use-config";
 import { isTypingTarget, OPEN_OVERLAY, type ShortcutKeyEvent } from "@/lib/approval-shortcuts";
 import { cn } from "@/lib/utils";
 import { focusQuietly } from "./pane/quiet-focus";
@@ -201,6 +206,15 @@ export function useFirstRunGuide() {
     return { step: 0, firstRun: true };
   });
   const [state, setState] = useState<GuideState | null>(null);
+  // Setup holds the first-run open: while its first task runs (a reload on
+  // that session), and in the page load that went through `/setup`. Null
+  // until the onboarding payload answers.
+  const { config } = useConfig();
+  const onboarding = useOnboarding();
+  const setupHolds = onboarding.isPending
+    ? null
+    : Boolean(isOnboardingOpen(onboarding.data) && onboarding.data?.state.firstTaskId) ||
+      wasSetupVisited(config.apiUrl);
   useEffect(() => {
     if (param !== "1" && param !== "0") return;
     if (param === "1") setWaiting((prev) => prev ?? { step: 0, firstRun: false });
@@ -214,7 +228,13 @@ export function useFirstRunGuide() {
     );
   }, [param, setSearchParams]);
   useEffect(() => {
-    if (!waiting || userState !== "ready") return;
+    if (!waiting || userState !== "ready" || setupHolds === null) return;
+    // Dropped, not deferred: the guide must not pop up when setup finishes.
+    // `?guide=1` still opens it.
+    if (waiting.firstRun && setupHolds) {
+      setWaiting(null);
+      return;
+    }
     const show = () => {
       // Another dialog or its closing fade is on screen: try again soon.
       if (document.querySelector(OPEN_OVERLAY)) return false;
@@ -227,7 +247,7 @@ export function useFirstRunGuide() {
       if (show()) window.clearInterval(timer);
     }, 200);
     return () => window.clearInterval(timer);
-  }, [waiting, userState]);
+  }, [waiting, userState, setupHolds]);
   useKeyboardShortcuts(
     matchHelp,
     () => {

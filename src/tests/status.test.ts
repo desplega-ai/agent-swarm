@@ -1212,10 +1212,10 @@ describe("computeHealth (Phase 2)", () => {
     expect((harness.providers ?? []).map((p) => p.provider)).toEqual(["claude"]);
   });
 
-  test("`ok` when workers are `configured` (heartbeat drift is a runtime concern, not setup health)", async () => {
+  test("`ok` when workers are `configured` and the seeded lead is `idle`", async () => {
     // Workers in `configured` state means agents exist but haven't posted a
-    // heartbeat in the last 5 minutes. This is surfaced on /agents and the
-    // dashboard canvas — it should NOT degrade the header health dot.
+    // heartbeat in the last 5 minutes. Health reads the lead's status, not
+    // its heartbeat: this lead is `idle`, so it can take work.
     const lead = await createAgent({
       name: "lead-d",
       isLead: true,
@@ -1229,7 +1229,90 @@ describe("computeHealth (Phase 2)", () => {
     });
     const payload = await buildStatusPayload();
     expect(getMilestone(payload, "workers").state).toBe("configured");
+    expect(payload.activity.leads_ready).toBe(1);
     expect(payload.health).toBe("ok");
+  });
+
+  test("`ok` for an idle lead with a stale heartbeat and no worker heartbeat", async () => {
+    const lead = await createAgent({
+      name: "lead-idle",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    const worker = await createAgent({
+      name: "worker-quiet",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    // The lead last ran a session an hour ago. The worker never heartbeated.
+    const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    await getDbClient().run(`UPDATE agents SET lastActivityAt = ? WHERE id = ?`, [
+      hourAgo,
+      lead.id,
+    ]);
+    const pass = { ok: true, error: null, latency_ms: 12, testedAt: Date.now() };
+    await seedCredStatus(lead.id, "claude", { ready: true, satisfiedBy: "env", liveTest: pass });
+    await seedCredStatus(worker.id, "claude", { ready: true, satisfiedBy: "env", liveTest: pass });
+
+    const payload = await buildStatusPayload();
+    expect(payload.activity.leads_online).toBe(0);
+    expect(payload.activity.leads_ready).toBe(1);
+    expect(payload.health).toBe("ok");
+  });
+
+  test("`degraded` when no lead row exists", async () => {
+    const worker = await createAgent({
+      name: "worker-alone",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await updateAgentActivity(worker.id);
+    await seedCredStatus(worker.id, "claude", {
+      ready: true,
+      satisfiedBy: "env",
+      liveTest: { ok: true, error: null, latency_ms: 12, testedAt: Date.now() },
+    });
+
+    const payload = await buildStatusPayload();
+    expect(getMilestone(payload, "harness").state).toBe("verified");
+    expect(payload.activity.leads_ready).toBe(0);
+    expect(payload.health).toBe("degraded");
+  });
+
+  test("`degraded` when the only lead is offline", async () => {
+    const lead = await createAgent({
+      name: "lead-gone",
+      isLead: true,
+      status: "offline",
+      capabilities: [],
+    });
+    const worker = await createAgent({
+      name: "worker-left",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await updateAgentActivity(worker.id);
+    const pass = { ok: true, error: null, latency_ms: 12, testedAt: Date.now() };
+    await seedCredStatus(lead.id, "claude", { ready: true, satisfiedBy: "env", liveTest: pass });
+    await seedCredStatus(worker.id, "claude", { ready: true, satisfiedBy: "env", liveTest: pass });
+
+    const payload = await buildStatusPayload();
+    expect(getMilestone(payload, "harness").state).toBe("verified");
+    expect(payload.activity.leads_ready).toBe(0);
+    expect(payload.health).toBe("degraded");
+  });
+
+  test("no ready lead degrades an otherwise `ok` rollup", () => {
+    const synthetic: SetupMilestone[] = [
+      { id: "harness", label: "Harness", state: "verified" },
+      { id: "workers", label: "Workers", state: "verified" },
+    ];
+    expect(computeHealth(synthetic, 1)).toBe("ok");
+    expect(computeHealth(synthetic, 0)).toBe("degraded");
   });
 
   test("`ok` when harness verified and workers verified (no other integration is `configured`)", () => {
@@ -1245,7 +1328,7 @@ describe("computeHealth (Phase 2)", () => {
       { id: "workers", label: "Workers", state: "verified" },
       { id: "first_task", label: "First task", state: "verified" },
     ];
-    expect(computeHealth(synthetic)).toBe("ok");
+    expect(computeHealth(synthetic, 1)).toBe("ok");
   });
 
   test("`degraded` when an integration is `configured`", () => {
@@ -1258,7 +1341,7 @@ describe("computeHealth (Phase 2)", () => {
       { id: "workers", label: "Workers", state: "verified" },
       { id: "first_task", label: "First task", state: "verified" },
     ];
-    expect(computeHealth(synthetic)).toBe("degraded");
+    expect(computeHealth(synthetic, 1)).toBe("degraded");
   });
 
   test("`ok` when a connected Slack reports `verified` next to other connected integrations", () => {
@@ -1271,7 +1354,7 @@ describe("computeHealth (Phase 2)", () => {
       { id: "workers", label: "Workers", state: "verified" },
       { id: "first_task", label: "First task", state: "verified" },
     ];
-    expect(computeHealth(synthetic)).toBe("ok");
+    expect(computeHealth(synthetic, 1)).toBe("ok");
   });
 
   test("integrations in `unverified` alone do NOT degrade health", () => {
@@ -1286,7 +1369,7 @@ describe("computeHealth (Phase 2)", () => {
       { id: "workers", label: "Workers", state: "verified" },
       { id: "first_task", label: "First task", state: "unverified" },
     ];
-    expect(computeHealth(synthetic)).toBe("ok");
+    expect(computeHealth(synthetic, 1)).toBe("ok");
   });
 
   test("an unverified embedding key never blocks boot or degrades health", () => {
@@ -1295,7 +1378,7 @@ describe("computeHealth (Phase 2)", () => {
       { id: "embeddings", label: "Memory search", state: "unverified" },
       { id: "workers", label: "Workers", state: "verified" },
     ];
-    expect(computeHealth(synthetic)).toBe("ok");
+    expect(computeHealth(synthetic, 1)).toBe("ok");
   });
 });
 

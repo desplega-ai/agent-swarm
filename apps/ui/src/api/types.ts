@@ -3357,6 +3357,8 @@ export type TelemetryEnableVia = "banner" | "settings" | "benchmark";
 export interface StatusActivity {
   agents_online: number;
   leads_online: number;
+  /** Leads with status idle or busy (not the heartbeat). Absent on servers that predate it. */
+  leads_ready?: number;
   recent_tasks_count: number;
 }
 

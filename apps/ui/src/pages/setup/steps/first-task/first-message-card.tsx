@@ -19,6 +19,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { optionValue, SWARM_ORG_USE_CASE, USE_CASES } from "@/lib/company-profile";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../../step-contract";
+import type { LeadReadiness } from "./agents-card";
 import { firstTaskStarters } from "./starters";
 
 type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
@@ -30,11 +31,18 @@ type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
  * minimizes setup, and opens the session. Step 7 completes when that task
  * completes.
  */
+/** The composer placeholder while it waits. */
+const WAITING_PLACEHOLDER: Record<Exclude<LeadReadiness["state"], "ready">, string> = {
+  offline: "Waiting for the lead to come online…",
+  unverified: "Waiting for a verified key for the lead…",
+};
+
 export function FirstTaskComposer({
   onboarding,
   act,
-  leadReady,
-}: Pick<StepProps, "onboarding" | "act"> & { leadReady: boolean }) {
+  lead,
+}: Pick<StepProps, "onboarding" | "act"> & { lead: LeadReadiness["state"] }) {
+  const leadReady = lead === "ready";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { state: userState, userId, locked } = useCurrentUser();
@@ -141,9 +149,7 @@ export function FirstTaskComposer({
         isError={Boolean(error)}
         errorMessage={error ?? undefined}
         pendingLabel="Sending…"
-        placeholder={
-          leadReady ? "Describe a goal for the swarm" : "Waiting for the lead to come online…"
-        }
+        placeholder={lead === "ready" ? "Describe a goal for the swarm" : WAITING_PLACEHOLDER[lead]}
         disabled={!live}
         sendLabel="Send first task"
         autoFocus={live && !wentLive}

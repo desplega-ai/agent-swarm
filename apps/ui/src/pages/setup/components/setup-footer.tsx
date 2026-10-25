@@ -29,9 +29,10 @@ interface SetupFooterProps {
   };
   /**
    * `blockedBy` disables the action and becomes its tooltip. `enterKey` binds
-   * the Enter shortcut (Continue only, never "Go to dashboard").
+   * the Enter shortcut (Continue only, never "Go to dashboard"). Omit it when
+   * the step has its own primary action (step 7 sends from its composer).
    */
-  primary: { label: string; onClick: () => void; blockedBy: string | null; enterKey?: boolean };
+  primary?: { label: string; onClick: () => void; blockedBy: string | null; enterKey?: boolean };
   busy?: boolean;
   /** Skip or the primary action shows a spinner on its own button while it runs. */
   busyAction?: SetupBusyAction | null;
@@ -52,7 +53,7 @@ export function SetupFooter({
 }: SetupFooterProps) {
   const back = onBack && !busy ? onBack : undefined;
   const skipNow = skip && !skip.blockedBy && !busy ? skip.onSkip : undefined;
-  const next = primary.enterKey && !primary.blockedBy && !busy ? primary.onClick : undefined;
+  const next = primary?.enterKey && !primary.blockedBy && !busy ? primary.onClick : undefined;
   useSetupShortcuts({ back, skip: skipNow, next });
 
   return (
@@ -105,22 +106,26 @@ export function SetupFooter({
             </Button>
           </Hint>
         ) : null}
-        <Hint
-          content={primary.blockedBy ?? (primary.enterKey ? `${primary.label} (Enter)` : undefined)}
-        >
-          <Button
-            onClick={primary.blockedBy ? undefined : primary.onClick}
-            aria-disabled={primary.blockedBy ? true : undefined}
-            disabled={busy && busyAction !== "primary"}
-            status={busyAction === "primary" ? "loading" : "idle"}
-            aria-keyshortcuts={primary.enterKey ? "Enter" : undefined}
-            className={cn(ARIA_DISABLED, "aria-disabled:hover:bg-primary")}
+        {primary ? (
+          <Hint
+            content={
+              primary.blockedBy ?? (primary.enterKey ? `${primary.label} (Enter)` : undefined)
+            }
           >
-            {primary.label}
-            {primary.enterKey ? <Keycap tone="inverted">↵</Keycap> : null}
-            <ArrowRight />
-          </Button>
-        </Hint>
+            <Button
+              onClick={primary.blockedBy ? undefined : primary.onClick}
+              aria-disabled={primary.blockedBy ? true : undefined}
+              disabled={busy && busyAction !== "primary"}
+              status={busyAction === "primary" ? "loading" : "idle"}
+              aria-keyshortcuts={primary.enterKey ? "Enter" : undefined}
+              className={cn(ARIA_DISABLED, "aria-disabled:hover:bg-primary")}
+            >
+              {primary.label}
+              {primary.enterKey ? <Keycap tone="inverted">↵</Keycap> : null}
+              <ArrowRight />
+            </Button>
+          </Hint>
+        ) : null}
       </div>
     </footer>
   );
