@@ -10,8 +10,9 @@ import { BrandLogo } from "@/components/shared/brand-logo";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SecretKeyField, TextField } from "./fields";
-import { type AiCardProps, baseUrlError, globalConfigValue } from "./model";
+import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
+import { DISCLOSURE_TITLE, SecretKeyField, TextField } from "./fields";
+import { type AiCardProps, baseUrlError, globalConfigValue, harnessNames } from "./model";
 import { ProviderCard } from "./provider-card";
 
 type OpenMode = "openrouter" | "gateway";
@@ -53,13 +54,15 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
   const currentUrl = globalConfigValue(configs, BASE_URL);
   const activeMode: OpenMode = mode ?? (gatewaySet ? "gateway" : "openrouter");
 
-  const keyField = (rule: SecretRule, placeholder: string, helper?: string) => (
+  const keyField = (label: string, rule: SecretRule, placeholder: string, helper?: string) => (
     <SecretKeyField
       id={`setup-ai-openrouter-key-${activeMode}`}
+      label={label}
       envKey={OR_KEY}
       placeholder={placeholder}
       saved={isSaved(OR_KEY)}
       rule={rule}
+      pool
       helper={helper}
       logo={<BrandLogo src="/provider-logos/openrouter.svg" className="size-3.5" />}
       onSave={async (value) => {
@@ -83,8 +86,8 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
       {...card}
       card="open"
       icon={<OpenHarnessIcon />}
-      title="Open harnesses: opencode, pi, DeepSeek"
-      subtitle="Model-agnostic harnesses. One OpenRouter key runs all three."
+      title="Open harnesses"
+      subtitle={`${harnessNames("open", "and")}. One OpenRouter key runs all three.`}
       saved={isSaved(OR_KEY) || isSaved(DS_KEY) || DIRECT_PROVIDERS.some(directSaved)}
     >
       <Tabs value={activeMode} onValueChange={(v) => setMode(v as OpenMode)}>
@@ -94,6 +97,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
         </TabsList>
         <TabsContent value="openrouter">
           {keyField(
+            "OpenRouter API key",
             KEY_RULES.openRouter,
             "sk-or-v1-...",
             gatewaySet ? "A new key here clears the gateway URL." : undefined,
@@ -102,6 +106,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
         <TabsContent value="gateway" className="space-y-3">
           <TextField
             id="setup-ai-openrouter-base-url"
+            label="Gateway URL"
             envKey={BASE_URL}
             placeholder="https://gateway.example.com/v1"
             baseline={currentUrl}
@@ -112,50 +117,47 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
               if (isSaved(OR_KEY)) onSaved("openai_gateway");
             }}
           />
-          {keyField(GATEWAY_RULE, "sk-...")}
+          {keyField("Gateway API key", GATEWAY_RULE, "sk-...")}
         </TabsContent>
       </Tabs>
 
-      <CollapsibleSection title="Direct keys instead">
-        <div className="pt-1.5">
+      {/* No onboarding method names the registry routes: a verified pi/opencode worker completes the step. */}
+      <CollapsibleSection title="Direct keys instead" titleClassName={DISCLOSURE_TITLE}>
+        <div className="space-y-3 pt-1.5">
+          <p className="text-xs text-muted-foreground">
+            Each field takes more than one key: separate them with commas.
+          </p>
           <SecretKeyField
             id="setup-ai-deepseek-key"
+            label="DeepSeek API key"
             envKey={DS_KEY}
             placeholder="sk-..."
             saved={isSaved(DS_KEY)}
             rule={KEY_RULES.deepSeek}
-            info={
-              <>
-                For DeepSeek (dsh) without OpenRouter. pi and opencode also reuse the Anthropic and
-                OpenAI keys.
-              </>
-            }
+            pool
+            poolHint={false}
+            info={`For ${HARNESS_LABEL.dsh} without OpenRouter. ${HARNESS_LABEL.pi} and ${HARNESS_LABEL.opencode} also reuse the Anthropic and OpenAI keys.`}
             logo={<BrandLogo src="/provider-logos/deepseek.svg" className="size-3.5" />}
             onSave={async (value) => {
               await save([{ key: DS_KEY, value, isSecret: true }]);
               onSaved("deepseek");
             }}
           />
-        </div>
-      </CollapsibleSection>
-
-      {/* No onboarding method names these routes: a verified pi/opencode worker completes the step. */}
-      <CollapsibleSection
-        title={`${DIRECT_PROVIDERS.map((p) => p.displayName).join(" and ")} keys`}
-      >
-        <div className="space-y-3 pt-1.5">
           {DIRECT_PROVIDERS.map((p) => (
             <SecretKeyField
               key={p.id}
               id={`setup-ai-${p.id}-key`}
+              label={`${p.displayName} API key`}
               envKey={p.envVar}
               placeholder="sk-..."
               saved={directSaved(p)}
               rule={GATEWAY_RULE}
+              pool
+              poolHint={false}
               info={
                 <>
-                  Runs <code className="font-mono">{p.id}/&lt;model&gt;</code> on pi and opencode.
-                  Comma-separate several keys to pool their concurrency.
+                  Runs <code className="font-mono">{p.id}/&lt;model&gt;</code> on {HARNESS_LABEL.pi}{" "}
+                  and {HARNESS_LABEL.opencode}.
                 </>
               }
               logo={

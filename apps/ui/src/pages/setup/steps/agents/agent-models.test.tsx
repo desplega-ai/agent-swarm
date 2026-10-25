@@ -31,6 +31,8 @@ const writes: Array<Record<string, unknown>> = [];
 const holds: Array<string | null> = [];
 let continueAction: (() => Promise<void>) | null = null;
 let tiersRefetches = 0;
+// `true`: rows store through the real autosave hook instead of the idle stub.
+let liveAutosave = false;
 
 mock.module("@/api/hooks/use-model-tiers", () => ({
   useModelTiers: () => ({
@@ -67,9 +69,13 @@ mock.module("@/api/hooks/use-config-api", () => ({
       select: (data: { configs: typeof storedConfigs }) => data.configs,
     }),
 }));
+const realAutosave = require("../../../../hooks/use-autosave");
+const idleAutosave = () => ({ phase: "idle", error: null });
 mock.module("@/hooks/use-autosave", () => ({
-  ...require("../../../../hooks/use-autosave"),
-  useAutosave: () => ({ phase: "idle", error: null }),
+  ...realAutosave,
+  // A test sets `liveAutosave` before it mounts, so a row always runs the same hook.
+  useAutosave: (options: unknown) =>
+    (liveAutosave ? realAutosave.useAutosave : idleAutosave)(options),
   useContinueHold: (reason: string | null) => {
     holds.push(reason);
   },
@@ -157,6 +163,21 @@ async function mount(agents: AgentWithTasks[]) {
 const tiles = (container: HTMLElement) =>
   [...container.querySelectorAll("fieldset button")].map((b) => b.textContent ?? "");
 
+/** The header of the per-agent card: its text, and a click that opens the rows. */
+function customize(container: HTMLElement) {
+  const header = [...container.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")].find(
+    (b) => b.textContent?.includes("Customize per agent"),
+  );
+  if (!header) throw new Error("no Customize per agent header");
+  return {
+    text: header.textContent ?? "",
+    open: () =>
+      act(async () => {
+        header.click();
+      }),
+  };
+}
+
 beforeEach(() => {
   tiers = tierRows();
   tiersError = false;
@@ -165,6 +186,7 @@ beforeEach(() => {
   holds.length = 0;
   continueAction = null;
   tiersRefetches = 0;
+  liveAutosave = false;
   document.body.innerHTML = "";
 });
 
@@ -232,6 +254,8 @@ describe("AgentModels reads the model tiers", () => {
     tiers = undefined;
     tiersError = true;
     const view = await mount([agent("1", "codex")]);
+    expect(customize(view.container).text).toContain("1 agent did not load. Open to retry.");
+    await customize(view.container).open();
     const retry = view.container.querySelector<HTMLButtonElement>(
       'button[aria-label="Retry loading the model"]',
     );
@@ -250,10 +274,49 @@ describe("AgentModels reads the model tiers", () => {
       { key: "REASONING_EFFORT_OVERRIDE", value: "xhigh" },
     ];
     const view = await mount([agent("1", "codex")]);
+    await customize(view.container).open();
     const max = view.container.querySelector<HTMLElement>(
       '[role="radiogroup"] [aria-checked="true"]',
     );
     expect(max?.textContent).toContain("Max");
+    await view.unmount();
+  });
+
+  test("the per-agent rows wait behind Customize per agent", async () => {
+    const view = await mount([agent("1", "codex"), agent("2", "codex")]);
+    expect(view.container.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(customize(view.container).text).toContain("2 agents on Optimal.");
+    await customize(view.container).open();
+    expect(view.container.querySelectorAll('[role="radiogroup"]')).toHaveLength(2);
+    await view.unmount();
+  });
+
+  test("a level tile stores every agent while the rows are closed", async () => {
+    liveAutosave = true;
+    const view = await mount([agent("1", "codex"), agent("2", "codex")]);
+    const max = view.container.querySelectorAll<HTMLButtonElement>("fieldset button")[2];
+    await act(async () => {
+      max.click();
+    });
+    // The row saves wait 150 ms.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(writes.map((w) => [w.id, w.model, w.reasoningEffort])).toEqual([
+      ["1", "gpt-5.6-sol", "xhigh"],
+      ["2", "gpt-5.6-sol", "xhigh"],
+    ]);
+    expect(view.container.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(customize(view.container).text).toContain("Saved. Applies to the next task.");
+    await view.unmount();
+  });
+
+  test("each tile shows its price per token next to Cheap", async () => {
+    const view = await mount([agent("1", "claude")]);
+    const [cheap, optimal, max] = tiles(view.container);
+    expect(cheap).toContain("Price per token: 1x");
+    expect(optimal).toMatch(/Price per token: \d+(\.\d)?x/);
+    expect(max).toMatch(/Price per token: \d+(\.\d)?x/);
     await view.unmount();
   });
 });

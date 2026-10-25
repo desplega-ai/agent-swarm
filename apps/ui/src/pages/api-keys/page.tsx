@@ -542,7 +542,7 @@ export default function ApiKeysPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="API Keys" />
+      <PageHeader title="Provider keys" />
 
       {/* Summary cards */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-6">
@@ -654,7 +654,7 @@ export default function ApiKeysPage() {
         columnDefs={columnDefs}
         quickFilterText={search}
         loading={isLoading}
-        emptyMessage="No API keys tracked yet"
+        emptyMessage="No provider keys tracked yet"
         paginationQueryKey="apiKeys"
       />
 

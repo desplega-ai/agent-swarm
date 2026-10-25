@@ -12,7 +12,7 @@ import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { useConfig } from "@/hooks/use-config";
-import { CopyIconButton } from "./fields";
+import { CopyIconButton, DISCLOSURE_TITLE } from "./fields";
 import type { AiCardProps } from "./model";
 import { ProviderCard } from "./provider-card";
 
@@ -177,6 +177,7 @@ export function CodexCard({
       <CollapsibleSection
         key={cliKey}
         title="Other ways to sign in"
+        titleClassName={DISCLOSURE_TITLE}
         defaultOpen={cliKey > 0}
         className="border-t border-border-subtle pt-3"
       >

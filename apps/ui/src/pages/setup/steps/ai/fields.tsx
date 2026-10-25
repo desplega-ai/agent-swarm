@@ -9,32 +9,50 @@ import { Label } from "@/components/ui/label";
 import { useAutosave } from "@/hooks/use-autosave";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 
-/** Env key label in machine voice, with an optional brand mark and info tip. */
+/** Title classes of a step 3 disclosure (`CollapsibleSection`): sentence case, not small caps. */
+export const DISCLOSURE_TITLE = "text-xs font-medium normal-case tracking-normal";
+
+/** Shown under a field that takes a credential pool (`CREDENTIAL_POOL_VARS` on the API). */
+const POOL_HINT = "You can add more than one: separate them with commas.";
+
+/** A human label with an optional brand mark. The info tip names the env key. */
 function FieldLabel({
   htmlFor,
+  label,
   envKey,
   logo,
   info,
 }: {
   htmlFor: string;
+  label: string;
   envKey: string;
   logo?: ReactNode;
   info?: ReactNode;
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      <Label htmlFor={htmlFor} className="gap-1.5 font-mono text-[11px] text-muted-foreground">
+      <Label htmlFor={htmlFor} className="gap-1.5 text-xs">
         {logo}
-        {envKey}
+        {label}
       </Label>
-      {info ? <InfoTip content={info} /> : null}
+      <InfoTip
+        content={
+          <span className="flex flex-col gap-1">
+            {info ? <span>{info}</span> : null}
+            <span>
+              Saved as <code className="font-mono">{envKey}</code>.
+            </span>
+          </span>
+        }
+      />
     </div>
   );
 }
 
-/** Env key label, the control, then a short helper or error line: every step 3 field. */
+/** Label, the control, then a short helper or error line: every step 3 field. */
 function KeyField({
   id,
+  label,
   envKey,
   logo,
   info,
@@ -43,6 +61,7 @@ function KeyField({
   children,
 }: {
   id: string;
+  label: string;
   envKey: string;
   logo?: ReactNode;
   info?: ReactNode;
@@ -52,7 +71,7 @@ function KeyField({
 }) {
   return (
     <div className="space-y-1.5">
-      <FieldLabel htmlFor={id} envKey={envKey} logo={logo} info={info} />
+      <FieldLabel htmlFor={id} label={label} envKey={envKey} logo={logo} info={info} />
       {children}
       {error ? (
         <p id={`${id}-help`} className="text-xs text-status-error-strong">
@@ -67,22 +86,41 @@ function KeyField({
   );
 }
 
-/** A step 3 secret: the autosaving `AutosaveSecretField` under its env key. */
+/**
+ * A step 3 secret: the autosaving `AutosaveSecretField` under its label.
+ * `pool` fields take comma-separated keys and say so under the field, unless
+ * `poolHint` is off because one line above a group of fields says it.
+ */
 export function SecretKeyField({
+  label,
   envKey,
   logo,
   info,
   helper,
+  poolHint = true,
   ...field
 }: ComponentProps<typeof AutosaveSecretField> & {
+  label: string;
   envKey: string;
   logo?: ReactNode;
   info?: ReactNode;
   helper?: ReactNode;
+  poolHint?: boolean;
 }) {
+  const hint = field.pool && poolHint;
+  const help =
+    helper && hint ? (
+      <>
+        {helper} {POOL_HINT}
+      </>
+    ) : hint ? (
+      POOL_HINT
+    ) : (
+      helper
+    );
   return (
-    <KeyField id={field.id} envKey={envKey} logo={logo} info={info} helper={helper}>
-      <AutosaveSecretField {...field} describedBy={helper ? `${field.id}-help` : undefined} />
+    <KeyField id={field.id} label={label} envKey={envKey} logo={logo} info={info} helper={help}>
+      <AutosaveSecretField {...field} describedBy={help ? `${field.id}-help` : undefined} />
     </KeyField>
   );
 }
@@ -93,6 +131,7 @@ export function SecretKeyField({
  */
 export function TextField({
   id,
+  label,
   envKey,
   placeholder,
   baseline,
@@ -101,6 +140,7 @@ export function TextField({
   onSave,
 }: {
   id: string;
+  label: string;
   envKey: string;
   placeholder: string;
   /** The stored value, shown until the operator types. */
@@ -121,7 +161,7 @@ export function TextField({
     save: onSave,
   });
   return (
-    <KeyField id={id} envKey={envKey} info={info} error={error}>
+    <KeyField id={id} label={label} envKey={envKey} info={info} error={error}>
       <WithIndicator indicator={<SaveIndicator phase={autosave.phase} error={autosave.error} />}>
         <Input
           id={id}

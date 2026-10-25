@@ -35,6 +35,15 @@ const FORMAT_WARNINGS: Record<string, (v: string) => string | null> = {
       : null,
 };
 
+// A key never has a space or a line break inside. Each key of a credential
+// pool is checked on its own: the server splits on commas and trims each key.
+function poolSpaceWarning(v: string): string | null {
+  const keys = v.split(",").map((s) => s.trim());
+  return keys.some((key) => /\s/.test(key))
+    ? "Remove the space or line break from the key. Separate keys with commas."
+    : null;
+}
+
 interface FieldRendererProps {
   field: IntegrationField;
   existingConfig?: SwarmConfig;
@@ -83,7 +92,10 @@ export function FieldRenderer({
   // Skip warnings while showing the server-side mask sentinel — that value
   // isn't a real user input and would always fail prefix checks.
   const warningText =
-    value && value !== SECRET_MASK_SENTINEL ? (FORMAT_WARNINGS[field.key]?.(value) ?? null) : null;
+    value && value !== SECRET_MASK_SENTINEL
+      ? (FORMAT_WARNINGS[field.key]?.(value) ??
+        (field.credentialPool ? poolSpaceWarning(value) : null))
+      : null;
 
   // Source chip: distinguishes "set via deployment env only" from "persisted in
   // swarm_config". When both are true the DB row was already loaded into env at

@@ -21,7 +21,12 @@ import { StatusIcon } from "@/components/shared/status-icon";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAutosave, useContinueAction, useContinueHold } from "@/hooks/use-autosave";
+import {
+  type AutosavePhase,
+  useAutosave,
+  useContinueAction,
+  useContinueHold,
+} from "@/hooks/use-autosave";
 import {
   HARNESS_LABEL,
   hasRuntimeCredential,
@@ -62,6 +67,8 @@ const LEVEL_BLURB: Record<DialLevel, string> = {
 };
 
 const NOT_APPLIED = "Not applied yet. Continue applies Optimal.";
+/** A stored model reaches the agent when its next task starts. */
+const SAVED_NOTE = "Saved. Applies to the next task.";
 const LOAD_FAILED = "The model did not load, so Continue skips this agent. Click to retry.";
 
 /** A level the operator picked. `nonce` makes a repeated pick store again (a retry). */
@@ -69,6 +76,15 @@ interface Intent {
   level: DialLevel;
   nonce: number;
 }
+
+/** Where one agent's save is. `RowSave` reports it, the row and the card header show it. */
+interface SaveState {
+  phase: AutosavePhase;
+  error: string | null;
+}
+
+/** "1 agent", "3 agents". */
+const agentCount = (n: number) => `${n} agent${n === 1 ? "" : "s"}`;
 
 interface Row {
   agent: AgentWithTasks;
@@ -268,7 +284,23 @@ export function AgentModels({
 
   const [intents, setIntents] = useState<Record<string, Intent>>({});
   const [remembered, setRemembered] = useState<Record<string, DialLevel>>({});
+  const [saves, setSaves] = useState<Record<string, SaveState>>({});
+  // The level tiles fit most swarms: the per-agent rows wait behind a toggle.
+  const [customizing, setCustomizing] = useState(false);
   const nonce = useRef(0);
+
+  const reportSave = useCallback((id: string, next: SaveState | null) => {
+    setSaves((prev) => {
+      const current = prev[id];
+      if (!next) {
+        if (!current) return prev;
+        const { [id]: _, ...rest } = prev;
+        return rest;
+      }
+      if (current?.phase === next.phase && current.error === next.error) return prev;
+      return { ...prev, [id]: next };
+    });
+  }, []);
 
   const pick = useCallback((ids: string[], level: DialLevel) => {
     nonce.current += 1;
@@ -392,56 +424,141 @@ export function AgentModels({
     );
   }
 
+  // One line for the closed per-agent card: saves, failures, then the levels.
+  const rowSaves = dialRows.flatMap((row) => saves[row.agent.id] ?? []);
+  const saving = rowSaves.some((s) => s.phase === "pending" || s.phase === "saving");
+  const saveErrors = rowSaves.filter((s) => s.phase === "error").length;
+  const loadErrors = dialRows.filter((row) => row.loadFailed).length;
+  // A running task keeps the model it started with.
+  const running = dialRows.reduce(
+    (sum, row) => sum + (row.agent.capacity?.current ?? (row.agent.status === "busy" ? 1 : 0)),
+    0,
+  );
+  const summary: { tone: "busy" | "error" | "saved" | "none"; text: string } = saving
+    ? { tone: "busy", text: "Saving…" }
+    : saveErrors > 0
+      ? { tone: "error", text: `${agentCount(saveErrors)} did not save. Pick the level again.` }
+      : loadErrors > 0
+        ? { tone: "error", text: `${agentCount(loadErrors)} did not load. Open to retry.` }
+        : rowSaves.some((s) => s.phase === "saved")
+          ? {
+              tone: "saved",
+              text: `Saved. Applies to the next task${running > 0 ? ` (${running} running)` : ""}.`,
+            }
+          : {
+              tone: "none",
+              text: allLevel
+                ? `${agentCount(dialRows.length)} on ${DIAL_LEVEL_LABEL[allLevel]}.`
+                : "Agents use different levels.",
+            };
+
+  const rowList = (
+    <ul className="divide-y divide-border-subtle">
+      {rows.map((row) => (
+        <AgentModelRow
+          key={row.agent.id}
+          row={row}
+          save={saves[row.agent.id]}
+          context={context}
+          onPick={(level) => pick([row.agent.id], level)}
+        />
+      ))}
+    </ul>
+  );
+
   return (
     <div className="space-y-3">
-      {dialRows.length > 0 ? (
-        <LevelTiles
-          value={allLevel}
-          harnesses={harnessesInUse}
-          context={context}
-          onPick={(level) =>
-            pick(
-              dialRows.map((row) => row.agent.id),
-              level,
-            )
-          }
+      {/* Always mounted: a level tile stores for every agent while the rows are closed. */}
+      {dialRows.map((row) => (
+        <RowSave
+          key={row.agent.id}
+          row={row}
+          onSettle={settle}
+          write={write}
+          onReport={reportSave}
         />
-      ) : null}
-      <SetupCard
-        icon={<Gauge className="size-4" />}
-        title="Per agent"
-        description={
-          dialRows.length > 0 ? (
-            // Touch screens have no hover, so the price tooltip never opens there.
-            <>
-              <span className="[@media(hover:hover)_and_(pointer:fine)]:hidden">
-                Pick a level for one agent. Its row shows the model it runs.
-              </span>
-              <span className="hidden [@media(hover:hover)_and_(pointer:fine)]:inline">
-                Pick a level for one agent. Hover a level to see its model and price.
-              </span>
-            </>
-          ) : (
-            "These agents pick their own models. Skip this step."
-          )
-        }
-        bodyClassName="p-0"
-      >
-        <ul className="divide-y divide-border-subtle">
-          {rows.map((row) => (
-            <AgentModelRow
-              key={row.agent.id}
-              row={row}
-              context={context}
-              onPick={(level) => pick([row.agent.id], level)}
-              onSettle={settle}
-              write={write}
-            />
-          ))}
-        </ul>
-      </SetupCard>
+      ))}
+      {dialRows.length > 0 ? (
+        <>
+          <LevelTiles
+            value={allLevel}
+            harnesses={harnessesInUse}
+            context={context}
+            onPick={(level) =>
+              pick(
+                dialRows.map((row) => row.agent.id),
+                level,
+              )
+            }
+          />
+          <SetupCard
+            icon={<Gauge className="size-4" />}
+            title="Customize per agent"
+            description={summary.text}
+            status={
+              summary.tone === "none" ? undefined : (
+                <StatusIcon tone={summary.tone} focusable={false} label={summary.text} />
+              )
+            }
+            collapsible={{ open: customizing, onOpenChange: setCustomizing }}
+            bodyClassName="p-0"
+          >
+            {rowList}
+          </SetupCard>
+        </>
+      ) : (
+        <SetupCard
+          icon={<Gauge className="size-4" />}
+          title="Per agent"
+          description="These agents pick their own models. Skip this step."
+          bodyClassName="p-0"
+        >
+          {rowList}
+        </SetupCard>
+      )}
     </div>
   );
+}
+
+/**
+ * The save of one agent's pick, with no markup. It stays mounted while the
+ * per-agent rows are closed, so a level tile stores for every agent. The
+ * row shows what it reports.
+ */
+function RowSave({
+  row,
+  onSettle,
+  write,
+  onReport,
+}: {
+  row: Row;
+  onSettle: (agentId: string, nonce: number) => void;
+  write: (agentId: string, setting: DialSetting) => Promise<void>;
+  onReport: (agentId: string, save: SaveState | null) => void;
+}) {
+  const { agent, target, intent } = row;
+
+  useEffect(() => {
+    if (intent && row.applied) onSettle(agent.id, intent.nonce);
+  }, [intent, row.applied, onSettle, agent.id]);
+
+  // The value carries the pick nonce, so picking a level again retries a failed save.
+  const save = useAutosave({
+    value: target && intent ? JSON.stringify([intent.nonce, target]) : "",
+    dirty: target !== null && !row.applied,
+    ready: true,
+    delayMs: 150,
+    save: async (value) => {
+      const [, setting] = JSON.parse(value) as [unknown, DialSetting];
+      await write(agent.id, setting);
+    },
+  });
+
+  useEffect(() => {
+    onReport(agent.id, { phase: save.phase, error: save.error });
+  }, [onReport, agent.id, save.phase, save.error]);
+  useEffect(() => () => onReport(agent.id, null), [onReport, agent.id]);
+  return null;
 }
 
 /** Why a level has no model: the tiers still load, or its tier names no model for the harness. */
@@ -449,6 +566,38 @@ function noModelNote(context: DialContext): string {
   return context.tiers
     ? "No model is set for this level on this harness. Set its model tier on the Configuration page."
     : "Loading model tiers…";
+}
+
+/**
+ * The price per token of each level next to Cheap (Cheap is 1), from the list
+ * price of input plus output per 1M tokens, summed over the harnesses in use.
+ * `null` when a level has no model or no known price. Effort is not in it:
+ * two levels on one model (Codex Optimal and Max) show the same number.
+ */
+function relativeTokenPrices(
+  harnesses: DialHarness[],
+  context: DialContext,
+): Record<DialLevel, number> | null {
+  const totals = DIAL_LEVELS.map((level) => {
+    let total = 0;
+    for (const harness of harnesses) {
+      const setting = dialSetting(harness, level, context);
+      const price = setting ? dialPrice(setting, context.catalog) : null;
+      if (price?.input == null || price.output == null) return null;
+      total += price.input + price.output;
+    }
+    return total;
+  });
+  const [base] = totals;
+  if (!base || totals.some((total) => total === null)) return null;
+  return Object.fromEntries(
+    DIAL_LEVELS.map((level, i) => [level, (totals[i] as number) / base]),
+  ) as Record<DialLevel, number>;
+}
+
+/** "1x", "1.7x", "12x". */
+function formatRatio(ratio: number): string {
+  return `${ratio < 10 ? Number(ratio.toFixed(1)) : Math.round(ratio)}x`;
 }
 
 /** Cheap, Optimal (recommended), Max: one tile per level, applied to every agent. */
@@ -464,6 +613,8 @@ function LevelTiles({
   context: DialContext;
   onPick: (level: DialLevel) => void;
 }) {
+  // Visible on every tile: touch screens have no hover for the price tooltip.
+  const prices = relativeTokenPrices(harnesses, context);
   return (
     <fieldset className="grid gap-3 sm:grid-cols-3">
       <legend className="sr-only">Level for all agents</legend>
@@ -529,6 +680,14 @@ function LevelTiles({
                     </span>
                   )}
                 </span>
+                {prices ? (
+                  <span className="mt-auto text-xs text-muted-foreground">
+                    Price per token:{" "}
+                    <span className="font-mono tabular-nums text-foreground">
+                      {formatRatio(prices[level])}
+                    </span>
+                  </span>
+                ) : null}
               </button>
             </TooltipTrigger>
             <TooltipContent className="max-w-80">
@@ -557,48 +716,31 @@ function LevelTiles({
 
 function AgentModelRow({
   row,
+  save,
   context,
   onPick,
-  onSettle,
-  write,
 }: {
   row: Row;
+  /** What this agent's `RowSave` reported. */
+  save: SaveState | undefined;
   context: DialContext;
   onPick: (level: DialLevel) => void;
-  onSettle: (agentId: string, nonce: number) => void;
-  write: (agentId: string, setting: DialSetting) => Promise<void>;
 }) {
-  const { agent, harness, target, intent } = row;
-
-  useEffect(() => {
-    if (intent && row.applied) onSettle(agent.id, intent.nonce);
-  }, [intent, row.applied, onSettle, agent.id]);
-
-  // The value carries the pick nonce, so picking a level again retries a failed save.
-  const save = useAutosave({
-    value: target && intent ? JSON.stringify([intent.nonce, target]) : "",
-    dirty: target !== null && !row.applied,
-    ready: true,
-    delayMs: 150,
-    save: async (value) => {
-      const [, setting] = JSON.parse(value) as [unknown, DialSetting];
-      await write(agent.id, setting);
-    },
-  });
+  const { agent, harness } = row;
+  const phase = save?.phase ?? "idle";
 
   const harnessLabel = agent.harnessProvider
     ? (HARNESS_LABEL[agent.harnessProvider] ?? agent.harnessProvider)
     : "Unknown";
 
   let status: { tone: "busy" | "saved" | "dirty" | "error" | "none"; label?: string } | null;
-  if (save.phase === "pending" || save.phase === "saving")
-    status = { tone: "busy", label: "Saving…" };
-  else if (save.phase === "error") status = { tone: "error", label: save.error ?? "Not saved." };
+  if (phase === "pending" || phase === "saving") status = { tone: "busy", label: "Saving…" };
+  else if (phase === "error") status = { tone: "error", label: save?.error ?? "Not saved." };
   else if (row.loading) status = { tone: "busy", label: "Loading the current model…" };
   // `null`: the retry button takes the slot.
   else if (row.loadFailed) status = null;
   else if (row.notApplied) status = { tone: "dirty", label: NOT_APPLIED };
-  else if (save.phase === "saved") status = { tone: "saved", label: "Saved" };
+  else if (phase === "saved") status = { tone: "saved", label: SAVED_NOTE };
   else status = { tone: "none" };
 
   return (
@@ -608,7 +750,7 @@ function AgentModelRow({
           <SetupChip>{agent.isLead ? "Lead" : "Worker"}</SetupChip>
         </span>
         <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate font-mono text-xs">{agent.name}</span>
+          <span className="truncate text-sm font-medium">{agent.name}</span>
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <HarnessIcon harness={agent.harnessProvider} />
             {harnessLabel}

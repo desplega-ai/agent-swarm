@@ -17,6 +17,8 @@ import { useAutosave } from "@/hooks/use-autosave";
  *   needs 16 characters, and a value that is only the start of a known
  *   prefix ("gh", "gl") is still being typed.
  * - Neither: the format is unknown and needs 16 characters.
+ *
+ * Without `pattern`, a space or a line break inside the value fails at once.
  */
 export interface SecretRule {
   prefixes?: readonly string[];
@@ -78,13 +80,48 @@ export interface SecretCheck {
   problemNow: boolean;
 }
 
-export function checkSecret(raw: string, rule: SecretRule = {}): SecretCheck {
+/** A key never has a space or a line break inside. The field is masked, so the user cannot see one. */
+const SPACE_PROBLEM = "Remove the space or line break from the key.";
+
+/** The keys of a credential pool, as the server splits it: on commas, trimmed, blanks dropped. */
+function poolKeys(value: string): string[] {
+  return value
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Check a secret against its rule. `pool`: the value is a comma-separated
+ * credential pool, and every key in it must pass the rule.
+ */
+export function checkSecret(raw: string, rule: SecretRule = {}, pool = false): SecretCheck {
+  const keys = pool && !rule.pattern ? poolKeys(raw) : [];
+  if (keys.length < 2) return checkOneSecret(keys[0] ?? raw, rule);
+  for (const [index, key] of keys.entries()) {
+    const check = checkOneSecret(key, rule);
+    if (check.valid) continue;
+    // Only the last key can still be typed. A key before a comma is finished.
+    const last = index === keys.length - 1;
+    const problem = check.problem ?? (last ? null : (rule.hint ?? "Looks too short."));
+    return {
+      valid: false,
+      problem: problem && `Key ${index + 1}: ${problem}`,
+      problemNow: check.problemNow || !last,
+    };
+  }
+  return { valid: true, problem: null, problemNow: false };
+}
+
+function checkOneSecret(raw: string, rule: SecretRule): SecretCheck {
   const value = raw.trim();
   if (!value) return { valid: false, problem: null, problemNow: false };
   if (rule.pattern) {
+    // Multi-line formats (PEM keys) have line breaks inside.
     const ok = rule.pattern.test(value);
     return { valid: ok, problem: ok ? null : (rule.hint ?? null), problemNow: false };
   }
+  if (/\s/.test(value)) return { valid: false, problem: SPACE_PROBLEM, problemNow: true };
   const prefixes = rule.prefixes ?? [];
   if (prefixes.some((p) => value.startsWith(p))) {
     const long = value.length >= (rule.minLength ?? OTHER_FORMAT_MIN);
@@ -141,6 +178,8 @@ interface AutosaveSecretFieldProps {
   describedBy?: string;
   /** Textarea for multi-line secrets (PEM keys). No eye toggle. */
   multiline?: boolean;
+  /** A credential pool: comma-separated keys, each checked against `rule`. */
+  pool?: boolean;
 }
 
 /**
@@ -160,18 +199,22 @@ export function AutosaveSecretField({
   disabled,
   describedBy,
   multiline,
+  pool,
 }: AutosaveSecretFieldProps) {
   const [draft, setDraft] = useState("");
   const [replacing, setReplacing] = useState(false);
   const [focused, setFocused] = useState(false);
   const [blurred, setBlurred] = useState(false);
+  // Keys in the pool this field stored. The API never returns the value, so
+  // the count is known only after a save in this view.
+  const [savedKeys, setSavedKeys] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const replaceRef = useRef<HTMLButtonElement>(null);
   // Where focus goes after the next render, so switching views never drops it.
   const focusNext = useRef<"field" | "replace" | null>(null);
   const value = draft.trim();
-  const check = checkSecret(value, rule);
+  const check = checkSecret(value, rule, pool);
 
   const autosave = useAutosave({
     value,
@@ -181,6 +224,7 @@ export function AutosaveSecretField({
     readyOnCommit: check.valid,
     save: async (next) => {
       await onSave(next);
+      if (pool) setSavedKeys(poolKeys(next).length);
       // Typing that came after this value stays in the field.
       setDraft((current) => (current.trim() === next ? "" : current));
       setReplacing(false);
@@ -229,6 +273,11 @@ export function AutosaveSecretField({
             className="bg-muted/40 pr-8 font-mono text-muted-foreground"
           />
         </WithIndicator>
+        {savedKeys > 1 ? (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            <span className="font-mono tabular-nums">{savedKeys}</span> keys
+          </span>
+        ) : null}
         <Button
           ref={replaceRef}
           type="button"

@@ -3,20 +3,13 @@ import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";
-import { type AiCardId, type AiCardProps, CARD_HARNESSES } from "./model";
+import { type AiCardId, type AiCardProps, CARD_HARNESSES, harnessNames } from "./model";
 import { WaitingPanel } from "./waiting";
-
-/** "Codex" for one harness, "Pi-Mono, Opencode, or DeepSeek (dsh)" for several. */
-function harnessPhrase(card: AiCardId): string {
-  const names = CARD_HARNESSES[card].map((h) => HARNESS_LABEL[h] ?? h);
-  if (names.length === 1) return names[0];
-  return `${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}`;
-}
 
 /**
  * Accordion card shared by the four providers: status icon, the card's form,
- * then the waiting line once a key is saved, then the R2 harness switch
- * whenever no worker runs the card's harness.
+ * then the waiting line once a key is saved, then the R2 harness switch once
+ * a key is saved and no worker runs the card's harness.
  */
 export function ProviderCard({
   card,
@@ -65,7 +58,7 @@ export function ProviderCard({
     <StatusIcon
       tone="warning"
       focusable={false}
-      label={`Saved. No worker runs ${harnessPhrase(card)} yet.`}
+      label={`Saved. No worker runs ${harnessNames(card)} yet.`}
     />
   ) : saved ? (
     <StatusIcon
@@ -91,10 +84,11 @@ export function ProviderCard({
       {saved || rollup.verified ? (
         <WaitingPanel rollup={rollup} harnessLabel={waitingLabel} />
       ) : null}
-      {/* A key only verifies on a worker that runs this harness. */}
-      {noWorker ? (
+      {/* A key only verifies on a worker that runs this harness. Before a key
+          is saved, the agent list would only push the form down. */}
+      {saved && noWorker ? (
         <HarnessSwitch
-          harnessPhrase={harnessPhrase(card)}
+          harnessPhrase={harnessNames(card)}
           targets={harnesses}
           agents={agents}
           dialContext={dialContext}

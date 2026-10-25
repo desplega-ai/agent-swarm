@@ -27,10 +27,12 @@ export function DevinCard({ presence, configs, onSaved, ...card }: AiCardProps) 
       <div className="grid gap-3 sm:grid-cols-2">
         <SecretKeyField
           id="setup-ai-devin-key"
+          label="Devin API key"
           envKey={API_KEY}
           placeholder="cog_..."
           saved={keySaved}
           rule={KEY_RULES.devin}
+          pool
           info="Service user key or personal access token from app.devin.ai."
           onSave={async (value) => {
             await save([{ key: API_KEY, value, isSecret: true }]);
@@ -39,6 +41,7 @@ export function DevinCard({ presence, configs, onSaved, ...card }: AiCardProps) 
         />
         <TextField
           id="setup-ai-devin-org"
+          label="Devin organization ID"
           envKey={ORG_ID}
           placeholder="org_..."
           baseline={currentOrg}
