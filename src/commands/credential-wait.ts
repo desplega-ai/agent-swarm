@@ -12,7 +12,7 @@
  *   3. Re-checks; if ready, returns.
  *   4. Logs a `[boot] waiting for …` line and invokes `onTick(status)` so
  *      callers can report state to the API.
- *   5. Sleeps with exponential backoff (2s → 30s, cap configurable).
+ *   5. Sleeps with exponential backoff (2s to 10s, cap configurable).
  *   6. If `BOOT_MAX_WAIT_SECONDS` is set and exceeded, throws a
  *      `BootMaxWaitExceededError` so the runner can exit with a distinct
  *      code. Default 0 = wait forever.
@@ -96,7 +96,7 @@ function resolveBackoff(
   };
   return {
     initialMs: override?.initialMs ?? parsePositive(env.BOOT_INITIAL_BACKOFF_MS, 2000),
-    maxMs: override?.maxMs ?? parsePositive(env.BOOT_MAX_BACKOFF_MS, 30000),
+    maxMs: override?.maxMs ?? parsePositive(env.BOOT_MAX_BACKOFF_MS, 10000),
     // 0 = wait forever — the runner can override with a finite ceiling per
     // worker if monitoring wants a "config never arrived" signal.
     maxWaitSeconds: override?.maxWaitSeconds ?? parsePositive(env.BOOT_MAX_WAIT_SECONDS, 0),

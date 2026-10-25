@@ -11742,6 +11742,8 @@ export interface ApiKeyStatus {
   /** Auth failures in a row since the last success or clear. */
   consecutiveAuthFailures: number;
   lastAuthFailureAt: string | null;
+  lastValidationError: string | null;
+  lastValidationFailedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -11767,6 +11769,7 @@ function rowToApiKeyStatus(row: ApiKeyStatusRow): ApiKeyStatus {
 
 export interface AvailableKeyIndicesResult {
   availableIndices: number[];
+  rejectedIndices: number[];
   /** Indices excluded only by an active model-scoped window block (not key-wide). */
   modelBlockedIndices: number[];
   /** ISO of the earliest resetsAt among modelBlockedIndices, or null when none. */
@@ -11815,8 +11818,9 @@ export async function getAvailableKeyIndices(
     rateLimitWindows: string | null;
     plan: string | null;
     authFailureSeq: number;
+    lastValidationFailedAt: string | null;
   }>(
-    `SELECT keyIndex, status, rateLimitWindows, plan, authFailureSeq FROM api_key_status
+    `SELECT keyIndex, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
        WHERE keyType = ? AND scope = ? AND scopeId = ?`,
     [keyType, scope, effectiveScopeId],
   );
@@ -11824,6 +11828,12 @@ export async function getAvailableKeyIndices(
   const blockedIndices = new Set(
     rows.filter((r) => r.status === "rate_limited").map((r) => r.keyIndex),
   );
+  const rejectedIndices = [
+    ...new Set(
+      rows.filter((row) => row.lastValidationFailedAt !== null).map((row) => row.keyIndex),
+    ),
+  ];
+  for (const index of rejectedIndices) blockedIndices.add(index);
 
   const modelBlockedIndices: number[] = [];
   let earliestModelResetsAtSec: number | undefined;
@@ -11866,6 +11876,7 @@ export async function getAvailableKeyIndices(
 
   return {
     availableIndices,
+    rejectedIndices,
     modelBlockedIndices,
     seatBlockedIndices,
     earliestModelResetAt:
@@ -11991,6 +12002,56 @@ export interface KeyAuthFailureResult {
   consecutiveAuthFailures: number;
   benched: boolean;
   rateLimitedUntil: string | null;
+}
+
+/** Store definitive live-test results and retire rejections for removed pool members. */
+export async function recordKeyValidation(
+  keyType: string,
+  keys: Array<{
+    keyIndex: number;
+    keySuffix: string;
+    ok: boolean;
+    httpStatus?: number;
+    error?: string;
+  }>,
+  scope = "global",
+  scopeId: string | null = null,
+): Promise<void> {
+  const effectiveScopeId = scopeId ?? "";
+  const provider = deriveProviderFromKeyType(keyType);
+  await getDbClient().transaction(async (tx) => {
+    const now = new Date().toISOString();
+    for (const key of keys) {
+      if (!key.ok && key.httpStatus !== 401 && key.httpStatus !== 403) continue;
+      await tx.run(
+        `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastValidationError, lastValidationFailedAt, provider, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(keyType, keySuffix, scope, scopeId)
+         DO UPDATE SET lastValidationError = excluded.lastValidationError,
+           lastValidationFailedAt = excluded.lastValidationFailedAt,
+           keyIndex = excluded.keyIndex, updatedAt = excluded.updatedAt`,
+        [
+          keyType,
+          key.keySuffix,
+          key.keyIndex,
+          scope,
+          effectiveScopeId,
+          key.ok ? null : `HTTP ${key.httpStatus}`,
+          key.ok ? null : now,
+          provider,
+          now,
+        ],
+      );
+    }
+    const placeholders = keys.map(() => "?").join(", ");
+    await tx.run(
+      `UPDATE api_key_status SET lastValidationError = NULL, lastValidationFailedAt = NULL, updatedAt = ?
+       WHERE keyType = ? AND scope = ? AND scopeId = ?
+         ${keys.length ? `AND keySuffix NOT IN (${placeholders})` : ""}
+         AND lastValidationFailedAt IS NOT NULL`,
+      [now, keyType, scope, effectiveScopeId, ...keys.map((key) => key.keySuffix)],
+    );
+  });
 }
 
 /** Count an auth failure, ordered by `authFailureSeq`; at the threshold, bench (extend only). */

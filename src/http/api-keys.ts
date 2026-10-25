@@ -10,6 +10,7 @@ import {
   recordKeyRateLimitWindows,
   recordKeySeatMismatch,
   recordKeyUsage,
+  recordKeyValidation,
   setApiKeyName,
   setApiKeyPlan,
 } from "../be/db";
@@ -77,6 +78,39 @@ const reportRateLimit = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+});
+
+const reportValidation = route({
+  method: "post",
+  path: "/api/keys/report-validation",
+  pattern: ["api", "keys", "report-validation"],
+  summary: "Record live validation results for a credential pool",
+  tags: ["API Keys"],
+  body: z.object({
+    keyType: z.string(),
+    keys: z
+      .array(
+        z.object({
+          keyIndex: z.number().int().min(0),
+          keySuffix: z.string().min(1).max(10),
+          ok: z.boolean(),
+          httpStatus: z.number().int().optional(),
+        }),
+      )
+      .min(1)
+      .max(100),
+    scope: z.string().optional(),
+    scopeId: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Validation recorded", schema: successMessageSchema },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+  rbac: {
+    ungated: "worker credential telemetry, same posture as POST /api/keys/report-rate-limit",
+  },
 });
 
 const reportAuthFailure = route({
@@ -223,6 +257,7 @@ const getAvailable = route({
       schema: z.object({
         success: z.literal(true),
         availableIndices: z.array(z.number().int()),
+        rejectedIndices: z.array(z.number().int()).optional(),
         totalKeys: z.number().int(),
         /** Indices excluded only by an active model-scoped window block. Present only when `model` was passed. */
         modelBlockedIndices: z.array(z.number().int()).optional(),
@@ -273,6 +308,8 @@ const ApiKeyStatusSchema = z.object({
   /** Auth failures in a row since the last success or clear. */
   consecutiveAuthFailures: z.number().int(),
   lastAuthFailureAt: z.string().nullable(),
+  lastValidationError: z.string().nullable(),
+  lastValidationFailedAt: z.string().nullable(),
   /** Derived, readable view of any rejected model-scoped window (Fable/Opus/Sonnet) on this key. */
   modelLimits: z.array(
     z.object({
@@ -555,6 +592,21 @@ export async function handleApiKeys(
     return true;
   }
 
+  // POST /api/keys/report-validation
+  if (reportValidation.match(req.method, pathSegments)) {
+    const parsed = await reportValidation.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { keyType, keys, scope, scopeId } = parsed.body;
+    try {
+      await recordKeyValidation(keyType, keys, scope, scopeId ?? null);
+      reportValidation.respond(res, 200, { success: true, message: "Key validation recorded" });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to record key validation", 500);
+    }
+    return true;
+  }
+
   // POST /api/keys/report-auth-failure
   if (reportAuthFailure.match(req.method, pathSegments)) {
     const parsed = await reportAuthFailure.parse(req, res, pathSegments, queryParams);
@@ -650,6 +702,7 @@ export async function handleApiKeys(
       getAvailable.respond(res, 200, {
         success: true,
         availableIndices: result.availableIndices,
+        rejectedIndices: result.rejectedIndices,
         totalKeys,
         authFailureFence: result.authFailureFence,
         ...(model !== undefined

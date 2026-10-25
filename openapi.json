@@ -18273,6 +18273,120 @@
         }
       }
     },
+    "/api/keys/report-validation": {
+      "post": {
+        "summary": "Record live validation results for a credential pool",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "keyIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "keySuffix": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 10
+                        },
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "httpStatus": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "keyIndex",
+                        "keySuffix",
+                        "ok"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keys"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keys/report-auth-failure": {
       "post": {
         "summary": "Record an auth failure for a pooled key; bench it after 2 in a row",
@@ -18692,6 +18806,12 @@
                         "type": "integer"
                       }
                     },
+                    "rejectedIndices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
                     "totalKeys": {
                       "type": "integer"
                     },
@@ -18933,6 +19053,18 @@
                               "null"
                             ]
                           },
+                          "lastValidationError": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "lastValidationFailedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "modelLimits": {
                             "type": "array",
                             "items": {
@@ -18992,6 +19124,8 @@
                           "lastSeatMismatchModel",
                           "consecutiveAuthFailures",
                           "lastAuthFailureAt",
+                          "lastValidationError",
+                          "lastValidationFailedAt",
                           "modelLimits",
                           "createdAt",
                           "updatedAt"

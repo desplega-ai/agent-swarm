@@ -380,6 +380,7 @@ export function validateOpencodeCredentials(
 /** Per-pool availability, including the model-scoped block breakdown when a model was requested. */
 export interface AvailabilityInfo {
   availableIndices: number[];
+  rejectedIndices?: number[];
   modelBlockedIndices?: number[];
   earliestModelResetAt?: string | null;
   /** Indices excluded because the key's subscription plan cannot run the model. */
@@ -414,12 +415,14 @@ async function fetchAvailableIndices(
         if (resp.ok) {
           const data = (await resp.json()) as {
             availableIndices: number[];
+            rejectedIndices?: number[];
             modelBlockedIndices?: number[];
             earliestModelResetAt?: string | null;
             seatBlockedIndices?: number[];
           };
           availableIndicesMap[envVar] = {
             availableIndices: data.availableIndices,
+            rejectedIndices: data.rejectedIndices,
             modelBlockedIndices: data.modelBlockedIndices,
             earliestModelResetAt: data.earliestModelResetAt,
             seatBlockedIndices: data.seatBlockedIndices,
@@ -558,7 +561,7 @@ export async function resolveCredentialPools(
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(
-        `[credentials] Selected ${envVar} credential ${result.index + 1}/${result.total}${availInfo} [...${result.keySuffix}]`,
+        `[credentials] Selected ${envVar} credential ${result.index + 1}/${result.total}${availInfo} [...${result.keySuffix}]${info?.rejectedIndices?.length ? ` (${info.rejectedIndices.length} rejected)` : ""}`,
       );
       selections.push({
         ...result,

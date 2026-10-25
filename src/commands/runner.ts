@@ -118,7 +118,12 @@ import {
   prependContextPreamble,
 } from "./context-preamble.ts";
 import { reportCredentialOutcomeThenFinish } from "./credential-outcome-report.ts";
-import { type CredentialRefreshState, refreshCredentialStatus } from "./credential-refresh.ts";
+import {
+  type CredentialRefreshState,
+  credentialFingerprint,
+  refreshCredentialStatus,
+  reportKeyValidation,
+} from "./credential-refresh.ts";
 import {
   awaitCredentials,
   BootMaxWaitExceededError,
@@ -831,6 +836,8 @@ export async function exitAfterTasksIfFinished(
  */
 export interface ResolvedEnvResult {
   env: Record<string, string | undefined>;
+  /** Full credential pools for live validation. Keep this environment in process only. */
+  credentialEnv: Record<string, string | undefined>;
   credentialSelections: CredentialSelection[];
   /** Raw config-row value, kept separate from the merged environment so an
    * actual worker environment variable retains precedence. */
@@ -1049,6 +1056,7 @@ export async function fetchResolvedEnv(
   });
   const effectiveModel = modelSelection.model || (env.MODEL_OVERRIDE as string | undefined) || "";
 
+  const credentialEnv = { ...env };
   const credentialSelections = await resolveCredentialPools(env, {
     apiUrl,
     apiKey,
@@ -1065,7 +1073,7 @@ export async function fetchResolvedEnv(
     enforceModelCapacity: sessionContext?.enforceModelCapacity,
   });
 
-  return { env, credentialSelections, resolvedProvider, scriptsOnlyConfigValue };
+  return { env, credentialEnv, credentialSelections, resolvedProvider, scriptsOnlyConfigValue };
 }
 
 /**
@@ -6019,7 +6027,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     ready: null,
     lastRefreshAt: 0,
     inFlight: false,
+    fingerprint: null,
+    rejectedKeys: 0,
   };
+  let latestCredentialEnv: Record<string, string | undefined> | undefined;
 
   // Throttle for live HARNESS_PROVIDER reconciliation. Each reconciliation
   // calls `fetchResolvedEnv` which also re-resolves credential pools — we
@@ -6413,6 +6424,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       credentialRefreshState.harnessProvider = state.harnessProvider;
       credentialRefreshState.ready = bootCredSnapshot?.ready ?? true;
       credentialRefreshState.lastRefreshAt = Date.now();
+      credentialRefreshState.fingerprint = credentialFingerprint(process.env);
+      const keys = bootCredSnapshot?.liveTest?.keys;
+      credentialRefreshState.rejectedKeys = keys?.length
+        ? keys.filter((key) => !key.ok).length
+        : bootCredSnapshot?.liveTest?.ok === false
+          ? 1
+          : 0;
+      if (keys?.length) await reportKeyValidation(apiConfig, keys);
     } catch (error) {
       console.error(`[${role}] Failed to report credential readiness after recovery: ${error}`);
       process.exit(1);
@@ -7015,9 +7034,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       try {
         const {
           env: freshEnv,
+          credentialEnv,
           resolvedProvider,
           scriptsOnlyConfigValue,
         } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
+        latestCredentialEnv = credentialEnv;
         const nextScriptsOnly = resolveScriptsOnlyMode({
           env: process.env.SCRIPTS_ONLY_MCP,
           configValue: scriptsOnlyConfigValue,
@@ -7049,7 +7070,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       apiConfig,
       credentialRefreshState,
       state.harnessProvider,
-      process.env,
+      latestCredentialEnv ?? process.env,
     ).catch((err) =>
       console.warn(`[${role}] cred_status post_task refresh failed (non-fatal): ${err}`),
     );

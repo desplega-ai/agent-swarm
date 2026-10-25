@@ -6057,6 +6057,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keys/report-validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record live validation results for a credential pool */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keys: {
+                            keyIndex: number;
+                            keySuffix: string;
+                            ok: boolean;
+                            httpStatus?: number;
+                        }[];
+                        scope?: string;
+                        scopeId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Validation recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            message: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys/report-auth-failure": {
         parameters: {
             query?: never;
@@ -6311,6 +6383,7 @@ export interface paths {
                             /** @enum {boolean} */
                             success: true;
                             availableIndices: number[];
+                            rejectedIndices?: number[];
                             totalKeys: number;
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
@@ -6410,6 +6483,8 @@ export interface paths {
                                 lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
                                 lastAuthFailureAt: string | null;
+                                lastValidationError: string | null;
+                                lastValidationFailedAt: string | null;
                                 modelLimits: {
                                     model: string;
                                     window: string;
