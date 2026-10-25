@@ -1,11 +1,11 @@
-// Integrations catalog — single source of truth for the Integrations UI.
+// Integrations catalog: single source of truth for the Integrations UI.
 //
 // Each `IntegrationDef` describes a third-party integration: its human-facing
 // metadata, the `swarm_config` global rows it maps to, and any special flow
 // (Linear OAuth, Codex CLI) that needs custom UI.
 //
 // Reserved keys (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) are intentionally NOT
-// listed here — they're rejected server-side by `swarm-config-guard.ts` and
+// listed here: they're rejected server-side by `swarm-config-guard.ts` and
 // must never be stored in `swarm_config`.
 //
 // See plan: thoughts/taras/plans/2026-04-21-integrations-ui.md (Phase 1).
@@ -36,7 +36,11 @@ export interface IntegrationField {
   /** Collapsed under "Advanced" by default. */
   advanced?: boolean;
   default?: string;
-  /** Comma-separated list hint (credential pool). */
+  /**
+   * A credential pool (`CREDENTIAL_POOL_VARS` on the API). The field renders
+   * `PoolKeysList`, which adds and removes one key at a time, outside the
+   * page Save and Clear.
+   */
   credentialPool?: boolean;
   /** Shows restart hint when true. */
   affectsRestart?: boolean;
@@ -52,6 +56,7 @@ export interface IntegrationField {
 export interface IntegrationAlternative {
   id: string;
   label: string;
+  /** Config keys. A key that ends with `*` matches every global key with that prefix. */
   keys: string[];
 }
 
@@ -97,7 +102,7 @@ export type AgentRole = "lead" | "worker";
 export type SkillSource = "swarm-registry" | "template";
 
 export interface RecommendedSkill {
-  /** Canonical name — matches the `name` column in the swarm skills registry. */
+  /** Canonical name: matches the `name` column in the swarm skills registry. */
   name: string;
   /** Where this skill lives (see {@link SkillSource}). */
   source: SkillSource;
@@ -119,7 +124,7 @@ export interface RecommendedSkill {
   templatePath?: string;
   /**
    * When true, the skill is automatically installed (via `skill-install-remote`)
-   * as part of integration setup — the operator doesn't need to visit
+   * as part of integration setup, so the operator doesn't need to visit
    * /settings/skills to install it manually.
    * Only meaningful when `source === 'template'` and `templateRepo` is set.
    */
@@ -158,7 +163,7 @@ export interface IntegrationDef {
   specialFlow?: IntegrationSpecialFlow;
   /**
    * Skills recommended alongside this integration. Env-var configuration is
-   * not always enough — some integrations depend on procedural knowledge (a
+   * not always enough: some integrations depend on procedural knowledge (a
    * skill) installed on a specific agent role. Each entry declares where the
    * skill lives so the operator knows how to get it.
    */
@@ -197,7 +202,7 @@ export function getPresenceKeys(def: IntegrationDef): string[] {
     for (const alias of field.aliasKeys ?? []) keys.add(alias);
   }
   for (const alternative of def.alternatives ?? []) {
-    for (const key of alternative.keys) keys.add(key);
+    for (const key of alternative.keys) if (!key.endsWith("*")) keys.add(key);
   }
   for (const key of def.presenceKeys ?? []) keys.add(key);
   if (def.disableKey) keys.add(def.disableKey);
@@ -253,7 +258,7 @@ function openAICompatibleIntegrations(): IntegrationDef[] {
           placeholder: "sk-...",
           helpText: `${p.displayName} API key for \`${p.id}/<model>\` on pi and opencode.${aliases}${
             p.keyNote ? ` ${p.keyNote}` : ""
-          } Comma-separate multiple keys to form a credential pool.`,
+          } Add one key at a time. Agents rotate across the keys.`,
           credentialPool: true,
           aliasKeys: [...p.aliasEnvVars],
         },
@@ -281,7 +286,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
   {
     id: "slack",
     name: "Slack",
-    description: "Chat with the swarm from Slack — assign tasks, get alerts, follow-up in threads.",
+    description: "Chat with the swarm from Slack: assign tasks, get alerts, follow-up in threads.",
     category: "comm",
     iconKey: "message-square",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/slack",
@@ -381,7 +386,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     id: "kapso",
     name: "Kapso (WhatsApp)",
     description:
-      "Chat with the swarm over WhatsApp via Kapso — inbound messages become tasks, agents reply in-thread.",
+      "Chat with the swarm over WhatsApp via Kapso: inbound messages become tasks, agents reply in-thread.",
     category: "comm",
     iconKey: "message-circle",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/kapso",
@@ -496,7 +501,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         type: "password",
         required: true,
         isSecret: true,
-        helpText: "Secret configured on your GitHub webhook — verifies incoming payloads.",
+        helpText: "Secret configured on your GitHub webhook. Verifies incoming payloads.",
         affectsRestart: true,
       },
       {
@@ -590,7 +595,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         type: "password",
         required: true,
         isSecret: true,
-        helpText: "Secret configured on your GitLab webhook — verifies incoming payloads.",
+        helpText: "Secret configured on your GitLab webhook. Verifies incoming payloads.",
         affectsRestart: true,
       },
       {
@@ -1017,7 +1022,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         isSecret: true,
         placeholder: "sk-ant-oat01-...",
         helpText:
-          "Run `claude setup-token` (Claude Code CLI) to generate. Takes precedence over ANTHROPIC_API_KEY when both are set. Comma-separate multiple tokens to form a credential pool.",
+          "Run `claude setup-token` (Claude Code CLI) to generate. Takes precedence over ANTHROPIC_API_KEY when both are set. Add one token at a time. Agents rotate across the tokens.",
         credentialPool: true,
         affectsRestart: true,
       },
@@ -1028,7 +1033,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         isSecret: true,
         placeholder: "sk-ant-...",
         helpText:
-          "Anthropic API key. Used when no Claude Code OAuth token is set. Comma-separate multiple keys to form a credential pool.",
+          "Anthropic API key. Used when no Claude Code OAuth token is set. Add one key at a time. Agents rotate across the keys.",
         credentialPool: true,
         affectsRestart: true,
       },
@@ -1052,7 +1057,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         required: true,
         isSecret: true,
         placeholder: "sk-or-...",
-        helpText: "OpenRouter API key. Comma-separate multiple keys to form a credential pool.",
+        helpText: "OpenRouter API key. Add one key at a time. Agents rotate across the keys.",
         credentialPool: true,
         affectsRestart: true,
       },
@@ -1393,15 +1398,18 @@ export const INTEGRATIONS: IntegrationDef[] = [
     id: "codex-oauth",
     name: "Codex (ChatGPT OAuth)",
     description:
-      "Authenticate codex workers with your ChatGPT account. Requires a CLI step — cannot be configured from the UI.",
+      "Authenticate codex workers with your ChatGPT accounts. Sign in with the codex-login CLI command.",
     category: "llm",
     iconKey: "key-round",
     docsUrl: "https://docs.agent-swarm.dev/docs/guides/provider-auth/codex-oauth",
     specialFlow: "codex-cli",
     restartRequired: true,
     fields: [],
-    // The OAuth flow stores its credentials as a global `codex_oauth` row.
-    alternatives: [{ id: "oauth", label: "ChatGPT OAuth", keys: ["codex_oauth"] }],
+    // Each sign-in stores a global `codex_oauth_<n>` row. `codex_oauth` is the legacy slot 0.
+    alternatives: [
+      { id: "oauth", label: "ChatGPT OAuth", keys: ["codex_oauth_*"] },
+      { id: "legacy", label: "ChatGPT OAuth (legacy row)", keys: ["codex_oauth"] },
+    ],
   },
 
   // -------------------------------------------------- Claude Managed Agents

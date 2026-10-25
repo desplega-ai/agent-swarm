@@ -8,6 +8,7 @@ import {
 import { toast } from "sonner";
 import { api } from "../client";
 import type { SwarmConfig, SwarmConfigsResponse } from "../types";
+import { POOL_KEYS_QUERY_KEY } from "./use-pool-keys";
 
 export interface ConfigFilters {
   scope?: string;
@@ -102,14 +103,14 @@ export function useDeleteConfig() {
 }
 
 // ---------------------------------------------------------------------------
-// Batch helpers — used by the Integrations UI (Phase 3).
+// Batch helpers, used by the Integrations UI (Phase 3).
 //
 // The `/api/config` endpoint has no bulk route, so these hooks fire sequential
 // HTTP requests and aggregate results into a single toast. Query invalidation
 // happens once on completion to avoid thrashing the list.
 //
 // Reserved keys (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) are filtered out as
-// defense-in-depth — the server rejects them with 400 (see
+// defense-in-depth: the server rejects them with 400 (see
 // `src/be/swarm-config-guard.ts`), but filtering client-side keeps the UX
 // clean when a catalog entry is accidentally mis-typed during development.
 // ---------------------------------------------------------------------------
@@ -147,7 +148,7 @@ export function useUpsertConfigsBatch() {
       for (const entry of entries) {
         if (isReservedKey(entry.key)) {
           console.warn(
-            `[useUpsertConfigsBatch] skipping reserved key "${entry.key}" — rejected by server`,
+            `[useUpsertConfigsBatch] skipping reserved key "${entry.key}" (rejected by server)`,
           );
           continue;
         }
@@ -186,6 +187,8 @@ export function useUpsertConfigsBatch() {
     },
     onSettled: (result) => {
       queryClient.invalidateQueries({ queryKey: ["configs"] });
+      // A write can change a credential pool (Reset integration deletes its row).
+      queryClient.invalidateQueries({ queryKey: POOL_KEYS_QUERY_KEY });
       if (!result) return;
       if (result.failureCount === 0) {
         toast.success(`Saved ${result.successCount} value${result.successCount === 1 ? "" : "s"}`);
@@ -198,7 +201,7 @@ export function useUpsertConfigsBatch() {
 }
 
 export interface DeleteConfigsBatchInput {
-  /** Current configs from the cache — used to look up row ids by key+scope. */
+  /** Current configs from the cache, used to look up row ids by key+scope. */
   configs: SwarmConfig[];
   /** Keys to delete (scope="global" rows only by default). */
   keys: string[];
@@ -215,7 +218,7 @@ export function useDeleteConfigsBatch() {
       for (const key of keys) {
         if (isReservedKey(key)) {
           console.warn(
-            `[useDeleteConfigsBatch] skipping reserved key "${key}" — rejected by server`,
+            `[useDeleteConfigsBatch] skipping reserved key "${key}" (rejected by server)`,
           );
           continue;
         }
@@ -248,6 +251,8 @@ export function useDeleteConfigsBatch() {
     },
     onSettled: (result) => {
       queryClient.invalidateQueries({ queryKey: ["configs"] });
+      // A write can change a credential pool (Reset integration deletes its row).
+      queryClient.invalidateQueries({ queryKey: POOL_KEYS_QUERY_KEY });
       if (!result) return;
       if (result.successCount === 0 && result.failureCount === 0) {
         toast.info("Nothing to delete");

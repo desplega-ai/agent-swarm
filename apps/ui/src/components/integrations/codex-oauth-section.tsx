@@ -1,32 +1,23 @@
-import { AlertCircle, Check, Copy, Terminal, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { useConfigs, useDeleteConfigsBatch } from "@/api/hooks/use-config-api";
-import { OAuthSection, OAuthStatusRow } from "@/components/shared/oauth-section";
+import { AlertCircle, Check, Copy, Terminal } from "lucide-react";
+import { useConfigs } from "@/api/hooks/use-config-api";
+import { CodexAccountsList } from "@/components/onboarding/codex-accounts-list";
+import { OAuthSection, OAuthSectionRow, OAuthStatusRow } from "@/components/shared/oauth-section";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { getConfig } from "@/lib/config";
 
 // ---------------------------------------------------------------------------
-// Codex ChatGPT OAuth section — the entire flow happens on the user's laptop,
-// not the browser. We surface:
+// Codex ChatGPT OAuth section. The sign-in runs on the user's laptop, not in
+// the browser. We surface:
 //   1. An explainer
 //   2. A copyable `codex-login` snippet auto-filled with the current API URL
-//   3. Status derived from presence of the `codex_oauth` global config row
-//   4. A "Clear stored OAuth" button (confirm dialog) that deletes that row
+//   3. Status derived from the global `codex_oauth` / `codex_oauth_<n>` rows
+//   4. The stored ChatGPT accounts, each with Remove (`CodexAccountsList`)
 // ---------------------------------------------------------------------------
 
-const CODEX_OAUTH_KEY = "codex_oauth";
+/** Global rows the CLI and the device flow write (`codex_oauth` is the legacy slot 0). */
+const CODEX_SLOT_KEY = /^codex_oauth(_\d+)?$/i;
 
 function resolveApiUrl(): string {
   // Prefer the configured API URL so the snippet works in multi-connection setups.
@@ -42,21 +33,12 @@ export function CodexOAuthSection() {
   const snippet = `npx @desplega.ai/agent-swarm codex-login --api-url ${apiUrl}`;
 
   const { data: configs, isLoading } = useConfigs({ scope: "global" });
-  const deleteBatch = useDeleteConfigsBatch();
 
   const { copied, copy } = useCopyToClipboard();
-  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
-  const codexRow = configs?.find((c) => c.key === CODEX_OAUTH_KEY && c.scope === "global");
-  const isConfigured = !!codexRow;
+  const isConfigured = !!configs?.some((c) => c.scope === "global" && CODEX_SLOT_KEY.test(c.key));
 
   const handleCopy = () => copy(snippet);
-
-  function handleClear() {
-    if (!configs) return;
-    deleteBatch.mutate({ configs, keys: [CODEX_OAUTH_KEY] });
-    setConfirmClearOpen(false);
-  }
 
   return (
     <div className="space-y-6">
@@ -64,10 +46,9 @@ export function CodexOAuthSection() {
       <Alert>
         <Terminal className="h-4 w-4" />
         <AlertDescription>
-          Codex ChatGPT OAuth must be completed from your local terminal — it cannot be done from
-          this UI. Run the command below on your laptop; the CLI walks you through the browser
-          consent flow and then uploads the resulting credentials to this swarm's encrypted config
-          store.
+          Run the command below on your laptop. The CLI walks you through the browser consent flow,
+          then uploads the credentials to this swarm's encrypted config store. Each sign-in adds one
+          ChatGPT account.
         </AlertDescription>
       </Alert>
 
@@ -118,22 +99,11 @@ export function CodexOAuthSection() {
                 "Run the command above from your laptop to store Codex OAuth credentials."
               )
             }
-            actions={
-              isConfigured ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive-outline"
-                  onClick={() => setConfirmClearOpen(true)}
-                  disabled={deleteBatch.isPending}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Clear stored OAuth
-                </Button>
-              ) : null
-            }
           />
         )}
+        <OAuthSectionRow>
+          <CodexAccountsList />
+        </OAuthSectionRow>
       </OAuthSection>
 
       {/* Non-ideal edge: if we can't list configs at all, warn. */}
@@ -145,26 +115,6 @@ export function CodexOAuthSection() {
           </AlertDescription>
         </Alert>
       )}
-
-      {/* Confirm clear dialog */}
-      <AlertDialog open={confirmClearOpen} onOpenChange={setConfirmClearOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Clear stored Codex OAuth?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This deletes the <code className="font-mono">codex_oauth</code> row from the global
-              config. Codex workers will lose ChatGPT-based access until you re-run{" "}
-              <code className="font-mono">codex-login</code> from your laptop.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={handleClear}>
-              Clear
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

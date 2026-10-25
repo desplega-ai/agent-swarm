@@ -4080,6 +4080,70 @@ export interface CodexDevicePollResponse {
   error?: string;
 }
 
+// ─── Credential pool keys (`/api/config/pool-keys`) ─────────────────────────
+
+/** From the global `api_key_status` row of the key (same `keyType` and `keySuffix`). */
+export type PoolKeyStatus = "ok" | "rejected" | "rate_limited" | "unchecked";
+
+/** One key of a stored credential pool. Only the suffix leaves the server. */
+export interface PoolKey {
+  /** Position in the stored pool, 0-based. */
+  index: number;
+  /** The last 5 characters, the same as `api_key_status.keySuffix`. */
+  suffix: string;
+  status: PoolKeyStatus;
+  /** The last validation error when `rejected`, else null. */
+  error: string | null;
+  checkedAt: string | null;
+  rateLimitedUntil: string | null;
+}
+
+export interface PoolKeysResponse {
+  /** The env var name. */
+  key: string;
+  /** `stored`: a global swarm_config row. `env`: the deployment env only. */
+  source: "stored" | "env" | "none";
+  /** True when `source` is `env`: change the keys in the deployment env. */
+  readOnly: boolean;
+  keys: PoolKey[];
+}
+
+export type PoolKeyCheckResult = "verified" | "rejected" | "not_tested";
+
+/** The instant check of one new key in `POST /api/config/pool-keys`. */
+export interface PoolKeyCheck {
+  suffix: string;
+  result: PoolKeyCheckResult;
+  httpStatus: number | null;
+  /** Short and scrubbed. Never contains the key. */
+  error: string | null;
+}
+
+export interface PoolKeysAddResponse extends PoolKeysResponse {
+  checks: PoolKeyCheck[];
+}
+
+// ─── Codex ChatGPT accounts (`/api/codex-oauth/accounts`) ───────────────────
+
+export type CodexAccountStatus = "ok" | "needs_login" | "unchecked";
+
+export interface CodexAccount {
+  /** 0 for the legacy `codex_oauth` row when no `codex_oauth_0` exists. */
+  slot: number;
+  /** `codex_oauth_<n>` or `codex_oauth`. */
+  configKey: string;
+  legacy: boolean;
+  suffix: string | null;
+  plan: string | null;
+  email: string | null;
+  status: CodexAccountStatus;
+}
+
+export interface CodexAccountsResponse {
+  /** Sorted by slot. */
+  accounts: CodexAccount[];
+}
+
 // ─── Fleet benchmark (`GET /api/fleet-benchmark`) ───────────────────────────
 
 export type FleetBenchmarkState =

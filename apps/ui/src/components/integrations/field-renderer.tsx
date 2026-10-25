@@ -1,5 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import type { SwarmConfig } from "@/api/types";
+import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-secret-field";
+import { PoolKeysList } from "@/components/onboarding/pool-keys-list";
 import { SecretInput } from "@/components/shared/secret-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,14 +37,13 @@ const FORMAT_WARNINGS: Record<string, (v: string) => string | null> = {
       : null,
 };
 
-// A key never has a space or a line break inside. Each key of a credential
-// pool is checked on its own: the server splits on commas and trims each key.
-function poolSpaceWarning(v: string): string | null {
-  const keys = v.split(",").map((s) => s.trim());
-  return keys.some((key) => /\s/.test(key))
-    ? "Remove the space or line break from the key. Separate keys with commas."
-    : null;
-}
+// Format rules of credential pool fields, checked before the add request.
+// Other pools take any value of 16+ characters: an OpenRouter key can be a
+// gateway key, and registry providers have no fixed prefix.
+const POOL_RULES: Record<string, SecretRule> = {
+  CLAUDE_CODE_OAUTH_TOKEN: KEY_RULES.claudeToken,
+  ANTHROPIC_API_KEY: KEY_RULES.anthropicKey,
+};
 
 interface FieldRendererProps {
   field: IntegrationField;
@@ -75,31 +76,20 @@ export function FieldRenderer({
 
   // Secrets (tokens, API keys, webhook secrets): show masked read-only + Replace
   // until the user opts in. Non-secret values (emails, channel names, flags)
-  // are shown in plaintext and edited in place — they're not sensitive.
+  // are shown in plaintext and edited in place (they're not sensitive).
   const writeOnlyValuePresent = field.writeOnly === true && inEnv;
   const existingMasked =
     field.isSecret === true && (existingConfig !== undefined || writeOnlyValuePresent);
   const showMaskedReadOnly = existingMasked && !markedForReplace;
 
-  const poolSize =
-    field.credentialPool && value.includes(",")
-      ? value
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean).length
-      : 0;
-
-  // Skip warnings while showing the server-side mask sentinel — that value
+  // Skip warnings while showing the server-side mask sentinel: that value
   // isn't a real user input and would always fail prefix checks.
   const warningText =
-    value && value !== SECRET_MASK_SENTINEL
-      ? (FORMAT_WARNINGS[field.key]?.(value) ??
-        (field.credentialPool ? poolSpaceWarning(value) : null))
-      : null;
+    value && value !== SECRET_MASK_SENTINEL ? (FORMAT_WARNINGS[field.key]?.(value) ?? null) : null;
 
   // Source chip: distinguishes "set via deployment env only" from "persisted in
   // swarm_config". When both are true the DB row was already loaded into env at
-  // boot (or env set and DB row match) — either way it's live.
+  // boot (or env set and DB row match). Either way it's live.
   const inDb = existingConfig !== undefined;
   const sourceChip: { label: string; className: string; title: string } | null =
     writeOnlyValuePresent
@@ -118,14 +108,14 @@ export function FieldRenderer({
           : {
               label: "db (pending reload)",
               className: "bg-status-active/10 text-status-active-strong border-status-active/30",
-              title: "Saved to DB but not yet in process.env — reload or restart the API to apply.",
+              title: "Saved to DB but not yet in process.env. Reload or restart the API to apply.",
             }
         : inEnv
           ? {
               label: "env (deploy)",
               className: "bg-status-info/10 text-status-info-strong border-status-info/30",
               title:
-                "Set via deployment env (.env / docker). No DB row — save here to persist across DB reloads.",
+                "Set via deployment env (.env / docker). No DB row: save here to persist across DB reloads.",
             }
           : null;
 
@@ -171,7 +161,18 @@ export function FieldRenderer({
         )}
       </div>
 
-      {showMaskedReadOnly ? (
+      {field.credentialPool ? (
+        // A pool adds and removes one key at a time, on its own routes: it is
+        // not part of the page Save, and it has no Clear.
+        <PoolKeysList
+          envVar={field.key}
+          inputId={inputId}
+          label={field.label}
+          rule={POOL_RULES[field.key]}
+          placeholder={field.placeholder}
+          describedBy={field.helpText ? `${inputId}-help` : undefined}
+        />
+      ) : showMaskedReadOnly ? (
         <div className="flex gap-2 items-center">
           <Input
             id={inputId}
@@ -199,7 +200,7 @@ export function FieldRenderer({
                 onClick={onUnmarkForReplace}
                 className="text-xs text-muted-foreground underline hover:text-foreground"
               >
-                Cancel — keep existing value
+                Keep existing value
               </button>
             )}
             {!field.isSecret && existingConfig && onClearExisting && (
@@ -213,14 +214,6 @@ export function FieldRenderer({
             )}
           </div>
         </>
-      )}
-
-      {poolSize > 1 && (
-        <div className="text-[10px] text-muted-foreground">
-          <span className="inline-flex items-center rounded-md bg-muted/60 px-1.5 py-0.5 font-medium">
-            {poolSize} keys in pool
-          </span>
-        </div>
       )}
 
       {warningText && <p className="text-xs text-status-active-strong/90">{warningText}</p>}

@@ -99,6 +99,13 @@ describe("declared alternatives", () => {
     expect(status("github", [row("GITHUB_APP_ID")])).toBe("partial");
   });
 
+  test("Codex counts any ChatGPT account slot, not only the legacy row", () => {
+    expect(status("codex-oauth", [row("codex_oauth_3")])).toBe("configured");
+    expect(status("codex-oauth", [row("codex_oauth")])).toBe("configured");
+    expect(status("codex-oauth", [])).not.toBe("configured");
+    expect(getPresenceKeys(byId("codex-oauth"))).not.toContain("codex_oauth_*");
+  });
+
   test("GSC accepts the plain service-account JSON", () => {
     expect(status("gsc", [row("GSC_SERVICE_ACCOUNT_JSON")])).toBe("configured");
     expect(status("gsc", [], { GSC_SERVICE_ACCOUNT_JSON: true })).toBe("configured");

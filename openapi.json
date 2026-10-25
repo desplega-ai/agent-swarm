@@ -17311,6 +17311,207 @@
         }
       }
     },
+    "/api/codex-oauth/accounts": {
+      "get": {
+        "summary": "List stored Codex ChatGPT accounts",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stored account metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "slot": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "configKey": {
+                            "type": "string"
+                          },
+                          "legacy": {
+                            "type": "boolean"
+                          },
+                          "suffix": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "plan": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "needs_login",
+                              "unchecked"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "slot",
+                          "configKey",
+                          "legacy",
+                          "suffix",
+                          "plan",
+                          "email",
+                          "status"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "accounts"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot read all secrets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/codex-oauth/accounts/{slot}": {
+      "delete": {
+        "summary": "Remove a stored Codex ChatGPT account",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "slot",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Remaining accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "slot": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "configKey": {
+                            "type": "string"
+                          },
+                          "legacy": {
+                            "type": "boolean"
+                          },
+                          "suffix": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "plan": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "needs_login",
+                              "unchecked"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "slot",
+                          "configKey",
+                          "legacy",
+                          "suffix",
+                          "plan",
+                          "email",
+                          "status"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "accounts"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account slot does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/oauth/keep-warm/codex": {
       "post": {
         "summary": "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
@@ -17819,6 +18020,537 @@
                     "error",
                     "skipped"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/pool-keys": {
+      "get": {
+        "summary": "List credential pool suffixes and status",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "key",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential pool",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "stored",
+                        "env",
+                        "none"
+                      ]
+                    },
+                    "readOnly": {
+                      "type": "boolean"
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "rejected",
+                              "rate_limited",
+                              "unchecked"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rateLimitedUntil": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "suffix",
+                          "status",
+                          "error",
+                          "checkedAt",
+                          "rateLimitedUntil"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "source",
+                    "readOnly",
+                    "keys"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid pool variable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Secret read permission required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Test and append keys to a credential pool",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "baseUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Base URL for the check only. Null tests the provider default. Omit to use the stored URL."
+                  }
+                },
+                "required": [
+                  "key",
+                  "value"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated credential pool and checks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "stored",
+                        "env",
+                        "none"
+                      ]
+                    },
+                    "readOnly": {
+                      "type": "boolean"
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "rejected",
+                              "rate_limited",
+                              "unchecked"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rateLimitedUntil": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "suffix",
+                          "status",
+                          "error",
+                          "checkedAt",
+                          "rateLimitedUntil"
+                        ]
+                      }
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "verified",
+                              "rejected",
+                              "not_tested"
+                            ]
+                          },
+                          "httpStatus": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "suffix",
+                          "result",
+                          "httpStatus",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "source",
+                    "readOnly",
+                    "keys",
+                    "checks"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Config administration required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate key or deployment env pool",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Provider rejected a key. Nothing was saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "verified",
+                              "rejected",
+                              "not_tested"
+                            ]
+                          },
+                          "httpStatus": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "suffix",
+                          "result",
+                          "httpStatus",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "checks"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove one credential pool member",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "index",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 5
+            },
+            "required": true,
+            "name": "suffix",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated credential pool",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "stored",
+                        "env",
+                        "none"
+                      ]
+                    },
+                    "readOnly": {
+                      "type": "boolean"
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "rejected",
+                              "rate_limited",
+                              "unchecked"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rateLimitedUntil": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "suffix",
+                          "status",
+                          "error",
+                          "checkedAt",
+                          "rateLimitedUntil"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "source",
+                    "readOnly",
+                    "keys"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid pool member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Config administration required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The pool changed or comes from the deployment env",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

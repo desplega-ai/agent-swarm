@@ -95,6 +95,12 @@ import {
  */
 const injectedEnvOriginals = new Map<string, { original: string | undefined; injected: string }>();
 
+/** Read the deployment value without a stored config's temporary env injection. */
+export function getDeploymentEnvValue(key: string): string | undefined {
+  const tracked = injectedEnvOriginals.get(key);
+  return tracked && process.env[key] === tracked.injected ? tracked.original : process.env[key];
+}
+
 export async function loadGlobalConfigsIntoEnv(override = false): Promise<string[]> {
   const globalConfigs = await getInjectableGlobalConfigs();
   const updated: string[] = [];

@@ -81,6 +81,7 @@ export async function recordKeyValidation(
   }>,
   scope = "global",
   scopeId: string | null = null,
+  options: { retireAbsent?: boolean } = {},
 ): Promise<void> {
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
@@ -110,6 +111,7 @@ export async function recordKeyValidation(
         ],
       );
     }
+    if (options.retireAbsent === false) return;
     const placeholders = keys.map(() => "?").join(", ");
     await tx.run(
       `UPDATE api_key_status SET lastValidationError = NULL, lastValidationFailedAt = NULL, updatedAt = ?
@@ -118,5 +120,31 @@ export async function recordKeyValidation(
          AND lastValidationFailedAt IS NOT NULL`,
       [now, keyType, scope, effectiveScopeId, ...keys.map((key) => key.keySuffix)],
     );
+  });
+}
+
+/**
+ * Forget the status of a key that left its pool, and store the new index of
+ * each remaining key. A new key that later takes the same index or Codex slot
+ * then starts with no rejection, rate limit or auth bench.
+ */
+export async function retirePoolKeyStatus(
+  keyType: string,
+  removedSuffix: string,
+  remaining: Array<{ keySuffix: string; keyIndex: number }>,
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    if (!remaining.some((key) => key.keySuffix === removedSuffix)) {
+      await tx.run(
+        "DELETE FROM api_key_status WHERE keyType = ? AND keySuffix = ? AND scope = 'global' AND scopeId = ''",
+        [keyType, removedSuffix],
+      );
+    }
+    for (const key of remaining) {
+      await tx.run(
+        "UPDATE api_key_status SET keyIndex = ? WHERE keyType = ? AND keySuffix = ? AND scope = 'global' AND scopeId = ''",
+        [key.keyIndex, keyType, key.keySuffix],
+      );
+    }
   });
 }

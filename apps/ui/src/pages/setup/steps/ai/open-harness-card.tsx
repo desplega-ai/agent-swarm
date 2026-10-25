@@ -4,6 +4,7 @@ import {
   providerKeyVars,
 } from "@desplega/model-catalog";
 import { useState } from "react";
+import type { PoolKeysResponse } from "@/api/types";
 import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-secret-field";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { BrandLogo } from "@/components/shared/brand-logo";
@@ -11,7 +12,7 @@ import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
-import { DISCLOSURE_TITLE, SecretKeyField, TextField } from "./fields";
+import { DISCLOSURE_TITLE, POOL_LIST_HINT, PoolKeyField, TextField } from "./fields";
 import { type AiCardProps, baseUrlError, globalConfigValue, harnessNames } from "./model";
 import { ProviderCard } from "./provider-card";
 
@@ -45,7 +46,7 @@ function OpenHarnessIcon() {
 }
 
 export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardProps) {
-  const { save, isSaved } = useSetupSave(presence);
+  const { save, markSaved, isSaved } = useSetupSave(presence);
   // An alias (HELMCODE_API_NAN) counts: the runner copies it into the canonical var.
   const directSaved = (p: (typeof DIRECT_PROVIDERS)[number]) => providerKeyVars(p).some(isSaved);
   const [mode, setMode] = useState<OpenMode | null>(null);
@@ -54,29 +55,41 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
   const currentUrl = globalConfigValue(configs, BASE_URL);
   const activeMode: OpenMode = mode ?? (gatewaySet ? "gateway" : "openrouter");
 
+  // Removing the last key of a pool can clear the card's saved state.
+  const onPoolRemoved = (key: string) => (list: PoolKeysResponse) =>
+    markSaved(key, list.keys.length > 0);
+
+  async function afterOpenRouterAdd() {
+    if (activeMode === "gateway") {
+      if (currentUrl || gatewaySet) onSaved("openai_gateway");
+      return;
+    }
+    // A stored gateway URL would send this key to the gateway. Blank reverts to openrouter.ai.
+    if (gatewaySet) {
+      try {
+        await save([{ key: BASE_URL, value: "", isSecret: false }]);
+      } catch {
+        return; // `save` already showed the error.
+      }
+    }
+    onSaved("openrouter");
+  }
+
   const keyField = (label: string, rule: SecretRule, placeholder: string, helper?: string) => (
-    <SecretKeyField
-      id={`setup-ai-openrouter-key-${activeMode}`}
+    <PoolKeyField
+      inputId={`setup-ai-openrouter-key-${activeMode}`}
       label={label}
       envKey={OR_KEY}
       placeholder={placeholder}
-      saved={isSaved(OR_KEY)}
       rule={rule}
-      pool
       helper={helper}
       logo={<BrandLogo src="/provider-logos/openrouter.svg" className="size-3.5" />}
-      onSave={async (value) => {
-        if (activeMode === "gateway") {
-          await save([{ key: OR_KEY, value, isSecret: true }]);
-          if (currentUrl || gatewaySet) onSaved("openai_gateway");
-          return;
-        }
-        // A stored gateway URL would send this key to the gateway. Blank reverts to openrouter.ai.
-        await save([
-          { key: OR_KEY, value, isSecret: true },
-          ...(gatewaySet ? [{ key: BASE_URL, value: "", isSecret: false }] : []),
-        ]);
-        onSaved("openrouter");
+      // OpenRouter mode tests at openrouter.ai, even while a gateway URL is still stored.
+      checkBaseUrl={activeMode === "openrouter" ? null : undefined}
+      onRemoved={onPoolRemoved(OR_KEY)}
+      onAdded={() => {
+        markSaved(OR_KEY, true);
+        void afterOpenRouterAdd();
       }}
     />
   );
@@ -124,35 +137,30 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
       {/* No onboarding method names the registry routes: a verified pi/opencode worker completes the step. */}
       <CollapsibleSection title="Direct keys instead" titleClassName={DISCLOSURE_TITLE}>
         <div className="space-y-3 pt-1.5">
-          <p className="text-xs text-muted-foreground">
-            Each field takes more than one key: separate them with commas.
-          </p>
-          <SecretKeyField
-            id="setup-ai-deepseek-key"
+          <p className="text-xs text-muted-foreground">{POOL_LIST_HINT}</p>
+          <PoolKeyField
+            inputId="setup-ai-deepseek-key"
             label="DeepSeek API key"
             envKey={DS_KEY}
             placeholder="sk-..."
-            saved={isSaved(DS_KEY)}
             rule={KEY_RULES.deepSeek}
-            pool
             poolHint={false}
             info={`For ${HARNESS_LABEL.dsh} without OpenRouter. ${HARNESS_LABEL.pi} and ${HARNESS_LABEL.opencode} also reuse the Anthropic and OpenAI keys.`}
             logo={<BrandLogo src="/provider-logos/deepseek.svg" className="size-3.5" />}
-            onSave={async (value) => {
-              await save([{ key: DS_KEY, value, isSecret: true }]);
+            onRemoved={onPoolRemoved(DS_KEY)}
+            onAdded={() => {
+              markSaved(DS_KEY, true);
               onSaved("deepseek");
             }}
           />
           {DIRECT_PROVIDERS.map((p) => (
-            <SecretKeyField
+            <PoolKeyField
               key={p.id}
-              id={`setup-ai-${p.id}-key`}
+              inputId={`setup-ai-${p.id}-key`}
               label={`${p.displayName} API key`}
               envKey={p.envVar}
               placeholder="sk-..."
-              saved={directSaved(p)}
               rule={GATEWAY_RULE}
-              pool
               poolHint={false}
               info={
                 <>
@@ -163,9 +171,8 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
               logo={
                 <ProviderIcon provider={p.id as OpenAICompatibleProviderId} className="size-3.5" />
               }
-              onSave={async (value) => {
-                await save([{ key: p.envVar, value, isSecret: true }]);
-              }}
+              onRemoved={onPoolRemoved(p.envVar)}
+              onAdded={() => markSaved(p.envVar, true)}
             />
           ))}
         </div>

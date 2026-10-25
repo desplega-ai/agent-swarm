@@ -19,7 +19,6 @@
  */
 
 import {
-  type OpenAICompatibleProvider,
   openAICompatibleKeyVars,
   openAICompatibleProviders,
   providerBaseUrl,
@@ -51,10 +50,28 @@ import {
   splitCredentialPool,
 } from "../utils/credentials";
 import {
-  getOpenRouterAttributionHeaders,
-  getOpenRouterBaseUrl,
-} from "../utils/openrouter-base-url";
+  checkAnthropicApiKey,
+  checkDeepSeekApiKey,
+  checkOpenAICompatibleProvider,
+  checkOpenAiApiKey,
+  checkOpenRouter,
+  checkXaiApiKey,
+  type LiveKeyResult,
+  type LiveValidationResult,
+  timedFetch,
+} from "../utils/provider-key-probes";
 import { scrubSecrets } from "../utils/secret-scrubber";
+
+export {
+  checkAnthropicApiKey,
+  checkDeepSeekApiKey,
+  checkOpenAICompatibleProvider,
+  checkOpenAiApiKey,
+  checkOpenRouter,
+  checkXaiApiKey,
+  type LiveKeyResult,
+  type LiveValidationResult,
+} from "../utils/provider-key-probes";
 
 export type SupportedProvider =
   | "claude"
@@ -219,59 +236,8 @@ export async function checkProviderCredentials(
 // Mirrors `checkProviderCredentials` but issues a real (cheapest possible)
 // upstream call so the user can flip the `harness` milestone to `verified`.
 //
-// Pure function — no DB writes. Lives here (not on `ProviderAdapter`) because
-// adapters are runtime-loaded by workers, while this dispatcher is API-server
-// safe. All errors run through `scrubSecrets` so we never leak the user's
-// own key shape back through the JSON response.
-
-const LIVE_TEST_TIMEOUT_MS = 5_000;
-
-export interface LiveKeyResult {
-  keyType: string;
-  index: number;
-  suffix: string;
-  ok: boolean;
-  error?: string;
-  httpStatus?: number;
-  latency_ms: number;
-}
-
-export interface LiveValidationResult {
-  ok: boolean;
-  error?: string;
-  httpStatus?: number;
-  warning?: string;
-  keys?: LiveKeyResult[];
-  latency_ms: number;
-  /** No free live check exists for this credential (cloud routes): report presence only. */
-  skipped?: boolean;
-}
-
-async function timedFetch(
-  url: string,
-  init: RequestInit,
-): Promise<{ ok: boolean; status: number; bodyText: string; latency_ms: number }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LIVE_TEST_TIMEOUT_MS);
-  const start = Date.now();
-  try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    let bodyText = "";
-    try {
-      bodyText = await res.text();
-    } catch {
-      // ignore body read errors — status alone is enough for ok/not-ok
-    }
-    return {
-      ok: res.ok,
-      status: res.status,
-      bodyText,
-      latency_ms: Date.now() - start,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// Worker-only dispatch uses the shared probes in `provider-key-probes.ts`.
+// The API imports those probes directly to avoid loading worker harnesses.
 
 function asLiveError(err: unknown, latency_ms: number): LiveValidationResult {
   const raw = err instanceof Error ? err.message : String(err);
@@ -352,20 +318,6 @@ export async function checkEachKey(
 // users no longer see "ANTHROPIC_API_KEY is not set" when their adapter is
 // happily running off `CLAUDE_CODE_OAUTH_TOKEN`.
 
-async function checkAnthropicApiKey(apiKey: string): Promise<LiveValidationResult> {
-  const r = await timedFetch("https://api.anthropic.com/v1/models", {
-    method: "GET",
-    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-  });
-  if (r.ok) return { ok: true, latency_ms: r.latency_ms };
-  return {
-    ok: false,
-    error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
-    httpStatus: r.status,
-    latency_ms: r.latency_ms,
-  };
-}
-
 /**
  * Codex OAuth credentials (ChatGPT login) are treated as a presence check — we
  * don't issue a live upstream call. (Claude subscription tokens get a real
@@ -379,94 +331,6 @@ async function checkAnthropicApiKey(apiKey: string): Promise<LiveValidationResul
  */
 function presenceCheckOk(): LiveValidationResult {
   return { ok: true, latency_ms: 0 };
-}
-
-async function checkOpenAiApiKey(apiKey: string): Promise<LiveValidationResult> {
-  const r = await timedFetch("https://api.openai.com/v1/models", {
-    method: "GET",
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (r.ok) return { ok: true, latency_ms: r.latency_ms };
-  return {
-    ok: false,
-    error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
-    httpStatus: r.status,
-    latency_ms: r.latency_ms,
-  };
-}
-
-/** `GET /v1/models` is the call the Grok CLI makes first; it runs no inference. */
-async function checkXaiApiKey(apiKey: string): Promise<LiveValidationResult> {
-  const r = await timedFetch("https://api.x.ai/v1/models", {
-    method: "GET",
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (r.ok) return { ok: true, latency_ms: r.latency_ms };
-  return {
-    ok: false,
-    error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
-    httpStatus: r.status,
-    latency_ms: r.latency_ms,
-  };
-}
-
-/** Fetch a key-authenticated GET and normalize it into a `LiveValidationResult`. */
-async function checkBearerGet(url: string, init: RequestInit): Promise<LiveValidationResult> {
-  const r = await timedFetch(url, { method: "GET", ...init });
-  if (r.ok) return { ok: true, latency_ms: r.latency_ms };
-  return {
-    ok: false,
-    error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
-    httpStatus: r.status,
-    latency_ms: r.latency_ms,
-  };
-}
-
-/**
- * OpenRouter's `/models` is public and answers 200 for any key, so the check
- * reads `GET /key` (the key's own info, 401 for a bad key). A custom
- * `OPENROUTER_BASE_URL` without `/key` (404/405) falls back to `/models`.
- */
-async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
-  const base = getOpenRouterBaseUrl();
-  const get = (url: string) =>
-    checkBearerGet(url, {
-      headers: { ...getOpenRouterAttributionHeaders(url), Authorization: `Bearer ${apiKey}` },
-    });
-  const keyResult = await get(`${base}/key`);
-  if (keyResult.httpStatus === 404 || keyResult.httpStatus === 405) return get(`${base}/models`);
-  return keyResult;
-}
-
-/** `GET /models` on the official DeepSeek API: lists models, runs no inference. */
-function checkDeepSeekApiKey(apiKey: string): Promise<LiveValidationResult> {
-  return checkBearerGet("https://api.deepseek.com/models", {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-}
-
-/**
- * `GET <baseUrl>/models` with a Bearer key against an OpenAI-compatible
- * registry provider (NaN, Helmcode). Lists models, runs no inference.
- * `baseUrl` defaults to the registry entry; the probe passes the
- * `<ID>_BASE_URL` override, and tests inject a fake server.
- */
-export async function checkOpenAICompatibleProvider(
-  provider: OpenAICompatibleProvider,
-  apiKey: string,
-  baseUrl: string = provider.baseUrl,
-): Promise<LiveValidationResult> {
-  const r = await timedFetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (r.ok) return { ok: true, latency_ms: r.latency_ms };
-  return {
-    ok: false,
-    error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
-    httpStatus: r.status,
-    latency_ms: r.latency_ms,
-  };
 }
 
 /**

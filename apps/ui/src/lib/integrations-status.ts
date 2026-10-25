@@ -74,6 +74,12 @@ export function findConfigForKey(configs: SwarmConfig[], key: string): SwarmConf
  * `alternatives` on the def.
  */
 function isKeyPresent(key: string, configs: SwarmConfig[], envPresence: EnvPresence): boolean {
+  if (key.endsWith("*")) {
+    const prefix = key.slice(0, -1);
+    return configs.some(
+      (c) => c.scope === "global" && c.key.startsWith(prefix) && c.value.length > 0,
+    );
+  }
   if (isReservedKey(key)) return false;
   if (findConfigForKey(configs, key) !== undefined) return true;
   return envPresence[key] === true;

@@ -5563,6 +5563,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/codex-oauth/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List stored Codex ChatGPT accounts */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Stored account metadata */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            accounts: {
+                                slot: number;
+                                configKey: string;
+                                legacy: boolean;
+                                suffix: string | null;
+                                plan: string | null;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "ok" | "needs_login" | "unchecked";
+                            }[];
+                        };
+                    };
+                };
+                /** @description Caller cannot read all secrets */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/codex-oauth/accounts/{slot}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a stored Codex ChatGPT account */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slot: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Remaining accounts */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            accounts: {
+                                slot: number;
+                                configKey: string;
+                                legacy: boolean;
+                                suffix: string | null;
+                                plan: string | null;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "ok" | "needs_login" | "unchecked";
+                            }[];
+                        };
+                    };
+                };
+                /** @description Account slot does not exist */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/oauth/keep-warm/codex": {
         parameters: {
             query?: never;
@@ -5791,6 +5905,236 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/pool-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List credential pool suffixes and status */
+        get: {
+            parameters: {
+                query: {
+                    key: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Credential pool */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid pool variable */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Secret read permission required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Test and append keys to a credential pool */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        key: string;
+                        value: string;
+                        /** @description Base URL for the check only. Null tests the provider default. Omit to use the stored URL. */
+                        baseUrl?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated credential pool and checks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                            }[];
+                            checks: {
+                                suffix: string;
+                                /** @enum {string} */
+                                result: "verified" | "rejected" | "not_tested";
+                                httpStatus: number | null;
+                                error: string | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid key */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Config administration required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Duplicate key or deployment env pool */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Provider rejected a key. Nothing was saved. */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            checks: {
+                                suffix: string;
+                                /** @enum {string} */
+                                result: "verified" | "rejected" | "not_tested";
+                                httpStatus: number | null;
+                                error: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        /** Remove one credential pool member */
+        delete: {
+            parameters: {
+                query: {
+                    key: string;
+                    index?: number | null;
+                    suffix: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated credential pool */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid pool member */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Config administration required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The pool changed or comes from the deployment env */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;

@@ -1,6 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { AutosaveSecretField } from "@/components/onboarding/autosave-secret-field";
+import { PoolKeysList, type PoolKeysListProps } from "@/components/onboarding/pool-keys-list";
 import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
@@ -14,6 +15,9 @@ export const DISCLOSURE_TITLE = "text-xs font-medium normal-case tracking-normal
 
 /** Shown under a field that takes a credential pool (`CREDENTIAL_POOL_VARS` on the API). */
 const POOL_HINT = "You can add more than one: separate them with commas.";
+
+/** Shown under a `PoolKeyField`: the list adds one key at a time. */
+export const POOL_LIST_HINT = "Add one key at a time. Agents rotate across the keys.";
 
 /** A human label with an optional brand mark. The info tip names the env key. */
 function FieldLabel({
@@ -121,6 +125,49 @@ export function SecretKeyField({
   return (
     <KeyField id={field.id} label={label} envKey={envKey} logo={logo} info={info} helper={help}>
       <AutosaveSecretField {...field} describedBy={help ? `${field.id}-help` : undefined} />
+    </KeyField>
+  );
+}
+
+/**
+ * A step 3 credential pool: the saved keys and an add field (`PoolKeysList`)
+ * under its label. The label focuses the add field. `poolHint` is off when
+ * one line above a group of fields says it.
+ */
+export function PoolKeyField({
+  label,
+  envKey,
+  logo,
+  info,
+  helper,
+  poolHint = true,
+  ...list
+}: Omit<PoolKeysListProps, "envVar" | "label" | "describedBy"> & {
+  label: string;
+  envKey: string;
+  logo?: ReactNode;
+  info?: ReactNode;
+  helper?: ReactNode;
+  poolHint?: boolean;
+}) {
+  const help =
+    helper && poolHint ? (
+      <>
+        {helper} {POOL_LIST_HINT}
+      </>
+    ) : poolHint ? (
+      POOL_LIST_HINT
+    ) : (
+      helper
+    );
+  return (
+    <KeyField id={list.inputId} label={label} envKey={envKey} logo={logo} info={info} helper={help}>
+      <PoolKeysList
+        {...list}
+        envVar={envKey}
+        label={label}
+        describedBy={help ? `${list.inputId}-help` : undefined}
+      />
     </KeyField>
   );
 }

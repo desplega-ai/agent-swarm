@@ -67,7 +67,7 @@ export function readsRepoSecrets(
   }).allow;
 }
 
-async function requestSecretReadScope(
+export async function requestSecretReadScope(
   req: IncomingMessage,
   resolvedScope?: { agentId?: string; repoId?: string },
 ): Promise<"all" | "self" | "none"> {

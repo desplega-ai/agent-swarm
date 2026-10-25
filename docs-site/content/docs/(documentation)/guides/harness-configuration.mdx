@@ -702,6 +702,10 @@ Cognition's cloud and bills in ACUs rather than worker-side tokens.
 
 ## Multi-Credential Pools
 
+The dashboard lists each key by its last 5 characters and its status.
+You add or remove one key at a time.
+A new key is tested before it is saved, and a key the provider rejects with HTTP 401 is not saved.
+
 Workers test every key in a pool at boot and again when a key changes.
 A worker that waits for its first key sees it within about 10 seconds.
 A running worker sees a changed key when its idle poll returns, within about a minute.

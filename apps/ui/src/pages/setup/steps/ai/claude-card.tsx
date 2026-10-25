@@ -5,7 +5,7 @@ import { BrandLogo } from "@/components/shared/brand-logo";
 import { SetupChip } from "@/components/shared/setup-chip";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SecretKeyField } from "./fields";
+import { PoolKeyField } from "./fields";
 import type { AiCardProps } from "./model";
 import { ProviderCard } from "./provider-card";
 
@@ -33,23 +33,22 @@ const TOKEN_TERMS =
 
 export function ClaudeCard({ presence, onSaved, ...card }: AiCardProps) {
   const [tab, setTab] = useState<ClaudeTab>("token");
-  const { save, isSaved } = useSetupSave(presence);
+  const { markSaved, isSaved } = useSetupSave(presence);
 
   const field = (t: ClaudeTab, placeholder: string, helper: ReactNode, info?: string) => (
-    <SecretKeyField
-      id={fieldId(t)}
+    <PoolKeyField
+      inputId={fieldId(t)}
       label={TAB_LABEL[t]}
       envKey={TAB_KEY[t]}
       placeholder={placeholder}
-      saved={isSaved(TAB_KEY[t])}
       rule={RULES[t]}
-      pool
       info={info}
       helper={helper}
-      onSave={async (value) => {
-        await save([{ key: TAB_KEY[t], value, isSecret: true }]);
+      onAdded={() => {
+        markSaved(TAB_KEY[t], true);
         onSaved(t === "token" ? "claude_setup_token" : "claude_api_key");
       }}
+      onRemoved={(list) => markSaved(TAB_KEY[t], list.keys.length > 0)}
     />
   );
 

@@ -381,6 +381,38 @@ async function runtimePoolResponse<T>(res: Response, label: string): Promise<T> 
   return (await res.json()) as T;
 }
 
+/**
+ * A failed credential pool or Codex account request. `message` is the
+ * server's `error` text. A 422 from `POST /api/config/pool-keys` (a key was
+ * rejected, nothing was saved) also carries the per-key `checks`.
+ */
+export class CredentialApiError extends Error {
+  readonly status: number;
+  readonly checks: import("./types").PoolKeyCheck[];
+  constructor(message: string, status: number, checks: import("./types").PoolKeyCheck[] = []) {
+    super(message);
+    this.name = "CredentialApiError";
+    this.status = status;
+    this.checks = checks;
+  }
+}
+
+/** Parse a credential route response or throw a `CredentialApiError`. */
+async function credentialResponse<T>(res: Response, label: string): Promise<T> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      checks?: import("./types").PoolKeyCheck[];
+    };
+    throw new CredentialApiError(
+      body.error || `${label} (HTTP ${res.status}).`,
+      res.status,
+      Array.isArray(body.checks) ? body.checks : [],
+    );
+  }
+  return (await res.json()) as T;
+}
+
 /** Unwrap the `{ extension }` envelope every extension lifecycle route answers with. */
 async function extractExtension(res: Response, label: string): Promise<Extension> {
   if (!res.ok) {
@@ -890,6 +922,66 @@ class ApiClient {
       throw new Error(err.error || `Failed to poll Codex sign-in: ${res.status}`);
     }
     return res.json();
+  }
+
+  /** The stored ChatGPT accounts (`codex_oauth_<n>` slots), sorted by slot. */
+  async fetchCodexAccounts(): Promise<import("./types").CodexAccountsResponse> {
+    const url = `${this.getBaseUrl()}/api/codex-oauth/accounts`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    return credentialResponse(res, "Could not load the ChatGPT accounts");
+  }
+
+  /** Delete one ChatGPT account slot. Returns the accounts that are left. */
+  async removeCodexAccount(slot: number): Promise<import("./types").CodexAccountsResponse> {
+    const url = `${this.getBaseUrl()}/api/codex-oauth/accounts/${encodeURIComponent(String(slot))}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    return credentialResponse(res, "Could not remove the ChatGPT account");
+  }
+
+  /** The keys of one credential pool var. Only suffixes leave the server. */
+  async fetchPoolKeys(key: string): Promise<import("./types").PoolKeysResponse> {
+    const url = `${this.getBaseUrl()}/api/config/pool-keys?${new URLSearchParams({ key })}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    return credentialResponse(res, "Could not load the keys");
+  }
+
+  /**
+   * Check and append keys to a pool (`value` may hold several, comma
+   * separated). Throws a `CredentialApiError`: 422 with `checks` when a key
+   * is rejected (nothing is saved), 400 or 409 with the server's reason.
+   */
+  /** `baseUrl` is for the check only: null tests the provider default, undefined the stored URL. */
+  async addPoolKeys(
+    key: string,
+    value: string,
+    baseUrl?: string | null,
+  ): Promise<import("./types").PoolKeysAddResponse> {
+    const url = `${this.getBaseUrl()}/api/config/pool-keys`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ key, value, ...(baseUrl !== undefined ? { baseUrl } : {}) }),
+    });
+    return credentialResponse(res, "Could not add the key");
+  }
+
+  /**
+   * Remove the pool member at `index`. The server checks `suffix` against
+   * that member and answers 409 when the list changed under the caller.
+   */
+  async removePoolKey(args: {
+    key: string;
+    index: number;
+    suffix: string;
+  }): Promise<import("./types").PoolKeysResponse> {
+    const params = new URLSearchParams({
+      key: args.key,
+      index: String(args.index),
+      suffix: args.suffix,
+    });
+    const url = `${this.getBaseUrl()}/api/config/pool-keys?${params}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    return credentialResponse(res, "Could not remove the key");
   }
 
   /** Live harness switch for one agent (worker reconciles within ~10s). */

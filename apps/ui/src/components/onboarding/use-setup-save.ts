@@ -93,8 +93,23 @@ export function useSetupSave(presence: EnvPresenceMap = {}) {
     [queryClient],
   );
 
+  /**
+   * A write that did not go through `save` (a `PoolKeysList` add or remove)
+   * stored a key, or removed the last one. Env presence catches up later.
+   */
+  const markSaved = useCallback((key: string, stored: boolean) => {
+    setSavedNow((prev) => {
+      if (prev.has(key) === stored) return prev;
+      const next = new Set(prev);
+      if (stored) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+
   return {
     save,
+    markSaved,
     isSaved: (key: string) => Boolean(presence[key]) || savedNow.has(key),
   };
 }

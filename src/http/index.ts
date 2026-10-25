@@ -76,6 +76,7 @@ import { handleApprovalRequests } from "./approval-requests";
 import { handleApps } from "./apps";
 import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
+import { handleCodexOAuthAccounts } from "./codex-oauth-accounts";
 import { handleCodexOAuthDevice } from "./codex-oauth-device";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
 import { handleComb } from "./comb";
@@ -115,6 +116,7 @@ import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
 import { handlePagesPublic } from "./pages-public";
 import { handlePoll } from "./poll";
+import { handlePoolKeys } from "./pool-keys";
 import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
 import { handleRanking } from "./ranking";
@@ -360,6 +362,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleStatus(req, res, pathSegments, queryParams),
         () => handleOnboarding(req, res, pathSegments, queryParams),
         () => handleCodexOAuthDevice(req, res, pathSegments, queryParams),
+        () => handleCodexOAuthAccounts(req, res, pathSegments, queryParams),
         () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
         () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
         () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
@@ -367,6 +370,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleWorkflowEvents(req, res, pathSegments, queryParams),
         () => handleApprovalRequests(req, res, pathSegments, queryParams),
         () => handleApps(req, res, pathSegments, queryParams, myAgentId),
+        () => handlePoolKeys(req, res, pathSegments, queryParams),
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
         () => handleComb(req, res, pathSegments, queryParams, myAgentId),

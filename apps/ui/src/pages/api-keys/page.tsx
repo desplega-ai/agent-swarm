@@ -26,6 +26,7 @@ import {
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { HarnessIcon } from "@/components/shared/harness-icon";
+import { KeyStatusPill, type KeyStatusTone } from "@/components/shared/key-status-pill";
 import { isSubscriptionKeyType, PlanPicker } from "@/components/shared/plan-picker";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Badge } from "@/components/ui/badge";
@@ -52,17 +53,9 @@ import type { ProviderIconKey } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { cn, formatSmartTime } from "@/lib/utils";
 
-const statusConfig: Record<ApiKeyStatusType, { label: string; dot: string; tone: string }> = {
-  available: {
-    label: "AVAILABLE",
-    dot: "bg-status-success",
-    tone: "border-status-success/30 text-status-success-strong",
-  },
-  rate_limited: {
-    label: "RATE LIMITED",
-    dot: "bg-status-error",
-    tone: "border-status-error/30 text-status-error-strong",
-  },
+const statusConfig: Record<ApiKeyStatusType, { label: string; tone: KeyStatusTone }> = {
+  available: { label: "AVAILABLE", tone: "success" },
+  rate_limited: { label: "RATE LIMITED", tone: "error" },
 };
 
 /** Workers skip a key the provider rejected with HTTP 401, so it reads as its own state. */
@@ -76,30 +69,18 @@ function RejectedBadge({ keyStatus }: { keyStatus: ApiKeyStatus }) {
     ? `, ${formatSmartTime(keyStatus.lastValidationFailedAt)}`
     : "";
   return (
-    <Badge
-      variant="outline"
-      size="tag"
-      className="gap-1.5 border-status-error/30 text-status-error-strong"
+    <KeyStatusPill
+      tone="error"
       title={`The provider rejected this key in the last check (${reason}${when}). Agents skip it until it passes.`}
     >
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-status-error" />
       REJECTED
-    </Badge>
+    </KeyStatusPill>
   );
 }
 
 function KeyStatusBadge({ status }: { status: ApiKeyStatusType }) {
-  const config = statusConfig[status] ?? {
-    label: status,
-    dot: "bg-status-neutral",
-    tone: "border-status-neutral/30 text-status-neutral-strong",
-  };
-  return (
-    <Badge variant="outline" size="tag" className={cn("gap-1.5", config.tone)}>
-      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", config.dot)} />
-      {config.label}
-    </Badge>
-  );
+  const config = statusConfig[status] ?? { label: status, tone: "neutral" };
+  return <KeyStatusPill tone={config.tone}>{config.label}</KeyStatusPill>;
 }
 
 type KeyTypeMeta = { label: string; icon: ProviderIconKey | null };
@@ -249,7 +230,7 @@ export default function ApiKeysPage() {
   const providerFilter = readStringParam(searchParams, "provider", "all");
   // Dialog state for renaming a single key. Decoupled from AG Grid edit
   // mode (which has too many gotchas around cell focus / suppressCellFocus
-  // / cellRenderer click forwarding) — clicking the pencil icon opens this
+  // / cellRenderer click forwarding). Clicking the pencil icon opens this
   // dialog directly and the mutation flows through useSetApiKeyName.
   const [editingKey, setEditingKey] = useState<ApiKeyStatus | null>(null);
   const [editingName, setEditingName] = useState("");
