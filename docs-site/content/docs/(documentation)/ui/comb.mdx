@@ -77,7 +77,7 @@ Hover a row in the tree and click **...**, or right-click a row in the tree or t
 | **Add to favorites** | Stars it (see [Home, Recent, and Favorites](#home-recent-and-favorites)) |
 | **Download** | Downloads the file |
 | **New file...**, **New folder...** | Creates one in the folder. A name like `notes/todo.md` also makes the folders. A new folder holds an empty `.keep` file. |
-| **Rename...** | Renames or moves the file (edit its full path). Its versions and stars move with it. Its comments stay on the old path. |
+| **Rename...** | Renames or moves the file (edit its full path). agent-fs writes it as a new version at the new path. Its stars move with it. The old path keeps its history and its comments. |
 | **Delete...** | Deletes the file. Its versions are kept (`agent-fs revert` brings it back). Its comments are removed. |
 | **Open in agent-fs** | Opens it in the agent-fs live UI |
 
@@ -126,7 +126,7 @@ The drive root is the Comb home. The left panel starts collapsed there, because 
 
 The left panel shows the full lists: **Recent** (pick **Viewed** or **Changed**) and **Favorites**. The star in a file or folder header adds it to Favorites. Favorites also show under **Comb** in the sidebar.
 
-Before Comb used agent-fs stars, it kept them in the swarm API. The first time Comb connects to an agent-fs with the `favorites` feature, it moves those stars to agent-fs and drops the ones whose file is gone. An agent-fs without the feature keeps the swarm API stars.
+Before Comb used agent-fs stars, it kept them in the swarm API. The first time a browser connects Comb to an agent-fs with the `favorites` feature, Comb copies those stars to your agent-fs account and skips the ones whose file is gone. The swarm API keeps its copy: an agent-fs without the feature, or a browser that is not connected, still lists them.
 
 ### Full width
 
@@ -140,7 +140,7 @@ On a markdown file, **Full width** in the header (or `F`) lets the text run as w
 ## Comment
 
 - Select a passage in a markdown or text file, then click **Comment** (or press `C`). The comment anchors to that passage.
-- **Comment** on an image or a diagram (on hover, or in **Maximize**) anchors the comment to the asset's source lines, because agent-fs anchors comments on text and lines only. The asset gets an outline while its comment is selected. The agent-fs live UI shows it as a comment on those lines.
+- **Comment** on an image or a diagram (on hover, or in **Maximize**) anchors the comment to the asset's source lines, because agent-fs anchors comments on text and lines only. An asset with a comment gets an outline, and a bold one while its comment is selected. The agent-fs live UI shows an image comment on its line. It shows a diagram comment as **Lost**, because its diagrams carry no line numbers.
 - **Comment on file** adds a comment about the whole file.
 - **Add comment** saves the comment. It does not send it to the swarm (see [Send comments to the swarm](#send-comments-to-the-swarm)).
 - Reply, **Resolve**, and **Reopen** work on every thread.

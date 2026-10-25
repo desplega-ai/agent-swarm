@@ -173,8 +173,8 @@ export function writeLeftPanel(
 export function readRightPanel(storage: DraftStorage | null, apiUrl: string): RightPanelState {
   const stored = readJson(storage, deriveStorageKey(apiUrl, RIGHT_PANEL_KEY));
   return {
-    open: typeof stored?.open === "boolean" ? stored.open : null,
-    tab: isRightTab(stored?.tab) ? stored.tab : "comments",
+    open: typeof stored?.open === "boolean" ? stored.open : INITIAL_RIGHT_PANEL.open,
+    tab: isRightTab(stored?.tab) ? stored.tab : INITIAL_RIGHT_PANEL.tab,
   };
 }
 

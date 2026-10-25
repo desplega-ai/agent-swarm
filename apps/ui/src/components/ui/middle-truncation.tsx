@@ -216,7 +216,9 @@ export function MiddleTruncation({
   const containerRef = useRef<HTMLSpanElement>(null);
   const [displayed, setDisplayed] = useState<string>(children);
   const onTruncatedRef = useRef(onTruncatedChange);
-  onTruncatedRef.current = onTruncatedChange;
+  useLayoutEffect(() => {
+    onTruncatedRef.current = onTruncatedChange;
+  });
 
   useLayoutEffect(() => {
     const el = containerRef.current;

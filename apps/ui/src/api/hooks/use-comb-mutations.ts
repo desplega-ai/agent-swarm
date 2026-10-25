@@ -119,8 +119,14 @@ export function useCombMutations(drive: Drive) {
         await refresh();
         return created;
       },
-      /** Move a file. Its versions and star follow it. Its comments stay on the old path. */
+      /**
+       * Move a file (`to` is a full Comb path). agent-fs writes it as a new
+       * version at `to`. The old path keeps its history and its comments.
+       * Stars move with it. A taken path, or a file in the way, is refused first.
+       */
       rename: async (from: string, to: string) => {
+        if (await exists(to)) throw alreadyExists(to);
+        await assertFoldersFree("/", to.replace(/^\/+/, ""), false);
         await client().callOp(orgId, "mv", { from, to }, driveId);
         await refresh();
       },

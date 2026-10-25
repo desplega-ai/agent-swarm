@@ -2,7 +2,7 @@ import { Download, type LucideIcon, Maximize2, MessageSquarePlus, Minimize2 } fr
 import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAgentFsAccess } from "@/api/hooks/use-agent-fs";
-import { downloadDriveFile } from "@/components/comb/file-actions";
+import { downloadBlob, downloadDriveFile } from "@/components/comb/file-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -35,7 +35,12 @@ function ToolButton({
           size="icon-sm"
           variant="outline"
           aria-label={label}
-          onClick={onClick}
+          onClick={(event) => {
+            // A linked image puts the frame inside an <a>: the click must not follow it.
+            event.preventDefault();
+            event.stopPropagation();
+            onClick();
+          }}
           // Readable over any image: the outline variant's dark fill is see-through.
           className="bg-background/90 shadow-sm backdrop-blur-sm hover:bg-accent dark:bg-background/90 dark:hover:bg-accent"
         >
@@ -120,14 +125,7 @@ function svgCopy(svg: string, id: string): string {
 }
 
 function downloadSvg(svg: string) {
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "diagram.svg";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(new Blob([svg], { type: "image/svg+xml" }), "diagram.svg");
 }
 
 /**

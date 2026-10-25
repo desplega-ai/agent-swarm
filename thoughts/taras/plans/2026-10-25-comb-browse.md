@@ -60,8 +60,9 @@ open in a modal and take comments. One new PR on `feat/comb-browse`, not merged.
 ## Decisions
 
 - Favorites: agent-fs favorites when the server has the `favorites` feature. Existing dashboard
-  stars on the swarm drive are imported once per agent-fs user. Without the feature, Comb keeps
-  the dashboard table. The sidebar pins follow the same source. (asked)
+  stars on the swarm drive are imported (copied) once per browser and agent-fs user, marked in
+  localStorage. The dashboard keeps its stars. Without the feature, Comb keeps the dashboard
+  table. The sidebar pins follow the same source. (asked)
 - Asset comments: the live UI has none, so Comb anchors an asset comment to the asset's source
   lines and outlines the whole block. (asked: "the same way agent-fs does, or 1")
 - Icons: one mono lucide icon per file kind. Image thumbnails only in search results. (asked)

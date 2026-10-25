@@ -109,17 +109,15 @@ export function FileDialogsProvider({
   );
 }
 
-/** The drive path as people paste it: "/docs/plan.md", a folder with its "/". */
-export function copyablePath(target: DrivePath): string {
-  return target.path;
-}
+const CLIPBOARD_BLOCKED = "Could not copy. The browser blocked the clipboard.";
 
+/** Copy from a menu item. The menu closes at once, so a toast says it worked. */
 async function copyText(text: string, done: string) {
   try {
     await navigator.clipboard.writeText(text);
     toast.success(done);
   } catch {
-    toast.error("Could not copy. The browser blocked the clipboard.");
+    toast.error(CLIPBOARD_BLOCKED);
   }
 }
 
@@ -169,7 +167,8 @@ function useFileMenuGroups(target: DrivePath): MenuAction[][] {
       id: "copy-path",
       label: "Copy path",
       icon: Copy,
-      onSelect: () => void copyText(copyablePath(target), "Path copied"),
+      // The drive path as people paste it: "/docs/plan.md", a folder with its "/".
+      onSelect: () => void copyText(target.path, "Path copied"),
     },
   ];
   if (!isFolder && openDialog && features.has(SHARE_LINKS_FEATURE)) {
@@ -381,9 +380,7 @@ export function CopyPathButton({ target }: { target: DrivePath }) {
           variant="ghost"
           aria-label={label}
           onClick={async () => {
-            if (!(await copy(copyablePath(target)))) {
-              toast.error("Could not copy. The browser blocked the clipboard.");
-            }
+            if (!(await copy(target.path))) toast.error(CLIPBOARD_BLOCKED);
           }}
         >
           {copied ? <Check /> : <Copy />}

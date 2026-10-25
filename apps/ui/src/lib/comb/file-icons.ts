@@ -4,7 +4,7 @@
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import { AUDIO_TYPES, fileExtension } from "./file-kinds";
+import { AUDIO_TYPES, fileExtension, IMAGE_EXTS, VIDEO_EXTS } from "./file-kinds";
 
 export type FileIconKind =
   | "folder"
@@ -26,19 +26,6 @@ const BY_EXTENSION: Readonly<Record<string, FileIconKind>> = {
   mdx: "markdown",
   txt: "text",
   log: "text",
-  png: "image",
-  jpg: "image",
-  jpeg: "image",
-  gif: "image",
-  svg: "image",
-  webp: "image",
-  ico: "image",
-  avif: "image",
-  mp4: "video",
-  webm: "video",
-  ogv: "video",
-  mov: "video",
-  m4v: "video",
   mkv: "video",
   avi: "video",
   pdf: "pdf",
@@ -95,6 +82,9 @@ const BY_EXTENSION: Readonly<Record<string, FileIconKind>> = {
 export function fileIconKind(name: string, isFolder: boolean): FileIconKind {
   if (isFolder) return "folder";
   const ext = fileExtension(name);
+  // The viewer's own lists: an image icon means Comb shows the image.
+  if (IMAGE_EXTS.has(ext)) return "image";
+  if (VIDEO_EXTS.has(ext)) return "video";
   if (Object.hasOwn(AUDIO_TYPES, ext)) return "audio";
   return Object.hasOwn(BY_EXTENSION, ext) ? (BY_EXTENSION[ext] as FileIconKind) : "file";
 }

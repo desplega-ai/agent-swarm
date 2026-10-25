@@ -28,7 +28,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { LEFT_TABS, type LeftTab, type RightTab } from "@/lib/comb/panels";
+import { LEFT_TABS, type LeftTab, RIGHT_TABS, type RightTab } from "@/lib/comb/panels";
 import type { CombLocation } from "@/lib/comb/paths";
 import { usePageShortcut } from "@/lib/json-render/use-page-shortcut";
 import { cn } from "@/lib/utils";
@@ -369,7 +369,7 @@ export function RightPanelBody({
     >
       <div className={cn(titleRow, "pl-1.5")}>
         <TabsList variant="line" className="p-0 group-data-[orientation=horizontal]/tabs:h-full">
-          {(["comments", "outline"] as const).map((value) => {
+          {RIGHT_TABS.map((value) => {
             const Icon = value === "comments" ? MessageSquare : TableOfContents;
             return (
               <TabsTrigger key={value} value={value} data-panel-tab={value} className={LINE_TAB}>

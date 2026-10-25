@@ -1,15 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { api } from "@/api/client";
 import { agentFsKey, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { useFavorites, useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useAgentFs } from "@/contexts/agent-fs-context";
+import { useConfig } from "@/hooks/use-config";
+import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { type AgentFsClient, AgentFsError } from "@/lib/agent-fs/client";
 import type { AgentFsFavorite, FavoriteListResult } from "@/lib/agent-fs/types";
+import { browserStorage } from "@/lib/comb/drafts";
 import {
-  dashboardPinsToMove,
   favoriteApiPath,
   favoritePinIds,
+  favoritesImportKey,
+  starsToImport,
   withFavorite,
 } from "@/lib/comb/favorites";
 import { type DrivePath, pinIdFor } from "@/lib/comb/paths";
@@ -29,14 +33,33 @@ export interface CombFavorites {
   isToggling: boolean;
 }
 
+/** Star toggles in flight per favorites query (see `useCombFavorites`). */
+const inFlight = new Map<string, number>();
+
+function bumpInFlight(key: readonly unknown[], delta: 1 | -1): number {
+  const id = JSON.stringify(key);
+  const next = Math.max(0, (inFlight.get(id) ?? 0) + delta);
+  if (next === 0) inFlight.delete(id);
+  else inFlight.set(id, next);
+  return next;
+}
+
+/** Imports started in this page load, so a failing star is not retried in a loop. */
+const importing = new Set<string>();
+
 /**
  * Comb favorites. With an agent-fs that has the `favorites` feature, they are
  * the person's agent-fs stars, shared with the agent-fs live UI. Otherwise
  * they are the dashboard favorites (item type `agent-fs-path`), as before.
- * Dashboard stars on the drive move to agent-fs once it has stars.
+ *
+ * The dashboard stars on the drive are imported into agent-fs once per
+ * browser and agent-fs account (a marker in localStorage). The import copies:
+ * the dashboard keeps its stars, so an agent-fs without the feature, or a
+ * browser that is not connected, still lists them.
  */
 export function useCombFavorites(drive: Drive | null): CombFavorites {
   const { state, features } = useAgentFs();
+  const { apiUrl } = useConfig().config;
   const access = useAgentFsAccess();
   const queryClient = useQueryClient();
   const onAgentFs = state === "ready" && features.has("favorites") && access.client !== null;
@@ -67,6 +90,9 @@ export function useCombFavorites(drive: Drive | null): CombFavorites {
     staleTime: 30_000,
   });
 
+  // Each toggle patches only its own star, so a failure rolls back that star
+  // and no other. The list refetches once the last toggle settles: an
+  // earlier refetch could bring back the old state of a toggle still in flight.
   const starToggle = useMutation({
     mutationFn: ({ target, favorite }: { target: DrivePath; favorite: boolean }) =>
       (access.client as AgentFsClient).callOp(
@@ -76,26 +102,68 @@ export function useCombFavorites(drive: Drive | null): CombFavorites {
         target.driveId,
       ),
     onMutate: async ({ target, favorite }) => {
+      bumpInFlight(key, 1);
       await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<AgentFsFavorite[]>(key);
       queryClient.setQueryData<AgentFsFavorite[]>(key, (list) =>
         withFavorite(list ?? [], target.path, favorite, new Date().toISOString()),
       );
-      return { previous };
     },
-    onError: (_error, _vars, context) => queryClient.setQueryData(key, context?.previous),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
+    onError: (_error, { target, favorite }) =>
+      queryClient.setQueryData<AgentFsFavorite[]>(key, (list) =>
+        withFavorite(list ?? [], target.path, !favorite, new Date().toISOString()),
+      ),
+    onSettled: () => {
+      if (bumpInFlight(key, -1) > 0) return;
+      return queryClient.invalidateQueries({ queryKey: key });
+    },
   });
 
-  useMoveDashboardPins(
-    onAgentFs && drive && stars.data && dashboard.data ? drive : null,
-    dashboard.data?.favoriteIds ?? [],
-    access.client,
-    () => {
-      void queryClient.invalidateQueries({ queryKey: key });
-      void queryClient.invalidateQueries({ queryKey: ["favorites", "agent-fs-path"] });
-    },
-  );
+  // The one-time import of the dashboard stars. It reads both lists fresh
+  // from the servers: the query cache is persisted, so cached lists can be
+  // older than the servers, and the import would mark itself done too early.
+  const userId = access.userId;
+  const client = access.client;
+  const orgId = drive?.orgId;
+  const driveId = drive?.driveId;
+  const keyId = JSON.stringify(key);
+  useEffect(() => {
+    if (!onAgentFs || !orgId || !driveId || !client || !userId) return;
+    const target = { orgId, driveId };
+    const marker = deriveStorageKey(apiUrl, favoritesImportKey(client.endpoint, userId, target));
+    if (importing.has(marker) || readImported(marker)) return;
+    importing.add(marker);
+    void (async () => {
+      let complete = true;
+      let added = 0;
+      try {
+        const [dashboardList, starList] = await Promise.all([
+          api.listFavorites({ itemType: "agent-fs-path" }),
+          client.callOp<FavoriteListResult>(orgId, "favorite-list", {}, driveId),
+        ]);
+        for (const pin of starsToImport(dashboardList.favoriteIds, starList.favorites, target)) {
+          try {
+            await client.callOp(
+              orgId,
+              "favorite-add",
+              { path: favoriteApiPath(pin.path) },
+              driveId,
+            );
+            added++;
+          } catch (error) {
+            // A path that is gone (404) or cannot be a star (400) is skipped.
+            const skip =
+              error instanceof AgentFsError && (error.status === 404 || error.status === 400);
+            if (!skip) complete = false;
+          }
+        }
+      } catch {
+        complete = false;
+      }
+      // A failure (network, 5xx) leaves the marker unset: the next page load tries again.
+      if (complete) writeImported(marker);
+      if (added > 0) void queryClient.invalidateQueries({ queryKey: JSON.parse(keyId) });
+    })();
+  }, [onAgentFs, orgId, driveId, client, userId, apiUrl, queryClient, keyId]);
 
   if (onAgentFs && drive) {
     return {
@@ -120,61 +188,20 @@ export function useCombFavorites(drive: Drive | null): CombFavorites {
   };
 }
 
-/** One move per agent-fs user and drive per page load, so a failing star is not retried in a loop. */
-const moved = new Set<string>();
+function readImported(marker: string): boolean {
+  try {
+    return (browserStorage()?.getItem(marker) ?? null) !== null;
+  } catch {
+    return false;
+  }
+}
 
-/**
- * Moves the dashboard stars on `drive` to agent-fs: each one is starred on
- * agent-fs, then dropped from the dashboard. A path that is gone (404) or
- * cannot be a star (the drive root, 400) is dropped too. Any other failure
- * keeps the dashboard star for the next page load.
- */
-function useMoveDashboardPins(
-  drive: Drive | null,
-  dashboardIds: readonly string[],
-  client: AgentFsClient | null,
-  onDone: () => void,
-) {
-  const { credential } = useAgentFs();
-  const pins = drive ? dashboardPinsToMove(dashboardIds, drive) : [];
-  const runKey =
-    drive && client && pins.length > 0
-      ? `${client.endpoint}:${credential?.userId}:${drive.orgId}/${drive.driveId}`
-      : null;
-  // The latest pins and callback. `runKey` alone starts a move.
-  const latest = useRef({ pins, onDone });
-  latest.current = { pins, onDone };
-  useEffect(() => {
-    if (!runKey || !client || moved.has(runKey)) return;
-    moved.add(runKey);
-    const { pins: toMove, onDone: done } = latest.current;
-    void (async () => {
-      for (const pin of toMove) {
-        try {
-          await client.callOp(
-            pin.orgId,
-            "favorite-add",
-            { path: favoriteApiPath(pin.path) },
-            pin.driveId,
-          );
-        } catch (error) {
-          const gone =
-            error instanceof AgentFsError && (error.status === 404 || error.status === 400);
-          if (!gone) continue;
-        }
-        try {
-          await api.setFavorite({
-            itemType: "agent-fs-path",
-            itemId: pinIdFor(pin),
-            favorite: false,
-          });
-        } catch {
-          // The dashboard star stays. agent-fs already has it, so the next move only drops it.
-        }
-      }
-      done();
-    })();
-  }, [runKey, client]);
+function writeImported(marker: string) {
+  try {
+    browserStorage()?.setItem(marker, new Date().toISOString());
+  } catch {
+    // Blocked storage: the import runs again on the next page load (adding a star twice is a no-op).
+  }
 }
 
 /** Whether `target` is a star in `favorites`. */

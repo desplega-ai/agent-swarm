@@ -42,7 +42,7 @@ export function withFavorite(
   return [{ path, kind, createdAt: now }, ...rest];
 }
 
-/** The dashboard pins on `drive` that move to agent-fs (Comb used them before agent-fs had stars). */
+/** The dashboard pins on `drive` (Comb kept stars there before agent-fs had them). */
 export function dashboardPinsToMove(ids: readonly string[], drive: Drive): DrivePath[] {
   return ids
     .map(parsePinId)
@@ -50,4 +50,25 @@ export function dashboardPinsToMove(ids: readonly string[], drive: Drive): Drive
       (pin): pin is DrivePath =>
         pin !== null && pin.orgId === drive.orgId && pin.driveId === drive.driveId,
     );
+}
+
+/**
+ * The browser key that marks the dashboard stars of `drive` as imported into
+ * one agent-fs account. Per swarm (`deriveStorageKey` adds the API URL), per
+ * agent-fs server and user, and per drive.
+ */
+export function favoritesImportKey(endpoint: string, userId: string, drive: Drive): string {
+  return `comb:favorites-imported:${endpoint}|${userId}|${drive.orgId}/${drive.driveId}`;
+}
+
+/** The dashboard stars on `drive` that agent-fs does not have yet (the import). */
+export function starsToImport(
+  dashboardIds: readonly string[],
+  favorites: readonly AgentFsFavorite[],
+  drive: Drive,
+): DrivePath[] {
+  const have = new Set(favorites.map((favorite) => favorite.path));
+  return dashboardPinsToMove(dashboardIds, drive).filter(
+    (pin) => pin.path !== "/" && !have.has(favoriteApiPath(pin.path)),
+  );
 }

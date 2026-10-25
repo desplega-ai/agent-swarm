@@ -150,10 +150,19 @@ function SearchDialog({
     onChange({ query: draft, mode: next });
     inputRef.current?.focus();
   };
-  // Tab and Shift+Tab move between the modes. The arrows move through the results.
+  // Tab and Shift+Tab move between the modes. The arrows move through the
+  // results. The dialog's focus trap must not see the Tab: it would move focus
+  // out of the box. Enter after a failed search tries it again.
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === "Enter" && search.error) {
+      event.preventDefault();
+      void search.refetch();
+      return;
+    }
+    if (event.key !== "Tab") return;
     event.preventDefault();
+    event.stopPropagation();
     setMode(nextSearchMode(mode, event.shiftKey ? -1 : 1));
   };
 

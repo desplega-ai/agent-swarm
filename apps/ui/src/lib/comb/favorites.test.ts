@@ -4,6 +4,8 @@ import {
   favoriteApiPath,
   favoriteCombPath,
   favoritePinIds,
+  favoritesImportKey,
+  starsToImport,
   withFavorite,
 } from "./favorites";
 
@@ -58,5 +60,23 @@ describe("dashboardPinsToMove", () => {
       { orgId: "o", driveId: "d", path: "/a.md" },
       { orgId: "o", driveId: "d", path: "/docs/" },
     ]);
+  });
+});
+
+describe("the import of dashboard stars", () => {
+  test("only stars agent-fs does not have, never the drive root", () => {
+    const stars = [{ path: "/docs", kind: "directory" as const, createdAt: "x" }];
+    expect(starsToImport(["o/d/docs/", "o/d/a.md", "o/d/", "o/x/b.md"], stars, drive)).toEqual([
+      { orgId: "o", driveId: "d", path: "/a.md" },
+    ]);
+  });
+
+  test("the marker is per agent-fs server, user, and drive", () => {
+    expect(favoritesImportKey("https://fs", "u1", drive)).toBe(
+      "comb:favorites-imported:https://fs|u1|o/d",
+    );
+    expect(favoritesImportKey("https://fs", "u2", drive)).not.toBe(
+      favoritesImportKey("https://fs", "u1", drive),
+    );
   });
 });

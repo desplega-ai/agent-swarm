@@ -3,6 +3,16 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAgentFsComments } from "@/api/hooks/use-agent-fs";
 import { mutationMessage, useCombMutations } from "@/api/hooks/use-comb-mutations";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -159,10 +169,6 @@ export function RenameDialog({
     setBusy(true);
     setError(null);
     try {
-      if (await mutations.exists(to)) {
-        setError(`Something already exists at ${to}.`);
-        return;
-      }
       await mutations.rename(file.path, to);
       toast.success("Renamed", { description: to });
       onClose();
@@ -181,8 +187,8 @@ export function RenameDialog({
           <DialogHeader>
             <DialogTitle>Rename file</DialogTitle>
             <DialogDescription>
-              Edit the full path to rename or move the file. Its versions move with it.
-              {comments ? ` Its ${plural(comments, "comment")} stay on the old path.` : null}
+              Edit the full path to rename or move the file. The old path keeps its history
+              {comments ? ` and its ${plural(comments, "comment")}` : null}.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1.5">
@@ -260,37 +266,41 @@ export function DeleteDialog({
   };
 
   return (
-    <Dialog open onOpenChange={(next) => (next || busy ? undefined : onClose())}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Delete file</DialogTitle>
-          <DialogDescription>
+    // An alert dialog: an outside click does not dismiss a delete.
+    <AlertDialog open onOpenChange={(next) => (next || busy ? undefined : onClose())}>
+      <AlertDialogContent className="sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete file</AlertDialogTitle>
+          <AlertDialogDescription>
             Delete <Code>{file.path}</Code>? It leaves the listings. Its versions are kept, so{" "}
             <Code>agent-fs revert</Code> can bring it back.
             {comments ? ` Its ${plural(comments, "comment")} are removed.` : null}
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         {error ? (
           <p role="alert" className="text-xs text-destructive">
             {error}
           </p>
         ) : null}
-        <DialogFooter>
-          <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={busy}>
+        <AlertDialogFooter>
+          <AlertDialogCancel size="sm" disabled={busy}>
             Cancel
-          </Button>
-          <Button
-            type="button"
+          </AlertDialogCancel>
+          <AlertDialogAction
             variant="destructive"
             size="sm"
-            onClick={() => void remove()}
             disabled={busy}
+            onClick={(event) => {
+              // Stay open until agent-fs answers: an error shows here.
+              event.preventDefault();
+              void remove();
+            }}
           >
             {busy ? <Spinner /> : null}
             Delete
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

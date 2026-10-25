@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { AlertCircle, FolderOpen, Search, X } from "lucide-react";
+import { AlertCircle, FolderOpen } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgentFsLs, useCombSearch } from "@/api/hooks/use-agent-fs";
@@ -12,6 +12,7 @@ import {
   FileMenuButton,
   NewEntryButton,
 } from "@/components/comb/file-menu";
+import { FilterInput } from "@/components/comb/filter-input";
 import { FolderComments } from "@/components/comb/folder-comments";
 import { PinButton } from "@/components/comb/pin-button";
 import { UploadButton, UploadDropZone, UploadList } from "@/components/comb/upload-zone";
@@ -21,7 +22,6 @@ import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { AlertCallout } from "@/components/ui/alert-callout";
-import { Input } from "@/components/ui/input";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { PageHeader } from "@/components/ui/page-header";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -32,7 +32,6 @@ import { MIN_NAME_QUERY_LENGTH } from "@/lib/comb/search";
 import { sortEntries } from "@/lib/comb/tree";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatRelative } from "@/lib/relative-time";
-import { cn } from "@/lib/utils";
 
 interface FolderRow {
   /** Drive path of the entry (folders end with "/"). */
@@ -228,7 +227,12 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         description={count}
         action={
           <>
-            <FolderFilter value={draft} onChange={setDraft} className="hidden sm:flex" />
+            <FilterInput
+              value={draft}
+              onChange={setDraft}
+              label="Filter this folder"
+              className="hidden w-56 sm:flex"
+            />
             <NewEntryButton folder={folder} />
             <UploadButton folder={folder} />
             {/* The root is the Comb item, so no pin. */}
@@ -239,7 +243,12 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         }
       />
       {/* Phones: the filter takes its own row under the header. */}
-      <FolderFilter value={draft} onChange={setDraft} className="mb-3 sm:hidden" />
+      <FilterInput
+        value={draft}
+        onChange={setDraft}
+        label="Filter this folder"
+        className="mb-3 sm:hidden"
+      />
       <UploadList />
       {/* The drive root is the Comb home: favorites, recently viewed, recently changed. */}
       {folder.path === "/" ? <CombHome drive={folder} /> : null}
@@ -297,49 +306,5 @@ export function FolderView({ folder }: { folder: DrivePath }) {
       {/* Open comments below the folder: send to swarm, resolve in bulk. */}
       <FolderComments folder={folder} />
     </UploadDropZone>
-  );
-}
-
-/** The folder header's filter box (`?filter=`). Escape clears it. */
-function FolderFilter({
-  value,
-  onChange,
-  className,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  className?: string;
-}) {
-  return (
-    <div className={cn("relative flex items-center", className)}>
-      <Search
-        className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground"
-        aria-hidden
-      />
-      <Input
-        type="search"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && value) {
-            event.preventDefault();
-            onChange("");
-          }
-        }}
-        placeholder="Filter this folder"
-        aria-label="Filter this folder"
-        className="h-8 w-full pr-8 pl-8 sm:w-56 [&::-webkit-search-cancel-button]:hidden"
-      />
-      {value ? (
-        <button
-          type="button"
-          aria-label="Clear filter"
-          onClick={() => onChange("")}
-          className="absolute right-1.5 flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-        >
-          <X className="size-3.5" />
-        </button>
-      ) : null}
-    </div>
   );
 }

@@ -1,14 +1,17 @@
 import { useQueries } from "@tanstack/react-query";
-import { ChevronRight, Search, X } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentFsLsQuery, useAgentFsAccess, useCombSearch } from "@/api/hooks/use-agent-fs";
 import { FileKindIcon } from "@/components/comb/file-icon";
 import { FileContextMenu, FileMenuButton } from "@/components/comb/file-menu";
+import { FilterInput } from "@/components/comb/filter-input";
 import { PresenceDots } from "@/components/comb/presence-avatars";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { AgentFsError } from "@/lib/agent-fs/client";
+import { matchesName } from "@/lib/comb/folder-filter";
 import { ancestorFolders, type CombLocation, combPath, parentFolder } from "@/lib/comb/paths";
 import { isUnknownOpError, MIN_NAME_QUERY_LENGTH } from "@/lib/comb/search";
 import {
@@ -92,16 +95,25 @@ function useTreeFilter(
   const found = useCombSearch(drive, "name", active ? trimmed : "");
   if (!active) return null;
   if (found.error && isUnknownOpError(found.error, "find")) {
+    // Every typed word, like the folder filter.
     const paths = loaded
-      .filter((row) => row.kind === "entry" && !row.isFolder)
-      .filter((row) => row.kind === "entry" && nameParts(row.name, trimmed).some((p) => p.hit))
-      .map((row) => (row.kind === "entry" ? row.path : ""));
+      .filter(
+        (row): row is Extract<TreeRow, { kind: "entry" }> =>
+          row.kind === "entry" && !row.isFolder && matchesName(row.name, trimmed),
+      )
+      .map((row) => row.path);
     return {
       rows: matchTree(paths),
       note: "Open folders only. Update agent-fs to filter the whole drive.",
     };
   }
-  if (found.error) return { rows: [], note: found.error.message || "The filter failed." };
+  if (found.error) {
+    // A server error can name storage internals: say only that it failed.
+    const status = found.error instanceof AgentFsError ? found.error.status : 0;
+    const note =
+      status >= 400 && status < 500 ? found.error.message : "The filter failed. Try again.";
+    return { rows: [], note };
+  }
   if (!found.data || found.isPlaceholderData) {
     return {
       rows: found.data ? matchTree(found.data.hits.map((hit) => hit.path)) : [],
@@ -119,15 +131,14 @@ function useTreeFilter(
 }
 
 /**
- * The drive as a lazy tree. A folder lists its children only while it is
- * open. The folders on the way to the current path open on their own.
- * Keyboard: Up/Down move, Right opens or enters a folder, Left closes it or
- * goes to the parent, Home/End jump, Enter opens the row.
+ * The Files tab: the drive as a lazy tree. A folder lists its children only
+ * while it is open. The folders on the way to the current path open on their
+ * own. Keyboard: Up/Down move, Right opens or enters a folder, Left closes it
+ * or goes to the parent, Home/End jump, Enter opens the row.
  *
  * The filter box on top narrows the tree to matching file names across the
  * drive (`useTreeFilter`). It stays while the person opens the matches.
  */
-/** The Files tab: the drive tree. Favorites have their own tab (`FavoritesTab`). */
 export function TreeRail({
   location,
   onNavigate,
@@ -255,7 +266,13 @@ export function TreeRail({
   };
 
   const filterBox = (
-    <TreeFilterBox value={filter} onChange={setFilter} note={filtered?.note ?? null} />
+    <div className="sticky top-0 z-10 flex flex-col gap-1 border-b border-border-subtle bg-card px-1.5 py-1.5">
+      <FilterInput value={filter} onChange={setFilter} label="Filter files" compact />
+      {/* The count, a wait, or a hint, read out as it changes. */}
+      <p aria-live="polite" className="px-1 text-xs text-muted-foreground empty:hidden">
+        {filtered?.note ?? null}
+      </p>
+    </div>
   );
   // The root is not listed yet (a root status row is the only row).
   const [first] = rows;
@@ -370,58 +387,5 @@ export function TreeRail({
         })}
       </div>
     </>
-  );
-}
-
-/**
- * The filter box on top of the tree. Escape clears it. `note` is the line
- * under it (the count, a wait, or a hint), read out as it changes.
- */
-function TreeFilterBox({
-  value,
-  onChange,
-  note,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  note: string | null;
-}) {
-  return (
-    <div className="sticky top-0 z-10 flex flex-col gap-1 border-b border-border-subtle bg-card px-1.5 py-1.5">
-      <div className="relative flex items-center">
-        <Search
-          className="pointer-events-none absolute left-2 size-3.5 text-muted-foreground"
-          aria-hidden
-        />
-        <input
-          type="search"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && value) {
-              event.preventDefault();
-              event.stopPropagation();
-              onChange("");
-            }
-          }}
-          placeholder="Filter files"
-          aria-label="Filter files"
-          className="h-7 w-full rounded-md border border-input bg-transparent pr-7 pl-7 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60 [&::-webkit-search-cancel-button]:hidden"
-        />
-        {value ? (
-          <button
-            type="button"
-            aria-label="Clear filter"
-            onClick={() => onChange("")}
-            className="absolute right-1 flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
-        ) : null}
-      </div>
-      <p aria-live="polite" className="px-1 text-xs text-muted-foreground empty:hidden">
-        {note}
-      </p>
-    </div>
   );
 }

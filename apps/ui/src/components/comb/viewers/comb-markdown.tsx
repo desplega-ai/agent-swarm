@@ -398,6 +398,8 @@ export function CombMarkdown({
 }
 
 const URL_RE = /^https?:\/\/\S+$/i;
+/** A number, a boolean, or a date ("2026-10-14", with or without a time): set in mono. */
+const NUMBER_OR_DATE_RE = /^(?:-?\d+(?:\.\d+)?|true|false|\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+Z?)?)$/;
 
 function PropertyValue({ value }: { value: FrontmatterValue }): ReactNode {
   switch (value.kind) {
@@ -421,6 +423,9 @@ function PropertyValue({ value }: { value: FrontmatterValue }): ReactNode {
         </pre>
       );
     case "text":
+      if (NUMBER_OR_DATE_RE.test(value.text)) {
+        return <span className="font-mono">{value.text}</span>;
+      }
       return URL_RE.test(value.text) ? (
         <a href={value.text} target="_blank" rel="noreferrer" className={LINK_CLASS}>
           {value.text}

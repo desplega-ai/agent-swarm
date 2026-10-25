@@ -164,7 +164,11 @@ function CombWorkspace({ location }: { location: CombLocation }) {
           {file ? (
             <FileView key={`${file.orgId}/${file.driveId}:${file.path}`} file={file} />
           ) : (
-            <FolderView folder={location} />
+            // Keyed per folder: a new folder starts with its own filter (`?filter=`).
+            <FolderView
+              key={`${location.orgId}/${location.driveId}:${location.path}`}
+              folder={location}
+            />
           )}
         </section>
       </div>

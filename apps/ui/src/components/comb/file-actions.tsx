@@ -34,9 +34,13 @@ export async function downloadDriveFile(client: AgentFsClient, file: DrivePath):
     clickLink(signed.url);
     return;
   }
-  const blob = await client.fetchRaw(file.orgId, file.driveId, file.path);
+  downloadBlob(await client.fetchRaw(file.orgId, file.driveId, file.path), baseName(file.path));
+}
+
+/** Save `blob` as a file named `name` through a temporary local link. */
+export function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
-  clickLink(url, baseName(file.path) || "download");
+  clickLink(url, name || "download");
   // Some browsers read the blob after `click()` returns.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
