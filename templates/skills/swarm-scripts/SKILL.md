@@ -175,6 +175,7 @@ function rowsToObjects(res: any): any[] {
 - `kv_get` returns the entry at `data`: read `res.data.value`. The MCP tool shape `entry.value` reads `undefined` in a script.
 - `script_run` returns an envelope (`result`, `truncated`, `durationMs`, `stdout`, `stderr`, `exitCode`). The callee payload is at `.result`. Take key names from a real response: a guessed key that is absent reads as a false zero.
 - An `argsSchema` validation error fires before the body runs and repeats on every retry. Fix the args instead of retrying.
+- The skill methods disagree on the id field: `skill_get({ id })`, but `skill_update({ skillId, content })`. `skill_update({ id, content })` returns outer `success: true` with inner `data.success: false` ("skillId is required.") and writes nothing. Gate a write on `res.data.success`, then re-read: the version must increase and the content must match the draft.
 - Write a dedup or idempotency marker only after the step succeeds. A marker written after a failure blocks the next real attempt.
 - `kv_set` returns `success: false` instead of throwing when a key has a character outside `[a-zA-Z0-9._:/-]` (for example `#` or `|` from a git ref). Check `success` after every write.
 - `script_run` without `scope` runs an agent-scoped row of the same name before the global one, so a stale private copy silently wins. Pass `scope: "global"` for a shared script.
