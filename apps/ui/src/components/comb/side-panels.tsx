@@ -3,7 +3,9 @@ import {
   FolderTree,
   History,
   type LucideIcon,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -22,11 +24,13 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { LeftTab } from "@/lib/comb/panels";
 import type { CombLocation } from "@/lib/comb/paths";
+import { usePageShortcut } from "@/lib/json-render/use-page-shortcut";
 import { cn } from "@/lib/utils";
 import { useCombLayout } from "./comb-layout";
 import { OutlineList } from "./outline-list";
@@ -152,7 +156,12 @@ export function LeftPanel({ location }: { location: CombLocation }) {
   return (
     <aside
       aria-label="Files panel"
-      className={cn("flex shrink-0 flex-col", left.open ? `w-64 ${PANEL_CARD}` : STRIP)}
+      className={cn(
+        "flex shrink-0 flex-col",
+        left.open ? `w-64 ${PANEL_CARD}` : STRIP,
+        // Full width hides the panel. It stays mounted: the tree keeps its open folders.
+        layout.fullWidth && "hidden",
+      )}
     >
       {left.open ? null : (
         <>
@@ -350,12 +359,13 @@ export function CommentPanel({
 
   // Only a new link opens the panel: collapsing with a link in the URL stays collapsed.
   const showRight = layout?.showRight;
+  const fullWidth = layout?.fullWidth ?? false;
   const lastLinked = useRef<string | null>(null);
   useEffect(() => {
     if (linkedId === lastLinked.current) return;
     lastLinked.current = linkedId;
-    if (linkedId && !open) showRight?.();
-  }, [linkedId, open, showRight]);
+    if (linkedId && (!open || fullWidth)) showRight?.();
+  }, [linkedId, open, fullWidth, showRight]);
 
   const total = openCount + notSaved;
   const label = `Comments (${openCount} open${notSaved ? `, ${notSaved} not saved` : ""})`;
@@ -367,7 +377,12 @@ export function CommentPanel({
   return (
     <aside
       aria-label="Comments"
-      className={cn("flex shrink-0 flex-col", open ? `w-72 xl:w-80 ${PANEL_CARD}` : STRIP)}
+      className={cn(
+        "flex shrink-0 flex-col",
+        open ? `w-72 xl:w-80 ${PANEL_CARD}` : STRIP,
+        // Full width hides the panel. A comment link (a click on a passage) ends it.
+        fullWidth && "hidden",
+      )}
     >
       {open ? null : (
         <>
@@ -412,5 +427,39 @@ export function CommentPanel({
         {children}
       </div>
     </aside>
+  );
+}
+
+/**
+ * The header's full width toggle (`F`): hides both side panels so the content
+ * takes the page. Only where the panels sit beside the content (`md` up).
+ */
+export function FullWidthButton() {
+  const layout = useCombLayout();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const on = layout?.fullWidth ?? false;
+  const setFullWidth = layout?.setFullWidth;
+  usePageShortcut(layout?.inline ? "f" : undefined, buttonRef, () => setFullWidth?.(!on));
+  if (!layout?.inline) return null;
+  const label = on ? "Exit full width" : "Full width";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          ref={buttonRef}
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          aria-pressed={on}
+          aria-keyshortcuts="F"
+          onClick={() => layout.setFullWidth(!on)}
+        >
+          {on ? <Minimize2 /> : <Maximize2 />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="flex items-center gap-1.5">
+        {label} <Kbd aria-hidden>F</Kbd>
+      </TooltipContent>
+    </Tooltip>
   );
 }

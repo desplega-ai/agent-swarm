@@ -25,9 +25,11 @@ import {
   PANELS_INLINE_QUERY,
   type PanelTarget,
   RIGHT_OPEN_QUERY,
+  readFullWidth,
   readLeftPanel,
   readRightPanel,
   rightPanelOpen,
+  writeFullWidth,
   writeLeftPanel,
   writeRightPanel,
 } from "@/lib/comb/panels";
@@ -46,6 +48,12 @@ export interface CombLayoutValue {
   collapseLeft: () => void;
   showRight: () => void;
   collapseRight: () => void;
+  /**
+   * Full width (`inline` only): both side panels are hidden and the content
+   * takes the page. Opening either panel ends it.
+   */
+  fullWidth: boolean;
+  setFullWidth: (on: boolean) => void;
   /** The current file's headings (empty for a folder and for a file with no outline). */
   headings: readonly OutlineHeading[];
   /** The current file's viewer scroll pane (the outline scrolls it). */
@@ -91,6 +99,9 @@ export function CombLayoutProvider({
 
   const [left, setLeft] = useState(() => readLeftPanel(browserStorage(), apiUrl));
   const [rightStored, setRightStored] = useState(() => readRightPanel(browserStorage(), apiUrl));
+  const [fullWidthStored, setFullWidthStored] = useState(() =>
+    readFullWidth(browserStorage(), apiUrl),
+  );
   const [viewer, setViewer] = useState<HTMLElement | null>(null);
   const [outline, setOutline] = useState<OutlineResult | null>(null);
 
@@ -128,15 +139,27 @@ export function CombLayoutProvider({
     navigated.current = key;
   }, [key, resolved, apply]);
 
+  const setFullWidth = useCallback(
+    (on: boolean) => {
+      setFullWidthStored(on);
+      writeFullWidth(browserStorage(), apiUrl, on);
+    },
+    [apiUrl],
+  );
+
   const value = useMemo<CombLayoutValue>(
     () => ({
       inline,
       left: leftPanelView(left, target, leftWide),
       right: { open: rightPanelOpen(rightStored, rightWide) },
-      showLeft: (tab) => apply({ type: "show", tab, target }),
+      showLeft: (tab) => {
+        setFullWidth(false);
+        apply({ type: "show", tab, target });
+      },
       selectLeft: (tab) => apply({ type: "select", tab, target }),
       collapseLeft: () => apply({ type: "collapse" }),
       showRight: () => {
+        setFullWidth(false);
         setRightStored(true);
         writeRightPanel(browserStorage(), apiUrl, true);
       },
@@ -144,12 +167,28 @@ export function CombLayoutProvider({
         setRightStored(false);
         writeRightPanel(browserStorage(), apiUrl, false);
       },
+      fullWidth: inline && fullWidthStored,
+      setFullWidth,
       headings:
         outline?.key === key && outline.target === "outline" ? outline.headings : NO_HEADINGS,
       viewer,
       setViewer,
     }),
-    [inline, left, target, leftWide, rightStored, rightWide, apply, apiUrl, outline, key, viewer],
+    [
+      inline,
+      left,
+      target,
+      leftWide,
+      rightStored,
+      rightWide,
+      apply,
+      apiUrl,
+      fullWidthStored,
+      setFullWidth,
+      outline,
+      key,
+      viewer,
+    ],
   );
 
   return (

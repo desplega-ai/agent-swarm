@@ -152,7 +152,7 @@ export function UploadDropZone({ folder, children }: { folder: DrivePath; childr
 
   return (
     <div
-      className="relative flex min-h-0 flex-1 flex-col gap-3"
+      className="relative flex min-h-0 flex-1 flex-col"
       onDragEnter={(event) => {
         if (!upload || !hasFiles(event)) return;
         event.preventDefault();
@@ -183,7 +183,8 @@ export function UploadDropZone({ folder, children }: { folder: DrivePath; childr
         });
       }}
     >
-      {children}
+      {/* The folder scrolls as one page when its parts (home, listing, comments) do not fit. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">{children}</div>
       {over ? (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/85">
           <div className="flex flex-col items-center gap-2 px-6 text-center">

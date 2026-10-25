@@ -6,9 +6,11 @@ import {
   type LeftPanelState,
   leftPanelReducer,
   leftPanelView,
+  readFullWidth,
   readLeftPanel,
   readRightPanel,
   rightPanelOpen,
+  writeFullWidth,
   writeLeftPanel,
   writeRightPanel,
 } from "./panels";
@@ -215,6 +217,18 @@ describe("panel storage", () => {
     }
     storage.map.set(`swarm:v1:${apiUrl}:comb:panel:left`, '{"tab":"history"}');
     expect(readLeftPanel(storage, apiUrl).tab).toBe("outline");
+  });
+
+  test("full width is off until turned on, and round-trips per API URL", () => {
+    const storage = memoryStorage();
+    expect(readFullWidth(storage, apiUrl)).toBe(false);
+    writeFullWidth(storage, apiUrl, true);
+    expect(readFullWidth(storage, apiUrl)).toBe(true);
+    expect(readFullWidth(storage, "http://other")).toBe(false);
+    writeFullWidth(storage, apiUrl, false);
+    expect(readFullWidth(storage, apiUrl)).toBe(false);
+    storage.map.set(`swarm:v1:${apiUrl}:comb:full-width`, '{"on":"yes"}');
+    expect(readFullWidth(storage, apiUrl)).toBe(false);
   });
 
   test("no choice yet stores only the tab", () => {

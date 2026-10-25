@@ -251,7 +251,7 @@ export function RecentTab(props: Omit<ListProps, "limit">) {
         value={view}
         onValueChange={setView}
         options={RECENT_VIEWS}
-        className="w-full"
+        className="flex w-full *:flex-1"
       />
       {view === "viewed" ? <RecentlyViewedList {...props} /> : <RecentChangesList {...props} />}
     </div>

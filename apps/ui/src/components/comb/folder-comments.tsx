@@ -97,6 +97,8 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
     const show = failed.length > 0 ? toast.warning : toast.success;
     show(summary, {
       description,
+      // Long enough to reach Undo after a big batch.
+      duration: 10_000,
       action: {
         label: "Undo",
         onClick: () =>

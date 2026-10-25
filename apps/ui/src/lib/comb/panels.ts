@@ -129,6 +129,8 @@ export function rightPanelOpen(stored: boolean | null, wide: boolean): boolean {
 
 export const LEFT_PANEL_KEY = "comb:panel:left";
 export const RIGHT_PANEL_KEY = "comb:panel:right";
+/** Full width: both side panels hidden, the content as wide as the page. */
+export const FULL_WIDTH_KEY = "comb:full-width";
 
 function readJson(storage: DraftStorage | null, key: string): Record<string, unknown> | null {
   try {
@@ -178,4 +180,13 @@ export function readRightPanel(storage: DraftStorage | null, apiUrl: string): bo
 
 export function writeRightPanel(storage: DraftStorage | null, apiUrl: string, open: boolean) {
   writeJson(storage, deriveStorageKey(apiUrl, RIGHT_PANEL_KEY), { open });
+}
+
+/** The stored full width choice. Off until the person turns it on. */
+export function readFullWidth(storage: DraftStorage | null, apiUrl: string): boolean {
+  return readJson(storage, deriveStorageKey(apiUrl, FULL_WIDTH_KEY))?.on === true;
+}
+
+export function writeFullWidth(storage: DraftStorage | null, apiUrl: string, on: boolean) {
+  writeJson(storage, deriveStorageKey(apiUrl, FULL_WIDTH_KEY), { on });
 }

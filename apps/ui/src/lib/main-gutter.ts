@@ -8,3 +8,5 @@ export const MAIN_GUTTER = "p-4 md:p-6";
 export const MAIN_GUTTER_X = "px-4 md:px-6";
 export const MAIN_BLEED = "-m-4 md:-m-6";
 export const MAIN_BLEED_Y = "-my-4 md:-my-6";
+/** The gutter without the top: Comb's own header sits right under the app header. */
+export const MAIN_GUTTER_NO_TOP = "px-4 pb-4 md:px-6 md:pb-6";

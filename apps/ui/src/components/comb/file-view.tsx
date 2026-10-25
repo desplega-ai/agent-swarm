@@ -61,7 +61,7 @@ export function FileView({ file }: { file: DrivePath }) {
 /** The loaded frame while `stat` loads: the viewer pane and the comment panel's column. */
 function FileViewSkeleton() {
   const layout = useCombLayout();
-  const inline = layout?.inline ?? true;
+  const inline = (layout?.inline ?? true) && !layout?.fullWidth;
   const railOpen = layout?.right.open ?? true;
   return (
     <div className="flex min-h-0 flex-1 gap-3" aria-busy="true">

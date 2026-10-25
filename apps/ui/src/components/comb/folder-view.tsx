@@ -139,7 +139,13 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           fullPage
         />
       ) : isMobile ? (
-        <MobileList label="Folder contents" loading={listing.isPending} emptyMessage="Empty folder">
+        <MobileList
+          label="Folder contents"
+          loading={listing.isPending}
+          emptyMessage="Empty folder"
+          // Full height: the folder scrolls as one page on a phone.
+          className="flex-none overflow-visible"
+        >
           {rows.map((row) => (
             <MobileListRow
               key={row.id}
@@ -169,6 +175,8 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           loading={listing.isPending}
           emptyMessage="Empty folder"
           pagination={false}
+          // The listing keeps room for about six rows. Below that the folder scrolls.
+          className="min-h-72"
         />
       )}
       {/* Open comments below the folder: send to swarm, resolve in bulk. */}
