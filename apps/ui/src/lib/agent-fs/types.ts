@@ -324,3 +324,15 @@ export interface SignedUrlResult {
    */
   kind: "presigned" | "app";
 }
+
+/** One star (`favorite-list`, feature `favorites`). Per agent-fs user and drive. */
+export interface AgentFsFavorite {
+  /** "/docs/a.md" or "/docs" (a folder has no trailing "/"). */
+  path: string;
+  kind: "file" | "directory";
+  createdAt: string;
+}
+
+export interface FavoriteListResult {
+  favorites: AgentFsFavorite[];
+}

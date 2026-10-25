@@ -4,6 +4,7 @@ import { anthropicGatewayProvider } from "./anthropic-gateway.ts";
 import { bedrockProvider } from "./bedrock.ts";
 import { claudeSubscriptionProvider } from "./claude-subscription.ts";
 import { foundryProvider } from "./foundry.ts";
+import { openAiGatewayProvider } from "./openai-gateway.ts";
 import { vertexProvider } from "./vertex.ts";
 
 export const ROUTE_PROVIDERS: readonly RouteProvider[] = [
@@ -13,6 +14,7 @@ export const ROUTE_PROVIDERS: readonly RouteProvider[] = [
   foundryProvider,
   bedrockProvider,
   vertexProvider,
+  openAiGatewayProvider,
 ];
 
 export function getRouteProvider(id: string): RouteProvider | undefined {

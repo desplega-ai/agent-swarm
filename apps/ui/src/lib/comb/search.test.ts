@@ -5,7 +5,10 @@ import {
   isUnknownOpError,
   literalFtsPattern,
   NAME_RESULT_LIMIT,
+  nextSearchMode,
   SEMANTIC_RESULT_LIMIT,
+  searchModeFromParam,
+  searchModeParam,
   searchOutcome,
   searchParams,
   snippetParts,
@@ -45,6 +48,15 @@ describe("literalFtsPattern", () => {
 describe("searchParams", () => {
   test("maps each mode to its op params", () => {
     expect(searchParams("name", " notes ")).toEqual({ query: "notes", limit: NAME_RESULT_LIMIT });
+    expect(searchParams("name", "notes", "/docs/")).toEqual({
+      query: "notes",
+      limit: NAME_RESULT_LIMIT,
+      path: "/docs/",
+    });
+    expect(searchParams("name", "notes", "/")).toEqual({
+      query: "notes",
+      limit: NAME_RESULT_LIMIT,
+    });
     expect(searchParams("text", "road map")).toEqual({ pattern: '"road" AND "map"' });
     expect(searchParams("semantic", "files stored")).toEqual({
       query: "files stored",
@@ -97,8 +109,18 @@ describe("searchOutcome", () => {
         folder: "/docs/",
         snippet: [],
         chip: null,
+        size: 10,
+        modifiedAt: undefined,
       },
-      { path: "/notes.md", name: "notes.md", folder: "/", snippet: [], chip: null },
+      {
+        path: "/notes.md",
+        name: "notes.md",
+        folder: "/",
+        snippet: [],
+        chip: null,
+        size: 5,
+        modifiedAt: undefined,
+      },
     ]);
   });
 
@@ -146,5 +168,24 @@ describe("isUnknownOpError", () => {
       false,
     );
     expect(isUnknownOpError(new Error("Unknown operation: find"), "find")).toBe(false);
+  });
+});
+
+describe("search modes in the URL", () => {
+  test("file, semantic, text round-trip, and anything else reads as file", () => {
+    for (const mode of ["name", "semantic", "text"] as const) {
+      expect(searchModeFromParam(searchModeParam(mode))).toBe(mode);
+    }
+    expect(searchModeParam("name")).toBe("file");
+    expect(searchModeFromParam(null)).toBe("name");
+    expect(searchModeFromParam("name")).toBe("name");
+    expect(searchModeFromParam("fts")).toBe("name");
+  });
+
+  test("Tab goes file, semantic, text and wraps. Shift+Tab goes back", () => {
+    expect(nextSearchMode("name", 1)).toBe("semantic");
+    expect(nextSearchMode("semantic", 1)).toBe("text");
+    expect(nextSearchMode("text", 1)).toBe("name");
+    expect(nextSearchMode("name", -1)).toBe("text");
   });
 });

@@ -4,8 +4,17 @@
 // handlers, labels sanitized). Until the diagram renders, and when it cannot,
 // the block shows its source like any other fence.
 
-import { type ComponentProps, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type ComponentType,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import type { CodeTheme } from "./code-tokens";
+import type { AssetFrameProps } from "./comb-markdown";
 
 type MermaidApi = typeof import("mermaid")["default"];
 
@@ -40,11 +49,10 @@ async function renderDiagram(id: string, source: string, theme: CodeTheme): Prom
 }
 
 /**
- * Shrink a wide diagram to the column, but never below this share of its
- * natural width: past that the labels get too small, and the wrapper scrolls.
+ * Fit the diagram to the column: a wide diagram shrinks until all of it
+ * shows (Maximize opens it as large as the screen), a small one keeps its
+ * own size.
  */
-const MIN_SCALE = 0.6;
-
 function fitWidth(host: HTMLElement) {
   const svg = host.querySelector("svg");
   const width = svg?.viewBox?.baseVal?.width;
@@ -52,7 +60,6 @@ function fitWidth(host: HTMLElement) {
   svg.setAttribute("width", "100%");
   svg.removeAttribute("height");
   svg.style.maxWidth = `${width}px`;
-  svg.style.minWidth = `${Math.round(width * MIN_SCALE)}px`;
   svg.style.display = "block";
   svg.style.margin = "0 auto";
 }
@@ -66,12 +73,15 @@ export function MermaidBlock({
   source,
   theme,
   fallback,
+  frame: Frame,
   ...rest
 }: {
   source: string;
   theme: CodeTheme;
   /** The fence as a plain code block: shown while loading and on a parse error. */
   fallback: ReactNode;
+  /** The frame with Maximize and Comment (`asset-frame.tsx`). None: the bare diagram. */
+  frame?: ComponentType<AssetFrameProps>;
 } & Omit<ComponentProps<"div">, "children">) {
   const id = `comb-mermaid-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const [status, setStatus] = useState<Status>({ kind: "loading" });
@@ -105,9 +115,20 @@ export function MermaidBlock({
   if (status.kind === "ready") {
     // The diagram is not document text: comments anchor on the source lines,
     // not on the SVG labels (`data-comb-skip`).
-    return (
-      <div {...rest} className="my-4 overflow-x-auto rounded-md border border-border p-3">
+    const diagram = (
+      <div className="overflow-x-auto rounded-md border border-border p-3">
         <div ref={hostRef} data-comb-skip role="img" aria-label="Mermaid diagram" />
+      </div>
+    );
+    return (
+      <div {...rest} className="my-4">
+        {Frame ? (
+          <Frame asset={{ kind: "diagram", svg: status.svg, svgId: id }} block>
+            {diagram}
+          </Frame>
+        ) : (
+          diagram
+        )}
       </div>
     );
   }

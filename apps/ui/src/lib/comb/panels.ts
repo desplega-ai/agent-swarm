@@ -1,7 +1,7 @@
-// The two side panels of a Comb page. The left panel has tabs: Files, Recent,
-// Favorites, and Outline for a file with headings. The right panel holds the comments. From
-// `md` up each panel sits beside the content and collapses to an icon strip.
-// Below `md` both are sheets.
+// The two side panels of a Comb page. The left panel has tabs Files, Recent
+// and Favorites. The right panel has Comments and, for a file with headings,
+// Outline (like the agent-fs live UI). From `md` up each panel sits beside the
+// content and collapses to an icon strip. Below `md` both are sheets.
 //
 // The person's choice lives in localStorage, one key per panel, namespaced by
 // the swarm API URL like the other Comb keys. Until the person chooses, the
@@ -19,93 +19,66 @@ export const LEFT_OPEN_QUERY = "(min-width: 1440px)";
 /** The right panel starts open from this width up. */
 export const RIGHT_OPEN_QUERY = "(min-width: 1024px)";
 
-/** The left panel's tabs, in order. Outline shows only for a file with headings. */
-export const LEFT_TABS = ["files", "recent", "favorites", "outline"] as const;
+/** The left panel's tabs, in order. */
+export const LEFT_TABS = ["files", "recent", "favorites"] as const;
 export type LeftTab = (typeof LEFT_TABS)[number];
 
-/** Tabs that list files on any page. They stay put while the person moves between files. */
-const LIST_TABS: ReadonlySet<LeftTab> = new Set(["recent", "favorites"]);
+/** The right panel's tabs, in order. Outline shows only for a file with headings. */
+export const RIGHT_TABS = ["comments", "outline"] as const;
+export type RightTab = (typeof RIGHT_TABS)[number];
 
 function isLeftTab(value: unknown): value is LeftTab {
   return (LEFT_TABS as readonly unknown[]).includes(value);
 }
 
-/**
- * What the route shows, for the left panel: the drive root (`home`, the Comb
- * home), another folder, a file with an outline (`outline`), or a file
- * without one (`plain`: an image, a CSV, code, or markdown with fewer than
- * two headings).
- */
-export type PanelTarget = "home" | "folder" | "outline" | "plain";
+function isRightTab(value: unknown): value is RightTab {
+  return (RIGHT_TABS as readonly unknown[]).includes(value);
+}
+
+/** What the route shows: the drive root (`home`, the Comb home), another folder, or a file. */
+export type PanelTarget = "home" | "folder" | "file";
 
 export interface LeftPanelState {
   /** Open or collapsed by hand. Null until the person chooses: the width decides. */
   open: boolean | null;
-  /** The picked tab. Outline shows only on a file with an outline: elsewhere it reads as Files. */
   tab: LeftTab;
-  /** Collapsed for the current page only (the drive root, a file with no outline). Not stored. */
+  /** Collapsed for the current page only (the drive root). Not stored. */
   autoCollapsed: boolean;
 }
 
 export type LeftPanelEvent =
-  /** The route resolved to `target`. `first`: the first route since the page loaded. */
-  | { type: "navigate"; target: PanelTarget; first: boolean }
+  /** The route resolved to `target`. */
+  | { type: "navigate"; target: PanelTarget }
   /** The person opened the panel on `tab` (a strip icon or the toggle). */
-  | { type: "show"; tab: LeftTab; target: PanelTarget }
+  | { type: "show"; tab: LeftTab }
   /** The person picked a tab (the open panel, or the phone sheet: the open state stays). */
-  | { type: "select"; tab: LeftTab; target: PanelTarget }
+  | { type: "select"; tab: LeftTab }
   /** The person collapsed the panel. */
   | { type: "collapse" };
 
 export const INITIAL_LEFT_PANEL: LeftPanelState = {
   open: null,
-  tab: "outline",
+  tab: "files",
   autoCollapsed: false,
 };
 
 /**
- * The tab after the person picks `tab` on `target`. Recent and Favorites are
- * always kept. Files and Outline are kept where Outline exists. Elsewhere
- * Files only replaces a list tab, so Files on a folder does not turn off the
- * outline for the next file, and Outline (absent there) changes nothing.
- */
-function pickedTab(current: LeftTab, tab: LeftTab, target: PanelTarget): LeftTab {
-  if (LIST_TABS.has(tab) || target === "outline") return tab;
-  return tab === "files" && LIST_TABS.has(current) ? "files" : current;
-}
-
-/**
  * - Opening the drive root collapses the panel for that page only: the Comb
- *   home lists the files itself.
- * - Opening a file with an outline switches Files to Outline. Recent and
- *   Favorites stay, so the person can open one listed file after another.
- *   The first route keeps the stored tab, so a reload shows the tab the
- *   person left.
- * - Opening a file without an outline collapses the panel for that file only,
- *   unless Recent or Favorites is open.
- * - Opening a folder undoes that collapse. A collapse by hand stays.
- * - A tab picked by hand is stored as `pickedTab` says.
+ *   home lists the files itself. Any other page undoes that collapse.
+ * - Files and folders never change the tab or collapse the panel: the tree
+ *   stays while the person moves between files.
+ * - A collapse by hand stays.
  */
 export function leftPanelReducer(state: LeftPanelState, event: LeftPanelEvent): LeftPanelState {
   switch (event.type) {
-    case "navigate":
-      if (event.target === "home") return { ...state, autoCollapsed: true };
-      // A list tab (Recent, Favorites) stays open: the person moves through its files.
-      if (event.target === "plain") return { ...state, autoCollapsed: !LIST_TABS.has(state.tab) };
-      if (event.target === "outline" && !event.first && !LIST_TABS.has(state.tab)) {
-        return { ...state, tab: "outline", autoCollapsed: false };
-      }
-      return { ...state, autoCollapsed: false };
-    case "show":
-      return {
-        open: true,
-        tab: pickedTab(state.tab, event.tab, event.target),
-        autoCollapsed: false,
-      };
-    case "select": {
-      const tab = pickedTab(state.tab, event.tab, event.target);
-      return tab === state.tab ? state : { ...state, tab };
+    case "navigate": {
+      const autoCollapsed = event.target === "home";
+      return autoCollapsed === state.autoCollapsed ? state : { ...state, autoCollapsed };
     }
+    case "show":
+      return { open: true, tab: event.tab, autoCollapsed: false };
+    case "select":
+      return event.tab === state.tab ? state : { ...state, tab: event.tab };
     case "collapse":
       return { ...state, open: false, autoCollapsed: false };
   }
@@ -114,27 +87,44 @@ export function leftPanelReducer(state: LeftPanelState, event: LeftPanelEvent): 
 export interface LeftPanelView {
   open: boolean;
   tab: LeftTab;
+}
+
+/** What the left panel shows now. `wide`: the viewport matches `LEFT_OPEN_QUERY`. */
+export function leftPanelView(state: LeftPanelState, wide: boolean): LeftPanelView {
+  return { open: (state.open ?? wide) && !state.autoCollapsed, tab: state.tab };
+}
+
+export interface RightPanelState {
+  /** Open or collapsed by hand. Null until the person chooses: the width decides. */
+  open: boolean | null;
+  tab: RightTab;
+}
+
+export const INITIAL_RIGHT_PANEL: RightPanelState = { open: null, tab: "comments" };
+
+export interface RightPanelView {
+  open: boolean;
+  tab: RightTab;
   /** The Outline tab exists. */
   outline: boolean;
 }
 
-/** What the left panel shows now. `wide`: the viewport matches `LEFT_OPEN_QUERY`. */
-export function leftPanelView(
-  state: LeftPanelState,
-  target: PanelTarget,
+/**
+ * What the right panel shows now. `wide`: the viewport matches
+ * `RIGHT_OPEN_QUERY`. `outline`: the file has an outline. Outline picked on
+ * a file without one reads as Comments, and comes back on the next file
+ * that has one.
+ */
+export function rightPanelView(
+  state: RightPanelState,
   wide: boolean,
-): LeftPanelView {
-  const outline = target === "outline";
+  outline: boolean,
+): RightPanelView {
   return {
-    open: (state.open ?? wide) && !state.autoCollapsed,
-    tab: !outline && state.tab === "outline" ? "files" : state.tab,
+    open: state.open ?? wide,
+    tab: outline ? state.tab : "comments",
     outline,
   };
-}
-
-/** Whether the right panel is open. `wide`: the viewport matches `RIGHT_OPEN_QUERY`. */
-export function rightPanelOpen(stored: boolean | null, wide: boolean): boolean {
-  return stored ?? wide;
 }
 
 export const LEFT_PANEL_KEY = "comb:panel:left";
@@ -160,12 +150,12 @@ function writeJson(storage: DraftStorage | null, key: string, value: unknown) {
   }
 }
 
-/** The stored left panel (open and tab), or the initial state. */
+/** The stored left panel (open and tab), or the initial state. A stored Outline reads as Files. */
 export function readLeftPanel(storage: DraftStorage | null, apiUrl: string): LeftPanelState {
   const stored = readJson(storage, deriveStorageKey(apiUrl, LEFT_PANEL_KEY));
   return {
     open: typeof stored?.open === "boolean" ? stored.open : null,
-    tab: isLeftTab(stored?.tab) ? stored.tab : "outline",
+    tab: isLeftTab(stored?.tab) ? stored.tab : "files",
     autoCollapsed: false,
   };
 }
@@ -179,14 +169,22 @@ export function writeLeftPanel(
   writeJson(storage, deriveStorageKey(apiUrl, LEFT_PANEL_KEY), value);
 }
 
-/** The stored right panel choice, or null when the person has not chosen. */
-export function readRightPanel(storage: DraftStorage | null, apiUrl: string): boolean | null {
+/** The stored right panel (open and tab), or the initial state. */
+export function readRightPanel(storage: DraftStorage | null, apiUrl: string): RightPanelState {
   const stored = readJson(storage, deriveStorageKey(apiUrl, RIGHT_PANEL_KEY));
-  return typeof stored?.open === "boolean" ? stored.open : null;
+  return {
+    open: typeof stored?.open === "boolean" ? stored.open : INITIAL_RIGHT_PANEL.open,
+    tab: isRightTab(stored?.tab) ? stored.tab : INITIAL_RIGHT_PANEL.tab,
+  };
 }
 
-export function writeRightPanel(storage: DraftStorage | null, apiUrl: string, open: boolean) {
-  writeJson(storage, deriveStorageKey(apiUrl, RIGHT_PANEL_KEY), { open });
+export function writeRightPanel(
+  storage: DraftStorage | null,
+  apiUrl: string,
+  state: RightPanelState,
+) {
+  const value = state.open === null ? { tab: state.tab } : { open: state.open, tab: state.tab };
+  writeJson(storage, deriveStorageKey(apiUrl, RIGHT_PANEL_KEY), value);
 }
 
 /** The stored full width choice. Off until the person turns it on. */
@@ -196,4 +194,15 @@ export function readFullWidth(storage: DraftStorage | null, apiUrl: string): boo
 
 export function writeFullWidth(storage: DraftStorage | null, apiUrl: string, on: boolean) {
   writeJson(storage, deriveStorageKey(apiUrl, FULL_WIDTH_KEY), { on });
+}
+
+/** The markdown frontmatter block ("Properties"): open until the person collapses it. */
+export const PROPERTIES_OPEN_KEY = "comb:properties-open";
+
+export function readPropertiesOpen(storage: DraftStorage | null, apiUrl: string): boolean {
+  return readJson(storage, deriveStorageKey(apiUrl, PROPERTIES_OPEN_KEY))?.open !== false;
+}
+
+export function writePropertiesOpen(storage: DraftStorage | null, apiUrl: string, open: boolean) {
+  writeJson(storage, deriveStorageKey(apiUrl, PROPERTIES_OPEN_KEY), { open });
 }

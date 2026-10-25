@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { deriveDefaultRoute } from "@desplega/model-routing";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import {
   type Attributes,
@@ -4328,7 +4329,9 @@ async function spawnProviderProcess(
   // config-store slot — gates whether `codexSlot` is set below (see
   // `CodexOAuthCredentialInfo`).
   let oauthIsPoolBacked = false;
-  if (adapter.name === "codex") {
+  // A gateway route uses no OAuth: no pool slot is picked, so no auth.json is
+  // materialised for a session whose traffic goes to the gateway.
+  if (adapter.name === "codex" && !deriveDefaultRoute("codex", freshEnv)) {
     const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
     oauthSelection = oauthInfo?.selection;
     oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;

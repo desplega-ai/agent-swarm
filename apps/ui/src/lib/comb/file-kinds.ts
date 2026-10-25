@@ -13,10 +13,18 @@ export type FileKind =
   | "table"
   | "fallback";
 
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico"]);
+export const IMAGE_EXTS: ReadonlySet<string> = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "svg",
+  "webp",
+  "ico",
+]);
 
 // Browser-playable video containers. Other containers (mkv, avi) get the fallback.
-const VIDEO_EXTS = new Set(["mp4", "webm", "ogv", "mov", "m4v"]);
+export const VIDEO_EXTS: ReadonlySet<string> = new Set(["mp4", "webm", "ogv", "mov", "m4v"]);
 
 /** Audio containers the browser's `<audio>` element plays, with the type each one is sent as. */
 export const AUDIO_TYPES: Readonly<Record<string, string>> = {

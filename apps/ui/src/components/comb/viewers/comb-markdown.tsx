@@ -4,7 +4,7 @@
 // This module uses relative imports only, so `bun:test` can render it from the
 // repo root (where `@/` resolves to the API's `src/`).
 
-import { Image as ImageIcon } from "lucide-react";
+import { ChevronRight, Image as ImageIcon } from "lucide-react";
 import {
   type ComponentProps,
   type ComponentType,
@@ -15,11 +15,16 @@ import {
   type ReactNode,
   useContext,
   useMemo,
+  useState,
 } from "react";
 import { Link } from "react-router-dom";
 import { type Components, defaultRehypePlugins, Streamdown } from "streamdown";
 import { HIGHLIGHT_MAX_CHARS, prismLanguageForFence } from "../../../lib/comb/code-language";
-import { type Frontmatter, splitFrontmatter } from "../../../lib/comb/frontmatter";
+import {
+  type Frontmatter,
+  type FrontmatterValue,
+  splitFrontmatter,
+} from "../../../lib/comb/frontmatter";
 import { combPathForLink } from "../../../lib/comb/links";
 import {
   baseName,
@@ -69,6 +74,46 @@ export interface DriveImageProps {
   file: DrivePath;
   alt: string;
   fallback: ReactNode;
+  /** The image's source lines, for its frame (`AssetFrameProps.lines`). */
+  lines?: SourceLines;
+}
+
+/** An asset the markdown shows: an image (a drive file or a web URL), or a rendered diagram. */
+export type AssetSource =
+  | { kind: "image"; src: string; alt: string; file: DrivePath | null }
+  | { kind: "diagram"; svg: string; svgId: string };
+
+/**
+ * Props of the frame around an asset (Maximize and Comment on hover). The
+ * caller passes the component in (`asset-frame.tsx`): this module keeps
+ * relative imports only. `block`: the asset takes its own row (a diagram).
+ */
+export interface AssetFrameProps {
+  asset: AssetSource;
+  block?: boolean;
+  /**
+   * The asset's source lines. Streamdown takes an image alone in its
+   * paragraph out of the `<p>`, so the frame carries the lines itself: a
+   * comment on the asset anchors on them.
+   */
+  lines?: SourceLines;
+  children: ReactNode;
+}
+
+/** First and last source line of a markdown element. */
+export interface SourceLines {
+  start: number;
+  end: number;
+}
+
+/** The source lines of a hast node (`node.position`), when it has them. */
+function sourceLines(node: unknown): SourceLines | undefined {
+  const position = (node as { position?: { start?: { line?: number }; end?: { line?: number } } })
+    ?.position;
+  const start = position?.start?.line;
+  if (typeof start !== "number") return undefined;
+  const end = position?.end?.line;
+  return { start, end: typeof end === "number" && end >= start ? end : start };
 }
 
 /**
@@ -80,6 +125,7 @@ export interface DriveImageProps {
 const CombDocContext = createContext<{
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
+  AssetFrame?: ComponentType<AssetFrameProps>;
   liveUrl: string | null;
   codeTheme: CodeTheme;
 } | null>(null);
@@ -137,18 +183,27 @@ function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
 /** Web images (http, https, protocol-relative). Any other `src` is a drive path. */
 const WEB_IMAGE_RE = /^(?:https?:)?\/\//i;
 
-function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
+function CombImage({ node, src, alt, ...rest }: ElementProps<"img">) {
   const ctx = useContext(CombDocContext);
   const doc = ctx?.doc;
+  const lines = sourceLines(node);
   if (typeof src !== "string" || !src) return null;
   if (WEB_IMAGE_RE.test(src)) {
-    return (
+    const image = (
       <img
         src={src}
         alt={alt ?? ""}
         className="my-4 inline-block max-w-full rounded-lg"
         {...rest}
       />
+    );
+    const Frame = ctx?.AssetFrame;
+    return Frame ? (
+      <Frame asset={{ kind: "image", src, alt: alt ?? "", file: null }} lines={lines}>
+        {image}
+      </Frame>
+    ) : (
+      image
     );
   }
   // A drive image. `DriveImage` loads it through a media URL. The placeholder
@@ -174,7 +229,14 @@ function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
   );
   const DriveImage = ctx?.DriveImage;
   if (!doc || !target || !DriveImage || isFolderPath(target.path)) return placeholder;
-  return <DriveImage file={{ ...doc, path: target.path }} alt={alt ?? ""} fallback={placeholder} />;
+  return (
+    <DriveImage
+      file={{ ...doc, path: target.path }}
+      alt={alt ?? ""}
+      fallback={placeholder}
+      lines={lines}
+    />
+  );
 }
 
 /**
@@ -228,7 +290,8 @@ function mermaidSource(children: ReactNode): string | null {
 }
 
 function CombPre({ node: _node, children, ...rest }: ElementProps<"pre">) {
-  const codeTheme = useContext(CombDocContext)?.codeTheme ?? "dark";
+  const ctx = useContext(CombDocContext);
+  const codeTheme = ctx?.codeTheme ?? "dark";
   const block = isValidElement(children)
     ? cloneElement(children as React.ReactElement<Record<string, unknown>>, {
         "data-block": "true",
@@ -241,6 +304,7 @@ function CombPre({ node: _node, children, ...rest }: ElementProps<"pre">) {
       <MermaidBlock
         source={mermaid}
         theme={codeTheme}
+        frame={ctx?.AssetFrame}
         fallback={<pre className={PRE_CLASS}>{block}</pre>}
         {...(rest as ComponentProps<"div">)}
       />
@@ -273,32 +337,49 @@ export const COMB_MD_COMPONENTS: Components = {
  * relative imports only, so the caller passes the data-loading component in.
  * `liveUrl` is the agent-fs live UI host: live links to drive files open in
  * Comb (step-13). `codeTheme` is the dashboard theme (`useTheme().theme`),
- * for the fenced code colors.
+ * for the fenced code colors. `propertiesOpen` and `onPropertiesOpenChange`
+ * hold the frontmatter block's open state (stored by the caller). Without
+ * them it starts open and stays local.
  */
 export function CombMarkdown({
   text,
   doc,
   DriveImage,
+  AssetFrame,
   liveUrl = null,
   codeTheme = "dark",
+  propertiesOpen,
+  onPropertiesOpenChange,
 }: {
   text: string;
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
+  /** The frame around images and diagrams (Maximize, Comment). None: bare assets. */
+  AssetFrame?: ComponentType<AssetFrameProps>;
   liveUrl?: string | null;
   codeTheme?: CodeTheme;
+  propertiesOpen?: boolean;
+  onPropertiesOpenChange?: (open: boolean) => void;
 }): ReactNode {
   const { orgId, driveId, path } = doc;
   const ctx = useMemo(
-    () => ({ doc: { orgId, driveId, path }, DriveImage, liveUrl, codeTheme }),
-    [orgId, driveId, path, DriveImage, liveUrl, codeTheme],
+    () => ({ doc: { orgId, driveId, path }, DriveImage, AssetFrame, liveUrl, codeTheme }),
+    [orgId, driveId, path, DriveImage, AssetFrame, liveUrl, codeTheme],
   );
   // A leading YAML block shows as a key/value table. Its lines stay in the
   // body as blank lines, so the blocks below keep the file's line numbers.
   const { frontmatter, body } = useMemo(() => splitFrontmatter(text), [text]);
+  const [localOpen, setLocalOpen] = useState(true);
+  const open = propertiesOpen ?? localOpen;
   return (
     <CombDocContext.Provider value={ctx}>
-      {frontmatter && <FrontmatterBlock frontmatter={frontmatter} />}
+      {frontmatter && (
+        <FrontmatterBlock
+          frontmatter={frontmatter}
+          open={open}
+          onOpenChange={onPropertiesOpenChange ?? setLocalOpen}
+        />
+      )}
       {/* step-11: remount per text. Streamdown memoizes each block by its
           source position only, so an edit that keeps a block's line and
           columns (a same-length fix) never rendered. */}
@@ -316,36 +397,105 @@ export function CombMarkdown({
   );
 }
 
-/**
- * Frontmatter as a compact key/value table above the document. YAML that does
- * not parse to a mapping shows as the raw block. Not document text
- * (`data-comb-skip`): comments anchor on the markdown below.
- */
-function FrontmatterBlock({ frontmatter }: { frontmatter: Frontmatter }): ReactNode {
-  const { entries, raw, error } = frontmatter;
-  if (entries === null) {
-    return (
-      <div data-comb-skip data-frontmatter="raw" className="mb-6">
-        <pre className={PRE_CLASS}>{raw}</pre>
-        <p className="-mt-2 text-xs text-muted-foreground">
-          Frontmatter could not be parsed: {error}
-        </p>
-      </div>
-    );
+const URL_RE = /^https?:\/\/\S+$/i;
+/** A number, a boolean, or a date ("2026-10-14", with or without a time): set in mono. */
+const NUMBER_OR_DATE_RE = /^(?:-?\d+(?:\.\d+)?|true|false|\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+Z?)?)$/;
+
+function PropertyValue({ value }: { value: FrontmatterValue }): ReactNode {
+  switch (value.kind) {
+    case "list":
+      return (
+        <span className="flex flex-wrap gap-1">
+          {value.items.map((item, index) => (
+            <span
+              key={`${index}:${item}`}
+              className="rounded border border-border bg-background px-1.5 py-px [overflow-wrap:anywhere]"
+            >
+              {item}
+            </span>
+          ))}
+        </span>
+      );
+    case "block":
+      return (
+        <pre className="m-0 font-mono whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {value.text}
+        </pre>
+      );
+    case "text":
+      if (NUMBER_OR_DATE_RE.test(value.text)) {
+        return <span className="font-mono">{value.text}</span>;
+      }
+      return URL_RE.test(value.text) ? (
+        <a href={value.text} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+          {value.text}
+        </a>
+      ) : (
+        <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{value.text}</span>
+      );
   }
-  if (entries.length === 0) return null;
+}
+
+/**
+ * Frontmatter as a collapsible "Properties" block above the document: keys
+ * and values, lists as chips, nested values as YAML. YAML that does not parse
+ * is read line by line (`lenient`), and only text with no key at all shows
+ * as the raw block. Not document text (`data-comb-skip`): comments anchor on
+ * the markdown below.
+ */
+function FrontmatterBlock({
+  frontmatter,
+  open,
+  onOpenChange,
+}: {
+  frontmatter: Frontmatter;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}): ReactNode {
+  const { entries, raw, error, lenient } = frontmatter;
+  if (entries !== null && entries.length === 0) return null;
+  const note = entries === null ? "Could not read" : lenient ? "Not valid YAML" : null;
   return (
-    <dl
+    <section
       data-comb-skip
-      data-frontmatter="table"
-      className="mb-6 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-md border border-border bg-muted/30 px-4 py-3 text-xs"
+      data-frontmatter={entries === null ? "raw" : "table"}
+      className="mb-6 rounded-md border border-border bg-muted/30 text-xs"
     >
-      {entries.map(({ key, value }) => (
-        <Fragment key={key}>
-          <dt className="font-medium text-muted-foreground">{key}</dt>
-          <dd className="m-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{value}</dd>
-        </Fragment>
-      ))}
-    </dl>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
+        className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <ChevronRight
+          className={`size-3.5 shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+          aria-hidden
+        />
+        <span className="font-medium">Properties</span>
+        {entries ? <span className="tabular-nums">{entries.length}</span> : null}
+        {note ? (
+          <span className="ml-auto truncate" title={error ?? undefined}>
+            {note}
+          </span>
+        ) : null}
+      </button>
+      {!open ? null : entries === null ? (
+        <div className="border-t border-border-subtle px-4 py-3">
+          <pre className="m-0 font-mono whitespace-pre-wrap [overflow-wrap:anywhere]">{raw}</pre>
+          <p className="mt-2 text-muted-foreground">Frontmatter could not be parsed: {error}</p>
+        </div>
+      ) : (
+        <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-t border-border-subtle px-4 py-3">
+          {entries.map(({ key, value }, index) => (
+            <Fragment key={`${index}:${key}`}>
+              <dt className="font-medium text-muted-foreground">{key}</dt>
+              <dd className="m-0 min-w-0">
+                <PropertyValue value={value} />
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
+    </section>
   );
 }

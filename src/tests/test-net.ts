@@ -6,6 +6,8 @@
  * Always bind an OS-assigned port: `listenOnFreePort(server)` for an
  * in-process `node:http` server, `getFreePort()` for a port that must be known
  * before the server exists (spawned `src/http.ts` children take it via `PORT`).
+ * A spawned child can lose that port before it binds; `startOnFreePort` retries
+ * it on a new one.
  */
 import { createServer, type Server } from "node:net";
 
@@ -25,6 +27,35 @@ export function getFreePort(): Promise<number> {
       srv.close(() => resolve(port));
     });
   });
+}
+
+/** Matches the boot error a server prints when its port is already bound. */
+export const PORT_IN_USE_LOG = /EADDRINUSE|Is port \d+ in use\?/;
+
+/** Thrown by a `startOnFreePort` callback when the server lost its port to another process. */
+export class PortInUseError extends Error {}
+
+/**
+ * Start a server on a getFreePort() port, and on a new port when `start`
+ * throws PortInUseError. getFreePort() releases the port before the spawned
+ * server binds it, and under `bun test --parallel` another process can take
+ * it during the server's boot. Any other error, or the last attempt's
+ * PortInUseError, propagates unchanged.
+ */
+export async function startOnFreePort<T>(
+  start: (port: number) => Promise<T>,
+  opts: { attempts?: number; getPort?: () => Promise<number> } = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 3;
+  const getPort = opts.getPort ?? getFreePort;
+  for (let attempt = 1; ; attempt++) {
+    const port = await getPort();
+    try {
+      return await start(port);
+    } catch (error) {
+      if (!(error instanceof PortInUseError) || attempt >= attempts) throw error;
+    }
+  }
 }
 
 /**

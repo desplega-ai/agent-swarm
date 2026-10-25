@@ -28,7 +28,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { LEFT_TABS, type LeftTab } from "@/lib/comb/panels";
+import { LEFT_TABS, type LeftTab, RIGHT_TABS, type RightTab } from "@/lib/comb/panels";
 import type { CombLocation } from "@/lib/comb/paths";
 import { usePageShortcut } from "@/lib/json-render/use-page-shortcut";
 import { cn } from "@/lib/utils";
@@ -87,7 +87,7 @@ function PanelButton({
 /**
  * Keyboard focus follows the toggle: collapsing moves it to the strip,
  * expanding moves it into the panel (`expandTarget`). A panel that closes on
- * its own (a file without an outline) also hands keyboard focus to the strip.
+ * its own (the drive root) also hands keyboard focus to the strip.
  * Pointer focus stays put, so no tooltip pops up after a click.
  */
 function usePanelFocus(open: boolean) {
@@ -121,30 +121,22 @@ const TAB_LABEL: Record<LeftTab, string> = {
   files: "Files",
   recent: "Recent",
   favorites: "Favorites",
-  outline: "Outline",
 };
 const TAB_ICON: Record<LeftTab, LucideIcon> = {
   files: FolderTree,
   recent: History,
   favorites: Star,
-  outline: TableOfContents,
 };
-
-/** The tabs on `left`: Outline only for a file with headings. */
-function leftTabs(outline: boolean): LeftTab[] {
-  return LEFT_TABS.filter((tab) => outline || tab !== "outline");
-}
 
 /**
  * The left panel beside the content: Files (the drive tree), Recent (viewed
- * and changed files), Favorites, and, for a file with headings, Outline.
+ * and changed files), and Favorites.
  */
 export function LeftPanel({ location }: { location: CombLocation }) {
   const layout = useCombLayout();
   const { panelRef, stripRef, expandTarget } = usePanelFocus(layout?.left.open ?? true);
   if (!layout) return null;
   const { left, showLeft, collapseLeft } = layout;
-  const tabs = leftTabs(left.outline);
   const show = (tab: LeftTab, event: MouseEvent<HTMLElement>) => {
     if (fromKeyboard(event)) {
       expandTarget.current =
@@ -168,7 +160,7 @@ export function LeftPanel({ location }: { location: CombLocation }) {
             onClick={(event) => show(left.tab, event)}
           />
           <span aria-hidden className="my-0.5 h-px w-5 bg-border" />
-          {tabs.map((tab) => (
+          {LEFT_TABS.map((tab) => (
             <PanelButton
               key={tab}
               label={TAB_LABEL[tab]}
@@ -226,9 +218,9 @@ function LeftPanelBody({
           titleRowClassName,
         )}
       >
-        {/* Icons, with the name of the open tab: four names do not fit the panel. */}
+        {/* Icons, with the name of the open tab: three names do not fit the panel. */}
         <TabsList variant="line" className="p-0 group-data-[orientation=horizontal]/tabs:h-full">
-          {leftTabs(left.outline).map((tab) => {
+          {LEFT_TABS.map((tab) => {
             const Icon = TAB_ICON[tab];
             const active = tab === left.tab;
             return (
@@ -269,11 +261,6 @@ function LeftPanelBody({
       <TabsContent value="favorites" className="min-h-0 overflow-y-auto">
         <FavoritesTab drive={location} current={location.path} onNavigate={onNavigate} />
       </TabsContent>
-      {left.outline ? (
-        <TabsContent value="outline" className="min-h-0 overflow-y-auto">
-          <OutlineList onNavigate={onNavigate} />
-        </TabsContent>
-      ) : null}
     </Tabs>
   );
 }
@@ -331,10 +318,91 @@ export function LeftPanelSheet({ location }: { location: CombLocation }) {
   );
 }
 
+const RIGHT_LABEL: Record<RightTab, string> = { comments: "Comments", outline: "Outline" };
+
 /**
- * The comment rail's outer container from `md` up: the rail with a title row
- * and a collapse button, or a strip with the comment count. A `?comment=`
- * link (a deep link, or a click on a highlighted passage) opens the panel.
+ * The right panel's title row and tabs, shared by the inline panel and the
+ * phone sheet: Comments, and Outline for a file with headings (one title
+ * without tabs otherwise). The comments stay mounted on the Outline tab, so
+ * the rail keeps its filters and drafts.
+ */
+export function RightPanelBody({
+  comments,
+  count,
+  action,
+  onNavigate,
+  titleRowClassName,
+}: {
+  /** The comment rail. */
+  comments: ReactNode;
+  /** Open comments plus unsaved ones, next to the Comments tab name. */
+  count: number;
+  /** The collapse button (inline panel only). */
+  action?: ReactNode;
+  /** A heading moved the page (the phone sheet closes). */
+  onNavigate?: () => void;
+  titleRowClassName?: string;
+}) {
+  const layout = useCombLayout();
+  const outline = layout?.right.outline ?? false;
+  const tab = layout?.right.tab ?? "comments";
+  const titleRow = cn(
+    "flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle pr-1",
+    titleRowClassName,
+  );
+  if (!layout || !outline) {
+    return (
+      <>
+        <div className={cn(titleRow, "pl-3.5")}>
+          <h2 className="text-sm font-medium">Comments</h2>
+          {action ? <div className="ml-auto">{action}</div> : null}
+        </div>
+        {comments}
+      </>
+    );
+  }
+  return (
+    <Tabs
+      value={tab}
+      onValueChange={(next) => layout.selectRight(next as RightTab)}
+      className="min-h-0 flex-1 gap-0"
+    >
+      <div className={cn(titleRow, "pl-1.5")}>
+        <TabsList variant="line" className="p-0 group-data-[orientation=horizontal]/tabs:h-full">
+          {RIGHT_TABS.map((value) => {
+            const Icon = value === "comments" ? MessageSquare : TableOfContents;
+            return (
+              <TabsTrigger key={value} value={value} data-panel-tab={value} className={LINE_TAB}>
+                <Icon aria-hidden />
+                {RIGHT_LABEL[value]}
+                {value === "comments" && count > 0 ? (
+                  <span className="text-muted-foreground tabular-nums">{count}</span>
+                ) : null}
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+        {action ? <div className="ml-auto">{action}</div> : null}
+      </div>
+      <TabsContent
+        value="comments"
+        forceMount
+        className="flex min-h-0 flex-col data-[state=inactive]:hidden"
+      >
+        {comments}
+      </TabsContent>
+      <TabsContent value="outline" className="min-h-0 overflow-y-auto">
+        <OutlineList onNavigate={onNavigate} />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+/**
+ * The right panel from `md` up: Comments and Outline with a title row and a
+ * collapse button, or a strip with the comment count (and Outline). A
+ * `?comment=` link (a deep link, or a click on a highlighted passage) opens
+ * the panel on Comments.
  */
 export function CommentPanel({
   openCount,
@@ -358,36 +426,36 @@ export function CommentPanel({
   useEffect(() => {
     if (linkedId === lastLinked.current) return;
     lastLinked.current = linkedId;
-    if (linkedId && !open) showRight?.();
-  }, [linkedId, open, showRight]);
+    if (linkedId) showRight?.("comments");
+  }, [linkedId, showRight]);
 
   const total = openCount + notSaved;
   const label = `Comments (${openCount} open${notSaved ? `, ${notSaved} not saved` : ""})`;
-  const expand = (event: MouseEvent<HTMLElement>) => {
+  const expand = (tab: RightTab, event: MouseEvent<HTMLElement>) => {
     if (fromKeyboard(event)) expandTarget.current = collapseRef.current;
-    layout?.showRight();
+    layout?.showRight(tab);
   };
 
   return (
     <aside
-      aria-label="Comments"
+      aria-label={layout?.right.outline ? "Comments and outline" : "Comments"}
       className={cn("flex shrink-0 flex-col", open ? `w-72 xl:w-80 ${PANEL_CARD}` : STRIP)}
     >
       {open ? null : (
         <>
           <PanelButton
-            label="Expand comments"
+            label="Expand panel"
             icon={PanelRightOpen}
             side="left"
             buttonRef={stripRef}
-            onClick={expand}
+            onClick={(event) => expand(layout?.right.tab ?? "comments", event)}
           />
           <span aria-hidden className="my-0.5 h-px w-5 bg-border" />
           <PanelButton
             label={label}
             icon={notSaved ? CloudOff : MessageSquare}
             side="left"
-            onClick={expand}
+            onClick={(event) => expand("comments", event)}
             className={notSaved ? "[&_svg]:text-status-error-strong" : undefined}
           >
             {total > 0 ? (
@@ -396,24 +464,32 @@ export function CommentPanel({
               </span>
             ) : null}
           </PanelButton>
+          {layout?.right.outline ? (
+            <PanelButton
+              label="Outline"
+              icon={TableOfContents}
+              side="left"
+              onClick={(event) => expand("outline", event)}
+            />
+          ) : null}
         </>
       )}
       <div ref={panelRef} hidden={!open} className="flex min-h-0 flex-1 flex-col">
-        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle pr-1 pl-3.5">
-          <h2 className="text-sm font-medium">Comments</h2>
-          <div className="ml-auto">
-            {layout ? (
+        <RightPanelBody
+          comments={children}
+          count={total}
+          action={
+            layout ? (
               <PanelButton
-                label="Collapse comments"
+                label="Collapse panel"
                 icon={PanelRightClose}
                 side="bottom"
                 buttonRef={collapseRef}
                 onClick={() => layout.collapseRight()}
               />
-            ) : null}
-          </div>
-        </div>
-        {children}
+            ) : null
+          }
+        />
       </div>
     </aside>
   );

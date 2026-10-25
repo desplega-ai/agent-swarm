@@ -30,6 +30,13 @@
 
 import { existsSync as nodeExistsSync } from "node:fs";
 import { join } from "node:path";
+import {
+  CODEX_GATEWAY_API_KEY,
+  deriveDefaultRoute,
+  type ModelRoute,
+  routeCredentialStatus,
+  routeUnsetEnv,
+} from "@desplega/model-routing";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import { getApiKey } from "../utils/api-key";
@@ -82,6 +89,32 @@ import type {
 } from "./types";
 
 type CodexConfig = Record<string, CodexConfigValue | undefined>;
+
+/** `model_provider` id of the generated gateway block. */
+const CODEX_GATEWAY_PROVIDER_ID = "swarm-gateway";
+
+/**
+ * Config overrides that send Codex through the gateway route. Codex 0.164
+ * ignores `OPENAI_BASE_URL` and env keys for its built-in `openai` provider, so
+ * the gateway needs its own provider block. Verified on 0.164 against a local
+ * gateway: Codex sends `Authorization: Bearer $CODEX_GATEWAY_API_KEY` to
+ * `<base_url>/responses` and never the auth.json OAuth token. `wire_api`
+ * defaults to `responses` (`chat` is rejected); it is set to state intent.
+ */
+export function codexGatewayConfig(route: ModelRoute): CodexConfig {
+  return {
+    model_provider: CODEX_GATEWAY_PROVIDER_ID,
+    model_providers: {
+      [CODEX_GATEWAY_PROVIDER_ID]: {
+        name: "Swarm gateway",
+        base_url: route.baseUrl,
+        env_key: CODEX_GATEWAY_API_KEY,
+        wire_api: "responses",
+        requires_openai_auth: false,
+      },
+    },
+  };
+}
 
 /** Plugin id the worker image installs (`codex plugin add context-mode@context-mode`). */
 const CONTEXT_MODE_CODEX_PLUGIN = "context-mode@context-mode";
@@ -188,7 +221,10 @@ export type CodexThreadFactory = (options: {
 }) => Promise<CodexThread> | CodexThread;
 
 /**
- * Codex satisfies its credential requirement by ANY of:
+ * A gateway route (`CODEX_GATEWAY_BASE_URL` + `CODEX_GATEWAY_API_KEY`) wins
+ * and alone decides readiness: a gateway URL without its key is not ready,
+ * whatever OAuth or auth.json is present. Otherwise Codex satisfies its
+ * credential requirement by ANY of:
  *   1. `~/.codex/auth.json` already exists on disk (the canonical state once
  *      `codex login` has run).
  *   2. `OPENAI_API_KEY` is set — the entrypoint will run
@@ -205,6 +241,13 @@ export function checkCodexCredentials(
   env: Record<string, string | undefined>,
   opts: CredCheckOptions = {},
 ): CredStatus {
+  const gateway = deriveDefaultRoute("codex", env);
+  if (gateway) {
+    const status = routeCredentialStatus(gateway, env);
+    return status.ready
+      ? { ready: true, missing: [], satisfiedBy: "env", hint: status.hint }
+      : { ready: false, missing: status.missing, hint: status.hint };
+  }
   const homeDir = opts.homeDir ?? env.HOME ?? "/root";
   const existsSync = opts.fs?.existsSync ?? nodeExistsSync;
   const authFile = `${homeDir}/.codex/auth.json`;
@@ -1966,14 +2009,21 @@ export async function createInProcessCodexSession(
     preSessionEvents.push(event);
   };
 
-  const mergedConfig = await buildCodexConfig(config, resolvedModel, bufferedEmit);
+  const routeEnv = config.env ?? process.env;
+  const gateway = deriveDefaultRoute("codex", routeEnv);
+  const mergedConfig = {
+    ...(await buildCodexConfig(config, resolvedModel, bufferedEmit)),
+    ...(gateway ? codexGatewayConfig(gateway) : {}),
+  };
 
   // Auth resolution. `codex_oauth` (in the swarm config store) wins over
   // `OPENAI_API_KEY` so users can keep an OpenAI key set for embeddings
   // without it shadowing their ChatGPT login. The entrypoint already runs
   // this same precedence at boot — this block handles local dev (where
   // the entrypoint didn't run) and any case where auth.json is stale.
-  const authMode = await resolveCodexAuthMode(config, bufferedEmit);
+  // A gateway route skips it: no OAuth is restored for a session whose traffic
+  // goes to the gateway.
+  const authMode = gateway ? null : await resolveCodexAuthMode(config, bufferedEmit);
 
   // The app-server receives an explicit environment. Construct a
   // minimal env explicitly so the spawned Codex CLI can find its binary
@@ -2000,7 +2050,11 @@ export async function createInProcessCodexSession(
     ...buildOtelTraceparentEnv(config.env ?? process.env),
     SWARM_CODEX_APP_SERVER: "1",
   };
-  if (authMode === "chatgpt") delete env.OPENAI_API_KEY;
+  if (gateway) {
+    for (const key of routeUnsetEnv("codex", gateway)) delete env[key];
+    const gatewayKey = routeEnv[CODEX_GATEWAY_API_KEY];
+    if (gatewayKey) env[CODEX_GATEWAY_API_KEY] = gatewayKey;
+  } else if (authMode === "chatgpt") delete env.OPENAI_API_KEY;
   else if (env.OPENAI_API_KEY) {
     env.OPENAI_API_KEY = selectCredential(env.OPENAI_API_KEY, undefined, "OPENAI_API_KEY").selected;
   }
@@ -2478,6 +2532,9 @@ export class CodexAdapter implements ProviderAdapter {
   }
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
+    if (deriveDefaultRoute("codex", config.env ?? process.env)) {
+      console.log("\x1b[2m[codex]\x1b[0m Using credential: gateway");
+    }
     if (this.bypassSubprocess) {
       return createInProcessCodexSession(config, {
         skillsDir: this.skillsDir,

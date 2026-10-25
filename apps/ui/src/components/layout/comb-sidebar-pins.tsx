@@ -1,8 +1,8 @@
-import { File, Folder } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useFavorites } from "@/api/hooks/use-favorites";
+import { useCombFavorites } from "@/api/hooks/use-comb-favorites";
 import type { StatusComb } from "@/api/types";
+import { FileKindIcon } from "@/components/comb/file-icon";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar";
@@ -18,11 +18,12 @@ import { combPath, isFolderPath, pinLabel, sidebarPins } from "@/lib/comb/paths"
 export function CombSidebarPins({ comb }: { comb: StatusComb | undefined }) {
   const { pathname } = useLocation();
   const [showAll, setShowAll] = useState(false);
-  const { data } = useFavorites("agent-fs-path");
-  if (!comb?.org_id || !comb.drive_id) return null;
+  const drive =
+    comb?.org_id && comb.drive_id ? { orgId: comb.org_id, driveId: comb.drive_id } : null;
+  const favorites = useCombFavorites(drive);
+  if (!drive) return null;
 
-  const drive = { orgId: comb.org_id, driveId: comb.drive_id };
-  const { pins, total, foldable } = sidebarPins(data?.favoriteIds ?? [], drive, showAll);
+  const { pins, total, foldable } = sidebarPins(favorites.ids ?? [], drive, showAll);
   if (total === 0) return null;
 
   return (
@@ -37,7 +38,6 @@ export function CombSidebarPins({ comb }: { comb: StatusComb | undefined }) {
         {pins.map((pin) => {
           const to = combPath(pin);
           const label = pinLabel(pin.path);
-          const Icon = isFolderPath(pin.path) ? Folder : File;
           const active = pathname === to;
           return (
             <SidebarMenuSubItem key={pin.path}>
@@ -53,7 +53,7 @@ export function CombSidebarPins({ comb }: { comb: StatusComb | undefined }) {
                   aria-current={active ? "page" : undefined}
                   title={pin.path}
                 >
-                  <Icon aria-hidden />
+                  <FileKindIcon name={label} isFolder={isFolderPath(pin.path)} />
                   <MiddleTruncation title={undefined}>{label}</MiddleTruncation>
                 </Link>
               </SidebarMenuSubButton>

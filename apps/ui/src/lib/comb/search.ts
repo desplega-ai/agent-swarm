@@ -11,6 +11,35 @@ import { baseName, parentFolder } from "./paths";
 
 export type SearchMode = "name" | "text" | "semantic";
 
+/** The modes in the order the dialog lists them: file names, then meaning, then exact words. */
+export const SEARCH_MODES: readonly SearchMode[] = ["name", "semantic", "text"];
+
+/** The query params of an open search: `?q=<query>&mode=<file|semantic|text>`. */
+export const SEARCH_QUERY_PARAM = "q";
+export const SEARCH_MODE_PARAM = "mode";
+
+const MODE_PARAMS: Record<SearchMode, string> = {
+  name: "file",
+  semantic: "semantic",
+  text: "text",
+};
+
+/** The `mode` param of a search mode ("file" for name search). */
+export function searchModeParam(mode: SearchMode): string {
+  return MODE_PARAMS[mode];
+}
+
+/** The search mode of a `mode` param. Missing or unknown: file names. */
+export function searchModeFromParam(value: string | null): SearchMode {
+  return SEARCH_MODES.find((mode) => MODE_PARAMS[mode] === value) ?? "name";
+}
+
+/** The next mode in the dialog's order (`step` -1 goes back), wrapping around. Tab and Shift+Tab. */
+export function nextSearchMode(mode: SearchMode, step: 1 | -1): SearchMode {
+  const at = SEARCH_MODES.indexOf(mode);
+  return SEARCH_MODES[(at + step + SEARCH_MODES.length) % SEARCH_MODES.length] as SearchMode;
+}
+
 /** The agent-fs op behind each mode. */
 export const SEARCH_OPS: Record<SearchMode, "find" | "fts" | "search"> = {
   name: "find",
@@ -44,12 +73,21 @@ export function literalFtsPattern(query: string): string {
     .join(" AND ");
 }
 
-/** The op params for one search. */
-export function searchParams(mode: SearchMode, query: string): Record<string, unknown> {
+/**
+ * The op params for one search. `scope` (a Comb folder, name search only)
+ * limits `find` to the files below it.
+ */
+export function searchParams(
+  mode: SearchMode,
+  query: string,
+  scope?: string,
+): Record<string, unknown> {
   const trimmed = query.trim();
   switch (mode) {
     case "name":
-      return { query: trimmed, limit: NAME_RESULT_LIMIT };
+      return scope && scope !== "/"
+        ? { query: trimmed, limit: NAME_RESULT_LIMIT, path: scope }
+        : { query: trimmed, limit: NAME_RESULT_LIMIT };
     case "text":
       return { pattern: literalFtsPattern(trimmed) };
     case "semantic":
@@ -97,6 +135,9 @@ export interface SearchHit {
   snippet: SnippetPart[];
   /** "Page 3" (a PDF chunk), "Image", or null. */
   chip: string | null;
+  /** Name search only: the file's size and last change. */
+  size?: number;
+  modifiedAt?: string;
 }
 
 /** What a search answered, mapped for the list. */
@@ -142,7 +183,11 @@ export function searchOutcome(
   let hint: string | null = null;
   if (mode === "name") {
     const found = result as FindResult;
-    hits = found.matches.map((match) => hitFor(match.path, undefined, null));
+    hits = found.matches.map((match) => ({
+      ...hitFor(match.path, undefined, null),
+      size: match.size,
+      modifiedAt: match.modifiedAt,
+    }));
     serverTotal = found.total;
   } else if (mode === "text") {
     const found = result as FtsResult;

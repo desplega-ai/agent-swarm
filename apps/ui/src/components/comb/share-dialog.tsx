@@ -87,7 +87,8 @@ export function ShareButton({ file }: { file: DrivePath }) {
   );
 }
 
-function ShareDialog({ file, onClose }: { file: DrivePath; onClose: () => void }) {
+/** Make a share link for `file`, with an expiry. Mount it only while open. */
+export function ShareDialog({ file, onClose }: { file: DrivePath; onClose: () => void }) {
   const { client, endpoint } = useAgentFsAccess();
   const [expiresIn, setExpiresIn] = useState<ShareExpirySeconds>(DEFAULT_SHARE_EXPIRY_SECONDS);
   const [share, setShare] = useState<{ link: string; expiresAt: string } | null>(null);

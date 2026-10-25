@@ -9,6 +9,8 @@
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
+import { splitFrontmatter } from "./frontmatter";
+
 export interface OutlineHeading {
   /** 1 to 4. A `=` underline is 1, a `-` underline is 2. */
   level: number;
@@ -39,7 +41,9 @@ const HTML_BLOCK = /^ {0,3}<[a-zA-Z/!?]/;
 /** The h1 to h4 headings of a markdown document, in order. */
 export function extractOutline(markdown: string): OutlineHeading[] {
   const headings: OutlineHeading[] = [];
-  const lines = markdown.split(/\r\n|\r|\n/);
+  // A YAML block on top is Properties, not text: its closing "---" would turn
+  // the last key into a setext heading. Its lines stay as blank lines.
+  const lines = splitFrontmatter(markdown).body.split(/\r\n|\r|\n/);
   // The open fence (its character and length), or null outside code.
   let fence: { char: string; length: number } | null = null;
   // The paragraph that a setext underline turns into a heading.

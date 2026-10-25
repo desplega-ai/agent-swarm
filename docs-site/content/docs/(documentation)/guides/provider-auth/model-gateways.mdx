@@ -11,10 +11,10 @@ This page covers the stock worker image. A gateway that an upstream CLI supports
 
 | Gateway                         | Claude Code                                                                            | Codex                                                                | OpenCode                                                      | pi-mono                                                       | Devin            | Claude Managed   |
 | ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------- | ---------------- | ---------------- |
-| **OpenRouter**                  | **Supported** with environment variables ([below](#claude-code-through-a-gateway-or-cloud-provider)) | Custom image/config and a swarm-recognized Codex credential required | **Supported** with environment variables                      | **Supported** with environment variables                      | Not configurable | Not configurable |
+| **OpenRouter**                  | **Supported** with environment variables ([below](#claude-code-through-a-gateway-or-cloud-provider)) | Accepted by the gateway route ([below](#codex-through-a-gateway)); not tested end to end | **Supported** with environment variables                      | **Supported** with environment variables                      | Not configurable | Not configurable |
 | **Ramp Router**                 | Accepted by the credential gate; not tested end to end                                 | Custom image/config and a swarm-recognized Codex credential required | Not yet supported: Ramp's provider plugin is not in the image | Not yet supported: Ramp's provider plugin is not in the image | Not configurable | Not configurable |
 | **OrcaRouter**                  | Not supported by `OPENROUTER_BASE_URL`                                                 | Not supported by `OPENROUTER_BASE_URL`                               | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
-| **OpenAI-compatible gateway**   | Not supported by `OPENROUTER_BASE_URL`                                                 | Not supported by `OPENROUTER_BASE_URL`                               | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
+| **OpenAI-compatible gateway**   | Not supported by `OPENROUTER_BASE_URL`                                                 | **Supported** for Responses API gateways with environment variables ([below](#codex-through-a-gateway)) | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
 
 **Supported** means the stock image works with environment or swarm-config values. “Custom image” means the upstream harness can use the gateway, but the stock Agent Swarm image does not install the required provider configuration or plugin.
 
@@ -110,26 +110,37 @@ Every OpenRouter caller sends them: the pi-mono, OpenCode, dsh, grok and Claude 
 
 Set `OPENROUTER_APP_ATTRIBUTION=false` (or `0`) to turn it off, for example to attribute the traffic to your own app instead. It is read from each task's resolved config, so a value saved under **Settings → Configuration** applies on the worker's next task.
 
-### Codex: upstream-compatible, not in the stock image
+### Codex through a gateway
 
-OpenRouter's Codex setup uses the user-level `~/.codex/config.toml`:
+Set two variables per agent, the same way as the Claude Code gateway route:
 
-```toml
-model = "openai/gpt-5.3-codex"
-model_provider = "openrouter"
+| Variable                 | Value                                                                       |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `CODEX_GATEWAY_BASE_URL` | The gateway's OpenAI base URL, including the version prefix: `https://gw.example.com/v1` |
+| `CODEX_GATEWAY_API_KEY`  | The gateway key, sent as `Authorization: Bearer`                            |
 
-[model_providers.openrouter]
-name = "OpenRouter"
-base_url = "https://openrouter.ai/api/v1"
-env_key = "OPENROUTER_API_KEY"
-wire_api = "responses"
-```
+A `CODEX_GATEWAY_BASE_URL` on any host except `api.openai.com` selects the gateway route, and it wins over Codex OAuth, `OPENAI_API_KEY`, and `~/.codex/auth.json`. On that route the worker:
 
-The stock worker image bakes its own Codex config with the native provider and model, and Agent Swarm has no environment variable that adds this provider block. Its credential gate also does not recognize `OPENROUTER_API_KEY`; it waits for `OPENAI_API_KEY`, Codex OAuth, or an existing `~/.codex/auth.json` before starting work.
+- Adds a provider block to the Codex session config, equivalent to this `~/.codex/config.toml`. Codex sends `POST <base URL>/responses`, so the gateway must serve the OpenAI Responses API. Codex no longer supports chat completions.
 
-An experimental derivative image therefore needs both the complete provider config and a credential state the swarm accepts, in addition to `OPENROUTER_API_KEY` in the worker process environment. Merely setting `OPENROUTER_API_KEY`, mounting the TOML block, or setting `OPENROUTER_BASE_URL` is not sufficient in the stock deployment. Do not disable the credential gate to hide this mismatch.
+  ```toml
+  model_provider = "swarm-gateway"
 
-See OpenRouter's [Codex CLI setup](https://openrouter.ai/blog/tutorials/codex-cli-openrouter/) for the upstream configuration. This path has not been smoke-tested with the stock Agent Swarm worker.
+  [model_providers.swarm-gateway]
+  name = "Swarm gateway"
+  base_url = "https://gw.example.com/v1"
+  env_key = "CODEX_GATEWAY_API_KEY"
+  wire_api = "responses"
+  requires_openai_auth = false
+  ```
+
+- Picks no Codex OAuth pool slot, restores no OAuth credentials, and removes `CODEX_OAUTH` and `OPENAI_API_KEY` from the Codex CLI environment. The gateway receives only the gateway key. `OPENAI_API_KEY` still serves embeddings.
+- Passes the credential gate with the two variables alone. A gateway URL without its key is not ready, whatever OAuth is configured. The live check calls `GET <base URL>/models` on the gateway with the gateway key and never contacts `api.openai.com`. A gateway that does not list models (404 or 405) counts as configured but not tested.
+- Logs `[codex] Using credential: gateway` when a session starts.
+
+Codex ignores `OPENAI_BASE_URL` for its built-in provider (verified on Codex 0.164), so pointing that variable at a gateway does nothing. The task model must be one the gateway serves.
+
+OpenRouter's Responses endpoint fits the same route: `CODEX_GATEWAY_BASE_URL=https://openrouter.ai/api/v1` and `CODEX_GATEWAY_API_KEY=<OpenRouter key>`. This has not been tested end to end. OpenRouter's model list needs no key, so its live check does not prove the key.
 
 ## Claude Code through a gateway or cloud provider
 

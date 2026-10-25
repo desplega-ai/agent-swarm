@@ -42,6 +42,13 @@ export interface DomTextSpace extends TextSpace {
   pointToOffset(node: Node, offset: number): number | null;
   /** Blocks (elements carrying source lines) intersecting [start, end). */
   blocksFor(start: number, end: number): HTMLElement[];
+  /**
+   * The innermost blocks whose source lines meet lines a..b. A block with no
+   * text (an image alone in its paragraph, a diagram) has an empty offset
+   * range, so `blocksFor` cannot find it: a comment anchored on its lines
+   * finds it here.
+   */
+  blocksForLines(a: number, b: number): HTMLElement[];
 }
 
 const BLOCK_TAGS = new Set([
@@ -281,6 +288,11 @@ export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
         blocks.filter((bl) => bl.start < Math.max(end, start + 1) && bl.end > start),
       ).map((b) => b.el);
     },
+    blocksForLines(a, b) {
+      return innermost(blocks.filter((bl) => bl.lineStart <= b && bl.lineEnd >= a)).map(
+        (bl) => bl.el,
+      );
+    },
   };
 }
 
@@ -337,4 +349,24 @@ export function withBlockLineEnd(space: AnchorSpace, r: AnchorResolution): Ancho
   return blockEnd != null && (r.lineEnd == null || blockEnd > r.lineEnd)
     ? { ...r, lineEnd: blockEnd }
     : r;
+}
+
+/**
+ * The asset a line-only anchor points at: a comment on an image or a diagram
+ * stores the asset's source lines and no quote, so it resolves to an empty
+ * range. Returns the asset elements (`data-comb-asset`) in those lines' blocks,
+ * or the blocks themselves when they hold no asset. Empty for any other anchor.
+ */
+export function assetTargets(
+  space: Pick<DomTextSpace, "blocksForLines">,
+  anchor: { start?: number; end?: number; lineStart?: number; lineEnd?: number },
+): HTMLElement[] {
+  if (anchor.start == null || anchor.start !== anchor.end || anchor.lineStart == null) return [];
+  const blocks = space.blocksForLines(anchor.lineStart, anchor.lineEnd ?? anchor.lineStart);
+  const assets = blocks.flatMap((block) =>
+    block.matches("[data-comb-asset]")
+      ? [block]
+      : Array.from(block.querySelectorAll<HTMLElement>("[data-comb-asset]")),
+  );
+  return assets.length > 0 ? assets : blocks;
 }

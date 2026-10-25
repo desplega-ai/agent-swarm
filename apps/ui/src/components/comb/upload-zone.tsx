@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, CircleAlert, File, Upload, X } from "lucide-react";
+import { Check, CircleAlert, Upload, X } from "lucide-react";
 import {
   type DragEvent,
   type ReactNode,
@@ -11,6 +11,7 @@ import {
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { agentFsKey, agentFsLsQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
+import { FileKindIcon } from "@/components/comb/file-icon";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -327,7 +328,7 @@ function UploadIcon({ item }: { item: UploadItem }) {
   if (item.status === "error" || item.status === "rejected") {
     return <CircleAlert className="size-4 shrink-0 text-status-error-strong" aria-hidden />;
   }
-  return <File className="size-4 shrink-0 text-muted-foreground" aria-hidden />;
+  return <FileKindIcon name={item.path} isFolder={false} />;
 }
 
 function UploadStatusText({ item }: { item: UploadItem }) {

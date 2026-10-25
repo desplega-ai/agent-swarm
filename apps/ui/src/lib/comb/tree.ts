@@ -78,3 +78,80 @@ export function flattenTree(
   walk("/", 1);
   return rows;
 }
+
+/**
+ * The tree of a filter: the matched files (Comb paths) under the folders that
+ * hold them, every folder open. Sorted like the drive tree. Matches past the
+ * `find` limit are not here: the caller says so.
+ */
+export function matchTree(paths: readonly string[]): TreeRow[] {
+  interface Node {
+    folders: Map<string, Node>;
+    files: Set<string>;
+  }
+  const root: Node = { folders: new Map(), files: new Set() };
+  for (const path of paths) {
+    const segments = path.split("/").filter(Boolean);
+    const name = segments.pop();
+    if (!name) continue;
+    let node = root;
+    for (const segment of segments) {
+      let next = node.folders.get(segment);
+      if (!next) {
+        next = { folders: new Map(), files: new Set() };
+        node.folders.set(segment, next);
+      }
+      node = next;
+    }
+    node.files.add(name);
+  }
+  const rows: TreeRow[] = [];
+  const walk = (node: Node, folder: string, level: number) => {
+    const entries = sortEntries([
+      ...[...node.folders.keys()].map((name): LsEntry => ({ name, type: "directory", size: 0 })),
+      ...[...node.files].map((name): LsEntry => ({ name, type: "file", size: 0 })),
+    ]);
+    entries.forEach((entry, index) => {
+      const isFolder = entry.type === "directory";
+      const path = childPath(folder, entry.name, isFolder);
+      rows.push({
+        kind: "entry",
+        path,
+        name: entry.name,
+        isFolder,
+        level,
+        posinset: index + 1,
+        setsize: entries.length,
+      });
+      const child = node.folders.get(entry.name);
+      if (isFolder && child) walk(child, path, level + 1);
+    });
+  };
+  walk(root, "/", 1);
+  return rows;
+}
+
+/** A name split into plain and matched parts: each query word, case-insensitive, is marked. */
+export function nameParts(name: string, query: string): { text: string; hit: boolean }[] {
+  const words = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  if (words.length === 0) return [{ text: name, hit: false }];
+  const lower = name.toLowerCase();
+  const marked = new Array<boolean>(name.length).fill(false);
+  for (const word of words) {
+    for (let at = lower.indexOf(word); at !== -1; at = lower.indexOf(word, at + word.length)) {
+      marked.fill(true, at, at + word.length);
+    }
+  }
+  const parts: { text: string; hit: boolean }[] = [];
+  for (let index = 0; index < name.length; index++) {
+    const last = parts[parts.length - 1];
+    const hit = marked[index] as boolean;
+    if (last && last.hit === hit) last.text += name[index];
+    else parts.push({ text: name[index] as string, hit });
+  }
+  return parts;
+}

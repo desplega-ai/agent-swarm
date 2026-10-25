@@ -50,7 +50,7 @@ An existing drive member keeps their role. A viewer can read files and comments 
 
 ## Browse
 
-The left panel has four tabs: **Files** (the drive as a tree), **Recent**, **Favorites**, and **Outline** (the headings of a markdown file). A folder opens as a grid of its files. Comb shows these file types in the page:
+The left panel has three tabs: **Files** (the drive as a tree), **Recent**, and **Favorites**. It stays as you leave it while you open files. The right panel has **Comments** and, for a markdown file with headings, **Outline**. A folder opens as a grid of its files. Each file shows one icon for its kind (markdown, image, audio, video, PDF, HTML, code, data, table, archive). Comb shows these file types in the page:
 
 - Markdown, rendered.
 - Code and other text files, with line numbers.
@@ -60,17 +60,40 @@ The left panel has four tabs: **Files** (the drive as a tree), **Recent**, **Fav
 
 Other files show **Download** and **Open in agent-fs**.
 
+### Find files
+
+- **Filter files** on top of the Files tab narrows the tree to the files whose names match, across the whole drive (the agent-fs `find` op, the best 50). Type 2 characters or more. Escape clears it. An agent-fs without `find` filters the folders the tree has loaded.
+- **Filter this folder** in a folder header keeps the folder's own items whose names hold every word you type, and lists matching files in its subfolders under them. The filter is in the URL (`?filter=`), so you can share it, and Back brings it back.
+
+### File menu
+
+Hover a row in the tree and click **...**, or right-click a row in the tree or the folder grid (a long press on a phone). The same menu is under **...** in a file header:
+
+| Item | Does |
+| --- | --- |
+| **Open**, **Open in new tab** | Opens the file or folder in Comb |
+| **Copy link**, **Copy path** | Copies the Comb link, or the drive path (`/docs/plan.md`) |
+| **Share...** | Makes a share link (files, see [Share links](#share-links)) |
+| **Add to favorites** | Stars it (see [Home, Recent, and Favorites](#home-recent-and-favorites)) |
+| **Download** | Downloads the file |
+| **New file...**, **New folder...** | Creates one in the folder. A name like `notes/todo.md` also makes the folders. A new folder holds an empty `.keep` file. |
+| **Rename...** | Renames or moves the file (edit its full path). agent-fs writes it as a new version at the new path. Its stars move with it. The old path keeps its history and its comments. |
+| **Delete...** | Deletes the file. Its versions are kept (`agent-fs revert` brings it back). Its comments are removed. |
+| **Open in agent-fs** | Opens it in the agent-fs live UI |
+
+**New**, **Rename**, and **Delete** use the agent-fs `write`, `mv`, and `rm` ops, like the live UI, and need the editor role in the drive. A name in the tree that does not fit shows in full on hover. **Copy path** is also an icon in each file and folder header.
+
 ### Search
 
-Click the search icon in the header, or press `/`. Pick a mode:
+Click the search icon in the header, or press `/`. Pick a mode, or press Tab and Shift+Tab to move between them:
 
 | Mode | agent-fs op | Finds |
 | --- | --- | --- |
-| **Name** | `find` | File names, close matches too. Needs 2 characters and agent-fs 0.18.5 or later. |
-| **Full text** | `fts` | The exact words inside files. |
+| **File** | `find` | File names, close matches too. Needs 2 characters and agent-fs 0.18.5 or later. |
 | **Semantic** | `search` | Files about the topic, by meaning and keywords. Without an embedding provider, agent-fs returns keyword results only. |
+| **Text** | `fts` | The exact words inside files. |
 
-Search covers the whole swarm drive. Enter opens the selected file.
+Search covers the whole swarm drive. Image results show a small preview. Enter opens the selected file. The search is in the URL (`?q=` and `?mode=`): share the link to share the search. Back closes it, and Back from an opened result shows the search again.
 
 ### Share links
 
@@ -92,24 +115,32 @@ Preview shows when agent-fs reports the `html-sites` feature.
 
 ### Home, Recent, and Favorites
 
-The drive root is the Comb home. The left panel starts collapsed there, because the home lists the files itself. It opens again in a folder or in a file with an outline, or with a click on its icon strip. The home shows these lists above the folder:
+The drive root is the Comb home. The left panel starts collapsed there, because the home lists the files itself. It opens again in any folder or file, or with a click on its icon strip. The home shows these lists above the folder:
 
 | List | What it shows | Where it is stored |
 | --- | --- | --- |
 | **In progress** | Each unfinished swarm task that open comments wait on, with those comments under it. Shows only while a task runs. | The comments in agent-fs, the task status in the swarm API |
-| **Favorites** | Files and folders you starred | The swarm API, for the key that the dashboard uses (the operator key, or your user token) |
+| **Favorites** | Files and folders you starred | agent-fs, for your agent-fs account (the `favorites` feature). The agent-fs live UI shows the same stars. |
 | **Recently viewed** | The last 20 files you opened | This browser only |
 | **Recently changed** | The newest version of each changed file, and who wrote it | agent-fs (`recent` op) |
 
 The left panel shows the full lists: **Recent** (pick **Viewed** or **Changed**) and **Favorites**. The star in a file or folder header adds it to Favorites. Favorites also show under **Comb** in the sidebar.
 
+Before Comb used agent-fs stars, it kept them in the swarm API. The first time a browser connects Comb to an agent-fs with the `favorites` feature, Comb copies those stars to your agent-fs account and skips the ones whose file is gone. The swarm API keeps its copy: an agent-fs without the feature, or a browser that is not connected, still lists them.
+
 ### Full width
 
 On a markdown file, **Full width** in the header (or `F`) lets the text run as wide as its pane, without the reading width. The side panels stay. The choice stays in this browser.
 
+### Frontmatter, images, and diagrams
+
+- A YAML block at the top of a markdown file shows as **Properties**: lists as chips, links as links, nested values as YAML. Click its title to collapse it. The choice stays in this browser. YAML that does not parse (for example a value with `: ` in it) is read line by line and marked **Not valid YAML**.
+- Images and mermaid diagrams show **Maximize** and **Comment** on hover. **Maximize** shows the asset as large as the screen, with **Actual size** and **Download** (a diagram downloads as SVG). A wide diagram fits the page width.
+
 ## Comment
 
 - Select a passage in a markdown or text file, then click **Comment** (or press `C`). The comment anchors to that passage.
+- **Comment** on an image or a diagram (on hover, or in **Maximize**) anchors the comment to the asset's source lines, because agent-fs anchors comments on text and lines only. An asset with a comment gets an outline, and a bold one while its comment is selected. The agent-fs live UI shows an image comment on its line. It shows a diagram comment as **Lost**, because its diagrams carry no line numbers.
 - **Comment on file** adds a comment about the whole file.
 - **Add comment** saves the comment. It does not send it to the swarm (see [Send comments to the swarm](#send-comments-to-the-swarm)).
 - Reply, **Resolve**, and **Reopen** work on every thread.

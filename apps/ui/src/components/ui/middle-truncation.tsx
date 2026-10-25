@@ -181,6 +181,8 @@ type BaseProps = React.ComponentPropsWithoutRef<"span"> & {
   children: string;
   /** Custom ellipsis string to show in the middle. @default "..." */
   ellipsis?: string;
+  /** Local change: called when the shown text starts or stops being cut (a full-name tooltip). */
+  onTruncatedChange?: (truncated: boolean) => void;
 };
 
 export type MiddleTruncationProps = BaseProps &
@@ -208,10 +210,15 @@ export function MiddleTruncation({
   end,
   minEnd,
   ellipsis = "...",
+  onTruncatedChange,
   ...props
 }: MiddleTruncationProps) {
   const containerRef = useRef<HTMLSpanElement>(null);
   const [displayed, setDisplayed] = useState<string>(children);
+  const onTruncatedRef = useRef(onTruncatedChange);
+  useLayoutEffect(() => {
+    onTruncatedRef.current = onTruncatedChange;
+  });
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -219,7 +226,9 @@ export function MiddleTruncation({
 
     const recalculate = (width: number) => {
       const font = getComputedFont(el);
-      setDisplayed(computeTruncated(children, end, minEnd, width, font, ellipsis));
+      const next = computeTruncated(children, end, minEnd, width, font, ellipsis);
+      setDisplayed(next);
+      onTruncatedRef.current?.(next !== children);
     };
 
     const debouncedRecalculate = debounceWithRAF(recalculate, 150);
