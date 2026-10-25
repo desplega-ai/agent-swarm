@@ -1,5 +1,5 @@
-// The two side panels of a Comb page. The left panel has two tabs (Files, and
-// Outline for a file with headings). The right panel holds the comments. From
+// The two side panels of a Comb page. The left panel has tabs: Files, Recent,
+// Favorites, and Outline for a file with headings. The right panel holds the comments. From
 // `md` up each panel sits beside the content and collapses to an icon strip.
 // Below `md` both are sheets.
 //
@@ -19,7 +19,12 @@ export const LEFT_OPEN_QUERY = "(min-width: 1440px)";
 /** The right panel starts open from this width up. */
 export const RIGHT_OPEN_QUERY = "(min-width: 1024px)";
 
-export type LeftTab = "files" | "outline";
+export type LeftTab = "files" | "recent" | "favorites" | "outline";
+
+/** Tabs that list files on any page. They stay put while the person moves between files. */
+const LIST_TABS: ReadonlySet<LeftTab> = new Set(["recent", "favorites"]);
+
+const LEFT_TABS: ReadonlySet<string> = new Set(["files", "recent", "favorites", "outline"]);
 
 /**
  * What the route shows, for the left panel: a folder, a file with an outline
@@ -31,7 +36,7 @@ export type PanelTarget = "folder" | "outline" | "plain";
 export interface LeftPanelState {
   /** Open or collapsed by hand. Null until the person chooses: the width decides. */
   open: boolean | null;
-  /** The tab for a file with an outline. Folders and other files show Files. */
+  /** The picked tab. Outline shows only on a file with an outline: elsewhere it reads as Files. */
   tab: LeftTab;
   /** Collapsed for the current file only, because it has no outline. Not stored. */
   autoCollapsed: boolean;
@@ -54,29 +59,43 @@ export const INITIAL_LEFT_PANEL: LeftPanelState = {
 };
 
 /**
- * - Opening a file with an outline switches to Outline. The first route keeps
- *   the stored tab, so a reload shows the tab the person left.
+ * The tab after the person picks `tab` on `target`. Recent and Favorites are
+ * always kept. Files and Outline are kept where Outline exists. Elsewhere
+ * Files only replaces a list tab, so Files on a folder does not turn off the
+ * outline for the next file, and Outline (absent there) changes nothing.
+ */
+function pickedTab(current: LeftTab, tab: LeftTab, target: PanelTarget): LeftTab {
+  if (LIST_TABS.has(tab) || target === "outline") return tab;
+  return tab === "files" && LIST_TABS.has(current) ? "files" : current;
+}
+
+/**
+ * - Opening a file with an outline switches Files to Outline. Recent and
+ *   Favorites stay, so the person can open one listed file after another.
+ *   The first route keeps the stored tab, so a reload shows the tab the
+ *   person left.
  * - Opening a file without an outline collapses the panel for that file only.
- * - Opening a folder shows Files and undoes that collapse. A collapse by hand stays.
- * - A tab picked by hand is stored only where Outline exists, so Files on a
- *   folder does not turn off the outline for the next file.
+ * - Opening a folder undoes that collapse. A collapse by hand stays.
+ * - A tab picked by hand is stored as `pickedTab` says.
  */
 export function leftPanelReducer(state: LeftPanelState, event: LeftPanelEvent): LeftPanelState {
   switch (event.type) {
     case "navigate":
       if (event.target === "plain") return { ...state, autoCollapsed: true };
-      if (event.target === "outline" && !event.first) {
+      if (event.target === "outline" && !event.first && !LIST_TABS.has(state.tab)) {
         return { ...state, tab: "outline", autoCollapsed: false };
       }
       return { ...state, autoCollapsed: false };
     case "show":
       return {
         open: true,
-        tab: event.target === "outline" ? event.tab : state.tab,
+        tab: pickedTab(state.tab, event.tab, event.target),
         autoCollapsed: false,
       };
-    case "select":
-      return event.target === "outline" ? { ...state, tab: event.tab } : state;
+    case "select": {
+      const tab = pickedTab(state.tab, event.tab, event.target);
+      return tab === state.tab ? state : { ...state, tab };
+    }
     case "collapse":
       return { ...state, open: false, autoCollapsed: false };
   }
@@ -98,7 +117,7 @@ export function leftPanelView(
   const outline = target === "outline";
   return {
     open: (state.open ?? wide) && !state.autoCollapsed,
-    tab: outline ? state.tab : "files",
+    tab: !outline && state.tab === "outline" ? "files" : state.tab,
     outline,
   };
 }
@@ -134,7 +153,10 @@ export function readLeftPanel(storage: DraftStorage | null, apiUrl: string): Lef
   const stored = readJson(storage, deriveStorageKey(apiUrl, LEFT_PANEL_KEY));
   return {
     open: typeof stored?.open === "boolean" ? stored.open : null,
-    tab: stored?.tab === "files" ? "files" : "outline",
+    tab:
+      typeof stored?.tab === "string" && LEFT_TABS.has(stored.tab)
+        ? (stored.tab as LeftTab)
+        : "outline",
     autoCollapsed: false,
   };
 }

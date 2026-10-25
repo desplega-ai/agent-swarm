@@ -42,12 +42,13 @@ function commentChanged(path: string) {
 }
 
 describe("keysToInvalidate", () => {
-  test("file.changed: the file's stat and the listing of every folder above it", () => {
+  test("file.changed: the file's stat, the listing of every folder above it, and the drive's recent changes", () => {
     expect(keysToInvalidate(fileChanged("/a/b/c.md"), CTX)).toEqual([
       [...PREFIX, "stat", "/a/b/c.md"],
       [...PREFIX, "ls", "/"],
       [...PREFIX, "ls", "/a/"],
       [...PREFIX, "ls", "/a/b/"],
+      [...PREFIX, "recent"],
     ]);
   });
 
@@ -55,6 +56,7 @@ describe("keysToInvalidate", () => {
     expect(keysToInvalidate(fileChanged("notes.md", "delete"), CTX)).toEqual([
       [...PREFIX, "stat", "/notes.md"],
       [...PREFIX, "ls", "/"],
+      [...PREFIX, "recent"],
     ]);
   });
 
@@ -81,13 +83,14 @@ describe("keysToInvalidate", () => {
     expect(keysToInvalidate(commentChanged("/a/b/c.md"), CTX)).toEqual(expected);
   });
 
-  test("ready (connect and every reconnect): every stat, ls, and comments query of the drive", () => {
+  test("ready (connect and every reconnect): every stat, ls, comments, and recent query of the drive", () => {
     expect(
       keysToInvalidate({ type: "ready", driveId: "drive-1", at: "2026-09-30T10:00:00.000Z" }, CTX),
     ).toEqual([
       [...PREFIX, "stat"],
       [...PREFIX, "ls"],
       [...PREFIX, "comments"],
+      [...PREFIX, "recent"],
     ]);
   });
 });

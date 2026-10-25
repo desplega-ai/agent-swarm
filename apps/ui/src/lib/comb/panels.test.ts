@@ -142,6 +142,42 @@ describe("auto-switch on navigation", () => {
   });
 });
 
+describe("Recent and Favorites tabs", () => {
+  const open: LeftPanelState = { open: true, tab: "files", autoCollapsed: false };
+
+  test("picked on a folder, they stay while files with an outline open", () => {
+    for (const tab of ["recent", "favorites"] as const) {
+      const state = run(
+        open,
+        { type: "select", tab, target: "folder" },
+        { type: "navigate", target: "outline", first: false },
+      );
+      expect(leftPanelView(state, "outline", true).tab).toBe(tab);
+      expect(leftPanelView(state, "folder", true).tab).toBe(tab);
+    }
+  });
+
+  test("Files picked on a folder leaves a list tab", () => {
+    const state = run(
+      open,
+      { type: "select", tab: "recent", target: "folder" },
+      { type: "select", tab: "files", target: "folder" },
+    );
+    expect(leftPanelView(state, "folder", true).tab).toBe("files");
+  });
+
+  test("the strip opens the panel on a list tab anywhere", () => {
+    const collapsed: LeftPanelState = { open: false, tab: "outline", autoCollapsed: false };
+    const state = run(collapsed, { type: "show", tab: "favorites", target: "plain" });
+    expect(state).toEqual({ open: true, tab: "favorites", autoCollapsed: false });
+  });
+
+  test("Outline stored shows Files where there is no outline", () => {
+    const stored: LeftPanelState = { open: true, tab: "outline", autoCollapsed: false };
+    expect(leftPanelView(stored, "folder", true).tab).toBe("files");
+  });
+});
+
 describe("right panel", () => {
   test("the stored choice wins over the width", () => {
     expect(rightPanelOpen(null, true)).toBe(true);
@@ -169,6 +205,16 @@ describe("panel storage", () => {
     });
     expect(readRightPanel(storage, apiUrl)).toBe(true);
     expect(readRightPanel(storage, "http://other")).toBeNull();
+  });
+
+  test("every tab round-trips, and an unknown one reads as Outline", () => {
+    const storage = memoryStorage();
+    for (const tab of ["files", "recent", "favorites", "outline"] as const) {
+      writeLeftPanel(storage, apiUrl, { open: true, tab });
+      expect(readLeftPanel(storage, apiUrl).tab).toBe(tab);
+    }
+    storage.map.set(`swarm:v1:${apiUrl}:comb:panel:left`, '{"tab":"history"}');
+    expect(readLeftPanel(storage, apiUrl).tab).toBe("outline");
   });
 
   test("no choice yet stores only the tab", () => {

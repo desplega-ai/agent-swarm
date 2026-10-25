@@ -40,6 +40,7 @@ import type {
   FtsResult,
   LogResult,
   LsResult,
+  RecentResult,
   RevertParams,
   RevertResult,
   SearchResult,
@@ -70,6 +71,7 @@ import {
 } from "@/lib/comb/media";
 import { markMentionsRead } from "@/lib/comb/mentions";
 import type { DrivePath } from "@/lib/comb/paths";
+import { RECENT_CHANGES_LIMIT, recentChanges } from "@/lib/comb/recent";
 import {
   isSearchable,
   isUnknownOpError,
@@ -805,6 +807,31 @@ export function useCombSearch(
     refetchOnWindowFocus: false,
     // The previous answer of the same mode stays on screen while the next query runs.
     placeholderData: keepUnderPrefix(modeKey),
+  });
+}
+
+/**
+ * The drive's recently changed files (the agent-fs `recent` op): the newest
+ * version of each, deletes left out, at most `max`. Undefined data while an
+ * older agent-fs without the op answers: the lists hide then. A
+ * `file.changed` event refreshes it while the drive's stream is live.
+ */
+export function useRecentChanges(drive: { orgId: string; driveId: string }, max: number) {
+  const access = useAgentFsAccess();
+  return useQuery({
+    queryKey: agentFsKey(access.endpoint, access.userId, drive.orgId, drive.driveId, "recent"),
+    queryFn: ({ signal }) =>
+      connectedClient(access).callOp<RecentResult>(
+        drive.orgId,
+        "recent",
+        { limit: RECENT_CHANGES_LIMIT },
+        drive.driveId,
+        { signal },
+      ),
+    select: (result) => recentChanges(result.entries, max),
+    enabled: access.client !== null,
+    retry: (count, error) => !isUnknownOpError(error, "recent") && agentFsRetry(count, error),
+    refetchInterval: drivePoll(access, drive, "recent"),
   });
 }
 

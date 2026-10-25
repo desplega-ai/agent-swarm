@@ -9,11 +9,11 @@ import { SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/comp
 import { combPath, isFolderPath, pinLabel, sidebarPins } from "@/lib/comb/paths";
 
 /**
- * The swarm drive's pins under the sidebar's Comb item. The "Pinned" header
+ * The swarm drive's favorites under the sidebar's Comb item. The "Favorites" header
  * folds them like the WORK / SWARM / RESOURCES groups, and the state stays in
  * localStorage. A long list shows the newest pins and a "Show all" row.
  * Renders nothing while the drive has no pins. The icon-collapsed sidebar
- * shows no pins: the Comb icon leads to the tree's full Pinned list.
+ * shows no pins: the Comb icon leads to the full Favorites tab.
  */
 export function CombSidebarPins({ comb }: { comb: StatusComb | undefined }) {
   const { pathname } = useLocation();
@@ -27,7 +27,7 @@ export function CombSidebarPins({ comb }: { comb: StatusComb | undefined }) {
 
   return (
     <CollapsibleSection
-      title="Pinned"
+      title="Favorites"
       defaultOpen
       persistKey="agent-swarm:sidebar-group:comb-pins"
       // Puts the chevron under the Comb icon, on top of the list's guide line.

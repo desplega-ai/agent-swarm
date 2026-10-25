@@ -3,9 +3,12 @@ import { useFavorites, useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { type DrivePath, pinIdFor } from "@/lib/comb/paths";
 
-const PIN_LABELS = { add: "Pin to sidebar", remove: "Unpin" };
+const PIN_LABELS = { add: "Add to favorites", remove: "Remove from favorites" };
 
-/** Star that pins a Comb file or folder to the sidebar (a favorite of type `agent-fs-path`). */
+/**
+ * Star that makes a Comb file or folder a favorite (type `agent-fs-path`):
+ * the Favorites tab, the Comb home, and the sidebar list it.
+ */
 export function PinButton({ target, className }: { target: DrivePath; className?: string }) {
   const pins = useFavorites("agent-fs-path");
   const toggle = useFavoriteToggle("agent-fs-path");
@@ -23,7 +26,12 @@ export function PinButton({ target, className }: { target: DrivePath; className?
       onToggle={() =>
         toggle.mutate(
           { itemId, favorite: !pinned },
-          { onError: () => toast.error(pinned ? "Could not unpin." : "Could not pin.") },
+          {
+            onError: () =>
+              toast.error(
+                pinned ? "Could not remove the favorite." : "Could not add the favorite.",
+              ),
+          },
         )
       }
     />

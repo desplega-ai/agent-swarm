@@ -112,7 +112,7 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
   return (
     <section
       aria-label="Open comments"
-      className="flex max-h-96 shrink-0 flex-col rounded-xl border border-border bg-card"
+      className="flex max-h-80 shrink-0 flex-col rounded-xl border border-border bg-card"
     >
       <header className="flex min-h-11 items-center gap-2 border-b border-border-subtle px-3 py-1.5">
         <Checkbox

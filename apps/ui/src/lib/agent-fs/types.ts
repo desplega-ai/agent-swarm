@@ -233,6 +233,24 @@ export interface CommentNotificationReadResult {
   markedRead: number;
 }
 
+/** One file version in the core `recent` op's answer. Newest first. */
+export interface RecentEntry {
+  /** Drive path, with or without the leading "/". */
+  path: string;
+  version: number;
+  /** agent-fs user id of the writer. */
+  author: string;
+  createdAt: string;
+  operation: "write" | "edit" | "append" | "delete" | "revert";
+  message?: string;
+  size?: number;
+}
+
+/** Result of the core `recent` op: the drive's newest file versions. */
+export interface RecentResult {
+  entries: RecentEntry[];
+}
+
 /** Result of the core `find` op (fuzzy file names, agent-fs 0.18.5+). Best first. */
 export interface FindResult {
   matches: Array<{ path: string; size: number; modifiedAt?: string; score: number }>;

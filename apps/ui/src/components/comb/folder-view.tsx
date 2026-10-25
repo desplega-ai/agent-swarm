@@ -3,6 +3,7 @@ import { AlertCircle, File, Folder, FolderOpen } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgentFsLs } from "@/api/hooks/use-agent-fs";
+import { CombHome } from "@/components/comb/comb-home";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FolderComments } from "@/components/comb/folder-comments";
 import { PinButton } from "@/components/comb/pin-button";
@@ -128,6 +129,8 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         }
       />
       <UploadList />
+      {/* The drive root is the Comb home: favorites, recently viewed, recently changed. */}
+      {folder.path === "/" ? <CombHome drive={folder} /> : null}
       {listing.data && rows.length === 0 ? (
         <EmptyState
           icon={FolderOpen}
@@ -168,7 +171,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           pagination={false}
         />
       )}
-      {/* Open comments below the folder, with "Send N to swarm" (step-9). */}
+      {/* Open comments below the folder: send to swarm, resolve in bulk. */}
       <FolderComments folder={folder} />
     </UploadDropZone>
   );

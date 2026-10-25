@@ -20,7 +20,7 @@ export interface LiveKeyContext {
  * because its events refresh them. `drivePoll` and the `ready` resync both
  * read this list.
  */
-export const LIVE_QUERY_KINDS: readonly string[] = ["stat", "ls", "comments"];
+export const LIVE_QUERY_KINDS: readonly string[] = ["stat", "ls", "comments", "recent"];
 
 /** The dashboard's default poll (`app/providers.tsx`). */
 export const COMB_POLL_MS = 10_000;
@@ -64,8 +64,9 @@ export function agentFsFolderCommentsKey(
 /**
  * Query-key prefixes to invalidate for one event.
  *
- * - `file.changed`: the file's `stat`, and the `ls` of every folder above it
- *   (a new or emptied subfolder also changes its parent's listing). Content,
+ * - `file.changed`: the file's `stat`, the `ls` of every folder above it
+ *   (a new or emptied subfolder also changes its parent's listing), and the
+ *   drive's `recent` changes (Comb home, the Recent tab). Content,
  *   media, and log keys end with the `stat` revision, so the new `stat`
  *   loads them. A diff key names two fixed versions and never goes stale.
  * - `comment.changed`: the file's `comments`, and the folder comment list
@@ -81,7 +82,11 @@ export function keysToInvalidate(event: DriveEvent, ctx: LiveKeyContext): QueryK
       return LIVE_QUERY_KINDS.map((kind) => key(kind));
     case "file.changed": {
       const path = commentCombPath(event.path);
-      return [key("stat", path), ...ancestorFolders(path).map((folder) => key("ls", folder))];
+      return [
+        key("stat", path),
+        ...ancestorFolders(path).map((folder) => key("ls", folder)),
+        key("recent"),
+      ];
     }
     case "comment.changed": {
       const path = commentCombPath(event.path);

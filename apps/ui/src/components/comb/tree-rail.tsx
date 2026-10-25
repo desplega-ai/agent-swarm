@@ -3,7 +3,6 @@ import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentFsLsQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
-import { PinnedList } from "@/components/comb/pinned-list";
 import { PresenceDots } from "@/components/comb/presence-avatars";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { ancestorFolders, type CombLocation, combPath, parentFolder } from "@/lib/comb/paths";
@@ -239,12 +238,7 @@ function DriveTree({
   );
 }
 
-/** The Comb side rail: the pinned list (step-12) on top of the drive tree. */
+/** The Files tab: the drive tree. Favorites have their own tab (`FavoritesTab`). */
 export function TreeRail(props: Parameters<typeof DriveTree>[0]) {
-  return (
-    <>
-      <PinnedList location={props.location} onNavigate={props.onNavigate} />
-      <DriveTree {...props} />
-    </>
-  );
+  return <DriveTree {...props} />;
 }

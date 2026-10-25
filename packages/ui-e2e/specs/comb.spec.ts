@@ -109,13 +109,14 @@ test("Comb connects, comments, replies, and resolves on agent-fs", { tag: "@loca
 
     await page.getByRole("button", { name: "Comment on file" }).click();
     await page.getByRole("textbox", { name: "Comment on this file" }).fill("E2E file comment");
-    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.getByRole("button", { name: "Add comment", exact: true }).click();
     const thread = page.getByRole("article").filter({ hasText: "E2E file comment" });
     await expect(thread).toBeVisible();
 
     await thread.getByRole("button", { name: "Reply", exact: true }).click();
     await thread.getByRole("textbox", { name: "Reply" }).fill("E2E reply");
-    await thread.getByRole("button", { name: "Send", exact: true }).click();
+    // The opener hides while the reply box is open: this "Reply" saves the reply.
+    await thread.getByRole("button", { name: "Reply", exact: true }).click();
     await expect(thread.getByText("E2E reply")).toBeVisible();
 
     await thread.getByRole("button", { name: "Resolve" }).click();
