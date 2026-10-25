@@ -18,6 +18,7 @@ import { combPath, pinLabel } from "@/lib/comb/paths";
 import type { Drive } from "@/lib/comb/recent";
 import { isTaskUnfinished, threadsByTask } from "@/lib/comb/thread-status";
 import { formatRelative } from "@/lib/relative-time";
+import { statusLabel } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
 
 /** Rows each list card shows. The left panel's Recent and Favorites tabs show the rest. */
@@ -122,20 +123,21 @@ function TaskGroup({
 }) {
   const count = `${comments.length} ${comments.length === 1 ? "comment" : "comments"}`;
   const more = comments.length - TASK_COMMENTS;
+  const short = task.id.slice(0, 8);
+  const time = formatRelative(task.createdAt);
   return (
     <li className="flex min-w-0 flex-col gap-0.5 py-1.5">
       <Link
         to={`/tasks/${task.id}`}
+        aria-label={`Task ${short}, ${statusLabel(task.status)}, ${count}, ${time}`}
         className="hover-linger flex min-w-0 items-center gap-2 rounded-md px-2 py-1 outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         <StatusBadge status={task.status} />
         <span className="text-sm font-medium">{count}</span>
-        <span className="font-mono text-xs text-muted-foreground">{task.id.slice(0, 8)}</span>
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-          {formatRelative(task.createdAt)}
-        </span>
+        <span className="font-mono text-xs text-muted-foreground">{short}</span>
+        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{time}</span>
       </Link>
-      <ul aria-label={`Comments in task ${task.id.slice(0, 8)}`} className="flex flex-col">
+      <ul aria-label={`Comments in task ${short}`} className="flex flex-col">
         {comments.slice(0, TASK_COMMENTS).map((thread) => {
           const path = commentCombPath(thread.path);
           return (

@@ -173,7 +173,7 @@ export function CombLayoutProvider({
         setRightStored(false);
         writeRightPanel(browserStorage(), apiUrl, false);
       },
-      fullWidth: fullWidthStored,
+      fullWidth: inline && fullWidthStored,
       setFullWidth,
       canWiden: outline?.key === key && outline.markdown,
       headings:

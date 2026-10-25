@@ -6,7 +6,7 @@ import {
   isTaskUnfinished,
   type ThreadSwarmState,
   threadSwarmStates,
-  watchedTaskId,
+  threadsByTask,
 } from "@/lib/comb/thread-status";
 import { useCombServiceUserId } from "./use-comb-service-user";
 
@@ -43,14 +43,10 @@ export function useThreadSwarmStates(
   threads: ReadonlyArray<CommentListEntry>,
 ): ReadonlyMap<string, ThreadSwarmState> {
   const serviceUserId = useCombServiceUserId();
-  const taskIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const thread of threads) {
-      const taskId = watchedTaskId(thread, serviceUserId);
-      if (taskId) ids.add(taskId);
-    }
-    return [...ids].sort();
-  }, [threads, serviceUserId]);
+  const taskIds = useMemo(
+    () => [...threadsByTask(threads, serviceUserId).keys()].sort(),
+    [threads, serviceUserId],
+  );
 
   const results = useWatchedTasks(taskIds);
 
