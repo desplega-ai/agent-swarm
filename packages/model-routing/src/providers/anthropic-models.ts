@@ -61,5 +61,9 @@ export async function checkAnthropicModels(
       reason: `HTTP ${res.status}: the endpoint does not list models, so the key was not checked`,
     };
   }
-  return { status: "failed", reason: `HTTP ${res.status}: ${body.slice(0, 200)}` };
+  return {
+    status: "failed",
+    reason: `HTTP ${res.status}: ${body.slice(0, 200)}`,
+    httpStatus: res.status,
+  };
 }

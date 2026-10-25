@@ -287,7 +287,7 @@ export {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
 } from "./db/agents";
-export { recordKeySeatMismatch } from "./db/api-keys";
+export { recordKeySeatMismatch, recordKeyValidation } from "./db/api-keys";
 export {
   type ApprovalRequestSummary,
   type ApprovalVote,
@@ -11771,6 +11771,8 @@ export interface ApiKeyStatus {
   /** Auth failures in a row since the last success or clear. */
   consecutiveAuthFailures: number;
   lastAuthFailureAt: string | null;
+  lastValidationError: string | null;
+  lastValidationFailedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -11796,6 +11798,7 @@ function rowToApiKeyStatus(row: ApiKeyStatusRow): ApiKeyStatus {
 
 export interface AvailableKeyIndicesResult {
   availableIndices: number[];
+  rejectedIndices: number[];
   /** Indices excluded only by an active model-scoped window block (not key-wide). */
   modelBlockedIndices: number[];
   /** ISO of the earliest resetsAt among modelBlockedIndices, or null when none. */
@@ -11844,8 +11847,9 @@ export async function getAvailableKeyIndices(
     rateLimitWindows: string | null;
     plan: string | null;
     authFailureSeq: number;
+    lastValidationFailedAt: string | null;
   }>(
-    `SELECT keyIndex, status, rateLimitWindows, plan, authFailureSeq FROM api_key_status
+    `SELECT keyIndex, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
        WHERE keyType = ? AND scope = ? AND scopeId = ?`,
     [keyType, scope, effectiveScopeId],
   );
@@ -11853,6 +11857,12 @@ export async function getAvailableKeyIndices(
   const blockedIndices = new Set(
     rows.filter((r) => r.status === "rate_limited").map((r) => r.keyIndex),
   );
+  const rejectedIndices = [
+    ...new Set(
+      rows.filter((row) => row.lastValidationFailedAt !== null).map((row) => row.keyIndex),
+    ),
+  ];
+  for (const index of rejectedIndices) blockedIndices.add(index);
 
   const modelBlockedIndices: number[] = [];
   let earliestModelResetsAtSec: number | undefined;
@@ -11895,6 +11905,7 @@ export async function getAvailableKeyIndices(
 
   return {
     availableIndices,
+    rejectedIndices,
     modelBlockedIndices,
     seatBlockedIndices,
     earliestModelResetAt:

@@ -68,3 +68,55 @@ export async function recordKeySeatMismatch(
     return { planChanged };
   });
 }
+
+/** Store definitive live-test results and retire rejections for removed pool members. */
+export async function recordKeyValidation(
+  keyType: string,
+  keys: Array<{
+    keyIndex: number;
+    keySuffix: string;
+    ok: boolean;
+    httpStatus?: number;
+    error?: string;
+  }>,
+  scope = "global",
+  scopeId: string | null = null,
+): Promise<void> {
+  const effectiveScopeId = scopeId ?? "";
+  const provider = deriveProviderFromKeyType(keyType);
+  await getDbClient().transaction(async (tx) => {
+    const now = new Date().toISOString();
+    for (const key of keys) {
+      // Only 401 means the key is bad. A 403 on a list endpoint can be a valid
+      // key without that scope (an OpenAI restricted key, a gateway virtual key).
+      if (!key.ok && key.httpStatus !== 401) continue;
+      await tx.run(
+        `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastValidationError, lastValidationFailedAt, provider, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(keyType, keySuffix, scope, scopeId)
+         DO UPDATE SET lastValidationError = excluded.lastValidationError,
+           lastValidationFailedAt = excluded.lastValidationFailedAt,
+           keyIndex = excluded.keyIndex, updatedAt = excluded.updatedAt`,
+        [
+          keyType,
+          key.keySuffix,
+          key.keyIndex,
+          scope,
+          effectiveScopeId,
+          key.ok ? null : `HTTP ${key.httpStatus}`,
+          key.ok ? null : now,
+          provider,
+          now,
+        ],
+      );
+    }
+    const placeholders = keys.map(() => "?").join(", ");
+    await tx.run(
+      `UPDATE api_key_status SET lastValidationError = NULL, lastValidationFailedAt = NULL, updatedAt = ?
+       WHERE keyType = ? AND scope = ? AND scopeId = ?
+         ${keys.length ? `AND keySuffix NOT IN (${placeholders})` : ""}
+         AND lastValidationFailedAt IS NOT NULL`,
+      [now, keyType, scope, effectiveScopeId, ...keys.map((key) => key.keySuffix)],
+    );
+  });
+}

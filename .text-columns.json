@@ -570,6 +570,12 @@
     },
     "lastSeatMismatchModel": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastValidationError": {
+      "exempt": "enum or fixed-format value"
+    },
+    "lastValidationFailedAt": {
+      "exempt": "timestamp"
     }
   },
   "app_user_config": {

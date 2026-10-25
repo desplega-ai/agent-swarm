@@ -45,7 +45,11 @@ import type {
   ProviderName,
   ReasoningEffort,
 } from "../types";
-import { CLAUDE_CREDENTIALS_HINT } from "../utils/credentials";
+import {
+  CLAUDE_CREDENTIALS_HINT,
+  CREDENTIAL_POOL_VARS,
+  splitCredentialPool,
+} from "../utils/credentials";
 import {
   getOpenRouterAttributionHeaders,
   getOpenRouterBaseUrl,
@@ -222,9 +226,22 @@ export async function checkProviderCredentials(
 
 const LIVE_TEST_TIMEOUT_MS = 5_000;
 
+export interface LiveKeyResult {
+  keyType: string;
+  index: number;
+  suffix: string;
+  ok: boolean;
+  error?: string;
+  httpStatus?: number;
+  latency_ms: number;
+}
+
 export interface LiveValidationResult {
   ok: boolean;
   error?: string;
+  httpStatus?: number;
+  warning?: string;
+  keys?: LiveKeyResult[];
   latency_ms: number;
   /** No free live check exists for this credential (cloud routes): report presence only. */
   skipped?: boolean;
@@ -265,6 +282,69 @@ function asLiveError(err: unknown, latency_ms: number): LiveValidationResult {
   };
 }
 
+/**
+ * Run `check` on every member of a comma pool in parallel. The pool passes
+ * when one key works (the runner skips a rejected key); `warning` names the
+ * keys that failed, and the check fails only when every key fails.
+ */
+export async function checkEachKey(
+  keyType: string,
+  value: string,
+  check: (key: string) => Promise<LiveValidationResult>,
+): Promise<LiveValidationResult> {
+  const members = splitCredentialPool(value);
+  if (members.length === 0) members.push(value.trim());
+  const results = await Promise.all(
+    members.map(async (member) => {
+      const startedAt = Date.now();
+      try {
+        return await check(member);
+      } catch (err) {
+        return asLiveError(err, Date.now() - startedAt);
+      }
+    }),
+  );
+  const latency_ms = Math.max(...results.map((result) => result.latency_ms));
+  if (results.every((result) => result.skipped)) return { ok: true, skipped: true, latency_ms };
+  const keys = results.map(
+    (result, index): LiveKeyResult => ({
+      keyType,
+      index,
+      suffix: members[index]!.slice(-5),
+      ok: result.ok,
+      ...(result.error !== undefined ? { error: result.error } : {}),
+      ...(result.httpStatus !== undefined ? { httpStatus: result.httpStatus } : {}),
+      latency_ms: result.latency_ms,
+    }),
+  );
+  const failed = keys.filter((key) => !key.ok);
+  if (failed.length === 0) return { ok: true, latency_ms, keys };
+  const failures = failed
+    .map(
+      (key) =>
+        `key ending ${key.suffix} (${key.httpStatus !== undefined ? `HTTP ${key.httpStatus}` : (key.error ?? "Unknown error")})`,
+    )
+    .join(", ");
+  if (failed.length < keys.length) {
+    return {
+      ok: true,
+      latency_ms,
+      keys,
+      warning: `${failed.length} of ${keys.length} keys failed: ${failures}.`,
+    };
+  }
+  if (keys.length === 1) {
+    return {
+      ok: false,
+      error: failed[0]!.error,
+      httpStatus: failed[0]!.httpStatus,
+      latency_ms,
+      keys,
+    };
+  }
+  return { ok: false, error: `All ${keys.length} keys failed: ${failures}.`, latency_ms, keys };
+}
+
 // ─── Per-endpoint live-call helpers ──────────────────────────────────────────
 // Each helper accepts the auth material it needs and returns a normalized
 // `LiveValidationResult`. The harness-level dispatcher below picks which
@@ -281,13 +361,15 @@ async function checkAnthropicApiKey(apiKey: string): Promise<LiveValidationResul
   return {
     ok: false,
     error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+    httpStatus: r.status,
     latency_ms: r.latency_ms,
   };
 }
 
 /**
- * OAuth credentials (Claude Pro/Max via `claude` CLI login, ChatGPT via Codex
- * OAuth) are treated as a presence check — we don't issue a live upstream call.
+ * Codex OAuth credentials (ChatGPT login) are treated as a presence check — we
+ * don't issue a live upstream call. (Claude subscription tokens get a real
+ * check through the route: see `claudeSubscriptionProvider`.)
  *
  * Why: OAuth flows include their own refresh logic (handled at adapter boot,
  * not here), the OAuth-bearer-with-/v1/models contract isn't a stable public
@@ -308,6 +390,7 @@ async function checkOpenAiApiKey(apiKey: string): Promise<LiveValidationResult> 
   return {
     ok: false,
     error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+    httpStatus: r.status,
     latency_ms: r.latency_ms,
   };
 }
@@ -322,22 +405,44 @@ async function checkXaiApiKey(apiKey: string): Promise<LiveValidationResult> {
   return {
     ok: false,
     error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+    httpStatus: r.status,
     latency_ms: r.latency_ms,
   };
 }
 
-async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
-  const url = `${getOpenRouterBaseUrl()}/models`;
-  const r = await timedFetch(url, {
-    method: "GET",
-    headers: { ...getOpenRouterAttributionHeaders(url), Authorization: `Bearer ${apiKey}` },
-  });
+/** Fetch a key-authenticated GET and normalize it into a `LiveValidationResult`. */
+async function checkBearerGet(url: string, init: RequestInit): Promise<LiveValidationResult> {
+  const r = await timedFetch(url, { method: "GET", ...init });
   if (r.ok) return { ok: true, latency_ms: r.latency_ms };
   return {
     ok: false,
     error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+    httpStatus: r.status,
     latency_ms: r.latency_ms,
   };
+}
+
+/**
+ * OpenRouter's `/models` is public and answers 200 for any key, so the check
+ * reads `GET /key` (the key's own info, 401 for a bad key). A custom
+ * `OPENROUTER_BASE_URL` without `/key` (404/405) falls back to `/models`.
+ */
+async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
+  const base = getOpenRouterBaseUrl();
+  const get = (url: string) =>
+    checkBearerGet(url, {
+      headers: { ...getOpenRouterAttributionHeaders(url), Authorization: `Bearer ${apiKey}` },
+    });
+  const keyResult = await get(`${base}/key`);
+  if (keyResult.httpStatus === 404 || keyResult.httpStatus === 405) return get(`${base}/models`);
+  return keyResult;
+}
+
+/** `GET /models` on the official DeepSeek API: lists models, runs no inference. */
+function checkDeepSeekApiKey(apiKey: string): Promise<LiveValidationResult> {
+  return checkBearerGet("https://api.deepseek.com/models", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
 }
 
 /**
@@ -359,6 +464,7 @@ export async function checkOpenAICompatibleProvider(
   return {
     ok: false,
     error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+    httpStatus: r.status,
     latency_ms: r.latency_ms,
   };
 }
@@ -402,14 +508,15 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  *
  * | Harness          | Accepted credentials (in resolution order)                              | Endpoint                       |
  * |------------------|-------------------------------------------------------------------------|--------------------------------|
- * | `claude`         | default route: Foundry / Bedrock / Vertex → gateway (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`) → `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | the route's own `/v1/models`; OAuth presence-only; cloud routes skipped |
+ * | `claude`         | default route: Foundry / Bedrock / Vertex → gateway (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`) → `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | the route's own `/v1/models`; OAuth: `/api/oauth/profile` (403 scope = ok); cloud routes skipped |
  * | `claude-managed` | `ANTHROPIC_API_KEY` (managed agents always use API key + managed envs)  | Anthropic `/v1/models`         |
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
- * | `opencode`       | auth.json (file) → `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → each registry provider key (`NAN_API_KEY` or `HELMCODE_API_NAN`, `HELMCODE_API_KEY`) | file presence-only, otherwise provider's `/v1/models` |
+ * | `opencode`       | auth.json (file) → `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → each registry provider key (`NAN_API_KEY` or `HELMCODE_API_NAN`, `HELMCODE_API_KEY`) | file presence-only, otherwise OpenRouter `/key` or the provider's `/v1/models` |
  * | `pi`             | auth.json (file) → provider API keys, including model-specific keys   | file/model-specific key presence-only, otherwise provider's `/v1/models` |
  * | `acp`            | target-specific (the ACP target process owns its own auth)              | presence-only (validated by the target process) |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v3/self`            |
+ * | `dsh`            | `DEEPSEEK_API_KEY` → `OPENROUTER_API_KEY`                               | DeepSeek `/models`, or OpenRouter `/key` |
  * | `amp`            | `AMP_API_KEY`                                                           | `amp usage` (credit balance, no inference; 5s timeout) |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
@@ -429,8 +536,9 @@ export async function validateProviderCredentials(
       case "claude": {
         // The default route decides where the check goes: a gateway key is
         // checked against the gateway only (scoped fetch), never against
-        // api.anthropic.com. OAuth stays presence-only; cloud routes have no
-        // free check and report `configured` (no live test).
+        // api.anthropic.com. A subscription token is checked against
+        // `/api/oauth/profile`; cloud routes have no free check and report
+        // `configured` (no live test).
         const route = deriveDefaultRoute("claude", env);
         if (!route) {
           return {
@@ -439,16 +547,40 @@ export async function validateProviderCredentials(
             latency_ms: Date.now() - startedAt,
           };
         }
-        const result = await validateRoute(route, env);
-        const latency_ms = Date.now() - startedAt;
-        if (result.status === "verified") return { ok: true, latency_ms };
-        if (result.status === "configured") return { ok: true, skipped: true, latency_ms };
-        return { ok: false, error: scrubSecrets(result.reason), latency_ms };
+        const checkRoute = async (
+          routeEnv: Record<string, string | undefined>,
+        ): Promise<LiveValidationResult> => {
+          const start = Date.now();
+          const result = await validateRoute(route, routeEnv);
+          const latency_ms = Date.now() - start;
+          if (result.status === "verified") return { ok: true, latency_ms };
+          if (result.status === "configured") return { ok: true, skipped: true, latency_ms };
+          return {
+            ok: false,
+            error: scrubSecrets(result.reason),
+            httpStatus: result.httpStatus,
+            latency_ms,
+          };
+        };
+        const keyVar =
+          route.auth.kind === "subscription"
+            ? "CLAUDE_CODE_OAUTH_TOKEN"
+            : "secretKey" in route.auth
+              ? route.auth.secretKey
+              : undefined;
+        const value = keyVar ? env[keyVar] : undefined;
+        // Only pool vars are split: the runner never splits a gateway token.
+        if (keyVar && value && (CREDENTIAL_POOL_VARS as readonly string[]).includes(keyVar)) {
+          return checkEachKey(keyVar, value, (member) => checkRoute({ ...env, [keyVar]: member }));
+        }
+        return checkRoute(env);
       }
       case "claude-managed": {
         // Managed agents always run with an API key — OAuth not supported on
         // the managed-agents path today.
-        if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
+        if (env.ANTHROPIC_API_KEY) {
+          return checkEachKey("ANTHROPIC_API_KEY", env.ANTHROPIC_API_KEY, checkAnthropicApiKey);
+        }
         return {
           ok: false,
           error: "ANTHROPIC_API_KEY is not set.",
@@ -474,7 +606,9 @@ export async function validateProviderCredentials(
         if (codexAuthFileExists(env)) return presenceCheckOk();
         if (parseCodexOAuthAccess(env.CODEX_OAUTH)) return presenceCheckOk();
         if (hasCodexOAuthPoolSlots(env)) return presenceCheckOk();
-        if (env.OPENAI_API_KEY) return checkOpenAiApiKey(env.OPENAI_API_KEY);
+        if (env.OPENAI_API_KEY) {
+          return checkEachKey("OPENAI_API_KEY", env.OPENAI_API_KEY, checkOpenAiApiKey);
+        }
         return {
           ok: false,
           error:
@@ -503,13 +637,21 @@ export async function validateProviderCredentials(
         // registry providers in declaration order (NaN, canonical key or
         // alias → Helmcode) at their `<ID>_BASE_URL`, so existing env
         // combinations keep their probe.
-        if (env.OPENROUTER_API_KEY) return checkOpenRouter(env.OPENROUTER_API_KEY);
-        if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
-        if (env.OPENAI_API_KEY) return checkOpenAiApiKey(env.OPENAI_API_KEY);
+        if (env.OPENROUTER_API_KEY) {
+          return checkEachKey("OPENROUTER_API_KEY", env.OPENROUTER_API_KEY, checkOpenRouter);
+        }
+        if (env.ANTHROPIC_API_KEY) {
+          return checkEachKey("ANTHROPIC_API_KEY", env.ANTHROPIC_API_KEY, checkAnthropicApiKey);
+        }
+        if (env.OPENAI_API_KEY) {
+          return checkEachKey("OPENAI_API_KEY", env.OPENAI_API_KEY, checkOpenAiApiKey);
+        }
         for (const direct of openAICompatibleProviders()) {
           const key = providerKeyFromEnv(direct, env);
           if (key) {
-            return checkOpenAICompatibleProvider(direct, key, providerBaseUrl(direct, env));
+            return checkEachKey(direct.envVar, key, (member) =>
+              checkOpenAICompatibleProvider(direct, member, providerBaseUrl(direct, env)),
+            );
           }
         }
         // Model-specific keys (e.g. GEMINI_API_KEY) can satisfy readiness
@@ -534,28 +676,36 @@ export async function validateProviderCredentials(
           };
         }
         const baseUrl = env.DEVIN_API_BASE_URL ?? "https://api.devin.ai";
-        const r = await timedFetch(`${baseUrl.replace(/\/+$/, "")}/v3/self`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
+        return checkEachKey("DEVIN_API_KEY", apiKey, async (member) => {
+          const r = await timedFetch(`${baseUrl.replace(/\/+$/, "")}/v3/self`, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${member}`,
+              "Content-Type": "application/json",
+            },
+          });
+          if (r.ok) return { ok: true, latency_ms: r.latency_ms };
+          return {
+            ok: false,
+            error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+            httpStatus: r.status,
+            latency_ms: r.latency_ms,
+          };
         });
-        if (r.ok) return { ok: true, latency_ms: r.latency_ms };
+      }
+      case "dsh": {
+        // Same precedence as `checkDshCredentials`: the DeepSeek key, then OpenRouter.
+        const deepseekKey = env.DEEPSEEK_API_KEY?.trim();
+        if (deepseekKey) return checkEachKey("DEEPSEEK_API_KEY", deepseekKey, checkDeepSeekApiKey);
+        const openRouterKey = env.OPENROUTER_API_KEY?.trim();
+        if (openRouterKey)
+          return checkEachKey("OPENROUTER_API_KEY", openRouterKey, checkOpenRouter);
         return {
           ok: false,
-          error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
-          latency_ms: r.latency_ms,
+          error: "Set DEEPSEEK_API_KEY or OPENROUTER_API_KEY for dsh.",
+          latency_ms: Date.now() - startedAt,
         };
       }
-      case "dsh":
-        return checkDshCredentials(env).ready
-          ? presenceCheckOk()
-          : {
-              ok: false,
-              error: "Set DEEPSEEK_API_KEY or OPENROUTER_API_KEY for dsh.",
-              latency_ms: Date.now() - startedAt,
-            };
       case "amp": {
         if (!checkAmpCredentials(env).ready) {
           return {
@@ -565,14 +715,17 @@ export async function validateProviderCredentials(
           };
         }
         // `amp usage` reads the credit balance and runs no inference.
-        const live = await liveTestAmpCredentials(env as Record<string, string | undefined>);
-        return live.ok
-          ? { ok: true, latency_ms: Date.now() - startedAt }
-          : {
-              ok: false,
-              error: live.error ?? "amp usage failed",
-              latency_ms: Date.now() - startedAt,
-            };
+        return checkEachKey("AMP_API_KEY", env.AMP_API_KEY!, async (member) => {
+          const start = Date.now();
+          const live = await liveTestAmpCredentials({ ...env, AMP_API_KEY: member });
+          return live.ok
+            ? { ok: true, latency_ms: Date.now() - start }
+            : {
+                ok: false,
+                error: live.error ?? "amp usage failed",
+                latency_ms: Date.now() - start,
+              };
+        });
       }
       case "cursor": {
         const apiKey = env.CURSOR_API_KEY?.trim();
@@ -584,16 +737,21 @@ export async function validateProviderCredentials(
           };
         }
         const { liveTestCursorKey } = await import("../providers/cursor-adapter");
-        const result = await liveTestCursorKey(apiKey);
-        return result.ok
-          ? { ok: true, latency_ms: Date.now() - startedAt }
-          : { ok: false, error: result.error, latency_ms: Date.now() - startedAt };
+        return checkEachKey("CURSOR_API_KEY", apiKey, async (member) => {
+          const start = Date.now();
+          const result = await liveTestCursorKey(member);
+          return result.ok
+            ? { ok: true, latency_ms: Date.now() - start }
+            : { ok: false, error: result.error, latency_ms: Date.now() - start };
+        });
       }
       case "grok": {
         const apiKey = env.XAI_API_KEY?.trim();
-        if (apiKey) return checkXaiApiKey(apiKey);
+        if (apiKey) return checkEachKey("XAI_API_KEY", apiKey, checkXaiApiKey);
         const openRouterKey = env.OPENROUTER_API_KEY?.trim();
-        if (openRouterKey) return checkOpenRouter(openRouterKey);
+        if (openRouterKey) {
+          return checkEachKey("OPENROUTER_API_KEY", openRouterKey, checkOpenRouter);
+        }
         return {
           ok: false,
           error: "Set XAI_API_KEY or OPENROUTER_API_KEY for grok.",
@@ -653,6 +811,8 @@ export async function buildCredStatusReport(
       error: live.error ?? null,
       latency_ms: live.latency_ms,
       testedAt: Date.now(),
+      ...(live.warning !== undefined ? { warning: live.warning } : {}),
+      ...(live.keys !== undefined ? { keys: live.keys } : {}),
     };
   }
   // Include the Bedrock enumeration block when the pi probe ran in Bedrock SDK

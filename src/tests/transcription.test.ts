@@ -207,6 +207,14 @@ describe("provider key fallback", () => {
     });
   });
 
+  test("a pooled OPENAI_API_KEY sends one member", async () => {
+    process.env.OPENAI_API_KEY = `${OPENAI_FAKE}-a,${OPENAI_FAKE}-b`;
+    const apiKey = resolveTranscriptionConfig()?.apiKey;
+    expect([`${OPENAI_FAKE}-a`, `${OPENAI_FAKE}-b`]).toContain(apiKey);
+    await transcribeAudio(audio);
+    expect(captured[0]?.authorization).toMatch(new RegExp(`^Bearer ${OPENAI_FAKE}-[ab]$`));
+  });
+
   test("GROQ_API_KEY alone uses Groq's OpenAI-compatible endpoint and whisper model", async () => {
     process.env.GROQ_API_KEY = GROQ_FAKE;
     expect(resolveTranscriptionConfig()).toMatchObject({

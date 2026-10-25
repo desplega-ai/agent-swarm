@@ -25,6 +25,7 @@ import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { getEnvApiKey } from "@earendil-works/pi-ai/compat";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { getValidCodexOAuth, persistCodexOAuth } from "../../providers/codex-oauth/storage.js";
+import { selectCredential } from "../credentials.js";
 import { type CredentialKind, DEFAULT_MODEL, resolveRaterModelString } from "./models.js";
 
 registerBunOAuthFlows();
@@ -135,7 +136,7 @@ export async function resolveCredential(
   if (openrouterKey) {
     return {
       kind: "openrouter",
-      apiKey: openrouterKey,
+      apiKey: selectCredential(openrouterKey, undefined, "OPENROUTER_API_KEY").selected,
       modelDefault: resolveRaterModelString("openrouter"),
     };
   }
@@ -151,7 +152,7 @@ export async function resolveCredential(
   if (anthropicKey) {
     return {
       kind: "anthropic",
-      apiKey: anthropicKey,
+      apiKey: selectCredential(anthropicKey, undefined, "ANTHROPIC_API_KEY").selected,
       modelDefault: resolveRaterModelString("anthropic"),
     };
   }
@@ -161,7 +162,7 @@ export async function resolveCredential(
   if (openaiKey) {
     return {
       kind: "openai",
-      apiKey: openaiKey,
+      apiKey: selectCredential(openaiKey, undefined, "OPENAI_API_KEY").selected,
       modelDefault: resolveRaterModelString("openai"),
     };
   }

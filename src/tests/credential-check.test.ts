@@ -1,8 +1,9 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { OPENAI_COMPATIBLE_PROVIDERS } from "@desplega/model-catalog";
 import {
   buildCredStatusReport,
   CREDENTIAL_PROVIDER_CHECKERS,
+  checkEachKey,
   checkOpenAICompatibleProvider,
   checkProviderCredentials,
   isBedrockMode,
@@ -26,6 +27,241 @@ function fsWith(present: Set<string>): { existsSync(p: string): boolean } {
 }
 
 const noFiles = fsWith(new Set());
+
+describe("pool live test", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test("all members pass in parallel with the maximum latency", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const check = mock(async (key: string) => {
+      await gate;
+      return { ok: true, latency_ms: key === "fake-abcde" ? 30 : 10 };
+    });
+    const pending = checkEachKey("OPENAI_API_KEY", " fake-abcde, fake-fghij ", check);
+    expect(check).toHaveBeenCalledTimes(2);
+    release();
+    expect(await pending).toEqual({
+      ok: true,
+      latency_ms: 30,
+      keys: [
+        { keyType: "OPENAI_API_KEY", index: 0, suffix: "abcde", ok: true, latency_ms: 30 },
+        { keyType: "OPENAI_API_KEY", index: 1, suffix: "fghij", ok: true, latency_ms: 10 },
+      ],
+    });
+  });
+
+  test("one failed member preserves pool order and reports a warning", async () => {
+    const result = await checkEachKey(
+      "ANTHROPIC_API_KEY",
+      "fake-first,fake-abcde,fake-third",
+      async (key) =>
+        key === "fake-abcde"
+          ? { ok: false, error: "Unauthorized", httpStatus: 401, latency_ms: 20 }
+          : { ok: true, latency_ms: 10 },
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      latency_ms: 20,
+      warning: "1 of 3 keys failed: key ending abcde (HTTP 401).",
+    });
+    expect(result.keys).toEqual([
+      { keyType: "ANTHROPIC_API_KEY", index: 0, suffix: "first", ok: true, latency_ms: 10 },
+      {
+        keyType: "ANTHROPIC_API_KEY",
+        index: 1,
+        suffix: "abcde",
+        ok: false,
+        error: "Unauthorized",
+        httpStatus: 401,
+        latency_ms: 20,
+      },
+      { keyType: "ANTHROPIC_API_KEY", index: 2, suffix: "third", ok: true, latency_ms: 10 },
+    ]);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("several failed members use HTTP status or the member error", async () => {
+    const result = await checkEachKey(
+      "OPENAI_API_KEY",
+      "fake-abcde,fake-fghij,fake-third",
+      async (key) => {
+        if (key === "fake-abcde") {
+          return { ok: false, error: "Unauthorized", httpStatus: 401, latency_ms: 10 };
+        }
+        if (key === "fake-fghij") return { ok: false, error: "timeout", latency_ms: 30 };
+        return { ok: true, latency_ms: 20 };
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.warning).toBe(
+      "2 of 3 keys failed: key ending abcde (HTTP 401), key ending fghij (timeout).",
+    );
+    expect(result.latency_ms).toBe(30);
+  });
+
+  test("all failed members produce an error", async () => {
+    const result = await checkEachKey("OPENAI_API_KEY", "fake-abcde,fake-fghij", async () => ({
+      ok: false,
+      error: "Unauthorized",
+      httpStatus: 401,
+      latency_ms: 10,
+    }));
+    expect(result).toMatchObject({
+      ok: false,
+      error: "All 2 keys failed: key ending abcde (HTTP 401), key ending fghij (HTTP 401).",
+      latency_ms: 10,
+    });
+    expect(result.keys).toHaveLength(2);
+    expect(result.warning).toBeUndefined();
+    expect(result.httpStatus).toBeUndefined();
+  });
+
+  test("one failed key preserves the member error and HTTP status", async () => {
+    const result = await checkEachKey("OPENAI_API_KEY", "fake-abcde", async () => ({
+      ok: false,
+      error: "HTTP 401: rejected",
+      httpStatus: 401,
+      latency_ms: 10,
+    }));
+    expect(result).toMatchObject({
+      ok: false,
+      error: "HTTP 401: rejected",
+      httpStatus: 401,
+      latency_ms: 10,
+    });
+    expect(result.keys).toHaveLength(1);
+  });
+
+  test("a thrown check becomes a scrubbed member failure", async () => {
+    const result = await checkEachKey("OPENAI_API_KEY", "fake-abcde,fake-fghij", async (key) => {
+      if (key === "fake-abcde") throw new Error("timeout");
+      return { ok: true, latency_ms: 0 };
+    });
+    expect(result.ok).toBe(true);
+    expect(result.warning).toBe("1 of 2 keys failed: key ending abcde (timeout).");
+    expect(result.keys?.[0]).toMatchObject({ ok: false, error: "timeout" });
+    expect(result.keys?.[0]?.latency_ms).toBeGreaterThanOrEqual(0);
+  });
+
+  test("a CODEX_OAUTH JSON blob remains one member", async () => {
+    const blob = '{"access":"fake-access","refresh":"fake-refresh","expires":123}';
+    const check = mock(async () => ({ ok: true, latency_ms: 0 }));
+    const result = await checkEachKey("CODEX_OAUTH", ` ${blob} `, check);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(check).toHaveBeenCalledWith(blob);
+    expect(result.keys).toHaveLength(1);
+    expect(result.keys?.[0]?.suffix).toBe(blob.slice(-5));
+  });
+
+  test("an empty split checks the trimmed input once", async () => {
+    const check = mock(async () => ({ ok: false, error: "Missing key", latency_ms: 0 }));
+    const result = await checkEachKey("OPENAI_API_KEY", " , , ", check);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(check).toHaveBeenCalledWith(", ,");
+    expect(result.error).toBe("Missing key");
+  });
+
+  test("all configured members skip the live test", async () => {
+    const result = await checkEachKey("ANTHROPIC_API_KEY", "fake-abcde,fake-fghij", async () => ({
+      ok: true,
+      skipped: true,
+      latency_ms: 10,
+    }));
+    expect(result).toEqual({ ok: true, skipped: true, latency_ms: 10 });
+  });
+
+  test("Claude API-key pools send a separate request for each member", async () => {
+    const fetchMock = mock(async (_url: string | URL | Request, init?: RequestInit) => {
+      const key = new Headers(init?.headers).get("x-api-key");
+      return new Response("{}", { status: key === "fake-good1" ? 200 : 401 });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    const result = await validateProviderCredentials("claude", {
+      ANTHROPIC_API_KEY: "fake-good1,fake-bad01",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get("x-api-key")),
+    ).toEqual(["fake-good1", "fake-bad01"]);
+    expect(result.ok).toBe(true);
+    expect(result.warning).toBe("1 of 2 keys failed: key ending bad01 (HTTP 401).");
+    expect(result.keys?.[1]?.httpStatus).toBe(401);
+  });
+
+  test("Claude subscription pools check the OAuth profile for each member", async () => {
+    const fetchMock = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
+      return new Response("{}", { status: 200 });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    const result = await validateProviderCredentials("claude", {
+      CLAUDE_CODE_OAUTH_TOKEN: "fake-token-a,fake-token-b",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.keys).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(String(url)).toBe("https://api.anthropic.com/api/oauth/profile");
+      expect(init?.method).toBe("GET");
+    }
+    expect(
+      fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get("Authorization")),
+    ).toEqual(["Bearer fake-token-a", "Bearer fake-token-b"]);
+  });
+
+  test("buildCredStatusReport copies the warning and per-key results", async () => {
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const key = new Headers(init?.headers).get("x-api-key");
+      return new Response("{}", { status: key === "fake-good1" ? 200 : 401 });
+    }) as typeof fetch;
+    const report = await buildCredStatusReport(
+      "claude",
+      { ANTHROPIC_API_KEY: "fake-good1,fake-bad01" },
+      {},
+      "boot",
+    );
+    expect(report.liveTest?.warning).toBe("1 of 2 keys failed: key ending bad01 (HTTP 401).");
+    expect(report.liveTest?.keys).toEqual([
+      {
+        keyType: "ANTHROPIC_API_KEY",
+        index: 0,
+        suffix: "good1",
+        ok: true,
+        latency_ms: expect.any(Number),
+      },
+      {
+        keyType: "ANTHROPIC_API_KEY",
+        index: 1,
+        suffix: "bad01",
+        ok: false,
+        error: "HTTP 401: {}",
+        httpStatus: 401,
+        latency_ms: expect.any(Number),
+      },
+    ]);
+    expect(AgentCredStatusSchema.parse(report).liveTest).toEqual(report.liveTest);
+    const success = await buildCredStatusReport(
+      "claude",
+      { ANTHROPIC_API_KEY: "fake-good1" },
+      {},
+      "boot",
+    );
+    expect(success.liveTest).not.toHaveProperty("warning");
+    const presenceOnly = await buildCredStatusReport(
+      "acp",
+      { ACP_COMMAND: "fake-command" },
+      {},
+      "boot",
+    );
+    expect(presenceOnly.liveTest).not.toHaveProperty("warning");
+    expect(presenceOnly.liveTest).not.toHaveProperty("keys");
+  });
+});
 
 // ─── claude ──────────────────────────────────────────────────────────────────
 
@@ -1174,7 +1410,10 @@ describe("buildCredStatusReport", () => {
           expect(failure.liveTest?.ok).toBe(false);
           expect(failure.liveTest?.error).toContain("HTTP 401");
           expect(fetchMock).toHaveBeenCalledTimes(2);
-          expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/models$/);
+          // OpenRouter's /models is public, so its key is checked on /key.
+          expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
+            key === "OPENROUTER_API_KEY" ? /\/key$/ : /\/models$/,
+          );
         } finally {
           globalThis.fetch = realFetch;
         }
@@ -1435,5 +1674,54 @@ describe("runBedrockSdkProbeAndEnumerate — intersection logic", () => {
     expect(usable.find((m) => m.id === profileModel.id)?.name).toBe(profileModel.name);
 
     mock.restore();
+  });
+});
+
+describe("OpenRouter and DeepSeek live checks", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  /** Answers by path; records every URL. */
+  function stubByPath(statusFor: (url: string) => number) {
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : String(input);
+      urls.push(url);
+      return new Response("{}", { status: statusFor(url) });
+    }) as typeof fetch;
+    return urls;
+  }
+
+  test("OpenRouter checks the key on /key, not the public /models", async () => {
+    const urls = stubByPath((url) => (url.endsWith("/key") ? 401 : 200));
+    const result = await validateProviderCredentials("pi", { OPENROUTER_API_KEY: "or-bad" });
+    expect(result).toMatchObject({ ok: false, httpStatus: 401 });
+    expect(urls).toEqual(["https://openrouter.ai/api/v1/key"]);
+  });
+
+  test("a base URL without /key falls back to /models", async () => {
+    const urls = stubByPath((url) => (url.endsWith("/key") ? 404 : 200));
+    const result = await validateProviderCredentials("pi", { OPENROUTER_API_KEY: "or-key" });
+    expect(result.ok).toBe(true);
+    expect(urls).toEqual([
+      "https://openrouter.ai/api/v1/key",
+      "https://openrouter.ai/api/v1/models",
+    ]);
+  });
+
+  test("dsh checks DEEPSEEK_API_KEY on DeepSeek /models, else OpenRouter", async () => {
+    const urls = stubByPath(() => 401);
+    const deepseek = await validateProviderCredentials("dsh", {
+      DEEPSEEK_API_KEY: "ds-bad",
+      OPENROUTER_API_KEY: "or-key",
+    });
+    expect(deepseek).toMatchObject({ ok: false, httpStatus: 401 });
+    expect(urls).toEqual(["https://api.deepseek.com/models"]);
+
+    const openrouter = await validateProviderCredentials("dsh", { OPENROUTER_API_KEY: "or-key" });
+    expect(openrouter).toMatchObject({ ok: false, httpStatus: 401 });
+    expect(urls.at(-1)).toBe("https://openrouter.ai/api/v1/key");
   });
 });

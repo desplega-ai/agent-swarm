@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Type } from "typebox";
 import { z } from "zod";
 import { SummaryWithRatingsSchema } from "../../be/memory/raters/llm.js";
@@ -501,6 +501,42 @@ describe("completeStructured", () => {
 });
 
 describe("defaultSpawnClaudeCli", () => {
+  for (const mirrored of [false, true]) {
+    test(`selects single credentials before CLI spawn (mirror=${mirrored})`, async () => {
+      const keys = [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "AGENT_SWARM_CLAUDE_OAUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+      ];
+      const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = mirrored ? "" : "example-first,example-second";
+      process.env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN = "example-first,example-second";
+      process.env.ANTHROPIC_API_KEY = "example-first,example-second";
+      let capturedEnv: Record<string, string | undefined> | undefined;
+      const spawn = spyOn(Bun, "spawn").mockImplementation(((
+        ...args: Parameters<typeof Bun.spawn>
+      ) => {
+        const options = args[0] as Bun.SpawnOptions.OptionsObject;
+        capturedEnv = options.env;
+        throw new Error("test stops before CLI spawn");
+      }) as typeof Bun.spawn);
+      try {
+        await expect(defaultSpawnClaudeCli("prompt", "haiku")).rejects.toThrow(
+          "test stops before CLI spawn",
+        );
+        for (const key of ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]) {
+          expect(["example-first", "example-second"]).toContain(capturedEnv?.[key]);
+        }
+      } finally {
+        spawn.mockRestore();
+        for (const [key, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    });
+  }
+
   test("sets SKIP_SESSION_SUMMARY=1 in the child env (Stop-hook recursion guard)", async () => {
     // Without this guard, the spawned `claude -p` summarizer session fires the
     // same global Stop hook on exit, which spawns another summarizer claude,

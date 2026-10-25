@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { selectCredential } from "../../../utils/credentials";
 import { getOpenRouterAttributionHeaders } from "../../../utils/openrouter-base-url";
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../constants";
 import type { EmbeddingProvider } from "../types";
@@ -46,7 +47,10 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private readonly apiKey: string | undefined;
 
   constructor(config?: OpenAIEmbeddingConfig) {
-    this.apiKey = config?.apiKey ?? process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY;
+    const apiKey = config?.apiKey ?? process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY;
+    this.apiKey = apiKey
+      ? selectCredential(apiKey, undefined, "EMBEDDING_API_KEY").selected
+      : undefined;
 
     this.model = config?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
 

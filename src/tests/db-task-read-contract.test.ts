@@ -529,6 +529,7 @@ value:recordKeyAuthFailure
 value:recordKeyRateLimitWindows
 value:recordKeySeatMismatch
 value:recordKeyUsage
+value:recordKeyValidation
 value:recordSlackMessage
 value:recordTaskProviderIfUnset
 value:recordTaskPullRequestAttachments

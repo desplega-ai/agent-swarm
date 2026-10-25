@@ -362,11 +362,69 @@ describe("onboarding state", () => {
       signals: { providers: Array<Record<string, unknown>> };
     };
     expect(body.signals.providers).toEqual([
-      { provider: "claude", state: "verified", workers: 2, verifiedWorkers: 2 },
+      {
+        provider: "claude",
+        state: "verified",
+        workers: 2,
+        verifiedWorkers: 2,
+        error: null,
+        warning: null,
+      },
     ]);
     expect(body.state.steps.ai).toMatchObject({
       status: "done",
       method: "claude_setup_token",
+    });
+  });
+
+  test("GET carries the latest live test error and the pool warning", async () => {
+    const report = (liveTest: {
+      ok: boolean;
+      error: string | null;
+      latency_ms: number;
+      testedAt: number;
+      warning?: string;
+    }) => ({
+      ready: true,
+      missing: [],
+      satisfiedBy: "env" as const,
+      hint: null,
+      liveTest,
+      reportedAt: Date.now(),
+      reportKind: "boot" as const,
+    });
+    const failing = await createAgent({ name: "codex-worker", isLead: false, status: "idle" });
+    await setAgentHarnessProvider(failing.id, "codex");
+    await updateAgentCredStatus(
+      failing.id,
+      report({ ok: false, error: "HTTP 401: bad key", latency_ms: 5, testedAt: Date.now() }),
+    );
+    const warned = await createAgent({ name: "pi-worker", isLead: false, status: "idle" });
+    await setAgentHarnessProvider(warned.id, "pi");
+    await updateAgentCredStatus(
+      warned.id,
+      report({
+        ok: true,
+        error: null,
+        latency_ms: 5,
+        testedAt: Date.now(),
+        warning: "1 of 2 keys failed: key ending abcde (HTTP 401).",
+      }),
+    );
+
+    const body = (await (await request("/api/onboarding")).json()) as {
+      signals: { providers: Array<Record<string, unknown>> };
+    };
+    const byProvider = Object.fromEntries(body.signals.providers.map((p) => [p.provider, p]));
+    expect(byProvider.codex).toMatchObject({
+      state: "configured",
+      error: "HTTP 401: bad key",
+      warning: null,
+    });
+    expect(byProvider.pi).toMatchObject({
+      state: "verified",
+      error: null,
+      warning: "1 of 2 keys failed: key ending abcde (HTTP 401).",
     });
   });
 
@@ -852,6 +910,55 @@ describe("onboarding memory probe", () => {
     expect(((await response.json()) as { errorClass?: string }).errorClass).toBe("auth");
     expect((await getState()).steps.memory.status).toBe("todo");
   });
+
+  test("probes and saves the first member of a reused OpenAI pool", async () => {
+    const originalFetch = globalThis.fetch;
+    let authorization: string | null = null;
+    process.env.OPENAI_API_KEY = "example-first, example-second";
+    globalThis.fetch = (async (input, init) => {
+      const req = new Request(input, init);
+      if (new URL(req.url).hostname !== "api.openai.com") return originalFetch(input, init);
+      authorization = req.headers.get("authorization");
+      return embeddingResponse(512);
+    }) as typeof fetch;
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "openai", reuseKey: "OPENAI_API_KEY" },
+      });
+      expect(await response.json()).toMatchObject({ ok: true, dimensions: 512 });
+      expect(authorization).toBe("Bearer example-first");
+      const configs = await getSwarmConfigs({ scope: "global", key: "EMBEDDING_API_KEY" });
+      expect(configs[0]?.value).toBe("example-first");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  for (const keyVar of ["EMBEDDING_API_KEY", "OPENAI_API_KEY"]) {
+    test(`existing memory probes the first member of ${keyVar}`, async () => {
+      const originalFetch = globalThis.fetch;
+      let authorization: string | null = null;
+      process.env[keyVar] = "example-first, example-second";
+      process.env.EMBEDDING_API_BASE_URL = "https://api.openai.com/v1";
+      globalThis.fetch = (async (input, init) => {
+        const req = new Request(input, init);
+        if (new URL(req.url).hostname !== "api.openai.com") return originalFetch(input, init);
+        authorization = req.headers.get("authorization");
+        return embeddingResponse(512);
+      }) as typeof fetch;
+      try {
+        const response = await request("/api/onboarding/memory", {
+          method: "POST",
+          body: { preset: "existing" },
+        });
+        expect(await response.json()).toMatchObject({ ok: true, dimensions: 512 });
+        expect(authorization).toBe("Bearer example-first");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
 
   test("does not send a reused OpenAI key to another host", async () => {
     let hits = 0;

@@ -864,30 +864,30 @@ describe("validateProviderCredentials — error scrubbing", () => {
     expect(result.error).toContain("ANTHROPIC_API_KEY");
   });
 
-  test("claude with CLAUDE_CODE_OAUTH_TOKEN passes via presence check (no upstream call)", async () => {
+  test("claude with CLAUDE_CODE_OAUTH_TOKEN checks the token against the OAuth profile", async () => {
     delete process.env.ANTHROPIC_API_KEY;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-fake-oauth-token";
-    let fetchCalled = false;
-    globalThis.fetch = (async () => {
-      fetchCalled = true;
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      urls.push(String(url));
       return new Response("{}", { status: 200 });
     }) as typeof fetch;
     const result = await validateProviderCredentials("claude");
     expect(result.ok).toBe(true);
-    expect(fetchCalled).toBe(false);
+    expect(urls).toEqual(["https://api.anthropic.com/api/oauth/profile"]);
   });
 
-  test("claude prefers OAuth presence check over API-key live call when both are set", async () => {
+  test("claude prefers the OAuth check over the API-key check when both are set", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-api-fake-1234";
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-fake-oauth";
-    let fetchCalled = false;
-    globalThis.fetch = (async () => {
-      fetchCalled = true;
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      urls.push(String(url));
       return new Response("{}", { status: 200 });
     }) as typeof fetch;
     const result = await validateProviderCredentials("claude");
     expect(result.ok).toBe(true);
-    expect(fetchCalled).toBe(false);
+    expect(urls).toEqual(["https://api.anthropic.com/api/oauth/profile"]);
   });
 
   test("codex with valid CODEX_OAUTH JSON passes via presence check (no upstream call)", async () => {

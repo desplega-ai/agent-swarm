@@ -310,11 +310,23 @@ export interface AgentRuntimeInstancesResponse {
   staleThresholdMinutes: number;
 }
 
+export interface AgentCredStatusKeyResult {
+  keyType: string;
+  index: number;
+  suffix: string;
+  ok: boolean;
+  error?: string;
+  httpStatus?: number;
+  latency_ms: number;
+}
+
 export interface AgentCredStatusLiveTest {
   ok: boolean;
   error?: string | null;
   latency_ms: number;
   testedAt: number;
+  warning?: string;
+  keys?: AgentCredStatusKeyResult[];
 }
 
 export interface AgentBedrockStatusModel {
@@ -2978,6 +2990,9 @@ export interface ApiKeyStatus {
   /** Subscription plan id (see `GET /api/keys/plans`), when known. */
   plan: string | null;
   planSource: "manual" | "detected" | "estimated" | null;
+  /** The provider rejected this key in a worker live test (`HTTP 401`), until it passes or leaves the pool. */
+  lastValidationError?: string | null;
+  lastValidationFailedAt?: string | null;
   rateLimitWindows: Record<
     string,
     {
@@ -3995,6 +4010,10 @@ export interface OnboardingProviderSignal {
   state: "unverified" | "configured" | "verified";
   workers: number;
   verifiedWorkers: number;
+  /** The latest live test failed: its error. */
+  error?: string | null;
+  /** The latest live test passed, but some pool keys failed: names them. */
+  warning?: string | null;
 }
 
 export interface OnboardingSignals {

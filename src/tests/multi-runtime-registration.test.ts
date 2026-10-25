@@ -2995,11 +2995,19 @@ describe("post-task credential recovery without a restart", () => {
         ready: true,
         lastRefreshAt: 0,
         inFlight: false,
+        fingerprint: null,
+        rejectedKeys: 0,
       };
       const check = spyOn(CREDENTIAL_PROVIDER_CHECKERS, "claude");
       const originalOAuth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      // The real Claude checker and live-test use OAuth presence, no upstream I/O.
       process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-credential-recovery";
+      // The subscription live test calls Anthropic's OAuth profile: answer it locally.
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.startsWith("https://api.anthropic.com/")) return new Response("{}");
+        return realFetch(input, init);
+      }) as typeof fetch;
       try {
         // A live provider swap produces a real not-ready post-task snapshot.
         await refreshCredentialStatus(api, refresh, "claude", {}, 1);
@@ -3021,6 +3029,8 @@ describe("post-task credential recovery without a restart", () => {
         await refreshCredentialStatus(api, refresh, "claude", {}, CREDENTIAL_RETRY_INTERVAL_MS + 1);
         expect(check).toHaveBeenCalledTimes(2);
         expect((await getAgentById(id))?.status).toBe("waiting_for_credentials");
+        // Credentials resolve. A changed credential is checked at once, inside
+        // the retry throttle. Same runner state, provider, and runtime identity.
         const env = { CLAUDE_CODE_OAUTH_TOKEN: "test-credential-recovery" };
         await refreshCredentialStatus(
           api,
@@ -3028,17 +3038,6 @@ describe("post-task credential recovery without a restart", () => {
           "claude",
           env,
           2 * CREDENTIAL_RETRY_INTERVAL_MS,
-        );
-        expect(check).toHaveBeenCalledTimes(2);
-        expect((await getAgentById(id))?.status).toBe("waiting_for_credentials");
-
-        // Credentials resolve. Same runner state, provider, and runtime identity.
-        await refreshCredentialStatus(
-          api,
-          refresh,
-          "claude",
-          env,
-          2 * CREDENTIAL_RETRY_INTERVAL_MS + 1,
         );
         expect(check).toHaveBeenCalledTimes(3);
         expect((await getAgentById(id))?.status).toBe("idle");
@@ -3058,6 +3057,7 @@ describe("post-task credential recovery without a restart", () => {
         );
         expect(check).toHaveBeenCalledTimes(3);
       } finally {
+        globalThis.fetch = realFetch;
         check.mockRestore();
         if (originalOAuth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
         else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOAuth;

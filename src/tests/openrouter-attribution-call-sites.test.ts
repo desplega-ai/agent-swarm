@@ -164,12 +164,12 @@ describe("workflow raw-llm and validate nodes", () => {
   });
 });
 
-describe("OpenRouter credential check (GET /models)", () => {
+describe("OpenRouter credential check (GET /key)", () => {
   for (const c of CASES) {
     test(`${c.name}`, async () => {
       setEnv(c.env);
       await validateProviderCredentials("grok", { OPENROUTER_API_KEY: "example-or-key" });
-      expect(requests[0]?.url.endsWith("/models")).toBe(true);
+      expect(requests[0]?.url.endsWith("/key")).toBe(true);
       expectAttribution(requests[0]?.headers, c.attributed);
     });
   }

@@ -21,6 +21,7 @@ const TEST_DB_PATH = "./test-integrations-http.sqlite";
 
 interface FakeClientLog {
   retrieveCalls: string[];
+  apiKeys: string[];
   retrieveResult?: { name?: string | null; model?: string | null };
   retrieveError?: Error;
 }
@@ -60,7 +61,7 @@ async function clearManagedConfigRows() {
 describe("POST /api/integrations/claude-managed/test", () => {
   let server: Server;
   let baseUrl = "";
-  const log: FakeClientLog = { retrieveCalls: [] };
+  const log: FakeClientLog = { retrieveCalls: [], apiKeys: [] };
   const savedEnv = {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     MANAGED_AGENT_ID: process.env.MANAGED_AGENT_ID,
@@ -71,7 +72,10 @@ describe("POST /api/integrations/claude-managed/test", () => {
     initDb(TEST_DB_PATH);
 
     const handler = createIntegrationsHandler({
-      buildClient: () => buildFakeClient(log),
+      buildClient: (apiKey) => {
+        log.apiKeys.push(apiKey);
+        return buildFakeClient(log);
+      },
     });
 
     server = createHttpServer(async (req, res) => {
@@ -101,6 +105,7 @@ describe("POST /api/integrations/claude-managed/test", () => {
 
   beforeEach(async () => {
     log.retrieveCalls = [];
+    log.apiKeys = [];
     log.retrieveResult = undefined;
     log.retrieveError = undefined;
     await clearManagedConfigRows();
@@ -136,6 +141,31 @@ describe("POST /api/integrations/claude-managed/test", () => {
       model: "claude-sonnet-4-6",
     });
     expect(log.retrieveCalls).toEqual(["agent_abc123"]);
+  });
+
+  test("a comma pool sends one key to Anthropic", async () => {
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "ANTHROPIC_API_KEY",
+      value: "sk-ant-first,sk-ant-second",
+      isSecret: true,
+    });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "MANAGED_AGENT_ID",
+      value: "agent_abc123",
+      isSecret: false,
+    });
+
+    const res = await fetch(`${baseUrl}/api/integrations/claude-managed/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+
+    expect((await res.json()) as { ok: boolean }).toMatchObject({ ok: true });
+    expect(log.apiKeys).toHaveLength(1);
+    expect(["sk-ant-first", "sk-ant-second"]).toContain(log.apiKeys[0]);
   });
 
   test("missing-config path — returns ok:false with helpful error", async () => {

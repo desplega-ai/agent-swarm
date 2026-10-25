@@ -85,7 +85,9 @@ describe("validateRoute", () => {
       [500, "failed"],
     ] as const) {
       stubFetch(status);
-      expect((await validateRoute(route(GATEWAY), GATEWAY)).status).toBe(expected);
+      const result = await validateRoute(route(GATEWAY), GATEWAY);
+      expect(result.status).toBe(expected);
+      if (result.status === "failed") expect(result.httpStatus).toBe(status);
     }
   });
 
@@ -104,11 +106,56 @@ describe("validateRoute", () => {
     expect(calls[0]?.url).toBe("https://api.anthropic.com/v1/models");
   });
 
-  test("subscription: presence only, no network", async () => {
+  test("subscription: GET /api/oauth/profile with the token as bearer", async () => {
     const env = { CLAUDE_CODE_OAUTH_TOKEN: "oauth" };
-    const { calls } = stubFetch(500);
-    expect((await validateRoute(route(env), env)).status).toBe("verified");
-    expect(calls).toEqual([]);
+    const { calls } = stubFetch(200);
+    expect(await validateRoute(route(env), env)).toEqual({ status: "verified" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://api.anthropic.com/api/oauth/profile");
+    expect(calls[0]?.headers.Authorization).toBe("Bearer oauth");
+  });
+
+  test("subscription: a setup token's 403 permission_error is verified", async () => {
+    const env = { CLAUDE_CODE_OAUTH_TOKEN: "oauth" };
+    stubFetch(
+      403,
+      JSON.stringify({
+        type: "error",
+        error: {
+          type: "permission_error",
+          message: "OAuth token does not meet scope requirement any_of(user:profile, user:office)",
+        },
+      }),
+    );
+    expect(await validateRoute(route(env), env)).toEqual({ status: "verified" });
+  });
+
+  test("subscription: a 429 or 5xx is not tested, not failed", async () => {
+    const env = { CLAUDE_CODE_OAUTH_TOKEN: "oauth" };
+    for (const status of [429, 503]) {
+      stubFetch(status);
+      expect((await validateRoute(route(env), env)).status).toBe("configured");
+    }
+  });
+
+  test("subscription: 401 and other 403s fail with the HTTP status", async () => {
+    const env = { CLAUDE_CODE_OAUTH_TOKEN: "oauth" };
+    stubFetch(
+      401,
+      JSON.stringify({
+        type: "error",
+        error: { type: "authentication_error", message: "OAuth access token is invalid." },
+      }),
+    );
+    const rejected = await validateRoute(route(env), env);
+    expect(rejected).toMatchObject({ status: "failed", httpStatus: 401 });
+    expect(rejected.status === "failed" && rejected.reason).toContain("claude setup-token");
+
+    stubFetch(403, JSON.stringify({ type: "error", error: { type: "forbidden" } }));
+    expect(await validateRoute(route(env), env)).toMatchObject({
+      status: "failed",
+      httpStatus: 403,
+    });
   });
 
   test("cloud routes are configured without a network call", async () => {
