@@ -584,6 +584,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "SESSION_LOG_RETENTION_DAYS",
       "AGENT_LOG_RETENTION_DAYS",
       "EVENTS_RETENTION_DAYS",
+      "SCRIPT_RUNS_RETENTION_DAYS",
       // A kept-version count, not days. The floor of 1 is what guarantees the
       // sweep never deletes the newest version of any (agentId, field).
       "CONTEXT_VERSIONS_KEEP_LATEST",

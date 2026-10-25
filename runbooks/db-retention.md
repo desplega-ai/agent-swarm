@@ -8,6 +8,7 @@ Database retention permanently deletes rows. Unsetting a retention key stops fut
 - `agent_log` deletion removes task and agent state-transition history. Old activity timelines become empty.
 - `events` deletion removes telemetry. Aggregate event counters become retention-window totals, not all-time totals. A newer event can retain a `parentEventId` for a deleted older event.
 - `context_versions` deletion removes older profile history (SOUL, IDENTITY, TOOLS, CLAUDE.md, setup script, HEARTBEAT). The oldest surviving version's `previousVersionId` becomes `NULL`, and `context-diff` on it reports `predecessorPruned` instead of a diff. Rolling a field back past the kept window is no longer possible.
+- `script_runs` deletion removes finished script runs: their stored source, args, output and error, plus their `script_run_journal` rows. Old run links and `get-script-run` return 404, list totals shrink, and audit scripts that read `script_runs` directly see only the kept window.
 
 ## Scope and safety boundary
 
@@ -19,11 +20,15 @@ The server sweeps only this closed code-reviewed list:
 | `agent_log` | age | `AGENT_LOG_RETENTION_DAYS` | Task and agent history |
 | `events` | age | `EVENTS_RETENTION_DAYS` | Telemetry events |
 | `context_versions` | keep latest | `CONTEXT_VERSIONS_KEEP_LATEST` | Profile versions beyond the newest N per agent and field |
+| `script_runs` | age, finished runs only | `SCRIPT_RUNS_RETENTION_DAYS` | Finished script runs and their journal |
 
 Table and column names never come from configuration. An operator can set a retention value only. An unset key disables that table's sweep.
 
 - **age**: the value is whole days from 1 through 1,000,000. Rows older than the horizon are deleted, oldest first. Use at least seven days unless you have verified that a shorter window is suitable for your deployment.
 - **keep latest**: the value is a count from 1 through 1,000,000. Within each `(agentId, field)`, only the newest N rows by `version` are kept. Age plays no part, so the only version of a rarely edited field is never deleted. The floor of 1 means the newest version of every field always survives, so the next edit still numbers itself from it. Each sweep deletes the deepest history first, so an interrupted sweep leaves every field's surviving versions contiguous. A version can be hundreds of KB, so this table's batches start at 50 rows and never exceed 100.
+- **age, finished runs only** (`script_runs`): the value is whole days, measured on `startedAt`. Only rows whose `status` is `completed`, `failed`, `cancelled` or `aborted_limit` are eligible. A `running` or `paused` run is never deleted, however old, so the supervisor can still resume it. A run with an `idempotencyKey` is never deleted either, so a retried launch with the same key still gets its 409 instead of running twice. Workflow runs store `startedAt` as `YYYY-MM-DD HH:MM:SS` and inline runs as ISO strings, so the cutoff uses the space-separated form: a space-format row is compared exactly, and an ISO row dated on the cutoff's own day is kept until the next day's ticks, never deleted early. `script_run_journal` rows leave with their run through `ON DELETE CASCADE`, looked up on `idx_srj_runId`. Rows average about 30 KB and reach about 1.3 MB, so batches start at 100 rows and never exceed 500.
+
+  Pick a horizon no shorter than the longest reader you rely on. The server itself needs no history: the supervisor reads only live runs, and citations check a run once, at write time. Saved scripts that query `script_runs` through `db-query` are another matter: the seeded `compound-insights` script looks back 3 days by default, but your own audit or reporting scripts may read weeks or months of past runs. Search your catalog for `script_runs` and check each window before you enable the sweep.
 
 To add a table, change the closed descriptor list in `src/be/db-retention.ts`, add a validator, catalog entry, metrics field, docs row, and parameterized tests in the same PR. Add a table only when its delete and its backlog `COUNT(*)` run on an index (the time column for an age table, the partition and rank columns for a keep-latest table), and its readers safely tolerate missing old rows. A new table also needs an `EXPLAIN QUERY PLAN` assertion in the retention tests, confirming the delete uses the index rather than a table scan.
 
@@ -39,7 +44,7 @@ An incoming foreign key needs extra care. With `foreign_keys = ON`, SQLite looks
 6. Set `DB_RETENTION_DRY_RUN=false`.
 7. Recheck the next sweep. Enable the remaining tables one at a time only after this is stable.
 
-The sweep runs hourly once every enabled table is drained. While any table is undrained it runs again every `DB_RETENTION_CATCHUP_INTERVAL_MS` (default 60 s) instead of waiting for the next hourly tick. Each tick divides a `DB_RETENTION_TICK_BUDGET_MS` budget (default 30 s) evenly across the enabled tables, and rotates which table sweeps first each tick so one table's backlog cannot starve the others. Age tables delete oldest-first through the table's `createdAt` index, and `context_versions` deletes deepest-history-first through `idx_cv_agent_field`, in batches sized adaptively against `DB_RETENTION_MAX_STATEMENT_MS` (default 250 ms per statement, measured as driver execution time — waiting for the database lock does not count against it and cannot shrink the batch).
+The sweep runs hourly once every enabled table is drained. While any table is undrained it runs again every `DB_RETENTION_CATCHUP_INTERVAL_MS` (default 60 s) instead of waiting for the next hourly tick. Each tick divides a `DB_RETENTION_TICK_BUDGET_MS` budget (default 30 s) evenly across the enabled tables, and rotates which table sweeps first each tick so one table's backlog cannot starve the others. Age tables delete oldest-first through the table's `createdAt` index (`script_runs` through `idx_script_runs_status_startedAt`), and `context_versions` deletes deepest-history-first through `idx_cv_agent_field`, in batches sized adaptively against `DB_RETENTION_MAX_STATEMENT_MS` (default 250 ms per statement, measured as driver execution time — waiting for the database lock does not count against it and cannot shrink the batch).
 
 Each of the three tuning settings has its own accepted range: 1000–300000 ms for the tick budget, 5000–3600000 ms for the catch-up interval, 25–5000 ms for the statement target. The config API rejects a value outside the range, and a value set directly in the environment falls back to the default instead of taking effect.
 

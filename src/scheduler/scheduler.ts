@@ -91,8 +91,9 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
     agentId,
     scriptName: schedule.scriptName,
     // A pointer, not a copy: script schedules fire as often as every minute and
-    // script_runs has no retention sweep, so copying the source on every fire
-    // would grow the table by tens of MB a day. script_versions keeps the text.
+    // script_runs retention (SCRIPT_RUNS_RETENTION_DAYS) is off by default, so
+    // copying the source on every fire would grow the table by tens of MB a
+    // day. script_versions keeps the text.
     source: `// Scheduled run of '${script.name}' v${script.version} (global, contentHash ${script.contentHash}) by schedule '${schedule.name}'.\n// Full source: script_versions row for this version.\n`,
     args,
     startedAt: new Date().toISOString(),

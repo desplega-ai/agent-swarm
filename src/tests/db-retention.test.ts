@@ -19,8 +19,13 @@ import {
 const TEST_DB_PATH = "./test-db-retention.sqlite";
 const NOW = new Date("2026-08-23T12:00:00.000Z");
 const RETENTION_KEYS = DB_RETENTION_TABLES.map((table) => table.envKey);
-/** Time-horizon tables. Count-based context_versions has its own suite. */
-const AGE_TABLES = DB_RETENTION_TABLES.filter((table) => table.policy === "age");
+/**
+ * Plain time-horizon tables. Count-based context_versions and status-filtered
+ * script_runs have their own suites.
+ */
+const AGE_TABLES = DB_RETENTION_TABLES.filter(
+  (table) => table.policy === "age" && !("terminalStatuses" in table),
+);
 type AgeTable = (typeof AGE_TABLES)[number];
 const TUNING_KEYS = [
   "DB_RETENTION_TICK_BUDGET_MS",
@@ -135,12 +140,13 @@ afterEach(async () => {
 });
 
 describe("DB retention", () => {
-  test("keeps the closed allowlist limited to the four approved tables", () => {
+  test("keeps the closed allowlist limited to the five approved tables", () => {
     expect(DB_RETENTION_TABLES.map((table) => table.table)).toEqual([
       "session_logs",
       "agent_log",
       "events",
       "context_versions",
+      "script_runs",
     ]);
   });
 

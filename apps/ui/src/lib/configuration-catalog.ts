@@ -909,6 +909,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
+        key: "SCRIPT_RUNS_RETENTION_DAYS",
+        label: "Script run retention",
+        description:
+          "Delete finished script_runs rows (completed, failed, cancelled, aborted) older than this many days, with their journal. Running and paused runs and runs with an idempotency key are kept. Leave unset to disable this table's sweep. Deletion permanently removes script run source, args and output.",
+        kind: "number",
+        unit: "days",
+        placeholder: "95",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
         key: "DB_RETENTION_DRY_RUN",
         label: "Database retention dry run",
         description:

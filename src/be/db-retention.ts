@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Attributes, DbRetentionSweepMetric, SpanStatus, SwarmSpan } from "../otel";
 import { recordDbRetentionStatement, recordDbRetentionSweep, startSpan, withSpan } from "../otel";
+import { TERMINAL_SCRIPT_RUN_STATUSES } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
@@ -23,7 +24,11 @@ const YIELD_MS = 25;
  *
  * Two policies exist:
  *  - `age`: the env value is a number of days; rows whose `timeColumn` is older
- *    than that horizon are deleted.
+ *    than that horizon are deleted. Optional narrowing: `terminalStatuses`
+ *    deletes only rows whose `statusColumn` is in that list, `keepWhenSet`
+ *    keeps every row where that column is non-NULL, and
+ *    `cutoffFormat: "sqliteDatetime"` compares against a `YYYY-MM-DD HH:MM:SS`
+ *    cutoff for a column that mixes that format with ISO strings.
  *  - `keepLatest`: the env value is a count; within each `partitionBy` group,
  *    only the newest `rankBy` rows are kept. The newest row of a group is
  *    never deleted, because the smallest accepted count is 1.
@@ -65,6 +70,29 @@ export const DB_RETENTION_TABLES = [
     initialBatchSize: 50,
     maxBatchSize: 100,
   },
+  {
+    // Every inline script run stores its full source, args and output. Only
+    // terminal runs are eligible: a running or paused durable run must survive
+    // to be resumed. Runs with an idempotencyKey are kept, so a retried launch
+    // still gets its 409 instead of executing twice. The status filter, the
+    // time range and the key exclusion all resolve on indexes
+    // (idx_script_runs_status_startedAt, idx_script_runs_idempotencyKey).
+    // Workflow runs write `datetime('now')` (space separator) while inline runs
+    // write ISO strings, hence the sqliteDatetime cutoff. script_run_journal
+    // rows go with their run through ON DELETE CASCADE on idx_srj_runId.
+    // Rows average ~30 KB and reach ~1.3 MB, so batches stay small.
+    table: "script_runs",
+    policy: "age",
+    timeColumn: "startedAt",
+    cutoffFormat: "sqliteDatetime",
+    statusColumn: "status",
+    terminalStatuses: TERMINAL_SCRIPT_RUN_STATUSES,
+    keepWhenSet: "idempotencyKey",
+    envKey: "SCRIPT_RUNS_RETENTION_DAYS",
+    metricsKey: "scriptRuns",
+    initialBatchSize: 100,
+    maxBatchSize: 500,
+  },
 ] as const satisfies ReadonlyArray<
   {
     table: string;
@@ -73,7 +101,14 @@ export const DB_RETENTION_TABLES = [
     initialBatchSize?: number;
     maxBatchSize?: number;
   } & (
-    | { policy: "age"; timeColumn: string }
+    | {
+        policy: "age";
+        timeColumn: string;
+        cutoffFormat?: "sqliteDatetime";
+        statusColumn?: string;
+        terminalStatuses?: readonly string[];
+        keepWhenSet?: string;
+      }
     | { policy: "keepLatest"; partitionBy: string; rankBy: string }
   )
 >;
@@ -326,13 +361,33 @@ export function sweepStatements(table: RetentionTable, value: number, now: Date)
       params: [value],
     };
   }
-  const cutoff = new Date(now.getTime() - value * DAY_MS).toISOString();
+  const iso = new Date(now.getTime() - value * DAY_MS).toISOString();
+  // Text comparison of the two formats: ' ' sorts before 'T', so against a
+  // space-separated cutoff an ISO row on the cutoff's own date is kept, never
+  // deleted early. It is swept on the next day's ticks instead.
+  const cutoff = "cutoffFormat" in table ? `${iso.slice(0, 10)} ${iso.slice(11, 19)}` : iso;
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+  if ("terminalStatuses" in table) {
+    conditions.push(
+      `${table.statusColumn} IN (${table.terminalStatuses.map(() => "?").join(", ")})`,
+    );
+    params.push(...table.terminalStatuses);
+  }
+  conditions.push(`${table.timeColumn} < ?`);
+  params.push(cutoff);
+  if ("keepWhenSet" in table) {
+    conditions.push(
+      `rowid NOT IN (SELECT rowid FROM ${table.table} WHERE ${table.keepWhenSet} IS NOT NULL)`,
+    );
+  }
+  const where = conditions.join(" AND ");
   return {
-    backlogSql: `SELECT COUNT(*) AS n FROM ${table.table} WHERE ${table.timeColumn} < ?`,
+    backlogSql: `SELECT COUNT(*) AS n FROM ${table.table} WHERE ${where}`,
     deleteSql: `DELETE FROM ${table.table} WHERE rowid IN (
-         SELECT rowid FROM ${table.table} WHERE ${table.timeColumn} < ? ORDER BY ${table.timeColumn} LIMIT ?
+         SELECT rowid FROM ${table.table} WHERE ${where} ORDER BY ${table.timeColumn} LIMIT ?
        )`,
-    params: [cutoff],
+    params,
   };
 }
 

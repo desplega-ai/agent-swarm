@@ -86,6 +86,7 @@ const SwarmMetricsSchema = z.object({
     agentLog: RetentionTableStatsSchema.optional(),
     events: RetentionTableStatsSchema.optional(),
     contextVersions: RetentionTableStatsSchema.optional(),
+    scriptRuns: RetentionTableStatsSchema.optional(),
   }),
 });
 
