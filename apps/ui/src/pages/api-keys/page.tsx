@@ -588,7 +588,8 @@ export default function ApiKeysPage() {
       <div
         className={cn(
           "grid gap-3 grid-cols-2",
-          stats.rejected > 0 ? "lg:grid-cols-7" : "lg:grid-cols-6",
+          // Seven panels truncate their labels in one row below 2xl.
+          stats.rejected > 0 ? "lg:grid-cols-4 2xl:grid-cols-7" : "lg:grid-cols-6",
         )}
       >
         <StatPanel icon={Key} label="Total Keys" value={stats.total} />
