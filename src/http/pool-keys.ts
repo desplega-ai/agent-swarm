@@ -92,7 +92,7 @@ const addPoolKeys = route({
       schema: PoolKeysResponseSchema.extend({ checks: z.array(PoolKeyCheckSchema) }),
     },
     400: { description: "Invalid key" },
-    403: { description: "Config administration required" },
+    403: { description: "Config administration and permission to read all secrets required" },
     409: { description: "Duplicate key or deployment env pool" },
     422: {
       description: "Provider rejected a key. Nothing was saved.",
@@ -115,7 +115,7 @@ const deletePoolKey = route({
   responses: {
     200: { description: "Updated credential pool", schema: PoolKeysResponseSchema },
     400: { description: "Invalid pool member" },
-    403: { description: "Config administration required" },
+    403: { description: "Config administration and permission to read all secrets required" },
     409: { description: "The pool changed or comes from the deployment env" },
   },
 });
@@ -188,6 +188,13 @@ async function savePool(key: string, members: string[], row: SwarmConfig | undef
   return null;
 }
 
+/** Every response lists the pool's key suffixes and statuses, so each route needs this gate. */
+async function ensureSecretRead(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  if ((await requestSecretReadScope(req)) === "all") return true;
+  jsonError(res, "Reading credential pools requires permission to read all secrets.", 403);
+  return false;
+}
+
 export async function handlePoolKeys(
   req: IncomingMessage,
   res: ServerResponse,
@@ -197,10 +204,7 @@ export async function handlePoolKeys(
   if (getPoolKeys.match(req.method, pathSegments)) {
     const parsed = await getPoolKeys.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if ((await requestSecretReadScope(req)) !== "all") {
-      jsonError(res, "Reading credential pools requires permission to read all secrets.", 403);
-      return true;
-    }
+    if (!(await ensureSecretRead(req, res))) return true;
     getPoolKeys.respond(res, 200, await poolResponse(parsed.query.key));
     return true;
   }
@@ -208,6 +212,7 @@ export async function handlePoolKeys(
     const parsed = await addPoolKeys.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
+    if (!(await ensureSecretRead(req, res))) return true;
     const { key, value, baseUrl } = parsed.body;
     const additions = value
       .split(",")
@@ -315,6 +320,7 @@ export async function handlePoolKeys(
     const parsed = await deletePoolKey.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await ensureConfigAdmin(req, res, "config.delete.any"))) return true;
+    if (!(await ensureSecretRead(req, res))) return true;
     const { key, index, suffix } = parsed.query;
     const result = await getDbClient().transaction(async () => {
       const current = await readPool(key);

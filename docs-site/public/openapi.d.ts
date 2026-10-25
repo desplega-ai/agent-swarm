@@ -5661,6 +5661,15 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Config administration and permission to read all secrets required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Account slot does not exist */
                 404: {
                     headers: {
@@ -6031,7 +6040,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Config administration required */
+                /** @description Config administration and permission to read all secrets required */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -6115,7 +6124,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Config administration required */
+                /** @description Config administration and permission to read all secrets required */
                 403: {
                     headers: {
                         [name: string]: unknown;

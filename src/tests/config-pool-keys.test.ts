@@ -12,6 +12,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import {
   closeDb,
+  createUser,
   getAvailableKeyIndices,
   getDbClient,
   getSwarmConfigs,
@@ -28,7 +29,7 @@ import {
 import { handlePoolKeys, type PoolKeysResponse } from "../http/pool-keys";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { CREDENTIAL_POOL_VARS } from "../utils/credentials";
-import { setRequestAuth } from "../utils/request-auth-context";
+import { type HttpRequestAuth, setRequestAuth } from "../utils/request-auth-context";
 
 const API_KEY = "example-pool-test-operator";
 const KEY = "ANTHROPIC_API_KEY";
@@ -40,17 +41,26 @@ let providerCalls: Array<{ url: string; init?: RequestInit }>;
 let providerFetch: (input: string, init?: RequestInit) => Promise<Response>;
 let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, "fetch">>;
 
+type Principal = boolean | HttpRequestAuth;
+
 async function call(
   path: string,
   method: string,
   body?: unknown,
-  guest = false,
+  guest: Principal = false,
 ): Promise<Response> {
   const req = Readable.from(
     body === undefined ? [] : [Buffer.from(JSON.stringify(body))],
   ) as IncomingMessage;
   Object.assign(req, { method, url: path, headers: { "content-type": "application/json" } });
-  setRequestAuth(req, guest ? { kind: "guest" } : { kind: "operator", fingerprint: API_KEY });
+  setRequestAuth(
+    req,
+    typeof guest === "object"
+      ? guest
+      : guest
+        ? { kind: "guest" }
+        : { kind: "operator", fingerprint: API_KEY },
+  );
   let status = 200;
   let text = "";
   const res = {
@@ -71,7 +81,12 @@ async function call(
   return new Response(text, { status });
 }
 
-async function request(method = "GET", query = `?key=${KEY}`, body?: unknown, guest = false) {
+async function request(
+  method = "GET",
+  query = `?key=${KEY}`,
+  body?: unknown,
+  guest: Principal = false,
+) {
   const response = await call(`/api/config/pool-keys${query}`, method, body, guest);
   const text = await response.text();
   expect(text).not.toContain(first);
@@ -340,6 +355,38 @@ describe("credential pool additions", () => {
       (await request("DELETE", `?key=${KEY}&index=0&suffix=first`, undefined, true)).status,
     ).toBe(403);
     expect(providerCalls).toHaveLength(0);
+  });
+
+  test("a config admin who cannot read secrets cannot add or remove keys", async () => {
+    await store();
+    const user = await createUser({ name: "Config writer without secret read" });
+    // A new user starts as admin. Replace that with a role that grants only config writes.
+    await getDbClient().run("DELETE FROM principal_roles WHERE principalId = ?", [user.id]);
+    await getDbClient().run("INSERT INTO roles (id, name) VALUES ('pool-writer', 'pool-writer')");
+    for (const verb of ["config.write.any", "config.delete.any"]) {
+      await getDbClient().run(
+        "INSERT INTO role_permissions (roleId, verb) VALUES ('pool-writer', ?)",
+        [verb],
+      );
+    }
+    await getDbClient().run(
+      "INSERT INTO principal_roles (principalType, principalId, roleId) VALUES ('user', ?, 'pool-writer')",
+      [user.id],
+    );
+    const writer: HttpRequestAuth = { kind: "user", userId: user.id, user };
+    const previous = process.env.RBAC_ENABLED;
+    process.env.RBAC_ENABLED = "true";
+    try {
+      expect((await request("POST", "", { key: KEY, value: second }, writer)).status).toBe(403);
+      expect(
+        (await request("DELETE", `?key=${KEY}&index=0&suffix=first`, undefined, writer)).status,
+      ).toBe(403);
+    } finally {
+      if (previous === undefined) delete process.env.RBAC_ENABLED;
+      else process.env.RBAC_ENABLED = previous;
+    }
+    expect(providerCalls).toHaveLength(0);
+    expect((await getSwarmConfigs({ scope: "global", key: KEY }))[0]?.value).toBe(first);
   });
 
   test("rechecks duplicates after a probe without holding the write transaction", async () => {

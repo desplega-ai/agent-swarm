@@ -51,6 +51,7 @@ const deleteAccount = route({
   params: z.object({ slot: z.coerce.number().int().min(0).max(MAX_CODEX_OAUTH_SLOT) }),
   responses: {
     200: { description: "Remaining accounts", schema: CodexAccountsResponseSchema },
+    403: { description: "Config administration and permission to read all secrets required" },
     404: { description: "Account slot does not exist" },
   },
 });
@@ -133,6 +134,13 @@ async function accountsResponse(): Promise<CodexAccountsResponse> {
   return { accounts };
 }
 
+/** Both responses list account emails and plans, so both routes need this gate. */
+async function ensureSecretRead(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  if ((await requestSecretReadScope(req)) === "all") return true;
+  jsonError(res, "Reading Codex accounts requires access to all secrets", 403);
+  return false;
+}
+
 export async function handleCodexOAuthAccounts(
   req: IncomingMessage,
   res: ServerResponse,
@@ -142,10 +150,7 @@ export async function handleCodexOAuthAccounts(
   if (listAccounts.match(req.method, pathSegments)) {
     const parsed = await listAccounts.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if ((await requestSecretReadScope(req)) !== "all") {
-      jsonError(res, "Reading Codex accounts requires access to all secrets", 403);
-      return true;
-    }
+    if (!(await ensureSecretRead(req, res))) return true;
     listAccounts.respond(res, 200, await accountsResponse());
     return true;
   }
@@ -154,6 +159,7 @@ export async function handleCodexOAuthAccounts(
     const parsed = await deleteAccount.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await ensureConfigAdmin(req, res, "config.delete.any"))) return true;
+    if (!(await ensureSecretRead(req, res))) return true;
     const deletedKey = await getDbClient().transaction(async () => {
       const rows = await accountRows();
       const account = rows.find((row) => row.slot === parsed.params.slot);

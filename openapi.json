@@ -17499,6 +17499,16 @@
               }
             }
           },
+          "403": {
+            "description": "Config administration and permission to read all secrets required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Account slot does not exist",
             "content": {
@@ -18323,7 +18333,7 @@
             }
           },
           "403": {
-            "description": "Config administration required",
+            "description": "Config administration and permission to read all secrets required",
             "content": {
               "application/json": {
                 "schema": {
@@ -18536,7 +18546,7 @@
             }
           },
           "403": {
-            "description": "Config administration required",
+            "description": "Config administration and permission to read all secrets required",
             "content": {
               "application/json": {
                 "schema": {

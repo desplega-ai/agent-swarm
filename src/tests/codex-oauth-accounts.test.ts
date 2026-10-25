@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import {
   closeDb,
   createAgent,
+  createUser,
   getAvailableKeyIndices,
   getDbClient,
   getSwarmConfigs,
@@ -14,7 +15,7 @@ import {
   upsertKv,
   upsertSwarmConfig,
 } from "../be/db";
-import { mintAgentToken } from "../be/users";
+import { mintAgentToken, mintToken } from "../be/users";
 import { type CodexAccountsResponse, handleCodexOAuthAccounts } from "../http/codex-oauth-accounts";
 import { _autoReloadStatsForTests, _resetAutoReloadForTests, handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -314,6 +315,36 @@ describe("Codex account HTTP routes", () => {
       expect((await request(`/${slot}`, "DELETE")).status).toBe(400);
     }
     expect(_autoReloadStatsForTests().pending).toBe(false);
+  });
+
+  test("a user who may delete config but not read secrets cannot remove an account", async () => {
+    await store("codex_oauth_0", credentials("grant-keep0", { email: "keep@example.com" }));
+    await store("codex_oauth_1");
+    const user = await createUser({ name: "Delete-only user" });
+    const token = await mintToken(user.id, "delete-only", { kind: "operator", id: "codex-test" });
+    // A new user starts as admin. Replace that with a role that grants only the delete.
+    await getDbClient().run("DELETE FROM principal_roles WHERE principalId = ?", [user.id]);
+    await getDbClient().run(
+      "INSERT INTO roles (id, name) VALUES ('codex-delete-only', 'codex-delete-only')",
+    );
+    await getDbClient().run(
+      "INSERT INTO role_permissions (roleId, verb) VALUES ('codex-delete-only', 'config.delete.any')",
+    );
+    await getDbClient().run(
+      "INSERT INTO principal_roles (principalType, principalId, roleId) VALUES ('user', ?, 'codex-delete-only')",
+      [user.id],
+    );
+    const previous = process.env.RBAC_ENABLED;
+    process.env.RBAC_ENABLED = "true";
+    try {
+      const response = await request("/1", "DELETE", token.plaintext);
+      expect(response.status).toBe(403);
+      expect(await response.text()).not.toContain("keep@example.com");
+      expect((await getSwarmConfigs({ scope: "global", key: "codex_oauth_1" })).length).toBe(1);
+    } finally {
+      if (previous === undefined) delete process.env.RBAC_ENABLED;
+      else process.env.RBAC_ENABLED = previous;
+    }
   });
 
   test("denies worker deletion and identity spoofing while allowing the lead", async () => {
