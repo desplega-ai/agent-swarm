@@ -319,7 +319,13 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     case "workflow_getRun": {
       const id = typeof body.id === "string" ? body.id : undefined;
       if (!id) throw new Error("workflow_getRun requires string `id`");
-      return { method: "GET", path: `/api/workflow-runs/${encodeURIComponent(id)}` };
+      if (body.fields !== undefined && body.fields !== "full" && body.fields !== "slim") {
+        throw new Error('workflow_getRun `fields` must be "full" or "slim"');
+      }
+      return {
+        method: "GET",
+        path: appendQuery(`/api/workflow-runs/${encodeURIComponent(id)}`, { fields: body.fields }),
+      };
     }
     case "workflow_delete": {
       const id = typeof body.id === "string" ? body.id : undefined;
