@@ -14,13 +14,30 @@ import { useCombServiceUserId } from "./use-comb-service-user";
 const PROCESSING_POLL_MS = 10_000;
 
 /**
+ * The task detail query of each id (`["task", id]`, the key `useTask` uses,
+ * so the task page shares it): one request per task, since the API has no
+ * read of several tasks by id. A task polls every 10 s until it finishes.
+ */
+export function useWatchedTasks(taskIds: readonly string[]) {
+  return useQueries({
+    queries: taskIds.map((id) => ({
+      queryKey: ["task", id],
+      queryFn: () => api.fetchTask(id),
+      refetchInterval: (query: { state: { status: string; data?: { status: string } } }) =>
+        query.state.status === "error" ||
+        (query.state.data !== undefined && !isTaskUnfinished(query.state.data.status))
+          ? false
+          : PROCESSING_POLL_MS,
+    })),
+  });
+}
+
+/**
  * Unsent and processing threads by thread id (`threadSwarmStates`). Each
- * sent, unanswered thread watches its task through the task detail query
- * (`["task", id]`, the key `useTask` uses, so the task page shares it): one
- * request per distinct task, since one send makes one task for all its
- * comments. The API has no read of several tasks by id. A task polls every
- * 10 s until it finishes. Nothing polls when no thread waits: an answer on
- * the thread stops watching its task.
+ * sent, unanswered thread watches its task (`useWatchedTasks`): one request
+ * per distinct task, since one send makes one task for all its comments.
+ * Nothing polls when no thread waits: an answer on the thread stops watching
+ * its task.
  */
 export function useThreadSwarmStates(
   threads: ReadonlyArray<CommentListEntry>,
@@ -35,17 +52,7 @@ export function useThreadSwarmStates(
     return [...ids].sort();
   }, [threads, serviceUserId]);
 
-  const results = useQueries({
-    queries: taskIds.map((id) => ({
-      queryKey: ["task", id],
-      queryFn: () => api.fetchTask(id),
-      refetchInterval: (query: { state: { status: string; data?: { status: string } } }) =>
-        query.state.status === "error" ||
-        (query.state.data !== undefined && !isTaskUnfinished(query.state.data.status))
-          ? false
-          : PROCESSING_POLL_MS,
-    })),
-  });
+  const results = useWatchedTasks(taskIds);
 
   // One string for every answer, so the states (and the highlights that read
   // them) change only when a status does.

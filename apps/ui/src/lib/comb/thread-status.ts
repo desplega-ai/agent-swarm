@@ -7,6 +7,7 @@
 import type { CommentListEntry } from "../agent-fs/types";
 import { TERMINAL_STATUSES } from "../task-activity";
 import { canSendThread } from "./batch";
+import { commentCombPath } from "./comments";
 import { sentReplyTaskId } from "./markers";
 
 export type SwarmThreadStatus =
@@ -51,6 +52,30 @@ export function watchedTaskId(
   if (thread.resolved) return null;
   const status = swarmThreadStatus(thread, serviceUserId);
   return status.kind === "sent" && !status.answered ? status.taskId : null;
+}
+
+/**
+ * The threads that wait on each task (`watchedTaskId`: open, sent, not
+ * answered), by task id. Each group is in file order, then oldest first.
+ * The Comb home's "In progress" card lists the groups whose task runs.
+ */
+export function threadsByTask(
+  threads: ReadonlyArray<CommentListEntry>,
+  serviceUserId: string | null,
+): Map<string, CommentListEntry[]> {
+  const groups = new Map<string, CommentListEntry[]>();
+  for (const thread of threads) {
+    const taskId = watchedTaskId(thread, serviceUserId);
+    if (taskId) groups.set(taskId, [...(groups.get(taskId) ?? []), thread]);
+  }
+  for (const group of groups.values()) {
+    group.sort(
+      (a, b) =>
+        commentCombPath(a.path).localeCompare(commentCombPath(b.path)) ||
+        a.createdAt.localeCompare(b.createdAt),
+    );
+  }
+  return groups;
 }
 
 /** A known task status that has not finished. Unknown (loading, unreadable) is false. */
