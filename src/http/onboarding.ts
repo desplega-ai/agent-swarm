@@ -36,11 +36,14 @@ async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> 
     const provider = ProviderNameSchema.safeParse(entry.provider);
     if (!provider.success) continue;
     const rollup = await rollupCredStatusForProvider(provider.data);
+    const live = rollup.latestLiveTest;
     providers.push({
       provider: provider.data,
       state: rollup.state,
       workers: rollup.workers,
       verifiedWorkers: rollup.verifiedWorkers,
+      error: live && !live.ok ? (live.error ?? null) : null,
+      warning: live?.ok ? (live.warning ?? null) : null,
     });
   }
 

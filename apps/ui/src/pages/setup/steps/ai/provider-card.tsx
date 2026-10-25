@@ -54,6 +54,8 @@ export function ProviderCard({
       focusable={false}
       label={`Verified by ${rollup.verifiedWorkers} of ${rollup.workers} agents`}
     />
+  ) : rollup.error ? (
+    <StatusIcon tone="error" focusable={false} label="Key rejected. Fix it and save it again." />
   ) : saved && noWorker ? (
     <StatusIcon
       tone="warning"
@@ -81,7 +83,7 @@ export function ProviderCard({
       bodyClassName="space-y-3 sm:pl-[60px]"
     >
       {children}
-      {saved || rollup.verified ? (
+      {saved || rollup.verified || rollup.error ? (
         <WaitingPanel rollup={rollup} harnessLabel={waitingLabel} />
       ) : null}
       {/* A key only verifies on a worker that runs this harness. Before a key

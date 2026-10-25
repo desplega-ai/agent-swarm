@@ -12280,6 +12280,8 @@ export interface paths {
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
                                     verifiedWorkers: number;
+                                    error: string | null;
+                                    warning: string | null;
                                 }[];
                                 embeddings: {
                                     configured: boolean;
@@ -12491,6 +12493,8 @@ export interface paths {
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
                                     verifiedWorkers: number;
+                                    error: string | null;
+                                    warning: string | null;
                                 }[];
                                 embeddings: {
                                     configured: boolean;
@@ -26630,7 +26634,18 @@ export interface components {
             error: string | null;
             latency_ms: number;
             testedAt: number;
+            warning?: string;
+            keys?: components["schemas"]["AgentCredStatusKeyResult"][];
         } | null;
+        AgentCredStatusKeyResult: {
+            keyType: string;
+            index: number;
+            suffix: string;
+            ok: boolean;
+            error?: string;
+            httpStatus?: number;
+            latency_ms: number;
+        };
         /** @default null */
         AgentLatestModel: {
             model: string;

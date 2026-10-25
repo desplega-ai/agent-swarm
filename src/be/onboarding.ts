@@ -130,6 +130,10 @@ export const OnboardingSignalsSchema = z.object({
       state: z.enum(["unverified", "configured", "verified"]),
       workers: z.number().int().nonnegative(),
       verifiedWorkers: z.number().int().nonnegative(),
+      /** The latest live test failed: its error. */
+      error: z.string().nullable(),
+      /** The latest live test passed, but some pool keys failed: names them. */
+      warning: z.string().nullable(),
     }),
   ),
   embeddings: z.object({

@@ -648,6 +648,15 @@
           },
           "testedAt": {
             "type": "number"
+          },
+          "warning": {
+            "type": "string"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentCredStatusKeyResult"
+            }
           }
         },
         "default": null,
@@ -655,6 +664,39 @@
           "ok",
           "latency_ms",
           "testedAt"
+        ]
+      },
+      "AgentCredStatusKeyResult": {
+        "type": "object",
+        "properties": {
+          "keyType": {
+            "type": "string"
+          },
+          "index": {
+            "type": "number"
+          },
+          "suffix": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "httpStatus": {
+            "type": "number"
+          },
+          "latency_ms": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "keyType",
+          "index",
+          "suffix",
+          "ok",
+          "latency_ms"
         ]
       },
       "AgentLatestModel": {
@@ -30614,13 +30656,27 @@
                               "verifiedWorkers": {
                                 "type": "integer",
                                 "minimum": 0
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "warning": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
                               }
                             },
                             "required": [
                               "provider",
                               "state",
                               "workers",
-                              "verifiedWorkers"
+                              "verifiedWorkers",
+                              "error",
+                              "warning"
                             ]
                           }
                         },
@@ -31614,13 +31670,27 @@
                               "verifiedWorkers": {
                                 "type": "integer",
                                 "minimum": 0
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "warning": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
                               }
                             },
                             "required": [
                               "provider",
                               "state",
                               "workers",
-                              "verifiedWorkers"
+                              "verifiedWorkers",
+                              "error",
+                              "warning"
                             ]
                           }
                         },

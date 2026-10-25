@@ -362,11 +362,69 @@ describe("onboarding state", () => {
       signals: { providers: Array<Record<string, unknown>> };
     };
     expect(body.signals.providers).toEqual([
-      { provider: "claude", state: "verified", workers: 2, verifiedWorkers: 2 },
+      {
+        provider: "claude",
+        state: "verified",
+        workers: 2,
+        verifiedWorkers: 2,
+        error: null,
+        warning: null,
+      },
     ]);
     expect(body.state.steps.ai).toMatchObject({
       status: "done",
       method: "claude_setup_token",
+    });
+  });
+
+  test("GET carries the latest live test error and the pool warning", async () => {
+    const report = (liveTest: {
+      ok: boolean;
+      error: string | null;
+      latency_ms: number;
+      testedAt: number;
+      warning?: string;
+    }) => ({
+      ready: true,
+      missing: [],
+      satisfiedBy: "env" as const,
+      hint: null,
+      liveTest,
+      reportedAt: Date.now(),
+      reportKind: "boot" as const,
+    });
+    const failing = await createAgent({ name: "codex-worker", isLead: false, status: "idle" });
+    await setAgentHarnessProvider(failing.id, "codex");
+    await updateAgentCredStatus(
+      failing.id,
+      report({ ok: false, error: "HTTP 401: bad key", latency_ms: 5, testedAt: Date.now() }),
+    );
+    const warned = await createAgent({ name: "pi-worker", isLead: false, status: "idle" });
+    await setAgentHarnessProvider(warned.id, "pi");
+    await updateAgentCredStatus(
+      warned.id,
+      report({
+        ok: true,
+        error: null,
+        latency_ms: 5,
+        testedAt: Date.now(),
+        warning: "1 of 2 keys failed: key ending abcde (HTTP 401).",
+      }),
+    );
+
+    const body = (await (await request("/api/onboarding")).json()) as {
+      signals: { providers: Array<Record<string, unknown>> };
+    };
+    const byProvider = Object.fromEntries(body.signals.providers.map((p) => [p.provider, p]));
+    expect(byProvider.codex).toMatchObject({
+      state: "configured",
+      error: "HTTP 401: bad key",
+      warning: null,
+    });
+    expect(byProvider.pi).toMatchObject({
+      state: "verified",
+      error: null,
+      warning: "1 of 2 keys failed: key ending abcde (HTTP 401).",
     });
   });
 
