@@ -65,7 +65,7 @@ const statusConfig: Record<ApiKeyStatusType, { label: string; dot: string; tone:
   },
 };
 
-/** Workers skip a key the provider rejected, so it reads as its own state. */
+/** Workers skip a key the provider rejected with HTTP 401, so it reads as its own state. */
 function isRejected(key: ApiKeyStatus): boolean {
   return key.lastValidationFailedAt != null;
 }

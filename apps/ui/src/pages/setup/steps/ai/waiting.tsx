@@ -25,7 +25,9 @@ export function WaitingPanel({
           Verified by {n} agent{n === 1 ? "" : "s"}
         </StatusLine>
         {rollup.warning ? (
-          <StatusLine tone="warning">{rollup.warning} Agents skip a rejected key.</StatusLine>
+          <StatusLine tone="warning">
+            {rollup.warning} Agents skip a key the provider rejects with HTTP 401.
+          </StatusLine>
         ) : null}
       </div>
     );

@@ -54,14 +54,14 @@ describe("pooled key validation", () => {
     }
   });
 
-  test.each([401, 403])("HTTP %i marks the key as rejected", async (httpStatus) => {
-    await recordKeyValidation(keyType, [{ ...rejected, httpStatus }]);
+  test("HTTP 401 marks the key as rejected", async () => {
+    await recordKeyValidation(keyType, [{ ...rejected, httpStatus: 401 }]);
     const [row] = await getKeyStatuses(keyType);
     expect(row).toMatchObject({
       keyIndex: 0,
       keySuffix: "aaa11",
       provider: "claude",
-      lastValidationError: `HTTP ${httpStatus}`,
+      lastValidationError: "HTTP 401",
     });
     expect(row!.lastValidationFailedAt).not.toBeNull();
   });
@@ -76,7 +76,9 @@ describe("pooled key validation", () => {
     });
   });
 
+  // 403 included: a valid key can lack the scope of the list endpoint.
   test.each([
+    403,
     500,
     429,
     undefined,

@@ -87,7 +87,9 @@ export async function recordKeyValidation(
   await getDbClient().transaction(async (tx) => {
     const now = new Date().toISOString();
     for (const key of keys) {
-      if (!key.ok && key.httpStatus !== 401 && key.httpStatus !== 403) continue;
+      // Only 401 means the key is bad. A 403 on a list endpoint can be a valid
+      // key without that scope (an OpenAI restricted key, a gateway virtual key).
+      if (!key.ok && key.httpStatus !== 401) continue;
       await tx.run(
         `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastValidationError, lastValidationFailedAt, provider, updatedAt)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
