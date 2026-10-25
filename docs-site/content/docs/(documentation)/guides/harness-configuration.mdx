@@ -705,6 +705,7 @@ Cognition's cloud and bills in ACUs rather than worker-side tokens.
 The dashboard lists each key by its last 5 characters and its status.
 You add or remove one key at a time.
 A new key is tested before it is saved, and a key the provider rejects with HTTP 401 is not saved.
+With a gateway in `ANTHROPIC_BASE_URL`, an `ANTHROPIC_API_KEY` is tested at the gateway.
 
 Workers test every key in a pool at boot and again when a key changes.
 A worker that waits for its first key sees it within about 10 seconds.

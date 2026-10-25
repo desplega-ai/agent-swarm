@@ -4,7 +4,12 @@ import {
   providerBaseUrl,
   providerForKeyVar,
 } from "@desplega/model-catalog";
-import { deriveDefaultRoute, getRouteProvider } from "@desplega/model-routing";
+import {
+  createScopedFetch,
+  deriveDefaultRoute,
+  getRouteProvider,
+  type ModelRoute,
+} from "@desplega/model-routing";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { getOpenRouterAttributionHeaders, getOpenRouterBaseUrl } from "./openrouter-base-url";
 import { scrubSecrets } from "./secret-scrubber";
@@ -225,6 +230,44 @@ export async function checkOpenAICompatibleProvider(
   };
 }
 
+/**
+ * Run the route provider's own check. Requests stay on the route's origin and
+ * path prefix, go to public hosts only, and never follow a redirect.
+ */
+async function checkRoute(
+  route: ModelRoute,
+  env: Record<string, string | undefined>,
+): Promise<LiveValidationResult> {
+  const startedAt = Date.now();
+  const provider = getRouteProvider(route.provider);
+  const baseUrl = route.baseUrl ?? provider?.defaultBaseUrl;
+  if (!provider?.validate || !baseUrl) return { ok: true, skipped: true, latency_ms: 0 };
+  const publicFetch = async (url: string | URL | Request, init?: RequestInit) => {
+    assertUrlSafe(String(url), publicEndpointSsrfOptions());
+    const res = await fetch(url, init);
+    if (res.ok || !res.body) return res;
+    return new Response(scrubProbeBody(await res.text(), init ?? {}), {
+      status: res.status,
+      statusText: res.statusText,
+      headers: res.headers,
+    });
+  };
+  const result = await provider.validate({
+    route,
+    env,
+    signal: AbortSignal.timeout(LIVE_TEST_TIMEOUT_MS),
+    fetch: createScopedFetch(baseUrl, publicFetch as typeof fetch),
+  });
+  const latency_ms = Date.now() - startedAt;
+  if (result.status === "verified") return { ok: true, latency_ms };
+  return {
+    ok: result.status === "configured",
+    ...(result.status === "configured" ? { skipped: true } : { httpStatus: result.httpStatus }),
+    error: scrubSecrets(result.reason),
+    latency_ms,
+  };
+}
+
 /** Check one newly submitted pool member without loading a worker harness. */
 export async function checkProviderPoolKey(
   keyType: string,
@@ -235,8 +278,20 @@ export async function checkProviderPoolKey(
   const options: ProbeOptions = { env, publicEndpoint: true };
   try {
     switch (keyType) {
-      case "ANTHROPIC_API_KEY":
+      case "ANTHROPIC_API_KEY": {
+        // Behind a gateway (`ANTHROPIC_BASE_URL`), Claude Code sends this key
+        // to the gateway, so check it there and not at api.anthropic.com.
+        const keyEnv = { ...env, ANTHROPIC_API_KEY: apiKey };
+        const route = deriveDefaultRoute("claude", keyEnv);
+        if (
+          route?.provider === "anthropic-gateway" &&
+          "secretKey" in route.auth &&
+          route.auth.secretKey === "ANTHROPIC_API_KEY"
+        ) {
+          return await checkRoute(route, keyEnv);
+        }
         return await checkAnthropicApiKey(apiKey, options);
+      }
       case "OPENAI_API_KEY":
         return await checkOpenAiApiKey(apiKey, options);
       case "OPENROUTER_API_KEY":
@@ -247,34 +302,7 @@ export async function checkProviderPoolKey(
         return await checkXaiApiKey(apiKey, options);
       case "CLAUDE_CODE_OAUTH_TOKEN": {
         const tokenEnv = { CLAUDE_CODE_OAUTH_TOKEN: apiKey };
-        const route = deriveDefaultRoute("claude", tokenEnv)!;
-        const provider = getRouteProvider("claude-subscription")!;
-        const result = await provider.validate!({
-          route,
-          env: tokenEnv,
-          signal: AbortSignal.timeout(LIVE_TEST_TIMEOUT_MS),
-          fetch: async (path, init) => {
-            const url = new URL(path, route.baseUrl).toString();
-            assertUrlSafe(url, publicEndpointSsrfOptions());
-            const res = await fetch(url, { ...init, redirect: "manual" });
-            if (res.ok || !res.body) return res;
-            return new Response(scrubProbeBody(await res.text(), init ?? {}), {
-              status: res.status,
-              statusText: res.statusText,
-              headers: res.headers,
-            });
-          },
-        });
-        const latency_ms = Date.now() - startedAt;
-        if (result.status === "verified") return { ok: true, latency_ms };
-        return {
-          ok: result.status === "configured",
-          ...(result.status === "configured"
-            ? { skipped: true }
-            : { httpStatus: result.httpStatus }),
-          error: scrubSecrets(result.reason),
-          latency_ms,
-        };
+        return await checkRoute(deriveDefaultRoute("claude", tokenEnv)!, tokenEnv);
       }
       default: {
         const provider = providerForKeyVar(keyType);

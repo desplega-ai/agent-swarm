@@ -34,7 +34,7 @@ const API_KEY = "example-pool-test-operator";
 const KEY = "ANTHROPIC_API_KEY";
 const first = "example-provider-key-first";
 const second = "example-provider-key-secnd";
-const envKeys = [...CREDENTIAL_POOL_VARS, "OPENROUTER_BASE_URL"];
+const envKeys = [...CREDENTIAL_POOL_VARS, "OPENROUTER_BASE_URL", "ANTHROPIC_BASE_URL"];
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 let providerCalls: Array<{ url: string; init?: RequestInit }>;
 let providerFetch: (input: string, init?: RequestInit) => Promise<Response>;
@@ -392,6 +392,14 @@ describe("credential pool additions", () => {
     expect((await request("POST", "", body)).status).toBe(200);
     expect(providerCalls).toHaveLength(1);
     expect(providerCalls[0]?.url).toStartWith("https://openrouter.ai/");
+  });
+
+  test("an Anthropic key behind a gateway is checked at the gateway", async () => {
+    process.env.ANTHROPIC_BASE_URL = "https://gateway.example";
+    const result = await request("POST", "", { key: KEY, value: first });
+    expect(result.status).toBe(200);
+    expect(result.body.checks[0]?.result).toBe("verified");
+    expect(providerCalls.map((call) => call.url)).toEqual(["https://gateway.example/v1/models"]);
   });
 
   test("the old PUT config route still saves a whole pool", async () => {

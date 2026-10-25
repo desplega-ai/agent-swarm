@@ -80,6 +80,67 @@ describe("API pool key probes", () => {
     if (!ok) expect(result.httpStatus).toBe(status);
   });
 
+  test("checks an Anthropic key at its gateway, keeping the URL path prefix", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response("Unauthorized", { status: 401 });
+    }) as unknown as typeof fetch;
+    const result = await checkProviderPoolKey("ANTHROPIC_API_KEY", "fake-abcde", {
+      ANTHROPIC_BASE_URL: "https://gateway.example/api",
+    });
+    expect(result).toMatchObject({ ok: false, httpStatus: 401 });
+    expect(calls.map((call) => call.url)).toEqual(["https://gateway.example/api/v1/models"]);
+    expect(new Headers(calls[0]?.init?.headers).get("x-api-key")).toBe("fake-abcde");
+    expect(calls[0]?.init?.redirect).toBe("manual");
+
+    globalThis.fetch = mock(async () => new Response("{}")) as unknown as typeof fetch;
+    expect(
+      await checkProviderPoolKey("ANTHROPIC_API_KEY", "fake-abcde", {
+        ANTHROPIC_BASE_URL: "https://gateway.example/api",
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  test("a gateway that lists no models leaves the Anthropic key unchecked", async () => {
+    globalThis.fetch = mock(
+      async () => new Response("Not found", { status: 404 }),
+    ) as unknown as typeof fetch;
+    expect(
+      await checkProviderPoolKey("ANTHROPIC_API_KEY", "fake-abcde", {
+        ANTHROPIC_BASE_URL: "https://gateway.example",
+      }),
+    ).toMatchObject({ ok: true, skipped: true });
+  });
+
+  test("an Anthropic key stays on api.anthropic.com when the gateway uses ANTHROPIC_AUTH_TOKEN", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      urls.push(String(url));
+      return new Response("{}");
+    }) as unknown as typeof fetch;
+    expect(
+      await checkProviderPoolKey("ANTHROPIC_API_KEY", "fake-abcde", {
+        ANTHROPIC_BASE_URL: "https://gateway.example",
+        ANTHROPIC_AUTH_TOKEN: "gateway-token",
+      }),
+    ).toMatchObject({ ok: true });
+    expect(urls).toEqual(["https://api.anthropic.com/v1/models"]);
+  });
+
+  test("a private Anthropic gateway gets no credentials and no rejection", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ALLOW_PRIVATE_NETWORK_URLS;
+    const fetch = mock(async () => new Response("{}"));
+    globalThis.fetch = fetch as unknown as typeof globalThis.fetch;
+    const result = await checkProviderPoolKey("ANTHROPIC_API_KEY", "fake-abcde", {
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:4000",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.httpStatus).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   test("skips keys without an API-safe probe", async () => {
     const fetch = mock(async () => new Response("{}"));
     globalThis.fetch = fetch as unknown as typeof globalThis.fetch;
