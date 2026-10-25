@@ -29,7 +29,7 @@ import {
 } from "@/api/hooks/use-agent-fs";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -78,7 +78,7 @@ import { PassageMarkers } from "./passage-markers";
 import { QuoteExcerpt } from "./quote-excerpt";
 import { CommentSearch, FilterMenu, FilterSummary, SearchToggle, SendBar } from "./rail-filters";
 import { SelectionCommentButton } from "./selection-comment-button";
-import { CommentPanel } from "./side-panels";
+import { CommentPanel, RightPanelBody } from "./side-panels";
 import { useAuthorLabel } from "./use-author-label";
 import { type CommentOutbox, useCommentOutbox } from "./use-comment-outbox";
 import { useDomTextSpace } from "./use-dom-text-space";
@@ -473,10 +473,16 @@ export function CommentRail({
             className="max-h-[80dvh] gap-0 p-0"
             aria-describedby={undefined}
           >
-            <SheetHeader className="border-b border-border">
-              <SheetTitle>Comments</SheetTitle>
-            </SheetHeader>
-            <div className="flex min-h-0 flex-1 flex-col">{rail}</div>
+            <SheetTitle className="sr-only">Comments</SheetTitle>
+            {/* The sheet's close button sits at the title row's right end. */}
+            <div className="flex min-h-0 flex-1 flex-col pt-1">
+              <RightPanelBody
+                comments={rail}
+                count={open.length + notSaved}
+                onNavigate={() => setSheetOpen(false)}
+                titleRowClassName="pr-12"
+              />
+            </div>
           </SheetContent>
         </Sheet>
       )}
