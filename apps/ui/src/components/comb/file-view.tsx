@@ -148,7 +148,7 @@ function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
         )}
         // The send bar's "Send to swarm" for the open threads of the file.
         sendAction={({ open }) => (
-          <SendBatchButton drive={file} scopePath={file.path} threads={open} variant="bar" />
+          <SendBatchButton drive={file} scopePath={file.path} threads={open} />
         )}
       />
     </div>

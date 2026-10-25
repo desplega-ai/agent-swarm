@@ -157,26 +157,21 @@ export function SendThreadButton({ file, thread }: { file: DrivePath; thread: Co
 }
 
 /**
- * "Send to swarm" for a file (the rail's send bar, `variant="bar"`) or a
- * folder (`FolderComments`, "Send N to swarm"). N counts the open root
- * comments not sent yet. Hidden when N is 0. The dialog lets the human
- * uncheck some and add a note for the lead.
+ * "Send to swarm" for a file: the primary button of the rail's send bar (the
+ * bar shows the count). It offers the open root comments not sent yet and is
+ * hidden when there are none. The dialog lets the human uncheck some and add
+ * a note for the lead. A folder sends its checked comments through
+ * `SendBatchDialog` (`FolderComments`).
  */
 export function SendBatchButton({
   drive,
   scopePath,
   threads,
-  showPaths = false,
-  variant = "header",
 }: {
   drive: Drive;
-  /** The file or folder path the batch is sent from. */
+  /** The file path the batch is sent from. */
   scopePath: string;
   threads: ReadonlyArray<CommentListEntry>;
-  /** List each comment's file (a folder batch). */
-  showPaths?: boolean;
-  /** `bar`: the primary button of the rail's send bar (the bar shows the count). */
-  variant?: "bar" | "header";
 }) {
   const serviceUserId = useCombServiceUserId();
   const eligible = useMemo(
@@ -184,7 +179,6 @@ export function SendBatchButton({
     [threads, serviceUserId],
   );
   const [open, setOpen] = useState(false);
-  const label = `Send ${eligible.length} to swarm`;
 
   return (
     <>
@@ -193,13 +187,12 @@ export function SendBatchButton({
           <TooltipTrigger asChild>
             <Button
               size="sm"
-              variant={variant === "bar" ? "default" : "outline"}
-              aria-label={label}
+              aria-label={`Send ${eligible.length} to swarm`}
               className="shrink-0"
               onClick={() => setOpen(true)}
             >
               <Send />
-              {variant === "bar" ? "Send to swarm" : label}
+              Send to swarm
             </Button>
           </TooltipTrigger>
           <TooltipContent>Send the open comments to the lead as one task</TooltipContent>
@@ -211,7 +204,7 @@ export function SendBatchButton({
           drive={drive}
           scopePath={scopePath}
           threads={eligible}
-          showPaths={showPaths}
+          showPaths={false}
           onClose={() => setOpen(false)}
         />
       ) : null}
@@ -219,17 +212,21 @@ export function SendBatchButton({
   );
 }
 
-function SendBatchDialog({
+export function SendBatchDialog({
   drive,
   scopePath,
   threads,
   showPaths,
+  onSent,
   onClose,
 }: {
   drive: Drive;
   scopePath: string;
   threads: CommentListEntry[];
+  /** List each comment's file (a folder batch). */
   showPaths: boolean;
+  /** After a send that landed, before `onClose`. */
+  onSent?: () => void;
   onClose: () => void;
 }) {
   const send = useSendToSwarm(drive);
@@ -323,7 +320,12 @@ function SendBatchDialog({
                   scopePath,
                   note: batchNote(note),
                 },
-                { onSuccess: onClose },
+                {
+                  onSuccess: () => {
+                    onSent?.();
+                    onClose();
+                  },
+                },
               )
             }
           >

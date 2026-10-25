@@ -15,7 +15,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import type { CombReviewBatchInput, CombReviewBatchResult } from "@/api/types";
@@ -45,6 +45,7 @@ import type {
   SearchResult,
   StatResult,
 } from "@/lib/agent-fs/types";
+import { BULK_CONCURRENCY, type BulkOutcome, runLimited } from "@/lib/comb/bulk";
 import {
   COMB_LOG_LIMIT,
   commentReadPaths,
@@ -515,6 +516,47 @@ export function useResolveComment(file: DrivePath) {
     onMutate: () => queryClient.cancelQueries({ queryKey: key }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
   });
+}
+
+/**
+ * Resolve or reopen many root threads of `drive` (the folder panel's bulk
+ * actions). agent-fs resolves one comment per call, so `run` sends
+ * `BULK_CONCURRENCY` at a time and never rejects: the outcome lists the ids
+ * that failed. `progress` counts the finished calls of the run in flight.
+ * Every comment query of the drive refreshes once, at the end.
+ */
+export function useBulkResolve(drive: { orgId: string; driveId: string }) {
+  const access = useAgentFsAccess();
+  const queryClient = useQueryClient();
+  const [progress, setProgress] = useState<{ finished: number; total: number } | null>(null);
+  const run = useCallback(
+    async (ids: string[], resolved: boolean): Promise<BulkOutcome<string>> => {
+      const client = connectedClient(access);
+      const key = agentFsCommentsKey(access, drive);
+      // A poll that started before the writes must not bring the old state back.
+      await queryClient.cancelQueries({ queryKey: key });
+      setProgress({ finished: 0, total: ids.length });
+      try {
+        return await runLimited(
+          ids,
+          BULK_CONCURRENCY,
+          (id) =>
+            client.callOp<CommentResolveResult>(
+              drive.orgId,
+              "comment-resolve",
+              { id, resolved },
+              drive.driveId,
+            ),
+          (finished) => setProgress({ finished, total: ids.length }),
+        );
+      } finally {
+        setProgress(null);
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+    },
+    [access, drive, queryClient],
+  );
+  return { run, progress };
 }
 
 /**
