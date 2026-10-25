@@ -23,9 +23,10 @@ import {
   type WorkflowIdempotencyClaim,
   workflowRequestFingerprint,
 } from "../be/db/workflow-idempotency";
-import { getWorkflowRunStepsSlimByRunId, getWorkflowRunSummary } from "../be/db/workflow-run-rows";
 import {
   getWorkflowRunParent,
+  getWorkflowRunStepsSlimByRunId,
+  getWorkflowRunSummary,
   getWorkflowRunTree,
   WORKFLOW_RUN_TREE_MAX_DEPTH,
   WorkflowRunTreeError,

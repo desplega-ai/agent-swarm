@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getWorkflowRun, getWorkflowRunStepsByRunId } from "@/be/db";
-import { getWorkflowRunStepsSlimByRunId, getWorkflowRunSummary } from "@/be/db/workflow-run-rows";
+import { getWorkflowRunStepsSlimByRunId, getWorkflowRunSummary } from "@/be/db/workflow-runs";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 const STEP_VALUE_CAP = 400;
