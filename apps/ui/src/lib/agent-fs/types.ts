@@ -263,6 +263,16 @@ export interface SearchResult {
   tookMs?: number;
 }
 
+/** Result of a write (`PUT .../raw`). */
+export interface WriteResult {
+  version: number;
+  path: string;
+  size: number;
+  contentHash?: string;
+  /** True when the bytes matched the head version, so no version was added. */
+  deduped?: boolean;
+}
+
 /** Result of the core `share-create` op (feature `share-links`). */
 export interface ShareCreateResult {
   id: string;

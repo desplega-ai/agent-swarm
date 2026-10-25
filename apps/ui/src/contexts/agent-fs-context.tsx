@@ -49,6 +49,8 @@ export interface AgentFsContextValue extends AgentFsLive {
   me: MeResponse | null;
   /** `/health` features of the agent-fs server. Empty when unknown. */
   features: Set<string>;
+  /** `/health` upload limit in bytes. Null when the server does not say. */
+  maxUploadBytes: number | null;
   /** Why the state is `invalid-key` or `unreachable`. */
   error: AgentFsError | null;
   /** Save a verified credential and switch to it. */
@@ -128,6 +130,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   const meQuery = useAgentFsMe(meKey, client);
   const healthFeatures = health.data?.features;
   const features = useMemo(() => new Set(healthFeatures ?? []), [healthFeatures]);
+  const maxUploadBytes = health.data?.maxUploadBytes ?? null;
 
   // A 401 from any agent-fs query (a listing, a file) checks `me` again.
   useEffect(() => {
@@ -191,6 +194,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       client,
       me: state === "ready" ? (me ?? null) : null,
       features,
+      maxUploadBytes,
       error,
       connect,
       disconnect,
@@ -210,6 +214,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       client,
       me,
       features,
+      maxUploadBytes,
       error,
       connect,
       disconnect,

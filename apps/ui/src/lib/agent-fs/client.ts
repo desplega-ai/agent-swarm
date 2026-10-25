@@ -14,6 +14,7 @@ import type {
   ShareCreateResult,
   SignedUrlDisposition,
   SignedUrlResult,
+  WriteResult,
 } from "./types";
 
 /** An agent-fs request failure. `status` is 0 when no response arrived. */
@@ -180,6 +181,80 @@ export class AgentFsClient {
     options: { disposition?: SignedUrlDisposition; expiresIn?: number } = {},
   ): Promise<SignedUrlResult> {
     return this.callOp<SignedUrlResult>(orgId, "signed-url", { path, ...options }, driveId);
+  }
+
+  /**
+   * Upload bytes to `PUT .../files/<path>/raw` (editor role). The whole path
+   * is one encoded segment. `ifNoneMatch` makes it create-only: a taken name
+   * answers 409 and writes nothing. agent-fs picks the content type from the
+   * extension. Uses `XMLHttpRequest`, because `fetch` reports no upload
+   * progress. The server rejects a body over its `maxUploadBytes` with 413.
+   */
+  putRaw(
+    orgId: string,
+    driveId: string,
+    path: string,
+    body: Blob,
+    opts: {
+      ifNoneMatch?: boolean;
+      message?: string;
+      signal?: AbortSignal;
+      onProgress?: (fraction: number) => void;
+    } = {},
+  ): Promise<WriteResult> {
+    const url = this.getRawUrl(orgId, driveId, path.replace(/^\/+/, ""));
+    const apiKey = this.#apiKey;
+    return new Promise<WriteResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", url);
+      xhr.responseType = "text";
+      xhr.setRequestHeader("Authorization", `Bearer ${apiKey}`);
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      if (opts.ifNoneMatch) xhr.setRequestHeader("If-None-Match", "*");
+      if (opts.message) {
+        // Headers must be Latin-1, so the message travels percent-encoded.
+        xhr.setRequestHeader("X-Agent-FS-Message", encodeURIComponent(opts.message));
+        xhr.setRequestHeader("X-Agent-FS-Message-Encoding", "percent");
+      }
+      const onProgress = opts.onProgress;
+      if (onProgress) {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
+        };
+      }
+      xhr.onload = () => {
+        let body: { error?: unknown; message?: unknown } | null = null;
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          body = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && body) {
+          resolve(body as WriteResult);
+          return;
+        }
+        const code = typeof body?.error === "string" ? body.error : "UNKNOWN";
+        const message =
+          typeof body?.message === "string"
+            ? body.message
+            : xhr.status === 413
+              ? "Larger than the agent-fs upload limit"
+              : `agent-fs upload failed: ${xhr.status}`;
+        reject(new AgentFsError(xhr.status, code, redact(message, apiKey)));
+      };
+      xhr.onerror = () => {
+        reject(new AgentFsError(0, "NETWORK", `Cannot reach agent-fs at ${originOf(url)}`));
+      };
+      xhr.onabort = () => {
+        reject(new AgentFsError(0, "ABORTED", "Upload cancelled"));
+      };
+      if (opts.signal?.aborted) {
+        reject(new AgentFsError(0, "ABORTED", "Upload cancelled"));
+        return;
+      }
+      opts.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+      xhr.send(body);
+    });
   }
 
   /**

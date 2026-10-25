@@ -6,6 +6,7 @@ import { useAgentFsLs } from "@/api/hooks/use-agent-fs";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FolderComments } from "@/components/comb/folder-comments";
 import { PinButton } from "@/components/comb/pin-button";
+import { UploadButton, UploadDropZone, UploadList } from "@/components/comb/upload-zone";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -47,7 +48,10 @@ function NameCell({ data }: ICellRendererParams<FolderRow>) {
   );
 }
 
-/** One folder of the drive: a grid of its entries (a list on phones). */
+/**
+ * One folder of the drive: a grid of its entries (a list on phones). Files
+ * upload here with the Upload button or a drop on the view.
+ */
 export function FolderView({ folder }: { folder: DrivePath }) {
   const listing = useAgentFsLs(folder);
   const authorLabel = useAuthorLabel(folder);
@@ -110,23 +114,25 @@ export function FolderView({ folder }: { folder: DrivePath }) {
   const count = listing.data ? `${rows.length} ${rows.length === 1 ? "item" : "items"}` : "";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <UploadDropZone folder={folder}>
       <PageHeader
         title="Folder"
         description={count}
         action={
           <>
-            {/* Folder actions: later steps add buttons here. The root is the Comb item, so no pin. */}
+            <UploadButton folder={folder} />
+            {/* The root is the Comb item, so no pin. */}
             {folder.path === "/" ? null : <PinButton target={folder} className="size-8" />}
             <OpenInAgentFsButton target={folder} iconOnly />
           </>
         }
       />
+      <UploadList drive={folder} />
       {listing.data && rows.length === 0 ? (
         <EmptyState
           icon={FolderOpen}
           title={folder.path === "/" ? "The drive is empty" : "This folder is empty"}
-          description="Files that agents write here show up in this list."
+          description="Files that agents write here show up in this list. Drop files here to upload them."
           fullPage
         />
       ) : isMobile ? (
@@ -164,6 +170,6 @@ export function FolderView({ folder }: { folder: DrivePath }) {
       )}
       {/* Open comments below the folder, with "Send N to swarm" (step-9). */}
       <FolderComments folder={folder} />
-    </div>
+    </UploadDropZone>
   );
 }
