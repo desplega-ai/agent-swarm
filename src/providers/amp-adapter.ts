@@ -532,6 +532,8 @@ class AmpSession implements ProviderSession {
     // no tool result took is dropped at turn end (`onTurnEnd`).
     this.observeContextBound = createContextBoundNote({
       threshold: contextBoundNoteThreshold(run.env),
+      // A mode names no model in advance, so only a pinned model gets a window share.
+      model: () => run.selection.pin,
       canDeliver: () => !this.inputClosed && !this.aborted,
       inject: (note) => this.queueSteering(note, true),
     });

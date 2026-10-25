@@ -1782,6 +1782,7 @@ describe("PiMonoSession context-bound note", () => {
     threshold: string,
     events: AgentSessionEvent[],
     afterEvents: () => Promise<unknown> = () => Bun.sleep(50),
+    model?: string,
   ): Promise<string[]> {
     const steerCalls: string[] = [];
     const session = new PiMonoSession(
@@ -1789,6 +1790,7 @@ describe("PiMonoSession context-bound note", () => {
       {
         ...makeSessionConfig(join(tmpLogDir, `bound-note-${crypto.randomUUID()}.log`)),
         env: { CONTEXT_BOUND_NOTE_TOKENS: threshold },
+        ...(model ? { model } : {}),
       },
       false,
     );
@@ -1805,6 +1807,18 @@ describe("PiMonoSession context-bound note", () => {
     ]);
     // 500 + 300 + 200 reaches 1000; the larger later request does not steer again.
     expect(steers).toEqual([await renderContextBoundNote(1000)]);
+  });
+
+  test("the note shows the window share for a known model and omits it for an unknown one", async () => {
+    const events = () => [assistantTurn(usage(209_500)), assistantTurn(usage(400), true)];
+    const rest =
+      "Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.";
+    expect(await steersFor("200000", events(), undefined, "anthropic/claude-sonnet-4-6")).toEqual([
+      `Context is 210,000 tokens (21% of the 1,000,000-token window). ${rest}`,
+    ]);
+    expect(await steersFor("200000", events(), undefined, "made-up/model")).toEqual([
+      `Context is 210,000 tokens. ${rest}`,
+    ]);
   });
 
   test("no-op below the threshold and when disabled at 0", async () => {

@@ -2647,6 +2647,7 @@ describe("CodexSession context-bound note", () => {
     env: Record<string, string>,
     steer: (input: string) => Promise<void> = async () => {},
     beforeTurnCompleted: () => Promise<unknown> = () => Bun.sleep(50),
+    model?: string,
   ): Promise<{ steers: string[]; result: ProviderResult }> {
     const steers: string[] = [];
     const thread = {
@@ -2675,7 +2676,7 @@ describe("CodexSession context-bound note", () => {
       bypassSubprocess: true,
       threadFactory: () => thread as never,
     });
-    const session = await adapter.createSession(testConfig({ env }));
+    const session = await adapter.createSession(testConfig({ env, ...(model ? { model } : {}) }));
     const result = await session.waitForCompletion();
     return { steers, result };
   }
@@ -2685,8 +2686,32 @@ describe("CodexSession context-bound note", () => {
       CONTEXT_BOUND_NOTE_TOKENS: "1000",
     });
     expect(result.isError).toBe(false);
-    expect(steers).toEqual([await renderContextBoundNote(1_200)]);
+    expect(steers).toEqual([await renderContextBoundNote(1_200, "gpt-5.4")]);
     expect(steers[0]).toContain("1,200");
+  });
+
+  test("the note shows the window share for a known model and omits it for an unknown one", async () => {
+    const noteFor = async (model: string) =>
+      (
+        await runWithSteers(
+          requestEvents([525_000]),
+          { CONTEXT_BOUND_NOTE_TOKENS: "1000" },
+          undefined,
+          undefined,
+          model,
+        )
+      ).steers;
+    const rest =
+      "Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.";
+    expect(await noteFor("gpt-5.4")).toEqual([
+      `Context is 525,000 tokens (50% of the 1,050,000-token window). ${rest}`,
+    ]);
+    expect(await noteFor("made-up-codex-model")).toEqual([`Context is 525,000 tokens. ${rest}`]);
+  });
+
+  test("off when CONTEXT_BOUND_NOTE_TOKENS is unset", async () => {
+    const { steers } = await runWithSteers(requestEvents([250_000, 900_000]), {});
+    expect(steers).toEqual([]);
   });
 
   test("no-op below the threshold", async () => {

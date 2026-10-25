@@ -773,8 +773,12 @@ describe("amp session", () => {
 
 describe("amp context-bound note", () => {
   // Each fake request is 4 input + 200 cache read + 1000 cache write = 1204 tokens.
-  async function toolResults(mode: string, env: Record<string, string>) {
-    const { config } = await fixture(mode, {}, env);
+  async function toolResults(
+    mode: string,
+    env: Record<string, string>,
+    overrides: Partial<ProviderSessionConfig> = {},
+  ) {
+    const { config } = await fixture(mode, overrides, env);
     const { events, result } = await runToCompletion(config);
     const results = events.flatMap((e) => (e.type === "tool_end" ? [e.result] : []));
     return { results, result };
@@ -788,6 +792,20 @@ describe("amp context-bound note", () => {
     // Carried inside the turn: no extra turn replays it.
     expect(result).toMatchObject({ isError: false, output: "DONE1" });
     expect(result.cost?.numTurns).toBe(1);
+  });
+
+  test("a pinned model gets the window share; a mode names no model and gets none", async () => {
+    const pin = "anthropic/claude-sonnet-4-6";
+    const pinned = await toolResults(
+      "steer-twice",
+      { CONTEXT_BOUND_NOTE_TOKENS: "1204" },
+      { model: pin },
+    );
+    const note = await renderContextBoundNote(1204, pin);
+    expect(note).toContain("of the 1,000,000-token window)");
+    expect(pinned.results).toEqual([`2\n\n${note}`, "2"]);
+    const mode = await toolResults("steer-twice", { CONTEXT_BOUND_NOTE_TOKENS: "1204" });
+    expect(mode.results[0]).not.toContain("token window");
   });
 
   test("no-op below the threshold and when disabled at 0", async () => {

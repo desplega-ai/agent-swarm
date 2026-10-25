@@ -23,19 +23,18 @@ import { renderContextBoundNote } from "../prompts/context-bound-note";
  * blocks a tool call.
  */
 
-export const CONTEXT_BOUND_NOTE_DEFAULT_TOKENS = 200_000;
-
-/** Threshold from `CONTEXT_BOUND_NOTE_TOKENS`. 0 disables; unset or invalid uses the default. */
+/**
+ * Threshold from `CONTEXT_BOUND_NOTE_TOKENS`. Off by default: unset, empty,
+ * 0 or invalid returns 0 (off); a positive integer turns the note on at that
+ * many tokens.
+ */
 export function contextBoundNoteThreshold(
   env: Record<string, string | undefined> = process.env,
 ): number {
   const raw = env.CONTEXT_BOUND_NOTE_TOKENS?.trim();
-  if (!raw) return CONTEXT_BOUND_NOTE_DEFAULT_TOKENS;
+  if (!raw || !/^\d+$/.test(raw)) return 0;
   const parsed = Number(raw);
-  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(parsed)) {
-    return CONTEXT_BOUND_NOTE_DEFAULT_TOKENS;
-  }
-  return parsed;
+  return Number.isSafeInteger(parsed) ? parsed : 0;
 }
 
 /** True when a valid token count reaches an enabled (> 0) threshold. */
@@ -51,10 +50,11 @@ function reachesThreshold(contextTokens: unknown, threshold: number): contextTok
 /** Render the note and hand it to `inject`. Fails open. */
 async function deliverContextBoundNote(
   contextTokens: number,
+  model: string | undefined,
   inject: (note: string) => unknown,
 ): Promise<void> {
   try {
-    const note = await renderContextBoundNote(contextTokens);
+    const note = await renderContextBoundNote(contextTokens, model);
     if (note) await inject(note);
   } catch {
     // Fail open.
@@ -69,16 +69,30 @@ export function contextBoundNoteMarkerPath(taskFilePath: string): string {
   return `${taskFilePath}.bound-note`;
 }
 
+/** What the session records for the hook: the latest request's size and the session's model. */
+export interface ContextState {
+  contextTokens: number;
+  model?: string;
+}
+
 /**
- * Record the latest request's context size for the hook. Synchronous so
+ * Record the latest request's context size (and the session's model, for the
+ * window share) for the hook. Synchronous so
  * writes land in stream order; tmp + rename so the hook never reads a partial
  * file. Errors are swallowed: a missing state file only means no note.
  */
-export function recordContextState(taskFilePath: string, contextTokens: number): void {
+export function recordContextState(
+  taskFilePath: string,
+  contextTokens: number,
+  model?: string,
+): void {
   const path = contextStatePath(taskFilePath);
   const tmp = `${path}.tmp`;
   try {
-    writeFileSync(tmp, JSON.stringify({ contextTokens, updatedAt: new Date().toISOString() }));
+    writeFileSync(
+      tmp,
+      JSON.stringify({ contextTokens, model, updatedAt: new Date().toISOString() }),
+    );
     renameSync(tmp, path);
   } catch {
     // Fail open.
@@ -86,21 +100,24 @@ export function recordContextState(taskFilePath: string, contextTokens: number):
 }
 
 /**
- * Returns the context size when the note should fire now, else null. Fires at
+ * Returns the recorded state when the note should fire now, else null. Fires at
  * most once per task file: the marker is created with `wx`, so a second call
  * (or a concurrent hook) loses the race and gets null.
  */
 export async function claimContextBoundNote(
   taskFilePath: string | undefined,
   threshold: number,
-): Promise<number | null> {
+): Promise<ContextState | null> {
   if (!taskFilePath || threshold <= 0) return null;
   let contextTokens: unknown;
+  let model: unknown;
   try {
     const state = JSON.parse(await readFile(contextStatePath(taskFilePath), "utf8")) as {
       contextTokens?: unknown;
+      model?: unknown;
     };
     contextTokens = state?.contextTokens;
+    model = state?.model;
   } catch {
     return null;
   }
@@ -112,7 +129,7 @@ export async function claimContextBoundNote(
   } catch {
     return null;
   }
-  return contextTokens;
+  return { contextTokens, model: typeof model === "string" && model ? model : undefined };
 }
 
 /** Claude PostToolUse path: claim from the task file, then hand the note to `inject`. */
@@ -121,8 +138,8 @@ export async function injectClaimedContextBoundNote(
   threshold: number,
   inject: (note: string) => unknown,
 ): Promise<void> {
-  const contextTokens = await claimContextBoundNote(taskFilePath, threshold).catch(() => null);
-  if (contextTokens !== null) await deliverContextBoundNote(contextTokens, inject);
+  const state = await claimContextBoundNote(taskFilePath, threshold).catch(() => null);
+  if (state) await deliverContextBoundNote(state.contextTokens, state.model, inject);
 }
 
 /**
@@ -139,6 +156,8 @@ export async function injectClaimedContextBoundNote(
  */
 export function createContextBoundNote(options: {
   threshold: number;
+  /** The session's model, read when the note renders, for the window share. */
+  model?: () => string | undefined;
   inject: (note: string) => unknown;
   /** True while a note injected now reaches the model inside the current turn. */
   canDeliver: () => boolean;
@@ -164,7 +183,7 @@ export function createContextBoundNote(options: {
     state = "rendering";
     let note = "";
     try {
-      note = await renderContextBoundNote(contextTokens);
+      note = await renderContextBoundNote(contextTokens, options.model?.());
     } catch {
       // Fail open.
     }

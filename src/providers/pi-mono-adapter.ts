@@ -1046,6 +1046,7 @@ export class PiMonoSession implements ProviderSession {
     this.sessionStartedAt = Date.now();
     this.observeContextBound = createContextBoundNote({
       threshold: contextBoundNoteThreshold(config.env ?? process.env),
+      model: () => this.reportedModel(),
       canDeliver: () => this.toolTurnOpen && !this.sessionEnded && !this.abortRequested,
       inject: (note) => this.deliverSteering({ mode: "steer", text: note }),
     });

@@ -442,7 +442,7 @@ class ClaudeSdkSession implements ProviderSession {
       normalized.requestContextTokens !== this.lastContextTokens
     ) {
       this.lastContextTokens = normalized.requestContextTokens;
-      recordContextState(this.options.taskFilePath, normalized.requestContextTokens);
+      recordContextState(this.options.taskFilePath, normalized.requestContextTokens, this.model);
     }
     this.transcript.push(...normalized.transcriptEntries);
     for (const event of normalized.events) this.emit(event);

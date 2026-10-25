@@ -4,7 +4,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  CONTEXT_BOUND_NOTE_DEFAULT_TOKENS,
   claimContextBoundNote,
   contextBoundNoteThreshold,
   contextStatePath,
@@ -33,23 +32,29 @@ function taskFileWith(contextTokens?: number): string {
 }
 
 describe("contextBoundNoteThreshold", () => {
-  test("defaults to 200k when unset, blank or invalid", () => {
-    expect(contextBoundNoteThreshold({})).toBe(CONTEXT_BOUND_NOTE_DEFAULT_TOKENS);
-    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: " " })).toBe(200_000);
-    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "-5" })).toBe(200_000);
-    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "lots" })).toBe(200_000);
+  test("off when unset, blank, invalid or 0", () => {
+    expect(contextBoundNoteThreshold({})).toBe(0);
+    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "" })).toBe(0);
+    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: " " })).toBe(0);
+    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "-5" })).toBe(0);
+    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "lots" })).toBe(0);
+    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "1e5" })).toBe(0);
+    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "99999999999999999999" })).toBe(
+      0,
+    );
+    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "0" })).toBe(0);
   });
 
-  test("reads an override, including 0", () => {
+  test("a positive integer turns the note on at that threshold", () => {
     expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "150000" })).toBe(150_000);
-    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: "0" })).toBe(0);
+    expect(contextBoundNoteThreshold({ CONTEXT_BOUND_NOTE_TOKENS: " 200000 " })).toBe(200_000);
   });
 });
 
 describe("claimContextBoundNote", () => {
   test("fires once at the threshold, not again on later calls", async () => {
     const taskFile = taskFileWith(200_000);
-    expect(await claimContextBoundNote(taskFile, 200_000)).toBe(200_000);
+    expect(await claimContextBoundNote(taskFile, 200_000)).toEqual({ contextTokens: 200_000 });
     expect(await claimContextBoundNote(taskFile, 200_000)).toBeNull();
     recordContextState(taskFile, 400_000);
     expect(await claimContextBoundNote(taskFile, 200_000)).toBeNull();
@@ -60,14 +65,23 @@ describe("claimContextBoundNote", () => {
     const results = await Promise.all(
       Array.from({ length: 8 }, () => claimContextBoundNote(taskFile, 200_000)),
     );
-    expect(results.filter((r) => r !== null)).toEqual([300_000]);
+    expect(results.filter((r) => r !== null)).toEqual([{ contextTokens: 300_000 }]);
   });
 
   test("no-op below the threshold, then fires once it is crossed", async () => {
     const taskFile = taskFileWith(199_999);
     expect(await claimContextBoundNote(taskFile, 200_000)).toBeNull();
     recordContextState(taskFile, 210_000);
-    expect(await claimContextBoundNote(taskFile, 200_000)).toBe(210_000);
+    expect(await claimContextBoundNote(taskFile, 200_000)).toEqual({ contextTokens: 210_000 });
+  });
+
+  test("returns the model the session recorded", async () => {
+    const taskFile = join(dir, `task-${++n}.json`);
+    recordContextState(taskFile, 250_000, "claude-opus-5-5");
+    expect(await claimContextBoundNote(taskFile, 200_000)).toEqual({
+      contextTokens: 250_000,
+      model: "claude-opus-5-5",
+    });
   });
 
   test("disabled at 0", async () => {
@@ -106,11 +120,13 @@ describe("createContextBoundNote", () => {
     threshold: number,
     inject: (note: string) => unknown = () => {},
     canDeliver: () => boolean = () => true,
+    model?: () => string | undefined,
   ) {
     const notes: string[] = [];
     const observe = createContextBoundNote({
       threshold,
       canDeliver,
+      model,
       inject: (note) => {
         notes.push(note);
         return inject(note);
@@ -176,6 +192,16 @@ describe("createContextBoundNote", () => {
     expect(notes).toEqual([]);
   });
 
+  test("renders with the session's model at render time", async () => {
+    let model = "made-up-model";
+    const { observe, notes } = observer(200_000, undefined, undefined, () => model);
+    model = "claude-opus-5-5";
+    await observe(210_000);
+    expect(notes).toEqual([
+      "Context is 210,000 tokens (21% of the 1,000,000-token window). Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.",
+    ]);
+  });
+
   test("checks the window after rendering, not before", async () => {
     let open = true;
     const { observe, notes } = observer(200_000, undefined, () => open);
@@ -187,9 +213,25 @@ describe("createContextBoundNote", () => {
 });
 
 describe("renderContextBoundNote", () => {
-  test("renders the code default with a formatted token count", async () => {
-    expect(await renderContextBoundNote(213_456)).toBe(
-      "Context is 213,456 tokens. Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.",
+  const rest =
+    "Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.";
+
+  test("renders the code default with a formatted token count and no model", async () => {
+    expect(await renderContextBoundNote(213_456)).toBe(`Context is 213,456 tokens. ${rest}`);
+  });
+
+  test("adds the window share for a known model", async () => {
+    expect(await renderContextBoundNote(210_000, "claude-opus-5-5")).toBe(
+      `Context is 210,000 tokens (21% of the 1,000,000-token window). ${rest}`,
+    );
+    expect(await renderContextBoundNote(200_000, "gpt-5")).toBe(
+      `Context is 200,000 tokens (50% of the 400,000-token window). ${rest}`,
+    );
+  });
+
+  test("omits the share for an unknown model instead of using the 200k fallback", async () => {
+    expect(await renderContextBoundNote(210_000, "made-up-model")).toBe(
+      `Context is 210,000 tokens. ${rest}`,
     );
   });
 });

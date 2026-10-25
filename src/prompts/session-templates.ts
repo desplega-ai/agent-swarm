@@ -362,11 +362,16 @@ registerTemplate({
   eventType: "system.agent.context.bound_note",
   header: "",
   defaultBody:
-    "Context is {{contextTokens}} tokens. Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.",
+    "Context is {{contextTokens}} tokens{{contextShare}}. Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.",
   variables: [
     {
       name: "contextTokens",
       description: "Prompt size of the latest request (input + cache read + cache write tokens)",
+    },
+    {
+      name: "contextShare",
+      description:
+        'How full the model\'s context window is, e.g. " (21% of the 1,000,000-token window)". Empty when the window is unknown',
     },
   ],
   category: "system",

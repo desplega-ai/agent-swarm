@@ -67,7 +67,12 @@ function catalogContext(provider: string, model: string): number | undefined {
  * Unknown models get a conservative 200k so percent math stays finite.
  */
 export function getContextWindowSize(model: string): number {
-  if (!model) return DEFAULT_CONTEXT_WINDOW;
+  return getKnownContextWindowSize(model) ?? DEFAULT_CONTEXT_WINDOW;
+}
+
+/** {@link getContextWindowSize} without the fallback: undefined when the catalog has no window. */
+export function getKnownContextWindowSize(model: string | undefined): number | undefined {
+  if (!model) return undefined;
   const slash = model.indexOf("/");
   if (slash > 0) {
     const scoped = catalogContext(model.slice(0, slash), model.slice(slash + 1));
@@ -83,11 +88,8 @@ export function getContextWindowSize(model: string): number {
     if (dated) return dated;
   }
   const shortname = resolveClaudeShortname(model);
-  if (shortname) {
-    const resolved = catalogContext("anthropic", shortname);
-    if (resolved) return resolved;
-  }
-  return DEFAULT_CONTEXT_WINDOW;
+  if (shortname) return catalogContext("anthropic", shortname);
+  return undefined;
 }
 
 /**

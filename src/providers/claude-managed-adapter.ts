@@ -295,6 +295,7 @@ class ClaudeManagedSession implements ProviderSession {
     });
     this.observeContextBound = createContextBoundNote({
       threshold: contextBoundNoteThreshold(config.env ?? process.env),
+      model: () => this.cost.model,
       // A message with no tool call left to return, or after idle or abort,
       // would start another turn.
       canDeliver: () => !this.settled && !this.aborted && this.openToolCalls.size > 0,

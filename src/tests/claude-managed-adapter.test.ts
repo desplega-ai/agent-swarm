@@ -1413,9 +1413,6 @@ describe("ClaudeManagedAdapter (Phase 6) — full happy-path integration", () =>
       tConfig({
         model: "claude-sonnet-4-6",
         logFile: join(tmpLogDir, "e2e.log"),
-        // The 1M-token request would otherwise earn the context-bound note,
-        // a second send this test does not count.
-        env: { CONTEXT_BOUND_NOTE_TOKENS: "0" },
       }),
     );
 
@@ -1566,6 +1563,7 @@ describe("ClaudeManagedAdapter — one-time context-bound note", () => {
     events: Array<Record<string, unknown>>,
     threshold: string,
     onSend?: Parameters<typeof makeFakeClient>[0]["onSend"],
+    model?: string,
   ) {
     const spy = makeFakeClient({
       streamEvents: async function* () {
@@ -1578,6 +1576,7 @@ describe("ClaudeManagedAdapter — one-time context-bound note", () => {
       tConfig({
         logFile: join(tmpLogDir, `note-${++seq}.log`),
         env: { CONTEXT_BOUND_NOTE_TOKENS: threshold },
+        ...(model ? { model } : {}),
       }),
     );
     const result = await session.waitForCompletion();
@@ -1604,7 +1603,25 @@ describe("ClaudeManagedAdapter — one-time context-bound note", () => {
       "200000",
     );
     expect(result.isError).toBe(false);
-    expect(notes).toEqual([{ type: "user.message", text: await renderContextBoundNote(200_000) }]);
+    expect(notes).toEqual([
+      { type: "user.message", text: await renderContextBoundNote(200_000, "claude-sonnet-4-6") },
+    ]);
+  });
+
+  test("the note shows the window share for a known model and omits it for an unknown one", async () => {
+    const noteFor = async (model: string) =>
+      (await runNotes([requestEnd(250_000), toolUse(), idle()], "200000", undefined, model)).notes;
+    const rest =
+      "Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.";
+    expect(await noteFor("claude-sonnet-4-6")).toEqual([
+      {
+        type: "user.message",
+        text: `Context is 250,000 tokens (25% of the 1,000,000-token window). ${rest}`,
+      },
+    ]);
+    expect(await noteFor("made-up-model")).toEqual([
+      { type: "user.message", text: `Context is 250,000 tokens. ${rest}` },
+    ]);
   });
 
   test("no-op below the threshold, then fires once it is crossed", async () => {
@@ -1612,14 +1629,17 @@ describe("ClaudeManagedAdapter — one-time context-bound note", () => {
       [requestEnd(199_999), toolUse(), requestEnd(205_000), toolUse(), idle()],
       "200000",
     );
-    expect(notes).toEqual([{ type: "user.message", text: await renderContextBoundNote(205_000) }]);
+    expect(notes).toEqual([
+      { type: "user.message", text: await renderContextBoundNote(205_000, "claude-sonnet-4-6") },
+    ]);
   });
 
-  test("off at 0", async () => {
+  test("off at 0 and when unset", async () => {
     const events = () => [requestEnd(500_000), toolUse(), idle()];
     expect((await runNotes(events(), "0")).notes).toEqual([]);
-    // Control: the same session with the default threshold gets the note.
-    expect((await runNotes(events(), "")).notes).toHaveLength(1);
+    expect((await runNotes(events(), "")).notes).toEqual([]);
+    // Control: the same session with a threshold gets the note.
+    expect((await runNotes(events(), "200000")).notes).toHaveLength(1);
   });
 
   test("no note when the request ends the turn without a tool call", async () => {
@@ -1648,7 +1668,9 @@ describe("ClaudeManagedAdapter — one-time context-bound note", () => {
       "200000",
     );
     expect(result.isError).toBe(false);
-    expect(notes).toEqual([{ type: "user.message", text: await renderContextBoundNote(210_000) }]);
+    expect(notes).toEqual([
+      { type: "user.message", text: await renderContextBoundNote(210_000, "claude-sonnet-4-6") },
+    ]);
   });
 
   test("fails open when sending the note rejects", async () => {

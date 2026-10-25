@@ -841,7 +841,7 @@ describe("OpencodeSession — context-bound note", () => {
     expect(host.synthetics).toEqual([
       {
         sessionID: SESSION_ID,
-        text: await renderContextBoundNote(1_000),
+        text: await renderContextBoundNote(1_000, "openrouter/google/gemini-3-flash-preview"),
         delivery: "steer",
         resume: false,
       },
@@ -849,6 +849,35 @@ describe("OpencodeSession — context-bound note", () => {
     expect(host.synthetics[0]?.text).toContain("1,000");
     session.handleOpencodeEvent(succeeded);
     expect((await session.waitForCompletion()).isError).toBe(false);
+  });
+
+  test("the note shows the window share for a known model and omits it for an unknown one", async () => {
+    const noteFor = async (model: string) => {
+      const { session, host } = await startSession(
+        [],
+        testConfig({ model, env: { CONTEXT_BOUND_NOTE_TOKENS: "1000" } }),
+      );
+      session.handleOpencodeEvent(step(SESSION_ID, 524_288));
+      await waitFor(() => host.synthetics.length > 0);
+      session.handleOpencodeEvent(succeeded);
+      await session.waitForCompletion();
+      return host.synthetics[0]?.text;
+    };
+    const rest =
+      "Keep this task bounded: finish the current step, store-progress, and complete or defer instead of starting new exploration.";
+    expect(await noteFor("openrouter/google/gemini-3-flash-preview")).toBe(
+      `Context is 524,288 tokens (50% of the 1,048,576-token window). ${rest}`,
+    );
+    expect(await noteFor("openrouter/made-up/model")).toBe(`Context is 524,288 tokens. ${rest}`);
+  });
+
+  test("off when CONTEXT_BOUND_NOTE_TOKENS is unset", async () => {
+    const { session, host } = await startSession([]);
+    session.handleOpencodeEvent(step(SESSION_ID, 900_000));
+    await Bun.sleep(20);
+    expect(host.synthetics).toEqual([]);
+    session.handleOpencodeEvent(succeeded);
+    await session.waitForCompletion();
   });
 
   test("no-op below the threshold and for a child session's steps", async () => {

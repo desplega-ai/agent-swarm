@@ -552,6 +552,7 @@ export class OpencodeSession implements ProviderSession {
     });
     this.observeContextBound = createContextBoundNote({
       threshold: contextBoundNoteThreshold(swarm.env ?? process.env),
+      model: () => this.model,
       canDeliver: () => !this.completed && !this.aborted,
       // A steer is promoted at the next step boundary mid-work; `resume: false`
       // leaves an idle session idle. Same route as OpenCode's own Plan reminder.

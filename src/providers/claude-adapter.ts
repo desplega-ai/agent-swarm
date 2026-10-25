@@ -1282,7 +1282,11 @@ class ClaudeSession implements ProviderSession {
         normalized.requestContextTokens !== this.lastContextTokens
       ) {
         this.lastContextTokens = normalized.requestContextTokens;
-        recordContextState(getTaskFilePath(this.taskFileKey), normalized.requestContextTokens);
+        recordContextState(
+          getTaskFilePath(this.taskFileKey),
+          normalized.requestContextTokens,
+          this.model,
+        );
       }
       this.transcript.push(...normalized.transcriptEntries);
       for (const event of normalized.events) this.emit(event);

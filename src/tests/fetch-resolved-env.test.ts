@@ -14,6 +14,7 @@ import {
   fetchResolvedEnv,
   RELOADABLE_ENV_KEYS,
 } from "../commands/runner";
+import { contextBoundNoteThreshold } from "../hooks/context-bound-note";
 import { checkCodexCredentials } from "../providers/codex-adapter";
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
@@ -792,6 +793,22 @@ describe("agent-scoped PI_CODEMODE_MODELS reaches the worker env", () => {
     const changed = applyResolvedEnvToProcessEnv(result.env);
     expect(changed).toContain("PI_CODEMODE_MODELS");
     expect(process.env.PI_CODEMODE_MODELS).toBe("true");
+  });
+});
+
+describe("agent-scoped CONTEXT_BOUND_NOTE_TOKENS turns the note on for one agent", () => {
+  // Each session's env is this agent's /api/config/resolved result (global,
+  // then agent, then repo rows), and every adapter reads the threshold from it.
+  test("the agent with the row gets the threshold; an agent without it stays off", async () => {
+    mockResponsesByAgentId.set("bound-note-pilot", {
+      status: 200,
+      body: { configs: [{ key: "CONTEXT_BOUND_NOTE_TOKENS", value: "150000" }] },
+    });
+    const baseEnv: Record<string, string | undefined> = {};
+    const pilot = await fetchResolvedEnv(testUrl, "key", "bound-note-pilot", baseEnv);
+    const other = await fetchResolvedEnv(testUrl, "key", "bound-note-other", baseEnv);
+    expect(contextBoundNoteThreshold(pilot.env)).toBe(150_000);
+    expect(contextBoundNoteThreshold(other.env)).toBe(0);
   });
 });
 

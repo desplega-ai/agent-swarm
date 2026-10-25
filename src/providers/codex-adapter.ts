@@ -1020,6 +1020,7 @@ export class CodexSession implements ProviderSession {
     this.logFileHandle = Bun.file(config.logFile).writer();
     this.observeContextBound = createContextBoundNote({
       threshold: contextBoundNoteThreshold(config.env ?? process.env),
+      model: () => this.resolvedModel,
       // `turn/steer` only joins the active turn, so a late note never starts one.
       canDeliver: () => this.acceptsSteering && !this.settled && !this.aborted,
       inject: (note) => this.deliverSteering({ mode: "steer", text: note }),
