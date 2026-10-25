@@ -11,6 +11,7 @@ import type {
   HealthResponse,
   MeResponse,
   RegisterResponse,
+  ShareCreateResult,
   SignedUrlDisposition,
   SignedUrlResult,
 } from "./types";
@@ -179,6 +180,20 @@ export class AgentFsClient {
     options: { disposition?: SignedUrlDisposition; expiresIn?: number } = {},
   ): Promise<SignedUrlResult> {
     return this.callOp<SignedUrlResult>(orgId, "signed-url", { path, ...options }, driveId);
+  }
+
+  /**
+   * Make a public, read-only link (feature `share-links`). A file gets
+   * `/share/<token>`, a folder `/site/<token>/`. agent-fs defaults to 24
+   * hours and allows 7 days at most.
+   */
+  async createShare(
+    orgId: string,
+    driveId: string,
+    path: string,
+    options: { expiresIn?: number } = {},
+  ): Promise<ShareCreateResult> {
+    return this.callOp<ShareCreateResult>(orgId, "share-create", { path, ...options }, driveId);
   }
 
   /**

@@ -263,6 +263,23 @@ export interface SearchResult {
   tookMs?: number;
 }
 
+/** Result of the core `share-create` op (feature `share-links`). */
+export interface ShareCreateResult {
+  id: string;
+  /** `file` for a file. `site` for a folder (`/site/<token>/`). Absent on older servers. */
+  kind?: "file" | "site";
+  /** Absolute when the server knows its public address, else the same as `sharePath`. */
+  url: string;
+  /** Host-relative link: `/share/<token>` for a file, `/site/<token>/` for a folder. */
+  sharePath: string;
+  path: string;
+  expiresIn: number;
+  /** ISO time. */
+  expiresAt: string;
+  /** `null` = unlimited views. */
+  maxViews: number | null;
+}
+
 /** Mirrors the `disposition` param of the core `signed-url` op. */
 export type SignedUrlDisposition = "inline" | "attachment";
 

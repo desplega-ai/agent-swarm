@@ -5,6 +5,7 @@ import { UpdatedChip } from "@/components/comb/live-indicator";
 import { PinButton } from "@/components/comb/pin-button";
 import { PresenceAvatars } from "@/components/comb/presence-avatars";
 import { VersionsMenu } from "@/components/comb/review/versions-menu";
+import { ShareButton } from "@/components/comb/share-dialog";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import type { StatResult } from "@/lib/agent-fs/types";
@@ -61,7 +62,7 @@ function FileFacts({ file, stat }: { file: DrivePath; stat: StatResult }) {
 
 /**
  * The other people on the file, then its actions as icon buttons: Versions,
- * Pin, Download, Open in agent-fs.
+ * Pin, Share link, Download, Open in agent-fs.
  */
 export function FileActions({ file }: { file: DrivePath }) {
   const stat = useFileStat(file);
@@ -72,6 +73,7 @@ export function FileActions({ file }: { file: DrivePath }) {
       {/* step-10: Versions menu (compare an older version with the current one). */}
       <VersionsMenu file={file} stat={stat} />
       <PinButton target={file} className="size-8" />
+      <ShareButton file={file} />
       <DownloadButton file={file} bytes={stat.size} iconOnly />
       <OpenInAgentFsButton target={file} iconOnly />
     </>
