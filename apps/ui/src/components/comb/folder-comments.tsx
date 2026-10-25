@@ -95,7 +95,7 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
   );
 }
 
-/** Pending or Processing, else "Sent" for a thread the swarm got (and answered or finished). */
+/** "Processing", else "Sent" for a thread the swarm got (and answered or finished). */
 function FolderThreadState({
   state,
   sent,

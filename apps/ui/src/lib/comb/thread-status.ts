@@ -1,6 +1,6 @@
-// Where a comment thread stands with the swarm. "Pending": an open `@swarm`
-// comment that was not sent yet (the rule "Send N" uses). "Processing": a
-// sent comment whose task has not finished and that nobody answered yet.
+// Where a comment thread stands with the swarm. "Unsent": an open comment
+// that was not sent yet (the rule "Send to swarm" uses). "Processing": a sent
+// comment whose task has not finished and that nobody answered yet.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
@@ -11,7 +11,7 @@ import { sentReplyTaskId } from "./markers";
 
 export type SwarmThreadStatus =
   | { kind: "none" }
-  | { kind: "pending" }
+  | { kind: "unsent" }
   /**
    * `answered`: a reply came after the "sent" reply from someone other than
    * the thread's author (the lead, or an agent it delegated to).
@@ -22,7 +22,7 @@ export type SwarmThreadStatus =
  * A thread's status with the swarm. The newest "sent" reply
  * (`sentReplyTaskId`) wins. A reply by the thread's own author (a follow-up
  * while it waits) does not count as an answer. Without a "sent" reply, the
- * thread is pending when "Send to swarm" offers it (`canSendThread`).
+ * thread is unsent when "Send to swarm" offers it (`canSendThread`).
  */
 export function swarmThreadStatus(
   thread: CommentListEntry,
@@ -40,7 +40,7 @@ export function swarmThreadStatus(
     }
   }
   if (taskId) return { kind: "sent", taskId, answered };
-  return canSendThread(thread, serviceUserId) ? { kind: "pending" } : { kind: "none" };
+  return canSendThread(thread, serviceUserId) ? { kind: "unsent" } : { kind: "none" };
 }
 
 /** The task to watch for "Processing": an open thread that was sent and not answered yet. */
@@ -58,10 +58,10 @@ export function isTaskUnfinished(status: string | null | undefined): boolean {
   return status != null && !(TERMINAL_STATUSES as ReadonlySet<string>).has(status);
 }
 
-export type ThreadSwarmState = { kind: "pending" } | { kind: "processing"; taskId: string };
+export type ThreadSwarmState = { kind: "unsent" } | { kind: "processing"; taskId: string };
 
 /**
- * The pending and processing threads of a list, by thread id. `taskStatus`
+ * The unsent and processing threads of a list, by thread id. `taskStatus`
  * answers the status of a watched task (undefined while unknown). Threads
  * with neither state are absent.
  */
@@ -74,8 +74,8 @@ export function threadSwarmStates(
   for (const thread of threads) {
     if (thread.resolved) continue;
     const status = swarmThreadStatus(thread, serviceUserId);
-    if (status.kind === "pending") {
-      states.set(thread.id, { kind: "pending" });
+    if (status.kind === "unsent") {
+      states.set(thread.id, { kind: "unsent" });
     } else if (
       status.kind === "sent" &&
       !status.answered &&

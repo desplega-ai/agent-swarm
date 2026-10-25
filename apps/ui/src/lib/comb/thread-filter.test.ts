@@ -89,7 +89,7 @@ describe("threadMatchesSearch", () => {
 });
 
 describe("threadMatchesFilter", () => {
-  const pending = thread({ body: "@swarm add a risk" });
+  const unsent = thread({ body: "@swarm add a risk" });
   const processing = thread({ body: "@swarm tighten" });
   const mentionsMe = thread({ author: "u-bob", mentions: [mention("u-ann")] });
   const replyMentionsMe = thread({ author: "u-bob" }, [
@@ -97,7 +97,7 @@ describe("threadMatchesFilter", () => {
   ]);
   const bobs = thread({ author: "u-bob" });
   const states = new Map<string, ThreadSwarmState>([
-    [pending.id, { kind: "pending" }],
+    [unsent.id, { kind: "unsent" }],
     [processing.id, { kind: "processing", taskId: "t1" }],
   ]);
   const facts: FilterFacts = { me: "u-ann", states };
@@ -107,14 +107,14 @@ describe("threadMatchesFilter", () => {
   }
 
   test("all matches everything", () => {
-    for (const t of [pending, processing, mentionsMe, bobs]) {
+    for (const t of [unsent, processing, mentionsMe, bobs]) {
       expect(threadMatchesFilter(t, "all", facts)).toBe(true);
     }
   });
 
-  test("pending and processing read the swarm states", () => {
-    expect(threadMatchesFilter(pending, "pending", facts)).toBe(true);
-    expect(threadMatchesFilter(processing, "pending", facts)).toBe(false);
+  test("unsent and processing read the swarm states", () => {
+    expect(threadMatchesFilter(unsent, "unsent", facts)).toBe(true);
+    expect(threadMatchesFilter(processing, "unsent", facts)).toBe(false);
     expect(threadMatchesFilter(processing, "processing", facts)).toBe(true);
     expect(threadMatchesFilter(bobs, "processing", facts)).toBe(false);
   });
@@ -126,14 +126,14 @@ describe("threadMatchesFilter", () => {
   });
 
   test("mine: the connected user wrote the root", () => {
-    expect(threadMatchesFilter(pending, "mine", facts)).toBe(true);
+    expect(threadMatchesFilter(unsent, "mine", facts)).toBe(true);
     expect(threadMatchesFilter(bobs, "mine", facts)).toBe(false);
   });
 
   test("without a connected user, mentions me and mine match nothing", () => {
     const anonymous: FilterFacts = { me: null, states };
     expect(threadMatchesFilter(mentionsMe, "mentions", anonymous)).toBe(false);
-    expect(threadMatchesFilter(pending, "mine", anonymous)).toBe(false);
+    expect(threadMatchesFilter(unsent, "mine", anonymous)).toBe(false);
   });
 });
 
@@ -143,7 +143,7 @@ describe("filterThreads and countByFilter", () => {
   const c = thread({ body: "Cost looks fine", author: "u-bob" });
   const facts: FilterFacts = {
     me: "u-ann",
-    states: new Map<string, ThreadSwarmState>([[a.id, { kind: "pending" }]]),
+    states: new Map<string, ThreadSwarmState>([[a.id, { kind: "unsent" }]]),
   };
 
   test("keeps the threads that match both the search and the filter, in order", () => {
@@ -152,7 +152,7 @@ describe("filterThreads and countByFilter", () => {
       c,
     ]);
     expect(
-      filterThreads([a, b, c], { needle: "cost", filter: "pending" }, facts, authorName),
+      filterThreads([a, b, c], { needle: "cost", filter: "unsent" }, facts, authorName),
     ).toEqual([a]);
     expect(filterThreads([a, b, c], { needle: "", filter: "all" }, facts, authorName)).toEqual([
       a,
@@ -164,14 +164,14 @@ describe("filterThreads and countByFilter", () => {
   test("counts each filter with the search applied", () => {
     expect(countByFilter([a, b, c], "", facts, authorName)).toEqual({
       all: 3,
-      pending: 1,
+      unsent: 1,
       processing: 0,
       mentions: 0,
       mine: 1,
     });
     expect(countByFilter([a, b, c], "bob", facts, authorName)).toEqual({
       all: 2,
-      pending: 0,
+      unsent: 0,
       processing: 0,
       mentions: 0,
       mine: 0,

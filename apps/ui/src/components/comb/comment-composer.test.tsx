@@ -116,7 +116,7 @@ async function typeAndSend(container: HTMLElement, text: string) {
   await clickSend(container);
 }
 
-async function clickSend(container: HTMLElement, label = "Send") {
+async function clickSend(container: HTMLElement, label = "Add comment") {
   const send = [...container.querySelectorAll("button")].find((b) =>
     b.textContent?.includes(label),
   );
@@ -164,7 +164,7 @@ describe("CommentComposer send errors", () => {
       expect(outboxAdds).toEqual([
         [{ path: "comb-qa/notes.md", body: "Tighten this" }, error.message],
       ]);
-      expect(toastWarning).toHaveBeenCalledWith("Not sent. Kept in Comments.");
+      expect(toastWarning).toHaveBeenCalledWith("Not saved. Kept in Comments.");
       expect(onClose).toHaveBeenCalledTimes(1);
       await act(async () => root.unmount());
     }

@@ -3403,6 +3403,8 @@ export interface CombReviewBatchInput {
   commentIds: string[];
   /** The file or folder the batch is sent from ("/docs/a.md", "/docs/"). */
   scopePath: string;
+  /** A note for the lead about the whole batch, at most `COMB_NOTE_MAX` characters. */
+  note?: string;
 }
 
 export interface CombReviewBatchResult {

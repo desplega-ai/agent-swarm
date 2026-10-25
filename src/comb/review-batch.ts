@@ -32,6 +32,8 @@ import "./templates";
 
 /** Most comments one batch may carry. */
 export const REVIEW_BATCH_MAX = 50;
+/** Longest note for the lead about a whole batch (the UI's `COMB_NOTE_MAX`). */
+export const REVIEW_NOTE_MAX = 4000;
 /** Most agent-fs reads one batch runs at the same time (they use the bootstrap key). */
 export const REVIEW_BATCH_READ_CONCURRENCY = 5;
 
@@ -63,6 +65,8 @@ export interface ReviewBatchInput {
   commentIds: string[];
   /** The file or folder the batch was sent from. */
   scopePath: string;
+  /** The sender's note for the lead about the whole batch. Blank means none. */
+  note?: string;
   requestedByUserId: string | null;
 }
 
@@ -122,6 +126,9 @@ export async function sendReviewBatch(
   const ids = [...new Set(input.commentIds)];
   if (ids.length === 0 || ids.length > REVIEW_BATCH_MAX) {
     throw new ReviewBatchError(400, `Send between 1 and ${REVIEW_BATCH_MAX} comments`);
+  }
+  if ((input.note?.length ?? 0) > REVIEW_NOTE_MAX) {
+    throw new ReviewBatchError(400, `The note is longer than ${REVIEW_NOTE_MAX} characters`);
   }
   const agentFs = combAgentFs();
   if (!agentFs) throw new ReviewBatchError(503, "agent-fs is not set up for this swarm");
@@ -440,6 +447,7 @@ async function renderTaskText(
     requested_by: await requesterLabel(input.requestedByUserId),
     org_id: input.orgId,
     drive_id: input.driveId,
+    note_block: noteBlock(input.note),
     comments_block: blocks.join("\n"),
   });
   return batch.skipped ? null : batch.text;
@@ -462,6 +470,12 @@ function lineRange(comment: AgentFsComment): string {
  * Human text as data: an indented fenced block that the text cannot close.
  * The fence is longer than the longest backtick run in the text.
  */
+/** The sender's note in a fenced block, or "" when there is none. */
+function noteBlock(note: string | undefined): string {
+  const text = note?.trim();
+  return text ? `\nNote from the sender, about all the comments:\n${fenced(text)}\n` : "";
+}
+
 function fenced(text: string): string {
   const longest = (text.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
   const fence = "`".repeat(Math.max(3, longest + 1));

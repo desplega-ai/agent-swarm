@@ -5640,7 +5640,7 @@ export interface paths {
         put?: never;
         /**
          * Send agent-fs comments to the swarm as one lead task
-         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
          */
         post: {
             parameters: {
@@ -5656,6 +5656,7 @@ export interface paths {
                         driveId: string;
                         commentIds: string[];
                         scopePath: string;
+                        note?: string;
                     };
                 };
             };

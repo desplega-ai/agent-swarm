@@ -8,13 +8,13 @@ import type { DomTextSpace } from "@/lib/comb/dom-text-space";
 const NAMES = {
   anchored: "comb-comment",
   moved: "comb-comment-moved",
-  pending: "comb-comment-pending",
+  flagged: "comb-comment-pending",
   active: "comb-comment-active",
 } as const;
 
 // Older browsers: a class on the blocks that hold the passage instead.
 const FALLBACK_CLASS = "comb-comment-fallback";
-const FALLBACK_PENDING_CLASS = "comb-comment-fallback-pending";
+const FALLBACK_FLAGGED_CLASS = "comb-comment-fallback-pending";
 const FALLBACK_ACTIVE_CLASS = "comb-comment-fallback-active";
 
 function supportsHighlights(): boolean {
@@ -27,8 +27,8 @@ interface CommentHighlightsProps {
   anchors: Map<string, AnchorResolution>;
   /** Comments to paint (the open threads the rail's search and filter show). */
   paintIds: ReadonlySet<string>;
-  /** Painted comments in the pending style (`@swarm`, not sent yet). */
-  pendingIds: ReadonlySet<string>;
+  /** Painted comments in the flagged style (`@swarm`, not sent yet). */
+  flaggedIds: ReadonlySet<string>;
   /** Painted in the active style, open or not: the selected card, the hovered card. */
   emphasizedIds: ReadonlySet<string>;
   /** The passage a new comment is being written on. */
@@ -45,7 +45,7 @@ export function CommentHighlights({
   space,
   anchors,
   paintIds,
-  pendingIds,
+  flaggedIds,
   emphasizedIds,
   pending,
   onHover,
@@ -64,7 +64,7 @@ export function CommentHighlights({
     const groups: Record<keyof typeof NAMES, Range[]> = {
       anchored: [],
       moved: [],
-      pending: [],
+      flagged: [],
       active: [],
     };
     const marked: Element[] = [];
@@ -84,9 +84,9 @@ export function CommentHighlights({
       const parts = space.toRanges(resolution.start, resolution.end);
       if (parts.length === 0) return;
       ranges.set(id, { ranges: parts, length: resolution.end - resolution.start });
-      // A pending passage keeps the pending style when it moved: the card says "Moved".
-      const style = pendingIds.has(id)
-        ? "pending"
+      // A flagged passage keeps the flagged style when it moved: the card says "Moved".
+      const style = flaggedIds.has(id)
+        ? "flagged"
         : resolution.status === "moved"
           ? "moved"
           : "anchored";
@@ -98,8 +98,8 @@ export function CommentHighlights({
           resolution.end,
           emphasized
             ? FALLBACK_ACTIVE_CLASS
-            : style === "pending"
-              ? FALLBACK_PENDING_CLASS
+            : style === "flagged"
+              ? FALLBACK_FLAGGED_CLASS
               : FALLBACK_CLASS,
         );
       }
@@ -122,10 +122,10 @@ export function CommentHighlights({
     return () => {
       if (native) for (const name of Object.values(NAMES)) CSS.highlights.delete(name);
       for (const el of marked) {
-        el.classList.remove(FALLBACK_CLASS, FALLBACK_PENDING_CLASS, FALLBACK_ACTIVE_CLASS);
+        el.classList.remove(FALLBACK_CLASS, FALLBACK_FLAGGED_CLASS, FALLBACK_ACTIVE_CLASS);
       }
     };
-  }, [space, anchors, paintIds, pendingIds, emphasizedIds, pending]);
+  }, [space, anchors, paintIds, flaggedIds, emphasizedIds, pending]);
 
   // Pointer hit-testing over the painted ranges (the smallest range wins).
   useEffect(() => {

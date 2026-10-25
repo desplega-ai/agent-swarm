@@ -1,4 +1,4 @@
-import { Check, SendHorizontal } from "lucide-react";
+import { Check, Plus, Reply } from "lucide-react";
 import {
   type MutableRefObject,
   type ReactNode,
@@ -99,9 +99,18 @@ interface CommentComposerProps {
 }
 
 /**
- * Write a comment. Cmd/Ctrl+Enter sends. Escape closes and keeps the draft,
+ * The submit label. Adding a comment only saves it: "Send to swarm" is a
+ * separate step, so the word "Send" stays out of the composer.
+ */
+function submitLabel(target: ComposerTarget): string {
+  if (target.kind === "edit") return "Save";
+  return target.kind === "reply" ? "Reply" : "Add comment";
+}
+
+/**
+ * Write a comment. Cmd/Ctrl+Enter saves it. Escape closes and keeps the draft,
  * Cancel drops it. The text is saved as a draft while typing (7 days). A
- * network error or a 5xx moves the comment to the outbox ("Not sent" in the
+ * network error or a 5xx moves the comment to the outbox ("Not saved" in the
  * rail). A 403 marks the rail read-only. Read-only renders nothing: the rail
  * shows the notice.
  *
@@ -209,7 +218,7 @@ export function CommentComposer({
     }
   };
 
-  const send = async () => {
+  const submit = async () => {
     const text = body.trim();
     if (!text || pending) return;
     if (target.kind === "edit") {
@@ -232,7 +241,7 @@ export function CommentComposer({
           break;
         case "outbox":
           outbox.add(params, errorMessage(err));
-          toast.warning("Not sent. Kept in Comments.");
+          toast.warning("Not saved. Kept in Comments.");
           finish();
           break;
         case "inline":
@@ -264,7 +273,7 @@ export function CommentComposer({
             }
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
               event.preventDefault();
-              void send();
+              void submit();
             } else if (event.key === "Escape") {
               event.preventDefault();
               event.stopPropagation();
@@ -287,12 +296,12 @@ export function CommentComposer({
         <Button
           type="button"
           size="sm"
-          onClick={() => void send()}
+          onClick={() => void submit()}
           disabled={!body.trim() || pending}
           aria-keyshortcuts="Meta+Enter Control+Enter"
         >
-          {editing ? <Check /> : <SendHorizontal />}
-          {editing ? "Save" : "Send"}
+          {editing ? <Check /> : target.kind === "reply" ? <Reply /> : <Plus />}
+          {submitLabel(target)}
           <Kbd tone="inverted" aria-hidden className="hidden sm:inline-flex">
             ⌘⏎
           </Kbd>

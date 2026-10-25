@@ -15,51 +15,28 @@ export function ProcessingDot({ className }: { className?: string }) {
   );
 }
 
-/** The pending dot: the info tone of the `@swarm` chip. */
-export function PendingDot({ className }: { className?: string }) {
-  return (
-    <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full bg-status-info", className)} />
-  );
-}
-
-const LABEL_CLASS = {
-  pending: "text-status-info-strong",
-  processing: "text-status-active-strong",
-} as const;
-
 /**
- * A thread's swarm state as a dot and a word: "Pending" or "Processing".
- * For rows that are already a link (the folder's comment list).
+ * A thread's swarm state as a dot and a word: "Processing". Unsent threads
+ * show nothing (the rail's send bar counts them). For rows that are already a
+ * link (the folder's comment list).
  */
 export function SwarmStateTag({ state }: { state: ThreadSwarmState }) {
+  if (state.kind !== "processing") return null;
   return (
-    <span
-      className={cn(
-        "flex shrink-0 items-center gap-1.5 text-xs font-medium",
-        LABEL_CLASS[state.kind],
-      )}
-    >
-      {state.kind === "pending" ? <PendingDot /> : <ProcessingDot />}
-      {state.kind === "pending" ? "Pending" : "Processing"}
+    <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-status-active-strong">
+      <ProcessingDot />
+      Processing
     </span>
   );
 }
 
 /**
- * The thread card's state line under its header. Pending: the comment has
- * `@swarm` and was not sent. Processing: a link to the task the swarm works
- * on. Clicks stay on the link, not the card.
+ * The thread card's state line under its header while the swarm works on
+ * it: a link to the task. Unsent threads show nothing. Clicks stay on the
+ * link, not the card.
  */
 export function SwarmStateLine({ state }: { state: ThreadSwarmState }) {
-  if (state.kind === "pending") {
-    return (
-      <p className="flex items-center gap-1.5 text-xs">
-        <PendingDot />
-        <span className={cn("font-medium", LABEL_CLASS.pending)}>Pending</span>
-        <span className="text-muted-foreground">Not sent to the swarm yet</span>
-      </p>
-    );
-  }
+  if (state.kind !== "processing") return null;
   return (
     <Link
       to={`/tasks/${state.taskId}`}
@@ -67,7 +44,7 @@ export function SwarmStateLine({ state }: { state: ThreadSwarmState }) {
       className="flex w-fit items-center gap-1.5 rounded-sm text-xs underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
     >
       <ProcessingDot />
-      <span className={cn("font-medium", LABEL_CLASS.processing)}>Processing</span>
+      <span className="font-medium text-status-active-strong">Processing</span>
       <span className="text-muted-foreground">
         task <span className="font-mono">{state.taskId.slice(0, 8)}</span>
       </span>

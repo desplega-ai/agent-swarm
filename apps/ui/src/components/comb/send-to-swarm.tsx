@@ -1,5 +1,5 @@
 import { Send } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { CombSendError } from "@/api/client";
@@ -19,10 +19,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CommentListEntry } from "@/lib/agent-fs/types";
 import {
+  batchNote,
   COMB_BATCH_MAX,
+  COMB_NOTE_MAX,
   canSendThread,
   eligibleForBatch,
   leadNote,
@@ -99,7 +102,7 @@ function useSendToSwarm(drive: Drive) {
 
 /**
  * Thread action (the comment rail's `threadActions`): "Send to swarm" on an
- * open root comment with `@swarm` that was not sent yet, with a confirm popover.
+ * open root comment that was not sent yet, with a confirm popover.
  */
 export function SendThreadButton({ file, thread }: { file: DrivePath; thread: CommentListEntry }) {
   const serviceUserId = useCombServiceUserId();
@@ -154,16 +157,17 @@ export function SendThreadButton({ file, thread }: { file: DrivePath; thread: Co
 }
 
 /**
- * "Send N to swarm" for a file (the rail's `railHeaderActions`) or a folder
- * (`FolderComments`). N counts open root comments with `@swarm` that were not
- * sent yet. Hidden when N is 0. The dialog lets the human uncheck some.
+ * "Send to swarm" for a file (the rail's send bar, `variant="bar"`) or a
+ * folder (`FolderComments`, "Send N to swarm"). N counts the open root
+ * comments not sent yet. Hidden when N is 0. The dialog lets the human
+ * uncheck some and add a note for the lead.
  */
 export function SendBatchButton({
   drive,
   scopePath,
   threads,
   showPaths = false,
-  compact = false,
+  variant = "header",
 }: {
   drive: Drive;
   /** The file or folder path the batch is sent from. */
@@ -171,8 +175,8 @@ export function SendBatchButton({
   threads: ReadonlyArray<CommentListEntry>;
   /** List each comment's file (a folder batch). */
   showPaths?: boolean;
-  /** Show "Send N" (the narrow rail header). The full label moves to the tooltip. */
-  compact?: boolean;
+  /** `bar`: the primary button of the rail's send bar (the bar shows the count). */
+  variant?: "bar" | "header";
 }) {
   const serviceUserId = useCombServiceUserId();
   const eligible = useMemo(
@@ -189,16 +193,16 @@ export function SendBatchButton({
           <TooltipTrigger asChild>
             <Button
               size="sm"
-              variant="outline"
+              variant={variant === "bar" ? "default" : "outline"}
               aria-label={label}
               className="shrink-0"
               onClick={() => setOpen(true)}
             >
               <Send />
-              {compact ? `Send ${eligible.length}` : label}
+              {variant === "bar" ? "Send to swarm" : label}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Send the open @swarm comments to the lead as one task</TooltipContent>
+          <TooltipContent>Send the open comments to the lead as one task</TooltipContent>
         </Tooltip>
       ) : null}
       {/* Stays mounted while the list refreshes under it. */}
@@ -238,6 +242,8 @@ function SendBatchDialog({
   );
   const selected = listed.filter((thread) => checked.has(thread.id));
   const full = checked.size >= COMB_BATCH_MAX;
+  const [note, setNote] = useState("");
+  const noteId = useId();
 
   const toggle = (id: string) =>
     setChecked((current) => {
@@ -290,6 +296,20 @@ function SendBatchDialog({
             Only the first {COMB_BATCH_MAX} are sent in one batch. Send again for the rest.
           </p>
         ) : null}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={noteId} className="text-xs font-medium text-muted-foreground">
+            Note for the lead (optional)
+          </label>
+          <Textarea
+            id={noteId}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={COMB_NOTE_MAX}
+            rows={2}
+            placeholder="Context for all the comments, if any"
+            className="max-h-40 min-h-14 text-sm"
+          />
+        </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="ghost">Cancel</Button>
@@ -298,7 +318,11 @@ function SendBatchDialog({
             disabled={selected.length === 0 || send.isPending}
             onClick={() =>
               send.mutate(
-                { commentIds: selected.map((thread) => thread.id), scopePath },
+                {
+                  commentIds: selected.map((thread) => thread.id),
+                  scopePath,
+                  note: batchNote(note),
+                },
                 { onSuccess: onClose },
               )
             }

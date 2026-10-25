@@ -14,7 +14,7 @@ import { useCombServiceUserId } from "./use-comb-service-user";
 const PROCESSING_POLL_MS = 10_000;
 
 /**
- * Pending and processing threads by thread id (`threadSwarmStates`). Each
+ * Unsent and processing threads by thread id (`threadSwarmStates`). Each
  * sent, unanswered thread watches its task through the task detail query
  * (`["task", id]`, the key `useTask` uses, so the task page shares it): one
  * request per distinct task, since one send makes one task for all its

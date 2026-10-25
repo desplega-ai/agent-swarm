@@ -297,11 +297,11 @@ export function LeftPanelSheet({ location }: { location: CombLocation }) {
  */
 export function CommentPanel({
   openCount,
-  notSent,
+  notSaved,
   children,
 }: {
   openCount: number;
-  notSent: number;
+  notSaved: number;
   children: ReactNode;
 }) {
   const layout = useCombLayout();
@@ -320,8 +320,8 @@ export function CommentPanel({
     if (linkedId && !open) showRight?.();
   }, [linkedId, open, showRight]);
 
-  const total = openCount + notSent;
-  const label = `Comments (${openCount} open${notSent ? `, ${notSent} not sent` : ""})`;
+  const total = openCount + notSaved;
+  const label = `Comments (${openCount} open${notSaved ? `, ${notSaved} not saved` : ""})`;
   const expand = (event: MouseEvent<HTMLElement>) => {
     if (fromKeyboard(event)) expandTarget.current = collapseRef.current;
     layout?.showRight();
@@ -344,10 +344,10 @@ export function CommentPanel({
           <span aria-hidden className="my-0.5 h-px w-5 bg-border" />
           <PanelButton
             label={label}
-            icon={notSent ? CloudOff : MessageSquare}
+            icon={notSaved ? CloudOff : MessageSquare}
             side="left"
             onClick={expand}
-            className={notSent ? "[&_svg]:text-status-error-strong" : undefined}
+            className={notSaved ? "[&_svg]:text-status-error-strong" : undefined}
           >
             {total > 0 ? (
               <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 font-medium text-[10px] text-foreground tabular-nums ring-2 ring-background">

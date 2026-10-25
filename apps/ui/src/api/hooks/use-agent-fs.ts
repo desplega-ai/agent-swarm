@@ -814,7 +814,7 @@ export function useSendCombReviewBatch(
   const access = useAgentFsAccess();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: Pick<CombReviewBatchInput, "commentIds" | "scopePath">) =>
+    mutationFn: (input: Pick<CombReviewBatchInput, "commentIds" | "scopePath" | "note">) =>
       api.sendCombReviewBatch({ orgId: drive.orgId, driveId: drive.driveId, ...input }),
     onSuccess: callbacks.onSuccess,
     onError: callbacks.onError,

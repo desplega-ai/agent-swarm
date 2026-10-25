@@ -146,9 +146,9 @@ function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
             <ReviewChangesButton file={file} stat={stat} thread={thread} />
           </>
         )}
-        // step-9: "Send N" for every open @swarm thread of the file.
-        railHeaderActions={({ open }) => (
-          <SendBatchButton drive={file} scopePath={file.path} threads={open} compact />
+        // The send bar's "Send to swarm" for the open threads of the file.
+        sendAction={({ open }) => (
+          <SendBatchButton drive={file} scopePath={file.path} threads={open} variant="bar" />
         )}
       />
     </div>

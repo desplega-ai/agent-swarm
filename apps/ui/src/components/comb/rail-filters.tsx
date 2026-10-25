@@ -13,7 +13,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { COMMENT_FILTERS, type CommentFilter } from "@/lib/comb/thread-filter";
 import { cn } from "@/lib/utils";
-import { PendingDot } from "./swarm-state";
 
 /** An icon button of the rail header. `on`: it holds a value (a search, a filter). */
 function RailIconButton({
@@ -154,38 +153,38 @@ export function FilterMenu({
 }
 
 /**
- * "N pending" over the list while open `@swarm` comments wait to be sent,
- * with the send action (`children`, the rail's "Send N"). The count shows
- * the pending comments (it sets the Pending filter, or clears it).
+ * The send bar under the comment list, while open comments wait to be sent:
+ * "N not sent" (it sets the Not sent filter, or clears it) and the send
+ * action (`children`, the rail's "Send to swarm"). Like the page feedback
+ * panel: comments are drafts for the swarm until one send takes them.
  */
-export function PendingSummary({
+export function SendBar({
   count,
   showing,
   onShow,
   children,
 }: {
   count: number;
-  /** The Pending filter is on. */
+  /** The Not sent filter is on. */
   showing: boolean;
   onShow: () => void;
   children: ReactNode;
 }) {
   return (
-    <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-status-info/5 px-3 py-2">
+    <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border-subtle px-3 py-2.5">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             aria-pressed={showing}
             onClick={onShow}
-            className="flex items-center gap-1.5 rounded-sm text-xs font-medium text-status-info-strong underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+            className="rounded-sm text-xs text-muted-foreground tabular-nums underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 aria-pressed:font-medium aria-pressed:text-foreground"
           >
-            <PendingDot />
-            {count} pending
+            {count} not sent
           </button>
         </TooltipTrigger>
         <TooltipContent>
-          {showing ? "Show all comments" : "Show the @swarm comments not sent yet"}
+          {showing ? "Show all comments" : "Show the comments not sent to the swarm"}
         </TooltipContent>
       </Tooltip>
       {children}

@@ -47,6 +47,7 @@ import { COMMENT_LIST_MAX, commentAuthorNames } from "@/lib/comb/comments";
 import type { DomTextSpace } from "@/lib/comb/dom-text-space";
 import { browserStorage, type OutboxEntry, sweepExpiredDrafts } from "@/lib/comb/drafts";
 import { getFileKind } from "@/lib/comb/file-kinds";
+import { hasSwarmMarker } from "@/lib/comb/markers";
 import { PANELS_INLINE_QUERY } from "@/lib/comb/panels";
 import type { DrivePath } from "@/lib/comb/paths";
 import {
@@ -75,13 +76,7 @@ import { CommentHighlights } from "./comment-highlights";
 import { CommentThread } from "./comment-thread";
 import { PassageMarkers } from "./passage-markers";
 import { QuoteExcerpt } from "./quote-excerpt";
-import {
-  CommentSearch,
-  FilterMenu,
-  FilterSummary,
-  PendingSummary,
-  SearchToggle,
-} from "./rail-filters";
+import { CommentSearch, FilterMenu, FilterSummary, SearchToggle, SendBar } from "./rail-filters";
 import { SelectionCommentButton } from "./selection-comment-button";
 import { CommentPanel } from "./side-panels";
 import { useAuthorLabel } from "./use-author-label";
@@ -118,11 +113,11 @@ export interface CommentRailProps {
   /** Thread actions mount point: step-9 "Send to swarm", step-10 "Review changes". */
   threadActions?: (thread: CommentListEntry) => ReactNode;
   /**
-   * Rail header mount point: step-9 "Send N to swarm". `open` = the open
-   * threads. It shows in the "N pending" summary, which is there only while
-   * pending comments exist.
+   * Send bar mount point: "Send to swarm" for the file. `open` = the open
+   * threads. It shows in the "N not sent" bar under the list, which is there
+   * only while open comments wait to be sent.
    */
-  railHeaderActions?: (ctx: { file: DrivePath; open: CommentListEntry[] }) => ReactNode;
+  sendAction?: (ctx: { file: DrivePath; open: CommentListEntry[] }) => ReactNode;
   /** Composer mount point: step-8 mention picker. Every composer of the file gets it. */
   renderComposerExtras?: (ctx: ComposerExtrasContext) => ReactNode;
   /**
@@ -142,8 +137,8 @@ export interface CommentRailProps {
 
 /**
  * Comments on one file: the right-hand rail (Open / Resolved threads, search
- * and filters, the "N pending" summary, a file-level composer, the "Not sent"
- * outbox), the text-selection "Comment" button, and the passage highlights
+ * and filters, a file-level composer, the "Not saved" outbox, the "N not
+ * sent" send bar), the text-selection "Comment" button, and the passage highlights
  * and processing markers in the viewer pane. Below `lg` the rail is a bottom
  * sheet.
  *
@@ -156,7 +151,7 @@ export function CommentRail({
   stat,
   viewerRef,
   threadActions,
-  railHeaderActions,
+  sendAction,
   renderComposerExtras,
   readOnly,
   onReadOnly,
@@ -342,19 +337,21 @@ export function CommentRail({
   }, [retryAll]);
 
   // The page matches the list: only the open threads the search and the
-  // filter show are painted, pending ones in their own style, processing
-  // ones with a marker.
+  // filter show are painted, unsent `@swarm` ones in their own style,
+  // processing ones with a marker.
   const paintIds = useMemo(() => new Set(shownOpen.map((thread) => thread.id)), [shownOpen]);
-  const [pendingIds, processingIds] = useMemo(() => {
-    const byKind = { pending: new Set<string>(), processing: new Set<string>() };
+  const [flaggedIds, processingIds] = useMemo(() => {
+    const flagged = new Set<string>();
+    const processing = new Set<string>();
     for (const thread of shownOpen) {
-      const state = states.get(thread.id);
-      if (state) byKind[state.kind].add(thread.id);
+      const kind = states.get(thread.id)?.kind;
+      if (kind === "processing") processing.add(thread.id);
+      else if (kind === "unsent" && hasSwarmMarker(thread.body)) flagged.add(thread.id);
     }
-    return [byKind.pending, byKind.processing] as const;
+    return [flagged, processing] as const;
   }, [shownOpen, states]);
-  const pendingCount = useMemo(
-    () => open.filter((thread) => states.get(thread.id)?.kind === "pending").length,
+  const unsentCount = useMemo(
+    () => open.filter((thread) => states.get(thread.id)?.kind === "unsent").length,
     [open, states],
   );
   // The selected card stays emphasized only while the list shows it.
@@ -408,12 +405,12 @@ export function CommentRail({
       totals={{ open: open.length, resolved: resolved.length }}
       query={railQuery}
       states={states}
-      pendingCount={pendingCount}
-      onShowPending={() => {
-        if (filter === "pending") {
+      unsentCount={unsentCount}
+      onShowUnsent={() => {
+        if (filter === "unsent") {
           setFilter("all");
         } else {
-          setFilter("pending");
+          setFilter("unsent");
           setTab("open");
         }
       }}
@@ -428,11 +425,11 @@ export function CommentRail({
       onCardHover={(id) => setHover(id ? { id, from: "card" } : null)}
       canAnchor={space !== null}
       listRef={listRef}
-      header={railHeaderActions?.({ file, open })}
+      sendAction={sendAction?.({ file, open })}
       threadActions={threadActions}
     />
   );
-  const notSent = outbox.entries.length;
+  const notSaved = outbox.entries.length;
 
   return (
     <CommentContextProvider value={context}>
@@ -441,7 +438,7 @@ export function CommentRail({
         space={space}
         anchors={anchors}
         paintIds={paintIds}
-        pendingIds={pendingIds}
+        flaggedIds={flaggedIds}
         emphasizedIds={emphasizedIds}
         pending={pending}
         onHover={(id) =>
@@ -455,7 +452,7 @@ export function CommentRail({
       <SelectionCommentButton rootRef={viewerRef} space={space} onPendingChange={setPending} />
       {wide ? (
         // The collapsible outer container (title row, collapse, icon strip): side-panels.tsx.
-        <CommentPanel openCount={open.length} notSent={notSent}>
+        <CommentPanel openCount={open.length} notSaved={notSaved}>
           {rail}
         </CommentPanel>
       ) : (
@@ -465,10 +462,10 @@ export function CommentRail({
               variant="outline"
               size="sm"
               className="fixed right-4 bottom-4 z-30 shadow-sm"
-              aria-label={`Comments (${open.length} open${notSent ? `, ${notSent} not sent` : ""})`}
+              aria-label={`Comments (${open.length} open${notSaved ? `, ${notSaved} not saved` : ""})`}
             >
-              {notSent ? <CloudOff className="text-status-error-strong" /> : <MessageSquare />}
-              {open.length + notSent}
+              {notSaved ? <CloudOff className="text-status-error-strong" /> : <MessageSquare />}
+              {open.length + notSaved}
             </Button>
           </SheetTrigger>
           <SheetContent
@@ -511,10 +508,10 @@ interface RailBodyProps {
   totals: Record<RailTab, number>;
   query: RailQuery;
   states: ReadonlyMap<string, ThreadSwarmState>;
-  /** Open `@swarm` threads not sent yet (all of them, not only the shown ones). */
-  pendingCount: number;
-  /** "N pending": show the pending threads (or all again). */
-  onShowPending: () => void;
+  /** Open threads not sent to the swarm yet (all of them, not only the shown ones). */
+  unsentCount: number;
+  /** "N not sent": show the unsent threads (or all again). */
+  onShowUnsent: () => void;
   /** Only the newest `COMMENT_LIST_MAX` threads are listed. */
   truncated: boolean;
   loading: boolean;
@@ -527,7 +524,7 @@ interface RailBodyProps {
   /** The file shows text, so a selection can anchor a comment. */
   canAnchor: boolean;
   listRef: RefObject<HTMLDivElement | null>;
-  header: ReactNode;
+  sendAction: ReactNode;
   threadActions?: (thread: CommentListEntry) => ReactNode;
 }
 
@@ -539,8 +536,8 @@ function RailBody({
   totals,
   query,
   states,
-  pendingCount,
-  onShowPending,
+  unsentCount,
+  onShowUnsent,
   truncated,
   loading,
   error,
@@ -551,7 +548,7 @@ function RailBody({
   onCardHover,
   canAnchor,
   listRef,
-  header,
+  sendAction,
   threadActions,
 }: RailBodyProps) {
   const { readOnly, renderComposerExtras } = useCommentContext();
@@ -647,16 +644,6 @@ function RailBody({
           />
         ) : null}
       </div>
-      {pendingCount > 0 ? (
-        <PendingSummary
-          count={pendingCount}
-          showing={query.filter === "pending"}
-          onShow={onShowPending}
-        >
-          {/* Rail header actions mount point (step-9 Send N to swarm). */}
-          {header}
-        </PendingSummary>
-      ) : null}
       {/* Both tabs: a comment that did not post is never out of sight. */}
       <OutboxList />
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
@@ -723,6 +710,11 @@ function RailBody({
           ))
         )}
       </div>
+      {unsentCount > 0 && sendAction ? (
+        <SendBar count={unsentCount} showing={query.filter === "unsent"} onShow={onShowUnsent}>
+          {sendAction}
+        </SendBar>
+      ) : null}
     </>
   );
 }
@@ -738,13 +730,13 @@ function OutboxList() {
     <div aria-live="polite" aria-atomic={false}>
       {entries.length > 0 ? (
         <section
-          aria-label="Not sent"
+          aria-label="Not saved"
           className="flex max-h-60 flex-col gap-2 overflow-y-auto border-b border-border-subtle p-3"
         >
           {entries.length > 1 ? (
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="font-medium text-status-error-strong">
-                {entries.length} not sent
+                {entries.length} not saved
               </span>
               <Button
                 size="xs"
@@ -782,14 +774,14 @@ function OutboxCard({
   sending: boolean;
 }) {
   const { file } = useCommentContext();
-  const label = `${sending ? "Sending" : "Not sent"}${entry.params.parentId ? " (reply)" : ""}`;
+  const label = `${sending ? "Saving" : "Not saved"}${entry.params.parentId ? " (reply)" : ""}`;
   return (
     <article className="flex flex-col gap-2 rounded-lg border border-dashed border-status-error/40 bg-surface p-3">
       <div className="flex items-center justify-between gap-2 text-xs">
         <Tooltip>
           <TooltipTrigger asChild>
             <span
-              // biome-ignore lint/a11y/noNoninteractiveTabindex: focus opens the tooltip, so keyboard users can read why it was not sent
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: focus opens the tooltip, so keyboard users can read why it was not saved
               tabIndex={0}
               className="flex items-center gap-1.5 rounded-sm font-medium text-status-error-strong outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >

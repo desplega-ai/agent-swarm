@@ -231,7 +231,7 @@ describe("pickerItems", () => {
   test("finds a reserved label by the display name, and the detail names the member", () => {
     const fan = labelMembers([member("u-fan", "fan@x.io", "Swarm Fan")]);
     expect(pickerItems(fan, "swarm")).toEqual([
-      { value: "swarm", label: "swarm", detail: "Send to the swarm", userId: null },
+      { value: "swarm", label: "swarm", detail: "Flag for the swarm", userId: null },
       { value: "member:u-fan", label: "fan", detail: "Swarm Fan · fan@x.io", userId: "u-fan" },
     ]);
     expect(pickerItems(labeled, "Bob")[0].detail).toBe("bob@swarmcorp.io");

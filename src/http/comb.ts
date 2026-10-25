@@ -2,7 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getCombConfig } from "../comb/config";
-import { REVIEW_BATCH_MAX, ReviewBatchError, sendReviewBatch } from "../comb/review-batch";
+import {
+  REVIEW_BATCH_MAX,
+  REVIEW_NOTE_MAX,
+  ReviewBatchError,
+  sendReviewBatch,
+} from "../comb/review-batch";
 import { can } from "../rbac";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -47,7 +52,7 @@ const reviewBatchRoute = route({
   pattern: ["api", "comb", "review-batches"],
   summary: "Send agent-fs comments to the swarm as one lead task",
   description:
-    "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.",
+    "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.",
   tags: ["Comb"],
   body: z.object({
     orgId: z.string().min(1),
@@ -60,6 +65,8 @@ const reviewBatchRoute = route({
       .min(1)
       .max(1024)
       .refine(isDrivePath, "scopePath must start with '/' and have no '.' or '..' segment"),
+    /** The sender's note for the lead about the whole batch. */
+    note: z.string().max(REVIEW_NOTE_MAX).optional(),
   }),
   responses: {
     200: {

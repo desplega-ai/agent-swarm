@@ -335,13 +335,13 @@ interface CommentThreadProps {
   onHover: (id: string | null) => void;
   /** Thread actions mount point: step-9 "Send to swarm", step-10 "Review changes". */
   actions?: ReactNode;
-  /** "Pending" or "Processing" (`threadSwarmStates`). Undefined: neither. */
+  /** Unsent or processing (`threadSwarmStates`). Only "Processing" shows. Undefined: neither. */
   swarmState?: ThreadSwarmState;
 }
 
 /**
  * One root comment with its replies, reply box, Resolve / Reopen, its swarm
- * state ("Pending" or "Processing"), and Edit / Delete on the connected
+ * state ("Processing"), and Edit / Delete on the connected
  * user's own comments.
  */
 export function CommentThread({

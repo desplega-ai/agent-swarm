@@ -1,0 +1,182 @@
+---
+date: 2026-10-25T14:45:00Z
+topic: "Comb: send any comment, bulk resolve, recent and favorites, clean layout"
+status: in-progress
+autopilot: true
+---
+
+# Comb: send any comment, bulk resolve, recent and favorites, clean layout
+
+## Goal
+
+Taras could not find "Send to swarm" in Comb. The button showed only on comments with `@swarm`,
+and none of his 506 open comments had it (0 comments were ever sent from Comb). This PR makes
+every open comment sendable, gives a clear batch send, lets him resolve old comments in bulk,
+adds Recent, Recently viewed and Favorites, and tightens the layout. One PR, not merged.
+
+## Facts (2026-10-25, prod drive, read-only)
+
+- 506 open root comments on 111 files. 392 are older than 30 days, 351 are under `thoughts/`.
+  0 carry `@swarm`. 0 were sent.
+- The server never required `@swarm` (`src/tests/comb-markers.test.ts`). Only the UI did
+  (`canSendThread` in `apps/ui/src/lib/comb/batch.ts`).
+- The composer's submit button says "Send". It only saves a comment.
+- agent-fs: `comment-resolve` is one comment at a time and needs the editor role. The `recent`
+  op lists file versions newest first (`write`, `edit`, `append`, `delete`, `revert`).
+- Favorites already exist as Comb "Pinned" (swarm `favorites`, item type `agent-fs-path`).
+- No Comb "recently viewed" and no "full width" mode exist.
+- Space above the panels: 56 px shell bar + 24 px main padding + 44 px Comb header + 12 px gap.
+
+## Decisions
+
+- Any open, unsent root comment can be sent. `@swarm` stays as a chip and keeps its own paint
+  in the document. (asked: "yes to 1")
+- Inspired by page feedback (`src/pages/feedback-overlay.ts`): comments are drafts until sent.
+  A footer bar at the bottom of the comment panel shows "N not sent" and a primary
+  "Send to swarm". The dialog lists the comments (checked, at most 50) and takes an optional
+  note for the lead. (asked: "inspire by that")
+- The composer button says "Add comment" (root), "Reply" (reply), "Save" (edit). (asked)
+- The "Pending" state becomes "Not sent" (filter label, footer count). Cards no longer show a
+  "Pending" line: the footer says it once. (assumed)
+- The send body gets an optional `note` (at most 4000 characters). The `comb.review.batch`
+  template renders it in a fenced block. Older UIs do not send it. (assumed)
+- Bulk resolve lives in the folder "Open comments" panel: checkboxes, select all, an age filter,
+  and a selection bar with "Send to swarm" and "Resolve". Resolve runs 4 at a time, then a toast
+  with Undo (reopen). (asked: "Bulk resolve in Comb")
+- "Pinned" is renamed "Favorites" (the dashboard's word). Same storage. (assumed)
+- Recently viewed is stored in this browser, per swarm and drive, at most 20 files. (asked)
+- Recent and Favorites show both on the Comb home (drive root) and as left panel tabs. (asked:
+  "Both")
+- Layout: Comb routes drop the main top padding. A "Full width" toggle hides both side panels
+  and widens the text. It is stored in this browser. (asked: "clean af", top whitespace, full width)
+
+## Phase 1: Send any comment, batch send with a note
+
+- `lib/comb/batch.ts`: `canSendThread` drops the `@swarm` check.
+- `lib/comb/thread-status.ts`, `thread-filter.ts`: "pending" means "not sent" (any open,
+  unsent root). Filter label "Not sent".
+- `components/comb/rail-filters.tsx`: `PendingSummary` becomes a footer `SendBar`: "N not sent"
+  (toggles the filter) and a primary "Send to swarm" button.
+- `components/comb/send-to-swarm.tsx`: the dialog gets "Note for the lead (optional)". Copy drops
+  `@swarm`.
+- `components/comb/swarm-state.tsx`, `comment-thread.tsx`: no "Pending" line on cards.
+- `components/comb/comment-highlights.tsx`: the pending paint applies to `@swarm` comments only.
+- `components/comb/comment-composer.tsx`: submit label per mode.
+- `lib/comb/mentions.ts`: the picker's swarm item detail reads "Flag for the swarm".
+- Server: `src/http/comb.ts` (`note`), `src/comb/review-batch.ts`, `src/comb/templates.ts`
+  (`note_block`). `bun run docs:openapi`.
+- Tests: `batch.test.ts`, `thread-status.test.ts`, `thread-filter.test.ts`,
+  `src/tests/comb-review-batch.test.ts` (note rendered, note too long is 400).
+
+Verification:
+- `bun run test:root -- apps/ui/src/lib/comb src/tests/comb-review-batch.test.ts src/tests/comb-markers.test.ts`
+- `cd apps/ui && bunx tsc -b && bun run lint`
+
+Manual E2E:
+- Add a comment without `@swarm`. The footer shows "1 not sent". Send it with a note.
+- `curl -s "http://localhost:$API_PORT/api/tasks?limit=1" -H "Authorization: Bearer $KEY"`: the
+  task text has the note block.
+
+## Phase 2: Bulk resolve in the folder panel
+
+- `lib/comb/bulk.ts` (new): `runLimited(items, limit, worker, onProgress)` and
+  `olderThan(thread, days, now)`. Tests in `bulk.test.ts`.
+- `components/comb/folder-comments.tsx`: a checkbox per comment and per file, select all, an age
+  filter (Any age, Older than 7 days, Older than 30 days), and a selection bar ("N selected",
+  "Send to swarm" for at most 50, "Resolve", clear).
+- `api/hooks/use-agent-fs.ts`: `useBulkResolve(drive)` runs `comment-resolve` 4 at a time and
+  invalidates the comment queries once. Undo reopens the same ids.
+
+Verification:
+- `bun run test:root -- apps/ui/src/lib/comb/bulk.test.ts`
+- `cd apps/ui && bunx tsc -b && bun run lint`
+
+Manual E2E:
+- Seed 30 comments, 10 backdated is not possible through the op, so check the age filter with
+  the unit tests and with the newest/oldest split on a seeded drive. Select all, Resolve, Undo.
+
+## Phase 3: Recent, Recently viewed, Favorites
+
+- `lib/comb/recent.ts` (new): `rememberViewed(list, entry, max)` and `recentChanges(entries, max)`
+  (newest per path, deletes dropped). Tests in `recent.test.ts`.
+- `lib/agent-fs/types.ts`: `RecentResult`. `api/hooks/use-agent-fs.ts`: `useRecentChanges`
+  (op `recent`, an unknown op hides the list).
+- `components/comb/recent-lists.tsx` (new): `RecentlyViewedList`, `RecentChangesList`,
+  `FavoritesList` (from `pinned-list.tsx`).
+- `components/comb/comb-home.tsx` (new): three cards above the drive root listing.
+- `lib/comb/panels.ts`, `components/comb/side-panels.tsx`: left tabs Files, Recent, Favorites,
+  Outline. Recent has Viewed and Changed. Favorites moves out of the Files tab.
+- Rename "Pinned" to "Favorites" (`pin-button.tsx`, `pinned-list.tsx`, `comb-sidebar-pins.tsx`).
+
+Verification:
+- `bun run test:root -- apps/ui/src/lib/comb/recent.test.ts apps/ui/src/lib/comb/panels.test.ts`
+- `cd apps/ui && bunx tsc -b && bun run lint`
+
+Manual E2E:
+- Open 3 files, go to the drive root: Recently viewed lists them, newest first.
+- Write a file with `bun op.ts write`: Recently changed shows it within a minute.
+- Star a file: it shows in Favorites (home, tab, sidebar).
+
+## Phase 4: Clean layout
+
+- `components/layout/root-layout.tsx`: Comb routes (`/file`) get no top padding.
+- `pages/comb/page.tsx`: tighter header and panel gap.
+- `lib/comb/panels.ts`, `comb-layout.tsx`: `fullWidth` (stored per browser). Showing a panel
+  ends it. A header button and the `f` shortcut toggle it.
+- `components/comb/viewers/markdown-viewer.tsx`: wider text in full width.
+
+Verification:
+- `bun run test:root -- apps/ui/src/lib/comb/panels.test.ts`
+- `cd apps/ui && bunx tsc -b && bun run lint && bun run check:tokens`
+
+Manual E2E:
+- Screenshot a file page at 1440x900 before and after. Toggle full width with the button and
+  with `f`. Click a comment highlight: the comment panel comes back.
+
+## Docs
+
+- `docs-site/content/docs/(documentation)/ui/comb.mdx`: send rule, note, bulk resolve, Recent,
+  Favorites, full width.
+
+## Manual E2E (whole feature, local stack)
+
+```bash
+# agent-fs from source, local storage, local nomic embeddings
+AGENT_FS_HOME=/tmp/comb-flow/afs AGENT_FS_STORAGE_PROVIDER=local AGENT_FS_LOCAL_ROOT=/tmp/comb-flow/afs/storage \
+  SERVER_PORT=$AFS_PORT SERVER_HOST=127.0.0.1 EMBEDDING_PROVIDER=local EMBEDDING_MODEL=nomic-embed-text-v1.5 \
+  bun run ~/Documents/code/agent-fs/packages/cli/src/index.ts server
+# API with a throwaway DB
+DATABASE_PATH=/tmp/comb-flow/swarm.sqlite PORT=$API_PORT DESPLEGA_TELEMETRY_ENV=test \
+  AGENT_FS_API_URL=http://127.0.0.1:$AFS_PORT COMB_ENABLED=true bun run start:http
+# UI
+cd apps/ui && VITE_PROXY_TARGET=http://127.0.0.1:$API_PORT bunx vite --port $UI_PORT
+```
+
+Walk Phases 1 to 4 at 1440x900 and 390x844 with agent-browser. Upload screenshots to
+`qa/agent-swarm/2026-10-25-comb-review-flow/`. Record one video: add a comment, send it with a
+note, bulk resolve, full width.
+
+## Verification (whole PR)
+
+- `bun run check:local`, `bun run lint`, `bun run lint:slop`, `bun run tsc:check:tsc`
+- `bun run test:root -- --parallel=4`, `bun run e2e`, `bun run e2e:ui`
+- `bash scripts/check-db-boundary.sh`, `bash scripts/check-api-key-boundary.sh`,
+  `bash scripts/check-test-spawn-sync.sh`, `bash scripts/check-audit-columns.sh`, `bun run check:dep-graph`
+- `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+
+## Todo
+
+- [ ] Phase 1: Send any comment, batch send with a note
+- [ ] Phase 2: Bulk resolve
+- [ ] Phase 3: Recent, Recently viewed, Favorites
+- [ ] Phase 4: Clean layout
+- [ ] Docs
+- [ ] QA walk, screenshots, recording
+- [ ] Code review (Standards + Spec)
+- [ ] Gates
+- [ ] PR, cleanup, df -h
+
+## Log
+
+- 15:45 BCN: plan written. Worktree `~/worktrees/agent-swarm/2026-10-25-comb-review-flow`,
+  branch `feat/comb-review-flow` off `ef71532ed`. Disk before: 30 GiB free.

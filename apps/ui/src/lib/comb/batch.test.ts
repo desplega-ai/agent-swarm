@@ -30,21 +30,15 @@ function thread(
 const sentBy = (author: string) => comment({ body: `[comb:sent task=${TASK_ID}] Sent`, author });
 
 describe("eligibleForBatch", () => {
-  test("keeps open, unsent root threads that carry @swarm", () => {
+  test("keeps open, unsent root threads, with or without @swarm", () => {
     const marked = thread();
-    const again = thread({ body: "please, @Swarm, add tests" });
-    expect(eligibleForBatch([marked, again])).toEqual([marked, again]);
+    const plain = thread({ body: "no marker" });
+    const mail = thread({ body: "mail me@swarm.local" });
+    expect(eligibleForBatch([marked, plain, mail])).toEqual([marked, plain, mail]);
   });
 
-  test("drops threads without @swarm, resolved threads, and replies", () => {
-    expect(
-      eligibleForBatch([
-        thread({ body: "no marker" }),
-        thread({ body: "mail me@swarm.local" }),
-        thread({ resolved: true }),
-        thread({ parentId: "c0" }),
-      ]),
-    ).toEqual([]);
+  test("drops resolved threads and replies", () => {
+    expect(eligibleForBatch([thread({ resolved: true }), thread({ parentId: "c0" })])).toEqual([]);
   });
 
   test("drops threads the swarm already answered with the sent marker", () => {
@@ -59,9 +53,10 @@ describe("eligibleForBatch", () => {
 });
 
 describe("canSendThread", () => {
-  test("a one-thread send needs @swarm, like the batch", () => {
+  test("a one-thread send follows the batch rule: no @swarm needed", () => {
     expect(canSendThread(thread())).toBe(true);
-    expect(canSendThread(thread({ body: "no marker" }))).toBe(false);
+    expect(canSendThread(thread({ body: "no marker" }))).toBe(true);
+    expect(canSendThread(thread({ parentId: "c0" }))).toBe(false);
     expect(canSendThread(thread({ resolved: true }))).toBe(false);
     expect(canSendThread(thread({}, [sentBy("svc")]), "svc")).toBe(false);
   });

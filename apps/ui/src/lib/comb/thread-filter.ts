@@ -7,11 +7,11 @@ import type { CommentEntry, CommentListEntry } from "../agent-fs/types";
 import { commentQuote } from "./comment-anchor";
 import type { ThreadSwarmState } from "./thread-status";
 
-export type CommentFilter = "all" | "pending" | "processing" | "mentions" | "mine";
+export type CommentFilter = "all" | "unsent" | "processing" | "mentions" | "mine";
 
 export const COMMENT_FILTERS: ReadonlyArray<{ value: CommentFilter; label: string }> = [
   { value: "all", label: "All" },
-  { value: "pending", label: "Pending" },
+  { value: "unsent", label: "Not sent" },
   { value: "processing", label: "Processing" },
   { value: "mentions", label: "Mentions me" },
   { value: "mine", label: "Mine" },
@@ -20,7 +20,7 @@ export const COMMENT_FILTERS: ReadonlyArray<{ value: CommentFilter; label: strin
 export interface FilterFacts {
   /** The connected agent-fs user. Null: "Mentions me" and "Mine" match nothing. */
   me: string | null;
-  /** Pending and processing threads (`threadSwarmStates`). */
+  /** Unsent and processing threads (`threadSwarmStates`). */
   states: ReadonlyMap<string, ThreadSwarmState>;
 }
 
@@ -69,7 +69,7 @@ export function threadMatchesFilter(
   switch (filter) {
     case "all":
       return true;
-    case "pending":
+    case "unsent":
     case "processing":
       return facts.states.get(thread.id)?.kind === filter;
     case "mentions": {
@@ -115,7 +115,7 @@ export function countByFilter(
 ): Record<CommentFilter, number> {
   const counts: Record<CommentFilter, number> = {
     all: 0,
-    pending: 0,
+    unsent: 0,
     processing: 0,
     mentions: 0,
     mine: 0,

@@ -3,7 +3,7 @@
 
 import type { CombReviewBatchResult } from "../../api/types";
 import type { CommentListEntry } from "../agent-fs/types";
-import { hasSwarmMarker, isSentToSwarm } from "./markers";
+import { isSentToSwarm } from "./markers";
 
 /**
  * Most comments one send carries (the server's `REVIEW_BATCH_MAX`,
@@ -12,20 +12,28 @@ import { hasSwarmMarker, isSentToSwarm } from "./markers";
 export const COMB_BATCH_MAX = 50;
 
 /**
- * A thread that "Send to swarm" offers: an open root comment that carries
- * `@swarm` and was not sent yet. The one-thread button and the "Send N"
- * count use the same rule.
+ * Longest note for the lead (the server's `REVIEW_NOTE_MAX`,
+ * `src/tests/comb-review-batch.test.ts` checks that they match).
+ */
+export const COMB_NOTE_MAX = 4000;
+
+/** The note to send: trimmed, and left out when empty. */
+export function batchNote(text: string): string | undefined {
+  const note = text.trim();
+  return note ? note : undefined;
+}
+
+/**
+ * A thread that "Send to swarm" offers: an open root comment that was not
+ * sent yet. `@swarm` is not needed (it only flags a comment). The one-thread
+ * button and the "N not sent" count use the same rule. The server applies
+ * the same skips (`src/comb/review-batch.ts`).
  */
 export function canSendThread(
   thread: CommentListEntry,
   serviceUserId: string | null = null,
 ): boolean {
-  return (
-    !thread.resolved &&
-    !thread.parentId &&
-    hasSwarmMarker(thread.body) &&
-    !isSentToSwarm(thread, serviceUserId)
-  );
+  return !thread.resolved && !thread.parentId && !isSentToSwarm(thread, serviceUserId);
 }
 
 /** The threads "Send N to swarm" (a file or a folder) offers (`canSendThread`). */

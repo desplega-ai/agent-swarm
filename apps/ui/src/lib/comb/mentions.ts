@@ -102,7 +102,7 @@ export function pickerItems(members: readonly LabeledMember[], query: string): P
   const q = query.toLowerCase();
   const items: PickerItem[] = [];
   if (SWARM_LABEL.includes(q)) {
-    items.push({ value: "swarm", label: SWARM_LABEL, detail: "Send to the swarm", userId: null });
+    items.push({ value: "swarm", label: SWARM_LABEL, detail: "Flag for the swarm", userId: null });
   }
   for (const { member, label } of members) {
     const name = member.displayName?.trim() ?? "";
