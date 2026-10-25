@@ -9,8 +9,6 @@ import {
   getWorkflow,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
-  getWorkflowRunStepsSlimByRunId,
-  getWorkflowRunSummary,
   getWorkflowVersion,
   getWorkflowVersions,
   listWorkflowRunsPage,
@@ -25,6 +23,7 @@ import {
   type WorkflowIdempotencyClaim,
   workflowRequestFingerprint,
 } from "../be/db/workflow-idempotency";
+import { getWorkflowRunStepsSlimByRunId, getWorkflowRunSummary } from "../be/db/workflow-run-rows";
 import {
   getWorkflowRunParent,
   getWorkflowRunTree,
