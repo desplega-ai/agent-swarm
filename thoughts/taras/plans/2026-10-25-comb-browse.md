@@ -233,3 +233,22 @@ with Tab and Back, maximize and comment on a diagram.
 - Known limit: the agent-fs live UI drops the line stamps of a mermaid block
   (`MermaidDiagram` gets no props), so a Comb comment on a diagram shows as Lost there. Image
   comments resolve there (react-markdown keeps the `<p>`). Not fixed here: no agent-fs changes.
+- 20:20 BCN: two-axis review (Standards and Spec, Opus). Fixed: Shift+Tab focus escape, the folder
+  filter following links to other folders, rename text and checks (agent-fs `mv` writes a new
+  version, the old path keeps its history and comments), Delete in an AlertDialog, favorites
+  copied (not moved) from fresh server lists with a per-browser marker, per-star rollback,
+  linked-image toolbar clicks, one shared filter box (every word), tree filter 5xx text, mono
+  numbers and dates, icon sets reused from the viewer, small cleanups, ContextMenu row in
+  apps/ui/CLAUDE.md. Also fixed: the outline listed frontmatter as a heading (pre-existing).
+- QA of the fixes: Shift+Tab keeps focus, a folder link resets the filter, a taken rename path
+  is refused, the import copies a new dashboard star and does not bring back a removed one.
+
+## Review notes (not fixed)
+
+- The row `...` button is mouse only. Keyboard users open the row menu with the context menu
+  key or Shift+F10, which macOS lacks. The file header's `...` covers the open file.
+- An image frame carries its line. A line-only comment on a paragraph with an inline image now
+  outlines the image instead of the text (quote anchors are not affected).
+- Recent and Favorites rows keep their own small menu, not the full file menu.
+- In the search box Tab switches modes, so the error's Try again button is mouse only. Enter
+  retries a failed search.
