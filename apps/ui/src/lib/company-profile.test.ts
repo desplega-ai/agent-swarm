@@ -10,6 +10,7 @@ import {
   orgNameFromDomain,
   storedOrgName,
   TEAM_SIZES,
+  USE_CASE_GROUPS,
   USE_CASES,
 } from "./company-profile";
 
@@ -79,6 +80,13 @@ describe("option lists", () => {
     expect(optionValue(TEAM_SIZES, "2-10")).toBe("2-10");
     expect(optionValue(TEAM_SIZES, "1-5")).toBeNull();
     expect(optionValue(TEAM_SIZES, undefined)).toBeNull();
+  });
+
+  test("every use case sits in a group, and the groups keep the list order", () => {
+    const groups = USE_CASE_GROUPS.map((group) => group.id);
+    const order = USE_CASES.map((option) => groups.indexOf(option.group));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
   test("optionLabel reads the label", () => {

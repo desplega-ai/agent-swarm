@@ -3225,7 +3225,7 @@ export interface paths {
                         /** Format: email */
                         contactEmail?: string;
                         /** @enum {string} */
-                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other";
+                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "marketing" | "sales" | "research" | "ops" | "other";
                         quote?: string;
                     };
                 };

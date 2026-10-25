@@ -24,6 +24,7 @@ import type { FeedbackInput, SlackConnectMoment } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import type { UserFunction } from "@/lib/company-profile";
+import { reportedUserFunction } from "../../../../../src/utils/company-profile";
 
 export type NotificationEventAction = "view" | "submit" | "dismiss";
 
@@ -69,7 +70,12 @@ export function useNotificationEvents() {
     } else {
       sendUiTelemetry(status.data, {
         event: "notification.submitted",
-        properties: { key, ...properties },
+        // The catalog rejects a job function it does not list yet: leave it out.
+        properties: {
+          key,
+          ...properties,
+          user_function: reportedUserFunction(properties.user_function),
+        },
       });
     }
   }

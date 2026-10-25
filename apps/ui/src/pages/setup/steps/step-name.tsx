@@ -1,16 +1,16 @@
 import { Bot, House, ListTodo } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useStatus } from "@/api/hooks/use-status";
 import { type OrgProfileField, sendUiTelemetry } from "@/api/hooks/use-ui-telemetry";
 import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
+import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon } from "@/components/shared/status-icon";
+import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCurrentUser } from "@/contexts/current-user-context";
@@ -22,22 +22,27 @@ import {
   useContinueBlocker,
 } from "@/hooks/use-autosave";
 import { useTheme } from "@/hooks/use-theme";
-import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
+import {
+  AVATAR_COLOR_INPUT_FALLBACK,
+  AVATAR_SUGGESTED_SWATCHES,
+  AVATAR_SWATCH_NAMES,
+} from "@/lib/agent-color";
 import {
   companyDomain,
-  optionLabel,
   optionValue,
   orgNameFromDomain,
   SWARM_ORG_TEAM_SIZE,
   SWARM_ORG_USE_CASE,
   TEAM_SIZES,
   type TeamSize,
+  USE_CASE_GROUPS,
   USE_CASES,
   type UseCase,
 } from "@/lib/company-profile";
 import { resolveCssVarToHex } from "@/lib/css-color";
 import { cn } from "@/lib/utils";
 import {
+  isFilledOrgLogoUrl,
   normalizeOrgWebsite,
   orgLogoUrl,
   websiteSuggestion,
@@ -52,8 +57,8 @@ import {
   parseEmojiLogo,
   useEmojiImage,
 } from "./name/emoji-logo";
+import { useLogoColor } from "./name/logo-color";
 import { OptionChips } from "./name/option-chips";
-import { ThemeCard } from "./name/theme-card";
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -61,18 +66,27 @@ type LogoMode = "emoji" | "url";
 
 type ProfileEntry = { key: string; value: string; field: OrgProfileField };
 
+/** The `domain` of a logo URL the API filled from a website. */
+function logoDomain(url: string): string | null {
+  try {
+    return new URL(url).searchParams.get("domain");
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Step 2: the swarm identity (name, website, team size, use case, logo,
- * color), next to a checklist of what each answer unlocks. Every edit saves
- * as you type or pick. The name is required: no Skip, no default name.
- * Viewing the step saves nothing: on the first pass the name and website are
- * pre-filled from a company domain, and Continue stores what is still
- * untouched and completes the step. The theme card is this browser's
- * preference, not swarm state.
+ * Step 2: the swarm identity. Four profile answers (name, website, team size,
+ * use case); the logo and color follow the website, behind a Change link.
+ * Every edit saves as you type or pick. The name is required: no Skip, no
+ * default name. Viewing the step saves nothing: on the first pass the name
+ * and website are pre-filled from a company domain and the color from the
+ * website's logo, and Continue stores what is still untouched and completes
+ * the step. The theme is a browser preference: Settings > Appearance.
  */
 export function StepName({ onboarding, act, setContinueBlocker, setContinueAction }: StepProps) {
-  // The step's one blocker slot shows the scope's hold ("Saving…") first, then
-  // the required name (below), so the scope reports here instead of the shell.
+  // The step's one blocker slot shows the scope's hold ("Saving…"), so the
+  // scope reports here instead of the shell.
   const [scopeHold, setScopeHold] = useState<{ reason: string | null; busy: boolean }>({
     reason: null,
     busy: false,
@@ -94,14 +108,21 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   const storedName = row("SWARM_ORG_NAME")?.value;
   const storedLogo = identity?.logo_url ?? "";
   const storedEmoji = parseEmojiLogo(storedLogo);
+  // The API fills the logo from the website while no one has set another.
+  const storedFilled = isFilledOrgLogoUrl(storedLogo);
   const nameStep = onboarding.state.steps.name;
   // Both reads decide the suggestion, so nothing stores before they answer.
   const loaded = configs !== undefined && status !== undefined;
   // Pre-fill only until the step is done. After that, the fields show what is stored.
   const firstPass = nameStep.status !== "done";
+  const panelId = useId();
+  const nameInput = useRef<HTMLInputElement>(null);
 
   // `null` = untouched: follow the server value until the operator edits.
   const [nameDraft, setNameDraft] = useState<string | null>(null);
+  // The empty name shows as invalid only after a blur or a Continue attempt.
+  const [nameTouched, setNameTouched] = useState(false);
+  const [customizing, setCustomizing] = useState(false);
   const [logoMode, setLogoMode] = useState<LogoMode | null>(null);
   const [urlDraft, setUrlDraft] = useState<string | null>(null);
   const [emojiDraft, setEmojiDraft] = useState<string | null>(null);
@@ -132,16 +153,18 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   ).trim();
   const nameSuggested =
     nameDraft === null && nameDomain !== null && name === orgNameFromDomain(nameDomain);
-  // An empty name holds Continue on every pass, also once the step is done.
-  useContinueBlocker(
-    setContinueBlocker,
-    scopeHold.reason ?? (loaded && !name ? "Name your swarm to continue." : null),
-    { busy: scopeHold.reason !== null && scopeHold.busy },
-  );
+  const nameMissing = loaded && !name;
+  const nameInvalid = nameMissing && nameTouched;
+  useContinueBlocker(setContinueBlocker, scopeHold.reason, {
+    busy: scopeHold.reason !== null && scopeHold.busy,
+  });
 
-  // Logo: an emoji.family URL opens in Emoji mode, any other URL in Image URL mode.
-  const mode: LogoMode = logoMode ?? (storedLogo && !storedEmoji ? "url" : "emoji");
-  const urlInput = urlDraft ?? storedLogo;
+  // Logo: an emoji.family URL opens in Emoji mode, another custom URL in Image
+  // URL mode. A logo filled from the website opens in Emoji mode, and the URL
+  // field stays empty: the proxy URL is not something to edit.
+  const mode: LogoMode =
+    logoMode ?? (storedLogo && !storedEmoji && !storedFilled ? "url" : "emoji");
+  const urlInput = urlDraft ?? (storedFilled ? "" : storedLogo);
   const url = urlInput.trim();
   const urlError = url ? httpUrlError(url) : null;
   const emojiInput = emojiDraft ?? storedEmoji ?? "";
@@ -165,8 +188,23 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
             valid: emojiImage.status === "ok",
           }
         : { value: "", touched: emojiDraft !== null, valid: true };
+  // The website's logo: stored, or the one the API fills when the website saves.
+  const websiteLogo =
+    !storedLogo || storedFilled ? (website ? orgLogoUrl(website) : storedLogo || null) : null;
+  const shownLogo = logo.valid && logo.value ? logo.value : websiteLogo;
+  const fromWebsite = shownLogo !== null && shownLogo === websiteLogo;
+  const shownDomain = fromWebsite && shownLogo ? logoDomain(shownLogo) : null;
 
-  const colorInput = colorDraft ?? identity?.brand_color ?? "";
+  const storedColor = identity?.brand_color ?? "";
+  const websiteColor = useLogoColor(fromWebsite ? websiteLogo : null);
+  // The website's color while no color is set, on the first pass or after a
+  // website edit. Shown but not stored yet: Continue stores it.
+  const colorSuggested =
+    colorDraft === null &&
+    !storedColor &&
+    (firstPass || websiteDraft !== null) &&
+    websiteColor !== null;
+  const colorInput = colorDraft ?? (storedColor || (colorSuggested ? (websiteColor ?? "") : ""));
   // With no brand color the sidebar name renders in the theme's text color.
   // Show that color in the swatch instead of the picker's black fallback.
   const { theme, preset } = useTheme();
@@ -221,22 +259,32 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
     ready: name.length > 0 && loaded,
     save: storeName,
   });
-  // Continue stores the untouched pre-fills (name, website) and completes the step.
+  // Continue stores the untouched pre-fills (name, website, color) and
+  // completes the step. With no name, it marks the field and stays.
   useContinueAction(
     (action) => setContinueAction(action, { unlocks: true }),
-    loaded && name.length > 0 && ((nameDraft === null && firstPass) || websitePrefilled)
+    nameMissing
       ? async () => {
-          const entries: ProfileEntry[] = [];
-          if (nameDraft === null && name !== storedName) {
-            entries.push({ key: "SWARM_ORG_NAME", value: name, field: "name" });
-          }
-          if (websitePrefilled && website) {
-            entries.push({ key: "SWARM_ORG_WEBSITE", value: website, field: "website" });
-          }
-          await storeProfile(entries);
-          await completeStep();
+          setNameTouched(true);
+          nameInput.current?.focus();
+          throw new Error("Name your swarm to continue.");
         }
-      : null,
+      : loaded && ((nameDraft === null && firstPass) || websitePrefilled || colorSuggested)
+        ? async () => {
+            const entries: ProfileEntry[] = [];
+            if (nameDraft === null && name !== storedName) {
+              entries.push({ key: "SWARM_ORG_NAME", value: name, field: "name" });
+            }
+            if (websitePrefilled && website) {
+              entries.push({ key: "SWARM_ORG_WEBSITE", value: website, field: "website" });
+            }
+            await storeProfile(entries);
+            if (colorSuggested && HEX_RE.test(color)) {
+              await save([{ key: "SWARM_BRAND_COLOR", value: color, isSecret: false }]);
+            }
+            await completeStep();
+          }
+        : null,
   );
 
   // Team size and use case store on a pick (an explicit action).
@@ -256,18 +304,7 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
     ready: true,
     save: (value) => storeProfile([{ key: SWARM_ORG_USE_CASE, value, field: "use_case" }]),
   });
-
-  // The checklist ticks as the fields fill, drafts included.
-  const useCaseLabel = optionLabel(USE_CASES, useCase);
-  const unlocked = {
-    name: name.length > 0,
-    logo: website !== null,
-    // The peer group needs all three answers (`level: "full"` on /api/fleet-benchmark).
-    benchmark: website !== null && teamSize !== null && useCase !== null,
-    ideas: useCase !== null,
-  };
-  const unlockedCount = Object.values(unlocked).filter(Boolean).length;
-  const unlockTotal = Object.keys(unlocked).length;
+  // The Home benchmark compares only with telemetry on.
   const telemetryOff = status?.telemetry?.enabled === false;
 
   const logoSave = useAutosave({
@@ -278,8 +315,7 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   });
   const colorSave = useAutosave({
     value: color,
-    dirty:
-      colorDraft !== null && color.toLowerCase() !== (identity?.brand_color ?? "").toLowerCase(),
+    dirty: colorDraft !== null && color.toLowerCase() !== storedColor.toLowerCase(),
     ready: colorValid,
     save: (value) => save([{ key: "SWARM_BRAND_COLOR", value, isSecret: false }]),
   });
@@ -290,10 +326,17 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   }
 
   const logoIndicator = <SaveIndicator phase={logoSave.phase} error={logoSave.error} />;
+  const logoSource = shownDomain
+    ? `From ${shownDomain}`
+    : !shownLogo
+      ? "Hive mark"
+      : parseEmojiLogo(shownLogo)
+        ? "Your emoji"
+        : "Your image";
 
   return (
     <AutosaveScopeContext.Provider value={scope}>
-      <div className="grid items-start gap-3 sm:grid-cols-2">
+      <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <SetupCard
           title="Identity"
           status={
@@ -309,24 +352,30 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
             htmlFor="setup-swarm-name"
             required
             helper={
-              !name
-                ? "Name your swarm to continue. Your team sees it across the dashboard."
-                : nameSuggested
-                  ? `Suggested from ${nameDomain}. Change it if your team uses another name.`
-                  : undefined
+              !name ? (
+                <span className={nameInvalid ? "text-status-error-strong" : undefined}>
+                  Name your swarm to continue. Your team sees it across the dashboard.
+                </span>
+              ) : nameSuggested ? (
+                `Suggested from ${nameDomain}. Change it if your team uses another name.`
+              ) : undefined
             }
           >
             <WithIndicator
               indicator={<SaveIndicator phase={nameSave.phase} error={nameSave.error} />}
             >
               <Input
+                ref={nameInput}
                 id="setup-swarm-name"
                 placeholder="Acme"
                 autoComplete="organization"
                 value={nameDraft ?? name}
                 onChange={(event) => setNameDraft(event.target.value)}
-                onBlur={nameSave.commit}
-                aria-invalid={!name}
+                onBlur={() => {
+                  setNameTouched(true);
+                  nameSave.commit();
+                }}
+                aria-invalid={nameInvalid}
                 className="pr-8"
               />
             </WithIndicator>
@@ -339,9 +388,9 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
               websiteError ? (
                 <span className="text-status-error-strong">{websiteError}</span>
               ) : websitePrefilled ? (
-                "Filled from your email. Its logo becomes your swarm logo when you have not set one."
+                "Filled from your email. Its logo and color brand your swarm."
               ) : (
-                "Its logo becomes your swarm logo when you have not set one."
+                "Its logo and color brand your swarm, unless you pick your own."
               )
             }
           >
@@ -362,6 +411,176 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
             </WithIndicator>
           </SettingsRow>
 
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium leading-none">Logo and color</p>
+            <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2">
+              <LogoImage src={shownLogo} className="size-8" />
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate text-sm">{logoSource}</span>
+                {color && colorValid ? (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span
+                      aria-hidden="true"
+                      className="size-2.5 shrink-0 rounded-full border border-border"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="font-mono">{color}</span>
+                  </span>
+                ) : null}
+              </div>
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto shrink-0 px-1"
+                aria-label={customizing ? undefined : "Change logo and color"}
+                aria-expanded={customizing}
+                aria-controls={customizing ? panelId : undefined}
+                onClick={() => setCustomizing((open) => !open)}
+              >
+                {customizing ? "Done" : "Change"}
+              </Button>
+            </div>
+            <AnimatedReveal open={customizing} className="-m-1 p-1">
+              <div id={panelId} className="flex flex-col gap-4 pt-2">
+                <SettingsRow
+                  label={
+                    <>
+                      Logo
+                      <InfoTip
+                        content={
+                          mode === "emoji"
+                            ? "Served by emoji.family. Use Image URL to host your own."
+                            : "Optional. Without one, the sidebar shows the hive mark."
+                        }
+                      />
+                    </>
+                  }
+                  htmlFor={mode === "emoji" ? "setup-logo-emoji" : "setup-logo-url"}
+                  helper={
+                    mode === "emoji" && emojiError ? (
+                      <span className="text-status-error-strong">{emojiError}</span>
+                    ) : mode === "url" && urlError ? (
+                      <span className="text-status-error-strong">{urlError}</span>
+                    ) : undefined
+                  }
+                >
+                  <Tabs value={mode} onValueChange={(next) => setLogoMode(next as LogoMode)}>
+                    <TabsList>
+                      <TabsTrigger value="emoji">Emoji</TabsTrigger>
+                      <TabsTrigger value="url">Image URL</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="emoji" className="flex flex-col gap-2.5 pt-1">
+                      <WithIndicator indicator={logoIndicator}>
+                        <Input
+                          id="setup-logo-emoji"
+                          placeholder="Type or paste an emoji"
+                          value={emojiInput}
+                          // Keep one emoji: a new one typed after the old replaces it.
+                          onChange={(event) =>
+                            setEmojiDraft(lastEmoji(event.target.value) || event.target.value)
+                          }
+                          onBlur={logoSave.commit}
+                          aria-invalid={emojiError ? true : undefined}
+                          className="pr-8 text-base"
+                        />
+                      </WithIndicator>
+                      <EmojiSuggestions
+                        selected={emoji}
+                        onPick={(next) => {
+                          setEmojiDraft(next);
+                          logoSave.commit();
+                        }}
+                      />
+                    </TabsContent>
+                    <TabsContent value="url" className="pt-1">
+                      <WithIndicator indicator={logoIndicator}>
+                        <Input
+                          id="setup-logo-url"
+                          inputMode="url"
+                          spellCheck={false}
+                          placeholder="https://acme.dev/mark.png"
+                          value={urlInput}
+                          onChange={(event) => setUrlDraft(event.target.value)}
+                          onBlur={logoSave.commit}
+                          aria-invalid={urlError ? true : undefined}
+                          className="pr-8 font-mono"
+                        />
+                      </WithIndicator>
+                    </TabsContent>
+                  </Tabs>
+                </SettingsRow>
+
+                <SettingsRow
+                  label={
+                    <>
+                      Brand color
+                      <InfoTip content="Optional. Colors the swarm name in the sidebar." />
+                    </>
+                  }
+                  htmlFor="setup-brand-color"
+                  helper={
+                    colorValid ? undefined : (
+                      <span className="text-status-error-strong">Use hex, like #RRGGBB.</span>
+                    )
+                  }
+                >
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {AVATAR_SUGGESTED_SWATCHES.map((hex) => (
+                        <button
+                          key={hex}
+                          type="button"
+                          aria-label={AVATAR_SWATCH_NAMES[hex] ?? hex}
+                          title={AVATAR_SWATCH_NAMES[hex] ?? hex}
+                          aria-pressed={color.toLowerCase() === hex}
+                          onClick={() => pickSwatch(hex)}
+                          className={cn(
+                            "size-7 rounded-md border border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                            color.toLowerCase() === hex &&
+                              "ring-2 ring-foreground ring-offset-2 ring-offset-card",
+                          )}
+                          style={{ backgroundColor: hex }}
+                        />
+                      ))}
+                    </div>
+                    {/* Same control as Settings, Configuration for `kind: "color"`. */}
+                    <div className="flex gap-2">
+                      <Input
+                        type="color"
+                        aria-label="Brand color picker"
+                        value={
+                          colorValid && color
+                            ? color
+                            : (themeNameHex ?? AVATAR_COLOR_INPUT_FALLBACK)
+                        }
+                        onChange={(event) => setColorDraft(event.target.value)}
+                        className="w-10 shrink-0 p-1"
+                      />
+                      <WithIndicator
+                        className="flex-1"
+                        indicator={
+                          <SaveIndicator phase={colorSave.phase} error={colorSave.error} />
+                        }
+                      >
+                        <Input
+                          id="setup-brand-color"
+                          placeholder={themeNameHex ? `${themeNameHex} (theme text)` : "#RRGGBB"}
+                          maxLength={7}
+                          spellCheck={false}
+                          value={colorInput}
+                          onChange={(event) => setColorDraft(event.target.value)}
+                          onBlur={colorSave.commit}
+                          aria-invalid={!colorValid}
+                          className="pr-8 font-mono"
+                        />
+                      </WithIndicator>
+                    </div>
+                  </div>
+                </SettingsRow>
+              </div>
+            </AnimatedReveal>
+          </div>
+
           <SettingsRow
             label={
               <>
@@ -369,15 +588,16 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
                 <SaveIndicator phase={teamSizeSave.phase} error={teamSizeSave.error} />
               </>
             }
+            helper={telemetryOff ? undefined : "Picks your peers in the Home benchmark."}
           >
-            <SegmentedControl
+            <OptionChips
               aria-label="Team size"
+              options={TEAM_SIZES}
               value={teamSize}
               onValueChange={(next) => {
                 setTeamSizeDraft(next);
                 teamSizeSave.commit();
               }}
-              options={TEAM_SIZES}
             />
           </SettingsRow>
 
@@ -388,10 +608,12 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
                 <SaveIndicator phase={useCaseSave.phase} error={useCaseSave.error} />
               </>
             }
+            helper="Picks your first-task ideas in step 7."
           >
             <OptionChips
               aria-label="First use case"
               options={USE_CASES}
+              groups={USE_CASE_GROUPS}
               value={useCase}
               onValueChange={(next) => {
                 setUseCaseDraft(next);
@@ -399,192 +621,33 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
               }}
             />
           </SettingsRow>
-
-          <SettingsRow
-            label={
-              <>
-                Logo
-                <InfoTip
-                  content={
-                    mode === "emoji"
-                      ? "Served by emoji.family. Use Image URL to host your own."
-                      : "Optional. Without one, the sidebar shows the hive mark."
-                  }
-                />
-              </>
-            }
-            htmlFor={mode === "emoji" ? "setup-logo-emoji" : "setup-logo-url"}
-            helper={
-              mode === "emoji" && emojiError ? (
-                <span className="text-status-error-strong">{emojiError}</span>
-              ) : mode === "url" && urlError ? (
-                <span className="text-status-error-strong">{urlError}</span>
-              ) : undefined
-            }
-          >
-            <Tabs value={mode} onValueChange={(next) => setLogoMode(next as LogoMode)}>
-              <TabsList>
-                <TabsTrigger value="emoji">Emoji</TabsTrigger>
-                <TabsTrigger value="url">Image URL</TabsTrigger>
-              </TabsList>
-              <TabsContent value="emoji" className="flex flex-col gap-2.5 pt-1">
-                <WithIndicator indicator={logoIndicator}>
-                  <Input
-                    id="setup-logo-emoji"
-                    placeholder="Type or paste an emoji"
-                    value={emojiInput}
-                    // Keep one emoji: a new one typed after the old replaces it.
-                    onChange={(event) =>
-                      setEmojiDraft(lastEmoji(event.target.value) || event.target.value)
-                    }
-                    onBlur={logoSave.commit}
-                    aria-invalid={emojiError ? true : undefined}
-                    className="pr-8 text-base"
-                  />
-                </WithIndicator>
-                <EmojiSuggestions
-                  selected={emoji}
-                  onPick={(next) => {
-                    setEmojiDraft(next);
-                    logoSave.commit();
-                  }}
-                />
-              </TabsContent>
-              <TabsContent value="url" className="pt-1">
-                <WithIndicator indicator={logoIndicator}>
-                  <Input
-                    id="setup-logo-url"
-                    inputMode="url"
-                    spellCheck={false}
-                    placeholder="https://acme.dev/mark.png"
-                    value={urlInput}
-                    onChange={(event) => setUrlDraft(event.target.value)}
-                    onBlur={logoSave.commit}
-                    aria-invalid={urlError ? true : undefined}
-                    className="pr-8 font-mono"
-                  />
-                </WithIndicator>
-              </TabsContent>
-            </Tabs>
-          </SettingsRow>
-
-          <SettingsRow
-            label={
-              <>
-                Brand color
-                <InfoTip content="Optional. Colors the swarm name in the sidebar." />
-              </>
-            }
-            htmlFor="setup-brand-color"
-            helper={
-              colorValid ? undefined : (
-                <span className="text-status-error-strong">Use hex, like #RRGGBB.</span>
-              )
-            }
-          >
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap gap-1.5">
-                {AVATAR_SUGGESTED_SWATCHES.map((hex) => (
-                  <button
-                    key={hex}
-                    type="button"
-                    aria-label={`Use ${hex}`}
-                    aria-pressed={color.toLowerCase() === hex}
-                    onClick={() => pickSwatch(hex)}
-                    className={cn(
-                      "size-7 rounded-md border border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                      color.toLowerCase() === hex &&
-                        "ring-2 ring-foreground ring-offset-2 ring-offset-card",
-                    )}
-                    style={{ backgroundColor: hex }}
-                  />
-                ))}
-              </div>
-              {/* Same control as Settings, Configuration for `kind: "color"`. */}
-              <div className="flex gap-2">
-                <Input
-                  type="color"
-                  aria-label="Brand color picker"
-                  value={
-                    colorValid && color ? color : (themeNameHex ?? AVATAR_COLOR_INPUT_FALLBACK)
-                  }
-                  onChange={(event) => setColorDraft(event.target.value)}
-                  className="w-10 shrink-0 p-1"
-                />
-                <WithIndicator
-                  className="flex-1"
-                  indicator={<SaveIndicator phase={colorSave.phase} error={colorSave.error} />}
-                >
-                  <Input
-                    id="setup-brand-color"
-                    placeholder={themeNameHex ? `${themeNameHex} (theme text)` : "#RRGGBB"}
-                    maxLength={7}
-                    spellCheck={false}
-                    value={colorInput}
-                    onChange={(event) => setColorDraft(event.target.value)}
-                    onBlur={colorSave.commit}
-                    aria-invalid={!colorValid}
-                    className="pr-8 font-mono"
-                  />
-                </WithIndicator>
-              </div>
-            </div>
-          </SettingsRow>
         </SetupCard>
 
-        <div className="flex flex-col gap-3">
-          <SetupCard
-            title="What your answers unlock"
-            description={
-              <span className="tabular-nums">
-                {unlockedCount} of {unlockTotal} unlocked
-              </span>
-            }
-            bodyClassName="flex flex-col gap-3"
-          >
-            <Progress value={(unlockedCount / unlockTotal) * 100} className="h-1.5" />
-            <ul className="flex flex-col gap-2">
-              <Unlock done={unlocked.name}>Your name across the dashboard and in messages</Unlock>
-              <Unlock done={unlocked.logo}>
-                Your logo, filled from {website ?? "your website"}
-              </Unlock>
-              <Unlock done={unlocked.benchmark}>
-                Home benchmark against swarms of your size and use case. Needs the website, team
-                size and use case, and anonymous telemetry on
-                {telemetryOff ? " (it is off on this swarm)" : ""}.
-              </Unlock>
-              <Unlock done={unlocked.ideas}>
-                First-task ideas in step 7 for{" "}
-                {useCaseLabel ? `"${useCaseLabel}"` : "your use case"}
-              </Unlock>
-            </ul>
-          </SetupCard>
-          <SetupCard title="Sidebar preview" bodyClassName="rounded-b-xl bg-surface">
-            <SidebarPreview
-              name={name}
-              // An empty logo is filled from the website on save; preview that one.
-              logo={logo.valid && logo.value ? logo.value : website ? orgLogoUrl(website) : null}
-              color={color && colorValid ? color : null}
-            />
-          </SetupCard>
-          <ThemeCard />
-        </div>
+        {/* The Logo and color row shows the same on a phone. */}
+        <SetupCard
+          title="Sidebar preview"
+          className="sticky top-0 hidden sm:block"
+          bodyClassName="rounded-b-xl bg-surface"
+        >
+          <SidebarPreview name={name} logo={shownLogo} color={color && colorValid ? color : null} />
+        </SetupCard>
       </div>
     </AutosaveScopeContext.Provider>
   );
 }
 
-/** One checklist row: an amber check once its answer is in. */
-function Unlock({ done, children }: { done: boolean; children: ReactNode }) {
+/** A logo with the sidebar's fallback: the hive mark when it is unset or does not load. */
+function LogoImage({ src, className }: { src: string | null; className?: string }) {
   return (
-    <li className="flex items-start gap-2 text-sm">
-      <StatusIcon
-        tone={done ? "done" : "dirty"}
-        label={done ? "Unlocked" : "Not yet"}
-        className="mt-0.5"
-      />
-      <span className={done ? undefined : "text-muted-foreground"}>{children}</span>
-    </li>
+    <img
+      src={src ?? "/logo.png"}
+      alt=""
+      className={cn("shrink-0 rounded object-contain", className)}
+      onError={(event) => {
+        const img = event.currentTarget;
+        if (img.src !== `${window.location.origin}/logo.png`) img.src = "/logo.png";
+      }}
+    />
   );
 }
 
@@ -607,16 +670,7 @@ function SidebarPreview({
   return (
     <div className="overflow-hidden rounded-lg border border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="flex items-center gap-2.5 border-b border-sidebar-border px-3 py-2.5">
-        <img
-          src={logo ?? "/logo.png"}
-          alt=""
-          className="size-7 shrink-0 rounded object-contain"
-          onError={(event) => {
-            // Same fallback as the sidebar when a logo URL does not load.
-            const img = event.currentTarget;
-            if (img.src !== `${window.location.origin}/logo.png`) img.src = "/logo.png";
-          }}
-        />
+        <LogoImage src={logo} className="size-7" />
         <div className="min-w-0">
           <p
             className={cn(

@@ -135,7 +135,11 @@ function StepMarker({
             "hit-area relative isolate flex h-6 min-w-6 shrink-0 [--hit-size:36px] items-center justify-center font-mono text-[11px] leading-none outline-none transition-colors",
             "focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             current
-              ? "gap-1.5 px-1.5 font-semibold text-primary-foreground sm:pr-2.5"
+              ? cn(
+                  "gap-1.5 px-1.5 font-semibold text-primary-foreground sm:pr-2.5",
+                  // The corner badge covers the pill's right end: keep the label clear of it.
+                  (status === "done" || status === "failed") && "sm:pr-4",
+                )
               : cn(
                   "border-[1.5px] hover-linger",
                   STEP_TONE_CLASS[status],

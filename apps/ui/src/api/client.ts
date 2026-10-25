@@ -1,5 +1,6 @@
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getConfig } from "@/lib/config";
+import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import type {
   AcpRuntimeConfig,
@@ -918,7 +919,12 @@ class ApiClient {
       throw new Error("Invalid feedback endpoint");
     }
 
-    const body = JSON.stringify(data);
+    // The proxy rejects a profile value its catalog does not list yet: leave it out.
+    const body = JSON.stringify({
+      ...data,
+      use_case: reportedUseCase(data.use_case),
+      user_function: reportedUserFunction(data.user_function),
+    });
     let response: Response;
 
     try {

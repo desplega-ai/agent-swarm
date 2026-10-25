@@ -13,7 +13,7 @@
 import { getDbClient } from "./be/db/runtime";
 import { setTelemetryOrgDomain } from "./telemetry";
 import { emailDomain, type TelemetryUserRole } from "./telemetry-context";
-import { USER_FUNCTIONS } from "./utils/company-profile";
+import { reportedUserFunction } from "./utils/company-profile";
 
 const ROLE_TTL_MS = 60 * 60_000;
 const ROLE_CACHE_LIMIT = 1_000;
@@ -21,7 +21,7 @@ const DOMAIN_RECOMPUTE_DEBOUNCE_MS = 2_000;
 
 interface UserRoleEntry {
   role: TelemetryUserRole;
-  userFunction?: (typeof USER_FUNCTIONS)[number];
+  userFunction?: ReturnType<typeof reportedUserFunction>;
   at: number;
 }
 
@@ -40,7 +40,7 @@ async function loadUserRole(userId: string): Promise<UserRoleEntry | undefined> 
     );
     return {
       role,
-      userFunction: USER_FUNCTIONS.find((value) => value === user?.jobFunction),
+      userFunction: reportedUserFunction(user?.jobFunction),
       at: Date.now(),
     };
   } catch {

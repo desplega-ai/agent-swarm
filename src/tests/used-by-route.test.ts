@@ -183,6 +183,17 @@ describe("POST /api/used-by", () => {
     expect(proxied[1]?.body).not.toHaveProperty("quote");
   });
 
+  test("a job function the catalog does not list yet is stored but not sent", async () => {
+    const grant = await post(
+      { granted: true, contactEmail: "admin@acme.com", contactFunction: "marketing" },
+      OPERATOR,
+    );
+    expect(grant.statusCode).toBe(200);
+    expect(proxied[0]?.body).toMatchObject({ granted: true, contact_email: "admin@acme.com" });
+    expect(proxied[0]?.body).not.toHaveProperty("contact_function");
+    expect(await configValue("SWARM_USED_BY_CONTACT_FUNCTION")).toBe("marketing");
+  });
+
   test("a grant requires valid contact details and a quote of at most 280 characters", async () => {
     for (const details of [
       {},

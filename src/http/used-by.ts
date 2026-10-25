@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getDbClient, upsertSwarmConfig } from "../be/db";
 import { isTelemetryEnabled, trackRelayed } from "../telemetry";
-import { USER_FUNCTIONS } from "../utils/company-profile";
+import { reportedUserFunction, USER_FUNCTIONS } from "../utils/company-profile";
 import { orgIdentityStatus } from "../utils/org-identity";
 import { normalizeOrgWebsite, TELEMETRY_PROXY_ORIGIN } from "../utils/org-website";
 import { ensureConfigAdmin } from "./config";
@@ -129,7 +129,12 @@ export async function handleUsedBy(
         ...(orgDomain ? { org_domain: orgDomain } : {}),
         granted,
         ...(granted
-          ? { contact_email: contactEmail, contact_function: contactFunction, quote }
+          ? {
+              contact_email: contactEmail,
+              // The proxy rejects a job function its catalog does not list yet.
+              contact_function: reportedUserFunction(contactFunction),
+              quote,
+            }
           : {}),
         changed_at: changedAt,
       }),
