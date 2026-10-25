@@ -32,6 +32,7 @@ import { MIN_NAME_QUERY_LENGTH } from "@/lib/comb/search";
 import { sortEntries } from "@/lib/comb/tree";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatRelative } from "@/lib/relative-time";
+import { cn } from "@/lib/utils";
 
 interface FolderRow {
   /** Drive path of the entry (folders end with "/"). */
@@ -227,7 +228,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         description={count}
         action={
           <>
-            <FolderFilter value={draft} onChange={setDraft} />
+            <FolderFilter value={draft} onChange={setDraft} className="hidden sm:flex" />
             <NewEntryButton folder={folder} />
             <UploadButton folder={folder} />
             {/* The root is the Comb item, so no pin. */}
@@ -237,6 +238,8 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           </>
         }
       />
+      {/* Phones: the filter takes its own row under the header. */}
+      <FolderFilter value={draft} onChange={setDraft} className="mb-3 sm:hidden" />
       <UploadList />
       {/* The drive root is the Comb home: favorites, recently viewed, recently changed. */}
       {folder.path === "/" ? <CombHome drive={folder} /> : null}
@@ -298,9 +301,17 @@ export function FolderView({ folder }: { folder: DrivePath }) {
 }
 
 /** The folder header's filter box (`?filter=`). Escape clears it. */
-function FolderFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function FolderFilter({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
   return (
-    <div className="relative flex items-center">
+    <div className={cn("relative flex items-center", className)}>
       <Search
         className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground"
         aria-hidden
@@ -317,7 +328,7 @@ function FolderFilter({ value, onChange }: { value: string; onChange: (value: st
         }}
         placeholder="Filter this folder"
         aria-label="Filter this folder"
-        className="h-8 w-40 pr-8 pl-8 sm:w-56 [&::-webkit-search-cancel-button]:hidden"
+        className="h-8 w-full pr-8 pl-8 sm:w-56 [&::-webkit-search-cancel-button]:hidden"
       />
       {value ? (
         <button

@@ -75,9 +75,12 @@ export function FileActions({ file }: { file: DrivePath }) {
       <VersionsMenu file={file} stat={stat} />
       <PinButton target={file} className="size-8" />
       <ShareButton file={file} />
-      <CopyPathButton target={file} />
-      <DownloadButton file={file} bytes={stat.size} iconOnly />
-      <OpenInAgentFsButton target={file} iconOnly />
+      {/* Phones keep the subtitle readable: these three are in the ... menu too. */}
+      <span className="hidden sm:contents">
+        <CopyPathButton target={file} />
+        <DownloadButton file={file} bytes={stat.size} iconOnly />
+        <OpenInAgentFsButton target={file} iconOnly />
+      </span>
       <FileMenuButton target={file} header />
     </>
   );
