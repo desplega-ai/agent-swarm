@@ -5,8 +5,8 @@ import { FirstTaskComposer } from "./first-task/first-message-card";
 
 /**
  * Step 7: one secondary status line (the lead, the agent count), then a big
- * centered composer. The composer shows while the lead is still starting, but
- * stays disabled until the lead is online with a verified key.
+ * centered composer. The composer shows while the lead is still starting, and
+ * enables once the lead is online. With no verified key it warns, not blocks.
  */
 export function StepFirstTask({ onboarding, act }: StepProps) {
   const agentsQ = useAgents();

@@ -16,6 +16,7 @@ import { StatusIcon } from "@/components/shared/status-icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AutosaveScopeContext, useAutosaveScope, useContinueAction } from "@/hooks/use-autosave";
+import { optionValue, SWARM_ORG_USE_CASE, USE_CASES } from "@/lib/company-profile";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
 import { activeAuthorization, ComingSoonPane, OAuthToolPane } from "./integrations/business-panes";
@@ -25,9 +26,9 @@ import {
   connectedMethod,
   findSetupIntegration,
   REQUIRED_KEYS,
-  SETUP_GROUPS,
   type SetupIntegration,
   type SetupIntegrationId,
+  setupGroups,
 } from "./integrations/catalog";
 import { BitbucketPane, GitHubPane, GitLabPane } from "./integrations/git-panes";
 import { JiraPane, LinearPane } from "./integrations/oauth-panes";
@@ -54,13 +55,18 @@ export function StepIntegrations({
   const scope = useAutosaveScope(setContinueBlocker);
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const configsQ = useConfigs({ scope: "global" });
+  const useCase = optionValue(
+    USE_CASES,
+    configsQ.data?.find((entry) => entry.key === SWARM_ORG_USE_CASE)?.value,
+  );
+  const groups = setupGroups(useCase);
   const [selectedId, setSelectedId] = useState<SetupIntegrationId>(
-    () => findSetupIntegration(searchParams.get("integration"))?.id ?? "slack",
+    () => findSetupIntegration(searchParams.get("integration"))?.id ?? groups[0].items[0].id,
   );
   const [oauthError, setOauthError] = useState<{ id: SetupIntegrationId; message: string } | null>(
     null,
   );
-  const configsQ = useConfigs({ scope: "global" });
   const presenceQ = useEnvPresence(ALL_SETUP_KEYS);
   // Older APIs have no OAuth apps: the business tools then show no status.
   const oauthApps = useOAuthApps().data ?? [];
@@ -149,7 +155,7 @@ export function StepIntegrations({
           aria-label="Integrations"
           className="flex gap-2 overflow-x-auto pb-1 sm:min-h-0 sm:flex-col sm:gap-0 sm:overflow-x-hidden sm:overflow-y-auto sm:rounded-xl sm:border sm:bg-card sm:py-1 sm:shadow-sm"
         >
-          {SETUP_GROUPS.map((group) => (
+          {groups.map((group) => (
             <Fragment key={group.label}>
               <p className="hidden px-3 pt-3 pb-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground sm:block">
                 {group.label}

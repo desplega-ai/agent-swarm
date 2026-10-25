@@ -1,8 +1,8 @@
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getActiveConnection, getConfig } from "@/lib/config";
-import { withAddressSpace } from "@/lib/local-network";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
+import { withAddressSpace } from "../lib/local-network";
 import type {
   AcpRuntimeConfig,
   Agent,

@@ -1,5 +1,6 @@
 import type { OnboardingIntegrationMethod, OnboardingSignals } from "@/api/types";
 import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-secret-field";
+import { USE_CASES, type UseCase } from "@/lib/company-profile";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { httpUrlError } from "../../components/http-url";
 
@@ -198,10 +199,16 @@ export const COMING_SOON_TOOLS: ComingSoonTool[] = [
   },
 ];
 
-export const SETUP_GROUPS: ReadonlyArray<{ label: string; items: SetupIntegration[] }> = [
-  { label: "Chat and code", items: CORE_INTEGRATIONS },
-  { label: "Business tools", items: BUSINESS_TOOLS },
-];
+export type SetupGroup = { label: string; items: SetupIntegration[] };
+
+const CHAT_AND_CODE: SetupGroup = { label: "Chat and code", items: CORE_INTEGRATIONS };
+const BUSINESS: SetupGroup = { label: "Business tools", items: BUSINESS_TOOLS };
+
+/** The step 6 groups. A "Run the business" use case lists the business tools first. */
+export function setupGroups(useCase: UseCase | null): SetupGroup[] {
+  const business = USE_CASES.find((option) => option.value === useCase)?.group === "business";
+  return business ? [BUSINESS, CHAT_AND_CODE] : [CHAT_AND_CODE, BUSINESS];
+}
 
 export const SETUP_INTEGRATIONS: SetupIntegration[] = [...CORE_INTEGRATIONS, ...BUSINESS_TOOLS];
 

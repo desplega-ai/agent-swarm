@@ -32,17 +32,17 @@ type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
  * completes.
  */
 /** The composer placeholder while it waits. */
-const WAITING_PLACEHOLDER: Record<Exclude<LeadReadiness["state"], "ready">, string> = {
-  offline: "Waiting for the lead to come online…",
-  unverified: "Waiting for a verified key for the lead…",
-};
+const WAITING_PLACEHOLDER = "Waiting for the lead to come online…";
 
 export function FirstTaskComposer({
   onboarding,
   act,
   lead,
 }: Pick<StepProps, "onboarding" | "act"> & { lead: LeadReadiness["state"] }) {
-  const leadReady = lead === "ready";
+  // An online lead with no verified key can still take the task: Bedrock,
+  // Vertex and CRED_CHECK_DISABLE routes never report "verified". The status
+  // line above warns instead of blocking.
+  const leadReady = lead !== "offline";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { state: userState, userId, locked } = useCurrentUser();
@@ -151,7 +151,7 @@ export function FirstTaskComposer({
         isError={Boolean(error)}
         errorMessage={error ?? undefined}
         pendingLabel="Sending…"
-        placeholder={lead === "ready" ? "Describe a goal for the swarm" : WAITING_PLACEHOLDER[lead]}
+        placeholder={leadReady ? "Describe a goal for the swarm" : WAITING_PLACEHOLDER}
         disabled={!live}
         sendLabel="Send first task"
         autoFocus={live && !wentLive}
