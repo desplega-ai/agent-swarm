@@ -49605,6 +49605,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "labels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
                     "groups": {
                       "type": "array",
                       "items": {

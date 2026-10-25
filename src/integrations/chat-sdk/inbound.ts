@@ -1,5 +1,7 @@
 import type { Adapter, Message, Thread } from "chat";
 import { z } from "zod";
+import { sessionGroupKey } from "@/assets/key";
+import { sessionSourceKey } from "@/assets/source-key";
 import {
   getAgentById,
   getAgentWorkingOnContextKey,
@@ -9,6 +11,7 @@ import {
   getLeadAgent,
   isExtensionAgent,
 } from "@/be/db";
+import { rememberSessionLabel } from "@/be/db/session-labels";
 import { resolveIdentity } from "@/be/identity";
 import { recordUnmappedIdentity } from "@/be/unmapped-identities";
 import { dispatchPre } from "@/extensions/dispatcher";
@@ -373,6 +376,20 @@ async function targetFromExtension(
  * Runs outside any transaction, so `pre.chat.route` is dispatched here, after
  * the flush and before any task exists.
  */
+/**
+ * The source group label a Telegram or Discord message gives: the DM sender,
+ * or a Telegram group title. Slack labels come from the Slack lookup instead.
+ */
+function chatSourceLabel(adapter: string, item: ChatBufferedMessage): string | undefined {
+  if (adapter !== "telegram" && adapter !== "discord") return undefined;
+  const { facts } = item;
+  if (facts.chatType === "dm" || item.isDirectMessage)
+    return facts.from ? `DM · ${facts.from}` : undefined;
+  if (adapter === "telegram" && (facts.chatType === "group" || facts.chatType === "supergroup"))
+    return facts.title || undefined;
+  return undefined;
+}
+
 export async function flushChatThread(
   threadId: string,
   items: ChatBufferedMessage[],
@@ -538,6 +555,7 @@ export async function flushChatThread(
   const latestActive = await getLatestActiveTaskByContextKey(contextKey, "chat");
   const dependsOn = !immediate && latestActive ? [latestActive.id] : undefined;
   let created = 0;
+  let sourceKey: string | null = null;
   for (const match of target.matches) {
     const options: CreateTaskOptions = {
       agentId: match.agent?.id ?? null,
@@ -564,6 +582,7 @@ export async function flushChatThread(
     };
     try {
       const { task, unattached } = await createChatTaskWithFiles(description, options, inbound);
+      sourceKey ??= sessionSourceKey(task);
       created++;
       console.log(
         `[chat-sdk] ${threadId}: task ${task.id} for ${match.agent ? `agent ${match.agent.id}` : "no agent (queued)"} (${match.matchedText}, dependsOn: ${dependsOn?.join(", ") ?? "none"}${unattached.length ? `, ${unattached.length} file(s) not attached` : ""})`,
@@ -577,6 +596,14 @@ export async function flushChatThread(
         console.error(`[chat-sdk] ${threadId}: task creation failed: ${errorMessage(error)}`);
       }
     }
+  }
+  const label = chatSourceLabel(adapter, requester);
+  if (sourceKey && label) {
+    // Every message refreshes the label, so a renamed group shows its new title.
+    // The error may echo the label, which can hold a person's name: do not log it.
+    await rememberSessionLabel(sessionGroupKey(sourceKey), label).catch(() => {
+      console.warn("[chat-sdk] Could not save a session source label");
+    });
   }
   if (created > 0) {
     await rememberChatThreadRequester(threadId, requester.userId);

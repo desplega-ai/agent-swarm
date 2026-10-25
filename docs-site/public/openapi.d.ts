@@ -19180,6 +19180,9 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
+                            labels?: {
+                                [key: string]: string;
+                            };
                             groups: {
                                 total: number;
                                 unread: number;

@@ -283,17 +283,17 @@ The source filter (`showSource`, and the older `hideSource`) matches every root 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Label tests pass: `bun run test:root -- src/tests/session-source-labels.test.ts`
-- [ ] Session and chat tests pass: `bun run test:root -- src/tests/sessions-tree.test.ts src/tests/chat-sdk-*.test.ts`
-- [ ] Black-box Slack scenario passes, label included (clean checkout with no `.env`): `env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention`
-- [ ] OpenAPI is fresh: `bun run docs:openapi && git diff --exit-code openapi.json`
-- [ ] Response coverage passes: `bun run check:openapi-response-coverage`
-- [ ] Type check passes: `bun run tsc:check:tsc && cd apps/ui && bunx tsc -b`
-- [ ] Promise checks pass: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] Lint passes: `bun run lint && bun run lint:slop`
+- [x] Label tests pass: `bun run test:root -- src/tests/session-source-labels.test.ts`
+- [x] Session and chat tests pass: `bun run test:root -- src/tests/sessions-tree.test.ts src/tests/chat-sdk-*.test.ts`
+- [x] Black-box Slack scenario passes, label included (clean checkout with no `.env`): `env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention`
+- [x] OpenAPI is fresh: `bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] Response coverage passes: `bun run check:openapi-response-coverage`
+- [x] Type check passes: `bun run tsc:check:tsc && cd apps/ui && bunx tsc -b`
+- [x] Promise checks pass: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] Lint passes: `bun run lint && bun run lint:slop`
 
 #### Automated QA:
-- [ ] On the Phase 2 API (:3133), insert a label the way `rememberSessionLabel` writes it: `sqlite3 /tmp/sss-qa/p1.sqlite "INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at) VALUES ('session-labels', 'shared/slack/c0ar967k0kz/', '#swarm-dev-2', 'string', NULL, CAST(unixepoch('subsec')*1000 AS INTEGER), CAST(unixepoch('subsec')*1000 AS INTEGER))"`. Then confirm `curl -s http://localhost:3133/api/session-tree -H "Authorization: Bearer 123123" | jq .labels` shows it.
+- [x] On the Phase 2 API (:3133), insert a label the way `rememberSessionLabel` writes it: `sqlite3 /tmp/sss-qa/p1.sqlite "INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at) VALUES ('session-labels', 'shared/slack/c0ar967k0kz/', '#swarm-dev-2', 'string', NULL, CAST(unixepoch('subsec')*1000 AS INTEGER), CAST(unixepoch('subsec')*1000 AS INTEGER))"`. Then confirm `curl -s http://localhost:3133/api/session-tree -H "Authorization: Bearer 123123" | jq .labels` shows it.
 
 #### Manual Verification:
 - [ ] None. The Manual E2E section covers a real Slack label.
@@ -560,3 +560,4 @@ _Implementation run started 2026-10-25 in worktree `~/worktrees/agent-swarm/2026
 
 - Phase 1: an id that contains `/` gives no source key (it would add key segments). Taras chose a fallback for Slack through chat-sdk with no ts (`slack:<D…>:`, a top-level DM in the legacy assistant view): `shared/slack/<channel>/task:<id>/`, like Telegram with no topic. The `task-action` tool's `key` description (and `MCP.md`) now names the source key default.
 - Phase 2: the move guard allows only `sessionSourceKey(root)`. A root an agent created with an explicit `shared/slack/...` key that differs from its own fields can move out, but its Undo is refused (the UI ignores the Undo result). Accepted as an edge case. The PATCH route falls back to "no source key allowed" when it cannot load the session root.
+- Phase 3: `warmSlackChannelLabels` takes source group keys and looks up only channel group keys (`shared/slack/<channel>/`), so a bare `shared/slack/` or a deeper key never queues a lookup. chat-sdk capture covers Telegram and Discord only (a Slack DM through chat-sdk must not block the Slack lookup with an untimed label). Every chat message refreshes the label, once per flush, so a renamed Telegram group shows its new title.

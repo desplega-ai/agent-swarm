@@ -850,6 +850,7 @@ export interface SessionTreeGroup extends SessionSectionCounts {
 
 /** `GET /api/session-tree`: every visible group plus the section counts. */
 export interface SessionTreeResponse {
+  labels?: Record<string, string>;
   groups: SessionTreeGroup[];
   inbox: SessionSectionCounts;
   later: SessionSectionCounts;

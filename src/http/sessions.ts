@@ -21,6 +21,7 @@ import {
   getTaskById,
   listRecentSessions,
 } from "../be/db";
+import { getSessionLabels } from "../be/db/session-labels";
 import {
   listPrefixRoots,
   listSharedPrefixRoots,
@@ -54,6 +55,7 @@ import {
 import { can, isRbacEnabled } from "../rbac";
 import { sessionAccessTopic } from "../realtime/auth";
 import { realtimeBus } from "../realtime/bus";
+import { warmSlackChannelLabels } from "../slack/channel-labels";
 import {
   type AgentTask,
   AgentTaskSchema,
@@ -153,6 +155,7 @@ const SessionTreeGroupSchema = SessionSectionCountsSchema.extend({
   lastActivityAt: z.string(),
 });
 const SessionTreeResponseSchema = z.object({
+  labels: z.record(z.string(), z.string()).optional(),
   groups: z.array(SessionTreeGroupSchema),
   inbox: SessionSectionCountsSchema,
   later: SessionSectionCountsSchema,
@@ -1015,15 +1018,15 @@ export async function handleSessions(
     const parsed = await sessionTree.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const actor = await resolveSessionActor(req, myAgentId);
-    sessionTree.respond(
-      res,
-      200,
-      await getSessionTree(actor, undefined, {
-        mine: parsed.query.show !== "all",
-        hideSource: parsed.query.hideSource,
-        showSource: parsed.query.showSource,
-      }),
-    );
+    const tree = await getSessionTree(actor, undefined, {
+      mine: parsed.query.show !== "all",
+      hideSource: parsed.query.hideSource,
+      showSource: parsed.query.showSource,
+    });
+    const sourceKeys = tree.groups.map((group) => group.key).filter((key) => sourceOfKey(key));
+    const labels = await getSessionLabels(sourceKeys);
+    warmSlackChannelLabels(sourceKeys.filter((key) => labels[key] === undefined));
+    sessionTree.respond(res, 200, { ...tree, labels });
     return true;
   }
 
