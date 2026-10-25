@@ -21,16 +21,12 @@
   "budgetUsd": 0.75,
   "budgetMs": 720000,
   "passThreshold": 0.75,
-  "gates": [
-    "report-exists[w0]:/workspace/ledger/summary.md"
-  ],
+  "gates": ["report-exists[w0]:/workspace/ledger/summary.md"],
   "dimensions": [
     {
       "name": "correctness",
       "weight": 3,
-      "checks": [
-        "ledger-answer-key"
-      ],
+      "checks": ["ledger-answer-key"],
       "judge": null
     },
     {

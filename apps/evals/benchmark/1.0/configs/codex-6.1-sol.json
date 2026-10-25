@@ -5,21 +5,10 @@
   "harness": "codex",
   "model": "gpt-6.1-sol",
   "modelAlias": null,
-  "resolvedModels": [
-    "gpt-6.1-sol"
-  ],
+  "resolvedModels": ["gpt-6.1-sol"],
   "reasoningEffort": null,
   "envKeys": [],
-  "apiVersions": [
-    "2.5.3",
-    "2.5.4"
-  ],
-  "workerVersions": [
-    "2.5.3",
-    "2.5.4"
-  ],
-  "e2bTemplates": [
-    "rkxvj304b0cbgcc5rzuz",
-    "sd4hhphn0dopxjkrruix"
-  ]
+  "apiVersions": ["2.5.3", "2.5.4"],
+  "workerVersions": ["2.5.3", "2.5.4"],
+  "e2bTemplates": ["rkxvj304b0cbgcc5rzuz", "sd4hhphn0dopxjkrruix"]
 }
