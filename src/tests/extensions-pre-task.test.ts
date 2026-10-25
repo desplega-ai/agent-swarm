@@ -14,6 +14,7 @@ import {
   createWorkflowRunStep,
   getDbClient,
   getKv,
+  getMostRecentTaskInThread,
   getTaskByWorkflowRunStepId,
   initDb,
   startTask,
@@ -22,7 +23,7 @@ import * as dbClient from "../be/db-client";
 import type { InstallExtensionArgs as ExtensionInstallBody } from "../be/extensions/db";
 import { installExtension, listExtensionRuns } from "../be/extensions/db";
 import { getCatalogEntry } from "../extensions/catalog";
-import type { TaskBlockedEvent } from "../extensions/contract";
+import type { TaskBlockedEvent, TaskCreateEvent } from "../extensions/contract";
 import { disableExtension, enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
 import { initExtensionPostBridge, teardownExtensionPostBridge } from "../extensions/post-bridge";
 import { handleTasks } from "../http/tasks";
@@ -549,6 +550,57 @@ export default extension;
       "https://github.com/acme/project/issues/10",
       "api",
     );
+  });
+
+  test("Slack event metadata retains mixed-sender batches and rejects metadata rewrites", async () => {
+    await createAgent({ name: "slack-metadata-lead", isLead: true, status: "idle" });
+    await installSource(
+      "a-rewrite-slack-metadata",
+      `import type { SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => ({ action: "modify", data: {
+    priority: 7, slack: { trigger: "mention", messages: [] }
+  } as never }));
+};
+export default extension;
+`,
+    );
+    const recorder = await installAndEnable("record-task-create");
+    const channelId = "C_EVENT_METADATA";
+    const threadTs = "3000.0001";
+    bufferThreadMessage(channelId, threadTs, "first request", "U_FIRST", "3000.0002");
+    bufferThreadMessage(channelId, threadTs, "second request", "U_SECOND", "3000.0003");
+
+    await instantFlush(`${channelId}:${threadTs}`);
+
+    const event = (await getKv(`task:agent:${recorder.agentId}`, "ext:record-task-create:last"))
+      ?.value as TaskCreateEvent & { slack?: unknown };
+    expect(event.slack).toEqual({
+      trigger: "thread-buffer",
+      messages: [
+        { ts: "3000.0002", userId: "U_FIRST", text: "first request" },
+        { ts: "3000.0003", userId: "U_SECOND", text: "second request" },
+      ],
+    });
+    expect(event.origin).toBe("slack");
+    expect(event.options).toMatchObject({
+      slackTriggerMessageTs: "3000.0003",
+      slackUserId: "U_FIRST",
+      priority: 7,
+    });
+    expect(event.options).not.toHaveProperty("slack");
+    const task = await getMostRecentTaskInThread(channelId, threadTs);
+    expect(task).toMatchObject({
+      priority: 7,
+      slackTriggerMessageTs: "3000.0003",
+      slackUserId: "U_FIRST",
+    });
+    expect(task).not.toHaveProperty("slack");
+
+    await createTaskWithSiblingAwareness("ordinary API task", { source: "api" });
+    const apiEvent = (await getKv(`task:agent:${recorder.agentId}`, "ext:record-task-create:last"))
+      ?.value as TaskCreateEvent & { slack?: unknown };
+    expect(apiEvent).not.toHaveProperty("slack");
   });
 
   test("scheduler and workflow executor provide their task creation origins", async () => {

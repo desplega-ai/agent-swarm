@@ -22,6 +22,7 @@ import { join } from "node:path";
 import type { WebClient } from "@slack/web-api";
 import { getTaskAttachments, getTaskById, promoteDraftTask, refreshDraftTaskLease } from "../be/db";
 import { MAX_TASK_ATTACHMENT_BYTES, recordTaskAttachmentUpload } from "../be/task-attachment-store";
+import type { TaskCreateEvent } from "../extensions/contract";
 import { providerPath } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { resolveTemplate } from "../prompts/resolver";
@@ -320,17 +321,19 @@ export async function createSlackTaskWithFiles(
   description: string,
   options: CreateTaskOptions,
   inbound: InboundSlackFiles,
+  slack?: TaskCreateEvent["slack"],
 ): Promise<{ task: AgentTask; unattached: SlackFileFailure[] }> {
   noteSlackInboundSideEffect("task_created");
+  const context = { origin: "slack" as const, slack };
   if (inbound.fetched.length === 0) {
-    const task = await createTaskWithSiblingAwareness(description, options, { origin: "slack" });
+    const task = await createTaskWithSiblingAwareness(description, options, context);
     return { task, unattached: inbound.failed };
   }
 
   const task = await createTaskWithSiblingAwareness(
     description,
     { ...options, status: "draft" },
-    { origin: "slack" },
+    context,
   );
   const unattached = [...inbound.failed];
   // Uploads run one after another and can outlast the abandoned-draft sweep's

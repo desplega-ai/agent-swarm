@@ -117,6 +117,11 @@ export interface TaskCreateEvent {
   description: string;
   origin: TaskCreateOrigin;
   requestInfo?: RequestInfo;
+  /** Slack ingress metadata; not persisted or writable through modify. */
+  slack?: {
+    trigger: "mention" | "thread-buffer";
+    messages: { ts: string; userId: string; text: string }[];
+  };
 }
 
 /** A pre.task.create hook blocked a task before it was created. */

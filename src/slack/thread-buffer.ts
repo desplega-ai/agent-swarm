@@ -313,6 +313,10 @@ async function slackFlush(
         contextKey: slackContextKey({ channelId, threadTs }),
       },
       inbound,
+      {
+        trigger: "thread-buffer",
+        messages: items.map(({ ts, userId, text }) => ({ ts, userId, text })),
+      },
     );
   } catch (error) {
     if (!(error instanceof TaskCreationBlockedError)) throw error;

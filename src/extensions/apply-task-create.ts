@@ -3,7 +3,12 @@ import type { RequestInfo } from "../tools/utils";
 import { type CreateTaskOptions, CreateTaskOptionsSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
-import type { TaskBlockedEvent, TaskCreateModify, TaskCreateOrigin } from "./contract";
+import type {
+  TaskBlockedEvent,
+  TaskCreateEvent,
+  TaskCreateModify,
+  TaskCreateOrigin,
+} from "./contract";
 import { dispatchPre, extensionIdForAgent, listRegistered } from "./dispatcher";
 
 const MODIFIABLE_OPTION_KEYS = [
@@ -50,6 +55,7 @@ type ApplyPreTaskCreateArgs = {
   options: CreateTaskOptions;
   origin: TaskCreateOrigin;
   requestInfo?: RequestInfo;
+  slack?: TaskCreateEvent["slack"];
   /** The caller's escape hatch for an uncatalogued `model`; the harness check ignores it. */
   allowCustomModel?: boolean;
 };
@@ -141,6 +147,7 @@ export async function applyPreTaskCreate(
       options: args.options,
       origin,
       requestInfo: args.requestInfo,
+      ...(args.slack ? { slack: args.slack } : {}),
     },
     {
       skipExtensionId: creatingExtensionId,

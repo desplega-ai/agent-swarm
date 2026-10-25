@@ -18,7 +18,7 @@ import {
   getInProgressTasksByContextKey,
 } from "../be/db";
 import { applyPreTaskCreate } from "../extensions/apply-task-create";
-import type { TaskCreateOrigin } from "../extensions/contract";
+import type { TaskCreateEvent, TaskCreateOrigin } from "../extensions/contract";
 import type { AgentTask } from "../types";
 import { TaskCreationBlockedError } from "./errors";
 import {
@@ -151,7 +151,11 @@ export type PreparedTaskCreate = { description: string; options: CreateTaskOptio
 export async function prepareTaskWithSiblingAwareness(
   description: string,
   options: CreateTaskOptions,
-  args: { origin?: TaskCreateOrigin; allowCustomModel?: boolean } = {},
+  args: {
+    origin?: TaskCreateOrigin;
+    allowCustomModel?: boolean;
+    slack?: TaskCreateEvent["slack"];
+  } = {},
 ): Promise<PreparedTaskCreate> {
   const preCreate = await applyPreTaskCreate({
     description,
@@ -159,6 +163,7 @@ export async function prepareTaskWithSiblingAwareness(
     // Preserve the plan's REST default for callers without an explicit ingress origin.
     origin: args.origin ?? "rest",
     allowCustomModel: args.allowCustomModel,
+    slack: args.slack,
   });
   if (preCreate.kind === "blocked") {
     throw new TaskCreationBlockedError(preCreate.reason, preCreate.extension);
@@ -169,7 +174,11 @@ export async function prepareTaskWithSiblingAwareness(
 export async function createTaskWithSiblingAwareness(
   description: string,
   options: CreateTaskOptions,
-  args: { origin?: TaskCreateOrigin; allowCustomModel?: boolean } = {},
+  args: {
+    origin?: TaskCreateOrigin;
+    allowCustomModel?: boolean;
+    slack?: TaskCreateEvent["slack"];
+  } = {},
 ): Promise<AgentTask> {
   const { description: d, options: o } = await prepareTaskWithSiblingAwareness(
     description,

@@ -203,7 +203,7 @@ The Slack post event fires after authorization and before routing.
 
 | Event | Boundary | Event payload | Modify shape | Block effect |
 | --- | --- | --- | --- | --- |
-| `pre.task.create` | Task creation entry points | `{ options, description, origin, requestInfo? }` | Input fields from `CreateTaskOptions`, plus `description?` | The caller receives a skipped result. No task is created. |
+| `pre.task.create` | Task creation entry points | `{ options, description, origin, requestInfo?, slack? }` | Input fields from `CreateTaskOptions`, plus `description?` | The caller receives a skipped result. No task is created. |
 | `pre.task.followUp` | Worker follow-up entry point | `{ completedTask, status, output?, failureReason?, workerAgentId, leadAgentId, summary }` | `{ description?, agentId?, priority?, followUpConfig? }` | No lead follow-up task is created. |
 | `pre.slack.route` | Slack message handler | `{ channelId, userId, text, threadTs?, botMentioned, threadContext? }` | `{ target }` for an agent, lead, or broadcast | The message creates no task or reply. |
 | `pre.chat.route` | Chat SDK thread buffer flush, before task creation | `{ adapter, channelId, threadId, userId, userName?, text, botMentioned, isDirectMessage, chatType?, isForum?, replyToBot, threadContext? }` | `{ target }` for an agent, lead, broadcast, or workflow (`{ kind: "workflow", workflowId }`) | The buffered messages create no task, workflow run, or reply. |
@@ -232,6 +232,8 @@ The Slack post event fires after authorization and before routing.
 `post.email.received` carries the first 500 characters of the body. `post.kapso.message` carries the text, or a placeholder naming the type for a non-text message.
 `post.vcs.event` fires once per webhook event. `kind` is the provider's own object: `pull_request`, `merge_request`, `issue`, `issue_comment`, `note`, `pull_request_review`, or `pipeline`. `action` is the provider's own value, such as `opened`, `synchronize`, `merge`, or `created`; for a pipeline it is the status, such as `success` or `failed`. The event carries parsed fields, not the raw webhook body, and a field a kind does not have is absent.
 `pre.task.create` origins include REST, apps, MCP, Slack, schedules, workflows, webhooks, follow-ups, and extensions.
+For Slack mentions and thread-buffer flushes, `event.slack` carries `{ trigger: "mention" | "thread-buffer", messages: [{ ts, userId, text }] }`. A mention has one message; a buffer flush includes every message in buffer order, with its own sender, timestamp, and text before description formatting. Extensions can use these fields without parsing the description.
+This metadata is optional, is not stored on the task, and cannot be changed with `modify`. Existing `options.slackTriggerMessageTs` and `options.slackUserId` keep their meanings: for a buffer flush, the last message's timestamp and the first message's sender.
 Heartbeat classification values are `no-session`, `stale-session`, and `fresh-stalled`.
 Heartbeat actions are `supersede-resume`, `fail`, and `record`.
 

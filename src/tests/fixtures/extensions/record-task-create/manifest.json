@@ -1,0 +1,7 @@
+{
+  "name": "record-task-create",
+  "description": "Records task creation events",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}

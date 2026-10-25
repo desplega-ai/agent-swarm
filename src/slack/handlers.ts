@@ -679,6 +679,11 @@ export function registerMessageHandler(app: App): void {
       routingThreadContext,
     );
 
+    const slack = {
+      trigger: "mention" as const,
+      messages: [{ ts: msg.ts, userId: msg.user, text: msg.text ?? "" }],
+    };
+
     if (matches.length === 0) {
       if (!botMentioned && !isImplicitMention) return ignoreSlackInbound("not_addressed");
 
@@ -742,6 +747,7 @@ export function registerMessageHandler(app: App): void {
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         },
         inbound,
+        slack,
       );
       await ackSlackMessage(client, msg.channel, msg.ts, reactionName("accepted"), "accepted");
       await notifySlackFileFailures(client, msg.channel, threadTs, unattached);
@@ -864,6 +870,7 @@ export function registerMessageHandler(app: App): void {
               contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
             },
             inbound,
+            slack,
           );
           const { task } = created;
           unattached.push(...created.unattached);
@@ -888,6 +895,7 @@ export function registerMessageHandler(app: App): void {
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           },
           inbound,
+          slack,
         );
         const { task } = created;
         unattached.push(...created.unattached);
