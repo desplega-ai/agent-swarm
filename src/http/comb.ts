@@ -25,8 +25,8 @@ const resultSchema = z.object({
   /** Comments of an earlier send whose missing "sent" reply this batch posted again. */
   repaired: z.array(z.object({ id: z.string(), taskId: z.string() })),
   /**
-   * With a new task only. `online`: a lead got it. `offline`: the only lead is
-   * offline, so the task waits for it. `none`: no lead, so the task waits
+   * With a new task only. `online`: a lead got it. `offline`: every lead is offline,
+   * so the task waits for one. `none`: no lead, so the task waits
    * unassigned in the pool.
    */
   lead: z.enum(["online", "offline", "none"]).optional(),

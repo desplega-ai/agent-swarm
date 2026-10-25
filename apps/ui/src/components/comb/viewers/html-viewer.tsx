@@ -119,6 +119,8 @@ function HtmlPreview({ file, onShowSource }: { file: DrivePath; onShowSource: ()
   }
   if (!url) return <ViewerSkeleton />;
   return (
+    // `bg-white`: a page without a background expects the browser's white
+    // canvas, not the dashboard theme behind a transparent frame.
     <iframe
       src={url}
       title={`Preview of ${baseName(file.path)}`}

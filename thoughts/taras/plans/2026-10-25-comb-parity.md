@@ -166,11 +166,23 @@ Then walk Phases 1 to 5 at 1440x900 and 390x844 with agent-browser, upload the s
 - [x] Phase 2: Share links (895a95383)
 - [x] Phase 3: Viewers (b220e1602)
 - [x] Phase 4: Uploads (073898a3e)
-- [ ] Phase 5: Send to swarm
-- [ ] Docs
-- [ ] QA walk + screenshots + recording
+- [x] Phase 5: Send to swarm (08fcf59e9)
+- [x] Docs (e1d2b2b56)
+- [x] QA walk + screenshots + recording (agent-fs `qa/agent-swarm/2026-10-25-comb-parity/`)
+- [x] Code review (Standards + Spec, Opus): fixes in the review commit
 - [ ] Gates
 - [ ] PR + cleanup
+
+## Review notes (Minor, not fixed)
+
+- Viewer-role users see an enabled Upload button. Each file then fails with agent-fs's 403
+  message ("requires 'editor' role"). Comb has no role read to hide it.
+- Audio with no extension and no `audio/*` type opens in the fallback viewer. The live UI sniffs
+  magic bytes. Not ported.
+- `putRaw` (409, 413, abort, redaction) and the feature gates have no unit tests. They were
+  checked live (409 clash, abort via cancel path in the queue tests, gates by reading).
+- github-attach is not installed on this machine, so the PR embeds agent-fs signed URLs (7 days)
+  and a share-create link for the recording.
 
 ## Log
 

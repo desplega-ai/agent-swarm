@@ -26,7 +26,7 @@ import { usePageShortcut } from "@/lib/json-render/use-page-shortcut";
 type Drive = { orgId: string; driveId: string };
 
 const MODES = [
-  { value: "name", label: "Name", tooltip: "File and folder names, close matches too" },
+  { value: "name", label: "Name", tooltip: "File names, close matches too" },
   { value: "text", label: "Full text", tooltip: "Exact words inside files" },
   { value: "semantic", label: "Semantic", tooltip: "Files about the topic, by meaning" },
 ] as const;
@@ -122,7 +122,6 @@ function SearchDialog({
             onValueChange={setQuery}
             placeholder={PLACEHOLDERS[mode]}
             aria-label="Search query"
-            className="h-12"
           />
           <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 py-2">
             <SegmentedControl
@@ -205,7 +204,9 @@ function SearchBody({
         <AlertCircle className="size-5 text-status-error-strong" aria-hidden />
         <p>
           {unsupported
-            ? "This agent-fs has no name search. Update agent-fs to 0.18.5 or later."
+            ? mode === "name"
+              ? "This agent-fs has no name search. Update agent-fs to 0.18.5 or later."
+              : "This agent-fs cannot run this search. Update agent-fs."
             : search.error.message || "Search failed."}
         </p>
         {unsupported ? null : (
@@ -247,7 +248,7 @@ function SearchBody({
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex min-w-0 items-baseline gap-2">
               <span className="truncate font-medium">{hit.name}</span>
-              <span className="truncate font-mono text-[11px] text-muted-foreground">
+              <span className="truncate font-mono text-meta text-muted-foreground">
                 {hit.folder}
               </span>
               {hit.chip ? (

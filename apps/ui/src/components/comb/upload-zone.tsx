@@ -18,7 +18,7 @@ import { useAgentFs } from "@/contexts/agent-fs-context";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import { baseName, combPath, type DrivePath, parentFolder } from "@/lib/comb/paths";
 import {
-  type DropEntry,
+  dropSources,
   filesFromDrop,
   formatLimit,
   isFinished,
@@ -81,6 +81,7 @@ function useFolderUploader(folder: DrivePath) {
             return result;
           });
       queue.enqueue(
+        { orgId: folder.orgId, driveId: folder.driveId },
         inputs.map(({ file, relativePath }) => ({
           file,
           path: uploadTargetPath(folder.path, relativePath),
@@ -174,11 +175,7 @@ export function UploadDropZone({ folder, children }: { folder: DrivePath; childr
         depth.current = 0;
         setOver(false);
         // The item list empties after the event, so read the entries now.
-        const items = Array.from(event.dataTransfer.items);
-        const entries = items.map((item) =>
-          item.kind === "file" ? (item.webkitGetAsEntry() as DropEntry | null) : null,
-        );
-        const files = Array.from(event.dataTransfer.files);
+        const { entries, files } = dropSources(event.dataTransfer.items);
         void filesFromDrop(entries, files).then(upload, (error: unknown) => {
           toast.error("Could not read the dropped files", {
             description: error instanceof Error ? error.message : undefined,
@@ -204,7 +201,7 @@ export function UploadDropZone({ folder, children }: { folder: DrivePath; childr
 }
 
 /** The uploads of this page load, with progress and the clash choices. Hidden when empty. */
-export function UploadList({ drive }: { drive: { orgId: string; driveId: string } }) {
+export function UploadList() {
   const items = useUploadItems();
   const access = useAgentFsAccess();
   const queryClient = useQueryClient();
@@ -215,7 +212,7 @@ export function UploadList({ drive }: { drive: { orgId: string; driveId: string 
   const keepBoth = async (item: UploadItem) => {
     const folder = parentFolder(item.path);
     const listing = await queryClient
-      .fetchQuery(agentFsLsQuery(access, { ...drive, path: folder }))
+      .fetchQuery(agentFsLsQuery(access, { ...item.drive, path: folder }))
       .catch(() => null);
     const taken = new Set(listing?.entries.map((entry) => entry.name) ?? []);
     taken.add(baseName(item.path));
@@ -243,28 +240,17 @@ export function UploadList({ drive }: { drive: { orgId: string; driveId: string 
       </header>
       <ul className="min-h-0 flex-1 divide-y divide-border-subtle overflow-y-auto">
         {items.map((item) => (
-          <UploadRow
-            key={item.id}
-            item={item}
-            drive={drive}
-            onKeepBoth={() => void keepBoth(item)}
-          />
+          <UploadRow key={item.id} item={item} onKeepBoth={() => keepBoth(item)} />
         ))}
       </ul>
     </section>
   );
 }
 
-function UploadRow({
-  item,
-  drive,
-  onKeepBoth,
-}: {
-  item: UploadItem;
-  drive: { orgId: string; driveId: string };
-  onKeepBoth: () => void;
-}) {
+function UploadRow({ item, onKeepBoth }: { item: UploadItem; onKeepBoth: () => Promise<void> }) {
   const name = baseName(item.path);
+  // Keep both reads the folder first. The buttons wait for it.
+  const [resolving, setResolving] = useState(false);
   const cancellable = item.status === "queued" || item.status === "uploading";
   return (
     <li className="flex min-w-0 flex-col gap-1.5 px-3 py-2">
@@ -273,7 +259,7 @@ function UploadRow({
         <span className="flex min-w-0 flex-1 items-baseline gap-2">
           {item.status === "done" ? (
             <Link
-              to={combPath({ ...drive, path: item.path })}
+              to={combPath({ ...item.drive, path: item.path })}
               className="truncate text-sm font-medium underline-offset-2 hover:underline"
             >
               {name}
@@ -281,7 +267,7 @@ function UploadRow({
           ) : (
             <span className="truncate text-sm font-medium">{name}</span>
           )}
-          <span className="hidden truncate font-mono text-[11px] text-muted-foreground sm:inline">
+          <span className="hidden truncate font-mono text-meta text-muted-foreground sm:inline">
             {parentFolder(item.path)}
           </span>
         </span>
@@ -309,10 +295,23 @@ function UploadRow({
           <span className="text-xs text-muted-foreground">
             A file named {name} is already here.
           </span>
-          <Button size="xs" variant="outline" onClick={onKeepBoth}>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={resolving}
+            onClick={() => {
+              setResolving(true);
+              void onKeepBoth().finally(() => setResolving(false));
+            }}
+          >
             Keep both
           </Button>
-          <Button size="xs" variant="ghost" onClick={() => queue.skip(item.id)}>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={resolving}
+            onClick={() => queue.skip(item.id)}
+          >
             Skip
           </Button>
         </div>

@@ -1,6 +1,7 @@
 // Which comments "Send to swarm" offers. Relative imports only: `bun:test`
 // runs this from the repo root.
 
+import type { CombReviewBatchResult } from "../../api/types";
 import type { CommentListEntry } from "../agent-fs/types";
 import { hasSwarmMarker, isSentToSwarm } from "./markers";
 
@@ -36,7 +37,7 @@ export function eligibleForBatch(
 }
 
 /** Who got the task of a send (`lead` in the result). */
-export type SendLead = "online" | "offline" | "none";
+export type SendLead = NonNullable<CombReviewBatchResult["lead"]>;
 
 /**
  * The toast line about the lead. Null when a lead got the task, and for an

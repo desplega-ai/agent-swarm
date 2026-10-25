@@ -67,8 +67,8 @@ export interface ReviewBatchInput {
 }
 
 /**
- * Who got the new task: `online` (a lead that is not offline), `offline` (the
- * only lead is offline, so the task waits for it), or `none` (no lead, so the
+ * Who got the new task: `online` (a lead that is not offline), `offline` (every
+ * lead is offline, so the task waits for one), or `none` (no lead, so the
  * task waits unassigned in the pool).
  */
 export type ReviewBatchLead = "online" | "offline" | "none";

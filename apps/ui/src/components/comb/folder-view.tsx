@@ -127,7 +127,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           </>
         }
       />
-      <UploadList drive={folder} />
+      <UploadList />
       {listing.data && rows.length === 0 ? (
         <EmptyState
           icon={FolderOpen}

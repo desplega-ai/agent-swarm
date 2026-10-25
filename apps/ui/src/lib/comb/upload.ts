@@ -81,6 +81,29 @@ export interface DropEntry {
   };
 }
 
+/** The parts of a `DataTransferItem` that a drop reads. */
+export interface DropItem {
+  kind: string;
+  webkitGetAsEntry: () => unknown;
+  getAsFile: () => File | null;
+}
+
+/**
+ * The file entries and files of a drop, index by index. Only `file` items
+ * count: a drag from a web page also carries `string` items (a URL, HTML),
+ * and they must not shift the files against their entries.
+ */
+export function dropSources(items: ArrayLike<DropItem>): {
+  entries: Array<DropEntry | null>;
+  files: Array<File | null>;
+} {
+  const fileItems = Array.from(items).filter((item) => item.kind === "file");
+  return {
+    entries: fileItems.map((item) => item.webkitGetAsEntry() as DropEntry | null),
+    files: fileItems.map((item) => item.getAsFile()),
+  };
+}
+
 export interface UploadInput {
   file: File;
   /** Path relative to the folder the files were dropped on ("shots/a.png"). */
@@ -117,7 +140,7 @@ async function readEntry(entry: DropEntry, prefix: string, out: UploadInput[]): 
  */
 export async function filesFromDrop(
   entries: ReadonlyArray<DropEntry | null>,
-  files: ReadonlyArray<File>,
+  files: ReadonlyArray<File | null>,
 ): Promise<UploadInput[]> {
   const out: UploadInput[] = [];
   for (let index = 0; index < entries.length; index++) {
@@ -158,8 +181,15 @@ export type PutFn = (
   opts: { signal: AbortSignal; onProgress: (fraction: number) => void },
 ) => Promise<{ version: number }>;
 
+/** The drive an upload goes to. */
+export interface UploadDrive {
+  orgId: string;
+  driveId: string;
+}
+
 export interface UploadItem {
   id: number;
+  drive: UploadDrive;
   /** Drive path the file is sent to (changes on Keep both). */
   path: string;
   file: File;
@@ -181,8 +211,6 @@ export interface UploadQueueOptions {
   isConflict: (error: unknown) => boolean;
   /** True when the upload was cancelled. */
   isAbort: (error: unknown) => boolean;
-  /** After each upload lands. */
-  onUploaded?: (item: UploadItem) => void;
   /** Once nothing runs or waits for a decision. */
   onDrained?: (summary: UploadSummary) => void;
 }
@@ -223,12 +251,18 @@ export class UploadQueue {
     this.emit();
   }
 
-  /** Queue files for `paths`. A file over `maxBytes` is rejected before it is sent. */
-  enqueue(files: ReadonlyArray<{ file: File; path: string }>, put: PutFn, maxBytes: number): void {
+  /** Queue files for `paths` on `drive`. A file over `maxBytes` is rejected before it is sent. */
+  enqueue(
+    drive: UploadDrive,
+    files: ReadonlyArray<{ file: File; path: string }>,
+    put: PutFn,
+    maxBytes: number,
+  ): void {
     const added: UploadItem[] = files.map(({ file, path }) => {
       const tooBig = file.size > maxBytes;
       return {
         id: this.nextId++,
+        drive,
         path,
         file,
         status: tooBig ? "rejected" : "queued",
@@ -243,21 +277,31 @@ export class UploadQueue {
     this.summarizeIfDrained();
   }
 
-  /** Send a clashing file again under `path` (the next free name). */
+  private statusOf(id: number): UploadStatus | undefined {
+    return this.items.find((entry) => entry.id === id)?.status;
+  }
+
+  /**
+   * Send a clashing file again under `path` (the next free name). Only a
+   * `conflict` item moves: a second click, or a Skip that landed first, wins.
+   */
   keepBoth(id: number, path: string): void {
+    if (this.statusOf(id) !== "conflict") return;
     this.update(id, { status: "queued", path, progress: 0, error: undefined });
     this.pump();
   }
 
+  /** Leave out a waiting file (a clash, or one not started yet). */
   skip(id: number): void {
+    const status = this.statusOf(id);
+    if (status !== "conflict" && status !== "queued") return;
     this.update(id, { status: "skipped" });
     this.summarizeIfDrained();
   }
 
   cancel(id: number): void {
-    const item = this.items.find((entry) => entry.id === id);
-    if (item?.status === "uploading") this.controllers.get(id)?.abort();
-    else if (item?.status === "queued" || item?.status === "conflict") this.skip(id);
+    if (this.statusOf(id) === "uploading") this.controllers.get(id)?.abort();
+    else this.skip(id);
   }
 
   /** Drop finished rows from the list. */
@@ -289,8 +333,6 @@ export class UploadQueue {
       });
       this.update(id, { status: "done", progress: 1, version: result.version });
       this.batch.done++;
-      const done = this.items.find((entry) => entry.id === id);
-      if (done) this.options.onUploaded?.(done);
     } catch (error) {
       if (this.options.isConflict(error)) {
         this.update(id, { status: "conflict", progress: 0 });

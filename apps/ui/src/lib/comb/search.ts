@@ -157,8 +157,9 @@ export function searchOutcome(
     );
     hint = found.hint ?? null;
   }
-  const seen = new Set<string>();
-  hits = hits.filter((hit) => !seen.has(hit.path) && seen.add(hit.path));
+  const byPath = new Map<string, SearchHit>();
+  for (const hit of hits) if (!byPath.has(hit.path)) byPath.set(hit.path, hit);
+  hits = [...byPath.values()];
   return { hits, total: Math.max(serverTotal, hits.length), hint };
 }
 

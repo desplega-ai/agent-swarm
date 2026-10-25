@@ -1,5 +1,5 @@
 import { ExternalLink, Link2 } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { CopyableField } from "@/components/shared/copyable-fields";
@@ -92,6 +92,7 @@ function ShareDialog({ file, onClose }: { file: DrivePath; onClose: () => void }
   const [expiresIn, setExpiresIn] = useState<ShareExpirySeconds>(DEFAULT_SHARE_EXPIRY_SECONDS);
   const [share, setShare] = useState<{ link: string; expiresAt: string } | null>(null);
   const [pending, setPending] = useState(false);
+  const expiryLabelId = useId();
   const name = baseName(file.path);
 
   const create = async () => {
@@ -129,12 +130,14 @@ function ShareDialog({ file, onClose }: { file: DrivePath; onClose: () => void }
           <DialogDescription>{shareDescription(file.path)}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-1.5">
-          <span id="share-expiry-label" className="text-xs font-medium text-muted-foreground">
+          <span id={expiryLabelId} className="text-xs font-medium text-muted-foreground">
             Link expires after
           </span>
           <SegmentedControl
-            aria-labelledby="share-expiry-label"
+            aria-labelledby={expiryLabelId}
             size="sm"
+            // A link keeps the expiry it was made with: no change while one is made.
+            disabled={pending}
             value={String(expiresIn) as `${ShareExpirySeconds}`}
             onValueChange={(value) => {
               const next = Number(value) as ShareExpirySeconds;

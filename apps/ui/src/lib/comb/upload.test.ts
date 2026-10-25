@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_MAX_UPLOAD_BYTES,
   type DropEntry,
+  dropSources,
   filesFromDrop,
   formatLimit,
   keepBothName,
@@ -67,6 +68,8 @@ describe("upload limit", () => {
   });
 });
 
+const DRIVE = { orgId: "org", driveId: "drive" };
+
 function file(name: string, size = 3): File {
   return new File([new Uint8Array(size)], name);
 }
@@ -113,6 +116,20 @@ describe("filesFromDrop", () => {
     ]);
   });
 
+  test("dropSources reads file items only, so a page drag's string items do not shift the files", async () => {
+    const png = file("photo.png");
+    const items = [
+      { kind: "string", webkitGetAsEntry: () => null, getAsFile: () => null },
+      { kind: "string", webkitGetAsEntry: () => null, getAsFile: () => null },
+      { kind: "file", webkitGetAsEntry: () => null, getAsFile: () => png },
+    ];
+    const { entries, files } = dropSources(items);
+    expect(entries).toEqual([null]);
+    expect(files).toEqual([png]);
+    const inputs = await filesFromDrop(entries, files);
+    expect(inputs.map((input) => input.relativePath)).toEqual(["photo.png"]);
+  });
+
   test("falls back to the plain file when an item has no entry", async () => {
     const inputs = await filesFromDrop([null], [file("loose.txt")]);
     expect(inputs.map((input) => input.relativePath)).toEqual(["loose.txt"]);
@@ -151,6 +168,7 @@ describe("UploadQueue", () => {
   test("runs at most 3 at a time and summarizes the batch once", async () => {
     const { queue, put, calls, summaries, status, settle } = harness();
     queue.enqueue(
+      DRIVE,
       ["a", "b", "c", "d"].map((name) => ({ file: file(name), path: `/up/${name}` })),
       put,
       100,
@@ -169,7 +187,7 @@ describe("UploadQueue", () => {
 
   test("rejects a file over the limit before sending it", () => {
     const { queue, put, calls, status } = harness();
-    queue.enqueue([{ file: file("big", 11), path: "/big" }], put, 10);
+    queue.enqueue(DRIVE, [{ file: file("big", 11), path: "/big" }], put, 10);
     expect(calls.length).toBe(0);
     expect(status()).toEqual(["rejected"]);
     expect(queue.getItems()[0]?.error).toBe(`Larger than ${formatLimit(10)}`);
@@ -177,7 +195,7 @@ describe("UploadQueue", () => {
 
   test("a clash waits; Keep both sends it again under the new name", async () => {
     const { queue, put, calls, summaries, conflict, status, settle } = harness();
-    queue.enqueue([{ file: file("a.md"), path: "/docs/a.md" }], put, 100);
+    queue.enqueue(DRIVE, [{ file: file("a.md"), path: "/docs/a.md" }], put, 100);
     calls[0]?.reject(conflict);
     await settle();
     expect(status()).toEqual(["conflict"]);
@@ -192,9 +210,35 @@ describe("UploadQueue", () => {
     expect(summaries).toEqual([{ done: 1, failed: 0 }]);
   });
 
+  test("Keep both and Skip act on a waiting clash only", async () => {
+    const { queue, put, calls, conflict, status, settle } = harness();
+    queue.enqueue(DRIVE, [{ file: file("a.md"), path: "/a.md" }], put, 100);
+    calls[0]?.reject(conflict);
+    await settle();
+    const id = queue.getItems()[0]?.id as number;
+    // Skip lands before a slow Keep both: the file stays skipped.
+    queue.skip(id);
+    queue.keepBoth(id, "/a (1).md");
+    expect(status()).toEqual(["skipped"]);
+    expect(calls.length).toBe(1);
+    expect(queue.getItems()[0]?.drive).toEqual(DRIVE);
+  });
+
+  test("a second Keep both does not upload twice", async () => {
+    const { queue, put, calls, conflict, settle } = harness();
+    queue.enqueue(DRIVE, [{ file: file("a.md"), path: "/a.md" }], put, 100);
+    calls[0]?.reject(conflict);
+    await settle();
+    const id = queue.getItems()[0]?.id as number;
+    queue.keepBoth(id, "/a (1).md");
+    queue.keepBoth(id, "/a (1).md");
+    expect(calls.length).toBe(2);
+  });
+
   test("Skip, cancel, and errors", async () => {
     const { queue, put, calls, summaries, conflict, status, settle } = harness();
     queue.enqueue(
+      DRIVE,
       ["a", "b", "c"].map((name) => ({ file: file(name), path: `/${name}` })),
       put,
       100,

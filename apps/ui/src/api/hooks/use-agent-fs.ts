@@ -71,6 +71,7 @@ import { markMentionsRead } from "@/lib/comb/mentions";
 import type { DrivePath } from "@/lib/comb/paths";
 import {
   isSearchable,
+  isUnknownOpError,
   SEARCH_OPS,
   type SearchMode,
   type SearchOutcome,
@@ -180,7 +181,7 @@ export function useAgentFsText(target: DrivePath) {
     // One entry per revision: drop each as soon as no viewer reads it, so a
     // file that changes on every poll does not pile up copies of its bytes.
     gcTime: 0,
-    placeholderData: keepSameFile(fileKey),
+    placeholderData: keepUnderPrefix(fileKey),
   });
 }
 
@@ -194,15 +195,16 @@ function fileRevision(stat: StatResult | undefined) {
 }
 
 /**
- * `placeholderData` that keeps the previous data of the same file (keys under
- * `fileKey`) on screen while a new revision loads.
+ * `placeholderData` that keeps the previous data of a query under `prefix` on
+ * screen while the next one loads: the same file at a new revision, or the
+ * same search mode with a new query.
  */
-function keepSameFile(fileKey: readonly unknown[]) {
+function keepUnderPrefix(prefix: readonly unknown[]) {
   return <T>(previous: T | undefined, previousQuery?: { queryKey: QueryKey }) =>
-    previousQuery && sameKeyPrefix(previousQuery.queryKey, fileKey) ? previous : undefined;
+    previousQuery && sameKeyPrefix(previousQuery.queryKey, prefix) ? previous : undefined;
 }
 
-// --- Media URLs (step-6: image, video, and PDF viewers) ---
+// --- Media URLs (step-6: image, video, and PDF viewers, then audio) ---
 
 /** Presigned media URLs live one hour. */
 const MEDIA_URL_EXPIRES_IN_SECONDS = 3600;
@@ -268,7 +270,7 @@ export function useAgentFsMediaUrl(target: DrivePath, kind: MediaKind): AgentFsM
     // PDF at page 1 and restarts a video.
     refetchInterval: false,
     refetchOnWindowFocus: false,
-    placeholderData: keepSameFile(mediaKey),
+    placeholderData: keepUnderPrefix(mediaKey),
   });
   const presignedUrl = freshPresignedUrl(signed.data, mountedAt);
   const blobMode = signed.data?.kind === "blob";
@@ -286,7 +288,7 @@ export function useAgentFsMediaUrl(target: DrivePath, kind: MediaKind): AgentFsM
     refetchInterval: false,
     // Never keep media bytes (or their object URLs) for a file that is not on screen.
     gcTime: 0,
-    placeholderData: keepSameFile(mediaKey),
+    placeholderData: keepUnderPrefix(mediaKey),
   });
   const plan = blobUrlPlan(kind, target.path, stat?.contentType);
   const blob = blobMode && !tooLarge ? raw.data : undefined;
@@ -753,12 +755,14 @@ export function useCombSearch(
       return searchOutcome(mode, result);
     },
     enabled: access.client !== null && isSearchable(mode, trimmed),
-    retry: agentFsRetry,
+    // An older agent-fs without the op answers 500: retrying cannot help.
+    retry: (count, error) =>
+      !isUnknownOpError(error, SEARCH_OPS[mode]) && agentFsRetry(count, error),
     staleTime: 30_000,
     refetchInterval: false,
     refetchOnWindowFocus: false,
     // The previous answer of the same mode stays on screen while the next query runs.
-    placeholderData: keepSameFile(modeKey),
+    placeholderData: keepUnderPrefix(modeKey),
   });
 }
 
