@@ -446,7 +446,9 @@ export interface SessionTree {
   sources: { source: string; total: number }[];
   /** Every source group key in this view, hidden sources included, so a pane of a hidden source still gets its label. */
   sourceGroups: string[];
-  /** Titles of the oldest owned roots in nested source threads, including hidden sources. */
+  /** Slack channel ids backed by visible roots with matching Slack fields, including hidden sources. */
+  slackChannels: string[];
+  /** Titles of the oldest visible roots in nested source threads, including hidden sources. */
   threadLabels: Record<string, string>;
 }
 
@@ -465,15 +467,17 @@ export async function getSessionTree(
   });
   const threadRoots = threadRootsSql();
   const rows = await getDbClient().query<{
+    id: string;
     key: string;
     source: string;
+    slackChannelId: string | null;
     lastActivityAt: string;
     latestStatus: string;
     readState: SessionReadState | null;
     needsYou: number;
     threadRoots: number;
   }>(
-    `SELECT r."key", r.source, a.lastActivityAt, a.latestStatus, a.readState, a.needsYou,
+    `SELECT r.id, r."key", r.source, r.slackChannelId, a.lastActivityAt, a.latestStatus, a.readState, a.needsYou,
       ${threadRoots.sql} AS threadRoots
     FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id`,
     [...threadRoots.params, ...query.params],
@@ -487,13 +491,15 @@ export async function getSessionTree(
     noGroup: counts(),
     sources: [],
     sourceGroups: [],
+    slackChannels: [],
     threadLabels: {},
   };
   const hidden = new Set(opts.hideSource);
   const shown = opts.showSource ? new Set(opts.showSource) : null;
   const sources = new Map<string, number>();
   const sourceGroups = new Set<string>();
-  const threadGroups = new Set<string>();
+  const slackChannels = new Set<string>();
+  const threadRootIds: string[] = [];
   const groups = new Map<string, SessionTreeGroup>();
   const add = (section: SessionSectionCounts, row: (typeof rows)[number]) => {
     section.total++;
@@ -505,9 +511,14 @@ export async function getSessionTree(
     const source = effectiveSource(row.key, row.source);
     sources.set(source, (sources.get(source) ?? 0) + 1);
     const key = sessionThreadGroupKey(row.key, row.threadRoots);
+    const sourceGroupKey = sessionGroupKey(row.key);
+    const channelId = /^shared\/slack\/([^/]+)\/$/.exec(sourceGroupKey)?.[1];
+    if (channelId && row.slackChannelId?.toLowerCase() === channelId) {
+      slackChannels.add(channelId);
+    }
     if (row.threadRoots >= NESTED_THREAD_MIN_ROOTS && isSourceThreadKey(row.key)) {
-      threadGroups.add(key);
-      sourceGroups.add(sessionGroupKey(row.key));
+      threadRootIds.push(row.id);
+      sourceGroups.add(sourceGroupKey);
     }
     if (sourceOfKey(key)) sourceGroups.add(key);
     if (hidden.has(source) || (shown && !shown.has(source))) continue;
@@ -534,16 +545,16 @@ export async function getSessionTree(
     .map(([source, total]) => ({ source, total }))
     .sort((a, b) => b.total - a.total || a.source.localeCompare(b.source));
   result.sourceGroups = [...sourceGroups].sort();
-  if (threadGroups.size) {
+  result.slackChannels = [...slackChannels].sort();
+  if (threadRootIds.length) {
     // A missing or empty title falls back to the first 80 task characters.
     const labels = await getDbClient().query<{ key: string; label: string }>(
       `SELECT "key", label FROM (
         SELECT r."key", COALESCE(NULLIF(r.title, ''), substr(r.task, 1, 80)) AS label,
           ROW_NUMBER() OVER (PARTITION BY r."key" ORDER BY r.createdAt, r.rowid) AS ordinal
-        FROM agent_tasks r WHERE r.parentTaskId IS NULL AND r.requestedByUserId IS NOT NULL
-          AND r."key" IN (${[...threadGroups].map(() => "?").join(",")})
+        FROM agent_tasks r WHERE r.id IN (${threadRootIds.map(() => "?").join(",")})
       ) WHERE ordinal = 1`,
-      [...threadGroups],
+      threadRootIds,
     );
     result.threadLabels = Object.fromEntries(labels.map((row) => [row.key, row.label]));
   }

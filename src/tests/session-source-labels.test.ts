@@ -218,6 +218,51 @@ test("a null Slack client performs no work and does not reserve the id", async (
   expect(call).toHaveBeenCalledTimes(1);
 });
 
+test("Slack caps pending and active lookups across calls and accepts skipped ids on a later poll", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const call = fakeSlack(async () => {
+    await gate;
+    return { ok: true, channel: { name: "bounded" } };
+  });
+  const keys = Array.from({ length: 60 }, (_, i) => keyOf(`cqueue${i}`));
+  try {
+    warmSlackChannelLabels(keys.slice(0, 30));
+    await until(() => call.mock.calls.length === 1);
+    warmSlackChannelLabels(keys.slice(30));
+    expect(call).toHaveBeenCalledTimes(1);
+  } finally {
+    release();
+  }
+  await until(() => hasLabel("cqueue49", "#bounded"));
+  expect(call).toHaveBeenCalledTimes(50);
+  expect(await getSessionLabels(keys.slice(50))).toEqual({});
+  warmSlackChannelLabels(keys.slice(50));
+  await until(() => hasLabel("cqueue59", "#bounded"));
+  expect(call).toHaveBeenCalledTimes(60);
+});
+
+test("an explicit Slack key without matching Slack fields starts no lookup", async () => {
+  await createTaskExtended("explicit source key", { key: `${keyOf("cfake")}task:fake/` });
+  await createTaskExtended("mismatched source key", {
+    key: `${keyOf("cfake")}task:mismatch/`,
+    slackChannelId: "COTHER",
+    slackThreadTs: "123.456",
+  });
+  const call = fakeSlack(async () => ({ ok: true, channel: { name: "untrusted" } }));
+  for (let i = 0; i < 2; i++) {
+    const response = await fetch(`${baseUrl}/api/session-tree`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.groups.map((group: { key: string }) => group.key)).toEqual([keyOf("cfake")]);
+    expect(body.labels).toEqual({});
+    expect(body.slackChannels).toBeUndefined();
+  }
+  expect(call).not.toHaveBeenCalled();
+});
+
 test("tree returns cached source labels and starts one background lookup for a Slack miss", async () => {
   for (const channel of ["CTREECACHED", "CTREEMISS"]) {
     await createTaskExtended("label tree", {
@@ -267,6 +312,7 @@ test("tree returns labels for source groups the filter hides", async () => {
   );
   expect(body.labels[keyOf("ctreehidden")]).toBe("#hidden");
   expect(body.sourceGroups).toBeUndefined();
+  expect(body.slackChannels).toBeUndefined();
 });
 
 test("Telegram capture stores a group title and a DM sender under their source group keys without TTL", async () => {
@@ -336,6 +382,38 @@ test("a label write failure does not fail chat task creation or log the label", 
     expect(save).toHaveBeenCalledTimes(1);
   } finally {
     save.mockRestore();
+    warn.mockRestore();
+  }
+});
+
+test("a full Slack failure cache skips new ids without evicting live failures and reclaims expired entries", async () => {
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  const now = Date.now();
+  const clock = spyOn(Date, "now").mockReturnValue(now);
+  const call = fakeSlack(async () => {
+    throw new Error("lookup failed");
+  });
+  const keys = Array.from({ length: 500 }, (_, i) => keyOf(`cfull${i}`));
+  try {
+    for (let offset = 0; offset < keys.length; offset += 50) {
+      warmSlackChannelLabels(keys.slice(offset, offset + 50));
+      await until(() => warn.mock.calls.length === offset + 50);
+    }
+    expect(call).toHaveBeenCalledTimes(500);
+    warmSlackChannelLabels([keyOf("cfullnew")]);
+    await Bun.sleep(0);
+    warmSlackChannelLabels(keys);
+    await Bun.sleep(0);
+    expect(call).toHaveBeenCalledTimes(500);
+    expect(await getSessionLabels(keys)).toEqual({});
+
+    clock.mockReturnValue(now + 10 * 60_000 + 1);
+    call.mockImplementation(async () => ({ ok: true, channel: { name: "recovered" } }));
+    warmSlackChannelLabels([keyOf("cfullnew")]);
+    await until(() => hasLabel("cfullnew", "#recovered"));
+    expect(call).toHaveBeenCalledTimes(501);
+  } finally {
+    clock.mockRestore();
     warn.mockRestore();
   }
 });

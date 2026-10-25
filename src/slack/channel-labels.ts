@@ -6,6 +6,7 @@ import { callSlackWithRetry, slackErrorCode } from "./render-v2";
 const LABEL_TTL_MS = 24 * 60 * 60 * 1000;
 const FAILURE_TTL_MS = 10 * 60 * 1000;
 const FAILURE_CACHE_MAX = 500;
+const LOOKUP_QUEUE_MAX = 50;
 const inFlight = new Set<string>();
 const failedUntil = new Map<string, number>();
 let pending = Promise.resolve();
@@ -46,16 +47,21 @@ export function warmSlackChannelLabels(groupKeys: string[]): void {
     if (!id) continue;
     if (inFlight.has(id) || (failedUntil.get(id) ?? 0) > Date.now()) continue;
     failedUntil.delete(id);
+    if (inFlight.size >= LOOKUP_QUEUE_MAX) continue;
+    // Reserve failure capacity for queued work. Live failures must retain their TTL.
+    if (failedUntil.size + inFlight.size >= FAILURE_CACHE_MAX) {
+      const now = Date.now();
+      for (const [failedId, until] of failedUntil) {
+        if (until <= now) failedUntil.delete(failedId);
+      }
+      if (failedUntil.size + inFlight.size >= FAILURE_CACHE_MAX) continue;
+    }
     inFlight.add(id);
     pending = pending.then(async () => {
       try {
         const label = await channelLabel(client, id);
         await rememberSessionLabel(groupKey, label, LABEL_TTL_MS);
       } catch (error) {
-        if (failedUntil.size >= FAILURE_CACHE_MAX) {
-          const oldest = failedUntil.keys().next().value;
-          if (oldest !== undefined) failedUntil.delete(oldest);
-        }
         failedUntil.set(id, Date.now() + FAILURE_TTL_MS);
         console.warn(
           `[Slack] Could not cache a session channel label: ${slackErrorCode(error) ?? "unknown error"}`,

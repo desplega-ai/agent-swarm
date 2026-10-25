@@ -256,9 +256,13 @@ describe("nested source thread groups", () => {
     expect((await listRecentSessions(filters({ tree: true })))[0].groupKey).toBe(channel);
   });
 
-  test("nesting and the oldest title include owned roots outside viewer and source filters", async () => {
+  test("nesting counts private roots but labels use only roots visible to each user", async () => {
     const visible = await task(thread, { source: "slack" });
     const hidden = await task(thread, { requestedByUserId: other.id });
+    await getDbClient().run("UPDATE agent_tasks SET title = ? WHERE id = ?", [
+      "Visible title",
+      visible.id,
+    ]);
     await getDbClient().run("UPDATE agent_tasks SET createdAt = ?, title = ? WHERE id = ?", [
       OLD,
       "Hidden oldest",
@@ -266,13 +270,16 @@ describe("nested source thread groups", () => {
     ]);
     const tree = await getSessionTree(actor(), NOW, { mine: true, showSource: ["slack"] });
     expect(tree.groups.map((g) => [g.key, g.total])).toEqual([[thread, 1]]);
-    expect(tree.threadLabels[thread]).toBe("Hidden oldest");
+    expect(tree.threadLabels[thread]).toBe("Visible title");
     expect(await ids({ groupKey: channel })).toEqual([]);
     expect(await ids({ groupKey: thread })).toEqual([visible.id]);
     const filtered = await getSessionTree(actor(), NOW, { showSource: ["ui"] });
     expect(filtered.groups).toEqual([]);
     expect(filtered.sourceGroups).toEqual([channel, thread]);
-    expect(filtered.threadLabels[thread]).toBe("Hidden oldest");
+    expect(filtered.threadLabels[thread]).toBe("Visible title");
+    const otherTree = await getSessionTree({ kind: "user", userId: other.id }, NOW);
+    expect(otherTree.groups.map((g) => [g.key, g.total])).toEqual([[thread, 1]]);
+    expect(otherTree.threadLabels[thread]).toBe("Hidden oldest");
   });
 
   test("the route merges title fallbacks and cached labels, including hidden thread groups", async () => {
