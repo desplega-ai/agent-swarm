@@ -286,8 +286,9 @@ async function checkAnthropicApiKey(apiKey: string): Promise<LiveValidationResul
 }
 
 /**
- * OAuth credentials (Claude Pro/Max via `claude` CLI login, ChatGPT via Codex
- * OAuth) are treated as a presence check — we don't issue a live upstream call.
+ * Codex OAuth credentials (ChatGPT login) are treated as a presence check — we
+ * don't issue a live upstream call. (Claude subscription tokens get a real
+ * check through the route: see `claudeSubscriptionProvider`.)
  *
  * Why: OAuth flows include their own refresh logic (handled at adapter boot,
  * not here), the OAuth-bearer-with-/v1/models contract isn't a stable public
@@ -402,7 +403,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  *
  * | Harness          | Accepted credentials (in resolution order)                              | Endpoint                       |
  * |------------------|-------------------------------------------------------------------------|--------------------------------|
- * | `claude`         | default route: Foundry / Bedrock / Vertex → gateway (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`) → `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | the route's own `/v1/models`; OAuth presence-only; cloud routes skipped |
+ * | `claude`         | default route: Foundry / Bedrock / Vertex → gateway (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`) → `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | the route's own `/v1/models`; OAuth: `/api/oauth/profile` (403 scope = ok); cloud routes skipped |
  * | `claude-managed` | `ANTHROPIC_API_KEY` (managed agents always use API key + managed envs)  | Anthropic `/v1/models`         |
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
  * | `opencode`       | auth.json (file) → `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → each registry provider key (`NAN_API_KEY` or `HELMCODE_API_NAN`, `HELMCODE_API_KEY`) | file presence-only, otherwise provider's `/v1/models` |
@@ -429,8 +430,9 @@ export async function validateProviderCredentials(
       case "claude": {
         // The default route decides where the check goes: a gateway key is
         // checked against the gateway only (scoped fetch), never against
-        // api.anthropic.com. OAuth stays presence-only; cloud routes have no
-        // free check and report `configured` (no live test).
+        // api.anthropic.com. A subscription token is checked against
+        // `/api/oauth/profile`; cloud routes have no free check and report
+        // `configured` (no live test).
         const route = deriveDefaultRoute("claude", env);
         if (!route) {
           return {

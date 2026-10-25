@@ -69,7 +69,7 @@ export interface RouteContext {
 export type RouteValidation =
   | { status: "verified"; models?: string[] }
   | { status: "configured"; reason: string }
-  | { status: "failed"; reason: string; missing?: string[] };
+  | { status: "failed"; reason: string; missing?: string[]; httpStatus?: number };
 
 /** Vendor or gateway family (pi-ai's `provider`). One definition, many routes. */
 export interface RouteProvider {
