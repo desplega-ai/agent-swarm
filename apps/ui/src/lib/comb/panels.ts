@@ -31,18 +31,19 @@ function isLeftTab(value: unknown): value is LeftTab {
 }
 
 /**
- * What the route shows, for the left panel: a folder, a file with an outline
- * (`outline`), or a file without one (`plain`: an image, a CSV, code, or
- * markdown with fewer than two headings).
+ * What the route shows, for the left panel: the drive root (`home`, the Comb
+ * home), another folder, a file with an outline (`outline`), or a file
+ * without one (`plain`: an image, a CSV, code, or markdown with fewer than
+ * two headings).
  */
-export type PanelTarget = "folder" | "outline" | "plain";
+export type PanelTarget = "home" | "folder" | "outline" | "plain";
 
 export interface LeftPanelState {
   /** Open or collapsed by hand. Null until the person chooses: the width decides. */
   open: boolean | null;
   /** The picked tab. Outline shows only on a file with an outline: elsewhere it reads as Files. */
   tab: LeftTab;
-  /** Collapsed for the current file only, because it has no outline. Not stored. */
+  /** Collapsed for the current page only (the drive root, a file with no outline). Not stored. */
   autoCollapsed: boolean;
 }
 
@@ -74,6 +75,8 @@ function pickedTab(current: LeftTab, tab: LeftTab, target: PanelTarget): LeftTab
 }
 
 /**
+ * - Opening the drive root collapses the panel for that page only: the Comb
+ *   home lists the files itself.
  * - Opening a file with an outline switches Files to Outline. Recent and
  *   Favorites stay, so the person can open one listed file after another.
  *   The first route keeps the stored tab, so a reload shows the tab the
@@ -86,6 +89,7 @@ function pickedTab(current: LeftTab, tab: LeftTab, target: PanelTarget): LeftTab
 export function leftPanelReducer(state: LeftPanelState, event: LeftPanelEvent): LeftPanelState {
   switch (event.type) {
     case "navigate":
+      if (event.target === "home") return { ...state, autoCollapsed: true };
       // A list tab (Recent, Favorites) stays open: the person moves through its files.
       if (event.target === "plain") return { ...state, autoCollapsed: !LIST_TABS.has(state.tab) };
       if (event.target === "outline" && !event.first && !LIST_TABS.has(state.tab)) {

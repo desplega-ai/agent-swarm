@@ -84,6 +84,11 @@ function locationKey({ orgId, driveId, path }: DrivePath): string {
   return `${orgId}/${driveId}:${path}`;
 }
 
+/** The target of a folder route: the drive root is the Comb home. */
+function folderTarget(location: CombLocation): PanelTarget {
+  return location.path === "/" ? "home" : "folder";
+}
+
 /**
  * Holds the panel state for one swarm (key it by the API URL). The left panel
  * follows the route: see `leftPanelReducer`.
@@ -127,11 +132,13 @@ export function CombLayoutProvider({
   // meanwhile, so the tab does not flash while the next file loads.
   const key = locationKey(location);
   const resolved: PanelTarget | "pending" = location.isFolder
-    ? "folder"
+    ? folderTarget(location)
     : outline?.key === key
       ? outline.target
       : "pending";
-  const [target, setTarget] = useState<PanelTarget>(location.isFolder ? "folder" : "plain");
+  const [target, setTarget] = useState<PanelTarget>(
+    location.isFolder ? folderTarget(location) : "plain",
+  );
   const navigated = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (resolved === "pending") return;

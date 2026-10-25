@@ -75,6 +75,21 @@ describe("auto-switch on navigation", () => {
     expect(back.open).toBeNull();
   });
 
+  test("the drive root collapses the panel for that page only, even on a list tab", () => {
+    const stored: LeftPanelState = { open: true, tab: "recent", autoCollapsed: false };
+    const home = run(stored, { type: "navigate", target: "home", first: true });
+    expect(leftPanelView(home, "home", true)).toEqual({
+      open: false,
+      tab: "recent",
+      outline: false,
+    });
+    expect(home.open).toBe(true);
+    const reopened = run(home, { type: "show", tab: "files", target: "home" });
+    expect(leftPanelView(reopened, "home", true).open).toBe(true);
+    const inFolder = run(home, { type: "navigate", target: "folder", first: false });
+    expect(leftPanelView(inFolder, "folder", true).open).toBe(true);
+  });
+
   test("the person can reopen the panel on a file without an outline", () => {
     const image = run(folder, { type: "navigate", target: "plain", first: false });
     const reopened = run(image, { type: "show", tab: "files", target: "plain" });
