@@ -9,7 +9,7 @@ import { PresenceLayer } from "@/components/comb/presence-layer";
 import { ReviewChangesButton } from "@/components/comb/review/review-changes-button";
 import { ReviewPanel, ReviewRangeNotice } from "@/components/comb/review/review-panel";
 import { SendBatchButton, SendThreadButton } from "@/components/comb/send-to-swarm";
-import { useRememberViewed } from "@/components/comb/use-viewed-files";
+import { useForgetViewed, useRememberViewed } from "@/components/comb/use-viewed-files";
 import { FileViewer } from "@/components/comb/viewers/file-viewer";
 import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -31,8 +31,10 @@ export function FileView({ file }: { file: DrivePath }) {
   // A file written through agent-fs always has a version. No version means no
   // file row: on the local storage backend, `stat` answers for a directory.
   const unversioned = stat.data !== undefined && stat.data.currentVersion === undefined;
-  // Recently viewed lists a file once it opened (not a 404, not a folder).
+  // Recently viewed lists a file once it opened (not a 404, not a folder),
+  // and drops it once it is gone.
   useRememberViewed(stat.data && !notFound && !unversioned ? file : null);
+  useForgetViewed(notFound ? file : null);
 
   if (notFound || unversioned) {
     // A 404 keeps the last `stat.data`. Never show that stale file: it was

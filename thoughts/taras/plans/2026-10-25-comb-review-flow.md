@@ -133,6 +133,27 @@ Manual E2E:
 - Screenshot a file page at 1440x900 before and after. Toggle full width with the button and
   with `f`. Click a comment highlight: the comment panel comes back.
 
+## Phase 5: Drive-wide send tray
+
+Taras, mid-run: "would be nice to have a way to group the messages sent to the swarm in a single
+one". He picked a drive-wide tray (asked).
+
+- `lib/comb/batch.ts`: `myUnsent(threads, me, serviceUserId)` (the connected user's open, unsent
+  root comments, by path) and `groupByFile(threads)`. Tests in `batch.test.ts`.
+- `components/comb/send-tray.tsx` (new): a "Send N" header button on every Comb page while the
+  connected user has unsent comments. It reads the drive's comment list (`useFolderThreads` on
+  "/", the same cached query as the root's Open comments panel).
+- `components/comb/send-to-swarm.tsx`: the dialog groups rows by file when it lists paths, with a
+  checkbox per file.
+
+Verification:
+- `bun run test:root -- apps/ui/src/lib/comb/batch.test.ts`
+- `cd apps/ui && bunx tsc -b && bun run lint`
+
+Manual E2E:
+- Comment on two files, then open a third. The header shows "Send 2". The dialog groups the two
+  comments under their files. Send: one task with both.
+
 ## Docs
 
 - `docs-site/content/docs/(documentation)/ui/comb.mdx`: send rule, note, bulk resolve, Recent,
@@ -166,11 +187,12 @@ note, bulk resolve, full width.
 
 ## Todo
 
-- [ ] Phase 1: Send any comment, batch send with a note
-- [ ] Phase 2: Bulk resolve
-- [ ] Phase 3: Recent, Recently viewed, Favorites
-- [ ] Phase 4: Clean layout
-- [ ] Docs
+- [x] Phase 1: Send any comment, batch send with a note (c14ac64a1)
+- [x] Phase 2: Bulk resolve (18d278a8b)
+- [x] Phase 3: Recent, Recently viewed, Favorites (4b5a0cc99)
+- [x] Phase 4: Clean layout (bd45bcafe)
+- [ ] Phase 5: Drive-wide send tray
+- [x] Docs (7ba9fa5e9, Phase 5 to add)
 - [ ] QA walk, screenshots, recording
 - [ ] Code review (Standards + Spec)
 - [ ] Gates
@@ -180,3 +202,14 @@ note, bulk resolve, full width.
 
 - 15:45 BCN: plan written. Worktree `~/worktrees/agent-swarm/2026-10-25-comb-review-flow`,
   branch `feat/comb-review-flow` off `ef71532ed`. Disk before: 30 GiB free.
+- 16:10 BCN: Phases 1 to 4 and docs committed. Local stack in `/tmp/comb-flow/` (agent-fs 47433,
+  API 43013, UI 45274, main-branch UI 45275 from a detached worktree for before shots). Seeded
+  12 comments, 5 backdated 40 days in the local agent-fs DB. Live checks passed: send with a
+  note (task text has the fenced note), bulk resolve of the 5 old comments, Undo, Recent and
+  Favorites tabs, home cards, full width and its exit on a comment link, 390 px.
+- Fixes found in QA: the folder listing was squeezed by the home cards (the folder now scrolls
+  as one page, the grid keeps `min-h-72`), the phone list collapsed to 0 (`flex-none`), the
+  Recent toggle did not stretch, the Undo toast closed too soon (now 10 s).
+- Gotcha: `bun test` over all apps/ui component tests in ONE process fails with "Happy DOM has
+  already been globally registered". CI runs `--parallel=4`, one process per file.
+- Gotcha: `git stash` in a worktree uses the shared stash list. Do not stash there.

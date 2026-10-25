@@ -4,6 +4,7 @@ import { browserStorage } from "@/lib/comb/drafts";
 import type { DrivePath } from "@/lib/comb/paths";
 import {
   type Drive,
+  forgetViewed,
   readViewed,
   rememberViewed,
   type ViewedFile,
@@ -68,5 +69,17 @@ export function useRememberViewed(file: DrivePath | null) {
   const path = file?.path ?? null;
   useEffect(() => {
     if (key && path) update(key, rememberViewed(snapshot(key), path, Date.now()));
+  }, [key, path]);
+}
+
+/** Drops `file` from Recently viewed: it is gone (a 404). Null: nothing to drop. */
+export function useForgetViewed(file: DrivePath | null) {
+  const { apiUrl } = useConfig().config;
+  const key = file ? viewedStorageKey(apiUrl, file) : null;
+  const path = file?.path ?? null;
+  useEffect(() => {
+    if (!key || !path) return;
+    const list = snapshot(key);
+    if (list.some((entry) => entry.path === path)) update(key, forgetViewed(list, path));
   }, [key, path]);
 }

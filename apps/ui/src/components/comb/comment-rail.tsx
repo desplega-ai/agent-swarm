@@ -61,6 +61,7 @@ import {
   threadMatchesSearch,
 } from "@/lib/comb/thread-filter";
 import type { ThreadSwarmState } from "@/lib/comb/thread-status";
+import { useCombLayout } from "./comb-layout";
 import {
   CommentComposer,
   type ComposerExtrasContext,
@@ -243,9 +244,14 @@ export function CommentRail({
   // step-10: what the viewer pane shows instead of the file ("" = the file).
   const viewerState = viewerParams?.map((name) => searchParams.get(name) ?? "").join("") ?? "";
 
+  const layout = useCombLayout();
+  const showRight = layout?.showRight;
+  const fullWidth = layout?.fullWidth ?? false;
   const activate = useCallback(
     (id: string) => {
       setActiveId(id);
+      // A passage clicked in full width brings the comments back, even the one already linked.
+      if (fullWidth) showRight?.();
       setSearchParams(
         (params) => {
           const next = new URLSearchParams(params);
@@ -270,7 +276,16 @@ export function CommentRail({
         toast.info("The text this comment pointed to is no longer in the file.");
       }
     },
-    [anchors, space, reduceMotion, setSearchParams, viewerParams, viewerState],
+    [
+      anchors,
+      space,
+      reduceMotion,
+      setSearchParams,
+      viewerParams,
+      viewerState,
+      fullWidth,
+      showRight,
+    ],
   );
 
   // Deep link `?comment=<id>`: once the thread loads, open its tab (and the
@@ -710,7 +725,7 @@ function RailBody({
           ))
         )}
       </div>
-      {unsentCount > 0 && sendAction ? (
+      {tab === "open" && unsentCount > 0 && sendAction ? (
         <SendBar count={unsentCount} showing={query.filter === "unsent"} onShow={onShowUnsent}>
           {sendAction}
         </SendBar>

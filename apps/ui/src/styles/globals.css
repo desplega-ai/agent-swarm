@@ -665,7 +665,7 @@ button[data-slot="sidebar-rail"] {
   background-color: color-mix(in oklch, var(--color-status-warning) 24%, transparent);
   text-decoration: underline dotted var(--color-status-warning-strong);
 }
-::highlight(comb-comment-pending) {
+::highlight(comb-comment-flagged) {
   background-color: color-mix(in oklch, var(--color-status-info) 28%, transparent);
   text-decoration: underline dashed var(--color-status-info-strong);
 }
@@ -675,7 +675,7 @@ button[data-slot="sidebar-rail"] {
 .comb-comment-fallback {
   background-color: color-mix(in oklch, var(--color-primary) 10%, transparent);
 }
-.comb-comment-fallback-pending {
+.comb-comment-fallback-flagged {
   background-color: color-mix(in oklch, var(--color-status-info) 14%, transparent);
 }
 .comb-comment-fallback-active {

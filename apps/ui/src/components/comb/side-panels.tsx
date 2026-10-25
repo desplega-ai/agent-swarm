@@ -28,7 +28,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { LeftTab } from "@/lib/comb/panels";
+import { LEFT_TABS, type LeftTab } from "@/lib/comb/panels";
 import type { CombLocation } from "@/lib/comb/paths";
 import { usePageShortcut } from "@/lib/json-render/use-page-shortcut";
 import { cn } from "@/lib/utils";
@@ -132,7 +132,7 @@ const TAB_ICON: Record<LeftTab, LucideIcon> = {
 
 /** The tabs on `left`: Outline only for a file with headings. */
 function leftTabs(outline: boolean): LeftTab[] {
-  return outline ? ["files", "recent", "favorites", "outline"] : ["files", "recent", "favorites"];
+  return LEFT_TABS.filter((tab) => outline || tab !== "outline");
 }
 
 /**

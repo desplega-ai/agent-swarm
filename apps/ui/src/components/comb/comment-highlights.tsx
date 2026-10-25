@@ -8,13 +8,13 @@ import type { DomTextSpace } from "@/lib/comb/dom-text-space";
 const NAMES = {
   anchored: "comb-comment",
   moved: "comb-comment-moved",
-  flagged: "comb-comment-pending",
+  flagged: "comb-comment-flagged",
   active: "comb-comment-active",
 } as const;
 
 // Older browsers: a class on the blocks that hold the passage instead.
 const FALLBACK_CLASS = "comb-comment-fallback";
-const FALLBACK_FLAGGED_CLASS = "comb-comment-fallback-pending";
+const FALLBACK_FLAGGED_CLASS = "comb-comment-fallback-flagged";
 const FALLBACK_ACTIVE_CLASS = "comb-comment-fallback-active";
 
 function supportsHighlights(): boolean {

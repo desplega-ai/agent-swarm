@@ -81,9 +81,9 @@ describe("recentChanges", () => {
       [entry("docs/a.md", 3), entry("/b.md", 2), entry("docs/a.md", 1)],
       10,
     );
-    expect(changes.map((change) => [change.path, change.version])).toEqual([
-      ["/docs/a.md", 3],
-      ["/b.md", 2],
+    expect(changes).toEqual([
+      { path: "/docs/a.md", author: "u1", at: "2026-10-25T10:00:03Z" },
+      { path: "/b.md", author: "u1", at: "2026-10-25T10:00:02Z" },
     ]);
   });
 

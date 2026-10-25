@@ -5,7 +5,7 @@
 // - A draft is the text in one composer. It survives a reload and expires
 //   after 7 days.
 // - The outbox keeps comments that failed to post because of a network error
-//   or a 5xx, so the rail can show them as "Not sent" with Retry and Discard.
+//   or a 5xx, so the rail can show them as "Not saved" with Retry and Discard.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 

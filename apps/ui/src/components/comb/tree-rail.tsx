@@ -26,7 +26,8 @@ function indent(level: number): string {
  * Keyboard: Up/Down move, Right opens or enters a folder, Left closes it or
  * goes to the parent, Home/End jump, Enter opens the row.
  */
-function DriveTree({
+/** The Files tab: the drive tree. Favorites have their own tab (`FavoritesTab`). */
+export function TreeRail({
   location,
   onNavigate,
 }: {
@@ -236,9 +237,4 @@ function DriveTree({
       })}
     </div>
   );
-}
-
-/** The Files tab: the drive tree. Favorites have their own tab (`FavoritesTab`). */
-export function TreeRail(props: Parameters<typeof DriveTree>[0]) {
-  return <DriveTree {...props} />;
 }

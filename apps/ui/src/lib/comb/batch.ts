@@ -3,6 +3,7 @@
 
 import type { CombReviewBatchResult } from "../../api/types";
 import type { CommentListEntry } from "../agent-fs/types";
+import { commentCombPath } from "./comments";
 import { isSentToSwarm } from "./markers";
 
 /**
@@ -42,6 +43,38 @@ export function eligibleForBatch(
   serviceUserId: string | null = null,
 ): CommentListEntry[] {
   return threads.filter((thread) => canSendThread(thread, serviceUserId));
+}
+
+/**
+ * The send tray's comments: the open root comments of `me` (the connected
+ * agent-fs user) that were not sent yet, by file path, oldest first in a
+ * file. Null `me` (not connected): none.
+ */
+export function myUnsent(
+  threads: ReadonlyArray<CommentListEntry>,
+  me: string | null,
+  serviceUserId: string | null = null,
+): CommentListEntry[] {
+  if (!me) return [];
+  return eligibleForBatch(threads, serviceUserId)
+    .filter((thread) => thread.author === me)
+    .sort(
+      (a, b) =>
+        commentCombPath(a.path).localeCompare(commentCombPath(b.path)) ||
+        a.createdAt.localeCompare(b.createdAt),
+    );
+}
+
+/** Threads by file (`/docs/a.md`), in the order the files first appear. */
+export function groupByFile(
+  threads: ReadonlyArray<CommentListEntry>,
+): Array<{ path: string; threads: CommentListEntry[] }> {
+  const groups = new Map<string, CommentListEntry[]>();
+  for (const thread of threads) {
+    const path = commentCombPath(thread.path);
+    groups.set(path, [...(groups.get(path) ?? []), thread]);
+  }
+  return [...groups].map(([path, list]) => ({ path, threads: list }));
 }
 
 /** Who got the task of a send (`lead` in the result). */

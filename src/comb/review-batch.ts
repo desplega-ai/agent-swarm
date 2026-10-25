@@ -466,16 +466,16 @@ function lineRange(comment: AgentFsComment): string {
     : `lines ${comment.lineStart}-${end}`;
 }
 
-/**
- * Human text as data: an indented fenced block that the text cannot close.
- * The fence is longer than the longest backtick run in the text.
- */
 /** The sender's note in a fenced block, or "" when there is none. */
 function noteBlock(note: string | undefined): string {
   const text = note?.trim();
   return text ? `\nNote from the sender, about all the comments:\n${fenced(text)}\n` : "";
 }
 
+/**
+ * Human text as data: an indented fenced block that the text cannot close.
+ * The fence is longer than the longest backtick run in the text.
+ */
 function fenced(text: string): string {
   const longest = (text.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
   const fence = "`".repeat(Math.max(3, longest + 1));

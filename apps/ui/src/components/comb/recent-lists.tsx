@@ -24,7 +24,7 @@ import {
   pinIdFor,
   pinLabel,
 } from "@/lib/comb/paths";
-import { folderLabel, VIEWED_MAX } from "@/lib/comb/recent";
+import { type Drive, folderLabel, VIEWED_MAX } from "@/lib/comb/recent";
 import { isUnknownOpError } from "@/lib/comb/search";
 import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -32,8 +32,6 @@ import { cn } from "@/lib/utils";
 // The Comb file lists: Favorites, Recently viewed, and Recently changed. The
 // Comb home shows the top of each in a card, and the left panel's Recent and
 // Favorites tabs show them whole.
-
-type Drive = { orgId: string; driveId: string };
 
 interface ListProps {
   drive: Drive;
@@ -72,7 +70,8 @@ function ListRow({
   actions,
 }: {
   target: DrivePath;
-  detail: ReactNode;
+  /** The second line: where the file sits, and who changed it. Part of the link name. */
+  detail: string;
   aside?: ReactNode;
   current: boolean;
   onNavigate?: () => void;
@@ -89,8 +88,8 @@ function ListRow({
     >
       <Link
         to={combPath(target)}
-        // The visible name can be cut in the middle.
-        aria-label={label}
+        // The visible name can be cut in the middle. The detail tells same-named files apart.
+        aria-label={`${label}, ${detail}`}
         aria-current={current ? "page" : undefined}
         title={target.path}
         onClick={onNavigate}
@@ -182,9 +181,8 @@ export function FavoritesList({ drive, current, limit = Infinity, onNavigate }: 
   const favorites = useFavorites("agent-fs-path");
   const toggle = useFavoriteToggle("agent-fs-path");
   if (favorites.isPending) return <ListSkeleton rows={2} />;
-  // An API without favorites of this type: the header shows no star either.
   if (favorites.isError && !favorites.data) {
-    return <ListNote>This swarm does not keep favorites.</ListNote>;
+    return <ListNote tone="error">{favorites.error.message}</ListNote>;
   }
   const pins = drivePins(favorites.data?.favoriteIds ?? [], drive).slice(0, limit);
   if (pins.length === 0) return <ListNote>Star a file or folder to keep it here.</ListNote>;

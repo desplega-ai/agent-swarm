@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { CommentEntry, CommentListEntry } from "../agent-fs/types";
-import { canSendThread, eligibleForBatch, leadNote, sendFailure } from "./batch";
+import {
+  canSendThread,
+  eligibleForBatch,
+  groupByFile,
+  leadNote,
+  myUnsent,
+  sendFailure,
+} from "./batch";
 
 const TASK_ID = "0b8e1f5c-3d2a-4c6b-9e7f-1a2b3c4d5e6f";
 let seq = 0;
@@ -49,6 +56,33 @@ describe("eligibleForBatch", () => {
     const byOther = thread({}, [sentBy("someone")]);
     expect(eligibleForBatch([sent, byOther], "svc")).toEqual([byOther]);
     expect(eligibleForBatch([sent, byOther], null)).toEqual([]);
+  });
+});
+
+describe("the send tray", () => {
+  test("myUnsent keeps my open, unsent roots, by file, oldest first", () => {
+    const late = thread({ path: "docs/b.md", createdAt: "2026-10-02T00:00:00.000Z" });
+    const early = thread({ path: "/docs/b.md", createdAt: "2026-10-01T00:00:00.000Z" });
+    const first = thread({ path: "docs/a.md" });
+    const theirs = thread({ author: "bob" });
+    const sent = thread({}, [sentBy("svc")]);
+    const closed = thread({ resolved: true });
+    expect(myUnsent([late, theirs, early, sent, closed, first], "human", "svc")).toEqual([
+      first,
+      early,
+      late,
+    ]);
+    expect(myUnsent([first], null)).toEqual([]);
+  });
+
+  test("groupByFile keeps the order and joins paths with and without the slash", () => {
+    const a1 = thread({ path: "docs/a.md" });
+    const b = thread({ path: "docs/b.md" });
+    const a2 = thread({ path: "/docs/a.md" });
+    expect(groupByFile([a1, b, a2])).toEqual([
+      { path: "/docs/a.md", threads: [a1, a2] },
+      { path: "/docs/b.md", threads: [b] },
+    ]);
   });
 });
 

@@ -174,6 +174,22 @@ describe("Recent and Favorites tabs", () => {
     expect(state).toEqual({ open: true, tab: "favorites", autoCollapsed: false });
   });
 
+  test("a list tab keeps the panel open on a file without an outline", () => {
+    const state = run(
+      open,
+      { type: "select", tab: "recent", target: "folder" },
+      { type: "navigate", target: "plain", first: false },
+    );
+    expect(leftPanelView(state, "plain", true)).toEqual({
+      open: true,
+      tab: "recent",
+      outline: false,
+    });
+    // Files still collapses there, as before.
+    const files = run(open, { type: "navigate", target: "plain", first: false });
+    expect(leftPanelView(files, "plain", true).open).toBe(false);
+  });
+
   test("Outline stored shows Files where there is no outline", () => {
     const stored: LeftPanelState = { open: true, tab: "outline", autoCollapsed: false };
     expect(leftPanelView(stored, "folder", true).tab).toBe("files");

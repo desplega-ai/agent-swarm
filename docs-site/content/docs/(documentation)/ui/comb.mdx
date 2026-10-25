@@ -134,8 +134,9 @@ Comments are drafts for the swarm until you send them, like page feedback. Any o
 | **Send to swarm** | On a thread | That thread |
 | **Send to swarm** | The send bar under a file's comments ("N not sent") | The checked comments of the file |
 | **Send to swarm** | The **Open comments** panel of a folder, with comments checked | The checked comments |
+| **Send N** | The Comb header, on every page | Your unsent comments from every file, grouped by file |
 
-The dialog lists the comments, all checked, and takes an optional **Note for the lead** (at most 4000 characters). The note goes into the task text. One batch holds at most 50 comments. Send again for the rest. **N not sent** in the send bar shows only those comments.
+The dialog lists the comments, all checked, and takes an optional **Note for the lead** (at most 4000 characters). The note goes into the task text. An operator who customized the `comb.review.batch` template must add `{{note_block}}` to it, or the note is left out. One batch holds at most 50 comments. Send again for the rest. **N not sent** in the send bar shows only those comments.
 
 The task has the source `comb`. The swarm posts a reply on each sent comment, which shows as "Sent to the swarm · task ...". A comment that the swarm already received is skipped on the next send.
 

@@ -84,11 +84,10 @@ export function writeViewed(
 export interface RecentChange {
   /** Drive path ("/docs/a.md"). */
   path: string;
-  version: number;
+  /** agent-fs user id of the newest version's writer. */
   author: string;
   /** ISO time of the newest version. */
   at: string;
-  operation: RecentEntry["operation"];
 }
 
 /**
@@ -104,13 +103,7 @@ export function recentChanges(entries: ReadonlyArray<RecentEntry>, max: number):
     if (path === "/" || seen.has(path)) continue;
     seen.add(path);
     if (entry.operation === "delete") continue;
-    changes.push({
-      path,
-      version: entry.version,
-      author: entry.author,
-      at: entry.createdAt,
-      operation: entry.operation,
-    });
+    changes.push({ path, author: entry.author, at: entry.createdAt });
     if (changes.length >= max) break;
   }
   return changes;

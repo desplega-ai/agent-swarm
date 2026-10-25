@@ -1,12 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  bulkSummary,
-  matchesAge,
-  pruneSelection,
-  runLimited,
-  selectionState,
-  setAll,
-} from "./bulk";
+import { bulkSummary, matchesAge, runLimited, selectionState, setAll } from "./bulk";
 
 const NOW = Date.parse("2026-10-25T12:00:00Z");
 const daysAgo = (days: number) => ({ createdAt: new Date(NOW - days * 86_400_000).toISOString() });
@@ -38,12 +31,6 @@ describe("selection", () => {
     expect([...setAll(new Set(["z"]), ["a", "b"], true)]).toEqual(["z", "a", "b"]);
     expect([...setAll(new Set(["a", "b", "z"]), ["a", "b"], false)]).toEqual(["z"]);
   });
-
-  test("pruneSelection drops ids that left the list, and keeps the same set otherwise", () => {
-    const selected = new Set(["a", "b"]);
-    expect(pruneSelection(selected, ["a", "b", "c"])).toBe(selected);
-    expect([...pruneSelection(selected, ["b"])]).toEqual(["b"]);
-  });
 });
 
 describe("runLimited", () => {
@@ -61,7 +48,7 @@ describe("runLimited", () => {
         running--;
         if (n % 3 === 0) throw new Error(`no ${n}`);
       },
-      (finished) => progress.push(finished),
+      { onProgress: (finished) => progress.push(finished) },
     );
     expect(peak).toBe(3);
     expect(outcome.done).toEqual([1, 2, 4, 5, 7]);
@@ -70,7 +57,27 @@ describe("runLimited", () => {
   });
 
   test("an empty list finishes at once", async () => {
-    expect(await runLimited([], 4, async () => {})).toEqual({ done: [], failed: [] });
+    expect(await runLimited([], 4, async () => {})).toEqual({ done: [], failed: [], skipped: [] });
+  });
+
+  test("an error that stopOn matches starts no more items", async () => {
+    const denied = new Error("403");
+    const tried: number[] = [];
+    const outcome = await runLimited(
+      [1, 2, 3, 4, 5, 6],
+      2,
+      async (n) => {
+        tried.push(n);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        if (n === 2) throw denied;
+      },
+      { stopOn: (error) => error === denied },
+    );
+    // 1 and 2 run together, 3 starts after 1. Nothing starts after 2 fails.
+    expect(tried).toEqual([1, 2, 3]);
+    expect(outcome.done).toEqual([1, 3]);
+    expect(outcome.failed).toEqual([{ item: 2, error: denied }]);
+    expect(outcome.skipped).toEqual([4, 5, 6]);
   });
 });
 

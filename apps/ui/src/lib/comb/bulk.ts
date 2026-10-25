@@ -56,51 +56,56 @@ export function setAll(
   return next;
 }
 
-/** `selected` without the ids that are no longer listed. The same set when nothing went. */
-export function pruneSelection(selected: Set<string>, listed: ReadonlyArray<string>): Set<string> {
-  const keep = new Set(listed);
-  for (const id of selected) {
-    if (!keep.has(id)) return new Set([...selected].filter((other) => keep.has(other)));
-  }
-  return selected;
-}
-
 export interface BulkOutcome<T> {
   done: T[];
   failed: Array<{ item: T; error: unknown }>;
+  /** Never tried: an error that `stopOn` matched ended the run first. */
+  skipped: T[];
 }
 
 /**
  * Runs `worker` on every item, at most `limit` at a time, and never rejects:
- * a failed item lands in `failed`. `onProgress` gets the count of finished
- * items after each one. `done` keeps the input order.
+ * a failed item lands in `failed`. An error that `stopOn` matches (a missing
+ * permission) starts no more items: the rest land in `skipped`. `onProgress`
+ * gets the count of finished items after each one. `done` and `skipped` keep
+ * the input order.
  */
 export async function runLimited<T>(
   items: ReadonlyArray<T>,
   limit: number,
   worker: (item: T) => Promise<unknown>,
-  onProgress?: (finished: number) => void,
+  {
+    onProgress,
+    stopOn,
+  }: { onProgress?: (finished: number) => void; stopOn?: (error: unknown) => boolean } = {},
 ): Promise<BulkOutcome<T>> {
-  const ok = new Array<boolean>(items.length).fill(false);
+  const state = new Array<"todo" | "ok" | "failed">(items.length).fill("todo");
   const failed: BulkOutcome<T>["failed"] = [];
   let next = 0;
   let finished = 0;
+  let stopped = false;
   const lane = async () => {
-    while (next < items.length) {
+    while (!stopped && next < items.length) {
       const index = next++;
       const item = items[index] as T;
       try {
         await worker(item);
-        ok[index] = true;
+        state[index] = "ok";
       } catch (error) {
+        state[index] = "failed";
         failed.push({ item, error });
+        if (stopOn?.(error)) stopped = true;
       }
       finished++;
       onProgress?.(finished);
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, lane));
-  return { done: items.filter((_, index) => ok[index]), failed };
+  return {
+    done: items.filter((_, index) => state[index] === "ok"),
+    failed,
+    skipped: items.filter((_, index) => state[index] === "todo"),
+  };
 }
 
 /** The toast after a bulk resolve or reopen: "Resolved 12 comments", "Resolved 10. 2 failed". */

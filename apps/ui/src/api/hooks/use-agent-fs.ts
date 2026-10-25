@@ -15,7 +15,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import type { CombReviewBatchInput, CombReviewBatchResult } from "@/api/types";
@@ -531,14 +531,17 @@ export function useBulkResolve(drive: { orgId: string; driveId: string }) {
   const access = useAgentFsAccess();
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<{ finished: number; total: number } | null>(null);
+  // An Undo can start a run while another one is in flight: progress clears after the last.
+  const inFlight = useRef(0);
   const run = useCallback(
     async (ids: string[], resolved: boolean): Promise<BulkOutcome<string>> => {
       const client = connectedClient(access);
       const key = agentFsCommentsKey(access, drive);
-      // A poll that started before the writes must not bring the old state back.
-      await queryClient.cancelQueries({ queryKey: key });
+      inFlight.current++;
       setProgress({ finished: 0, total: ids.length });
       try {
+        // A poll that started before the writes must not bring the old state back.
+        await queryClient.cancelQueries({ queryKey: key });
         return await runLimited(
           ids,
           BULK_CONCURRENCY,
@@ -549,16 +552,26 @@ export function useBulkResolve(drive: { orgId: string; driveId: string }) {
               { id, resolved },
               drive.driveId,
             ),
-          (finished) => setProgress({ finished, total: ids.length }),
+          {
+            onProgress: (finished) => setProgress({ finished, total: ids.length }),
+            // Without the editor role every call fails the same way: stop at the first.
+            stopOn: isAccessDenied,
+          },
         );
       } finally {
-        setProgress(null);
+        inFlight.current--;
+        if (inFlight.current === 0) setProgress(null);
         void queryClient.invalidateQueries({ queryKey: key });
       }
     },
     [access, drive, queryClient],
   );
   return { run, progress };
+}
+
+/** agent-fs refused the key (401) or the role (403). */
+export function isAccessDenied(error: unknown): boolean {
+  return error instanceof AgentFsError && (error.status === 401 || error.status === 403);
 }
 
 /**

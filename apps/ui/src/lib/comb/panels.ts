@@ -19,12 +19,16 @@ export const LEFT_OPEN_QUERY = "(min-width: 1440px)";
 /** The right panel starts open from this width up. */
 export const RIGHT_OPEN_QUERY = "(min-width: 1024px)";
 
-export type LeftTab = "files" | "recent" | "favorites" | "outline";
+/** The left panel's tabs, in order. Outline shows only for a file with headings. */
+export const LEFT_TABS = ["files", "recent", "favorites", "outline"] as const;
+export type LeftTab = (typeof LEFT_TABS)[number];
 
 /** Tabs that list files on any page. They stay put while the person moves between files. */
 const LIST_TABS: ReadonlySet<LeftTab> = new Set(["recent", "favorites"]);
 
-const LEFT_TABS: ReadonlySet<string> = new Set(["files", "recent", "favorites", "outline"]);
+function isLeftTab(value: unknown): value is LeftTab {
+  return (LEFT_TABS as readonly unknown[]).includes(value);
+}
 
 /**
  * What the route shows, for the left panel: a folder, a file with an outline
@@ -74,14 +78,16 @@ function pickedTab(current: LeftTab, tab: LeftTab, target: PanelTarget): LeftTab
  *   Favorites stay, so the person can open one listed file after another.
  *   The first route keeps the stored tab, so a reload shows the tab the
  *   person left.
- * - Opening a file without an outline collapses the panel for that file only.
+ * - Opening a file without an outline collapses the panel for that file only,
+ *   unless Recent or Favorites is open.
  * - Opening a folder undoes that collapse. A collapse by hand stays.
  * - A tab picked by hand is stored as `pickedTab` says.
  */
 export function leftPanelReducer(state: LeftPanelState, event: LeftPanelEvent): LeftPanelState {
   switch (event.type) {
     case "navigate":
-      if (event.target === "plain") return { ...state, autoCollapsed: true };
+      // A list tab (Recent, Favorites) stays open: the person moves through its files.
+      if (event.target === "plain") return { ...state, autoCollapsed: !LIST_TABS.has(state.tab) };
       if (event.target === "outline" && !event.first && !LIST_TABS.has(state.tab)) {
         return { ...state, tab: "outline", autoCollapsed: false };
       }
@@ -155,10 +161,7 @@ export function readLeftPanel(storage: DraftStorage | null, apiUrl: string): Lef
   const stored = readJson(storage, deriveStorageKey(apiUrl, LEFT_PANEL_KEY));
   return {
     open: typeof stored?.open === "boolean" ? stored.open : null,
-    tab:
-      typeof stored?.tab === "string" && LEFT_TABS.has(stored.tab)
-        ? (stored.tab as LeftTab)
-        : "outline",
+    tab: isLeftTab(stored?.tab) ? stored.tab : "outline",
     autoCollapsed: false,
   };
 }

@@ -1,4 +1,4 @@
-import { Check, Plus, Reply } from "lucide-react";
+import { Check, type LucideIcon, Plus, Reply } from "lucide-react";
 import {
   type MutableRefObject,
   type ReactNode,
@@ -99,12 +99,14 @@ interface CommentComposerProps {
 }
 
 /**
- * The submit label. Adding a comment only saves it: "Send to swarm" is a
+ * The submit button. Adding a comment only saves it: "Send to swarm" is a
  * separate step, so the word "Send" stays out of the composer.
  */
-function submitLabel(target: ComposerTarget): string {
-  if (target.kind === "edit") return "Save";
-  return target.kind === "reply" ? "Reply" : "Add comment";
+function submitButton(target: ComposerTarget): { label: string; Icon: LucideIcon } {
+  if (target.kind === "edit") return { label: "Save", Icon: Check };
+  return target.kind === "reply"
+    ? { label: "Reply", Icon: Reply }
+    : { label: "Add comment", Icon: Plus };
 }
 
 /**
@@ -252,6 +254,7 @@ export function CommentComposer({
   };
 
   if (readOnly) return null;
+  const { label: submitLabel, Icon: SubmitIcon } = submitButton(target);
 
   return (
     <div className="flex flex-col gap-2">
@@ -300,8 +303,8 @@ export function CommentComposer({
           disabled={!body.trim() || pending}
           aria-keyshortcuts="Meta+Enter Control+Enter"
         >
-          {editing ? <Check /> : target.kind === "reply" ? <Reply /> : <Plus />}
-          {submitLabel(target)}
+          <SubmitIcon />
+          {submitLabel}
           <Kbd tone="inverted" aria-hidden className="hidden sm:inline-flex">
             ⌘⏎
           </Kbd>

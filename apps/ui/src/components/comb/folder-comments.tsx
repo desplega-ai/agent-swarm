@@ -1,8 +1,8 @@
 import { CheckCheck, MessageSquare, Send, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { useBulkResolve, useFolderThreads } from "@/api/hooks/use-agent-fs";
+import { isAccessDenied, useBulkResolve, useFolderThreads } from "@/api/hooks/use-agent-fs";
 import { SendBatchDialog } from "@/components/comb/send-to-swarm";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
@@ -25,7 +25,6 @@ import {
   type AgeFilter,
   bulkSummary,
   matchesAge,
-  pruneSelection,
   selectionState,
   setAll,
 } from "@/lib/comb/bulk";
@@ -37,6 +36,7 @@ import { SwarmStateTag } from "./swarm-state";
 import { useThreadSwarmStates } from "./use-thread-swarm-states";
 
 const NO_THREADS: CommentListEntry[] = [];
+const ROLE_NEEDED = "Resolving needs the editor role in this drive.";
 
 /**
  * The folder's "Open comments" panel: open threads grouped by file, each with
@@ -57,6 +57,8 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
   const [age, setAge] = useState<AgeFilter>("any");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [sending, setSending] = useState<CommentListEntry[] | null>(null);
+  // agent-fs refused a resolve (no editor role): Resolve stays off for this page view.
+  const [denied, setDenied] = useState(false);
 
   // The age filter reads the clock once per list change, not on every render.
   const shown = useMemo(() => {
@@ -64,9 +66,6 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
     return threads.filter((thread) => matchesAge(thread, age, now));
   }, [threads, age]);
   const shownIds = useMemo(() => shown.map((thread) => thread.id), [shown]);
-
-  // A comment that left the list (resolved, sent elsewhere, filtered out) leaves the selection.
-  useEffect(() => setSelected((current) => pruneSelection(current, shownIds)), [shownIds]);
 
   const groups = useMemo(() => {
     const byPath = new Map<string, CommentListEntry[]>();
@@ -84,9 +83,21 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
   const busy = bulk.progress !== null;
 
   const resolve = async (ids: string[]) => {
-    const outcome = await bulk.run(ids, true);
-    setSelected(new Set());
-    const { done, failed } = outcome;
+    const { done, failed, skipped } = await bulk.run(ids, true);
+    // What did not resolve stays checked, so the person can try again.
+    setSelected(new Set([...failed.map((entry) => entry.item), ...skipped]));
+    if (failed.some((entry) => isAccessDenied(entry.error))) {
+      setDenied(true);
+      toast.error(
+        done.length > 0
+          ? bulkSummary("Resolved", done.length, ids.length - done.length)
+          : "Could not resolve the comments",
+        {
+          description: ROLE_NEEDED,
+        },
+      );
+      return;
+    }
     const summary = bulkSummary("Resolved", done.length, failed.length);
     const firstError = failed[0]?.error;
     const description = firstError instanceof Error ? firstError.message : undefined;
@@ -123,11 +134,12 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
           disabled={busy || shown.length === 0}
           onCheckedChange={(on) => setSelected((current) => setAll(current, shownIds, on === true))}
         />
+        {/* One stable live region: it announces the start of a run (the toast announces the end). */}
+        <p className="sr-only" aria-live="polite">
+          {bulk.progress ? `Working on ${bulk.progress.total} comments` : ""}
+        </p>
         {bulk.progress ? (
-          <p
-            className="flex flex-1 items-center gap-2 text-sm text-muted-foreground"
-            aria-live="polite"
-          >
+          <p className="flex flex-1 items-center gap-2 text-sm text-muted-foreground">
             <Spinner className="size-4" />
             Working on {bulk.progress.finished} of {bulk.progress.total}
           </p>
@@ -141,6 +153,8 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
                 <Button
                   size="sm"
                   variant="outline"
+                  // The text hides on phones: the name stays.
+                  aria-label="Send to swarm"
                   aria-disabled={sendable.length === 0}
                   className="aria-disabled:opacity-50"
                   onClick={() => (sendable.length > 0 ? setSending(sendable) : undefined)}
@@ -155,10 +169,24 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
                   : "The checked comments were already sent"}
               </TooltipContent>
             </Tooltip>
-            <Button size="sm" onClick={() => void resolve(picked.map((thread) => thread.id))}>
-              <CheckCheck />
-              Resolve
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  aria-disabled={denied}
+                  className="aria-disabled:opacity-50"
+                  onClick={() =>
+                    denied ? undefined : void resolve(picked.map((thread) => thread.id))
+                  }
+                >
+                  <CheckCheck />
+                  Resolve
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {denied ? ROLE_NEEDED : "Resolve the checked comments (Undo reopens them)"}
+              </TooltipContent>
+            </Tooltip>
             <Button
               size="icon-sm"
               variant="ghost"
@@ -177,7 +205,14 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
                 {age === "any" ? threads.length : `${shown.length} of ${threads.length}`}
               </span>
             </h2>
-            <Select value={age} onValueChange={(value) => setAge(value as AgeFilter)}>
+            <Select
+              value={age}
+              onValueChange={(value) => {
+                // A new filter starts a new selection: no hidden comment stays checked.
+                setAge(value as AgeFilter);
+                setSelected(new Set());
+              }}
+            >
               <SelectTrigger size="sm" aria-label="Comment age" className="text-xs">
                 <SelectValue />
               </SelectTrigger>
@@ -264,7 +299,7 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
           scopePath={folder.path}
           threads={sending}
           showPaths
-          onSent={() => setSelected(new Set())}
+          onSent={(sent) => setSelected((current) => setAll(current, sent, false))}
           onClose={() => setSending(null)}
         />
       ) : null}
