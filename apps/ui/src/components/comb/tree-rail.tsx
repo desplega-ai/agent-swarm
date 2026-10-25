@@ -4,8 +4,10 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentFsLsQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { FileKindIcon } from "@/components/comb/file-icon";
+import { FileContextMenu, FileMenuButton } from "@/components/comb/file-menu";
 import { PresenceDots } from "@/components/comb/presence-avatars";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ancestorFolders, type CombLocation, combPath, parentFolder } from "@/lib/comb/paths";
 import { type FolderListing, flattenTree, visibleFolders } from "@/lib/comb/tree";
 import { cn } from "@/lib/utils";
@@ -19,6 +21,26 @@ function foldersToOpen(location: CombLocation): string[] {
 
 function indent(level: number): string {
   return `${0.25 + (level - 1) * 0.75}rem`;
+}
+
+/** A row name, cut in the middle to fit. A cut name shows in full in a tooltip on hover. */
+function RowName({ name }: { name: string }) {
+  const [cut, setCut] = useState(false);
+  const [open, setOpen] = useState(false);
+  return (
+    <Tooltip open={open && cut} onOpenChange={setOpen} disableHoverableContent>
+      <TooltipTrigger asChild>
+        <span className="flex min-w-0 flex-1">
+          <MiddleTruncation title={undefined} onTruncatedChange={setCut}>
+            {name}
+          </MiddleTruncation>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-96 break-all">
+        {name}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 /**
@@ -180,59 +202,68 @@ export function TreeRail({
         }
         const open = row.isFolder && expanded.has(row.path);
         const selected = row.path === currentPath;
+        const target = { orgId, driveId, path: row.path };
         return (
-          <div
-            key={row.path}
-            role="none"
-            className={cn(
-              "hover-linger flex items-center rounded-md pr-2 transition-colors hover:bg-accent/50",
-              selected && "bg-accent font-medium text-foreground",
-            )}
-            style={{ paddingLeft: indent(row.level) }}
-          >
-            {row.isFolder ? (
-              // Mouse only: the treeitem opens and closes with the arrow keys.
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-hidden="true"
-                onClick={() => setOpen(row.path, !open)}
-                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-              >
-                <ChevronRight className={cn("size-3.5", open && "rotate-90")} />
-              </button>
-            ) : (
-              <span className="size-5 shrink-0" aria-hidden />
-            )}
-            <Link
-              ref={(el) => {
-                if (el) itemRefs.current.set(row.path, el);
-                else itemRefs.current.delete(row.path);
-              }}
-              to={combPath({ orgId, driveId, path: row.path })}
-              role="treeitem"
-              data-path={row.path}
-              // The visible name can be cut in the middle. The full name stays the item's name.
-              aria-label={row.name}
-              aria-level={row.level}
-              aria-setsize={row.setsize}
-              aria-posinset={row.posinset}
-              aria-expanded={row.isFolder ? open : undefined}
-              aria-describedby={statusIds.get(row.path)}
-              aria-selected={selected}
-              tabIndex={row.path === tabStop ? 0 : -1}
-              onFocus={() => setFocusPath(row.path)}
-              onClick={() => {
-                if (row.isFolder) setOpen(row.path, true);
-                onNavigate?.();
-              }}
-              className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          <FileContextMenu key={row.path} target={target}>
+            <div
+              role="none"
+              className={cn(
+                "group/row hover-linger relative flex items-center rounded-md pr-1 transition-colors hover:bg-accent/50",
+                selected && "bg-accent font-medium text-foreground",
+              )}
+              style={{ paddingLeft: indent(row.level) }}
             >
-              <FileKindIcon name={row.name} isFolder={row.isFolder} open={open} />
-              <MiddleTruncation>{row.name}</MiddleTruncation>
-              {row.isFolder ? null : <PresenceDots path={row.path} />}
-            </Link>
-          </div>
+              {row.isFolder ? (
+                // Mouse only: the treeitem opens and closes with the arrow keys.
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onClick={() => setOpen(row.path, !open)}
+                  className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronRight className={cn("size-3.5", open && "rotate-90")} />
+                </button>
+              ) : (
+                <span className="size-5 shrink-0" aria-hidden />
+              )}
+              <Link
+                ref={(el) => {
+                  if (el) itemRefs.current.set(row.path, el);
+                  else itemRefs.current.delete(row.path);
+                }}
+                to={combPath({ orgId, driveId, path: row.path })}
+                role="treeitem"
+                data-path={row.path}
+                // The visible name can be cut in the middle. The full name stays the item's name.
+                aria-label={row.name}
+                aria-level={row.level}
+                aria-setsize={row.setsize}
+                aria-posinset={row.posinset}
+                aria-expanded={row.isFolder ? open : undefined}
+                aria-describedby={statusIds.get(row.path)}
+                aria-selected={selected}
+                tabIndex={row.path === tabStop ? 0 : -1}
+                onFocus={() => setFocusPath(row.path)}
+                onClick={() => {
+                  if (row.isFolder) setOpen(row.path, true);
+                  onNavigate?.();
+                }}
+                className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                <FileKindIcon name={row.name} isFolder={row.isFolder} open={open} />
+                <RowName name={row.name} />
+                {row.isFolder ? null : <PresenceDots path={row.path} />}
+              </Link>
+              {/* From md up the button shows on hover, over the end of the name, so a
+                  hidden button takes no room. Touch screens have no hover: below md it
+                  stays visible in the row. */}
+              <FileMenuButton
+                target={target}
+                className="md:absolute md:right-1 md:bg-accent md:opacity-0 md:group-hover/row:opacity-100 md:hover:bg-accent"
+              />
+            </div>
+          </FileContextMenu>
         );
       })}
     </div>

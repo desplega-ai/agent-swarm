@@ -6,6 +6,7 @@ import { useAgentFsLs } from "@/api/hooks/use-agent-fs";
 import { CombHome } from "@/components/comb/comb-home";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileKindIcon } from "@/components/comb/file-icon";
+import { CopyPathButton, FileContextMenu, FileMenuButton } from "@/components/comb/file-menu";
 import { FolderComments } from "@/components/comb/folder-comments";
 import { PinButton } from "@/components/comb/pin-button";
 import { UploadButton, UploadDropZone, UploadList } from "@/components/comb/upload-zone";
@@ -76,6 +77,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
     [listing.data, folder.path, authorLabel],
   );
 
+  const { orgId, driveId } = folder;
   const columnDefs = useMemo<ColDef<FolderRow>[]>(
     () => [
       { field: "name", headerName: "Name", flex: 2, minWidth: 160, cellRenderer: NameCell },
@@ -93,15 +95,39 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         valueFormatter: ({ value }) => (value ? formatRelative(value as string) : ""),
       },
       { field: "author", headerName: "Author", flex: 1, minWidth: 120 },
+      {
+        colId: "menu",
+        headerName: "",
+        width: 52,
+        sortable: false,
+        resizable: false,
+        cellRenderer: ({ data }: ICellRendererParams<FolderRow>) =>
+          data ? (
+            <span data-row-menu className="flex h-full items-center">
+              <FileMenuButton target={{ orgId, driveId, path: data.id }} />
+            </span>
+          ) : null,
+      },
     ],
-    [],
+    [orgId, driveId],
   );
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<FolderRow>) => {
+      // The "..." button opens its menu, not the row.
+      const target = event.event?.target;
+      if (target instanceof Element && target.closest("[data-row-menu]")) return;
       if (event.data) void navigate(combPath({ ...folder, path: event.data.id }));
     },
     [navigate, folder],
+  );
+  // One right-click menu for the grid: the row under the pointer (AG Grid's `row-id` is the path).
+  const pickRow = useCallback(
+    (element: Element): DrivePath | null => {
+      const id = element.closest("[row-id]")?.getAttribute("row-id");
+      return id?.startsWith("/") ? { orgId, driveId, path: id } : null;
+    },
+    [orgId, driveId],
   );
 
   if (listing.error) {
@@ -124,6 +150,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
             <UploadButton folder={folder} />
             {/* The root is the Comb item, so no pin. */}
             {folder.path === "/" ? null : <PinButton target={folder} className="size-8" />}
+            {folder.path === "/" ? null : <CopyPathButton target={folder} />}
             <OpenInAgentFsButton target={folder} iconOnly />
           </>
         }
@@ -147,31 +174,40 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           className="flex-none overflow-visible"
         >
           {rows.map((row) => (
-            <MobileListRow
-              key={row.id}
-              to={combPath({ ...folder, path: row.id })}
-              title={row.name}
-              leading={<FileKindIcon name={row.name} isFolder={row.isFolder} />}
-              meta={[
-                row.type,
-                row.isFolder ? null : formatBytes(row.size),
-                row.modifiedAt ? formatRelative(row.modifiedAt) : null,
-                row.author || null,
-              ]}
-            />
+            // A long press opens the file menu.
+            <FileContextMenu key={row.id} target={{ ...folder, path: row.id }}>
+              <div>
+                <MobileListRow
+                  to={combPath({ ...folder, path: row.id })}
+                  title={row.name}
+                  leading={<FileKindIcon name={row.name} isFolder={row.isFolder} />}
+                  meta={[
+                    row.type,
+                    row.isFolder ? null : formatBytes(row.size),
+                    row.modifiedAt ? formatRelative(row.modifiedAt) : null,
+                    row.author || null,
+                  ]}
+                />
+              </div>
+            </FileContextMenu>
           ))}
         </MobileList>
       ) : (
-        <DataGrid
-          rowData={rows}
-          columnDefs={columnDefs}
-          onRowClicked={onRowClicked}
-          loading={listing.isPending}
-          emptyMessage="Empty folder"
-          pagination={false}
-          // The listing keeps room for about six rows. Below that the folder scrolls.
-          className="min-h-72"
-        />
+        <FileContextMenu pick={pickRow}>
+          {/* `contents`: the grid keeps its place in the page layout. */}
+          <div className="contents">
+            <DataGrid
+              rowData={rows}
+              columnDefs={columnDefs}
+              onRowClicked={onRowClicked}
+              loading={listing.isPending}
+              emptyMessage="Empty folder"
+              pagination={false}
+              // The listing keeps room for about six rows. Below that the folder scrolls.
+              className="min-h-72"
+            />
+          </div>
+        </FileContextMenu>
       )}
       {/* Open comments below the folder: send to swarm, resolve in bulk. */}
       <FolderComments folder={folder} />

@@ -7,6 +7,7 @@ import { CombLayoutProvider, useCombLayout } from "@/components/comb/comb-layout
 import { ConnectCard } from "@/components/comb/connect-card";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileActions, FileSubtitle, FileTitle } from "@/components/comb/file-header";
+import { FileDialogsProvider } from "@/components/comb/file-menu";
 import { FileView } from "@/components/comb/file-view";
 import { FolderView } from "@/components/comb/folder-view";
 import { CombPresenceProvider } from "@/components/comb/presence-context";
@@ -126,7 +127,9 @@ function ConnectedView() {
         orgId={location.orgId}
         driveId={location.driveId}
       >
-        <CombWorkspace location={location} />
+        <FileDialogsProvider>
+          <CombWorkspace location={location} />
+        </FileDialogsProvider>
       </CombPresenceProvider>
     </CombLayoutProvider>
   );
