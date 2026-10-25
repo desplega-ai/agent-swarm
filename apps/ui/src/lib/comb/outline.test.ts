@@ -156,3 +156,22 @@ describe("activeHeadingIndex", () => {
     expect(activeHeadingIndex([-400, 250, 500, 700], { ...options, atEnd: true })).toBe(2);
   });
 });
+
+describe("frontmatter", () => {
+  test("a YAML block on top is not a heading, and the headings keep their file lines", () => {
+    const text = [
+      "---",
+      "date: 2026-10-14",
+      "topic: Seed deck",
+      "---",
+      "",
+      "# Title",
+      "",
+      "## Part",
+    ].join("\n");
+    expect(extractOutline(text)).toEqual([
+      { level: 1, text: "Title", line: 6 },
+      { level: 2, text: "Part", line: 8 },
+    ]);
+  });
+});

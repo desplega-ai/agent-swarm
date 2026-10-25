@@ -122,7 +122,7 @@ Verification: `bun test apps/ui/src/lib/comb/favorites.test.ts`, tsc, lint.
 - Truncated names show the full name in a tooltip.
 - A Copy path icon in the file and folder header.
 
-Verification: tsc, lint, `bun test apps/ui/src/lib/comb/file-menu.test.ts`.
+Verification: tsc, lint, live QA (the menu is UI wiring over existing helpers, no new pure logic).
 
 ## Phase 6: Write actions
 
@@ -166,7 +166,7 @@ Verification: `bun test apps/ui/src/lib/comb/search.test.ts`, tsc, lint.
   comment is active, and its marker sits next to it.
 - Check rendering on a wide diagram, a tall image, an SVG, and a broken image.
 
-Verification: `bun test apps/ui/src/lib/comb/comment-anchor.test.ts apps/ui/src/components/comb/viewers/comb-markdown.test.tsx`, tsc, lint.
+Verification: `bun test apps/ui/src/lib/comb/dom-text-space.test.ts apps/ui/src/components/comb/viewers/comb-markdown.test.tsx`, tsc, lint.
 
 ## Docs
 
@@ -203,21 +203,32 @@ with Tab and Back, maximize and comment on a diagram.
 
 ## Todo
 
-- [ ] Phase 1: Mono file kind icons
-- [ ] Phase 2: Frontmatter
-- [ ] Phase 3: Outline in the right panel
-- [ ] Phase 4: agent-fs favorites
-- [ ] Phase 5: Row menu, tooltip, copy path
-- [ ] Phase 6: Write actions
-- [ ] Phase 7: Tree filter
-- [ ] Phase 8: Folder filter
-- [ ] Phase 9: Search
-- [ ] Phase 10: Assets
-- [ ] Docs
-- [ ] QA, gates, PR
+- [x] Phase 1: Mono file kind icons (ad69b7f8c)
+- [x] Phase 2: Frontmatter (f1b771bfb)
+- [x] Phase 3: Outline in the right panel (22c681e6e)
+- [x] Phase 4: agent-fs favorites (4f8fbec20)
+- [x] Phase 5: Row menu, tooltip, copy path (e2c4b0c49)
+- [x] Phase 6: Write actions (c22cf78a9)
+- [x] Phase 7: Tree filter (90fc0c032)
+- [x] Phase 8: Folder filter (ff77df150)
+- [x] Phase 9: Search (0b6805119)
+- [x] Phase 10: Assets (cf96084ff)
+- [x] Docs (05ef2e62e)
+- [ ] QA, review, gates, PR
 
 ## Log
 
 - 18:44 BCN: #2420 merged. New worktree `~/worktrees/agent-swarm/2026-10-25-comb-browse` off
   origin/main 9c2afc7d8. Old worktree removed.
 - 19:10 BCN: research done (agent-fs live UI and core ops), 4 decisions asked and answered.
+- 20:00 BCN: Phases 1 to 10 and docs committed. Stack in `/tmp/comb-browse/` (agent-fs 47433, API
+  43013, UI 45274, main-branch UI 45275 from `/tmp/comb-browse/main-wt` for before shots).
+- QA findings fixed on the way: tree row button took name width (now overlays on hover), the
+  grid wrapper broke the grid height (now `contents`), a folder name over a file leaked the
+  storage path (now caught first, and 5xx messages are generic), URL-bound text boxes dropped
+  keys (React Router updates in a transition: boxes keep local state, `useUrlDraft`),
+  Streamdown unwraps an image alone in its paragraph (the frame carries the image's lines),
+  toolbar buttons were see-through on white images in dark mode, phone header overflow.
+- Known limit: the agent-fs live UI drops the line stamps of a mermaid block
+  (`MermaidDiagram` gets no props), so a Comb comment on a diagram shows as Lost there. Image
+  comments resolve there (react-markdown keeps the `<p>`). Not fixed here: no agent-fs changes.
