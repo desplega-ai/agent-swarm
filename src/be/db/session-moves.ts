@@ -85,15 +85,14 @@ export async function moveTaskChainKeyInTx(
       [task.id, task.id],
     );
     // The namespace is metadata, and lastUpdatedAt tracks task activity, as in updateTaskTitle.
-    await client.run('UPDATE agent_tasks SET "key" = ?, updated_by = ? WHERE id = ?', [
-      key,
-      changedBy ?? null,
-      task.id,
-    ]);
+    await client.run(
+      'UPDATE agent_tasks SET "key" = ?, updated_by = COALESCE(?, updated_by) WHERE id = ?',
+      [key, changedBy ?? null, task.id],
+    );
     for (const mapping of mappedFiles) {
       if (mapping.key === key) continue;
       await client.run(
-        'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
+        'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = COALESCE(?, updated_by) WHERE id = ?',
         [key, now, changedBy ?? null, mapping.id],
       );
       await insertAssetKeyHistory({

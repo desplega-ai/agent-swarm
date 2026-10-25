@@ -337,15 +337,15 @@ The source filter (`showSource`, and the older `hideSource`) matches every root 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Backfill tests pass: `bun run test:root -- src/tests/session-source-backfill.test.ts`
-- [ ] Move and key tests pass: `bun run test:root -- src/tests/sessions-move.test.ts src/tests/asset-key-migration.test.ts`
-- [ ] Type check passes: `bun run tsc:check:tsc`
-- [ ] Promise checks pass: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] Async seam check passes: `bash scripts/check-async-db-seam.sh`
-- [ ] Lint passes: `bun run lint && bun run lint:slop`
+- [x] Backfill tests pass: `bun run test:root -- src/tests/session-source-backfill.test.ts`
+- [x] Move and key tests pass: `bun run test:root -- src/tests/sessions-move.test.ts src/tests/asset-key-migration.test.ts`
+- [x] Type check passes: `bun run tsc:check:tsc`
+- [x] Promise checks pass: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] Async seam check passes: `bash scripts/check-async-db-seam.sh`
+- [x] Lint passes: `bun run lint && bun run lint:slop`
 
 #### Automated QA:
-- [ ] Copy a prod-shaped DB: `mkdir -p /tmp/sss-qa && cp /tmp/sv2-qa/db.sqlite /tmp/sss-qa/db.sqlite`. Seed Slack, `mcp`, and Telegram roots with default keys with a QA script `/tmp/sss-qa/seed.ts` (writes only that file, like `/tmp/sv2-qa/backfill-slack.ts`). Boot the API on it (`DATABASE_PATH=/tmp/sss-qa/db.sqlite PORT=3123 DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true bun run start:http`). Confirm the marker with `sqlite3 /tmp/sss-qa/db.sqlite "SELECT key FROM seed_state WHERE kind='maintenance' AND key='session-source-keys-v1'"` and the new keys with `sqlite3 /tmp/sss-qa/db.sqlite "SELECT key, COUNT(*) FROM agent_tasks WHERE parentTaskId IS NULL AND key >= 'shared/slack/' AND key < 'shared/slack0' GROUP BY 1"`. Restart and confirm no new `asset_key_history` rows.
+- [x] Copy a prod-shaped DB: `mkdir -p /tmp/sss-qa && cp /tmp/sv2-qa/db.sqlite /tmp/sss-qa/db.sqlite`. Seed Slack, `mcp`, and Telegram roots with default keys with a QA script `/tmp/sss-qa/seed.ts` (writes only that file, like `/tmp/sv2-qa/backfill-slack.ts`). Boot the API on it (`DATABASE_PATH=/tmp/sss-qa/db.sqlite PORT=3123 DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true bun run start:http`). Confirm the marker with `sqlite3 /tmp/sss-qa/db.sqlite "SELECT key FROM seed_state WHERE kind='maintenance' AND key='session-source-keys-v1'"` and the new keys with `sqlite3 /tmp/sss-qa/db.sqlite "SELECT key, COUNT(*) FROM agent_tasks WHERE parentTaskId IS NULL AND key >= 'shared/slack/' AND key < 'shared/slack0' GROUP BY 1"`. Restart and confirm no new `asset_key_history` rows.
 
 #### Manual Verification:
 - [ ] Taras reviews the prod impact numbers in the PR (about 2,400 roots: about 2,210 Slack roots plus about 230 agent roots in Slack threads, each with its chain) before the merge.
@@ -561,3 +561,4 @@ _Implementation run started 2026-10-25 in worktree `~/worktrees/agent-swarm/2026
 - Phase 1: an id that contains `/` gives no source key (it would add key segments). Taras chose a fallback for Slack through chat-sdk with no ts (`slack:<D…>:`, a top-level DM in the legacy assistant view): `shared/slack/<channel>/task:<id>/`, like Telegram with no topic. The `task-action` tool's `key` description (and `MCP.md`) now names the source key default.
 - Phase 2: the move guard allows only `sessionSourceKey(root)`. A root an agent created with an explicit `shared/slack/...` key that differs from its own fields can move out, but its Undo is refused (the UI ignores the Undo result). Accepted as an edge case. The PATCH route falls back to "no source key allowed" when it cannot load the session root.
 - Phase 3: `warmSlackChannelLabels` takes source group keys and looks up only channel group keys (`shared/slack/<channel>/`), so a bare `shared/slack/` or a deeper key never queues a lookup. chat-sdk capture covers Telegram and Discord only (a Slack DM through chat-sdk must not block the Slack lookup with an untimed label). Every chat message refreshes the label, once per flush, so a renamed Telegram group shows its new title.
+- Phase 4 (after three reviews, Codex included): each root moves in its own write transaction that re-checks the key (a user move after the batch read wins) and reads the chain ids inside the lock (a new child moves too). A failing root is logged and skipped; then the run deletes the cursor and writes no marker, so the next boot retries only the failed roots. `moveTaskChainKeyInTx` now writes `updated_by = COALESCE(?, updated_by)` (no actor keeps the last editor, the repo audit convention), which also changes the bulk and prefix move routes when they have no trusted actor. QA on a prod-shaped copy: `scanned=19 moved=19 skipped=0 failed=0`, marker written, a restart added no history rows.
