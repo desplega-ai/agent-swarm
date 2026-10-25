@@ -7,7 +7,7 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { swarmDisplayName } from "../../components/swarm-name";
 import { SLACK_TOKEN_FIELDS } from "./catalog";
-import { ConnectedGate, ExternalTextLink } from "./pane-parts";
+import { ConnectedGate, ExternalTextLink, StepLine } from "./pane-parts";
 import { FieldGrid } from "./setup-field";
 import { type PaneProps, useConfigForm } from "./use-config-form";
 
@@ -47,12 +47,15 @@ export function SlackPane({ configs, presence, connected }: PaneProps) {
       summary="Connected. Mention the bot in a channel to send a task."
     >
       <SlackAppActions />
-      <FieldGrid specs={SLACK_TOKEN_FIELDS} form={form} />
+      <div className="space-y-3">
+        <StepLine n={2}>Install the app to your workspace, then paste both tokens.</StepLine>
+        <FieldGrid specs={SLACK_TOKEN_FIELDS} form={form} />
+      </div>
     </ConnectedGate>
   );
 }
 
-/** Copy the manifest (pre-filled with the swarm name) or a setup prompt for an agent. */
+/** Step 1: copy the manifest (pre-filled with the swarm name) or a setup prompt for an agent. */
 function SlackAppActions() {
   const statusQ = useStatus();
   // Unset `SWARM_ORG_NAME` reads as "Swarm" on /status. Use the step 2 default instead.
@@ -70,9 +73,14 @@ function SlackAppActions() {
   // An older API has no manifest route: only the link stays.
   const unavailable = manifestQ.isError;
 
+  const createLink = <ExternalTextLink href={SLACK_APPS_URL}>api.slack.com/apps</ExternalTextLink>;
+
   return (
-    // The link sits on its own line, so nothing moves when a button shows its check.
-    <div className="flex flex-col items-start gap-2">
+    <div className="space-y-3">
+      <StepLine n={1}>
+        Create an app at {createLink}.
+        {unavailable ? null : ' Pick "From a manifest" and paste the manifest.'}
+      </StepLine>
       {unavailable ? null : (
         <div className="flex flex-wrap items-center gap-2">
           {/* Only the icon swaps on copy: the labels keep their width. */}
@@ -96,7 +104,7 @@ function SlackAppActions() {
             {copiedKey === "prompt" ? <Check /> : <Bot />}
             Copy setup prompt
           </Button>
-          <InfoTip content='Pick "From a manifest" and paste the manifest. Or give the setup prompt to Codex or Claude Code with computer use: it creates the app and reports both tokens.' />
+          <InfoTip content="Give the setup prompt to Codex or Claude Code with computer use. It creates the app and reports both tokens." />
           <span aria-live="polite" className="sr-only">
             {copiedKey === "manifest"
               ? "Manifest copied"
@@ -106,11 +114,6 @@ function SlackAppActions() {
           </span>
         </div>
       )}
-      <span className="text-sm">
-        <ExternalTextLink href={SLACK_APPS_URL}>
-          Create the app at api.slack.com/apps
-        </ExternalTextLink>
-      </span>
     </div>
   );
 }

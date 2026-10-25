@@ -62,7 +62,7 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
   },
   memory: {
     title: "Turn on memory",
-    description: "Embeddings let agents recall earlier work.",
+    description: "Let agents remember past work.",
   },
   integrations: {
     title: "Connect your tools",
@@ -76,7 +76,7 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
 
 /** Skip tooltips that say what skipping costs. */
 const SKIP_HINT: Partial<Record<OnboardingStepId, string>> = {
-  memory: "Memory stays off until you set it up.",
+  memory: "Agents still remember, but find past work by keyword only. Add a key later in Settings.",
 };
 
 const STEP_BODIES: Record<Exclude<OnboardingStepId, "connect">, ComponentType<StepProps>> = {

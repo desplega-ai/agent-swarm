@@ -31,7 +31,6 @@ export function SetupField({ spec, form }: { spec: SetupFieldSpec; form: ConfigF
   return (
     <SettingsRow
       htmlFor={id}
-      required={spec.required}
       className={cn(spec.multiline && "sm:col-span-2")}
       label={fieldLabel(spec)}
     >
@@ -73,7 +72,6 @@ function TextSetupField({
   return (
     <SettingsRow
       htmlFor={id}
-      required={spec.required}
       label={fieldLabel(spec)}
       helper={error ? <span className="text-status-error-strong">{error}</span> : undefined}
     >

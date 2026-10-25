@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, LayoutGrid } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -14,7 +14,8 @@ import { SetupCard } from "@/components/shared/setup-card";
 import { SetupChip } from "@/components/shared/setup-chip";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AutosaveScopeContext, useAutosaveScope } from "@/hooks/use-autosave";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { AutosaveScopeContext, useAutosaveScope, useContinueAction } from "@/hooks/use-autosave";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
 import { activeAuthorization, ComingSoonPane, OAuthToolPane } from "./integrations/business-panes";
@@ -23,6 +24,7 @@ import {
   CORE_INTEGRATIONS,
   connectedMethod,
   findSetupIntegration,
+  REQUIRED_KEYS,
   SETUP_GROUPS,
   type SetupIntegration,
   type SetupIntegrationId,
@@ -35,9 +37,20 @@ import type { PaneProps } from "./integrations/use-config-form";
 /** Query params the Linear/Jira OAuth return adds to `/setup?step=integrations`. */
 const RETURN_PARAMS = ["integration", "oauth", "error", "error_description"];
 
-type ItemState = "connected" | "saved" | "soon" | "none";
+type ItemState = "connected" | "saved" | "none";
 
-export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepProps) {
+/** Required keys saved so far, out of all of them. */
+interface KeyProgress {
+  saved: number;
+  total: number;
+}
+
+export function StepIntegrations({
+  onboarding,
+  act,
+  setContinueBlocker,
+  setContinueAction,
+}: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -94,16 +107,32 @@ export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepPr
     act({ action: "complete", step: "integrations", method }).catch(() => undefined);
   }, [method, stepStatus, act]);
 
+  // All optional: with nothing connected, Continue does what Skip does.
+  useContinueAction(
+    (action) => setContinueAction(action, { unlocks: true }),
+    method || stepStatus === "done" || stepStatus === "skipped"
+      ? null
+      : async () => {
+          await act({ action: "skip", step: "integrations" });
+        },
+  );
+
+  const hasKey = (key: string) =>
+    Boolean(presence[key]) || configs.some((c) => c.key === key && c.scope === "global");
+
   function itemState(item: SetupIntegration): ItemState {
     if (item.group === "business") {
-      if (!item.oauthPresetId) return "soon";
+      if (!item.oauthPresetId) return "none";
       return activeAuthorization(oauthApps, item.oauthPresetId) ? "connected" : "none";
     }
     if (signals[item.id]) return "connected";
-    const saved = item.chipKeys.some(
-      (key) => presence[key] || configs.some((c) => c.key === key && c.scope === "global"),
-    );
-    return saved ? "saved" : "none";
+    return item.chipKeys.some(hasKey) ? "saved" : "none";
+  }
+
+  function keyProgress(item: SetupIntegration): KeyProgress | undefined {
+    if (item.group !== "core") return undefined;
+    const keys = REQUIRED_KEYS[item.id];
+    return { saved: keys.filter(hasKey).length, total: keys.length };
   }
 
   const selected = findSetupIntegration(selectedId) ?? CORE_INTEGRATIONS[0];
@@ -130,6 +159,7 @@ export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepPr
                   key={item.id}
                   item={item}
                   state={itemState(item)}
+                  progress={keyProgress(item)}
                   active={item.id === selected.id}
                   onSelect={() => setSelectedId(item.id)}
                 />
@@ -148,7 +178,7 @@ export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepPr
         </nav>
 
         <SetupCard
-          icon={<BrandLogo src={selected.logo} />}
+          icon={<ItemIcon item={selected} />}
           title={selected.name}
           description={selected.purpose}
           actions={
@@ -162,7 +192,7 @@ export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepPr
               <ExternalLink className="size-3" />
             </a>
           }
-          status={<ItemStatus state={itemState(selected)} />}
+          status={<ItemStatus state={itemState(selected)} progress={keyProgress(selected)} />}
           className="sm:flex sm:min-h-0 sm:flex-col"
           bodyClassName="sm:min-h-0 sm:flex-1 sm:overflow-y-auto"
         >
@@ -187,31 +217,63 @@ export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepPr
   );
 }
 
-const STATE_LABEL: Record<Exclude<ItemState, "soon" | "none">, string> = {
-  connected: "Connected",
-  saved: "Saved, not connected yet",
-};
+function ItemIcon({ item, className }: { item: SetupIntegration; className?: string }) {
+  return item.logo ? (
+    <BrandLogo src={item.logo} className={className} />
+  ) : (
+    <LayoutGrid className={cn("size-5 shrink-0", className)} />
+  );
+}
 
-function ItemStatus({ state, focusable }: { state: ItemState; focusable?: boolean }) {
-  if (state === "soon") return <SetupChip>Soon</SetupChip>;
+/**
+ * The check mark is for a verified connection only. Saved keys that did not
+ * connect yet get a neutral chip: "1 of 2" while required keys are missing.
+ */
+function ItemStatus({
+  state,
+  progress,
+  focusable = true,
+}: {
+  state: ItemState;
+  progress?: KeyProgress;
+  focusable?: boolean;
+}) {
+  if (state === "connected") {
+    return <StatusIcon tone="done" label="Connected" focusable={focusable} />;
+  }
   if (state === "none") return <StatusIcon tone="none" />;
+  const partial = progress !== undefined && progress.saved < progress.total;
+  const label = partial
+    ? `${progress.saved} of ${progress.total} required fields saved. Not connected yet.`
+    : "Saved, not connected yet.";
   return (
-    <StatusIcon
-      tone={state === "connected" ? "done" : "saved"}
-      label={STATE_LABEL[state]}
-      focusable={focusable}
-    />
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={focusable ? 0 : undefined}
+          className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <span aria-hidden className="flex">
+            <SetupChip>{partial ? `${progress.saved} of ${progress.total}` : "Saved"}</SetupChip>
+          </span>
+          <span className="sr-only">{label}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
 function IntegrationItem({
   item,
   state,
+  progress,
   active,
   onSelect,
 }: {
   item: SetupIntegration;
   state: ItemState;
+  progress?: KeyProgress;
   active: boolean;
   onSelect: () => void;
 }) {
@@ -226,11 +288,11 @@ function IntegrationItem({
         active && "border-primary/60 bg-primary/5 font-medium sm:border-l-primary",
       )}
     >
-      <BrandLogo src={item.logo} className="size-4" />
+      <ItemIcon item={item} className="size-4" />
       <span className="flex-1 truncate text-left">{item.name}</span>
       <span className="hidden sm:inline-flex">
         {/* Inside the item button: no focus stop of its own. */}
-        <ItemStatus state={state} focusable={false} />
+        <ItemStatus state={state} progress={progress} focusable={false} />
       </span>
     </button>
   );
@@ -246,7 +308,7 @@ function IntegrationPane({
   oauthError: string | null;
 }) {
   if (item.group === "business") {
-    return item.oauthPresetId ? <OAuthToolPane tool={item} /> : <ComingSoonPane tool={item} />;
+    return item.oauthPresetId ? <OAuthToolPane tool={item} /> : <ComingSoonPane />;
   }
   switch (item.id) {
     case "slack":

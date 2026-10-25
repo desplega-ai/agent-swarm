@@ -4,12 +4,13 @@ import { Link } from "react-router-dom";
 import { useOAuthApps, useOAuthRedirectUri } from "@/api/hooks/use-script-connections";
 import type { OAuthAppSummary, OAuthAuthorizationSummary } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { CopyableField } from "@/components/shared/copyable-fields";
 import { StatusLine } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { OAuthInlineConnect } from "@/pages/connections/components/oauth-inline-connect";
-import type { BusinessTool } from "./catalog";
+import { type BusinessTool, COMING_SOON_TOOLS } from "./catalog";
 import { StepLine } from "./pane-parts";
 
 /** The first active OAuth authorization of a provider across its apps, or null. */
@@ -45,7 +46,13 @@ export function OAuthToolPane({ tool }: { tool: BusinessTool }) {
       </div>
     );
   }
-  if (appsQ.isError) return <OpenConnections tool={tool} note="This API has no OAuth apps yet." />;
+  if (appsQ.isError) {
+    return (
+      <OpenConnections
+        note={`This API has no OAuth apps yet. Connect ${tool.name} from Connections for now.`}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -58,9 +65,7 @@ export function OAuthToolPane({ tool }: { tool: BusinessTool }) {
         <div className="space-y-3">
           <StepLine n={1}>Create an OAuth client with this redirect URI.</StepLine>
           <CopyableField label="Redirect URI" value={redirectQ.data} />
-          <StepLine n={2}>
-            Pick the preset, paste the client ID and secret, then authorize.
-          </StepLine>
+          <StepLine n={2}>Paste the client ID and secret, then authorize.</StepLine>
         </div>
       ) : null}
       <OAuthInlineConnect
@@ -68,23 +73,35 @@ export function OAuthToolPane({ tool }: { tool: BusinessTool }) {
         value={authorizationId || active?.id || ""}
         onChange={setAuthorizationId}
         suggestedPresetId={tool.oauthPresetId}
+        lockPreset
         scopes={tool.scopes}
       />
     </div>
   );
 }
 
-/** Figma, Stripe, Salesforce, Shopify, Granola: guided setup ships later. */
-export function ComingSoonPane({ tool }: { tool: BusinessTool }) {
-  return <OpenConnections tool={tool} note="Guided setup coming soon." />;
+/** "More coming": the tools whose guided setup ships later. */
+export function ComingSoonPane() {
+  return (
+    <div className="space-y-4">
+      <ul className="space-y-2">
+        {COMING_SOON_TOOLS.map((tool) => (
+          <li key={tool.name} className="flex items-center gap-2 text-sm">
+            <BrandLogo src={tool.logo} className="size-4" />
+            <span className="font-medium">{tool.name}</span>
+            <span className="min-w-0 truncate text-muted-foreground">{tool.purpose}</span>
+          </li>
+        ))}
+      </ul>
+      <OpenConnections note="Connect them from Connections for now." />
+    </div>
+  );
 }
 
-function OpenConnections({ tool, note }: { tool: BusinessTool; note: string }) {
+function OpenConnections({ note }: { note: string }) {
   return (
     <div className="flex flex-col items-start gap-3">
-      <p className="text-sm text-muted-foreground">
-        {note} Connect {tool.name} from Connections for now.
-      </p>
+      <p className="text-sm text-muted-foreground">{note}</p>
       <Button asChild variant="outline" size="sm">
         {/* A new tab keeps setup open in this one. */}
         <Link to={setupExitHref("/connections")} target="_blank" rel="noopener noreferrer">
