@@ -1445,7 +1445,11 @@ export class ClaudeAdapter implements ProviderAdapter {
     // (headless) or block on the trust dialog (tmux), so seed trust for every session.
     if (isEnvFlagEnabled("CLAUDE_TRUST_PRESEED", true, sourceEnv)) {
       try {
-        await preseedClaudeTrustDialog(await resolveClaudeTrustDirs(config.cwd));
+        // Seed the ~/.claude.json the CLI reads: its HOME comes from the session env.
+        await preseedClaudeTrustDialog(
+          await resolveClaudeTrustDirs(config.cwd),
+          sourceEnv.HOME || undefined,
+        );
       } catch (err) {
         console.warn(
           `\x1b[33m[claude]\x1b[0m ${scrubSecrets(`Failed to pre-seed trust for ${config.cwd}: ${err}`)}`,

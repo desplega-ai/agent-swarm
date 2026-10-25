@@ -10,10 +10,10 @@
  * auth redacted.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { deriveDefaultRoute } from "@desplega/model-routing";
 import { closeDb, createAgent, getAgentById, initDb, updateAgentCredentialState } from "../be/db";
 import { awaitCredentials } from "../commands/credential-wait";
@@ -240,6 +240,11 @@ describe.skipIf(!CLAUDE_BINARY)("claude routes e2e (real CLI, fake endpoints)", 
 
           expect(result).toMatchObject({ isError: false, exitCode: 0 });
           expect(result.output).toContain(REPLY);
+          // Trust lands in the session's HOME, never in the host's ~/.claude.json.
+          const claudeJson = JSON.parse(readFileSync(join(env.HOME ?? "", ".claude.json"), "utf8"));
+          expect(
+            Object.keys(claudeJson.projects ?? {}).some((dir) => dir.endsWith(basename(cwd))),
+          ).toBe(true);
 
           const turn = fake.requests.find(
             (req) => req.method === "POST" && route.turnPath.test(req.path),
