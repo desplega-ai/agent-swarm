@@ -52,12 +52,43 @@ An existing drive member keeps their role. A viewer can read files and comments 
 
 The left rail shows the drive as a tree. A folder opens as a grid of its files. Comb shows these file types in the page:
 
-- Markdown, rendered. HTML files show as source code.
+- Markdown, rendered.
 - Code and other text files, with line numbers.
-- PDF, images, and video.
+- HTML files as source code, with a **Preview** tab (see [HTML preview](#html-preview)).
+- PDF, images, video, and audio (mp3, wav, flac, aac, m4a, ogg, opus).
 - CSV and TSV files as a table, with a **Source** view.
 
 Other files show **Download** and **Open in agent-fs**.
+
+### Search
+
+Click the search icon in the header, or press `/`. Pick a mode:
+
+| Mode | agent-fs op | Finds |
+| --- | --- | --- |
+| **Name** | `find` | File names, close matches too. Needs 2 characters and agent-fs 0.18.5 or later. |
+| **Full text** | `fts` | The exact words inside files. |
+| **Semantic** | `search` | Files about the topic, by meaning and keywords. Without an embedding provider, agent-fs returns keyword results only. |
+
+Search covers the whole swarm drive. Enter opens the selected file.
+
+### Share links
+
+**Share link** in the file header makes a public, read-only link to the file (the agent-fs `share-create` op). Pick how long it works: 1 hour, 24 hours, 3 days, or 7 days. Comb copies the link. Anyone with the link can open the file without an agent-fs account until it expires. Revoke a link with `agent-fs share-revoke --token <link>`. The button shows when agent-fs reports the `share-links` feature.
+
+### Upload
+
+**Upload** in a folder header, or a drop on the folder view, uploads files into that folder. A dropped folder keeps its structure. Comb uploads 3 files at a time and shows the progress. A file over the agent-fs upload limit (`maxUploadBytes`, 50 MB by default) is not sent. When a file with the same name is already there, pick **Keep both** (Comb uploads it as `name (1).ext`) or **Skip**. To replace a file, use the agent-fs live UI. Uploads need the editor role in the drive.
+
+### HTML preview
+
+An HTML file opens on **Source**, where comments anchor. **Preview** runs the page in a sandboxed frame:
+
+- The page loads from a 15-minute agent-fs site link to its folder, so its relative styles, images, and scripts load.
+- The frame comes from the agent-fs host, and its sandbox gives the page no origin. The page cannot read the dashboard, its local storage, or agent-fs cookies, and it cannot navigate the dashboard tab. Scripts, forms, popups, and dialogs run.
+- A page at the drive root asks first, because its site link covers the whole drive for 15 minutes.
+
+Preview shows when agent-fs reports the `html-sites` feature.
 
 **Pin to sidebar** on a file or folder adds it under **Comb** in the sidebar. The swarm API stores the pins for the key that the dashboard uses: the operator key, or your user token.
 
@@ -92,6 +123,18 @@ Three buttons send comments. Each click creates **one** task for the lead, with 
 Comb asks you to confirm before it sends. One batch holds at most 50 comments. Send again for the rest.
 
 The task has the source `comb`. The swarm posts a reply on each sent comment, which shows as "Sent to the swarm · task ...". A comment that the swarm already received is skipped on the next send.
+
+The task goes to the lead. With no lead, it waits unassigned in the pool, and the toast says so. With an offline lead, it waits for the lead to come back.
+
+When a send fails, nothing is sent:
+
+| Answer | Why |
+| --- | --- |
+| 400 | The comments are not on the swarm drive, or an id is not valid. |
+| 403 | You cannot create tasks. Ask a swarm admin. |
+| 409 | Every comment was skipped (already sent, resolved, a reply, or gone). |
+| 502 | agent-fs could not read one of the comments. Try again. |
+| 503 | agent-fs or the swarm drive is not set up, or an operator turned off a Comb review template. |
 
 ### What the agent does
 
@@ -147,7 +190,9 @@ The dashboard and the API then behave as they do without Comb. Comments, mention
 
 - The agent-fs key lives in this browser's local storage, separately for each swarm API and agent-fs URL. The dashboard sends it only to agent-fs, never to the swarm API. **Disconnect** removes it.
 - The dashboard saves its query cache in local storage. File contents and comments never go into it.
-- Comb shows HTML files as source code and never runs them.
+- Comb runs an HTML file only when you click **Preview**, in a sandboxed frame from the agent-fs host (`sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals"`, no `allow-same-origin`, no referrer). The page can read the files of its folder for 15 minutes, through its site link.
+- Search snippets show as text. Comb never renders file content from a snippet as HTML.
+- A share link is public until it expires. Anyone who gets it can open the file.
 - The swarm API receives only comment ids when you send. It reads the comments from agent-fs with its own key.
 
 ## Troubleshooting
