@@ -88,6 +88,19 @@ describe("blobUrlPlan", () => {
     });
   });
 
+  test("audio gets the type of its extension, never its stored type", () => {
+    expect(blobUrlPlan("audio", "/m/chime.mp3", "application/octet-stream")).toEqual({
+      as: "object-url",
+      type: "audio/mpeg",
+    });
+    expect(blobUrlPlan("audio", "/m/tone.WAV", "text/html")).toEqual({
+      as: "object-url",
+      type: "audio/wav",
+    });
+    // An extensionless voice note (opened as audio by its stored type).
+    expect(blobUrlPlan("audio", "/m/voice-note", "text/html")).toEqual(octet);
+  });
+
   test("SVG by extension or by stored type becomes a data URL", () => {
     const svg = { as: "data-url", type: "image/svg+xml" };
     expect(blobUrlPlan("image", "/a/logo.svg", "text/html")).toEqual(svg);

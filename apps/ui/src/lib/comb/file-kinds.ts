@@ -1,13 +1,40 @@
 // Which Comb viewer opens a file. The extension lists come from agent-fs
-// `live/src/components/viewers/FileViewer.tsx` (v0.14.0). Keep them in sync.
-// Comb adds `htm` (text) and the OOXML extensions (binary).
+// `live/src/components/viewers/FileViewer.tsx` (v0.14.0) and `live/src/lib/audio.ts`
+// (v0.18.5). Keep them in sync. Comb adds `htm` (text) and the OOXML
+// extensions (binary).
 
-export type FileKind = "markdown" | "text" | "image" | "video" | "pdf" | "table" | "fallback";
+export type FileKind =
+  | "markdown"
+  | "text"
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "table"
+  | "fallback";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico"]);
 
 // Browser-playable video containers. Other containers (mkv, avi) get the fallback.
 const VIDEO_EXTS = new Set(["mp4", "webm", "ogv", "mov", "m4v"]);
+
+/** Audio containers the browser's `<audio>` element plays, with the type each one is sent as. */
+export const AUDIO_TYPES: Readonly<Record<string, string>> = {
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  flac: "audio/flac",
+  aac: "audio/aac",
+  m4a: "audio/mp4",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  opus: "audio/ogg",
+};
+
+/** The audio type for a file name's extension, or null when it is not a known audio container. */
+export function audioTypeFor(name: string): string | null {
+  const ext = fileExtension(name);
+  return Object.hasOwn(AUDIO_TYPES, ext) ? (AUDIO_TYPES[ext] as string) : null;
+}
 
 // Known-binary extensions that never render as text, even when the stored
 // content type is the generic `application/octet-stream`.
@@ -17,13 +44,6 @@ const BINARY_EXTS = new Set([
   "avi",
   "wmv",
   "flv",
-  "mp3",
-  "wav",
-  "flac",
-  "aac",
-  "m4a",
-  "ogg",
-  "opus",
   "zip",
   "gz",
   "tar",
@@ -148,6 +168,7 @@ function isKnownExtension(ext: string): boolean {
     ["md", "mdx", "csv", "tsv", "pdf"].includes(ext) ||
     IMAGE_EXTS.has(ext) ||
     VIDEO_EXTS.has(ext) ||
+    Object.hasOwn(AUDIO_TYPES, ext) ||
     BINARY_EXTS.has(ext) ||
     TEXT_EXTS.has(ext)
   );
@@ -173,10 +194,11 @@ export function looksLikeText(text: string): boolean {
 }
 
 /**
- * The viewer kind for a file name. HTML is `text` (Comb shows the source and
- * never renders it). An unknown extension opens as text when agent-fs reports
- * a text content type, or when `needsSniff` holds and the file (`size` from
- * `stat`) is small. The text viewer then checks the bytes.
+ * The viewer kind for a file name. HTML is `text`: the text viewer shows the
+ * source, and the HTML viewer adds a sandboxed preview next to it. An unknown
+ * extension opens as audio for an `audio/*` content type, and as text when
+ * agent-fs reports a text content type, or when `needsSniff` holds and the
+ * file (`size` from `stat`) is small. The text viewer then checks the bytes.
  */
 export function getFileKind(name: string, contentType?: string, size?: number): FileKind {
   const ext = fileExtension(name);
@@ -185,8 +207,10 @@ export function getFileKind(name: string, contentType?: string, size?: number): 
   if (ext === "pdf") return "pdf";
   if (IMAGE_EXTS.has(ext)) return "image";
   if (VIDEO_EXTS.has(ext)) return "video";
+  if (Object.hasOwn(AUDIO_TYPES, ext)) return "audio";
   if (BINARY_EXTS.has(ext)) return "fallback";
   if (TEXT_EXTS.has(ext)) return "text";
+  if (mediaType(contentType).startsWith("audio/")) return "audio";
   if (contentType && isTextContentType(contentType)) return "text";
   if (needsSniff(name, contentType) && size !== undefined && size < SNIFF_MAX_BYTES) return "text";
   return "fallback";

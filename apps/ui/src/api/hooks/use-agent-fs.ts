@@ -52,6 +52,13 @@ import {
   listFileThreads,
 } from "@/lib/comb/comments";
 import {
+  HTML_SITE_TTL_SECONDS,
+  siteBaseUrl,
+  siteFileUrl,
+  siteFolderOf,
+  siteShareFreshFor,
+} from "@/lib/comb/html-view";
+import {
   blobUrlPlan,
   COMB_MEDIA_MAX_BYTES,
   freshPresignedUrl,
@@ -659,6 +666,56 @@ export function useRevertFile(file: DrivePath) {
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: drivePathKey(access, file, "stat") }),
   });
+}
+
+// --- Rendered HTML -------------------------------------------------------------
+
+/**
+ * The preview frame URL of an HTML file: the file inside a 15-minute site
+ * share of its folder (`share-create` on the folder, feature `html-sites`).
+ * One share per folder, kept in memory until 3 minutes before it expires, so
+ * two pages of one folder and a quick reopen reuse it. Nothing persists the
+ * token. `enabled: false` mints nothing. Key: `(..., "html-site", folder)`.
+ */
+export function useHtmlSiteUrl(file: DrivePath, enabled: boolean) {
+  const access = useAgentFsAccess();
+  const folder = siteFolderOf(file.path);
+  // A cached share near its expiry never shows on mount: it is stale, so the
+  // mount mints a new one and the frame loads once.
+  const [mountedAt] = useState(Date.now);
+  const site = useQuery({
+    queryKey: agentFsKey(
+      access.endpoint,
+      access.userId,
+      file.orgId,
+      file.driveId,
+      "html-site",
+      folder,
+    ),
+    queryFn: async () => {
+      const client = connectedClient(access);
+      const result = await client.createShare(file.orgId, file.driveId, folder, {
+        expiresIn: HTML_SITE_TTL_SECONDS,
+      });
+      const expiresAt = Date.parse(result.expiresAt);
+      return {
+        base: siteBaseUrl(access.endpoint || client.endpoint, result.sharePath),
+        expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + result.expiresIn * 1000,
+      };
+    },
+    enabled: enabled && access.client !== null,
+    retry: agentFsRetry,
+    staleTime: ({ state }) =>
+      state.data ? siteShareFreshFor(state.data.expiresAt, state.dataUpdatedAt) : 0,
+    gcTime: HTML_SITE_TTL_SECONDS * 1000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  });
+  const fresh = site.data && siteShareFreshFor(site.data.expiresAt, mountedAt) > 0;
+  return {
+    url: site.data && fresh ? siteFileUrl(site.data.base, file.path) : null,
+    error: site.error,
+  };
 }
 
 // --- Search ------------------------------------------------------------------

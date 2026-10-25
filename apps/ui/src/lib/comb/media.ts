@@ -1,11 +1,11 @@
-// Media loading rules for the Comb image, video, and PDF viewers. Pure, with
-// relative imports only, so the root test runner covers them.
+// Media loading rules for the Comb image, video, audio, and PDF viewers. Pure,
+// with relative imports only, so the root test runner covers them.
 
 import { AgentFsError } from "../agent-fs/client";
 import type { SignedUrlResult } from "../agent-fs/types";
-import { fileExtension } from "./file-kinds";
+import { audioTypeFor, fileExtension } from "./file-kinds";
 
-export type MediaKind = "image" | "video" | "pdf";
+export type MediaKind = "image" | "video" | "audio" | "pdf";
 
 /**
  * Blob mode reads the whole file into memory, so a larger file shows the
@@ -53,6 +53,9 @@ export function freshPresignedUrl(source: MediaSource | undefined, at: number): 
  * render as a document (HTML, or SVG with scripts), whatever its stored type:
  * - Raster images and video get `application/octet-stream`. `<img>` and
  *   `<video>` still sniff and decode the bytes, and a top-level open downloads.
+ * - Audio gets the audio type of its extension (`audio/mpeg` for `.mp3`), or
+ *   `application/octet-stream`. An audio type opened top-level plays in the
+ *   browser's media page, which runs no script from the file.
  * - A PDF gets `application/pdf`, so its frame shows the PDF viewer only.
  * - SVG needs its own type to render in `<img>`, so it gets a `data:` URL.
  *   A `data:` URL opened top-level has an opaque origin.
@@ -63,6 +66,9 @@ export function blobUrlPlan(
   contentType?: string,
 ): { as: "object-url" | "data-url"; type: string } {
   if (kind === "pdf") return { as: "object-url", type: "application/pdf" };
+  if (kind === "audio") {
+    return { as: "object-url", type: audioTypeFor(path) ?? "application/octet-stream" };
+  }
   const svg =
     fileExtension(path) === "svg" || contentType?.toLowerCase().startsWith("image/svg+xml");
   if (kind === "image" && svg) return { as: "data-url", type: "image/svg+xml" };

@@ -9,7 +9,12 @@ import type { ViewerProps } from "./file-viewer";
 import { ViewerSkeleton } from "./viewer-skeleton";
 
 /** What the error title calls the file. */
-const MEDIA_NOUNS: Record<MediaKind, string> = { image: "image", video: "video", pdf: "PDF" };
+const MEDIA_NOUNS: Record<MediaKind, string> = {
+  image: "image",
+  video: "video",
+  audio: "audio file",
+  pdf: "PDF",
+};
 
 /**
  * Load a media URL for the file and pass it to `children`, with an `onError`

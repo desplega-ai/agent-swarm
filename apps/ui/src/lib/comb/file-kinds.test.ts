@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { getFileKind, looksLikeText, needsSniff, SNIFF_MAX_BYTES } from "./file-kinds";
+import {
+  audioTypeFor,
+  getFileKind,
+  looksLikeText,
+  needsSniff,
+  SNIFF_MAX_BYTES,
+} from "./file-kinds";
 
 describe("getFileKind", () => {
   test("markdown", () => {
@@ -39,10 +45,30 @@ describe("getFileKind", () => {
   });
 
   test("binary files get the fallback, whatever the content type", () => {
-    for (const name of ["blob.bin", "a.zip", "a.mp3", "a.docx", "a.mkv", "a.woff2"]) {
+    for (const name of ["blob.bin", "a.zip", "a.docx", "a.mkv", "a.woff2"]) {
       expect(getFileKind(name, "application/octet-stream", 10)).toBe("fallback");
     }
     expect(getFileKind("a.bin", "text/plain")).toBe("fallback");
+  });
+
+  test("audio containers open in the audio viewer, whatever the stored type", () => {
+    for (const name of ["a.mp3", "a.wav", "a.flac", "a.aac", "a.m4a", "a.ogg", "a.oga", "A.OPUS"]) {
+      expect(getFileKind(name, "application/octet-stream", 10)).toBe("audio");
+    }
+    // An unknown extension with an audio type, such as a voice note.
+    expect(getFileKind("voice-note", "audio/webm", 10)).toBe("audio");
+    expect(getFileKind("clip.weird", "Audio/Mpeg; codecs=mp3", 10)).toBe("audio");
+    // Prototype names are not extensions.
+    expect(getFileKind("x.constructor", "application/octet-stream", 10)).not.toBe("audio");
+  });
+
+  test("audioTypeFor sends each container with its own audio type", () => {
+    expect(audioTypeFor("/media/tone.wav")).toBe("audio/wav");
+    expect(audioTypeFor("CHIME.MP3")).toBe("audio/mpeg");
+    expect(audioTypeFor("memo.m4a")).toBe("audio/mp4");
+    expect(audioTypeFor("note.opus")).toBe("audio/ogg");
+    expect(audioTypeFor("a.mp4")).toBeNull();
+    expect(audioTypeFor("x.toString")).toBeNull();
   });
 
   test("OOXML documents are binary, although their type names xml", () => {

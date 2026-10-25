@@ -1,6 +1,7 @@
 import { type ComponentType, type LazyExoticComponent, lazy, Suspense } from "react";
 import type { StatResult } from "@/lib/agent-fs/types";
 import { type FileKind, getFileKind } from "@/lib/comb/file-kinds";
+import { isHtmlPath } from "@/lib/comb/html-view";
 import type { DrivePath } from "@/lib/comb/paths";
 import { ViewerSkeleton } from "./viewer-skeleton";
 
@@ -15,6 +16,8 @@ export interface ViewerProps {
 }
 
 const FallbackViewer = lazy(() => import("./fallback-viewer"));
+// HTML is a `text` file with a sandboxed preview next to its source.
+const HtmlViewer = lazy(() => import("./html-viewer"));
 
 // Add a viewer = one entry + one component, same as live/ FileViewer.
 export const VIEWERS: Record<FileKind, LazyExoticComponent<ComponentType<ViewerProps>>> = {
@@ -22,6 +25,7 @@ export const VIEWERS: Record<FileKind, LazyExoticComponent<ComponentType<ViewerP
   text: lazy(() => import("./text-viewer")),
   image: lazy(() => import("./image-viewer")),
   video: lazy(() => import("./video-viewer")),
+  audio: lazy(() => import("./audio-viewer")),
   pdf: lazy(() => import("./pdf-viewer")),
   table: lazy(() => import("./table-viewer")),
   fallback: FallbackViewer,
@@ -29,7 +33,8 @@ export const VIEWERS: Record<FileKind, LazyExoticComponent<ComponentType<ViewerP
 
 /** Route a file to its viewer by extension (and content type for unknown extensions). */
 export function FileViewer({ file, stat }: ViewerProps) {
-  const Viewer = VIEWERS[getFileKind(file.path, stat.contentType, stat.size)];
+  const kind = getFileKind(file.path, stat.contentType, stat.size);
+  const Viewer = kind === "text" && isHtmlPath(file.path) ? HtmlViewer : VIEWERS[kind];
   return (
     <Suspense fallback={<ViewerSkeleton />}>
       <Viewer file={file} stat={stat} />

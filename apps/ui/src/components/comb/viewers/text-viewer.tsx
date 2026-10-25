@@ -106,7 +106,7 @@ export const TextLines = memo(function TextLines({
   );
 });
 
-/** Code and other text files (HTML included: Comb shows the source, never renders it). */
+/** Code and other text files. HTML source shows here too, under the HTML viewer's Source tab. */
 export default function TextViewer({ file, stat }: ViewerProps) {
   return (
     <TextGate file={file} stat={stat}>

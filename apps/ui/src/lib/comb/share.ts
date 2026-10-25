@@ -3,7 +3,7 @@
 // covers it. Rules follow agent-fs `live/src/lib/share-link.ts`.
 
 import type { ShareCreateResult } from "../agent-fs/types";
-import { fileExtension } from "./file-kinds";
+import { isHtmlPath } from "./html-view";
 
 /** The `/health` feature of servers that can make share links. */
 export const SHARE_LINKS_FEATURE = "share-links";
@@ -52,8 +52,7 @@ export function describeExpiry(seconds: number): string {
  * files next to it (images, scripts, styles) do not load from the link.
  */
 export function shareDescription(path: string): string {
-  const ext = fileExtension(path);
-  return ext === "html" || ext === "htm"
+  return isHtmlPath(path)
     ? "Anyone with the link can view this page. Only this file is shared, so files next to it (images, styles, scripts) do not load."
     : "Anyone with the link can view and download this file. It does not need an agent-fs account.";
 }

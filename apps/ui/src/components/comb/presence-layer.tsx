@@ -37,7 +37,7 @@ const STAMPED = "[data-line-start]";
 /** Text and markdown map a pointer to source lines, media to its box. Tables send none. */
 function pointerMode(kind: FileKind): "lines" | "media" | null {
   if (kind === "markdown" || kind === "text") return "lines";
-  if (kind === "image" || kind === "video" || kind === "pdf") return "media";
+  if (kind === "image" || kind === "video" || kind === "audio" || kind === "pdf") return "media";
   return null;
 }
 
@@ -46,6 +46,7 @@ function pointerMode(kind: FileKind): "lines" | "media" | null {
 const MEDIA_SELECTOR: Partial<Record<FileKind, string>> = {
   image: "img",
   video: "video",
+  audio: "audio",
   pdf: "iframe",
 };
 
