@@ -655,7 +655,7 @@ describe("Slack ingress with files", () => {
       "SELECT id FROM agent_tasks WHERE slackTriggerMessageTs = ?",
       [ts],
     );
-    return { client, task: row ? await getTaskById(row.id) : null };
+    return { client, task: row ? await getTaskById(row.id) : null, ts };
   }
 
   test("an image with no text creates a task that carries the image (case 1)", async () => {
@@ -956,6 +956,65 @@ describe("Slack ingress with files", () => {
       expect(await getSteeringMessagesForTask(earlier.id)).toEqual([]);
     });
   });
+
+  for (const [route, withFiles] of [
+    ["lead", false],
+    ["lead", true],
+    ["no-lead", false],
+    ["no-lead", true],
+    ["follow-up", false],
+    ["follow-up", true],
+  ] as const) {
+    test(`Assistant DM metadata reaches hooks for ${route} with files=${withFiles}`, async () => {
+      const agent =
+        route === "no-lead"
+          ? undefined
+          : await createAgent({
+              name: route === "follow-up" ? "worker" : "lead",
+              isLead: route === "lead",
+              status: route === "follow-up" ? "busy" : "idle",
+            });
+      const channelId = "D0ASSISTMETADATA";
+      const threadTs = "1800000000.000001";
+      const earlier =
+        route === "follow-up"
+          ? await createTaskExtended("earlier work", {
+              agentId: agent!.id,
+              source: "slack",
+              slackChannelId: channelId,
+              slackThreadTs: threadTs,
+            })
+          : undefined;
+      if (earlier) await startTask(earlier.id);
+      const installed = await installExtension(await loadBundleFixture("record-task-create"));
+      const recorder = await enableExtension(installed.extension.id);
+      const text = "<@U_SWARM_BOT> inspect this\n  keep the spacing";
+      try {
+        const { task, ts } = await sendAssistantDm({
+          channel: channelId,
+          thread_ts: threadTs,
+          text,
+          files: withFiles ? [slackFile()] : [],
+        });
+
+        expect(task).not.toBeNull();
+        expect(task!.agentId ?? undefined).toBe(agent?.id);
+        if (earlier) expect(task!.parentTaskId).toBe(earlier.id);
+        expect(await readStoredBytes(task!.id)).toEqual(withFiles ? [PNG_BYTES] : []);
+        const event = (await getKv(`task:agent:${recorder.agentId}`, "ext:record-task-create:last"))
+          ?.value;
+        expect(event).toMatchObject({
+          origin: "slack",
+          slack: {
+            trigger: "mention",
+            messages: [{ ts, userId: "U_HUMAN", text }],
+          },
+        });
+      } finally {
+        await disableExtension(recorder.id);
+      }
+    });
+  }
 
   test.each([
     false,

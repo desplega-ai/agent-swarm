@@ -213,6 +213,10 @@ export function createAssistant(): Assistant {
           buildEffectiveText(messageText, inbound.files, inbound.failed, inbound.notes),
           cachedBotUserId ?? undefined,
         );
+        const slack = {
+          trigger: "mention" as const,
+          messages: [{ ts: message.ts, userId, text: messageText }],
+        };
 
         if (workingAgent && workingAgent.status !== "offline") {
           // Otherwise, create a follow-up task for the working agent
@@ -236,6 +240,7 @@ export function createAssistant(): Assistant {
               contextKey: slackContextKey({ channelId, threadTs }),
             },
             inbound,
+            slack,
           );
           await ackSlackMessage(
             client,
@@ -285,6 +290,7 @@ export function createAssistant(): Assistant {
               contextKey: slackContextKey({ channelId, threadTs }),
             },
             inbound,
+            slack,
           );
           await ackSlackMessage(
             client,
@@ -318,6 +324,7 @@ export function createAssistant(): Assistant {
             contextKey: slackContextKey({ channelId, threadTs }),
           },
           inbound,
+          slack,
         );
         await ackSlackMessage(client, channelId, message.ts, reactionName("accepted"), "accepted");
         await notifySlackFileFailures(client, channelId, threadTs, unattached);
