@@ -21,8 +21,8 @@ import type {
   FullWidthCellKeyDownEvent,
   RowClickedEvent,
 } from "ag-grid-community";
-import { Hash } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionListItem } from "@/api/types";
@@ -30,6 +30,7 @@ import { AvatarStack } from "@/components/comb/presence-avatars";
 import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
+import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
@@ -37,10 +38,11 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsPhone } from "@/hooks/use-mobile";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import { peerColor } from "@/lib/comb/presence";
-import { groupCrumb } from "@/lib/session-groups";
+import { chatSourceOf, groupCrumb } from "@/lib/session-groups";
 import { useSessionsFilter } from "@/lib/sessions-show";
 import { sidebarListParams, userName } from "@/lib/sessions-v2";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
+import { GroupCrumbIcon } from "./group-crumb-icon";
 import { ActivityMark, activityOf, shortAgo } from "./sidebar/session-row";
 import { ReadMark, UNREAD_TITLE } from "./sidebar/tree-row";
 import { sectionTab } from "./tabs/tab-info";
@@ -106,6 +108,7 @@ function GroupList({
   const phone = useIsPhone();
   const { data: users } = useUsers();
   const nameOf = (id: string) => userName(users, id);
+  const labels = useSessionLabels();
   const [state, setState] = useState(() => lists.get(listKey) ?? FIRST);
   const { page, filter, q } = state;
   useEffect(() => {
@@ -119,8 +122,8 @@ function GroupList({
   }, [query]);
 
   const section = sectionTab(view);
-  const title = section?.title ?? groupCrumb(view, me, nameOf);
-  const Icon = section?.icon ?? Hash;
+  const title = section?.title ?? groupCrumb(view, me, nameOf, labels);
+  const SectionIcon = section?.icon;
   // Later and Done never hold an unread session: a session that wakes or gets news goes back to the Inbox.
   const noUnread = view === "later" || view === "done";
 
@@ -176,10 +179,17 @@ function GroupList({
         cellRenderer: (p: { data?: SessionListItem }) => {
           if (!p.data) return null;
           const unread = p.data.readState === "unread";
+          const chat = chatSourceOf(p.data.root);
           return (
             <span className="flex h-full min-w-0 items-center gap-2">
               <ReadMark unread={unread} />
               {unread ? <span className="sr-only">Unread. </span> : null}
+              {chat ? (
+                <>
+                  <TaskSourceMark source={chat} className="text-muted-foreground" />
+                  <span className="sr-only">From {taskSourceLabel(chat)}. </span>
+                </>
+              ) : null}
               <TruncatedTitle
                 title={sessionDisplayTitle(p.data.root)}
                 className={unread ? UNREAD_TITLE : "text-muted-foreground"}
@@ -194,7 +204,7 @@ function GroupList({
         width: 180,
         context: { ...HIDE_WHEN_COMPACT, compactHidePriority: 0 },
         sortable: false,
-        valueGetter: (p) => (p.data ? groupCrumb(p.data.groupKey, me, nameOf) : ""),
+        valueGetter: (p) => (p.data ? groupCrumb(p.data.groupKey, me, nameOf, labels) : ""),
         cellClass: "text-muted-foreground",
       },
       {
@@ -253,13 +263,21 @@ function GroupList({
           ) : null,
       },
     ],
-    [me, users],
+    [me, users, labels],
   );
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col gap-3 px-5 pt-4 pb-3", className)}>
       <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
-        <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        {SectionIcon ? (
+          <SectionIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <GroupCrumbIcon
+            groupKey={view}
+            noGroup={false}
+            className="size-4 text-muted-foreground"
+          />
+        )}
         <span className="truncate">{title}</span>
         <span className="font-mono text-xs font-normal tabular-nums text-muted-foreground">
           {list.data ? total : ""}

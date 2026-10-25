@@ -1023,10 +1023,11 @@ export async function handleSessions(
       hideSource: parsed.query.hideSource,
       showSource: parsed.query.showSource,
     });
-    const sourceKeys = tree.groups.map((group) => group.key).filter((key) => sourceOfKey(key));
-    const labels = await getSessionLabels(sourceKeys);
-    warmSlackChannelLabels(sourceKeys.filter((key) => labels[key] === undefined));
-    sessionTree.respond(res, 200, { ...tree, labels });
+    // Labels cover hidden sources too: a pane or tab of a hidden source still names its group.
+    const { sourceGroups, ...counts } = tree;
+    const labels = await getSessionLabels(sourceGroups);
+    warmSlackChannelLabels(sourceGroups.filter((key) => labels[key] === undefined));
+    sessionTree.respond(res, 200, { ...counts, labels });
     return true;
   }
 

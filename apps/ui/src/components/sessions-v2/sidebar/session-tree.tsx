@@ -34,6 +34,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import { useSessionListTriage } from "@/api/hooks/use-session-triage";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionListItem } from "@/api/types";
@@ -160,6 +161,7 @@ export function SessionTree({
   const { isOpen, setOpen, prune } = useTreeFolds(me);
   const myGroups = useMyGroups(me);
   const { groups, targets, writeBlock } = myGroups;
+  const labels = useSessionLabels();
   /** A new group's name field shows under this parent (`shared/` for the top level). */
   const [creating, setCreating] = useState<string | null>(null);
   /** The group whose name is an input. */
@@ -213,6 +215,7 @@ export function SessionTree({
   const moves = useTreeMoves({
     me,
     nameOf,
+    labels,
     emptyGroups: myGroups.emptyGroups,
     serverKeys: myGroups.serverKeys,
     targetKeys,
@@ -641,6 +644,7 @@ export function SessionTree({
             peek={cursor.peekKey === row.key}
             keyboard={keyboard}
             nameOf={nameOf}
+            labels={labels}
             onRowClick={onRowClick}
             onRowAuxClick={onRowAuxClick}
             onRowContextMenu={onRowContextMenu}
@@ -728,6 +732,7 @@ export function SessionTree({
         me={me}
         now={now}
         nameOf={nameOf}
+        labels={labels}
         selection={selection}
         canTriage={canTriage}
         renaming={renaming}

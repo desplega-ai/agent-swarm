@@ -254,6 +254,21 @@ test("tree returns cached source labels and starts one background lookup for a S
   });
 });
 
+test("tree returns labels for source groups the filter hides", async () => {
+  await createTaskExtended("hidden label tree", {
+    source: "slack",
+    slackChannelId: "CTREEHIDDEN",
+    slackThreadTs: "123.456",
+  });
+  await rememberSessionLabel(keyOf("ctreehidden"), "#hidden");
+  const body = await (await fetch(`${baseUrl}/api/session-tree?showSource=ui`)).json();
+  expect(body.groups.some((group: { key: string }) => group.key === keyOf("ctreehidden"))).toBe(
+    false,
+  );
+  expect(body.labels[keyOf("ctreehidden")]).toBe("#hidden");
+  expect(body.sourceGroups).toBeUndefined();
+});
+
 test("Telegram capture stores a group title and a DM sender under their source group keys without TTL", async () => {
   const harness = await startTelegramHarness();
   try {

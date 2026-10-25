@@ -4,7 +4,7 @@ import {
   SESSION_LEAF_KINDS,
   sessionGroupKey,
 } from "../../assets/key";
-import { effectiveSource, SESSION_SOURCES } from "../../assets/source-key";
+import { effectiveSource, SESSION_SOURCES, sourceOfKey } from "../../assets/source-key";
 import { isTerminalTaskStatus, TERMINAL_TASK_STATUSES } from "../../types";
 import { getDbClient, literalPrefixPattern } from "../db";
 import {
@@ -415,6 +415,8 @@ export interface SessionTree {
   noGroup: SessionSectionCounts;
   /** Each effective root source in this view with its session count, hidden sources included, most first. */
   sources: { source: string; total: number }[];
+  /** Every source group key in this view, hidden sources included, so a pane of a hidden source still gets its label. */
+  sourceGroups: string[];
 }
 
 export async function getSessionTree(
@@ -450,10 +452,12 @@ export async function getSessionTree(
     done: counts(),
     noGroup: counts(),
     sources: [],
+    sourceGroups: [],
   };
   const hidden = new Set(opts.hideSource);
   const shown = opts.showSource ? new Set(opts.showSource) : null;
   const sources = new Map<string, number>();
+  const sourceGroups = new Set<string>();
   const groups = new Map<string, SessionTreeGroup>();
   const add = (section: SessionSectionCounts, row: (typeof rows)[number]) => {
     section.total++;
@@ -464,8 +468,9 @@ export async function getSessionTree(
   for (const row of rows) {
     const source = effectiveSource(row.key, row.source);
     sources.set(source, (sources.get(source) ?? 0) + 1);
-    if (hidden.has(source) || (shown && !shown.has(source))) continue;
     const key = sessionGroupKey(row.key);
+    if (sourceOfKey(key)) sourceGroups.add(key);
+    if (hidden.has(source) || (shown && !shown.has(source))) continue;
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);
     let group: SessionTreeGroup | undefined;
@@ -488,6 +493,7 @@ export async function getSessionTree(
   result.sources = [...sources]
     .map(([source, total]) => ({ source, total }))
     .sort((a, b) => b.total - a.total || a.source.localeCompare(b.source));
+  result.sourceGroups = [...sourceGroups].sort();
   return result;
 }
 

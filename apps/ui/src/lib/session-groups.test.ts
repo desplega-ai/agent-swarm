@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionTreeGroup } from "../api/types";
+import type { AgentTaskSource, SessionTreeGroup } from "../api/types";
 import { stillEmpty, withEmptyGroups } from "./empty-groups";
 import {
   buildSessionGroupTree,
+  chatSourceOf,
   defaultSessionKey,
   groupCrumb,
   groupKeyOf,
@@ -15,6 +16,7 @@ import {
   personalOwner,
   renamedGroupKey,
   restoreKey,
+  sessionSourceOf,
   sourceGroupLabel,
   sourceOfGroupKey,
 } from "./session-groups";
@@ -326,9 +328,56 @@ describe("source sections (sources Phase 5)", () => {
     expect(sourceGroupLabel("shared/slack/c1/thread:1.2/")).toBe("thread:1.2");
   });
 
+  test("flat rows, cards, toasts, and crumbs name a source group by its label (sources Phase 6)", () => {
+    // The flat row label keeps the `#`: no hash icon sits next to it.
+    expect(groupLabel("shared/slack/c0eng00001/", ME, labels)).toBe("#eng");
+    expect(groupLabel("shared/slack/d0dm000001/", ME, labels)).toBe("DM · Lena");
+    expect(groupLabel("shared/telegram/-1001/", ME, labels)).toBe("Northwind ops");
+    expect(groupLabel("shared/slack/c0ar967k0kz/", ME)).toBe("#C0AR967K0KZ");
+    expect(groupLabel("shared/slack/", ME)).toBe("Slack");
+    expect(groupCrumb("shared/slack/c0eng00001/", ME, () => "", labels)).toBe("Slack › #eng");
+    expect(groupCrumb("shared/telegram/-1001/", ME, () => "", labels)).toBe(
+      "Telegram › Northwind ops",
+    );
+    expect(groupCrumb("shared/discord/123456/", ME, () => "")).toBe("Discord › 123456");
+    expect(groupCrumb("shared/slack/", ME, () => "")).toBe("Slack");
+    // Other keys keep their path.
+    expect(groupCrumb("shared/infra/", ME, () => "", labels)).toBe("infra");
+  });
+
   test("groupWriteBlock has no source rule, so Undo after a move out still works", () => {
     // Read-only shows in the tree (no menu, "+", or drop) and in the server guard.
     expect(groupWriteBlock("shared/slack/c0eng00001/", false)).toBeNull();
     expect(groupWriteBlock("shared/slack/c0eng00001/thread:1.2/", true)).toBeNull();
+  });
+});
+
+describe("session source marks (sources Phase 6)", () => {
+  const root = (key: string, source: string, tags: string[] = []) => ({
+    key,
+    source: source as AgentTaskSource,
+    tags,
+  });
+
+  test("a source key wins, so an agent session in a Slack thread is Slack", () => {
+    expect(sessionSourceOf(root("shared/slack/c1/thread:1.2/", "mcp"))).toBe("slack");
+    expect(sessionSourceOf(root("shared/telegram/-1001/task:t1/", "chat"))).toBe("telegram");
+  });
+
+  test("a chat root out of its section keeps its adapter, else it is chat", () => {
+    expect(sessionSourceOf(root("shared/infra/", "chat", ["chat-sdk", "discord"]))).toBe("discord");
+    expect(sessionSourceOf(root("shared/", "chat", ["chat-sdk", "teams"]))).toBe("chat");
+  });
+
+  test("any other root keeps its task source", () => {
+    expect(sessionSourceOf(root("shared/infra/", "slack"))).toBe("slack");
+    expect(sessionSourceOf(root("shared/task:t1/", "ui"))).toBe("ui");
+  });
+
+  test("only chat sessions show a mark on a row", () => {
+    expect(chatSourceOf(root("shared/slack/c1/thread:1.2/", "mcp"))).toBe("slack");
+    expect(chatSourceOf(root("shared/", "chat", ["chat-sdk", "teams"]))).toBe("chat");
+    expect(chatSourceOf(root("shared/task:t1/", "ui"))).toBeNull();
+    expect(chatSourceOf(root("shared/task:t1/", "github"))).toBeNull();
   });
 });

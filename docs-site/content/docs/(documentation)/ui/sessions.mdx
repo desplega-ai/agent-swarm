@@ -27,10 +27,11 @@ The sidebar shows these sections, from top to bottom:
 | **No group** | Inbox sessions that are in no group |
 | **My groups** | Groups under `shared/` and under your own `personal/<user-id>/` key, nested by path |
 | **Shared with me** | Groups under other people's `personal/<user-id>/` keys, with one entry for each owner |
+| **Slack**, **Telegram**, **Discord** | The [source sections](#sources): one group for each channel, DM, or chat |
 
 The sidebar shows the sessions that you started and the sessions that other people share with you.
 
-The filter menu at the end of the search row picks the sources the sidebar shows. Only sessions started from the dashboard (`ui`) are on by default. Every other source, Slack, GitHub, or one the sidebar has not seen before, stays off until you tick it. The Inbox, groups, and their counts follow the filter. A direct link to a session that the filter leaves out still opens it.
+The filter menu at the end of the search row picks the sources the sidebar shows. Only sessions started from the dashboard (`ui`) are on by default. Every other source, Slack, GitHub, or one the sidebar has not seen before, stays off until you tick it. A session under a [source key](/docs/guides/asset-namespaces#source-keys) counts as that source. So an agent session in a Slack thread counts as Slack, not as MCP, and only the Slack tick shows it. The Inbox, Later, Done, the groups, the source sections, and their counts follow the filter. A direct link to a session that the filter leaves out still opens it.
 
 Groups and No group list only Inbox sessions. A session in Later or Done shows in Later or Done, not in its group.
 
@@ -39,6 +40,7 @@ Each list shows its 10 newest sessions, by latest activity. **Show 10 more** sho
 A session row shows:
 
 - A dot and a bold title when the session is unread.
+- The logo of its source, before the title, when the session came from Slack, Telegram, Discord, or another chat.
 - A spinning ring while the session runs, or **Needs you** when it needs you.
 - The name of its group, in Inbox, Later, and Done.
 - The other people in the session, and the time of the latest activity. A row in Later shows its wake time.
@@ -59,6 +61,7 @@ A group is a prefix of the session's [asset namespace key](/docs/guides/asset-na
 | `shared/research/pricing/task:<id>/` | **pricing** under **research**, in My groups |
 | `personal/<your-user-id>/drafts/` | **drafts**, in My groups |
 | `personal/<other-user-id>/drafts/` | **drafts** under that person's name, in Shared with me |
+| `shared/slack/c0ar967k0kz/thread:<ts>/` | The channel group (**#swarm-dev-2**), in the Slack section |
 
 Groups nest by `/`. A group shows a chevron only when it has subgroups. When one of your personal groups has the same path as a `shared/` group, the personal group shows a lock ("Only you").
 
@@ -73,6 +76,30 @@ A session that you start in the dashboard gets the key `shared/task:<id>/` (No g
 Shared with me holds the groups under other people's `personal/<user-id>/` keys. Each owner gets one entry, with their name. A session that someone shares with you under a `shared/` key shows at its real path, in My groups or in No group.
 
 Groups under Shared with me have no menu, and you cannot drop sessions on them.
+
+### Sources
+
+The source sections come after Shared with me: **Slack**, **Telegram**, and **Discord**. A section shows only when you tick its source in the filter menu and it has sessions. Each section starts folded. Click its header to open it.
+
+A source section holds the sessions that came in from that source, and the agent sessions in their threads. Each channel, DM, or chat is one group:
+
+| Source | Group name |
+| --- | --- |
+| Slack | `#eng` for a channel, `DM · Lena` for a direct message, **Group DM** for a group DM |
+| Telegram | The group title, or `DM · Lena` for a private chat |
+| Discord | `DM · Lena` for a direct message. A channel shows its id. |
+
+The names come from Slack, Telegram, and Discord. Until a name arrives, a Slack channel shows its id (`#C0AR967K0KZ`), a Slack DM shows **DM**, and a Telegram or Discord chat shows its id. Telegram and Discord send the name with the next message. In Inbox, Later, and Done, a source session names its group (`#eng`). The hover card and the session header show the source and the group: `Slack › #eng`.
+
+Source groups are read-only:
+
+- A source group has no menu and no **+**. You cannot drop sessions on it.
+- The move dialog and **Start in** do not list source groups.
+- You can move a session out of a source group. **Undo** in the toast puts it back, unless an agent gave the session a source key that its own Slack thread or chat does not give. No other move goes into a source group.
+
+A session that you move out of a source group counts by its task source in the filter: Slack for a Slack session, Chat for a Telegram or Discord session, and MCP for an agent session.
+
+A source session shows to the dashboard user that the Slack, Telegram, or Discord person maps to. A session from a person with no dashboard user stays out of the sidebar.
 
 ### Create, rename, and delete groups
 

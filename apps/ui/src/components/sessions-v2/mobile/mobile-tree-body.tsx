@@ -41,6 +41,7 @@ export function MobileTreeBody({
   me,
   now,
   nameOf,
+  labels,
   selection,
   canTriage,
   renaming,
@@ -65,6 +66,8 @@ export function MobileTreeBody({
   me: string | null;
   now: number;
   nameOf: (userId: string) => string;
+  /** The source group labels of the tree (`#eng`), for the group label of a flat row. */
+  labels: Readonly<Record<string, string>>;
   selection: SessionSelection;
   canTriage: boolean;
   /** The group whose name is an input. */
@@ -142,6 +145,7 @@ export function MobileTreeBody({
             flat={row.flat}
             me={me}
             now={now}
+            labels={labels}
             selected={selection.selected.has(row.session.root.id)}
             selecting={selection.selectionMode}
             canTriage={canTriage}

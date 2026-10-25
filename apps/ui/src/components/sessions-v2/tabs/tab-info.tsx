@@ -12,11 +12,13 @@ import {
   SquareDashed,
   SquarePen,
 } from "lucide-react";
+import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import { type SessionPoll, useSession } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
+import { TaskSourceMark } from "@/components/shared/task-source-mark";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { groupCrumb, groupLabel } from "@/lib/session-groups";
+import { groupCrumb, groupLabel, sourceOfGroupKey } from "@/lib/session-groups";
 import {
   GROUP_TAB,
   isSessionTab,
@@ -46,8 +48,17 @@ export interface TabInfo {
   /** The full title and the group path, for the tooltip. */
   tip: string;
   icon: LucideIcon | null;
+  /** A source group's tab: the source whose logo shows in place of `icon`. */
+  source?: string;
   unread: boolean;
   activity: Activity;
+}
+
+/** The icon of a tab: a source group shows its source logo. */
+export function TabIcon({ info }: { info: TabInfo }) {
+  if (info.source) return <TaskSourceMark source={info.source} />;
+  const Icon = info.icon;
+  return Icon ? <Icon aria-hidden className="size-3.5 shrink-0" /> : null;
 }
 
 const ACTIVITY_WORDS: Record<Exclude<Activity, null>, string> = {
@@ -74,6 +85,7 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
   const { data: detail, error } = useSession(isSessionTab(tab) ? tab : undefined, { poll });
   const { data: users } = useUsers();
   const nameOf = (id: string) => userName(users, id);
+  const labels = useSessionLabels();
 
   if (tab === NEW_SESSION_TAB) {
     return {
@@ -86,12 +98,13 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
   }
   if (tab === GROUP_TAB) {
     const section = sectionTab(view);
-    const crumb = section?.title ?? groupCrumb(view ?? undefined, me, nameOf);
-    const title = section?.title ?? (groupLabel(view ?? undefined, me) || crumb);
+    const crumb = section?.title ?? groupCrumb(view ?? undefined, me, nameOf, labels);
+    const title = section?.title ?? (groupLabel(view ?? undefined, me, labels) || crumb);
     return {
       title,
       tip: `All sessions in ${crumb}`,
       icon: section?.icon ?? Hash,
+      source: (!section && view && sourceOfGroupKey(view)) || undefined,
       unread: false,
       activity: null,
     };
@@ -102,7 +115,7 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
   }
   const title = sessionDisplayTitle(detail.root);
   const item = itemFromDetail(detail);
-  const crumb = groupCrumb(item.groupKey, me, nameOf);
+  const crumb = groupCrumb(item.groupKey, me, nameOf, labels);
   return {
     title,
     tip: `${title} · ${crumb}`,

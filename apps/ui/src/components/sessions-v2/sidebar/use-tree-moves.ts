@@ -73,6 +73,7 @@ async function settle<T>(run: Promise<T>): Promise<T | null> {
 export function useTreeMoves({
   me,
   nameOf,
+  labels,
   emptyGroups,
   serverKeys,
   targetKeys,
@@ -83,6 +84,8 @@ export function useTreeMoves({
 }: {
   me: string | null;
   nameOf: (userId: string) => string;
+  /** The source group labels of the tree (`#eng`), for the toasts. */
+  labels: Readonly<Record<string, string>>;
   emptyGroups: EmptyGroups;
   /** Group keys the server has. */
   serverKeys: readonly string[];
@@ -97,7 +100,8 @@ export function useTreeMoves({
   const moveSessions = useMoveSessions();
   const movePrefix = useMovePrefix();
 
-  const labelOf = (key: string | null) => (key === null ? "No group" : groupCrumb(key, me, nameOf));
+  const labelOf = (key: string | null) =>
+    key === null ? "No group" : groupCrumb(key, me, nameOf, labels);
   /** The group a session sits in, null for No group. */
   const groupOf = (session: SessionListItem) =>
     session.groupKey && !isNoGroupKey(session.groupKey, me) ? session.groupKey : null;

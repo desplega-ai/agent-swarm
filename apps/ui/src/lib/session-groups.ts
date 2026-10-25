@@ -4,7 +4,7 @@
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import type { SessionSectionCounts, SessionTreeGroup } from "../api/types";
+import type { AgentTask, SessionSectionCounts, SessionTreeGroup } from "../api/types";
 
 /** The external sources with their own sidebar section. Mirrors `src/assets/source-key.ts`. */
 export const SESSION_SOURCES = ["slack", "telegram", "discord"] as const;
@@ -13,6 +13,29 @@ export type SessionSource = (typeof SESSION_SOURCES)[number];
 /** The source of a key under `shared/<source>/`, or null. */
 export function sourceOfGroupKey(key: string): SessionSource | null {
   return SESSION_SOURCES.find((source) => key.startsWith(`shared/${source}/`)) ?? null;
+}
+
+/**
+ * Where a session came from: the source of its key (`shared/slack/…`, so an
+ * agent session in a Slack thread is Slack), else the chat adapter of a
+ * `chat` root (its `telegram` or `discord` tag), else the task source.
+ */
+export function sessionSourceOf(root: Pick<AgentTask, "key" | "source" | "tags">): string {
+  const fromKey = sourceOfGroupKey(root.key ?? "");
+  if (fromKey) return fromKey;
+  if (root.source === "chat") {
+    return root.tags?.find((tag) => (SESSION_SOURCES as readonly string[]).includes(tag)) ?? "chat";
+  }
+  return root.source;
+}
+
+/** The sources whose sessions show their mark before the title: the chats. */
+const CHAT_SOURCES: ReadonlySet<string> = new Set([...SESSION_SOURCES, "chat"]);
+
+/** The chat source of a session (Slack, Telegram, Discord, chat), or null for any other source. */
+export function chatSourceOf(root: Pick<AgentTask, "key" | "source" | "tags">): string | null {
+  const source = sessionSourceOf(root);
+  return CHAT_SOURCES.has(source) ? source : null;
 }
 
 /** One group (an asset key prefix) in the sidebar tree. */
@@ -163,9 +186,23 @@ function myBase(key: string, me: string | null): string | null {
   return null;
 }
 
-/** The muted group label of a row in a flat list (Inbox, Later, Done): the last segment. */
-export function groupLabel(groupKey: string | undefined, me: string | null): string {
+/** A source as its section names it: `Slack`, `Telegram`, `Discord`. */
+function sourceName(source: SessionSource): string {
+  return source.charAt(0).toUpperCase() + source.slice(1);
+}
+
+/**
+ * The muted group label of a row in a flat list (Inbox, Later, Done): the
+ * last segment, or a source group's label (`#eng`, `DM · Lena`).
+ */
+export function groupLabel(
+  groupKey: string | undefined,
+  me: string | null,
+  labels: Readonly<Record<string, string>> = {},
+): string {
   if (!groupKey || isNoGroupKey(groupKey, me)) return "";
+  const source = sourceOfGroupKey(groupKey);
+  if (source) return sourceGroupLabel(groupKey, labels) || sourceName(source);
   const owner = personalOwner(groupKey);
   const parts = segments(groupKey).slice(owner ? 2 : 1);
   return parts[parts.length - 1] ?? "";
@@ -173,14 +210,21 @@ export function groupLabel(groupKey: string | undefined, me: string | null): str
 
 /**
  * The group path for a hover card: `northwind › pricing`. A group of another
- * person starts with that person's name. No group reads "No group".
+ * person starts with that person's name. A source group reads as its source
+ * and its label (`Slack › #eng`). No group reads "No group".
  */
 export function groupCrumb(
   groupKey: string | undefined,
   me: string | null,
   nameOf: (userId: string) => string,
+  labels: Readonly<Record<string, string>> = {},
 ): string {
   if (!groupKey || isNoGroupKey(groupKey, me)) return "No group";
+  const source = sourceOfGroupKey(groupKey);
+  if (source) {
+    const label = sourceGroupLabel(groupKey, labels);
+    return label ? `${sourceName(source)} › ${label}` : sourceName(source);
+  }
   const owner = personalOwner(groupKey);
   const parts = segments(groupKey).slice(owner ? 2 : 1);
   if (owner && owner !== me) return [nameOf(owner), ...parts].join(" › ");

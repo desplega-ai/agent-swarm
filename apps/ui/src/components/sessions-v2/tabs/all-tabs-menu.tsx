@@ -17,7 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { ReadMark, UNREAD_TITLE } from "../sidebar/tree-row";
 import { TruncatedTitle } from "../truncated-title";
-import { TabActivity, tabLabel, useTabInfo } from "./tab-info";
+import { TabActivity, TabIcon, tabLabel, useTabInfo } from "./tab-info";
 
 function AllTabsItem({
   tab,
@@ -32,7 +32,6 @@ function AllTabsItem({
 }) {
   // The strip's tab polls this session already.
   const info = useTabInfo(tab, view, "off");
-  const Icon = info.icon;
   return (
     <DropdownMenuItem
       onSelect={() => onFocusTab(tab)}
@@ -40,7 +39,7 @@ function AllTabsItem({
       className="gap-2"
     >
       <ReadMark unread={info.unread} />
-      {Icon ? <Icon aria-hidden className="size-3.5 shrink-0" /> : null}
+      <TabIcon info={info} />
       <TruncatedTitle title={info.title} className={cn("flex-1", info.unread && UNREAD_TITLE)} />
       <TabActivity activity={info.activity} />
       <Check

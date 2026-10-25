@@ -27,3 +27,13 @@ export function useSessionTree(options?: { enabled?: boolean }) {
     enabled: options?.enabled ?? true,
   });
 }
+
+const NO_LABELS: Readonly<Record<string, string>> = {};
+
+/**
+ * The source group labels of the tree (`#eng`, `DM · Lena`), from the same
+ * cache. Empty while it loads, and for a source the filter hides.
+ */
+export function useSessionLabels(): Readonly<Record<string, string>> {
+  return useSessionTree().data?.labels ?? NO_LABELS;
+}

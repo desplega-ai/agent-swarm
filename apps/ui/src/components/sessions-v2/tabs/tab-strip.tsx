@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
 import { useQuietTooltip } from "../pane/quiet-focus";
 import { ReadMark, TipKey, UNREAD_TITLE } from "../sidebar/tree-row";
 import { AllTabsMenu } from "./all-tabs-menu";
-import { TabActivity, tabLabel, useTabInfo } from "./tab-info";
+import { TabActivity, TabIcon, tabLabel, useTabInfo } from "./tab-info";
 
 /** The drag data of a tab (the split drop zone reads it). */
 export interface TabDragData {
@@ -74,7 +74,6 @@ function TabItem({
   // and on a quiet focus (the focus coming back after the split closes).
   const tip = useQuietTooltip();
   const [overClose, setOverClose] = useState(false);
-  const Icon = info.icon;
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) return;
     if (event.key === "Enter" || event.key === " ") onFocusTab(tab);
@@ -121,7 +120,7 @@ function TabItem({
           )}
         >
           <ReadMark unread={info.unread} />
-          {Icon ? <Icon aria-hidden className="size-3.5 shrink-0" /> : null}
+          <TabIcon info={info} />
           <span className={cn("min-w-0 flex-1 truncate", info.unread && UNREAD_TITLE)}>
             {info.title}
           </span>

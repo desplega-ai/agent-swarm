@@ -125,12 +125,15 @@ export async function runSessionSourceBackfill({
     }
 
     const batchLastId = roots[roots.length - 1]!.id;
-    await client.run(
-      `INSERT INTO seed_state (kind, key, seededHash, seededAt)
+    // After a failure the cursor stays behind the failed root, so a boot that
+    // stops later still re-reads it, and no done marker can skip it.
+    if (stats.failed === 0)
+      await client.run(
+        `INSERT INTO seed_state (kind, key, seededHash, seededAt)
        VALUES ('maintenance', ?, ?, datetime('now'))
        ON CONFLICT (kind, key) DO UPDATE SET seededHash = excluded.seededHash, seededAt = datetime('now')`,
-      [CURSOR_KEY, batchLastId],
-    );
+        [CURSOR_KEY, batchLastId],
+      );
     stats.scanned += roots.length;
     cursor = batchLastId;
     await afterBatch?.({ ids: roots.map((root) => root.id) });

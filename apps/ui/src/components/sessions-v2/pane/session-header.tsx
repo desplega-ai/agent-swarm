@@ -9,9 +9,9 @@
  *   left, the meta line (`SessionMetaLine`) on the right.
  */
 
-import { Hash, SquareDashed } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useInboxState } from "@/api/hooks/use-inbox-state";
+import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import { useSessionShares } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionDetailResponse, SessionListItem } from "@/api/types";
@@ -25,6 +25,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { groupCrumb, groupKeyOf, isNoGroupKey } from "@/lib/session-groups";
 import { itemFromDetail, userName } from "@/lib/sessions-v2";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
+import { GroupCrumbIcon } from "../group-crumb-icon";
 import { PeoplePill } from "./people-pill";
 import { focusQuietly } from "./quiet-focus";
 import { SessionMetaLine } from "./session-meta-line";
@@ -61,8 +62,8 @@ function GroupCrumb({
   onReveal: (groupKey: string | null) => void;
 }) {
   const { data: users } = useUsers();
+  const labels = useSessionLabels();
   const noGroup = !groupKey || isNoGroupKey(groupKey, me);
-  const GroupIcon = noGroup ? SquareDashed : Hash;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -70,10 +71,13 @@ function GroupCrumb({
           variant="ghost"
           size="xs"
           onClick={() => onReveal(noGroup ? null : groupKey)}
-          className="-ml-1.5 min-w-0 shrink justify-start font-normal text-muted-foreground hover:text-foreground"
+          // px-1.5 as with an svg icon: a source logo is a span.
+          className="-ml-1.5 min-w-0 shrink justify-start px-1.5 font-normal text-muted-foreground hover:text-foreground"
         >
-          <GroupIcon aria-hidden className="shrink-0" />
-          <span className="truncate">{groupCrumb(groupKey, me, (id) => userName(users, id))}</span>
+          <GroupCrumbIcon groupKey={groupKey} noGroup={noGroup} className="size-3" />
+          <span className="truncate">
+            {groupCrumb(groupKey, me, (id) => userName(users, id), labels)}
+          </span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>Show this group in the sidebar</TooltipContent>

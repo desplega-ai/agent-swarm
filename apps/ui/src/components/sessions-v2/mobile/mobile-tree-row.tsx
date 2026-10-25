@@ -1,8 +1,8 @@
 /**
  * The sidebar rows on a phone (SPEC R8.5, UX review R9): the same row model
  * as the desktop tree (`tree-rows.ts`), drawn for touch. Rows are at least
- * 44 px, session rows 56 px with two lines (the title, then the group, the
- * time, and the people). Counts always show. There are no tooltips, no
+ * 44 px, session rows 56 px with two lines (a chat source logo and the
+ * title, then the group, the time, and the people). Counts always show. There are no tooltips, no
  * hover card, no key hints, and no drag. Flat lists sit at the left edge
  * and nested rows take one indent step, with no guide lines.
  *
@@ -30,7 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useLongPress } from "@/hooks/use-long-press";
 import { type SwipeSide, useSwipeRow } from "@/hooks/use-swipe-row";
 import { peerColor } from "@/lib/comb/presence";
-import { groupLabel } from "@/lib/session-groups";
+import { chatSourceOf, groupLabel } from "@/lib/session-groups";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 import {
   type ContainerRow,
@@ -79,6 +79,8 @@ interface MobileSessionRowProps {
   flat: boolean;
   me: string | null;
   now: number;
+  /** The source group labels of the tree (`#eng`), for the group label of a flat row. */
+  labels: Readonly<Record<string, string>>;
   selected: boolean;
   /** A selection is on: a tap selects, and swipes are off. */
   selecting: boolean;
@@ -100,6 +102,7 @@ function MobileSessionRowView({
   flat,
   me,
   now,
+  labels,
   selected,
   selecting,
   canTriage,
@@ -122,7 +125,8 @@ function MobileSessionRowView({
   const unread = session.readState === "unread";
   const wake = session.readState === "later" ? session.snoozeUntil : null;
   const activity = activityOf(session);
-  const group = flat ? groupLabel(session.groupKey, me) : "";
+  const group = flat ? groupLabel(session.groupKey, me, labels) : "";
+  const chat = chatSourceOf(session.root);
   const others = othersOf(session, me);
   const nowDate = new Date(now);
   const behind = swipe.side ? swipeAction(session, swipe.side) : null;
@@ -215,6 +219,9 @@ function MobileSessionRowView({
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-center gap-2">
+            {chat ? (
+              <TaskSourceMark source={chat} className="size-3.5 text-muted-foreground" />
+            ) : null}
             <span
               className={cn(
                 "min-w-0 flex-1 truncate text-base",
@@ -229,7 +236,13 @@ function MobileSessionRowView({
               </span>
             ) : null}
           </span>
-          <span className="flex min-w-0 items-center gap-1.5 text-data text-muted-foreground">
+          <span
+            className={cn(
+              "flex min-w-0 items-center gap-1.5 text-data text-muted-foreground",
+              // Under the title, not under the source logo (14 px and the 8 px gap).
+              chat && "pl-5.5",
+            )}
+          >
             <span className="min-w-0 truncate">
               {[
                 group,

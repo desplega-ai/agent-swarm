@@ -24,6 +24,44 @@ When a workflow creates a task, the task inherits the workflow key unless the ta
 
 Writes to a `personal/<user-id>/` destination require the trusted user resolved from the authenticated request or task context to match the user ID in the key. A caller-supplied user ID is not sufficient. Shared namespaces retain each entity's existing mutation rules.
 
+## Source keys
+
+A session that comes in from Slack, Telegram, or Discord gets a source key under `shared/<source>/`. The server sets it on the first task of the session when the caller gives no key. The later tasks of the session inherit it, as with any key.
+
+| Session | Key |
+| --- | --- |
+| Slack thread | `shared/slack/<channel>/thread:<ts>/` |
+| Slack DM through Chat SDK, with no thread ts | `shared/slack/<channel>/task:<id>/` |
+| Telegram topic | `shared/telegram/<chatId>/thread:<topicId>/` |
+| Telegram chat with no topic | `shared/telegram/<chatId>/task:<id>/` |
+| Discord thread | `shared/discord/<channelId>/thread:<threadId>/` |
+| Discord channel or DM with no thread | `shared/discord/<channelId>/task:<id>/` |
+
+- `<id>` is the id of the first task of the session. Keys are lowercase, so the Slack channel `C0AR967K0KZ` becomes `c0ar967k0kz`.
+- A Slack key goes to every first task with Slack thread fields, whatever its source. So an agent session that the lead starts in a Slack thread gets the key of that thread.
+- Teams and the other Chat SDK adapters keep the default key. So does an id that holds a `/`.
+- A key that the caller gives wins. The server does not check keys under a source prefix at task creation.
+
+The group of a session is its key without the last segment, so each channel, DM, or chat is one group (`shared/slack/<channel>/`). The dashboard shows these groups in their own read-only [source sections](/docs/ui/sessions#sources).
+
+### Effective source
+
+The Sessions view filter (`showSource`, and the older `hideSource`) reads an effective source: the source of the key prefix when the key is under `shared/slack/`, `shared/telegram/`, or `shared/discord/`, else the task `source`. So an agent session (`mcp`) in a Slack thread counts as `slack`. The generic `source` filter still reads the task `source`.
+
+### Moves into source groups
+
+Source groups are read-only for moves. A move of a session into a key under a source prefix is refused with "Source groups are read-only." `PATCH /api/assets/task/{id}/key` returns 400. `POST /api/session-moves` returns 200 and lists the session in `skipped` with that reason. The one exception is the session's own source key (the key that its Slack fields or chat thread give), so **Undo** after a move out works. A session that an agent created with some other explicit `shared/slack/...` key cannot move back after a move out. A move out of a source group works. `POST /api/session-moves/prefix` (rename and delete of a group) refuses a source prefix as the old or the new key.
+
+### One-time backfill
+
+Sessions from before source keys sit under `shared/` or `shared/task:<id>/`. After the first boot of the version that adds source keys, a background job moves them to their source keys:
+
+- It moves a session only when its key is still the default (`shared/` or `shared/task:<id of the first task>/`). A session that someone moved to a group stays there.
+- It moves each session on its own: the whole chain of tasks and their attachment files, with a row in the key history.
+- It keeps the read state, Done, Later, and the latest activity time of each session.
+- When it finishes, it writes the done marker `session-source-keys-v1` in `seed_state`, so it never runs again. A session that fails stays on its old key, the run writes no done marker, and the next boot tries again. A boot that stops halfway goes on from the last batch that had no failure.
+- While the [key audit](#audit-and-rollout) blocks moves, the job waits for the next boot.
+
 ## Cross-entity API
 
 `GET /api/assets` returns lightweight summaries across tasks, workflows, schedules, pages, apps, scripts, and mapped files. It accepts `keyPrefix`, comma-separated `types`, and `limit` filters. Summaries contain labels and provider references but never task briefs, page bodies, workflow definitions, script source, secrets, or file bytes.

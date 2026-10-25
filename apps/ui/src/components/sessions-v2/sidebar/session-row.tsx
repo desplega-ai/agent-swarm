@@ -1,26 +1,29 @@
 /**
  * One session in the sidebar (SPEC R4, R5, R9, R10.3): the unread dot (a
- * checkbox on hover), the title on one line, the group label in flat lists,
- * the people, a still activity mark, and the time. A hover card shows the
- * full title and the latest output.
+ * checkbox on hover), the logo of a chat source (Slack, Telegram, Discord,
+ * chat), the title on one line, the group label in flat lists, the people,
+ * a still activity mark, and the time. A hover card shows the full title
+ * and the latest output.
  */
 
-import { AlarmClock, FolderInput, Hash, SquareDashed, Users } from "lucide-react";
+import { AlarmClock, FolderInput, Users } from "lucide-react";
 import { type MouseEvent, memo, useState } from "react";
 import type { SessionListItem } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { peerColor } from "@/lib/comb/presence";
-import { groupCrumb, groupLabel, isNoGroupKey } from "@/lib/session-groups";
+import { chatSourceOf, groupCrumb, groupLabel, isNoGroupKey } from "@/lib/session-groups";
 import { splitMatches } from "@/lib/session-search";
 import { sessionChipStatus } from "@/lib/session-status";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime, parseUTCDate, sessionDisplayTitle } from "@/lib/utils";
+import { GroupCrumbIcon } from "../group-crumb-icon";
 import { formatWakeShort, wakePhrase } from "./snooze-times";
 import {
   keepTreeFocus,
@@ -108,7 +111,7 @@ function sharedText(session: SessionListItem, me: string | null): string {
   return `Shared with ${who.join(", ")}`;
 }
 
-/** The row's accessible name: state, title, group, people, sharing, and time. */
+/** The row's accessible name: state, title, chat source, group, people, sharing, and time. */
 export function rowLabel(
   session: SessionListItem,
   me: string | null,
@@ -118,12 +121,14 @@ export function rowLabel(
 ): string {
   const activity = activityOf(session);
   const wake = session.readState === "later" && session.snoozeUntil;
+  const chat = chatSourceOf(session.root);
   return [
     session.readState === "unread" && "Unread",
     activity === "needs" && "Needs you",
     !TERMINAL_STATUSES.has(session.latestStatus) && "Running",
     session.latestStatus === "failed" && "Failed",
     title,
+    chat && `From ${taskSourceLabel(chat)}`,
     group && `In ${group}`,
     othersOf(session, me).length > 0 && withText(session, me),
     sharedText(session, me),
@@ -138,22 +143,23 @@ function SessionCard({
   me,
   title,
   nameOf,
+  labels,
 }: {
   session: SessionListItem;
   me: string | null;
   title: string;
   nameOf: (userId: string) => string;
+  labels: Readonly<Record<string, string>>;
 }) {
   const noGroup = !session.groupKey || isNoGroupKey(session.groupKey, me);
-  const GroupIcon = noGroup ? SquareDashed : Hash;
   const people = withText(session, me);
   const shared = sharedText(session, me);
   const wake = session.readState === "later" ? session.snoozeUntil : null;
   return (
     <>
       <p className="flex min-w-0 items-center gap-1 text-meta text-muted-foreground">
-        <GroupIcon aria-hidden className="size-3 shrink-0" />
-        <span className="truncate">{groupCrumb(session.groupKey, me, nameOf)}</span>
+        <GroupCrumbIcon groupKey={session.groupKey} noGroup={noGroup} className="size-3" />
+        <span className="truncate">{groupCrumb(session.groupKey, me, nameOf, labels)}</span>
       </p>
       <p className="mt-1 text-sm font-medium break-words">{title}</p>
       {session.preview ? (
@@ -211,6 +217,8 @@ interface SessionRowProps {
   /** Keys drive the list: only the cursor's card opens, and with no motion. */
   keyboard: boolean;
   nameOf: (userId: string) => string;
+  /** The source group labels of the tree (`#eng`), for the group label and the card. */
+  labels: Readonly<Record<string, string>>;
   onRowClick: (rowKey: string, event: MouseEvent) => void;
   onRowAuxClick: (rowKey: string, event: MouseEvent) => void;
   onRowContextMenu: (rowKey: string, event: MouseEvent) => void;
@@ -239,6 +247,7 @@ function SessionRowView({
   peek,
   keyboard,
   nameOf,
+  labels,
   onRowClick,
   onRowAuxClick,
   onRowContextMenu,
@@ -252,7 +261,8 @@ function SessionRowView({
   const unread = session.readState === "unread";
   const wake = session.readState === "later" ? session.snoozeUntil : null;
   const activity = activityOf(session);
-  const group = flat ? groupLabel(session.groupKey, me) : "";
+  const group = flat ? groupLabel(session.groupKey, me, labels) : "";
+  const chat = chatSourceOf(session.root);
   const others = othersOf(session, me);
   const nowDate = new Date(now);
 
@@ -325,6 +335,7 @@ function SessionRowView({
               />
             ) : null}
           </span>
+          {chat ? <TaskSourceMark source={chat} className="size-3 text-muted-foreground" /> : null}
           <span
             className={cn(
               "min-w-[45%] flex-1 truncate",
@@ -389,7 +400,7 @@ function SessionRowView({
           keyboard && "data-[state=closed]:animate-none data-[state=open]:animate-none",
         )}
       >
-        <SessionCard session={session} me={me} title={title} nameOf={nameOf} />
+        <SessionCard session={session} me={me} title={title} nameOf={nameOf} labels={labels} />
       </HoverCardContent>
     </HoverCard>
   );
