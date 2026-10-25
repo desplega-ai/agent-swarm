@@ -25892,10 +25892,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a workflow run with steps (includes retry columns) */
+        /**
+         * Get a workflow run with steps (includes retry columns)
+         * @description Returns the run with its `context` and every step with its `input` by default. A step's `input` is a snapshot of the context when the step started, so in runs with loops (polling, `wait`, iterations) the response grows with steps × context size. Pass `fields=slim` to drop `run.context` and `steps[].input`; outputs, errors, diagnostics, retry fields and `parent` stay.
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    fields?: "full" | "slim";
+                };
                 header?: never;
                 path: {
                     id: string;
@@ -25913,6 +25918,10 @@ export interface paths {
                         "application/json": {
                             run: components["schemas"]["WorkflowRun"];
                             steps: components["schemas"]["WorkflowRunStep"][];
+                            parent?: components["schemas"]["WorkflowRunParent"];
+                        } | {
+                            run: components["schemas"]["WorkflowRunSummary"];
+                            steps: components["schemas"]["WorkflowRunStepSlim"][];
                             parent?: components["schemas"]["WorkflowRunParent"];
                         };
                     };
@@ -28072,6 +28081,28 @@ export interface components {
             workflowId: string;
             stepId: string;
             nodeId: string;
+        };
+        WorkflowRunStepSlim: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            runId: string;
+            nodeId: string;
+            nodeType: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled";
+            output?: unknown;
+            error?: string;
+            startedAt: string;
+            finishedAt?: string;
+            /** @default 0 */
+            retryCount: number;
+            /** @default 3 */
+            maxRetries: number;
+            nextRetryAt?: string;
+            idempotencyKey?: string;
+            diagnostics?: string;
+            nextPort?: string;
         };
         WorkflowVersion: {
             /** Format: uuid */

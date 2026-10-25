@@ -378,7 +378,7 @@ declare module "swarm-sdk" {
       limit?: number;
       offset?: number;
     }): Promise<unknown>;
-    workflow_getRun(args: { id: string }): Promise<unknown>;
+    workflow_getRun(args: { id: string; fields?: "full" | "slim" }): Promise<unknown>;
     // --- prompt templates ---
     prompt_list(args?: {
       eventType?: string;

@@ -117,7 +117,9 @@ import type {
   WorkflowRun,
   WorkflowRunStatus,
   WorkflowRunStep,
+  WorkflowRunStepSlim,
   WorkflowRunStepStatus,
+  WorkflowRunSummary,
   WorkflowSnapshot,
   WorkflowSummary,
   WorkflowVersion,
@@ -8058,6 +8060,19 @@ export async function listWorkflowRuns(
   return rows.map((row) => rowToWorkflowRun(row, "display"));
 }
 
+/**
+ * `getWorkflowRun` without `context`, in the display view. Backs
+ * `GET /api/workflow-runs/{id}?fields=slim`: the large column is neither read
+ * nor parsed.
+ */
+export async function getWorkflowRunSummary(id: string): Promise<WorkflowRunSummary | null> {
+  const row = await getDbClient().get<WorkflowRunRow>(
+    `SELECT ${WORKFLOW_RUN_SUMMARY_COLUMNS} FROM workflow_runs WHERE id = ?`,
+    [id],
+  );
+  return row ? rowToWorkflowRun(row, "display") : null;
+}
+
 export async function countWorkflowRuns(
   workflowId: string,
   options: Pick<WorkflowRunListOptions, "status"> = {},
@@ -8106,10 +8121,11 @@ type WorkflowRunStepRow = {
   nodeId: string;
   nodeType: string;
   status: string;
-  input: string | null;
+  /** Absent from slim rows: see `WORKFLOW_RUN_STEP_SLIM_COLUMNS`. */
+  input?: string | null;
   output: string | null;
-  /** Sealed exact `output` (migration 201). */
-  output_replay: string | null;
+  /** Sealed exact `output` (migration 201). Absent from slim rows. */
+  output_replay?: string | null;
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
@@ -8267,6 +8283,22 @@ export async function getWorkflowRunStepsByRunId(
     [runId],
   );
   return rows.map((row) => rowToWorkflowRunStep(row, view));
+}
+
+// Everything but `input` (a context snapshot per step, so loops grow it with
+// every iteration) and `output_replay` (the display view never opens it).
+const WORKFLOW_RUN_STEP_SLIM_COLUMNS =
+  "id, runId, nodeId, nodeType, status, output, error, startedAt, finishedAt, retryCount, maxRetries, nextRetryAt, idempotencyKey, diagnostics, nextPort";
+
+/** `getWorkflowRunStepsByRunId` without `input`, in the display view. */
+export async function getWorkflowRunStepsSlimByRunId(
+  runId: string,
+): Promise<WorkflowRunStepSlim[]> {
+  const rows = await getDbClient().query<WorkflowRunStepRow>(
+    `SELECT ${WORKFLOW_RUN_STEP_SLIM_COLUMNS} FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC`,
+    [runId],
+  );
+  return rows.map((row) => rowToWorkflowRunStep(row, "display"));
 }
 
 // --- Stuck Workflow Run Recovery ---

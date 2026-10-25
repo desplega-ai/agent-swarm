@@ -3105,6 +3105,15 @@ export const WorkflowRunStepSchema = z
   .openapi("WorkflowRunStep");
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;
 
+/**
+ * Step of `GET /api/workflow-runs/{id}?fields=slim`: no `input`, the context
+ * snapshot taken when the step started. Loops repeat it once per iteration.
+ */
+export const WorkflowRunStepSlimSchema = WorkflowRunStepSchema.omit({ input: true }).openapi(
+  "WorkflowRunStepSlim",
+);
+export type WorkflowRunStepSlim = z.infer<typeof WorkflowRunStepSlimSchema>;
+
 // --- Wait State (workflow `wait` node side table) ---
 
 export const WaitModeSchema = z.enum(["time", "event"]);

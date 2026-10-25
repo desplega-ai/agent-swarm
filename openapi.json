@@ -5563,6 +5563,77 @@
           "nodeId"
         ]
       },
+      "WorkflowRunStepSlim": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "nodeType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "waiting",
+              "completed",
+              "failed",
+              "skipped",
+              "cancelled"
+            ]
+          },
+          "output": {},
+          "error": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          },
+          "retryCount": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "maxRetries": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 3
+          },
+          "nextRetryAt": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "diagnostics": {
+            "type": "string"
+          },
+          "nextPort": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "runId",
+          "nodeId",
+          "nodeType",
+          "status",
+          "startedAt"
+        ]
+      },
       "WorkflowVersion": {
         "type": "object",
         "properties": {
@@ -62980,6 +63051,7 @@
     "/api/workflow-runs/{id}": {
       "get": {
         "summary": "Get a workflow run with steps (includes retry columns)",
+        "description": "Returns the run with its `context` and every step with its `input` by default. A step's `input` is a snapshot of the context when the step started, so in runs with loops (polling, `wait`, iterations) the response grows with steps × context size. Pass `fields=slim` to drop `run.context` and `steps[].input`; outputs, errors, diagnostics, retry fields and `parent` stay.",
         "tags": [
           "Workflows"
         ],
@@ -62996,6 +63068,18 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
+            "in": "query"
           }
         ],
         "responses": {
@@ -63004,24 +63088,49 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "run": {
-                      "$ref": "#/components/schemas/WorkflowRun"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "run": {
+                          "$ref": "#/components/schemas/WorkflowRun"
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/WorkflowRunStep"
+                          }
+                        },
+                        "parent": {
+                          "$ref": "#/components/schemas/WorkflowRunParent"
+                        }
+                      },
+                      "required": [
+                        "run",
+                        "steps"
+                      ]
                     },
-                    "steps": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/WorkflowRunStep"
-                      }
-                    },
-                    "parent": {
-                      "$ref": "#/components/schemas/WorkflowRunParent"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "run": {
+                          "$ref": "#/components/schemas/WorkflowRunSummary"
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/WorkflowRunStepSlim"
+                          }
+                        },
+                        "parent": {
+                          "$ref": "#/components/schemas/WorkflowRunParent"
+                        }
+                      },
+                      "required": [
+                        "run",
+                        "steps"
+                      ]
                     }
-                  },
-                  "required": [
-                    "run",
-                    "steps"
                   ]
                 }
               }
