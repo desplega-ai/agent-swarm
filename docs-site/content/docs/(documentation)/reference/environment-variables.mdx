@@ -274,6 +274,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SCRIPTS_ONLY_MCP` | No | `false` | Experimental code-mode. Set alongside the API server value so worker prompts explain the reduced eight-tool MCP surface; all other swarm operations remain available through `script-run` and the scripts SDK. |
 | `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | `3` | How often (in turns) the context-mode MCP plugin surfaces its external-MCP guidance nudge, across Claude Code, Codex, and opencode alike |
 | `CONTEXT_PREAMBLE_MAX_TOKENS` | No | `2000` | Token budget for the universal follow-up context preamble prepended to a child task's prompt; applies across all harness providers |
+| `CONTEXT_BOUND_NOTE_TOKENS` | No | `0` (off) | Context size (input + cache read + cache write tokens of the latest main-thread request) at which a worker session gets a one-time note to finish the current step and complete or defer. A positive integer turns it on; can be set per agent via `set-config`. See [Configuration](/docs/ui/configuration) |
 | `CONTEXT_PREAMBLE_RESUME_MAX_TOKENS` | No | `4000` | Token budget for the resume-task preamble (2x the regular budget — carries the original task brief plus a tool-call summary so the resumed agent doesn't redo completed work) |
 | `STARTUP_SCRIPT_STRICT` | No | `false` | Exit on startup script failure. By default, per-agent `setupScript` failures log a v1.106.0 privilege-boundary migration warning and the worker continues booting |
 | `SHUTDOWN_TIMEOUT` | No | `30000` | Grace period (ms) before pausing tasks |

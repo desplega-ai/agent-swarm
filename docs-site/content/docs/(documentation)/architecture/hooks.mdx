@@ -12,7 +12,7 @@ Six hooks fire during each Claude Code session, providing safety, context manage
 | **SessionStart** | Session begins | Writes CLAUDE.md from DB, loads concurrent session context for leads |
 | **PreCompact** | Before context compaction | Injects a "goal reminder" with current task details so the agent doesn't lose track |
 | **PreToolUse** | Before each tool call | Checks for task cancellation, detects tool loops, blocks excessive polling |
-| **PostToolUse** | After each tool call | Sends heartbeat, syncs identity file edits to DB, auto-indexes memory files |
+| **PostToolUse** | After each tool call | Sends heartbeat, syncs identity file edits to DB, auto-indexes memory files, adds the one-time context-bound note |
 | **UserPromptSubmit** | New iteration starts | Checks for task cancellation |
 | **Stop** | Session ends | Syncs all identity files, runs session summarization, marks agent offline |
 
@@ -48,6 +48,7 @@ Fires after every tool call. This is the most active hook:
 - **Activity tracking** — Updates the agent's `lastActivityAt` timestamp (fire-and-forget) for stall detection
 - **Identity sync** — If an identity file (SOUL.md, IDENTITY.md, TOOLS.md, CLAUDE.md) was edited, syncs each changed file independently with `changeSource: "self_edit"`, so one rejected field cannot discard valid edits to the others. The session-start runner records baseline hashes; the Stop/session-end path skips unchanged files so lead-side `update-profile` edits are not overwritten by stale local copies. Filesystem sync skips SOUL.md and IDENTITY.md shorter than 500 characters, and growth beyond the identity-field budgets is surfaced as a persisted rejection for the next session
 - **Memory indexing** — If a file was written to a memory directory, automatically generates an embedding and indexes it
+- **Context-bound note** — Once per task, when the latest main-thread request reaches `CONTEXT_BOUND_NOTE_TOKENS` (off by default), returns a one-time note asking the agent to finish the current step, store progress, and complete or defer. Subagent hook calls are skipped, and missing usage state means no note; it never blocks a tool call. See [Configuration](/docs/ui/configuration)
 
 ### UserPromptSubmit
 

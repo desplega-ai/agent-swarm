@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.5.4] - 2026-10-25
+
+### Added
+- Hooks: a one-time context-bound note for long worker sessions. When the latest main-thread request reaches `CONTEXT_BOUND_NOTE_TOKENS` (off by default), the agent is told once per task to finish the current step, store progress, and complete or defer. Claude gets it from the PostToolUse hook; Codex, pi, OpenCode, Amp and Claude Managed get it as mid-turn steering. It can be enabled per agent with an agent-scoped config row (#2401).
+- Extensions: a blocked `pre.task.create` (or a rejected model/agent rewrite) emits `post.task.blocked` once per attempt, carrying the blocking extension, the attempt's origin and requester, and a scrubbed reason and description (#2402).
+- Workflows: `POST /api/workflows` and `POST /api/workflows/{id}/trigger` take an optional `Idempotency-Key` header. Retries with the same key replay the original status and body instead of creating a second workflow or run (#2380).
+
+### Changed
+- Bun 1.4.4 for `packageManager` and every Dockerfile pin (fixes CVE-2026-111497) (#2397).
+- Worker image bumps claude-code, acp, `@anthropic-ai/sdk`, amp, grok, goose and kiro (#2391, #2399).
+- Prompts and seeded skills hand people the agent-fs live app link and create share links only when needed (#2400).
+- Skills: vendored ai-toolbox skills re-synced to a1e33bc (#2389).
+
+### Fixed
+- Workflows: cancelling a run cancels its whole child-run tree (steps, tasks, pending approvals and queued retries) in one transaction, and nothing started mid-cancel can land inside the cancelled tree. Repeating the cancel finishes child runs still open (#2377).
+- Workflows: a foreach agent-task item cut by a deploy drain gets the same one-shot retry as a plain agent-task node (#2370).
+- Session logs are read in write order, so the resume preamble's tail returns the last N lines instead of interleaved flushes (#2383).
+- Controller: the client detects a half-open socket and reconnects after a network cut longer than the API ping timeout (#2396).
+- Worker: poll claims stop during shutdown (#2395).
+- Docker runtime provider: deleting a runtime also removes its anonymous volumes (#2390).
+- Config: a script run's token reads its own held secrets unmasked on the config list and by-id routes, matching `/api/config/resolved` (#2393).
+- Dashboard: the Sessions header totals cost over the whole task chain, not only the root task (#2403); integrations with only advanced metadata no longer show as Configured, and Sessions copies inline env names (#2394).
+
 ## [2.5.3] - 2026-10-24
 
 ### Added
