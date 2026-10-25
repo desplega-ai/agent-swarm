@@ -1,8 +1,9 @@
 import { useQueries } from "@tanstack/react-query";
-import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentFsLsQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
+import { FileKindIcon } from "@/components/comb/file-icon";
 import { PresenceDots } from "@/components/comb/presence-avatars";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { ancestorFolders, type CombLocation, combPath, parentFolder } from "@/lib/comb/paths";
@@ -179,7 +180,6 @@ export function TreeRail({
         }
         const open = row.isFolder && expanded.has(row.path);
         const selected = row.path === currentPath;
-        const Icon = row.isFolder ? (open ? FolderOpen : Folder) : File;
         return (
           <div
             key={row.path}
@@ -228,7 +228,7 @@ export function TreeRail({
               }}
               className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
-              <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <FileKindIcon name={row.name} isFolder={row.isFolder} open={open} />
               <MiddleTruncation>{row.name}</MiddleTruncation>
               {row.isFolder ? null : <PresenceDots path={row.path} />}
             </Link>

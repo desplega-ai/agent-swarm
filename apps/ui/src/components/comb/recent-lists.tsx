@@ -1,9 +1,10 @@
-import { Ellipsis, File, Folder, StarOff } from "lucide-react";
+import { Ellipsis, StarOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useRecentChanges } from "@/api/hooks/use-agent-fs";
 import { useFavorites, useFavoriteToggle } from "@/api/hooks/use-favorites";
+import { FileKindIcon } from "@/components/comb/file-icon";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useViewedFiles } from "@/components/comb/use-viewed-files";
 import { Button } from "@/components/ui/button";
@@ -78,7 +79,6 @@ function ListRow({
   actions?: ReactNode;
 }) {
   const label = pinLabel(target.path);
-  const Icon = isFolderPath(target.path) ? Folder : File;
   return (
     <li
       className={cn(
@@ -95,7 +95,7 @@ function ListRow({
         onClick={onNavigate}
         className="flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       >
-        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <FileKindIcon name={label} isFolder={isFolderPath(target.path)} className="mt-0.5" />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-baseline gap-2">
             <MiddleTruncation title={undefined} className="min-w-0 flex-1 text-sm">

@@ -1,10 +1,11 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { AlertCircle, File, Folder, FolderOpen } from "lucide-react";
+import { AlertCircle, FolderOpen } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgentFsLs } from "@/api/hooks/use-agent-fs";
 import { CombHome } from "@/components/comb/comb-home";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
+import { FileKindIcon } from "@/components/comb/file-icon";
 import { FolderComments } from "@/components/comb/folder-comments";
 import { PinButton } from "@/components/comb/pin-button";
 import { UploadButton, UploadDropZone, UploadList } from "@/components/comb/upload-zone";
@@ -40,10 +41,9 @@ function typeLabel(name: string, isFolder: boolean): string {
 
 function NameCell({ data }: ICellRendererParams<FolderRow>) {
   if (!data) return null;
-  const Icon = data.isFolder ? Folder : File;
   return (
     <span className="flex w-full min-w-0 items-center gap-2">
-      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <FileKindIcon name={data.name} isFolder={data.isFolder} />
       <MiddleTruncation>{data.name}</MiddleTruncation>
     </span>
   );
@@ -151,13 +151,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
               key={row.id}
               to={combPath({ ...folder, path: row.id })}
               title={row.name}
-              leading={
-                row.isFolder ? (
-                  <Folder className="size-4 text-muted-foreground" aria-hidden />
-                ) : (
-                  <File className="size-4 text-muted-foreground" aria-hidden />
-                )
-              }
+              leading={<FileKindIcon name={row.name} isFolder={row.isFolder} />}
               meta={[
                 row.type,
                 row.isFolder ? null : formatBytes(row.size),

@@ -1,8 +1,8 @@
-import { File, Folder } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useFavorites } from "@/api/hooks/use-favorites";
 import type { StatusComb } from "@/api/types";
+import { FileKindIcon } from "@/components/comb/file-icon";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar";
@@ -37,7 +37,6 @@ export function CombSidebarPins({ comb }: { comb: StatusComb | undefined }) {
         {pins.map((pin) => {
           const to = combPath(pin);
           const label = pinLabel(pin.path);
-          const Icon = isFolderPath(pin.path) ? Folder : File;
           const active = pathname === to;
           return (
             <SidebarMenuSubItem key={pin.path}>
@@ -53,7 +52,7 @@ export function CombSidebarPins({ comb }: { comb: StatusComb | undefined }) {
                   aria-current={active ? "page" : undefined}
                   title={pin.path}
                 >
-                  <Icon aria-hidden />
+                  <FileKindIcon name={label} isFolder={isFolderPath(pin.path)} />
                   <MiddleTruncation title={undefined}>{label}</MiddleTruncation>
                 </Link>
               </SidebarMenuSubButton>

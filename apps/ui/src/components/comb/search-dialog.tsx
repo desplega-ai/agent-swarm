@@ -1,7 +1,8 @@
-import { AlertCircle, FileText, Search } from "lucide-react";
+import { AlertCircle, Search } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCombSearch } from "@/api/hooks/use-agent-fs";
+import { FileKindIcon } from "@/components/comb/file-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -244,7 +245,7 @@ function SearchBody({
           onSelect={() => onOpen(hit)}
           className="items-start gap-2.5 px-2.5 py-2"
         >
-          <FileText className="mt-0.5" aria-hidden />
+          <FileKindIcon name={hit.name} isFolder={false} className="mt-0.5" />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex min-w-0 items-baseline gap-2">
               <span className="truncate font-medium">{hit.name}</span>
