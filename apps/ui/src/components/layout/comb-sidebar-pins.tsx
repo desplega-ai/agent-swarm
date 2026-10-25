@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useFavorites } from "@/api/hooks/use-favorites";
+import { useCombFavorites } from "@/api/hooks/use-comb-favorites";
 import type { StatusComb } from "@/api/types";
 import { FileKindIcon } from "@/components/comb/file-icon";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
@@ -18,11 +18,12 @@ import { combPath, isFolderPath, pinLabel, sidebarPins } from "@/lib/comb/paths"
 export function CombSidebarPins({ comb }: { comb: StatusComb | undefined }) {
   const { pathname } = useLocation();
   const [showAll, setShowAll] = useState(false);
-  const { data } = useFavorites("agent-fs-path");
-  if (!comb?.org_id || !comb.drive_id) return null;
+  const drive =
+    comb?.org_id && comb.drive_id ? { orgId: comb.org_id, driveId: comb.drive_id } : null;
+  const favorites = useCombFavorites(drive);
+  if (!drive) return null;
 
-  const drive = { orgId: comb.org_id, driveId: comb.drive_id };
-  const { pins, total, foldable } = sidebarPins(data?.favoriteIds ?? [], drive, showAll);
+  const { pins, total, foldable } = sidebarPins(favorites.ids ?? [], drive, showAll);
   if (total === 0) return null;
 
   return (

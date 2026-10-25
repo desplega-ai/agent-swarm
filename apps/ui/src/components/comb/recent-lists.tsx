@@ -3,7 +3,7 @@ import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useRecentChanges } from "@/api/hooks/use-agent-fs";
-import { useFavorites, useFavoriteToggle } from "@/api/hooks/use-favorites";
+import { useCombFavorites } from "@/api/hooks/use-comb-favorites";
 import { FileKindIcon } from "@/components/comb/file-icon";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useViewedFiles } from "@/components/comb/use-viewed-files";
@@ -17,14 +17,7 @@ import {
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  combPath,
-  type DrivePath,
-  drivePins,
-  isFolderPath,
-  pinIdFor,
-  pinLabel,
-} from "@/lib/comb/paths";
+import { combPath, type DrivePath, drivePins, isFolderPath, pinLabel } from "@/lib/comb/paths";
 import { type Drive, folderLabel, VIEWED_MAX } from "@/lib/comb/recent";
 import { isUnknownOpError } from "@/lib/comb/search";
 import { formatRelative } from "@/lib/relative-time";
@@ -174,24 +167,22 @@ export function RecentChangesList({ drive, current, limit = FULL_LIST, onNavigat
 
 /**
  * The person's favorites on the drive (the header star), by name. Each row
- * can leave the list. Favorites are per dashboard user (`agent-fs-path`
- * favorites), so every browser of that user shows the same list.
+ * can leave the list. They are the person's agent-fs stars
+ * (`useCombFavorites`), so the agent-fs live UI shows the same list.
  */
 export function FavoritesList({ drive, current, limit = Infinity, onNavigate }: ListProps) {
-  const favorites = useFavorites("agent-fs-path");
-  const toggle = useFavoriteToggle("agent-fs-path");
+  const favorites = useCombFavorites(drive);
   if (favorites.isPending) return <ListSkeleton rows={2} />;
-  if (favorites.isError && !favorites.data) {
+  if (favorites.error && !favorites.ids) {
     return <ListNote tone="error">{favorites.error.message}</ListNote>;
   }
-  const pins = drivePins(favorites.data?.favoriteIds ?? [], drive).slice(0, limit);
+  const pins = drivePins(favorites.ids ?? [], drive).slice(0, limit);
   if (pins.length === 0) return <ListNote>Star a file or folder to keep it here.</ListNote>;
 
   const remove = (pin: DrivePath) =>
-    toggle.mutate(
-      { itemId: pinIdFor(pin), favorite: false },
-      { onError: () => toast.error("Could not remove the favorite.") },
-    );
+    favorites.toggle(pin, false, {
+      onError: () => toast.error("Could not remove the favorite."),
+    });
 
   return (
     <ul aria-label="Favorites" className="flex flex-col gap-px">
@@ -217,7 +208,7 @@ export function FavoritesList({ drive, current, limit = Infinity, onNavigate }: 
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem disabled={toggle.isPending} onSelect={() => remove(pin)}>
+                  <DropdownMenuItem disabled={favorites.isToggling} onSelect={() => remove(pin)}>
                     <StarOff />
                     Remove from favorites
                   </DropdownMenuItem>
