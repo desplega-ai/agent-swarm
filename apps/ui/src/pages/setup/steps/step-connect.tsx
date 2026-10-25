@@ -1,12 +1,14 @@
-import { ExternalLink, Plug, UserRound, XCircle } from "lucide-react";
+import { ExternalLink, Plug, RotateCw, UserRound, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useStatus } from "@/api/hooks/use-status";
 import type { OnboardingResponse } from "@/api/types";
 import { IdentityForm } from "@/components/identity/identity-form";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { FadeIn } from "@/components/shared/fade-in";
+import { LocalNetworkHelp, LocalNetworkNotice } from "@/components/shared/local-network-help";
 import { SecretInput } from "@/components/shared/secret-input";
 import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon } from "@/components/shared/status-icon";
@@ -18,8 +20,10 @@ import { SettingsRow } from "@/components/ui/settings-row";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useContinueBlocker } from "@/hooks/use-autosave";
 import { useConfig } from "@/hooks/use-config";
-import { generateSlug } from "@/lib/slugs";
+import { connectionName } from "@/lib/config";
+import { needsLocalNetworkPermission, withAddressSpace } from "@/lib/local-network";
 import { httpUrlError } from "../components/http-url";
+import { DEFAULT_SWARM_NAME, swarmDisplayName } from "../components/swarm-name";
 import type { StepProps } from "../step-contract";
 
 export interface StepConnectProps {
@@ -31,6 +35,8 @@ export interface StepConnectProps {
   act?: StepProps["act"];
   /** Holds Continue until the operator picks who they are. */
   setContinueBlocker: StepProps["setContinueBlocker"];
+  /** Continue submits "Who are you?" (pick or create the user), then the shell moves on. */
+  setContinueAction: StepProps["setContinueAction"];
 }
 
 export function StepConnect({
@@ -38,13 +44,14 @@ export function StepConnect({
   onConnected,
   act,
   setContinueBlocker,
+  setContinueAction,
 }: StepConnectProps) {
   const { isConfigured } = useConfig();
   if (!isConfigured) return <ConnectForm onConnected={onConnected} />;
   return (
     <div className="space-y-3">
       <ConnectedSummary onboarding={onboarding} act={act} />
-      <WhoAreYou setContinueBlocker={setContinueBlocker} />
+      <WhoAreYou setContinueBlocker={setContinueBlocker} setContinueAction={setContinueAction} />
     </div>
   );
 }
@@ -56,7 +63,8 @@ function ConnectedSummary({
   onboarding: OnboardingResponse | null;
   act?: StepProps["act"];
 }) {
-  const { activeConnection, config, connectionLocked } = useConfig();
+  const { config, connectionLocked } = useConfig();
+  const { data: status } = useStatus({ pollIntervalMs: 30_000 });
   const connectStatus = onboarding?.state.steps.connect.status;
 
   // Existing installs skip server-side derivation, so "Run setup again" would
@@ -68,7 +76,10 @@ function ConnectedSummary({
     act({ action: "complete", step: "connect", method: "api_key" }).catch(() => {});
   }, [act, connectStatus]);
 
-  const name = activeConnection?.name ?? "your API";
+  // The API host until step 2 names the swarm. The stored connection keeps
+  // its own name for the connection switcher.
+  const swarmName = swarmDisplayName(status?.identity.name);
+  const name = swarmName === DEFAULT_SWARM_NAME ? connectionName(config.apiUrl) : swarmName;
   return (
     <SetupCard
       icon={<Plug className="size-4" />}
@@ -121,25 +132,31 @@ export function useIdentityPick() {
 
 /**
  * "Who are you?" right after the connection: pick or create the user the
- * swarm attributes tasks to. Holds Continue until a user is ready. Skipped
- * when a token or the deployment fixes the identity, or the API is older than
- * 1.76.0 (no users).
+ * swarm attributes tasks to. One flat form: the footer Continue (or Enter in
+ * a field) submits it and moves on. Holds Continue until the answers are
+ * complete. Skipped when a token or the deployment fixes the identity, or the
+ * API is older than 1.76.0 (no users).
  */
-function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBlocker">) {
+function WhoAreYou({
+  setContinueBlocker,
+  setContinueAction,
+}: Pick<StepConnectProps, "setContinueBlocker" | "setContinueAction">) {
   const { state, user, locked } = useCurrentUser();
   const { supported, checking, needed } = useIdentityPick();
   const [switching, setSwitching] = useState(false);
+  // What the form still needs (from `IdentityForm`), or null when Continue submits it.
+  const [formHold, setFormHold] = useState<string | null>("Enter your email.");
 
   const loadingUsers = needed && state === "pending";
   useContinueBlocker(
     setContinueBlocker,
     checking
       ? "Checking your server…"
-      : !needed
+      : !needed && !switching
         ? null
         : loadingUsers
           ? "Loading users…"
-          : "Tell us who you are",
+          : formHold,
     { busy: checking || loadingUsers },
   );
 
@@ -206,71 +223,110 @@ function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBl
         }
         status={<StatusIcon tone={state === "pending" ? "busy" : "none"} label="Loading users…" />}
       >
-        <IdentityForm surface="setup" autoFocus={false} onDone={() => setSwitching(false)} />
+        {/* The marker lets Enter in its fields run the footer Continue. */}
+        <div data-enter-continues>
+          <IdentityForm
+            surface="setup"
+            onDone={() => setSwitching(false)}
+            continueWith={{
+              setAction: (submit) => setContinueAction(submit, { unlocks: true }),
+              setHold: setFormHold,
+            }}
+          />
+        </div>
       </SetupCard>
     </FadeIn>
   );
 }
 
 // No success phase: storing the connection swaps this form for the connected
-// summary in the same render.
-type Probe = { phase: "idle" | "running" } | { phase: "error"; title: string; detail: string };
+// summary in the same render. `network`: no response at all (the API is down,
+// a wrong address, CORS, or the browser blocked local network access).
+type Probe =
+  | { phase: "idle" | "running" }
+  | { phase: "error"; title: string; detail: string; network: boolean };
+
+const UNREACHABLE = "Your swarm is not reachable yet";
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : "Connection failed";
+}
 
 function ConnectForm({ onConnected }: { onConnected: () => void }) {
-  const { addConnection, switchConnection } = useConfig();
-  const [placeholder] = useState(() => generateSlug());
-  const [name, setName] = useState("");
-  const [apiUrl, setApiUrl] = useState("http://localhost:3013");
-  const [apiKey, setApiKey] = useState("");
+  const { addConnection, switchConnection, setupLink, clearSetupLink } = useConfig();
+  // The install link (`/setup?apiUrl=&apiKey=`) fills the fields.
+  const [apiUrl, setApiUrl] = useState(setupLink?.apiUrl ?? "http://localhost:3013");
+  const [apiKey, setApiKey] = useState(setupLink?.apiKey ?? "");
   const [probe, setProbe] = useState<Probe>({ phase: "idle" });
 
   const url = apiUrl.trim().replace(/\/+$/, "");
   const urlValid = httpUrlError(url) === null;
   const running = probe.phase === "running";
+  // The hosted (https) dashboard and an API on this machine or the local network.
+  const asksPermission = urlValid && needsLocalNetworkPermission(url, window.location.href);
 
   async function handleTest() {
     if (!urlValid || !apiKey || running) return;
     setProbe({ phase: "running" });
-    const headers = { Authorization: `Bearer ${apiKey}` };
+    // For a local API, the first request opens the browser's permission prompt.
+    const init = withAddressSpace(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+    let res: Response;
     try {
-      const res = await fetch(`${url}/health`, { headers });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      res = await fetch(`${url}/health`, init);
+    } catch (err) {
+      setProbe({ phase: "error", title: UNREACHABLE, detail: errorText(err), network: true });
+      return;
+    }
+    try {
+      if (!res.ok) throw new Error(`GET /health returned ${res.status}`);
       // A JSON body tells the API apart from a host that answers every path
       // with HTML (this dashboard, for example).
-      await res.json();
-    } catch (err) {
-      setProbe({
-        phase: "error",
-        title: "Could not reach that address.",
-        detail: err instanceof Error ? err.message : "Connection failed",
+      await res.json().catch(() => {
+        throw new Error("GET /health did not return JSON");
       });
+    } catch (err) {
+      setProbe({ phase: "error", title: UNREACHABLE, detail: errorText(err), network: false });
       return;
     }
 
     try {
       // `/health` is public, so one authenticated read checks the key before
       // it is stored. Any status but 401/403 means the key was accepted.
-      const auth = await fetch(`${url}/api/onboarding`, { headers });
+      const auth = await fetch(`${url}/api/onboarding`, init);
       if (auth.status === 401 || auth.status === 403) {
         setProbe({
           phase: "error",
           title: "The server rejected this API key.",
           detail: `GET /api/onboarding returned ${auth.status}`,
+          network: false,
         });
         return;
       }
-      const created = addConnection({ name: name.trim() || placeholder, apiUrl: url, apiKey });
+      // Named after its host. The connection switcher can rename it.
+      const created = addConnection({ name: connectionName(url), apiUrl: url, apiKey });
       switchConnection(created.id);
+      clearSetupLink();
     } catch (err) {
       setProbe({
         phase: "error",
         title: "Could not save the connection.",
-        detail: err instanceof Error ? err.message : "Connection failed",
+        detail: errorText(err),
+        network: false,
       });
       return;
     }
     onConnected();
   }
+
+  // A setup link connects on its own. When the browser asks first, the notice
+  // explains the prompt, and Connect opens it.
+  const autoConnect = useRef(Boolean(setupLink) && !asksPermission);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once, on mount
+  useEffect(() => {
+    if (!autoConnect.current) return;
+    autoConnect.current = false;
+    void handleTest();
+  }, []);
 
   return (
     <SetupCard
@@ -291,23 +347,6 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
         }}
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <SettingsRow
-            label={
-              <>
-                Connection name
-                <InfoTip content="Optional. Shows in the connection switcher." />
-              </>
-            }
-            htmlFor="setup-connection-name"
-          >
-            <Input
-              id="setup-connection-name"
-              placeholder={placeholder}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              disabled={running}
-            />
-          </SettingsRow>
           <SettingsRow
             label={
               <>
@@ -334,26 +373,32 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
               className="font-mono"
             />
           </SettingsRow>
+          <SettingsRow
+            label={
+              <>
+                API key
+                <InfoTip
+                  content={
+                    <>
+                      The value of <code className="font-mono">AGENT_SWARM_API_KEY</code> on the
+                      server. Kept in this browser only.
+                    </>
+                  }
+                />
+              </>
+            }
+            htmlFor="setup-api-key"
+          >
+            <SecretInput
+              id="setup-api-key"
+              value={apiKey}
+              onChange={setApiKey}
+              disabled={running}
+            />
+          </SettingsRow>
         </div>
 
-        <SettingsRow
-          label={
-            <>
-              API key
-              <InfoTip
-                content={
-                  <>
-                    The value of <code className="font-mono">AGENT_SWARM_API_KEY</code> on the
-                    server. Kept in this browser only.
-                  </>
-                }
-              />
-            </>
-          }
-          htmlFor="setup-api-key"
-        >
-          <SecretInput id="setup-api-key" value={apiKey} onChange={setApiKey} disabled={running} />
-        </SettingsRow>
+        {asksPermission && probe.phase !== "error" ? <LocalNetworkNotice apiUrl={url} /> : null}
 
         <div>
           <Button type="submit" disabled={!urlValid || !apiKey || running}>
@@ -363,8 +408,24 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
         </div>
 
         {probe.phase === "error" ? (
-          <AlertCallout tone="error" icon={XCircle} title={probe.title}>
-            <span className="font-mono break-all">{probe.detail}</span>
+          <AlertCallout
+            tone="error"
+            icon={XCircle}
+            title={probe.title}
+            action={
+              <Button type="button" variant="outline" size="sm" onClick={() => void handleTest()}>
+                <RotateCw />
+                Retry
+              </Button>
+            }
+          >
+            <span className="block font-mono break-all">{probe.detail}</span>
+            {probe.network ? (
+              <>
+                <p className="mt-1">Check that your swarm is running and the URL is right.</p>
+                <LocalNetworkHelp apiUrl={url} />
+              </>
+            ) : null}
           </AlertCallout>
         ) : null}
       </form>

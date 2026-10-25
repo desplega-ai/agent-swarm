@@ -120,9 +120,9 @@ export function orgNameFromDomain(domain: string): string {
   return base.split("-").filter(Boolean).map(capitalize).join(" ");
 }
 
-/** ada.lovelace@acme.com becomes Ada Lovelace. */
+/** ada.lovelace@acme.com becomes Ada Lovelace. A plus tag (ada+qa@) is not part of the name. */
 export function nameFromEmail(email: string): string {
-  const local = email.trim().split("@")[0] ?? "";
+  const local = (email.trim().split("@")[0] ?? "").split("+")[0];
   return local
     .split(/[._-]+/)
     .filter(Boolean)

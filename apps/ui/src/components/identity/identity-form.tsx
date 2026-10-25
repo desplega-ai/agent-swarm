@@ -1,5 +1,5 @@
 import { AlertCircle, RotateCw, UserCircle2 } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useState } from "react";
 import { toast } from "sonner";
 import { useStatus } from "@/api/hooks/use-status";
 import { sendUiTelemetry } from "@/api/hooks/use-ui-telemetry";
@@ -8,13 +8,18 @@ import type { ApprovalQuestion, User } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { FadeIn } from "@/components/shared/fade-in";
 import { QuestionFlow, type QuestionFlowValues } from "@/components/shared/question-flow";
+import { useFinePointer } from "@/components/shared/questions/keyboard";
+import { OptionChoices } from "@/components/shared/questions/question-field";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useContinueAction, useContinueBlocker } from "@/hooks/use-autosave";
 import { useConfig } from "@/hooks/use-config";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { isTypingTarget } from "@/lib/approval-shortcuts";
 import {
   companyDomain,
   domainOf,
@@ -25,6 +30,20 @@ import {
   USER_FUNCTIONS,
 } from "@/lib/company-profile";
 import { normalizeOrgWebsite } from "../../../../../src/utils/org-website";
+
+/**
+ * An outer primary button submits the form (the `/setup` footer Continue).
+ * Local types: components never import from `pages/`.
+ */
+export interface IdentityContinue {
+  /** Offer `submit` as the outer Continue action, or remove it (null). */
+  setAction: (submit: (() => Promise<void>) | null) => void;
+  /** Why the answers cannot go yet, or null when Continue can submit them. */
+  setHold: (reason: string | null) => void;
+}
+
+const NO_ACTION: IdentityContinue["setAction"] = () => {};
+const NO_HOLD: IdentityContinue["setHold"] = () => {};
 
 type Stage =
   | { kind: "email" }
@@ -49,17 +68,19 @@ function emailHint(email: string): string {
   return "Stays on this swarm. With anonymous telemetry on, at most its domain is shared.";
 }
 
+const JOB_FUNCTION_QUESTION: ApprovalQuestion = {
+  id: "jobFunction",
+  type: "single-select",
+  label: "What do you work on?",
+  description: "Tunes the first tasks the swarm suggests to you.",
+  required: true,
+  options: [...USER_FUNCTIONS],
+};
+
 function detailQuestions(askWebsite: boolean): ApprovalQuestion[] {
   return [
     { id: "name", type: "text", label: "Your name", required: true, placeholder: "Ada Lovelace" },
-    {
-      id: "jobFunction",
-      type: "single-select",
-      label: "What do you work on?",
-      description: "Tunes the first tasks the swarm suggests to you.",
-      required: true,
-      options: [...USER_FUNCTIONS],
-    },
+    JOB_FUNCTION_QUESTION,
     ...(askWebsite
       ? [
           {
@@ -126,6 +147,7 @@ export function IdentityForm({
   autoFocus = true,
   onDone,
   saveCompanyWebsite,
+  continueWith,
 }: {
   /** The `surface` of `identity.user_created`. */
   surface: "identity_modal" | "setup";
@@ -135,8 +157,15 @@ export function IdentityForm({
   /**
    * Stores the company website a personal-address user gives. Pass it only
    * while the swarm has no website: the create flow then asks for one.
+   * Not asked with `continueWith`.
    */
   saveCompanyWebsite?: (website: string) => Promise<void>;
+  /**
+   * An outer Continue submits the answers (`/setup` step 1). The form is then
+   * one flat set of fields with no buttons of its own: the email, and for an
+   * address with no user yet, the name and the job function (1-9 pick it).
+   */
+  continueWith?: IdentityContinue;
 }) {
   const { setUserId, user: currentUser } = useCurrentUser();
   const { pendingIdentity, clearPendingIdentity } = useConfig();
@@ -155,6 +184,15 @@ export function IdentityForm({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [addedEmail, setAddedEmail] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
+  // `continueWith` mode: the name follows the email until it is edited (null).
+  const [name, setName] = useState<string | null>(null);
+  const [jobFunction, setJobFunction] = useState<string | null>(null);
+  // Enter in a field: show what is missing.
+  const [attempted, setAttempted] = useState(false);
+  const finePointer = useFinePointer();
+  // The name fields wait for a typing pause, so they do not flash in and out
+  // while a returning user types their address.
+  const settledEmail = useDebouncedValue(email, 400);
 
   const users = usersQuery.data ?? [];
 
@@ -249,6 +287,64 @@ export function IdentityForm({
     } catch (err) {
       setAddError(err instanceof Error ? err.message : "Could not save the email.");
     }
+  }
+
+  // `continueWith` mode: one flat form that the outer Continue submits.
+  const flat = continueWith !== undefined;
+  const match = isValidEmail(email) ? findByEmail(users, email) : undefined;
+  const nameValue = name ?? (pendingIdentity?.name?.trim() || nameFromEmail(email));
+  // A swarm with no users always creates one. Else ask once the address finds
+  // nobody: after a typing pause, or at once on Enter.
+  const unmatched = (value: string) => isValidEmail(value) && !findByEmail(users, value);
+  const asksDetails =
+    users.length === 0 || (unmatched(email) && (attempted || unmatched(settledEmail)));
+  const emailProblem = !email.trim()
+    ? "Enter your email."
+    : !isValidEmail(email)
+      ? "Enter a valid email, such as ada@acme.com."
+      : null;
+  const hold =
+    stage.kind === "list"
+      ? "Pick your user from the list."
+      : stage.kind === "add-email"
+        ? "Add an email to continue."
+        : !usersQuery.data
+          ? usersQuery.isPending
+            ? "Loading users…"
+            : "Could not load the users on this swarm."
+          : (emailProblem ??
+            (match
+              ? null
+              : !nameValue.trim()
+                ? "Enter your name."
+                : !jobFunction
+                  ? "Pick what you work on."
+                  : null));
+
+  async function submitFlat() {
+    const found = findByEmail(users, email);
+    sendUiTelemetry(status, { event: "identity.lookup", properties: { matched: Boolean(found) } });
+    if (found) {
+      pick(found.id);
+      return;
+    }
+    await create({ name: nameValue, jobFunction });
+  }
+
+  useContinueAction(
+    continueWith?.setAction ?? NO_ACTION,
+    flat && hold === null ? submitFlat : null,
+  );
+  useContinueBlocker(continueWith?.setHold ?? NO_HOLD, flat ? hold : null);
+
+  function onFlatKeyDown(event: KeyboardEvent<HTMLFormElement>) {
+    if (event.key === "Enter" && event.target instanceof HTMLInputElement) setAttempted(true);
+    // 1-9 pick the job function while focus is outside a text field.
+    const option = /^[1-9]$/.test(event.key) ? USER_FUNCTIONS[Number(event.key) - 1] : undefined;
+    if (!asksDetails || !option || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (isTypingTarget(event.target)) return;
+    event.preventDefault();
+    setJobFunction(option.value);
   }
 
   if (usersQuery.isPending) {
@@ -404,6 +500,87 @@ export function IdentityForm({
               Save and continue as {user.name}
             </Button>
           </div>
+        </form>
+      </FadeIn>
+    );
+  }
+
+  if (flat) {
+    const busy = createUser.isPending;
+    const fieldError = (problem: string | null) =>
+      attempted && problem ? <span className="text-status-error-strong">{problem}</span> : null;
+    return (
+      <FadeIn key="flat">
+        {/* No submit button: Enter and the outer Continue submit. */}
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => event.preventDefault()}
+          onKeyDown={onFlatKeyDown}
+          noValidate
+        >
+          <EmailInput
+            id="identity-email"
+            value={email}
+            onChange={setEmail}
+            error={attempted ? emailProblem : null}
+            autoFocus={autoFocus}
+            helper={emailHint(email)}
+          />
+          {match ? (
+            <FadeIn key="match">
+              <p className="text-sm">
+                Welcome back, <span className="font-medium">{match.name}</span>.
+              </p>
+            </FadeIn>
+          ) : asksDetails ? (
+            <FadeIn key="details" className="flex flex-col gap-4">
+              <SettingsRow
+                label="Your name"
+                htmlFor="identity-name"
+                required
+                helper={fieldError(nameValue.trim() ? null : "Enter your name.")}
+              >
+                <Input
+                  id="identity-name"
+                  autoComplete="name"
+                  placeholder="Ada Lovelace"
+                  value={nameValue}
+                  onChange={(event) => setName(event.target.value)}
+                  disabled={busy}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label={JOB_FUNCTION_QUESTION.label}
+                required
+                helper={
+                  fieldError(jobFunction ? null : "Pick what you work on.") ??
+                  JOB_FUNCTION_QUESTION.description
+                }
+              >
+                <OptionChoices
+                  question={JOB_FUNCTION_QUESTION}
+                  options={JOB_FUNCTION_QUESTION.options ?? []}
+                  selected={jobFunction ? [jobFunction] : []}
+                  multi={false}
+                  onToggle={setJobFunction}
+                  cursor={-1}
+                  showKeys={finePointer}
+                  disabled={busy}
+                />
+              </SettingsRow>
+            </FadeIn>
+          ) : null}
+          {users.length > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="self-start"
+              onClick={() => setStage({ kind: "list" })}
+            >
+              No email? Pick from the list
+            </Button>
+          ) : null}
         </form>
       </FadeIn>
     );

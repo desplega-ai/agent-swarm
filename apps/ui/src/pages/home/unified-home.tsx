@@ -25,12 +25,15 @@ import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
 import { FleetBenchmarkCard } from "@/components/dashboard/fleet-benchmark-card";
 import { MobileNow } from "@/components/dashboard/mobile-now";
 import { SetupChecklistCard } from "@/components/onboarding/setup-checklist-card";
+import { LocalNetworkHelp } from "@/components/shared/local-network-help";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useConfig } from "@/hooks/use-config";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 export function UnifiedHome() {
   const { supported, currentVersion, isError, error } = useFeatureGate("1.76.0");
+  const { config, pendingConnection } = useConfig();
 
   // The greeting lives in the top bar's breadcrumb slot now (Breadcrumbs
   // renders it on `/`) — this page is just the timeline region.
@@ -56,8 +59,11 @@ export function UnifiedHome() {
               isMobile={isMobile}
               versionResolved={versionResolved}
               supported={supported}
-              isError={isError}
+              // A connection from URL params is not stored until the naming
+              // dialog saves it: no attempt has failed yet.
+              isError={isError && !pendingConnection}
               error={error}
+              apiUrl={config.apiUrl}
             />
           </div>
         </div>
@@ -72,12 +78,14 @@ function TimelineRegion({
   supported,
   isError,
   error,
+  apiUrl,
 }: {
   isMobile: boolean;
   versionResolved: boolean;
   supported: boolean;
   isError: boolean;
   error: Error | null;
+  apiUrl: string;
 }) {
   // The version probe failed outright (dead apiUrl, bad key, CORS, network) —
   // stop spinning a skeleton forever and tell the user why, with a way out.
@@ -89,7 +97,8 @@ function TimelineRegion({
         <Link to="/settings/connections" className="underline underline-offset-2">
           Settings → Connections
         </Link>
-        .
+        .{/* `fetch` rejects with a TypeError when no response came back. */}
+        {error instanceof TypeError ? <LocalNetworkHelp apiUrl={apiUrl} /> : null}
       </AlertCallout>
     );
   }

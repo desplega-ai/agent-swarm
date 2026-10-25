@@ -4,6 +4,7 @@ import {
   addConnection as addStoredConnection,
   type Config,
   type Connection,
+  connectionName,
   getActiveConnection,
   getConnections,
   getDefaultConfig,
@@ -47,7 +48,7 @@ interface ConfigContextValue {
   setConfig: (config: Config) => void;
   /** Reset all connections and config */
   resetConfig: () => void;
-  /** True if active connection has an apiKey */
+  /** True if active connection has an apiKey, and no `/setup` link waits for its test */
   isConfigured: boolean;
   /** True when build-time settings own the only available connection */
   connectionLocked: boolean;
@@ -55,6 +56,13 @@ interface ConfigContextValue {
   pendingConnection: PendingConnection | null;
   /** Clear the pending connection state */
   clearPendingConnection: () => void;
+  /**
+   * Connection from the `/setup?apiUrl=&apiKey=` install link (not saved yet).
+   * The connect step tests it, then stores it. Never shown in a dialog.
+   */
+  setupLink: PendingConnection | null;
+  /** Clear the setup link (after the connect step stored it) */
+  clearSetupLink: () => void;
   /** Pending identity hint from URL params (?email=, ?name=) */
   pendingIdentity: PendingIdentity | null;
   /** Clear the pending identity state */
@@ -67,12 +75,17 @@ export const ConfigContext = createContext<ConfigContextValue | null>(null);
  * Extract ?apiUrl=, ?apiKey=, ?email=, ?name= from the URL, strip them, and
  * return the pending connection + identity hints. If a connection with the
  * given apiUrl+apiKey already exists, activate it and return a null
- * pendingConnection (the identity hint is still returned separately).
+ * pendingConnection (the identity hint is still returned separately). On
+ * `/setup`, a new connection comes back as `setupLink` instead.
  */
 function extractUrlParams(
   connections: Connection[],
   activateFn: (id: string) => void,
-): { pendingConnection: PendingConnection | null; pendingIdentity: PendingIdentity | null } {
+): {
+  pendingConnection: PendingConnection | null;
+  setupLink?: PendingConnection;
+  pendingIdentity: PendingIdentity | null;
+} {
   const params = new URLSearchParams(window.location.search);
   const apiUrl = params.get("apiUrl");
   const apiKey = params.get("apiKey");
@@ -80,7 +93,7 @@ function extractUrlParams(
   const name = params.get("name");
 
   // The router read its location before this ran: `ConnectionParamsCleanup`
-  // in the root layout drops the same params from the router's copy too.
+  // (root layout and `/setup`) drops the same params from the router's copy too.
   const stripped = withoutConnectionParams(window.location.search);
   if (stripped !== null) {
     const url = new URL(window.location.href);
@@ -125,17 +138,21 @@ function extractUrlParams(
   // tokens can never clobber each other, and the shared localStorage
   // connection list is never touched.
   if (isUserTokenApiKey(apiKey)) {
-    let host = normalizedUrl;
-    try {
-      host = new URL(normalizedUrl).host;
-    } catch {
-      // Keep the raw URL as the label if it doesn't parse.
-    }
-    setEmbedConnection({ name: `embed:${host}`, apiUrl: normalizedUrl, apiKey });
+    setEmbedConnection({
+      name: `embed:${connectionName(normalizedUrl)}`,
+      apiUrl: normalizedUrl,
+      apiKey,
+    });
     return { pendingConnection: null, pendingIdentity };
   }
 
-  return { pendingConnection: { apiUrl: normalizedUrl, apiKey }, pendingIdentity };
+  // The install link (`/setup?apiUrl=&apiKey=`): the connect step tests the
+  // connection, then stores it named after its host. No naming dialog.
+  const link = { apiUrl: normalizedUrl, apiKey };
+  if (window.location.pathname.replace(/\/+$/, "") === "/setup") {
+    return { pendingConnection: null, setupLink: link, pendingIdentity };
+  }
+  return { pendingConnection: link, pendingIdentity };
 }
 
 function loadState(): { connections: Connection[]; activeConnection: Connection | null } {
@@ -165,6 +182,9 @@ export function useConfigProvider() {
   const [pendingConnection, setPendingConnection] = useState<PendingConnection | null>(
     initialUrlParams.pendingConnection,
   );
+  const [setupLink, setSetupLink] = useState<PendingConnection | null>(
+    initialUrlParams.setupLink ?? null,
+  );
   const [pendingIdentity, setPendingIdentity] = useState<PendingIdentity | null>(
     initialUrlParams.pendingIdentity,
   );
@@ -182,6 +202,10 @@ export function useConfigProvider() {
 
   const clearPendingIdentity = useCallback(() => {
     setPendingIdentity(null);
+  }, []);
+
+  const clearSetupLink = useCallback(() => {
+    setSetupLink(null);
   }, []);
 
   // If there's a pending connection, use its credentials for the config
@@ -239,10 +263,13 @@ export function useConfigProvider() {
     resetStoredConfig();
     refreshState();
     setPendingConnection(null);
+    setSetupLink(null);
     setPendingIdentity(null);
   }, [refreshState]);
 
-  const isConfigured = !!config.apiKey;
+  // A setup link replaces the active connection once it passes the test, so
+  // `/setup` shows the connect step until then (also with another connection).
+  const isConfigured = !setupLink && !!config.apiKey;
   const connectionLocked = Boolean(uiDeploymentConfig.apiUrl);
 
   return {
@@ -259,6 +286,8 @@ export function useConfigProvider() {
     connectionLocked,
     pendingConnection,
     clearPendingConnection,
+    setupLink,
+    clearSetupLink,
     pendingIdentity,
     clearPendingIdentity,
   };

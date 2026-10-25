@@ -28,19 +28,21 @@ const DEFAULT_CONFIG: Config = {
 
 export const DEPLOYMENT_CONNECTION_ID = "deployment";
 
+/** A connection label from its API URL: the host (`localhost:3013`), or the URL when it is not absolute. */
+export function connectionName(apiUrl: string): string {
+  try {
+    return new URL(apiUrl).host || apiUrl;
+  } catch {
+    return apiUrl;
+  }
+}
+
 function getDeploymentConnection(): Connection | null {
   if (!uiDeploymentConfig.apiUrl || !uiDeploymentConfig.apiKey) return null;
 
-  let name = uiDeploymentConfig.apiUrl;
-  try {
-    name = new URL(uiDeploymentConfig.apiUrl).host;
-  } catch {
-    // Keep the configured URL as the label when it is not absolute.
-  }
-
   return {
     id: DEPLOYMENT_CONNECTION_ID,
-    name: isDemoMode ? "Demo swarm" : name,
+    name: isDemoMode ? "Demo swarm" : connectionName(uiDeploymentConfig.apiUrl),
     apiUrl: uiDeploymentConfig.apiUrl,
     apiKey: uiDeploymentConfig.apiKey,
   };
