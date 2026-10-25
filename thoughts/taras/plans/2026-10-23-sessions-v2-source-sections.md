@@ -391,13 +391,13 @@ The desktop and phone sidebars show one collapsed section per source after Share
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI unit tests pass: `cd apps/ui && bun test src/lib/session-groups.test.ts src/components/sessions-v2/sidebar/tree-rows.test.ts`
-- [ ] UI type check passes: `cd apps/ui && bunx tsc -b`
-- [ ] UI lint and tokens pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] UI E2E suite passes (clean checkout with no `.env`): `bun run e2e:ui`
+- [x] UI unit tests pass: `cd apps/ui && bun test src/lib/session-groups.test.ts src/components/sessions-v2/sidebar/tree-rows.test.ts`
+- [x] UI type check passes: `cd apps/ui && bunx tsc -b`
+- [x] UI lint and tokens pass: `cd apps/ui && bun run lint && bun run check:tokens`
+- [x] UI E2E suite passes (clean checkout with no `.env`): `bun run e2e:ui`
 
 #### Automated QA:
-- [ ] On the Phase 4 QA stack (API :3123, UI `cd apps/ui && VITE_PROXY_TARGET=http://localhost:3123 bunx vite --port 5294 --strictPort`), with `agent-browser` session `sss-qa`: with the default filter (only `ui` ticked), no source section shows. Tick Slack and Telegram in the filter menu: the Slack and Telegram sections sit after Shared with me and start collapsed. Opening Slack shows labeled channel and DM groups. A source group has no menu and no "+". Dragging a session onto a source group does nothing. The move dialog and Start in list no source group. Moving a session out works, and Undo puts it back. Screenshots for desktop and phone (390 x 844).
+- [x] On the Phase 4 QA stack (API :3123, UI `cd apps/ui && VITE_PROXY_TARGET=http://localhost:3123 bunx vite --port 5294 --strictPort`), with `agent-browser` session `sss-qa`: with the default filter (only `ui` ticked), no source section shows. Tick Slack and Telegram in the filter menu: the Slack and Telegram sections sit after Shared with me and start collapsed. Opening Slack shows labeled channel and DM groups. A source group has no menu and no "+". Dragging a session onto a source group does nothing. The move dialog and Start in list no source group. Moving a session out works, and Undo puts it back. Screenshots for desktop and phone (390 x 844).
 
 #### Manual Verification:
 - [ ] Taras checks the look of the source sections against the mockup.
@@ -562,3 +562,4 @@ _Implementation run started 2026-10-25 in worktree `~/worktrees/agent-swarm/2026
 - Phase 2: the move guard allows only `sessionSourceKey(root)`. A root an agent created with an explicit `shared/slack/...` key that differs from its own fields can move out, but its Undo is refused (the UI ignores the Undo result). Accepted as an edge case. The PATCH route falls back to "no source key allowed" when it cannot load the session root.
 - Phase 3: `warmSlackChannelLabels` takes source group keys and looks up only channel group keys (`shared/slack/<channel>/`), so a bare `shared/slack/` or a deeper key never queues a lookup. chat-sdk capture covers Telegram and Discord only (a Slack DM through chat-sdk must not block the Slack lookup with an untimed label). Every chat message refreshes the label, once per flush, so a renamed Telegram group shows its new title.
 - Phase 4 (after three reviews, Codex included): each root moves in its own write transaction that re-checks the key (a user move after the batch read wins) and reads the chain ids inside the lock (a new child moves too). A failing root is logged and skipped; then the run deletes the cursor and writes no marker, so the next boot retries only the failed roots. `moveTaskChainKeyInTx` now writes `updated_by = COALESCE(?, updated_by)` (no actor keeps the last editor, the repo audit convention), which also changes the bulk and prefix move routes when they have no trusted actor. QA on a prod-shaped copy: `scanned=19 moved=19 skipped=0 failed=0`, marker written, a restart added no history rows.
+- Phase 5 (Opus UI agent, QA screenshots in `/tmp/sss-qa/shots/p5-*.png`): a channel row drops the label's leading `#` next to its Hash icon (`eng`, not `# #eng`); flat rows and toasts keep `#eng`. A new or renamed group whose name lands under a source prefix (`slack`) is refused with a toast. `reveal` (pane crumb) opens a folded source section. The source header follows SPEC R5 (title and count, no chevron); a reviewer flagged that a folded section gives no visible "opens" cue, so Taras should judge it in the look check. DM icons come from id rules (Slack `d…`, Telegram positive chat id) plus the `DM · ` label prefix for Discord; a typed DM flag from the server is a possible follow-up. Seen in QA, not fixed (older code): on Android Chrome a tap on the phone filter button enters search mode (`mobile/mobile-search.tsx` `onFocus`).

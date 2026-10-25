@@ -24,7 +24,10 @@ export function useMyGroups(me: string | null) {
     [emptyGroups.keys, serverKeys],
   );
   const groups = useMemo(
-    () => (tree ? buildSessionGroupTree(withEmptyGroups(tree.groups, [...localGroups]), me) : null),
+    () =>
+      tree
+        ? buildSessionGroupTree(withEmptyGroups(tree.groups, [...localGroups]), me, tree.labels)
+        : null,
     [tree, localGroups, me],
   );
   const targets = useMemo(() => (groups ? groupTargets(groups, me) : []), [groups, me]);

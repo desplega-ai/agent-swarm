@@ -8,7 +8,12 @@ import type {
   SessionsListResponse,
   SessionTreeResponse,
 } from "../../../api/types";
-import { type GroupNode, personalOwner, type SessionGroupTree } from "../../../lib/session-groups";
+import {
+  type GroupNode,
+  personalOwner,
+  type SessionGroupTree,
+  type SessionSource,
+} from "../../../lib/session-groups";
 import {
   type SessionSection,
   SIDEBAR_LIST_LIMIT,
@@ -45,8 +50,17 @@ export type TreeRow =
       counts: SessionSectionCounts;
       /** Under Shared with me: no "+" (SPEC R3), and the name is the path below the owner. */
       sharedWithMe: boolean;
+      /** A source group: no menu, no "+", and no drops (SPEC R3, plan Phase 5). */
+      readOnly?: boolean;
       /** A search match: the name is the whole path, and the row does not fold. */
       searchMatch?: boolean;
+    })
+  | (RowBase & {
+      /** A source section header (Slack, Telegram, Discord). A click folds it. */
+      type: "source";
+      source: SessionSource;
+      open: boolean;
+      counts: SessionSectionCounts;
     })
   | (RowBase & {
       type: "owner";
@@ -91,12 +105,13 @@ export type TreeRow =
 
 export type NavRow = Extract<
   TreeRow,
-  { type: "box" | "group" | "owner" | "session" | "more" | "all" | "add" }
+  { type: "box" | "group" | "source" | "owner" | "session" | "more" | "all" | "add" }
 >;
 
 const NAV_TYPES = new Set<TreeRow["type"]>([
   "box",
   "group",
+  "source",
   "owner",
   "session",
   "more",
@@ -105,6 +120,13 @@ const NAV_TYPES = new Set<TreeRow["type"]>([
 ]);
 
 /** Rows the keyboard cursor stops on. */
+/** A group of mine: not under Shared with me and not a source group, so it takes menus, "+", and drops. */
+export function isMyGroupRow(
+  row: TreeRow | null | undefined,
+): row is Extract<TreeRow, { type: "group" }> {
+  return row?.type === "group" && !row.sharedWithMe && !row.readOnly;
+}
+
 export function isNavRow(row: TreeRow): row is NavRow {
   return NAV_TYPES.has(row.type);
 }
@@ -112,10 +134,14 @@ export function isNavRow(row: TreeRow): row is NavRow {
 /** The fold id of an owner node under Shared with me. */
 export const ownerFoldId = (ownerId: string) => `owner:${ownerId}`;
 
-/** The fold id of a container row: a section, a group key, or an owner. */
+/** The fold id of a source section. */
+export const sourceFoldId = (source: SessionSource) => `source:${source}`;
+
+/** The fold id of a container row: a section, a group key, a source, or an owner. */
 export function foldId(row: TreeRow): string | null {
   if (row.type === "box") return row.id;
   if (row.type === "group") return row.node.key;
+  if (row.type === "source") return sourceFoldId(row.source);
   if (row.type === "owner") return ownerFoldId(row.ownerId);
   return null;
 }
@@ -185,14 +211,17 @@ export function wholeListTotal(rows: TreeRow[], container: ContainerId): number 
   return total !== null && total > loaded ? total : null;
 }
 
-/** Open until folded: the Inbox, Later (the mockup default), and other people's groups. */
+/**
+ * Open until folded: the Inbox, Later (the mockup default), and other
+ * people's groups. Sources and their groups start folded.
+ */
 export function openByDefault(id: string, me: string | null): boolean {
   if (id === "inbox" || id === "later") return true;
   const owner = personalOwner(id);
   return owner !== null && owner !== me;
 }
 
-/** Every fold id the tree can show: the sections, each group, and each owner. */
+/** Every fold id the tree can show: the sections, each group, each source, and each owner. */
 export function foldIds(groups: SessionGroupTree): Set<string> {
   const ids = new Set<string>(["inbox", "later", "done", "nogroup"]);
   const walk = (node: GroupNode) => {
@@ -203,6 +232,10 @@ export function foldIds(groups: SessionGroupTree): Set<string> {
   for (const owner of groups.sharedWithMe) {
     ids.add(ownerFoldId(owner.ownerId));
     for (const node of owner.groups) ids.add(node.key);
+  }
+  for (const section of groups.sources) {
+    ids.add(sourceFoldId(section.source));
+    for (const node of section.nodes) walk(node);
   }
   return ids;
 }
@@ -228,7 +261,8 @@ interface BuildTreeRowsInput {
 
 /**
  * The sidebar as one flat row list (SPEC R4, R5, R6): Inbox, Later, Done,
- * No group, My groups, Shared with me. `containers` names the lists to
+ * No group, My groups, Shared with me, then one section per source
+ * (SPEC R4, plan Phase 5). `containers` names the lists to
  * load: open lists with sessions only, so a poll never loads a folded one.
  * Run it once with no lists to learn `containers`, then again with them.
  */
@@ -311,7 +345,7 @@ export function buildTreeRows({
     label: "My groups",
     count: groups.myGroupsTotal,
   });
-  const groupNode = (node: GroupNode, level: number) => {
+  const groupNode = (node: GroupNode, level: number, readOnly = false) => {
     const open = isOpen(node.key);
     const key = `group:${node.key}`;
     rows.push({
@@ -322,12 +356,13 @@ export function buildTreeRows({
       open,
       counts: open ? node.own : node.subtree,
       sharedWithMe: false,
+      readOnly,
     });
     if (creating === node.key) {
       rows.push({ type: "create", key: `create:${node.key}`, level: level + 1, parent: node.key });
     }
     if (!open) return;
-    for (const child of node.children) groupNode(child, level + 1);
+    for (const child of node.children) groupNode(child, level + 1, readOnly);
     const emptyKind =
       node.children.length > 0 ? null : localGroups?.has(node.key) ? "fresh" : "group";
     fill(node.key, key, node.own.total, level + 1, false, emptyKind);
@@ -380,6 +415,20 @@ export function buildTreeRows({
         if (groupOpen) fill(node.key, key, node.own.total, 2, false, "group");
       }
     }
+  }
+
+  // One section per source, folded until opened. Its groups are read-only.
+  for (const section of groups.sources) {
+    const open = isOpen(sourceFoldId(section.source));
+    rows.push({
+      type: "source",
+      key: sourceFoldId(section.source),
+      level: 0,
+      source: section.source,
+      open,
+      counts: section.counts,
+    });
+    if (open) for (const node of section.nodes) groupNode(node, 1, true);
   }
 
   return { rows, containers };

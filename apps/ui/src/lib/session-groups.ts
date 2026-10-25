@@ -1,15 +1,29 @@
 // Sessions v2 sidebar: nest the flat `groups` of `GET /api/session-tree` into
-// My groups and Shared with me, and add up the counts of folded groups.
+// My groups, Shared with me, and the source sections, and add up the counts
+// of folded groups.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
 import type { SessionSectionCounts, SessionTreeGroup } from "../api/types";
 
+/** The external sources with their own sidebar section. Mirrors `src/assets/source-key.ts`. */
+export const SESSION_SOURCES = ["slack", "telegram", "discord"] as const;
+export type SessionSource = (typeof SESSION_SOURCES)[number];
+
+/** The source of a key under `shared/<source>/`, or null. */
+export function sourceOfGroupKey(key: string): SessionSource | null {
+  return SESSION_SOURCES.find((source) => key.startsWith(`shared/${source}/`)) ?? null;
+}
+
 /** One group (an asset key prefix) in the sidebar tree. */
 export interface GroupNode {
   /** The group key (`shared/northwind/pricing/`). It is also the fold id and the `?view=` value. */
   key: string;
-  /** What the row shows: the last segment, or the path below the owner under Shared with me. */
+  /**
+   * What the row shows: the last segment, the path below the owner under
+   * Shared with me, or a source group's label (`sourceGroupLabel`, with no
+   * leading `#`: the row icon shows it).
+   */
   name: string;
   /** Sessions in exactly this group. Zero for a parent that holds only subgroups. */
   own: SessionSectionCounts;
@@ -20,6 +34,17 @@ export interface GroupNode {
   children: GroupNode[];
   /** A `personal/<me>/` group whose path a `shared/` group also uses. The row shows a lock ("Only you"). */
   privateClash: boolean;
+  /** A source group that is a direct message: the row shows a person, not a `#`. */
+  dm?: boolean;
+}
+
+/** One source section (Slack, Telegram, Discord): its groups, read-only. */
+export interface SourceSection {
+  source: SessionSource;
+  /** The groups below `shared/<source>/`, nested by `/`, newest first. */
+  nodes: GroupNode[];
+  /** Every session in the section. */
+  counts: SessionSectionCounts;
 }
 
 /** Another person's `personal/<owner>/` groups that I can see (decision 4). */
@@ -38,6 +63,8 @@ export interface SessionGroupTree {
   myGroupsTotal: number;
   /** Sessions under Shared with me, for the section header. */
   sharedWithMeTotal: number;
+  /** In `SESSION_SOURCES` order, only the sources with groups. */
+  sources: SourceSection[];
 }
 
 const ZERO: SessionSectionCounts = { total: 0, unread: 0, running: 0, needsYou: 0 };
@@ -160,6 +187,44 @@ export function groupCrumb(
   return parts.join(" › ");
 }
 
+/** The ids below `shared/<source>/`: `["c0ar967k0kz"]` for a Slack channel group. */
+function sourceIds(key: string): string[] {
+  return segments(key).slice(2);
+}
+
+/**
+ * The name of a source group: its label from the tree (`#eng`, `DM · Lena`,
+ * a Telegram chat title), else a name from its id: `#<ID>` for a Slack
+ * channel (`c…`, `g…`, in Slack's upper case), `DM` for a Slack DM (`d…`),
+ * and the raw id otherwise.
+ */
+export function sourceGroupLabel(
+  key: string,
+  labels: Readonly<Record<string, string>> = {},
+): string {
+  const label = labels[key];
+  if (label) return label;
+  const ids = sourceIds(key);
+  const id = ids[ids.length - 1] ?? "";
+  if (sourceOfGroupKey(key) === "slack" && ids.length === 1) {
+    if (/^[cg]/.test(id)) return `#${id.toUpperCase()}`;
+    if (id.startsWith("d")) return "DM";
+  }
+  return id;
+}
+
+/**
+ * A direct message: a Slack `d…` id, a Telegram private chat (a positive
+ * chat id; groups are negative), or a `DM · <name>` label (Discord).
+ */
+function isSourceDm(key: string, labels: Readonly<Record<string, string>>): boolean {
+  const ids = sourceIds(key);
+  const source = sourceOfGroupKey(key);
+  if (ids.length === 1 && source === "slack" && ids[0].startsWith("d")) return true;
+  if (ids.length === 1 && source === "telegram" && !ids[0].startsWith("-")) return true;
+  return labels[key]?.startsWith("DM · ") ?? false;
+}
+
 /** A group a session can move into or start in, with the path the sidebar shows. */
 export interface GroupTarget {
   key: string;
@@ -223,19 +288,8 @@ function rollUp(node: GroupNode): void {
   node.children.sort(byActivity);
 }
 
-/**
- * The sidebar tree. My groups holds `shared/` groups and my `personal/<me>/`
- * groups, nested by `/`, with a parent node for every prefix. Shared with me
- * holds other people's `personal/<owner>/` groups, one node per owner. No
- * group keys stay out: the No group box shows them.
- *
- * `me` is null for an operator with no picked user. Then every personal group
- * belongs to another person.
- */
-export function buildSessionGroupTree(
-  groups: SessionTreeGroup[],
-  me: string | null,
-): SessionGroupTree {
+/** Groups nested by `/` below their base (`shared/`, `shared/slack/`), with a parent node for every prefix. */
+function nester() {
   const nodes = new Map<string, GroupNode>();
   const roots: GroupNode[] = [];
   const nodeFor = (key: string, base: string): GroupNode => {
@@ -256,6 +310,29 @@ export function buildSessionGroupTree(
     else nodeFor(`${base}${parts.slice(0, -1).join("/")}/`, base).children.push(node);
     return node;
   };
+  return { nodes, roots, nodeFor };
+}
+
+/**
+ * The sidebar tree. My groups holds `shared/` groups and my `personal/<me>/`
+ * groups, nested by `/`, with a parent node for every prefix. Shared with me
+ * holds other people's `personal/<owner>/` groups, one node per owner. Each
+ * source (`shared/slack/`, `shared/telegram/`, `shared/discord/`) gets its
+ * own section, named with `labels`, and stays out of My groups, so it is
+ * never a move or Start in target. No group keys stay out: the No group box
+ * shows them.
+ *
+ * `me` is null for an operator with no picked user. Then every personal group
+ * belongs to another person.
+ */
+export function buildSessionGroupTree(
+  groups: SessionTreeGroup[],
+  me: string | null,
+  labels: Readonly<Record<string, string>> = {},
+): SessionGroupTree {
+  const mine = nester();
+  const { nodes, roots } = mine;
+  const bySource = new Map<SessionSource, ReturnType<typeof nester>>();
 
   const owners = new Map<string, OwnerNode>();
   for (const group of groups) {
@@ -266,9 +343,15 @@ export function buildSessionGroupTree(
       running: group.running,
       needsYou: group.needsYou,
     };
-    const base = myBase(group.key, me);
+    const source = sourceOfGroupKey(group.key);
+    const base = source ? `shared/${source}/` : myBase(group.key, me);
     if (base) {
-      const node = nodeFor(group.key, base);
+      let tree = mine;
+      if (source) {
+        tree = bySource.get(source) ?? nester();
+        bySource.set(source, tree);
+      }
+      const node = tree.nodeFor(group.key, base);
       node.own = counts;
       node.lastActivityAt = group.lastActivityAt;
       continue;
@@ -307,10 +390,28 @@ export function buildSessionGroupTree(
 
   const sharedWithMe = [...owners.values()].sort(byActivity);
   for (const owner of sharedWithMe) owner.groups.sort(byActivity);
+
+  const sources = SESSION_SOURCES.flatMap((source): SourceSection[] => {
+    const tree = bySource.get(source);
+    if (!tree) return [];
+    // Names first: the roll-up sorts by them. A channel row's `#` icon
+    // already says channel, so `#eng` shows as `eng`, like a user group.
+    for (const node of tree.nodes.values()) {
+      const label = sourceGroupLabel(node.key, labels);
+      node.dm = isSourceDm(node.key, labels);
+      node.name = node.dm ? label : label.replace(/^#/, "");
+    }
+    for (const root of tree.roots) rollUp(root);
+    tree.roots.sort(byActivity);
+    const counts = tree.roots.reduce((sum, node) => addCounts(sum, node.subtree), ZERO);
+    return [{ source, nodes: tree.roots, counts }];
+  });
+
   return {
     myGroups: roots,
     sharedWithMe,
     myGroupsTotal: roots.reduce((sum, node) => sum + node.subtree.total, 0),
     sharedWithMeTotal: sharedWithMe.reduce((sum, owner) => sum + owner.subtree.total, 0),
+    sources,
   };
 }

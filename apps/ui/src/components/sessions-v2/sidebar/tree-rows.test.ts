@@ -9,6 +9,7 @@ import type {
 import { buildSessionGroupTree } from "../../../lib/session-groups";
 import {
   buildTreeRows,
+  foldId,
   foldIds,
   fullListOf,
   isNavRow,
@@ -248,6 +249,79 @@ describe("buildTreeRows", () => {
         "shared/a/b/",
       ].sort(),
     );
+  });
+});
+
+describe("source sections (sources Phase 5)", () => {
+  const t = tree([
+    group("shared/a/", 1),
+    group("personal/lena/notes/", 1),
+    group("shared/telegram/-1001/", 2),
+    group("shared/slack/c0eng00001/", 3),
+    group("shared/slack/d0dm000001/", 1),
+  ]);
+
+  test("sections follow Shared with me in source order, folded by default", () => {
+    const { rows, containers } = build(t, { open: { inbox: false, later: false } });
+    expect(keys(rows).slice(4)).toEqual([
+      "section:mine",
+      "group:shared/a/",
+      "add:group",
+      "section:shared",
+      "owner:lena",
+      "source:slack",
+      "source:telegram",
+    ]);
+    expect(rows.find((row) => row.key === "source:slack")).toMatchObject({
+      type: "source",
+      source: "slack",
+      level: 0,
+      open: false,
+      counts: counts(4),
+    });
+    // A folded source loads nothing.
+    expect(containers).toEqual([]);
+  });
+
+  test("an open source lists its groups as read-only level 1 rows", () => {
+    const { rows, containers } = build(t, {
+      open: { inbox: false, later: false, "source:slack": true, "shared/slack/c0eng00001/": true },
+    });
+    const slack = rows.slice(rows.findIndex((row) => row.key === "source:slack"));
+    expect(keys(slack)).toEqual([
+      "source:slack",
+      "group:shared/slack/c0eng00001/",
+      "loading:shared/slack/c0eng00001/",
+      "group:shared/slack/d0dm000001/",
+      "source:telegram",
+    ]);
+    expect(slack[1]).toMatchObject({ type: "group", level: 1, readOnly: true, open: true });
+    expect(slack[3]).toMatchObject({ type: "group", level: 1, readOnly: true, open: false });
+    expect(containers).toEqual(["shared/slack/c0eng00001/"]);
+    // My groups stay writable.
+    expect(rows.find((row) => row.key === "group:shared/a/")).toMatchObject({ readOnly: false });
+  });
+
+  test("a source header is a cursor stop that folds its section", () => {
+    const { rows } = build(t, { open: { inbox: false, later: false } });
+    const source = rows.find((row) => row.key === "source:telegram");
+    expect(source && isNavRow(source)).toBe(true);
+    expect(source && foldId(source)).toBe("source:telegram");
+  });
+
+  test("foldIds keeps the source folds and the source groups", () => {
+    const ids = foldIds(buildSessionGroupTree(t.groups, ME));
+    for (const id of [
+      "source:slack",
+      "source:telegram",
+      "shared/slack/c0eng00001/",
+      "shared/slack/d0dm000001/",
+      "shared/telegram/-1001/",
+    ]) {
+      expect(ids.has(id)).toBe(true);
+    }
+    expect(openByDefault("source:slack", ME)).toBe(false);
+    expect(openByDefault("shared/slack/c0eng00001/", ME)).toBe(false);
   });
 });
 

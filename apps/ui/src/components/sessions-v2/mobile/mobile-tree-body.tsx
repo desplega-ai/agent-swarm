@@ -9,6 +9,7 @@
  * - A left swipe marks Done (back to the Inbox from Done). A right swipe
  *   opens the Later sheet (back to the Inbox from Later).
  * - A long-press selects a session, or opens the sheet of one of my groups.
+ *   It does nothing on a read-only group (Shared with me, a source).
  */
 
 import type { MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
@@ -18,13 +19,14 @@ import type { SwipeSide } from "@/hooks/use-swipe-row";
 import { cn } from "@/lib/utils";
 import { EmptyRow } from "../sidebar/list-state-rows";
 import { TreeSection, type TreeSegment } from "../sidebar/section-header";
-import type { NavRow, TreeRow } from "../sidebar/tree-rows";
+import { isMyGroupRow, type NavRow, type TreeRow } from "../sidebar/tree-rows";
 import type { SessionSelection } from "../sidebar/use-session-selection";
 import {
   MobileActionRow,
   MobileContainerRow,
   MobileCreateRow,
   MobileSessionRow,
+  MobileSourceRow,
 } from "./mobile-tree-row";
 
 export function MobileTreeBody({
@@ -110,7 +112,7 @@ export function MobileTreeBody({
       case "box":
       case "group":
       case "owner": {
-        const mine = row.type === "group" && !row.sharedWithMe;
+        const mine = isMyGroupRow(row);
         return (
           <MobileContainerRow
             key={row.key}
@@ -125,6 +127,10 @@ export function MobileTreeBody({
           />
         );
       }
+      case "source":
+        return (
+          <MobileSourceRow key={row.key} row={row} domId={domId(row.key)} onRowClick={onTap} />
+        );
       case "session":
         return (
           <MobileSessionRow

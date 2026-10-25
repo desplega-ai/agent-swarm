@@ -5,6 +5,7 @@
  * control), the group menu "⋯" and a "+" on hover or on the keyboard
  * cursor, and the counts. The actions sit next to the counts and never
  * cover them. My groups and No group take dropped rows (plan Phase 5).
+ * Source groups are read-only: no menu, no "+", and no drops.
  */
 
 import {
@@ -18,6 +19,7 @@ import {
   type LucideIcon,
   Plus,
   SquareDashed,
+  User,
 } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, memo, type ReactNode, useRef, useState } from "react";
 import type { SessionSectionCounts } from "@/api/types";
@@ -304,7 +306,10 @@ function RowAction({
   );
 }
 
-/** The icon of a container row: the section's, a hash, or the owner's avatar. `touch`: a size larger. */
+/**
+ * The icon of a container row: the section's, a hash, a person for a source
+ * DM, or the owner's avatar. `touch`: a size larger.
+ */
 export function RowIcon({
   row,
   ownerName,
@@ -317,7 +322,7 @@ export function RowIcon({
   if (row.type === "owner") {
     return <UserAvatar id={row.ownerId} name={ownerName ?? row.ownerId} size="xs" />;
   }
-  const Icon = row.type === "box" ? SECTION_META[row.id].icon : Hash;
+  const Icon = row.type === "box" ? SECTION_META[row.id].icon : row.node.dm ? User : Hash;
   return (
     <Icon aria-hidden className={cn("text-muted-foreground", touch ? "size-4" : "size-3.5")} />
   );

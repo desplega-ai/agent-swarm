@@ -1,8 +1,8 @@
 /**
  * The sessions v2 sidebar tree (plan Phases 4 and 5, SPEC R4 to R6, R9,
- * R10.3): the search, then Inbox, Later, Done, No group, My groups, and
- * Shared with me, with server counts, paged rows, read state, triage,
- * selection, moves, and group edits.
+ * R10.3): the search, then Inbox, Later, Done, No group, My groups,
+ * Shared with me, and the source sections, with server counts, paged rows,
+ * read state, triage, selection, moves, and group edits.
  *
  * The parts: `useMyGroups` (the groups), `useTreeRows` (the flat row list),
  * `useSearchRows`, `useTreeFolds`, `useTreeCursor` (keys, focus, the
@@ -56,13 +56,14 @@ import { FilterMenu } from "./filter-menu";
 import { GroupNode, SECTION_META } from "./group-node";
 import { AddGroupRow, CreateGroupRow, EmptyRow, LoadingRow, PagingRow } from "./list-state-rows";
 import type { RowMenuActions, RowMenuState } from "./row-menu";
-import { segmentsOf, TreeSection } from "./section-header";
+import { SourceHeader, segmentsOf, TreeSection } from "./section-header";
 import { SessionDragPreview, SessionRow } from "./session-row";
 import { SidebarSearch } from "./sidebar-search";
 import { TreeDialogs, useTreeDialogs } from "./tree-dialogs";
 import {
   type ContainerId,
   foldId,
+  isMyGroupRow,
   isNavRow,
   type NavRow,
   type TreeRow as TreeRowModel,
@@ -313,7 +314,7 @@ export function SessionTree({
   /** The group menu of a row, at the pointer (right-click) or under the control or row. */
   const openGroupMenu = (rowKey: string, anchor: { x: number; y: number }) => {
     const row = rowsByKey.get(rowKey);
-    if (row?.type !== "group" || row.sharedWithMe) return;
+    if (!isMyGroupRow(row)) return;
     cursor.place(rowKey);
     const groupKey = row.node.key;
     dialogs.setGroupMenu({
@@ -346,12 +347,11 @@ export function SessionTree({
    * connection cannot start a session in gives No group.
    */
   const startGroupOf = (row: NavRow | null | undefined): string | null => {
-    const key =
-      row?.type === "group" && !row.sharedWithMe
-        ? row.node.key
-        : row?.type === "session" && targetKeys.has(row.container)
-          ? row.container
-          : null;
+    const key = isMyGroupRow(row)
+      ? row.node.key
+      : row?.type === "session" && targetKeys.has(row.container)
+        ? row.container
+        : null;
     return key && !writeBlock(key) ? key : null;
   };
   const goNextUnread = () => {
@@ -583,7 +583,8 @@ export function SessionTree({
       case "box":
       case "group":
       case "owner": {
-        const mine = row.type === "group" && !row.sharedWithMe;
+        // Shared with me and source groups are read-only: no menu, no "+", no drops.
+        const mine = isMyGroupRow(row);
         // A personal group on the operator key takes no new sessions and no drops.
         const writable = mine && !writeBlock(row.node.key);
         const noGroupBox = row.type === "box" && row.id === "nogroup";
@@ -609,6 +610,16 @@ export function SessionTree({
           />
         );
       }
+      case "source":
+        return (
+          <SourceHeader
+            key={row.key}
+            row={row}
+            domId={domId(row.key)}
+            cursor={row.key === cursorRow?.key}
+            onRowClick={onRowClick}
+          />
+        );
       case "session": {
         const id = row.session.root.id;
         const isCursor = row.key === cursorRow?.key;

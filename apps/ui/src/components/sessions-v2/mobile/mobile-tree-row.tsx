@@ -9,7 +9,7 @@
  * Touch: tap a session to open it, swipe it left for Done and right for
  * Later (the action color shows behind it), and long-press it to start a
  * selection. While a selection is on, a tap selects. A long-press on one of
- * my groups opens its sheet. A tap on a group folds it.
+ * my groups opens its sheet. A tap on a group or a source header folds it.
  */
 
 import {
@@ -25,6 +25,7 @@ import {
 import { type CSSProperties, type MouseEvent, memo, type ReactNode } from "react";
 import type { SessionListItem } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
+import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useLongPress } from "@/hooks/use-long-press";
 import { type SwipeSide, useSwipeRow } from "@/hooks/use-swipe-row";
@@ -38,6 +39,7 @@ import {
   RowIcon,
   SessionCounts,
 } from "../sidebar/group-node";
+import { type SourceRow, sourceRowLabel } from "../sidebar/section-header";
 import {
   ActivityMark,
   activityOf,
@@ -352,6 +354,44 @@ function MobileContainerRowView({
 }
 
 export const MobileContainerRow = memo(MobileContainerRowView, rowPropsEqual);
+
+/**
+ * A source section header on a phone: the section header look (logo, name,
+ * count) in a 44 px row. A tap folds the section.
+ */
+function MobileSourceRowView({
+  row,
+  domId,
+  onRowClick,
+}: {
+  row: SourceRow;
+  domId: string;
+  onRowClick: (rowKey: string, event: MouseEvent) => void;
+}) {
+  return (
+    <div
+      id={domId}
+      role="treeitem"
+      tabIndex={-1}
+      aria-level={1}
+      aria-expanded={row.open}
+      aria-label={sourceRowLabel(row)}
+      onClick={(event) => onRowClick(row.key, event)}
+      className={cn(
+        "mx-1.5 mt-3 flex min-h-11 items-center gap-1.5 rounded-sm pr-2 pl-3 font-mono text-meta text-muted-foreground active:bg-accent",
+        TOUCH_ROW,
+      )}
+    >
+      <TaskSourceMark source={row.source} />
+      <span className="min-w-0 flex-1 truncate tracking-widest uppercase">
+        {taskSourceLabel(row.source)}
+      </span>
+      <span className="shrink-0 tabular-nums">{row.counts.total}</span>
+    </div>
+  );
+}
+
+export const MobileSourceRow = memo(MobileSourceRowView, rowPropsEqual);
 
 /** "Show 10 more", "View all N" (a chevron: it pushes a screen), and "New group". */
 export function MobileActionRow({
