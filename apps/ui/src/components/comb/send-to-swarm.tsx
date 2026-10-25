@@ -21,7 +21,13 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CommentListEntry } from "@/lib/agent-fs/types";
-import { COMB_BATCH_MAX, canSendThread, eligibleForBatch } from "@/lib/comb/batch";
+import {
+  COMB_BATCH_MAX,
+  canSendThread,
+  eligibleForBatch,
+  leadNote,
+  sendFailure,
+} from "@/lib/comb/batch";
 import { commentCombPath, lineRangeLabel } from "@/lib/comb/comments";
 import type { DrivePath } from "@/lib/comb/paths";
 
@@ -63,9 +69,11 @@ function useSendToSwarm(drive: Drive) {
     onClick: () => navigate(`/tasks/${taskId}`),
   });
   return useSendCombReviewBatch(drive, {
-    onSuccess: ({ taskId, sent, skipped, repaired }) => {
+    onSuccess: ({ taskId, sent, skipped, repaired, lead }) => {
       const description =
-        [skippedSummary(skipped), repairedSummary(repaired)].filter(Boolean).join(" ") || undefined;
+        [leadNote(lead), skippedSummary(skipped), repairedSummary(repaired)]
+          .filter(Boolean)
+          .join(" ") || undefined;
       const linked = taskId ?? repaired[0]?.taskId;
       toast.success(
         taskId
@@ -77,8 +85,12 @@ function useSendToSwarm(drive: Drive) {
     onError: (error) => {
       const skipped = error instanceof CombSendError ? error.skipped : [];
       const tasks = [...new Set(skipped.flatMap((item) => (item.taskId ? [item.taskId] : [])))];
-      toast.error(error.message, {
-        description: skippedSummary(skipped),
+      const failure =
+        error instanceof CombSendError
+          ? sendFailure(error.status, error.message)
+          : { title: "Could not send to the swarm", description: error.message };
+      toast.error(failure.title, {
+        description: skippedSummary(skipped) ?? failure.description,
         action: tasks.length === 1 ? openTask(tasks[0] as string) : undefined,
       });
     },

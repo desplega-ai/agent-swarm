@@ -24,6 +24,12 @@ const resultSchema = z.object({
   skipped: z.array(skippedSchema),
   /** Comments of an earlier send whose missing "sent" reply this batch posted again. */
   repaired: z.array(z.object({ id: z.string(), taskId: z.string() })),
+  /**
+   * With a new task only. `online`: a lead got it. `offline`: the only lead is
+   * offline, so the task waits for it. `none`: no lead, so the task waits
+   * unassigned in the pool.
+   */
+  lead: z.enum(["online", "offline", "none"]).optional(),
 });
 
 const batchErrorSchema = z.object({ error: z.string(), skipped: z.array(skippedSchema) });

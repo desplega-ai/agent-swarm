@@ -17529,6 +17529,14 @@
                           "taskId"
                         ]
                       }
+                    },
+                    "lead": {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "offline",
+                        "none"
+                      ]
                     }
                   },
                   "required": [
@@ -17604,6 +17612,14 @@
                           "taskId"
                         ]
                       }
+                    },
+                    "lead": {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "offline",
+                        "none"
+                      ]
                     }
                   },
                   "required": [

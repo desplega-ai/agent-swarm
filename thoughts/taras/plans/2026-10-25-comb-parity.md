@@ -162,10 +162,10 @@ Then walk Phases 1 to 5 at 1440x900 and 390x844 with agent-browser, upload the s
 
 ## Todo
 
-- [ ] Phase 1: Search
-- [ ] Phase 2: Share links
-- [ ] Phase 3: Viewers
-- [ ] Phase 4: Uploads
+- [x] Phase 1: Search (86da4cf90)
+- [x] Phase 2: Share links (895a95383)
+- [x] Phase 3: Viewers (b220e1602)
+- [x] Phase 4: Uploads (073898a3e)
 - [ ] Phase 5: Send to swarm
 - [ ] Docs
 - [ ] QA walk + screenshots + recording
@@ -173,3 +173,17 @@ Then walk Phases 1 to 5 at 1440x900 and 390x844 with agent-browser, upload the s
 - [ ] PR + cleanup
 
 ## Log
+
+- Local stack (scripts in `/tmp/comb-parity/`): agent-fs from source on 47433 (local storage,
+  nomic embeddings, home `/tmp/comb-parity/afs`), API on 43013 (DB `/tmp/comb-parity/swarm.sqlite`),
+  UI on 45274 (`VITE_PROXY_TARGET=http://127.0.0.1:43013`, dashboard API URL = UI origin). Seed:
+  `/tmp/comb-parity/seed/{gen.py,upload.ts,op.ts}`. agent-browser session `comb-parity`.
+- Send to swarm, live (before any change): folder batch of 3 `@swarm` comments answered 201 and
+  posted the "sent" replies. With no lead the task sat `unassigned` while the toast read like a
+  normal success. With a lead it was `pending` on the lead. Re-send: 409 "Nothing to send" with
+  `already-sent`. Unknown id: 409 `not-found`. Other drive: 400. Bad id: 400. No defect found.
+- Phase 5 change: the result now says who got the task (`lead: online | offline | none`), the toast
+  says when no lead or an offline lead got it, and each failure status maps to a plain title.
+- Decision: keep the 502-for-the-whole-batch rule (no partial sends). The toast now says nothing was sent.
+- Context warning at 52% (hook asked for AskUserQuestion). Continued because the brief says
+  autopilot with no checkpoints; this log is the handoff if the session dies.

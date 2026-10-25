@@ -987,11 +987,17 @@ class ApiClient {
    */
   async sendCombReviewBatch(data: CombReviewBatchInput): Promise<CombReviewBatchResult> {
     const url = `${this.getBaseUrl()}/api/comb/review-batches`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(data),
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: this.getHeaders(),
+        body: JSON.stringify(data),
+      });
+    } catch {
+      // No answer at all (offline, DNS, CORS): status 0.
+      throw new CombSendError("Cannot reach the swarm API", 0);
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new CombSendError(

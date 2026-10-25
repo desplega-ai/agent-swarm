@@ -5679,6 +5679,8 @@ export interface paths {
                                 id: string;
                                 taskId: string;
                             }[];
+                            /** @enum {string} */
+                            lead?: "online" | "offline" | "none";
                         };
                     };
                 };
@@ -5701,6 +5703,8 @@ export interface paths {
                                 id: string;
                                 taskId: string;
                             }[];
+                            /** @enum {string} */
+                            lead?: "online" | "offline" | "none";
                         };
                     };
                 };

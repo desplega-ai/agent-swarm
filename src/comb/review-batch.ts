@@ -66,12 +66,21 @@ export interface ReviewBatchInput {
   requestedByUserId: string | null;
 }
 
+/**
+ * Who got the new task: `online` (a lead that is not offline), `offline` (the
+ * only lead is offline, so the task waits for it), or `none` (no lead, so the
+ * task waits unassigned in the pool).
+ */
+export type ReviewBatchLead = "online" | "offline" | "none";
+
 export interface ReviewBatchResult {
   /** The new task. Null when the batch only repaired replies of earlier sends. */
   taskId: string | null;
   sent: string[];
   skipped: SkippedComment[];
   repaired: RepairedComment[];
+  /** Set with a new task only. */
+  lead?: ReviewBatchLead;
 }
 
 export interface ReviewBatchDeps {
@@ -157,6 +166,7 @@ export async function sendReviewBatch(
   // 4. One task for the won comments. On failure, free the claims again.
   const wonIds = won.map((read) => read.id);
   let taskId: string | null = null;
+  let leadState: ReviewBatchLead = "none";
   if (won.length > 0) {
     try {
       const text = await renderTaskText(input, won);
@@ -167,6 +177,7 @@ export async function sendReviewBatch(
         ]);
       }
       const lead = await getLeadAgent();
+      leadState = !lead ? "none" : lead.status === "offline" ? "offline" : "online";
       const task = await createTask(
         text,
         {
@@ -217,7 +228,9 @@ export async function sendReviewBatch(
   if (taskId === null && repaired.length === 0) {
     throw new ReviewBatchError(409, "Nothing to send", skipped);
   }
-  return { taskId, sent: wonIds, skipped, repaired };
+  return taskId === null
+    ? { taskId, sent: wonIds, skipped, repaired }
+    : { taskId, sent: wonIds, skipped, repaired, lead: leadState };
 }
 
 /** `items.map(fn)` with at most `limit` calls in flight. Results keep the input order. */

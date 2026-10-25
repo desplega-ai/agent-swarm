@@ -3409,6 +3409,11 @@ export interface CombReviewBatchResult {
   sent: string[];
   skipped: CombSkippedComment[];
   repaired: CombRepairedComment[];
+  /**
+   * With a new task only: `online` (a lead got it), `offline` (the only lead is
+   * offline), or `none` (no lead, so it waits in the pool). Absent on older servers.
+   */
+  lead?: "online" | "offline" | "none";
 }
 
 export interface StatusAgentFs {

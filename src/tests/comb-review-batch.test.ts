@@ -295,6 +295,7 @@ describe("sendReviewBatch", () => {
     expect(result.sent).toEqual([a.id, b.id, c.id]);
     expect(result.skipped).toEqual([]);
     expect(result.repaired).toEqual([]);
+    expect(result.lead).toBe("online");
     const task = await getTaskById(result.taskId as string);
     expect(task?.source).toBe("comb");
     expect(task?.taskType).toBe("comb-review");
@@ -554,9 +555,31 @@ describe("sendReviewBatch", () => {
       const task = await getTaskById(result.taskId as string);
       expect(task?.agentId || null).toBeNull();
       expect(task?.status).toBe("unassigned");
+      expect(result.lead).toBe("none");
     } finally {
       for (const lead of leads) {
         await getDbClient().run("UPDATE agents SET isLead = 1 WHERE id = ?", [lead.id]);
+      }
+    }
+  });
+
+  test("an offline lead still gets the task, and the result says it is offline", async () => {
+    const id = fake.add({ body: "@swarm a" }).id;
+    const leads = await getDbClient().query<{ id: string; status: string }>(
+      "SELECT id, status FROM agents WHERE isLead = 1",
+    );
+    await getDbClient().run("UPDATE agents SET status = 'offline' WHERE isLead = 1");
+    try {
+      const result = await sendReviewBatch(batch([id]));
+      expect(result.lead).toBe("offline");
+      const task = await getTaskById(result.taskId as string);
+      expect(leads.map((lead) => lead.id)).toContain(task?.agentId as string);
+    } finally {
+      for (const lead of leads) {
+        await getDbClient().run("UPDATE agents SET status = ? WHERE id = ?", [
+          lead.status,
+          lead.id,
+        ]);
       }
     }
   });
