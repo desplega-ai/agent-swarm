@@ -12,6 +12,7 @@ import {
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
+import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import {
   isOnboardingFinished,
   ONBOARDING_QUERY_KEY,
@@ -35,6 +36,7 @@ import { SetupStepper } from "./components/setup-stepper";
 import { SetupTopBar } from "./components/setup-top-bar";
 import { StepTransition } from "./components/step-transition";
 import type { StepProps } from "./step-contract";
+import { PRESENCE_KEYS } from "./steps/ai/model";
 import { StepAgents } from "./steps/step-agents";
 import { StepAi } from "./steps/step-ai";
 import { StepConnect, useIdentityPick } from "./steps/step-connect";
@@ -114,12 +116,27 @@ function stepStatuses(
 }
 
 /** Why Continue is disabled for a step that is neither done nor skipped. */
-function unsettledReason(step: OnboardingStepId, status: OnboardingStepStatus): string {
+function unsettledReason(
+  step: OnboardingStepId,
+  status: OnboardingStepStatus,
+  data: OnboardingResponse | null | undefined,
+  aiKeySaved: boolean,
+): string {
   if (step === "connect") return "Connect to your API first.";
   if (step === "name") return "Name your swarm to continue.";
   if (status === "failed") return "Last check failed. Retry or skip.";
+  if (step === "ai") {
+    // The step completes when a worker verifies a key (the API derives it).
+    const checking = data?.signals.providers.some((p) => p.state === "configured");
+    return aiKeySaved || checking
+      ? "Waiting for a worker to check the key."
+      : "Add a key for one provider, or skip.";
+  }
   return "Finish this step or skip it.";
 }
+
+/** A credential among the step 3 presence keys (not a base URL or an org id). */
+const AI_KEY_VARS = PRESENCE_KEYS.filter((key) => /_(KEY|TOKEN)$/.test(key));
 
 interface Blocker {
   reason: string;
@@ -258,12 +275,27 @@ function SetupFlow() {
   const currentStep = data?.state.currentStep;
   const { blocker, action, setters } = useStepControls(stepId);
   const direction = useStepDirection(index);
+  // Same query as step 3, so the Continue tooltip can say a key waits for its check.
+  const { data: presence } = useEnvPresence(stepId === "ai" ? PRESENCE_KEYS : []);
+  const aiKeySaved = AI_KEY_VARS.some((key) => presence?.[key]);
 
   // Only the content region scrolls: a new step starts at its top.
   const mainRef = useRef<HTMLElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs on step change only
   useLayoutEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
+  }, [stepId]);
+
+  // A step change moves focus to the new step's heading, so the next Tab
+  // starts in the step, not on the stepper. A step that focused one of its
+  // own controls on mount keeps that focus.
+  const focusedStep = useRef(stepId);
+  useEffect(() => {
+    if (focusedStep.current === stepId) return;
+    focusedStep.current = stepId;
+    const heading = mainRef.current?.querySelector<HTMLElement>(`[data-step-heading="${stepId}"]`);
+    if (!heading || heading.parentElement?.contains(document.activeElement)) return;
+    heading.focus({ preventScroll: true });
   }, [stepId]);
 
   useEffect(() => {
@@ -421,14 +453,19 @@ function SetupFlow() {
   const copy = STEP_COPY[stepId];
   const Body = stepId === "connect" ? null : STEP_BODIES[stepId];
   const settled = status === "done" || status === "skipped";
-  const primary =
-    data && (stepId === "first_task" || finished)
+  // Step 7 before its task is sent: Send in the composer is the primary
+  // action, and Skip is the one exit in the footer.
+  const firstTaskSent = Boolean(data?.state.firstTaskId);
+  const composing = stepId === "first_task" && !firstTaskSent && !finished;
+  const primary = composing
+    ? undefined
+    : data && (stepId === "first_task" || finished)
       ? { label: "Go to dashboard", blockedBy: null, onClick: () => void leave() }
       : {
           label: "Continue",
           blockedBy:
             blocker?.reason ??
-            (settled || action?.unlocks ? null : unsettledReason(stepId, status)),
+            (settled || action?.unlocks ? null : unsettledReason(stepId, status, data, aiKeySaved)),
           onClick: () => void continueStep(),
           enterKey: true,
         };
@@ -461,7 +498,11 @@ function SetupFlow() {
             <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-primary">
               Step {index} <span className="text-muted-foreground">of {TOTAL}</span>
             </p>
-            <h1 className="mb-1.5 text-xl font-semibold tracking-tight text-balance sm:text-2xl">
+            <h1
+              data-step-heading={stepId}
+              tabIndex={-1}
+              className="mb-1.5 text-xl font-semibold tracking-tight text-balance outline-none sm:text-2xl"
+            >
               {copy.title}
             </h1>
             <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">{copy.description}</p>
@@ -499,8 +540,13 @@ function SetupFlow() {
         busyAction={busyAction}
         onBack={index > 1 && data ? () => goTo(ONBOARDING_STEPS[index - 2].id) : undefined}
         skip={
-          // A done step has nothing to skip. The swarm name is required: no Skip.
-          data && stepId !== "connect" && stepId !== "name" && status !== "done"
+          // A done step has nothing to skip, and neither has a sent first task.
+          // The swarm name is required: no Skip.
+          data &&
+          stepId !== "connect" &&
+          stepId !== "name" &&
+          status !== "done" &&
+          !(stepId === "first_task" && firstTaskSent)
             ? {
                 label: status === "skipped" ? "Skipped" : "Skip",
                 // A pending save could fail after Skip and turn `skipped` into `failed`.

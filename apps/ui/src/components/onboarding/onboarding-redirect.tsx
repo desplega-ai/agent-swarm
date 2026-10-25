@@ -15,6 +15,11 @@ export function markSetupVisited(apiUrl: string) {
   setupVisited.add(apiUrl);
 }
 
+/** `/setup` was opened for this connection during this page load. */
+export function wasSetupVisited(apiUrl: string): boolean {
+  return setupVisited.has(apiUrl);
+}
+
 // Links from `/setup` open other dashboard pages in a new tab. A new tab is a
 // new page load, so it carries this marker instead of the in-memory flag.
 const FROM_SETUP_PARAM = "fromSetup";

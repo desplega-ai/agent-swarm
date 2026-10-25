@@ -361,12 +361,113 @@ const TOGGLE_KEY = SIDEBAR_KEYBOARD_SHORTCUT.toUpperCase();
 const TOGGLE_ARIA_KEYS = `Meta+${TOGGLE_KEY} Control+${TOGGLE_KEY}`;
 const TOGGLE_HINT = modKeyLabel() === "⌘" ? `⌘${TOGGLE_KEY}` : `Ctrl+${TOGGLE_KEY}`;
 
-function SidebarLogo({ src, alt, className }: { src: string; alt: string; className?: string }) {
+interface TrimmedLogo {
+  src: string;
+  /** The content is much wider than tall (a wordmark). */
+  wide: boolean;
+}
+
+const trimmedLogos = new Map<string, Promise<TrimmedLogo | null>>();
+
+/** Larger images are not scanned. */
+const TRIM_MAX_PIXELS = 1024 * 1024;
+
+/**
+ * The logo with its transparent padding cut off. The website logo proxy can
+ * return a wordmark centered in a padded square (desplega.ai), which shows as
+ * a thin line in a 32 px slot. Null when nothing needs a cut, or when the
+ * pixels cannot be read (the image host sends no CORS header): the logo then
+ * shows as it is.
+ */
+function trimLogo(src: string): Promise<TrimmedLogo | null> {
+  let pending = trimmedLogos.get(src);
+  if (!pending) {
+    pending = new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(cropPadding(img));
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+    trimmedLogos.set(src, pending);
+  }
+  return pending;
+}
+
+function cropPadding(img: HTMLImageElement): TrimmedLogo | null {
+  const { naturalWidth: w, naturalHeight: h } = img;
+  if (!w || !h || w * h > TRIM_MAX_PIXELS) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0);
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = ctx.getImageData(0, 0, w, h).data;
+  } catch {
+    return null; // A cross-origin image without CORS taints the canvas.
+  }
+  let [left, top, right, bottom] = [w, h, -1, -1];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (pixels[(y * w + x) * 4 + 3] <= 8) continue; // Transparent.
+      left = Math.min(left, x);
+      right = Math.max(right, x);
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  if (right < 0) return null;
+  const cw = right - left + 1;
+  const ch = bottom - top + 1;
+  if (cw > w * 0.9 && ch > h * 0.9) return null;
+  canvas.width = cw;
+  canvas.height = ch;
+  ctx.drawImage(img, left, top, cw, ch, 0, 0, cw, ch);
+  return { src: canvas.toDataURL("image/png"), wide: cw > ch * 1.5 };
+}
+
+function useTrimmedLogo(src: string): TrimmedLogo | null {
+  const [trimmed, setTrimmed] = useState<{ from: string; logo: TrimmedLogo | null } | null>(null);
+  useEffect(() => {
+    let current = true;
+    void trimLogo(src).then((logo) => {
+      if (current) setTrimmed({ from: src, logo });
+    });
+    return () => {
+      current = false;
+    };
+  }, [src]);
+  return trimmed?.from === src ? trimmed.logo : null;
+}
+
+function SidebarLogo({
+  src,
+  alt,
+  className,
+  allowWide = false,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  /**
+   * A wordmark may grow wider than the square slot (the expanded row).
+   * Otherwise the square shows its left end, where most wordmarks put their mark.
+   */
+  allowWide?: boolean;
+}) {
+  const trimmed = useTrimmedLogo(src);
   return (
     <img
-      src={src}
+      src={trimmed?.src ?? src}
       alt={alt}
-      className={cn("h-8 w-8 min-h-[32px] min-w-[32px] shrink-0 rounded object-contain", className)}
+      className={cn(
+        "h-8 w-8 min-h-[32px] min-w-[32px] shrink-0 rounded object-contain",
+        trimmed?.wide && (allowWide ? "w-auto max-w-24" : "object-cover object-left"),
+        className,
+      )}
       onError={(e) => {
         // Fall back to bundled logo if the configured logo URL fails.
         const img = e.currentTarget;
@@ -429,7 +530,7 @@ function SidebarBrandRow({
         to="/"
         className="flex min-w-0 flex-1 items-center gap-2 group-data-[collapsible=icon]:hidden"
       >
-        <SidebarLogo src={logo} alt={`${name} logo`} />
+        <SidebarLogo src={logo} alt={`${name} logo`} allowWide />
         <span
           className="text-lg font-semibold tracking-tight text-sidebar-foreground truncate"
           style={brandColor ? { color: brandColor } : undefined}

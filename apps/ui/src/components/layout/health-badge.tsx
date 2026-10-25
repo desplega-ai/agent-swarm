@@ -13,7 +13,13 @@ import { useSubmitFeedback } from "@/api/hooks/use-feedback";
 import { isOnboardingFinished, useOnboarding } from "@/api/hooks/use-onboarding";
 import { useApiVersion } from "@/api/hooks/use-stats";
 import { useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
-import type { ProviderName, SetupMilestone, StatusHealth, StatusResponse } from "@/api/types";
+import type {
+  MilestoneId,
+  ProviderName,
+  SetupMilestone,
+  StatusHealth,
+  StatusResponse,
+} from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { BorderBeam } from "@/components/shared/border-beam";
 import { StatusIcon, StatusLine } from "@/components/shared/status-icon";
@@ -51,7 +57,7 @@ const HEALTH_DOT_CLASS: Record<StatusHealth, string> = {
 
 const HEALTH_LABEL: Record<StatusHealth, string> = {
   ok: "All systems go",
-  degraded: "Some integrations need attention",
+  degraded: "Needs attention",
   broken: "Setup required",
 };
 
@@ -65,14 +71,15 @@ const TARGET_NOTE: Record<WorkerTarget, string> = {
 };
 
 interface FailingCheck {
-  milestone: SetupMilestone;
+  /** A setup milestone, or `lead`: no lead can take work (`activity.leads_ready`). */
+  milestone: Omit<SetupMilestone, "id"> & { id: MilestoneId | "lead" };
   /** `true` turns the badge red: no task can run. */
   blocks: boolean;
 }
 
 /** The checks behind a red or amber badge, by the rules of `computeHealth` in src/http/status.ts. */
-function failingChecks(setup: SetupMilestone[]): FailingCheck[] {
-  return setup.flatMap((milestone): FailingCheck[] => {
+function failingChecks({ setup, activity }: StatusResponse): FailingCheck[] {
+  const checks = setup.flatMap((milestone): FailingCheck[] => {
     const { id, state } = milestone;
     if ((id === "harness" || id === "workers") && state === "unverified") {
       return [{ milestone, blocks: true }];
@@ -82,6 +89,21 @@ function failingChecks(setup: SetupMilestone[]): FailingCheck[] {
     }
     return [];
   });
+  // With no agents at all, the workers check already says it.
+  const noAgents = setup.some((m) => m.id === "workers" && m.state === "unverified");
+  if (activity.leads_ready === 0 && !noAgents) {
+    checks.push({
+      milestone: {
+        id: "lead",
+        label: "No lead online",
+        state: "unverified",
+        hint: "Start the lead. New tasks wait until it is online.",
+        action_url: "/agents",
+      },
+      blocks: false,
+    });
+  }
+  return checks;
 }
 
 export function HealthBadge({ status }: { status: StatusResponse }) {
@@ -135,7 +157,7 @@ function HealthPopoverBody({
   onNavigate: () => void;
 }) {
   const live = useStatus({ pollIntervalMs: OPEN_POLL_MS }).data ?? status;
-  const checks = failingChecks(live.setup);
+  const checks = failingChecks(live);
   const workersOnline = live.activity.agents_online - live.activity.leads_online;
   const needsWorker = live.health === "broken" && workersOnline === 0;
   // Remember the wait, so a worker that shows up while open is announced.

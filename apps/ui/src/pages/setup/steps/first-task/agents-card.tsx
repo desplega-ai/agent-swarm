@@ -1,13 +1,15 @@
-import { ChevronDown, ExternalLink, SquareTerminal } from "lucide-react";
+import { ArrowRight, ChevronDown, ExternalLink, SquareTerminal } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import {
   type Agent,
+  type OnboardingProviderSignal,
   REASONING_EFFORT_LEVELS,
   type ReasoningEffortLevel,
   type SwarmConfig,
 } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
+import { setupStepHref } from "@/components/onboarding/step-status";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ModelLabel } from "@/components/shared/model-logo";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
@@ -25,9 +27,36 @@ import { ExternalTextLink } from "../integrations/pane-parts";
 
 const MAX_ROWS = 8;
 
-/** The lead can take work: some lead agent is idle or busy. */
-export function isLeadReady(agents: Agent[] | undefined): boolean {
-  return (agents ?? []).some((a) => a.isLead && (a.status === "idle" || a.status === "busy"));
+/**
+ * What the first task waits for. `offline`: no lead is idle or busy.
+ * `unverified`: a lead is online, but no key for its harness passed a check.
+ */
+export type LeadReadiness =
+  | { state: "offline" }
+  | { state: "unverified"; harness: string | null }
+  | { state: "ready" };
+
+function leadHarness(lead: Agent): string | null {
+  return lead.harnessProvider ?? lead.provider ?? null;
+}
+
+/**
+ * The lead can take work: a lead is idle or busy, and its harness has a
+ * verified key. "Verified" is the rollup that completes step 3.
+ */
+export function leadReadiness(
+  agents: Agent[] | undefined,
+  providers: OnboardingProviderSignal[],
+): LeadReadiness {
+  const online = (agents ?? []).filter(
+    (a) => a.isLead && (a.status === "idle" || a.status === "busy"),
+  );
+  if (online.length === 0) return { state: "offline" };
+  // A lead with no reported harness accepts any verified provider.
+  const verified = (harness: string | null) =>
+    providers.some((p) => p.state === "verified" && (harness === null || p.provider === harness));
+  if (online.some((lead) => verified(leadHarness(lead)))) return { state: "ready" };
+  return { state: "unverified", harness: leadHarness(online[0]) };
 }
 
 function lastSeen(agent: Agent): string {
@@ -44,22 +73,28 @@ function lastSeen(agent: Agent): string {
 export function LeadStatusLine({
   agents,
   loading,
-  ready,
+  readiness,
 }: {
   agents: Agent[] | undefined;
   loading: boolean;
-  ready: boolean;
+  readiness: LeadReadiness;
 }) {
   const list = [...(agents ?? [])].sort((a, b) => Number(b.isLead) - Number(a.isLead));
+  const harness =
+    readiness.state === "unverified" && readiness.harness
+      ? (HARNESS_LABEL[readiness.harness] ?? readiness.harness)
+      : "provider";
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm">
-      {ready ? (
+      {readiness.state === "ready" ? (
         <span className="flex items-center gap-2">
           {/* The amber live dot (DESIGN.md): the lead is alive and listening. */}
           <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />
           <span className="font-medium">The lead is ready</span>
         </span>
+      ) : readiness.state === "unverified" ? (
+        <StatusLine tone="warning">The lead has no verified {harness} key</StatusLine>
       ) : (
         <StatusLine tone="busy">Waiting for the lead</StatusLine>
       )}
@@ -81,7 +116,7 @@ export function LeadStatusLine({
         <PopoverContent
           align="center"
           collisionPadding={16}
-          className="w-[30rem] max-w-[calc(100vw-2rem)] p-0"
+          className="w-[38rem] max-w-[calc(100vw-2rem)] p-0"
           // Focus the list, not the first harness icon: that would open its tooltip on every open.
           onOpenAutoFocus={(event) => {
             event.preventDefault();
@@ -91,18 +126,23 @@ export function LeadStatusLine({
           <AgentList agents={list} loading={loading} />
         </PopoverContent>
       </Popover>
-      {ready ? null : (
-        <>
-          <span aria-hidden className="text-muted-foreground/50">
-            ·
-          </span>
-          <span className="text-xs">
-            <ExternalTextLink href="https://docs.agent-swarm.dev/docs/guides/deployment">
-              How to deploy workers
-            </ExternalTextLink>
-          </span>
-        </>
-      )}
+      {/* No separator dot before the link: it wraps to its own line on a phone. */}
+      {readiness.state === "offline" ? (
+        <span className="text-xs">
+          <ExternalTextLink href="https://docs.agent-swarm.dev/docs/guides/deployment">
+            How to deploy workers
+          </ExternalTextLink>
+        </span>
+      ) : readiness.state === "unverified" ? (
+        <Link
+          to={setupStepHref("ai")}
+          replace
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
+        >
+          Verify a key in step 3
+          <ArrowRight aria-hidden className="size-3" />
+        </Link>
+      ) : null}
     </div>
   );
 }
@@ -234,7 +274,8 @@ function AgentList({ agents, loading }: { agents: Agent[]; loading: boolean }) {
                 model={model}
                 modelLoading={configsQ.isPending}
               />
-              <span className="min-w-0 flex-1 truncate font-mono text-xs sm:min-w-20">
+              {/* A long name wraps: the name is how the user tells the agents apart. */}
+              <span className="min-w-0 flex-1 break-words font-mono text-xs sm:min-w-20">
                 {agent.name}
               </span>
               {/* Gives way to a long status before the name does. */}
@@ -245,7 +286,8 @@ function AgentList({ agents, loading }: { agents: Agent[]; loading: boolean }) {
               <span className="flex min-w-15 shrink-0 justify-end">
                 <StatusBadge status={agent.status} />
               </span>
-              <span className="w-14 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+              {/* Hidden on a phone: the name gets the room. */}
+              <span className="hidden w-14 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground sm:block">
                 {lastSeen(agent)}
               </span>
             </li>

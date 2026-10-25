@@ -29,6 +29,7 @@ import {
   getDbClient,
   getInstanceActivity,
   getLiveAgentCounts,
+  getReadyAgentCounts,
   hasFirstCompletedTask,
   listAgentsWithCredStatusByProvider,
   NOT_EXTENSION_AGENT_SQL,
@@ -121,6 +122,12 @@ export type StatusIdentity = z.infer<typeof StatusIdentitySchema>;
 export const StatusActivitySchema = z.object({
   agents_online: z.number().int().nonnegative(),
   leads_online: z.number().int().nonnegative(),
+  /**
+   * Leads that can take work now (status `idle` or `busy`). Unlike
+   * `leads_online`, this does not depend on a recent heartbeat: an idle lead
+   * stops updating its activity time.
+   */
+  leads_ready: z.number().int().nonnegative(),
   recent_tasks_count: z.number().int().nonnegative(),
 });
 export type StatusActivity = z.infer<typeof StatusActivitySchema>;
@@ -194,12 +201,13 @@ export type AutomationStatus = z.infer<typeof AutomationStatusSchema>;
 /**
  * Phase 2: Aggregate health derived from setup milestones.
  *
- * - `broken`  — harness or workers blocking (creds missing, no live workers ever).
- * - `degraded` — at least one optional integration `unverified`/`configured`
- *                 while another is configured, OR harness creds present but
- *                 the latest live test failed or never ran (`configured`).
- * - `ok`       — harness + workers `verified`; no integration left in
- *                 `configured` state.
+ * - `broken`: harness or workers blocking (creds missing, no live workers ever).
+ * - `degraded`: no lead can take work (none is `idle` or `busy`), OR at
+ *   least one optional integration `unverified`/`configured` while another
+ *   is configured, OR harness creds present but the latest live test failed
+ *   or never ran (`configured`).
+ * - `ok`: harness + workers `verified`, a lead can take work, and no
+ *   integration left in `configured` state.
  */
 export const StatusHealthSchema = z.enum(["ok", "degraded", "broken"]);
 export type StatusHealth = z.infer<typeof StatusHealthSchema>;
@@ -692,19 +700,23 @@ export async function buildSetup(
  * Decision matrix:
  * - Harness `unverified` (no creds at all) → `broken` — the swarm cannot run a task.
  * - Workers `unverified` (no agents ever) → `broken` — same reason.
+ * - No lead can take work (`readyLeads` is 0) → `degraded`. Tasks wait until a lead is online.
  * - Harness `configured` (creds present, never live-tested) → `degraded`.
  * - Any of {slack, github, linear, jira} `configured` (i.e. half-set-up) → `degraded`.
  * - Otherwise → `ok`.
  *
  * Notes:
+ * - `readyLeads` counts leads with status `idle` or `busy`
+ *   (`getReadyAgentCounts`). It does not use the heartbeat time: an agent
+ *   updates `lastActivityAt` only while a session runs, so an idle, healthy
+ *   lead looks stale.
  * - Worker `configured` (fleet exists but missed recent heartbeats) does NOT
- *   degrade the rollup. Heartbeat drift is a runtime concern surfaced on the
- *   /agents page and the dashboard canvas — not a setup health signal.
+ *   degrade the rollup on its own, for the same reason.
  * - Integrations in `unverified` are NOT degrading on their own — most
  *   deployments don't connect every integration. They only nudge the rollup if
  *   paired with another integration in `configured` (the brainstorm contract).
  */
-export function computeHealth(setup: SetupMilestone[]): StatusHealth {
+export function computeHealth(setup: SetupMilestone[], readyLeads: number): StatusHealth {
   const byId = new Map(setup.map((m) => [m.id, m] as const));
   const harness = byId.get("harness");
   const workers = byId.get("workers");
@@ -714,6 +726,7 @@ export function computeHealth(setup: SetupMilestone[]): StatusHealth {
   if (!workers || workers.state === "unverified") return "broken";
 
   // `degraded` rules.
+  if (readyLeads === 0) return "degraded";
   if (harness.state === "configured") return "degraded";
 
   for (const id of ["slack", "github", "linear", "jira"] as const) {
@@ -740,12 +753,13 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
     .map((automation) => toStatus(preflightAutomation(automation, automationSetup)))
     .sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
   const activity = await getInstanceActivity();
+  const readyLeads = (await getReadyAgentCounts()).leads;
   const instance = await getInstanceFeedbackSignals();
   return {
     runtime_pools: { enabled: isRuntimePoolsEnabled(), supervisor: runtimeSupervisorStatus() },
     identity: buildIdentity(),
     setup,
-    activity,
+    activity: { ...activity, leads_ready: readyLeads },
     agent_fs: {
       configured: !!process.env.AGENT_FS_API_URL,
       base_url: process.env.AGENT_FS_API_URL ?? null,
@@ -753,7 +767,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
       comb: getCombStatus(await combServiceUserId),
     },
     automations,
-    health: computeHealth(setup),
+    health: computeHealth(setup, readyLeads),
     telemetry: { enabled: isTelemetryEnabled() },
     instance,
   };
@@ -797,7 +811,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },
