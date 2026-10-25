@@ -17,6 +17,7 @@ import {
   Inbox,
   Lock,
   type LucideIcon,
+  MessagesSquare,
   Plus,
   SquareDashed,
   User,
@@ -308,7 +309,7 @@ function RowAction({
 
 /**
  * The icon of a container row: the section's, a hash, a person for a source
- * DM, or the owner's avatar. `touch`: a size larger.
+ * DM, a conversation for a thread, or the owner's avatar. `touch`: a size larger.
  */
 export function RowIcon({
   row,
@@ -322,7 +323,10 @@ export function RowIcon({
   if (row.type === "owner") {
     return <UserAvatar id={row.ownerId} name={ownerName ?? row.ownerId} size="xs" />;
   }
-  const Icon = row.type === "box" ? SECTION_META[row.id].icon : row.node.dm ? User : Hash;
+  let Icon: LucideIcon = Hash;
+  if (row.type === "box") Icon = SECTION_META[row.id].icon;
+  else if (row.node.thread) Icon = MessagesSquare;
+  else if (row.node.dm) Icon = User;
   return (
     <Icon aria-hidden className={cn("text-muted-foreground", touch ? "size-4" : "size-3.5")} />
   );
@@ -468,6 +472,8 @@ function GroupNodeView({
         className={cn(
           "relative flex min-w-0 grow basis-0 items-center justify-end",
           actionCount === 2 ? "min-w-12.5" : actionCount === 1 && "min-w-6",
+          // A thread's name is a session title: it truncates, and its counts stay whole.
+          row.type === "group" && row.node.thread && "min-w-max",
         )}
       >
         {counts ? (

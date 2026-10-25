@@ -3,7 +3,7 @@ date: 2026-10-23
 author: taras
 topic: "Sessions v2 slice 5: Slack and chat source sections, source keys, and backfill"
 tags: [plan, ui, sessions, slack, chat-sdk, asset-keys, backfill]
-status: in-progress
+status: completed
 autonomy: critical
 commit_per_phase: true
 issue: https://github.com/desplega-ai/agent-swarm/issues/2338
@@ -476,14 +476,14 @@ A Slack thread with 2 or more owned roots is a nested group under its channel, i
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Session tests pass: `bun run test:root -- src/tests/sessions-tree.test.ts src/tests/sessions-move.test.ts`
-- [ ] UI unit tests pass: `cd apps/ui && bun test src/lib/session-groups.test.ts src/components/sessions-v2/sidebar/tree-rows.test.ts`
-- [ ] Type checks pass: `bun run tsc:check:tsc && cd apps/ui && bunx tsc -b`
-- [ ] Lint passes: `bun run lint && bun run lint:slop && cd apps/ui && bun run lint`
-- [ ] Promise checks pass: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] Session tests pass: `bun run test:root -- src/tests/sessions-tree.test.ts src/tests/sessions-move.test.ts`
+- [x] UI unit tests pass: `cd apps/ui && bun test src/lib/session-groups.test.ts src/components/sessions-v2/sidebar/tree-rows.test.ts`
+- [x] Type checks pass: `bun run tsc:check:tsc && cd apps/ui && bunx tsc -b`
+- [x] Lint passes: `bun run lint && bun run lint:slop && cd apps/ui && bun run lint`
+- [x] Promise checks pass: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
 
 #### Automated QA:
-- [ ] On the QA stack (seed one Slack thread with 2 roots): the channel group shows a nested thread group with the title of its oldest session and 2 rows inside. Moving one row out turns the other into a plain row in the channel. Screenshot before and after.
+- [x] On the QA stack (seed one Slack thread with 2 roots): the channel group shows a nested thread group with the title of its oldest session and 2 rows inside. Moving one row out turns the other into a plain row in the channel. Screenshot before and after.
 
 #### Manual Verification:
 - [ ] None.
@@ -564,3 +564,4 @@ _Implementation run started 2026-10-25 in worktree `~/worktrees/agent-swarm/2026
 - Phase 4 (after three reviews, Codex included): each root moves in its own write transaction that re-checks the key (a user move after the batch read wins) and reads the chain ids inside the lock (a new child moves too). A failing root is logged and skipped; then the run deletes the cursor and writes no marker, so the next boot retries only the failed roots. `moveTaskChainKeyInTx` now writes `updated_by = COALESCE(?, updated_by)` (no actor keeps the last editor, the repo audit convention), which also changes the bulk and prefix move routes when they have no trusted actor. QA on a prod-shaped copy: `scanned=19 moved=19 skipped=0 failed=0`, marker written, a restart added no history rows.
 - Phase 5 (Opus UI agent, QA screenshots in `/tmp/sss-qa/shots/p5-*.png`): a channel row drops the label's leading `#` next to its Hash icon (`eng`, not `# #eng`); flat rows and toasts keep `#eng`. A new or renamed group whose name lands under a source prefix (`slack`) is refused with a toast. `reveal` (pane crumb) opens a folded source section. The source header follows SPEC R5 (title and count, no chevron); a reviewer flagged that a folded section gives no visible "opens" cue, so Taras should judge it in the look check. DM icons come from id rules (Slack `d…`, Telegram positive chat id) plus the `DM · ` label prefix for Discord; a typed DM flag from the server is a possible follow-up. Seen in QA, not fixed (older code): on Android Chrome a tap on the phone filter button enters search mode (`mobile/mobile-search.tsx` `onFocus`).
 - Phase 6 (Opus UI agent, QA in `/tmp/sss-qa/shots/p6-*.png` and `p6-sources.mp4`): `sessionSourceOf` and `chatSourceOf` live in `lib/session-groups.ts` (bun tests cannot load the component file). Group tabs, the tab strip, and the all-tabs menu also show source logos and labels, so no surface shows `# #eng`. Review fixes: `GET /api/session-tree` now returns labels for every source group the viewer can see, hidden sources included (`SessionTree.sourceGroups`, not sent on the wire), so a pane of an unticked source still names its group. The backfill keeps its saved cursor behind a failed root, so an interrupted boot cannot skip it. Docs now say that a bulk move lists a refused session in `skipped`, and when Undo is refused. Open design point: a Telegram or Discord session moved out of its section shows its chat logo, while the filter counts it as Chat.
+- Phase 7 (Codex, then a Codex fix round after the Standards review; the Spec sub-agent spawn was denied, so the orchestrator checked the spec, probed the leaf SQL on sample keys, and ran the browser QA): nesting applies to source keys only (`isSourceThreadKey`, `NESTED_THREAD_MIN_ROOTS = 2`). A nested thread's label is its oldest owned root's title (`COALESCE(NULLIF(title, ''), substr(task, 1, 80))`); a cached label wins. In flat Inbox rows, a session of a nested thread names the thread, not the channel. QA: a 2-root thread nests under `eng`; moving one root out turns the other into a plain row; moving it back nests them again. Long thread titles truncate and keep their counts (`min-w-max` on the counts slot).

@@ -2,6 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "
 import { createServer, type Server } from "node:http";
 import { keyPrefixRange, sessionGroupKey } from "../assets/key";
 import {
+  isSourceThreadKey,
+  NESTED_THREAD_MIN_ROOTS,
+  sessionThreadGroupKey,
+} from "../assets/source-key";
+import {
   closeDb,
   countSessions,
   createSteeringMessage,
@@ -12,7 +17,8 @@ import {
   listRecentSessions,
   upsertInboxState,
 } from "../be/db";
-import { getSessionTree, type SessionFilters } from "../be/db/session-tree";
+import { rememberSessionLabel } from "../be/db/session-labels";
+import { getSessionTree, type SessionFilters, threadRootsSql } from "../be/db/session-tree";
 import { setSessionShares } from "../be/session-shares";
 import { handleSessions } from "../http/sessions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -64,6 +70,7 @@ beforeEach(async () => {
   await getDbClient().run("DELETE FROM inbox_item_state");
   await getDbClient().run("DELETE FROM session_shares");
   await getDbClient().run("DELETE FROM agent_tasks");
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace = 'session-labels'");
 });
 afterAll(async () => {
   server.closeAllConnections();
@@ -189,6 +196,181 @@ describe("session groups and prefix bounds", () => {
     await task(`personal/${other.id}/`);
     await task("shared/release:v2/");
     expect(await ids({ noGroup: true })).toEqual([a.id, b.id].sort());
+  });
+});
+
+describe("nested source thread groups", () => {
+  const channel = "shared/slack/c1/";
+  const thread = `${channel}thread:1.2/`;
+
+  test("two owned roots nest, lists agree, and a move collapses the group", async () => {
+    const first = await task(thread, { source: "slack" });
+    const second = await task(thread, { source: "mcp" }, NOW);
+    await getDbClient().run("UPDATE agent_tasks SET createdAt = ?, title = ? WHERE id = ?", [
+      OLD,
+      "First conversation",
+      first.id,
+    ]);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+      second.id,
+    ]);
+    await pending(second.id);
+    const single = await task(`${channel}thread:3/`);
+    const tree = await getSessionTree(actor(), NOW);
+    expect(tree.groups).toEqual([
+      { key: channel, lastActivityAt: RECENT, total: 1, unread: 1, running: 0, needsYou: 0 },
+      { key: thread, lastActivityAt: NOW, total: 2, unread: 2, running: 1, needsYou: 1 },
+    ]);
+    expect(tree.threadLabels).toEqual({ [thread]: "First conversation" });
+    expect(tree.sourceGroups).toEqual([channel, thread]);
+    expect(await ids({ groupKey: channel })).toEqual([single.id]);
+    expect(await ids({ groupKey: thread })).toEqual([first.id, second.id].sort());
+    expect(await countSessions(filters({ groupKey: channel }))).toBe(1);
+    expect(await countSessions(filters({ groupKey: thread }))).toBe(2);
+    const rows = await listRecentSessions(filters());
+    expect(rows.find((r) => r.root.id === first.id)?.groupKey).toBe(thread);
+    expect(rows.find((r) => r.root.id === single.id)?.groupKey).toBe(channel);
+
+    const moved = await fetch(`${baseUrl}/api/session-moves`, {
+      method: "POST",
+      headers: { "x-swarm-user-id": owner.id, "content-type": "application/json" },
+      body: JSON.stringify({ rootTaskIds: [second.id], groupKey: "shared/research/" }),
+    });
+    expect(moved.status).toBe(200);
+    expect(
+      (await getSessionTree(actor(), NOW)).groups.find((g) => g.key === thread),
+    ).toBeUndefined();
+    expect(await ids({ groupKey: channel })).toEqual([first.id, single.id].sort());
+    expect(
+      (await listRecentSessions(filters())).find((r) => r.root.id === first.id)?.groupKey,
+    ).toBe(channel);
+  });
+
+  test("one owned root stays a channel row despite children and ownerless roots", async () => {
+    const root = await task(thread);
+    await task(thread, { parentTaskId: root.id });
+    await task(thread, { requestedByUserId: undefined });
+    const tree = await getSessionTree(actor(), NOW);
+    expect(tree.groups.map((g) => [g.key, g.total])).toEqual([[channel, 1]]);
+    expect(tree.threadLabels).toEqual({});
+    expect((await listRecentSessions(filters({ tree: true })))[0].groupKey).toBe(channel);
+  });
+
+  test("nesting and the oldest title include owned roots outside viewer and source filters", async () => {
+    const visible = await task(thread, { source: "slack" });
+    const hidden = await task(thread, { requestedByUserId: other.id });
+    await getDbClient().run("UPDATE agent_tasks SET createdAt = ?, title = ? WHERE id = ?", [
+      OLD,
+      "Hidden oldest",
+      hidden.id,
+    ]);
+    const tree = await getSessionTree(actor(), NOW, { mine: true, showSource: ["slack"] });
+    expect(tree.groups.map((g) => [g.key, g.total])).toEqual([[thread, 1]]);
+    expect(tree.threadLabels[thread]).toBe("Hidden oldest");
+    expect(await ids({ groupKey: channel })).toEqual([]);
+    expect(await ids({ groupKey: thread })).toEqual([visible.id]);
+    const filtered = await getSessionTree(actor(), NOW, { showSource: ["ui"] });
+    expect(filtered.groups).toEqual([]);
+    expect(filtered.sourceGroups).toEqual([channel, thread]);
+    expect(filtered.threadLabels[thread]).toBe("Hidden oldest");
+  });
+
+  test("the route merges title fallbacks and cached labels, including hidden thread groups", async () => {
+    const root = await task(thread);
+    await task(thread);
+    const text = "Oldest task text. ".repeat(8);
+    await getDbClient().run(
+      "UPDATE agent_tasks SET task = ?, title = '', createdAt = ? WHERE id = ?",
+      [text, OLD, root.id],
+    );
+    const headers = { "x-swarm-user-id": owner.id };
+    const read = async () => {
+      const res = await fetch(`${baseUrl}/api/session-tree?show=all&showSource=ui`, { headers });
+      expect(res.status).toBe(200);
+      return (await res.json()) as { labels: Record<string, string>; sourceGroups?: string[] };
+    };
+    await rememberSessionLabel(channel, "#engineering");
+    expect((await read()).labels).toEqual({
+      [channel]: "#engineering",
+      [thread]: text.slice(0, 80),
+    });
+    await rememberSessionLabel(thread, "Cached thread label");
+    const result = await read();
+    expect(result.labels[thread]).toBe("Cached thread label");
+    expect(result.sourceGroups).toBeUndefined();
+  });
+
+  test("only source thread leaves nest, including Telegram and Discord", async () => {
+    for (const [key, expectedGroup] of [
+      ["shared/telegram/-100/thread:42/", "shared/telegram/-100/thread:42/"],
+      ["shared/discord/77/thread:99/", "shared/discord/77/thread:99/"],
+      ["shared/slack/c1/thread:parent/thread:🚀/", "shared/slack/c1/thread:parent/thread:🚀/"],
+      ["shared/slack/c1/thread:parent/child/", "shared/slack/c1/thread:parent/child/"],
+      ["shared/slack/c1/task:leaf/", channel],
+      [`personal/${owner.id}/thread:1/`, `personal/${owner.id}/`],
+      ["shared/notes/thread:1/", "shared/notes/"],
+    ]) {
+      await getDbClient().run("DELETE FROM agent_tasks");
+      const root = await task(key);
+      await task(key);
+      expect(sessionThreadGroupKey(key, NESTED_THREAD_MIN_ROOTS)).toBe(expectedGroup);
+      expect(sessionThreadGroupKey(key, NESTED_THREAD_MIN_ROOTS - 1)).toBe(sessionGroupKey(key));
+      const threadRoots = threadRootsSql();
+      const count = await getDbClient().get<{ roots: number }>(
+        `SELECT ${threadRoots.sql} AS roots FROM agent_tasks r WHERE r.id = ?`,
+        [...threadRoots.params, root.id],
+      );
+      expect(count?.roots).toBe(isSourceThreadKey(key) ? NESTED_THREAD_MIN_ROOTS : 0);
+      expect((await listRecentSessions(filters({ rootId: root.id })))[0].groupKey).toBe(
+        expectedGroup,
+      );
+      const tree = await getSessionTree(actor(), NOW);
+      const noGroup = expectedGroup === `personal/${owner.id}/`;
+      expect(tree.noGroup.total).toBe(noGroup ? 2 : 0);
+      expect(tree.groups).toEqual(
+        noGroup
+          ? []
+          : [
+              {
+                key: expectedGroup,
+                lastActivityAt: RECENT,
+                total: 2,
+                unread: 2,
+                running: 0,
+                needsYou: 0,
+              },
+            ],
+      );
+    }
+  });
+
+  test("channel and thread queries retain indexed key lookup without LIKE", async () => {
+    await task(thread);
+    await task(thread);
+    for (const groupKey of [channel, thread]) {
+      const client = getDbClient();
+      const query = spyOn(client, "query");
+      let call: (typeof query.mock.calls)[number];
+      try {
+        await listRecentSessions(filters({ groupKey }));
+        call = query.mock.calls[0]!;
+      } finally {
+        query.mockRestore();
+      }
+      const [sql, params] = call;
+      const plan = await client.query<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, params);
+      expect(plan.some((p) => p.detail.startsWith("SEARCH r USING INDEX"))).toBe(true);
+      expect(
+        plan.some((p) =>
+          p.detail.includes("SEARCH session_thread_root USING INDEX idx_agent_tasks_asset_key"),
+        ),
+      ).toBe(true);
+      expect(
+        plan.some((p) => p.detail === "SCAN r" || p.detail === "SCAN session_thread_root"),
+      ).toBe(false);
+      expect(sql).not.toContain('"key" LIKE');
+      expect(sql).not.toContain("INDEXED BY");
+    }
   });
 });
 

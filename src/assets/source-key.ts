@@ -1,5 +1,5 @@
 import { chatThreadOfContextKey } from "../tasks/context-key";
-import { normalizeAssetKey } from "./key";
+import { normalizeAssetKey, sessionGroupKey } from "./key";
 
 export const SESSION_SOURCES = ["slack", "telegram", "discord"] as const;
 export type SessionSource = (typeof SESSION_SOURCES)[number];
@@ -57,6 +57,20 @@ export function sessionSourceKey({
 
 export function sourceOfKey(key: string): SessionSource | null {
   return SESSION_SOURCES.find((source) => key.startsWith(`shared/${source}/`)) ?? null;
+}
+
+export const NESTED_THREAD_MIN_ROOTS = 2;
+
+export function isSourceThreadKey(key: string): boolean {
+  return sourceOfKey(key) !== null && /\/thread:[^/]+\/$/.test(key);
+}
+
+/** A source thread with at least two owned roots gets its own nested group. */
+export function sessionThreadGroupKey(key: string, threadRoots: number): string {
+  const normalized = normalizeAssetKey(key);
+  return isSourceThreadKey(normalized) && threadRoots >= NESTED_THREAD_MIN_ROOTS
+    ? normalized
+    : sessionGroupKey(normalized);
 }
 
 export const SOURCE_GROUPS_READ_ONLY = "Source groups are read-only.";

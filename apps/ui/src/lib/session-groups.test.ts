@@ -292,16 +292,50 @@ describe("source sections (sources Phase 5)", () => {
     expect(discord[0].dm).toBe(true);
   });
 
-  test("a deeper source key nests under its channel, still in the section", () => {
+  test("a thread nests under its channel with its title and conversation icon", () => {
+    const thread = "shared/slack/c1/thread:1.2/";
     const nested = buildSessionGroupTree(
-      [group("shared/slack/c1/", at(8)), group("shared/slack/c1/thread:1.2/", at(9), { total: 2 })],
+      [group("shared/slack/c1/", at(8)), group(thread, at(9), { total: 2, unread: 1 })],
       ME,
+      { "shared/slack/c1/": "#eng", [thread]: "#Review the release" },
     );
     expect(nested.myGroups).toEqual([]);
     const channel = nested.sources[0].nodes[0];
     expect(channel.key).toBe("shared/slack/c1/");
-    expect(channel.children.map((node) => node.key)).toEqual(["shared/slack/c1/thread:1.2/"]);
+    expect(channel.name).toBe("eng");
+    expect(channel.own.total).toBe(1);
+    expect(channel.subtree.total).toBe(3);
+    expect(channel.children[0]).toMatchObject({
+      key: thread,
+      name: "#Review the release",
+      thread: true,
+      dm: false,
+      own: { total: 2, unread: 1, running: 0, needsYou: 0 },
+    });
     expect(nested.sources[0].counts.total).toBe(3);
+    expect(groupTargets(nested, ME)).toEqual([]);
+    expect(groupLabel(thread, ME, { [thread]: "Review the release" })).toBe("Review the release");
+    expect(groupCrumb(thread, ME, () => "", { [thread]: "Review the release" })).toBe(
+      "Slack › Review the release",
+    );
+  });
+
+  test("thread groups have a readable fallback and never use the DM icon", () => {
+    for (const base of ["shared/slack/d1/", "shared/telegram/42/", "shared/discord/77/"]) {
+      const key = `${base}thread:1.2/`;
+      const tree = buildSessionGroupTree([group(key, at(9), { total: 2 })], ME, {
+        [key]: "DM · Discuss the release",
+      });
+      const parent = tree.sources[0].nodes[0];
+      expect(parent.children[0]).toMatchObject({
+        name: "DM · Discuss the release",
+        thread: true,
+        dm: false,
+      });
+      expect(sourceGroupLabel(key)).toBe("Thread · 1.2");
+      expect(groupLabel(key, ME)).toBe("Thread · 1.2");
+      expect(groupCrumb(key, ME, () => "")).toEndWith(" › Thread · 1.2");
+    }
   });
 
   test("no source groups: no sections", () => {
@@ -324,8 +358,7 @@ describe("source sections (sources Phase 5)", () => {
     expect(sourceGroupLabel("shared/slack/d0dm000002/")).toBe("DM");
     expect(sourceGroupLabel("shared/telegram/-1002/")).toBe("-1002");
     expect(sourceGroupLabel("shared/discord/123456/")).toBe("123456");
-    // Below a channel, the raw last segment.
-    expect(sourceGroupLabel("shared/slack/c1/thread:1.2/")).toBe("thread:1.2");
+    expect(sourceGroupLabel("shared/slack/c1/thread:1.2/")).toBe("Thread · 1.2");
   });
 
   test("flat rows, cards, toasts, and crumbs name a source group by its label (sources Phase 6)", () => {

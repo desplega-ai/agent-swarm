@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import pkg from "../../package.json";
-import { defaultAssetKey, normalizeAssetKey, sessionGroupKey } from "../assets/key";
-import { sessionSourceKey } from "../assets/source-key";
+import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
+import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -208,6 +208,7 @@ import {
   sessionCountQuery,
   sessionPageFields,
   sessionSummaryQuery,
+  threadRootsSql,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
@@ -13006,6 +13007,7 @@ export async function listRecentSessions(
   opts: ListRecentSessionsOpts = {},
 ): Promise<SessionListItem[] | SessionListItemSummary[]> {
   const query = sessionSummaryQuery(opts);
+  const threadRoots = threadRootsSql();
   const rootRows = await getDbClient().query<
     AgentTaskRow & {
       __chainCount: number;
@@ -13014,15 +13016,17 @@ export async function listRecentSessions(
       __readState: SessionReadState | null;
       __snoozeUntil: string | null;
       __needsYou: number;
+      __threadRoots: number;
     }
   >(
     `SELECT r.*, a.chainCount AS __chainCount, a.lastActivityAt AS __lastActivityAt,
       a.latestStatus AS __latestStatus, a.readState AS __readState,
-      a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou
+      a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou,
+      ${threadRoots.sql} AS __threadRoots
     FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id
     ORDER BY ${opts.triage === "later" ? "a.snoozeUntil ASC," : ""}
       a.lastActivityAt DESC, r.createdAt DESC, r.id DESC LIMIT ? OFFSET ?`,
-    [...query.params, opts.limit ?? 25, opts.offset ?? 0],
+    [...threadRoots.params, ...query.params, opts.limit ?? 25, opts.offset ?? 0],
   );
   const fields = await sessionPageFields(
     rootRows.map((row) => ({
@@ -13038,7 +13042,7 @@ export async function listRecentSessions(
     ...(row.__readState ? { readState: row.__readState } : {}),
     snoozeUntil: row.__snoozeUntil,
     needsYou: !!row.__needsYou,
-    groupKey: sessionGroupKey(row.key),
+    groupKey: sessionThreadGroupKey(row.key, row.__threadRoots),
     ...fields.get(row.id),
   }));
 }

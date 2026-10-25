@@ -44,8 +44,8 @@ export interface GroupNode {
   key: string;
   /**
    * What the row shows: the last segment, the path below the owner under
-   * Shared with me, or a source group's label (`sourceGroupLabel`, with no
-   * leading `#`: the row icon shows it).
+   * Shared with me, or a source group's label (`sourceGroupLabel`). Channel
+   * labels omit the leading `#`: the row icon shows it. Thread titles stay intact.
    */
   name: string;
   /** Sessions in exactly this group. Zero for a parent that holds only subgroups. */
@@ -59,6 +59,8 @@ export interface GroupNode {
   privateClash: boolean;
   /** A source group that is a direct message: the row shows a person, not a `#`. */
   dm?: boolean;
+  /** A nested source thread group: the row shows a conversation icon. */
+  thread?: boolean;
 }
 
 /** One source section (Slack, Telegram, Discord): its groups, read-only. */
@@ -236,11 +238,15 @@ function sourceIds(key: string): string[] {
   return segments(key).slice(2);
 }
 
+function isThreadGroupKey(key: string): boolean {
+  return sourceOfGroupKey(key) !== null && /\/thread:[^/]+\/$/.test(key);
+}
+
 /**
  * The name of a source group: its label from the tree (`#eng`, `DM · Lena`,
  * a Telegram chat title), else a name from its id: `#<ID>` for a Slack
  * channel (`c…`, `g…`, in Slack's upper case), `DM` for a Slack DM (`d…`),
- * and the raw id otherwise.
+ * `Thread · <id>` for a nested thread, and the raw id otherwise.
  */
 export function sourceGroupLabel(
   key: string,
@@ -250,6 +256,7 @@ export function sourceGroupLabel(
   if (label) return label;
   const ids = sourceIds(key);
   const id = ids[ids.length - 1] ?? "";
+  if (isThreadGroupKey(key)) return `Thread · ${id.slice("thread:".length)}`;
   if (sourceOfGroupKey(key) === "slack" && ids.length === 1) {
     if (/^[cg]/.test(id)) return `#${id.toUpperCase()}`;
     if (id.startsWith("d")) return "DM";
@@ -263,9 +270,10 @@ export function sourceGroupLabel(
  */
 function isSourceDm(key: string, labels: Readonly<Record<string, string>>): boolean {
   const ids = sourceIds(key);
+  if (ids.length !== 1) return false;
   const source = sourceOfGroupKey(key);
-  if (ids.length === 1 && source === "slack" && ids[0].startsWith("d")) return true;
-  if (ids.length === 1 && source === "telegram" && !ids[0].startsWith("-")) return true;
+  if (source === "slack" && ids[0].startsWith("d")) return true;
+  if (source === "telegram" && !ids[0].startsWith("-")) return true;
   return labels[key]?.startsWith("DM · ") ?? false;
 }
 
@@ -442,8 +450,9 @@ export function buildSessionGroupTree(
     // already says channel, so `#eng` shows as `eng`, like a user group.
     for (const node of tree.nodes.values()) {
       const label = sourceGroupLabel(node.key, labels);
+      node.thread = isThreadGroupKey(node.key);
       node.dm = isSourceDm(node.key, labels);
-      node.name = node.dm ? label : label.replace(/^#/, "");
+      node.name = node.dm || node.thread ? label : label.replace(/^#/, "");
     }
     for (const root of tree.roots) rollUp(root);
     tree.roots.sort(byActivity);
