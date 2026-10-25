@@ -23,7 +23,12 @@ import {
   type WorkflowIdempotencyClaim,
   workflowRequestFingerprint,
 } from "../be/db/workflow-idempotency";
-import { getWorkflowRunParent } from "../be/db/workflow-runs";
+import {
+  getWorkflowRunParent,
+  getWorkflowRunTree,
+  WORKFLOW_RUN_TREE_MAX_DEPTH,
+  WorkflowRunTreeError,
+} from "../be/db/workflow-runs";
 import {
   AssetKeySchema,
   AutomationIntegrationIdSchema,
@@ -107,6 +112,13 @@ const WorkflowRunPageSchema = z.object({
     hasMore: z.boolean(),
     nextOffset: z.number().int().optional(),
   }),
+});
+
+/** Mirrors `WorkflowRunTree` in src/be/db/workflow-runs.ts. */
+const WorkflowRunTreeSchema = z.object({
+  rootRunId: z.string(),
+  runs: z.array(WorkflowRunSummarySchema),
+  hasOpenWork: z.boolean(),
 });
 
 const SuccessResponseSchema = z.object({ success: z.literal(true) });
@@ -362,6 +374,21 @@ const getWorkflowRunRoute = route({
       }),
     },
     404: { description: "Run not found" },
+  },
+});
+
+const getWorkflowRunTreeRoute = route({
+  method: "get",
+  path: "/api/workflow-runs/{id}/tree",
+  pattern: ["api", "workflow-runs", null, "tree"],
+  summary: "Get a workflow run and every sub-workflow run below it",
+  description: `Follows stored parent links (\`parentStepId\` → step → run) through every attempt of every step, terminal runs included. \`runs\` holds list rows without \`context\`, root first. \`hasOpenWork\` is true while any run in the tree is live, has a pending, running or waiting step, a queued retry, an open task or a pending approval; after a cancel it turns false once the tree has settled. Both come from one read snapshot. The tree is not paginated. Links that form a cycle or nest deeper than ${WORKFLOW_RUN_TREE_MAX_DEPTH} levels return 409.`,
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "The run tree", schema: WorkflowRunTreeSchema },
+    404: { description: "Run not found" },
+    409: { description: "Stored parent links form a cycle or nest past the depth bound" },
   },
 });
 
@@ -1023,6 +1050,26 @@ export async function handleWorkflows(
     const steps = await getWorkflowRunStepsByRunId(parsed.params.id, "display");
     const parent = run.parentStepId ? await getWorkflowRunParent(run.parentStepId) : null;
     getWorkflowRunRoute.respond(res, 200, { run, steps, ...(parent ? { parent } : {}) });
+    return true;
+  }
+
+  if (getWorkflowRunTreeRoute.match(req.method, pathSegments)) {
+    const parsed = await getWorkflowRunTreeRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    let tree: Awaited<ReturnType<typeof getWorkflowRunTree>>;
+    try {
+      tree = await getWorkflowRunTree(parsed.params.id);
+    } catch (err) {
+      if (!(err instanceof WorkflowRunTreeError)) throw err;
+      jsonError(res, err.message, 409);
+      return true;
+    }
+    if (!tree) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+    getWorkflowRunTreeRoute.respond(res, 200, tree);
     return true;
   }
 

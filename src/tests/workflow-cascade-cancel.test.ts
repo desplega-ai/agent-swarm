@@ -26,6 +26,7 @@ import {
   WorkflowStepNotExecutableError,
 } from "../be/db/workflow-runs";
 import { handleApprovalRequests } from "../http/approval-requests";
+import { handleWorkflows } from "../http/workflows";
 import * as slackApp from "../slack/app";
 import type { AgentTask, Workflow, WorkflowDefinition, WorkflowRun } from "../types";
 import * as approvalNotifications from "../workflows/approval-notifications";
@@ -1165,5 +1166,176 @@ describe("run lineage guard", () => {
         (s) => s === "failed",
       ),
     ).toBe("failed");
+  });
+});
+
+describe("run tree read (GET /api/workflow-runs/{id}/tree)", () => {
+  let server: ReturnType<typeof createServer>;
+  let baseUrl = "";
+
+  beforeAll(async () => {
+    server = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const handled = await handleWorkflows(
+        req,
+        res,
+        url.pathname.split("/").filter(Boolean),
+        url.searchParams,
+        undefined,
+      );
+      if (!handled) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Not found" }));
+      }
+    });
+    baseUrl = `http://127.0.0.1:${await listenOnFreePort(server)}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  type TreeBody = {
+    rootRunId: string;
+    runs: Array<WorkflowRun & Record<string, unknown>>;
+    hasOpenWork: boolean;
+    error?: string;
+  };
+
+  async function getTree(runId: string): Promise<{ status: number; body: TreeBody | null }> {
+    const response = await fetch(`${baseUrl}/api/workflow-runs/${runId}/tree`);
+    const text = await response.text();
+    return { status: response.status, body: text ? (JSON.parse(text) as TreeBody) : null };
+  }
+
+  test("lists every run of every attempt, root first, and settles after a cascade cancel", async () => {
+    const grandchild = await makeWorkflow(taskDef);
+    const child = await makeWorkflow(parentOf(grandchild.id));
+    const root = await makeWorkflow(parentOf(child.id));
+    const rootId = await startWorkflowExecution(root, {}, registry);
+    const childRun = await runOf(child.id, "waiting");
+    const grandchildRun = await runOf(grandchild.id, "waiting");
+    const [task] = await waitFor(
+      () => tasksOfRun(grandchildRun.id),
+      (tasks) => tasks.length === 1,
+    );
+
+    // A retry of the root step: the live child is attempt 1, and attempt 0's
+    // child failed after starting a grandchild of its own.
+    const [rootStep] = await getWorkflowRunStepsByRunId(rootId);
+    await getDbClient().run("UPDATE workflow_run_steps SET retryCount = 1 WHERE id = ?", [
+      rootStep!.id,
+    ]);
+    await getDbClient().run("UPDATE workflow_runs SET parentStepAttempt = 1 WHERE id = ?", [
+      childRun.id,
+    ]);
+    const oldChild = await linkedRun({
+      workflowId: child.id,
+      status: "failed",
+      parentStepId: rootStep!.id,
+      parentStepAttempt: 0,
+    });
+    const oldChildStep = await linkedStep(oldChild, {
+      nodeId: "child0",
+      nodeType: "sub-workflow",
+      status: "failed",
+    });
+    const oldGrandchild = await linkedRun({
+      workflowId: grandchild.id,
+      status: "failed",
+      parentStepId: oldChildStep,
+    });
+
+    const before = await getTree(rootId);
+    expect(before.status).toBe(200);
+    expect(before.body!.rootRunId).toBe(rootId);
+    expect(before.body!.hasOpenWork).toBe(true);
+    const ids = before.body!.runs.map((run) => run.id);
+    expect(ids[0]).toBe(rootId);
+    expect(new Set(ids.slice(1, 3))).toEqual(new Set([childRun.id, oldChild]));
+    expect(new Set(ids.slice(3))).toEqual(new Set([grandchildRun.id, oldGrandchild]));
+    const byId = new Map(before.body!.runs.map((run) => [run.id, run]));
+    expect(byId.get(childRun.id)).toMatchObject({
+      workflowId: child.id,
+      status: "waiting",
+      parentStepId: rootStep!.id,
+      parentStepAttempt: 1,
+    });
+    expect(byId.get(oldChild)).toMatchObject({ status: "failed", parentStepAttempt: 0 });
+    expect(byId.get(oldGrandchild)?.parentStepId).toBe(oldChildStep);
+    for (const run of before.body!.runs) expect("context" in run).toBe(false);
+
+    await cancelWorkflowRun(rootId, "stop the tree");
+    expect((await getTaskById(task!.id))?.status).toBe("cancelled");
+
+    const after = await getTree(rootId);
+    expect(after.status).toBe(200);
+    expect(after.body!.hasOpenWork).toBe(false);
+    expect(after.body!.runs.map((run) => run.id)).toEqual(ids);
+    const statuses = new Map(after.body!.runs.map((run) => [run.id, run.status]));
+    expect(statuses.get(rootId)).toBe("cancelled");
+    expect(statuses.get(childRun.id)).toBe("cancelled");
+    expect(statuses.get(grandchildRun.id)).toBe("cancelled");
+    // Terminal history keeps its status.
+    expect(statuses.get(oldChild)).toBe("failed");
+    expect(statuses.get(oldGrandchild)).toBe("failed");
+
+    // A subtree reads on its own, without its ancestors.
+    const subtree = await getTree(childRun.id);
+    expect(subtree.body!.runs.map((run) => run.id)).toEqual([childRun.id, grandchildRun.id]);
+  });
+
+  test("a tree wider than one summary query returns every run once, in walk order", async () => {
+    const wf = await makeWorkflow({ nodes: [] });
+    const rootId = await linkedRun({ workflowId: wf.id, status: "completed" });
+    const step = await linkedStep(rootId, {
+      nodeId: "fan",
+      nodeType: "sub-workflow",
+      status: "completed",
+    });
+    // One child per attempt, over two 500-id summary chunks, so a dropped or
+    // repeated chunk shows.
+    const childCount = 1_100;
+    await getDbClient().transaction(async () => {
+      for (let i = 0; i < childCount; i++) {
+        await createWorkflowRun({
+          id: crypto.randomUUID(),
+          workflowId: wf.id,
+          parentStepId: step,
+          parentStepAttempt: i,
+        });
+      }
+    });
+
+    const walk = await getWorkflowRunTreeIds(rootId);
+    expect(walk).toHaveLength(childCount + 1);
+    const tree = await getTree(rootId);
+    expect(tree.status).toBe(200);
+    expect(tree.body!.runs.map((run) => run.id)).toEqual(walk);
+    expect(tree.body!.hasOpenWork).toBe(true);
+  });
+
+  test("a run without children is its own tree", async () => {
+    const wf = await makeWorkflow({ nodes: [] });
+    const runId = await linkedRun({ workflowId: wf.id, status: "completed" });
+    const tree = await getTree(runId);
+    expect(tree.status).toBe(200);
+    expect(tree.body!.runs.map((run) => run.id)).toEqual([runId]);
+    expect(tree.body!.hasOpenWork).toBe(false);
+  });
+
+  test("an unknown run is 404 and a cycle in the stored links is 409", async () => {
+    expect((await getTree(crypto.randomUUID())).status).toBe(404);
+
+    const wf = await makeWorkflow({ nodes: [] });
+    const a = await linkedRun({ workflowId: wf.id, status: "waiting" });
+    const aStep = await linkedStep(a, { nodeId: "s", nodeType: "sub-workflow", status: "waiting" });
+    const b = await linkedRun({ workflowId: wf.id, status: "waiting", parentStepId: aStep });
+    const bStep = await linkedStep(b, { nodeId: "s", nodeType: "sub-workflow", status: "waiting" });
+    await getDbClient().run("UPDATE workflow_runs SET parentStepId = ? WHERE id = ?", [bStep, a]);
+
+    const cycle = await getTree(a);
+    expect(cycle.status).toBe(409);
+    expect(cycle.body!.error).toContain("cycle");
   });
 });

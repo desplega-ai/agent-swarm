@@ -133,7 +133,14 @@ export class SubWorkflowExecutor extends BaseExecutor<
       throw err;
     }
     const child = await db.getWorkflowRun(childRunId);
-    if (!child) return { status: "failed", error: `Child workflow run ${childRunId} not found` };
+    // The start committed the row, so a missing one was deleted with its workflow.
+    if (!child) {
+      return {
+        status: "failed",
+        error: `Child workflow run ${childRunId} not found`,
+        retryable: false,
+      };
+    }
     return this.settle(child, config.workflowId);
   }
 
