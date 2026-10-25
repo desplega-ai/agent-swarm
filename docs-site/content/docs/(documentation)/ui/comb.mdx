@@ -85,7 +85,7 @@ Search covers the whole swarm drive. Enter opens the selected file.
 An HTML file opens on **Source**, where comments anchor. **Preview** runs the page in a sandboxed frame:
 
 - The page loads from a 15-minute agent-fs site link to its folder, so its relative styles, images, and scripts load.
-- The frame comes from the agent-fs host, and its sandbox gives the page no origin. The page cannot read the dashboard, its local storage, or agent-fs cookies, and it cannot navigate the dashboard tab. Scripts, forms, popups, and dialogs run.
+- The frame comes from the agent-fs host, and its sandbox gives the page no origin. The page cannot read the dashboard, its local storage, or agent-fs cookies, and it cannot navigate the dashboard tab. Scripts, forms, popups, and dialogs run. A popup keeps the sandbox, so a site that needs its own storage can break in it.
 - A page at the drive root asks first, because its site link covers the whole drive for 15 minutes.
 
 Preview shows when agent-fs reports the `html-sites` feature.
@@ -190,7 +190,7 @@ The dashboard and the API then behave as they do without Comb. Comments, mention
 
 - The agent-fs key lives in this browser's local storage, separately for each swarm API and agent-fs URL. The dashboard sends it only to agent-fs, never to the swarm API. **Disconnect** removes it.
 - The dashboard saves its query cache in local storage. File contents and comments never go into it.
-- Comb runs an HTML file only when you click **Preview**, in a sandboxed frame from the agent-fs host (`sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals"`, no `allow-same-origin`, no referrer). The page can read the files of its folder for 15 minutes, through its site link.
+- Comb runs an HTML file only when you click **Preview**, in a sandboxed frame from the agent-fs host (`sandbox="allow-scripts allow-forms allow-popups allow-modals"`, no `allow-same-origin`, no sandbox-escaping popups, no referrer). The page can read the files of its folder for 15 minutes, through its site link.
 - Search snippets show as text. Comb never renders file content from a snippet as HTML.
 - A share link is public until it expires. Anyone who gets it can open the file.
 - The swarm API receives only comment ids when you send. It reads the comments from agent-fs with its own key.

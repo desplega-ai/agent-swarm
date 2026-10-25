@@ -16,17 +16,12 @@ describe("the preview frame sandbox", () => {
   const tokens = HTML_SANDBOX.split(/\s+/);
 
   test("lets the page run scripts, forms, popups, and dialogs", () => {
-    expect(tokens).toEqual([
-      "allow-scripts",
-      "allow-forms",
-      "allow-popups",
-      "allow-popups-to-escape-sandbox",
-      "allow-modals",
-    ]);
+    expect(tokens).toEqual(["allow-scripts", "allow-forms", "allow-popups", "allow-modals"]);
   });
 
-  test("never gives the page an origin, the top window, or downloads", () => {
+  test("never gives the page an origin, the top window, unsandboxed popups, or downloads", () => {
     expect(tokens).not.toContain("allow-same-origin");
+    expect(tokens).not.toContain("allow-popups-to-escape-sandbox");
     expect(tokens.filter((token) => token.startsWith("allow-top-navigation"))).toEqual([]);
     expect(tokens).not.toContain("allow-downloads");
     expect(tokens).not.toContain("allow-storage-access-by-user-activation");

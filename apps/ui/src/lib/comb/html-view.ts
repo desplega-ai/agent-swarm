@@ -14,13 +14,15 @@ import { fileExtension } from "./file-kinds";
 export const HTML_SITES_FEATURE = "html-sites";
 
 /**
- * The frame's sandbox. Scripts, forms, popups, and dialogs run, like the
- * agent-fs live UI. Never add `allow-same-origin` (the page would share an
- * origin with other agent-fs pages), `allow-top-navigation*` (it could move
- * the dashboard tab), or `allow-downloads`.
+ * The frame's sandbox. Scripts, forms, popups, and dialogs run. Never add
+ * `allow-same-origin` (the page would get the agent-fs origin),
+ * `allow-top-navigation*` (it could move the dashboard tab),
+ * `allow-popups-to-escape-sandbox` (a popup would run without the sandbox),
+ * or `allow-downloads`. The live UI allows sandbox-escaping popups. Comb does
+ * not: a popup keeps this sandbox, so a site that needs its own storage can
+ * break in it.
  */
-export const HTML_SANDBOX =
-  "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals";
+export const HTML_SANDBOX = "allow-scripts allow-forms allow-popups allow-modals";
 
 /** Every attribute of the preview frame that limits the page. */
 export const HTML_FRAME_POLICY = {
