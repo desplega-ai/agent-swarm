@@ -1,7 +1,7 @@
 ---
 date: 2026-10-25T14:45:00Z
 topic: "Comb: send any comment, bulk resolve, recent and favorites, clean layout"
-status: in-progress
+status: done
 autopilot: true
 ---
 
@@ -191,11 +191,11 @@ note, bulk resolve, full width.
 - [x] Phase 2: Bulk resolve (18d278a8b)
 - [x] Phase 3: Recent, Recently viewed, Favorites (4b5a0cc99)
 - [x] Phase 4: Clean layout (bd45bcafe)
-- [ ] Phase 5: Drive-wide send tray
-- [x] Docs (7ba9fa5e9, Phase 5 to add)
-- [ ] QA walk, screenshots, recording
-- [ ] Code review (Standards + Spec)
-- [ ] Gates
+- [x] Phase 5: Drive-wide send tray, with the review fixes (a13a093c8, 54d5107f2)
+- [x] Docs (7ba9fa5e9, a13a093c8)
+- [x] QA walk, screenshots, recording (agent-fs `qa/agent-swarm/2026-10-25-comb-review-flow/`)
+- [x] Code review (Standards + Spec, Opus): Important and most Minor findings fixed in a13a093c8
+- [x] Gates: all green except `script-executor-quickjs` ("caps the binary bodies"), which fails on clean main too (macOS). The Comb UI e2e flow passed against the local agent-fs (`E2E_COMB_AGENT_FS_URL`).
 - [ ] PR, cleanup, df -h
 
 ## Log
@@ -213,3 +213,16 @@ note, bulk resolve, full width.
 - Gotcha: `bun test` over all apps/ui component tests in ONE process fails with "Happy DOM has
   already been globally registered". CI runs `--parallel=4`, one process per file.
 - Gotcha: `git stash` in a worktree uses the shared stash list. Do not stash there.
+- 16:45 BCN: review fixes and Phase 5 committed. Live: tray across 4 files, grouped dialog,
+  viewer (403) bulk resolve stops early and keeps the selection, list tab stays open on a
+  plain file. Recently viewed is now keyed per agent-fs user (QA showed two Comb accounts in
+  one browser sharing it).
+
+## Review notes (not fixed)
+
+- An older agent-fs without `recent` shows "This agent-fs does not list changes." in the home
+  card and the tab, instead of hiding them. Kept: it says why the list is empty.
+- `useRememberViewed`, the full-width exit, and the send bar count have no automated test. They
+  were checked live.
+- The send bar and the tray both read open comments. The tray counts only your own comments,
+  the bar counts everyone's on the file (the old "Send N" rule).
