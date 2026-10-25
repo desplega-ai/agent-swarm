@@ -60,12 +60,18 @@ export function OAuthInlineConnect({
   value,
   onChange,
   suggestedPresetId,
+  lockPreset = false,
   scopes,
 }: {
   oauthApps: OAuthAppSummary[];
   value: string;
   onChange: (authorizationId: string) => void;
   suggestedPresetId?: string;
+  /**
+   * Only `suggestedPresetId` (`/setup`): no preset picker, the first app of
+   * `oauthApps` is preselected, and the app picker shows once an app exists.
+   */
+  lockPreset?: boolean;
   /**
    * Scopes for an app created from `suggestedPresetId`, instead of that
    * preset's defaults. Other presets keep their defaults.
@@ -82,7 +88,9 @@ export function OAuthInlineConnect({
     () => oauthApps.find((app) => app.authorizations?.some((z) => z.id === value))?.id ?? "",
     [oauthApps, value],
   );
-  const [appId, setAppId] = useState<string>(owningAppId);
+  const [appId, setAppId] = useState<string>(
+    () => owningAppId || (lockPreset ? (oauthApps[0]?.id ?? "") : ""),
+  );
   const [presetId, setPresetId] = useState(suggestedPresetId ?? "");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -236,51 +244,55 @@ export function OAuthInlineConnect({
 
   return (
     <div className="space-y-3 rounded-md border border-dashed p-3">
-      <div className="space-y-2">
-        <Label className="text-xs">OAuth App</Label>
-        <Select
-          value={appId || NEW_APP}
-          onValueChange={(next) => {
-            if (next === NEW_APP) {
-              setAppId("");
-              setAuthorizeMode(false);
-            } else {
-              setAppId(next);
-              setAuthorizeMode(false);
-            }
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Select or create an OAuth app" />
-          </SelectTrigger>
-          <SelectContent>
-            {oauthApps.map((app) => (
-              <SelectItem key={app.id} value={app.id}>
-                {app.provider}
-              </SelectItem>
-            ))}
-            <SelectItem value={NEW_APP}>+ New from preset</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {lockPreset && oauthApps.length === 0 ? null : (
+        <div className="space-y-2">
+          <Label className="text-xs">OAuth App</Label>
+          <Select
+            value={appId || NEW_APP}
+            onValueChange={(next) => {
+              if (next === NEW_APP) {
+                setAppId("");
+                setAuthorizeMode(false);
+              } else {
+                setAppId(next);
+                setAuthorizeMode(false);
+              }
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select or create an OAuth app" />
+            </SelectTrigger>
+            <SelectContent>
+              {oauthApps.map((app) => (
+                <SelectItem key={app.id} value={app.id}>
+                  {app.provider}
+                </SelectItem>
+              ))}
+              <SelectItem value={NEW_APP}>+ New from preset</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {!appId ? (
         <div className="space-y-3">
-          <div className="space-y-2">
-            <Label className="text-xs">Preset</Label>
-            <Select value={presetId} onValueChange={setPresetId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a provider preset" />
-              </SelectTrigger>
-              <SelectContent>
-                {presets.map((preset) => (
-                  <SelectItem key={preset.id} value={preset.id}>
-                    {preset.displayName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {lockPreset ? null : (
+            <div className="space-y-2">
+              <Label className="text-xs">Preset</Label>
+              <Select value={presetId} onValueChange={setPresetId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a provider preset" />
+                </SelectTrigger>
+                <SelectContent>
+                  {presets.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      {preset.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {redirectUriHint ? (
             <p className="text-xs text-muted-foreground">
               Register this redirect URI in the provider console:{" "}
