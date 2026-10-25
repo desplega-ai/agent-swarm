@@ -481,7 +481,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 |-----------|------|----------|---------|-------------|
 | `action` | `create \| claim \| release \| accept \| reject \| to_backlog \| from_backlog` | Yes | - | The action to perform: 'create' creates an unassigned task, 'claim' takes a task from pool, 'release' returns task to pool, 'accept' accepts offered task, 'reject' declines offered task, 'to_backlog' moves task to backlog, 'from_backlog' moves task from backlog to pool. |
 | `task` | `string` | No | - | Task description (required for 'create'). |
-| `key` | `unknown` | No | - | Logical namespace for a created task. Defaults to a shared/task:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace for a created task. Default: the Slack or chat source key of the task (for example shared/slack/<channel>/thread:<ts>/), else shared/task:<id>/. |
 | `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature'). |
 | `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
 | `priority` | `number` | No | - | Priority 0-100, default 50. |

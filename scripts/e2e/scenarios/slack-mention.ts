@@ -46,12 +46,17 @@ export const slackMention: Scenario = {
       `Slack task ${taskId} is ${String(task.status)}, not pending`,
     );
 
-    const row = ctx.db.get<{ source: string }>("SELECT source FROM agent_tasks WHERE id = ?", [
-      taskId,
-    ]);
+    const row = ctx.db.get<{ source: string; key: string }>(
+      'SELECT source, "key" FROM agent_tasks WHERE id = ?',
+      [taskId],
+    );
     expect(
       row?.source === "slack",
       `agent_tasks row for ${taskId} has source ${row?.source ?? "<missing row>"}`,
+    );
+    expect(
+      row?.key === `shared/slack/${"C0GENERAL0".toLowerCase()}/thread:${message.ts}/`,
+      `agent_tasks row for ${taskId} has key ${row?.key ?? "<missing row>"}`,
     );
 
     await claim(ctx, leadId, taskId);

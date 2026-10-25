@@ -68,7 +68,7 @@ export const taskActionInputSchema = z.object({
   // For 'create' action:
   task: z.string().min(1).optional().describe("Task description (required for 'create')."),
   key: AssetKeySchema.optional().describe(
-    "Logical namespace for a created task. Defaults to a shared/task:<id>/ resource key.",
+    "Logical namespace for a created task. Default: the Slack or chat source key of the task (for example shared/slack/<channel>/thread:<ts>/), else shared/task:<id>/.",
   ),
   taskType: z.string().max(50).optional().describe("Task type (e.g., 'bug', 'feature')."),
   tags: z

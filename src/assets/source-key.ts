@@ -1,0 +1,60 @@
+import { chatThreadOfContextKey } from "../tasks/context-key";
+import { normalizeAssetKey } from "./key";
+
+export const SESSION_SOURCES = ["slack", "telegram", "discord"] as const;
+export type SessionSource = (typeof SESSION_SOURCES)[number];
+
+/**
+ * The source asset key of a root session, or null when the task has no Slack
+ * thread and no supported Chat SDK thread. Shapes:
+ * - Slack fields or chat-sdk `slack:<channel>:<ts>`: `shared/slack/<channel>/thread:<ts>/`
+ * - chat-sdk `slack:<channel>:` (a top-level DM, empty ts): `shared/slack/<channel>/task:<id>/`
+ * - `telegram:<chatId>[:<topicId>]`: `shared/telegram/<chatId>/thread:<topicId>/`, else `.../task:<id>/`
+ * - `discord:<guild|@me>:<channelId>[:<threadId>]`: `shared/discord/<channelId>/thread:<threadId>/`, else `.../task:<id>/`
+ */
+export function sessionSourceKey({
+  id,
+  slackChannelId,
+  slackThreadTs,
+  contextKey,
+}: {
+  id: string;
+  slackChannelId?: string | null;
+  slackThreadTs?: string | null;
+  contextKey?: string | null;
+}): string | null {
+  let parts: [SessionSource, string | undefined, string | undefined];
+  if (slackChannelId && slackThreadTs) {
+    parts = ["slack", slackChannelId, slackThreadTs];
+  } else {
+    const chat = chatThreadOfContextKey(contextKey);
+    if (!chat) return null;
+    // threadId keeps its adapter prefix, so index 0 is the adapter.
+    const ids = chat.threadId.split(":");
+    if (chat.adapter === "slack" && ids.length === 3 && !ids[2]) ids.pop();
+    if (ids.some((part) => !part)) return null;
+    if (chat.adapter === "slack" && (ids.length === 2 || ids.length === 3)) {
+      parts = ["slack", ids[1], ids[2]];
+    } else if (chat.adapter === "telegram" && (ids.length === 2 || ids.length === 3)) {
+      parts = ["telegram", ids[1], ids[2]];
+    } else if (chat.adapter === "discord" && (ids.length === 3 || ids.length === 4)) {
+      parts = ["discord", ids[2], ids[3]];
+    } else {
+      return null;
+    }
+  }
+  const [source, channel, thread] = parts;
+  // A "/" inside an id would add key segments and break the group shape.
+  if (!channel || channel.includes("/") || thread?.includes("/")) return null;
+  try {
+    return normalizeAssetKey(
+      `shared/${source}/${channel}/${thread ? `thread:${thread}` : `task:${id}`}/`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+export function sourceOfKey(key: string): SessionSource | null {
+  return SESSION_SOURCES.find((source) => key.startsWith(`shared/${source}/`)) ?? null;
+}

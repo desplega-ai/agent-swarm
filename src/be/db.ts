@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey, sessionGroupKey } from "../assets/key";
+import { sessionSourceKey } from "../assets/source-key";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -2850,7 +2851,18 @@ export async function createTaskExtended(
   }
 
   const auditUserId = getCurrentRequestUserId() ?? null;
-  const assetKey = normalizeAssetKey(options?.key ?? defaultAssetKey("task", id));
+  const assetKey = normalizeAssetKey(
+    options?.key ??
+      (options?.parentTaskId
+        ? null
+        : sessionSourceKey({
+            id,
+            slackChannelId: options?.slackChannelId,
+            slackThreadTs: options?.slackThreadTs,
+            contextKey: options?.contextKey,
+          })) ??
+      defaultAssetKey("task", id),
+  );
   // The Linear tracker dedup guard and the INSERT commit as one unit. Two
   // distinct webhook deliveries for the same issue are dispatched
   // fire-and-forget (src/linear/webhook.ts), nothing serializes them, and

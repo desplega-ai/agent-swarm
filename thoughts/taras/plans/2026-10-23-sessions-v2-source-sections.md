@@ -157,16 +157,16 @@ Verify with the phase checks below and the Manual E2E section.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New tests pass: `bun run test:root -- src/tests/session-source-keys.test.ts`
-- [ ] Key and session tests pass: `bun run test:root -- src/tests/asset-key-normalization.test.ts src/tests/sessions-tree.test.ts src/tests/context-key.test.ts`
-- [ ] Slack and chat-sdk tests pass: `bun run test:root -- src/tests/slack-*.test.ts src/tests/chat-sdk-*.test.ts`
-- [ ] Black-box Slack scenarios pass (run from a clean checkout with no `.env`): `env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention,slack-follow-up`
-- [ ] Type check passes: `bun run tsc:check:tsc`
-- [ ] Lint passes: `bun run lint && bun run lint:slop`
-- [ ] Boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] New tests pass: `bun run test:root -- src/tests/session-source-keys.test.ts`
+- [x] Key and session tests pass: `bun run test:root -- src/tests/asset-key-normalization.test.ts src/tests/sessions-tree.test.ts src/tests/context-key.test.ts`
+- [x] Slack and chat-sdk tests pass: `bun run test:root -- src/tests/slack-*.test.ts src/tests/chat-sdk-*.test.ts`
+- [x] Black-box Slack scenarios pass (run from a clean checkout with no `.env`): `env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention,slack-follow-up`
+- [x] Type check passes: `bun run tsc:check:tsc`
+- [x] Lint passes: `bun run lint && bun run lint:slop`
+- [x] Boundary check passes: `bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
-- [ ] `POST /api/tasks` has no Slack fields (its body schema at `src/http/tasks.ts:282-313` drops them), so probe the insert path directly. Write `/tmp/sss-qa/p1-probe.ts`: it sets `DATABASE_PATH=/tmp/sss-qa/p1.sqlite`, boots the DB the way `src/tests/sessions-tree.test.ts` does, calls `createTaskExtended` for a Slack root, an `mcp` root with Slack fields, a child of the Slack root, and a Telegram chat-sdk root, then prints each `key`. Run `mkdir -p /tmp/sss-qa && rm -f /tmp/sss-qa/p1.sqlite && bun /tmp/sss-qa/p1-probe.ts` from the repo root. Expect `shared/slack/c0ar967k0kz/thread:1729000000.123456/` three times and `shared/telegram/-1001234567890/thread:42/` once.
+- [x] `POST /api/tasks` has no Slack fields (its body schema at `src/http/tasks.ts:282-313` drops them), so probe the insert path directly. Write `/tmp/sss-qa/p1-probe.ts`: it sets `DATABASE_PATH=/tmp/sss-qa/p1.sqlite`, boots the DB the way `src/tests/sessions-tree.test.ts` does, calls `createTaskExtended` for a Slack root, an `mcp` root with Slack fields, a child of the Slack root, and a Telegram chat-sdk root, then prints each `key`. Run `mkdir -p /tmp/sss-qa && rm -f /tmp/sss-qa/p1.sqlite && bun /tmp/sss-qa/p1-probe.ts` from the repo root. Expect `shared/slack/c0ar967k0kz/thread:1729000000.123456/` three times and `shared/telegram/-1001234567890/thread:42/` once.
 
 #### Manual Verification:
 - [ ] None. The Manual E2E section covers a real Slack mention.
@@ -551,3 +551,11 @@ _Reviewed: 2026-10-24 by Claude (automated review, auto-apply, against main dd1a
 - [x] **Important**: the prod impact numbers now agree (about 2,400 roots) in the Implementation Approach, Phase 4, and Manual E2E. Auto-applied.
 - [x] **Important**: a derail note covers the users whose ticked sources show something different under effective source (`mcp` without Slack, `chat` without Telegram). Auto-applied.
 - [x] **Minor**: frontmatter has `topic` and `tags`. The migration line names main's tail (242). The `context-key.ts` import check is now a fact (it has no imports). The Done rule of #2379 and #2381 is in Current State, and Phase 4 tests that a Done session stays Done. `e2e` and `e2e:ui` run from a clean checkout with no `.env`. Auto-fixed.
+
+---
+
+## Implementation Notes
+
+_Implementation run started 2026-10-25 in worktree `~/worktrees/agent-swarm/2026-10-25-sessions-source-sections` (branch `feat/sessions-source-sections`). Taras switched to "keep going till the end" after Phase 1._
+
+- Phase 1: an id that contains `/` gives no source key (it would add key segments). Taras chose a fallback for Slack through chat-sdk with no ts (`slack:<D…>:`, a top-level DM in the legacy assistant view): `shared/slack/<channel>/task:<id>/`, like Telegram with no topic. The `task-action` tool's `key` description (and `MCP.md`) now names the source key default.
