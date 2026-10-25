@@ -15,6 +15,7 @@ handlers, user cancel, user retry, crash). Code map: `ACTIONS.md`. Calibration: 
 | Open counterexamples on `main` @ `795526ca3` (CX8-CX10) | **3**, no repro test yet |
 | Closed by #1832 (CX11) | **1** |
 | Open counterexamples on `main` @ `eaf5d0cc1` (CX12 from #1832, CX13 pre-existing) | **2**, no repro test yet |
+| Closed by #2377 (CX13) | **1** |
 | Open counterexamples on `main` @ `7912fff73` (CX14 from #1926) | **1**, no repro test yet |
 | Open counterexamples on `main` @ `77039db51` (CX15 from #2364) | **1**, no repro test yet |
 | Dropped as model drift | **0** (false-positive rate 0 / 7) |
@@ -127,6 +128,8 @@ introduced by #1832; no earlier config combined leaves, async branches, and canc
 
 - Property: `TerminalRunStaysQuiet` (Inv1). `Probe-cancel-finalize.cfg`, 954 distinct states, depth 20.
 - Trace: `… XCkWait (B waiting) → TaskFinish(B ok) → E1 → E2 (run running) → Cancel → EFin (run completed)`
+- Closed by #2377 (F9 `FixCancelTree`): `finalizeOrWait` now returns unless the run is `running`
+  or `waiting`. `Fix-CX13.cfg` holds; `Probe-cancel-finalize.cfg` (F9 off) is the control.
 
 ## Sync with #1926 fail-closed write (`main` @ `7912fff73`)
 
@@ -599,3 +602,53 @@ Re-run with tla2tools 2.19, BFS, `-workers 8` (`-workers 4` for the three one-br
 `Probe-replay-unreadable-control.cfg` drops from 13,005 to 12,899 distinct states: with F8 a
 stale executor write no longer lands, so fewer states are reachable. It still holds.
 
+## Sync with #2370, #2377 and #2380 (`main` @ `ace735ed8`)
+
+#2377 cancels a run's whole child tree and keeps it stopped. New fix flag F9 `FixCancelTree`
+models what reaches a one-run model (ACTIONS.md, "Fix flags"); it has F8's `TRUE`/`FALSE` split,
+plus `TRUE` in `Probe-child-run-crash-control.cfg`. What changed in the model:
+
+- `finalizeOrWait` (`EFin`, `H13`) returns unless the run is `running` or `waiting`. This closes
+  CX13: new `Fix-CX13.cfg` (`Probe-cancel-finalize.cfg` with F9 on) holds, 3,937 distinct states,
+  and `Probe-cancel-finalize.cfg` still finds it.
+- `Cancel` cancels every open task of the run and drops the queued retry of every `failed` row
+  (`nra` FALSE). An already cancelled run is swept again.
+- The agent-task dispatch in `XRun` commits only while the step is `running` in a live run;
+  otherwise the executor throws and the fenced `XFail` writes nothing. Before, a cancel between
+  the claim and the dispatch left a running task on a cancelled row.
+- `E2`, `H8`, `ER`, `H7R` and `ChildClaim` check the run is not cancelled. A cancel cancels every
+  open step in its transaction, so these checks change no state. The other new
+  `getRunLineageBlock` checks sit next to a run-status check that already excludes `cancelled`.
+
+#2370 retries a foreach agent-task item cut by a deploy drain, and #2380 records an
+`Idempotency-Key` inside the run-creation transaction. Neither reaches a modelled guard: the
+model has no foreach node and one trigger. ACTIONS.md is re-pinned to `ace735ed8`.
+
+Re-run with tla2tools 2.19, BFS, `-workers 4` (`-workers 12` for `Probe-child-run.cfg`). Every
+config gives the same verdict as on `77039db51`. Configs with F9 off that hold keep their
+distinct-state counts. `Probe-replay-unreadable-control.cfg` with F9 off gives 12,899 as before;
+with F9 on it gives 13,164, because a dispatch after a cancel now fails the executor.
+`src/tests/workflow-tla-races.test.ts` + `src/tests/workflow-sub-workflow.test.ts` +
+`src/tests/workflow-cascade-cancel.test.ts`: 68 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 30,307 | 24 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 13,682 | 19 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 264 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 3,856 / 2,917 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,253 / 2,438 / 30,476 / 7,566 / 335 / 969 | 22 / 19 / 28 / 29 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,202 | - / 20 |
+| `Fix-CX13.cfg` (new) / `Probe-cancel-finalize.cfg` | holds / CX13 found | 3,937 / 579 | - / 17 |
+| `Probe-task-retry.cfg` | CX12 found | 636,243 | 34 |
+| `Probe-input-await.cfg` | CX6 found | 297 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,086 / 13,164 | 18 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 3,965,730 / 187,982 | - / 34 |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,440 | 19 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 9,444 / 756 | - / 18 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 4,693 | 35 |
+
+`Probe-child-run.cfg` drops from 4,063,408 (F9 off, rerun) to 3,965,730 distinct states. It has
+no cancel, so the drop is the `finalizeOrWait` guard alone: a branch's finalizer no longer moves a
+run another branch already failed back to `waiting` or `completed`. It still holds.

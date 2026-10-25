@@ -39,7 +39,8 @@ CONSTANTS
   FixRecoveryRetry,  \* F4: recovery does not re-walk a node that is pending retry / held by the poller
   FixJoinWaitsLive,  \* F6: join waits for a branch whose latest step is live or not inserted; finalizers leave a run with a running step to its walker
   FixTaskRetry,      \* F7 (#1832): a failed agent task honors node.retry (task.failed handler and recovery sweep), fenced on the task still bound to the step; finalizeOrWait counts retry-pending rows as live
-  FixStepFence       \* F8 (#2364): executor result writes are fenced on the claim (step running, same retryCount, run live), an exhausted failure writes step and run in one transaction; with ChildRunResume: one child per attempt, an orphaned running row is re-claimed, a failed child honors node.retry, and a sweep re-walks orphaned rows
+  FixStepFence,      \* F8 (#2364): executor result writes are fenced on the claim (step running, same retryCount, run live), an exhausted failure writes step and run in one transaction; with ChildRunResume: one child per attempt, an orphaned running row is re-claimed, a failed child honors node.retry, and a sweep re-walks orphaned rows
+  FixCancelTree      \* F9 (#2377): a cancel also drops queued retries and every open task of the run; a step's task is inserted only while the step runs in a live run; finalizeOrWait and the task/child claims write nothing in a run that is no longer live (cancelled tree)
 
 ASSUME MaxRetries >= 1 /\ BranchOutcomes \subseteq {"ok", "fail", "async"}
 
@@ -131,6 +132,11 @@ Fence(t) == /\ steps[thr[t].sid].st = "running"
 \* no longer owns (getRunningSubWorkflowSteps, executeStep's re-claim).
 OrphanRow(n) == {i \in StepIds : steps[i].node = n /\ steps[i].st = "running" /\ i \notin Owned
                                  /\ ~\E j \in StepIds : j > i /\ steps[j].node = n}
+
+\* F9 workflow-runs.ts getRunLineageBlock: the run (the model has no parent
+\* runs) is not cancelled. Every claim that already requires a live run
+\* implies it; the task and child claims below check it explicitly.
+TreeLive == ~(FixCancelTree /\ run = "cancelled")
 
 \* The node the retry poller currently holds (step flipped to running, not yet checkpointed).
 PollerHeld == IF thr[TPoll].pc \in {"p5", "p6", "p7", "p8", "p9", "p10"}
@@ -256,6 +262,10 @@ XRun(t) ==
             [] o = "async" ->
                  IF FixStepFence /\ ChildRunResume
                  THEN ChildStart(t, "xCkOk", "xFail", "xCkWait")
+                 ELSE IF FixCancelTree /\ ~(steps[thr[t].sid].st = "running" /\ run \in {"running", "waiting"})
+                 THEN \* F9 db.ts createTaskExtended getStepExecutionBlock: the task
+                      \* INSERT is refused, the executor throws (engine.ts catch).
+                      SetT(t, [thr[t] EXCEPT !.pc = "xFail"]) /\ UNCHANGED steps
                  ELSE /\ steps' = [steps EXCEPT ![thr[t].sid].task = "run", ![thr[t].sid].tg = @ + 1]
                       /\ SetT(t, [thr[t] EXCEPT !.pc = "xCkWait"])
   /\ UNCHANGED <<run, active, okCount, hbLeft, crashes>>
@@ -605,9 +615,13 @@ Poller == P1 \/ P2 \/ P3 \/ P4 \/ P5 \/ P5Unreadable \/ P6 \/ P7 \/ P8 \/ P9 \/ 
 ----------------------------------------------------------------------------
 (* Heartbeat recoverIncompleteRuns (recovery.ts)                          *)
 
-\* resume.ts finalizeOrWait (EFin, H13): transaction, no run-status guard.
+\* resume.ts finalizeOrWait (EFin, H13): transaction. Pre-F9 no run-status
+\* guard (CX13). F9 (#2377): a run that is not running/waiting, or whose tree
+\* is cancelled, is left as it is.
 FinalizeOrWait ==
-  IF FixJoinWaitsLive /\ LatestIn({"running"}) # {}
+  IF FixCancelTree /\ run \notin {"running", "waiting"}
+  THEN run
+  ELSE IF FixJoinWaitsLive /\ LatestIn({"running"}) # {}
   THEN \* F6: leave it to the live walk, whose finalizer needs `running`
        IF run = "waiting" THEN "running" ELSE run
   ELSE IF \E j \in StepIds : steps[j].st = "waiting"
@@ -711,7 +725,7 @@ H6 ==
 H7R ==
   /\ thr[THb].pc = "h7r"
   /\ LET i == thr[THb].sid IN
-     IF steps[i].st = "waiting" /\ Bound(i, thr[THb].g)
+     IF steps[i].st = "waiting" /\ Bound(i, thr[THb].g) /\ TreeLive
      THEN IF steps[i].rc < MaxRetries
           THEN /\ steps' = [steps EXCEPT ![i] = RetryRow(i)]
                /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h6"])
@@ -736,7 +750,7 @@ H8 ==
   /\ thr[THb].pc = "h8"
   /\ LET i == thr[THb].sid
          n == thr[THb].cur IN
-     IF steps[i].st = "waiting" /\ (FixTaskRetry => Bound(i, thr[THb].g))
+     IF steps[i].st = "waiting" /\ (FixTaskRetry => Bound(i, thr[THb].g)) /\ TreeLive
      THEN /\ steps' = [steps EXCEPT ![i].st = "completed"]
           /\ okCount' = [okCount EXCEPT ![n] = @ + 1]
           /\ run' = "running"
@@ -763,7 +777,7 @@ ChildClaim(t, back, fin) ==
   LET i == thr[t].sid
       n == thr[t].cur
       tk == steps[i].task IN
-  IF steps[i].st # "waiting" \/ tk \notin {"ok", "fail"}
+  IF steps[i].st # "waiting" \/ tk \notin {"ok", "fail"} \/ ~TreeLive
   THEN SetT(t, [thr[t] EXCEPT !.pc = back]) /\ UNCHANGED <<steps, okCount, run, active>>
   ELSE IF tk = "fail" /\ steps[i].rc < MaxRetries
   THEN /\ steps' = [steps EXCEPT ![i] = RetryRow(i)]
@@ -899,7 +913,7 @@ H12 ==
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h10"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-\* H13 resume.ts:1033 finalizeOrWait (as EFin): no run-status guard.
+\* H13 resume.ts:1170 finalizeOrWait (as EFin): run-status guard only with F9.
 H13 ==
   /\ thr[THb].pc = "h13"
   /\ run' = FinalizeOrWait
@@ -949,7 +963,7 @@ E2(t) ==
   /\ thr[t].pc = "e2"
   /\ LET i == thr[t].sid
          n == thr[t].cur IN
-     IF steps[i].st = "waiting" /\ (ChildRunResume => run \in {"waiting", "running"})
+     IF steps[i].st = "waiting" /\ (ChildRunResume => run \in {"waiting", "running"}) /\ TreeLive
      THEN /\ steps' = [steps EXCEPT ![i].st = "completed"]
           /\ okCount' = [okCount EXCEPT ![n] = @ + 1]
           /\ run' = "running"
@@ -971,7 +985,7 @@ E2Unreadable(t) ==
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eRF", !.rf = "eDone"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* E3 resume.ts:273-300 finalizeOrWait — transaction, but no run-status guard.
+\* E3 resume.ts:291-322 finalizeOrWait — transaction; run-status guard only with F9 (CX13).
 \* F7: a retry-pending row keeps the run waiting, like a waiting row.
 EFin(t) ==
   /\ thr[t].pc = "eFin"
@@ -984,7 +998,7 @@ EFin(t) ==
 ER(t) ==
   /\ thr[t].pc = "eR"
   /\ LET i == thr[t].sid IN
-     IF steps[i].st = "waiting" /\ Bound(i, thr[t].g)
+     IF steps[i].st = "waiting" /\ Bound(i, thr[t].g) /\ TreeLive
      THEN IF steps[i].rc < MaxRetries
           THEN /\ steps' = [steps EXCEPT ![i] = RetryRow(i)]
                /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
@@ -1013,14 +1027,21 @@ Event(t) == E1(t) \/ E2(t) \/ E2Unreadable(t) \/ EFin(t) \/ ER(t) \/ EF(t) \/ EC
 ----------------------------------------------------------------------------
 (* User actions (resume.ts)                                                *)
 
-\* C1 resume.ts:644-700 cancelWorkflowRun — one transaction. Steps already
-\* `failed` count as terminal and are skipped, nextRetryAt included.
+\* C1 resume.ts cancelWorkflowRun -> cancelWorkflowRunRows — one transaction.
+\* Pre-F9: steps already `failed` count as terminal and are skipped,
+\* nextRetryAt included. F9 (#2377): every open task of the run is cancelled
+\* (also one left on a terminal row), queued retries are dropped
+\* (disarmWorkflowTreeRetries), and an already cancelled run is swept again.
 Cancel ==
   /\ thr[TCancel].pc = "cIdle"
   /\ run # "none"
-  /\ IF run \notin RunTerminal
+  /\ IF run \notin RunTerminal \/ (FixCancelTree /\ run = "cancelled")
      THEN /\ steps' = [i \in StepIds |->
-                        IF steps[i].st \in StepTerminal THEN steps[i]
+                        IF steps[i].st \in StepTerminal
+                        THEN IF FixCancelTree
+                             THEN [steps[i] EXCEPT !.nra = IF steps[i].st = "failed" THEN FALSE ELSE @,
+                                                   !.task = IF @ = "run" THEN "cancelled" ELSE @]
+                             ELSE steps[i]
                         ELSE [steps[i] EXCEPT !.st = "cancelled",
                                               !.task = IF @ = "run" THEN "cancelled" ELSE @]]
           /\ run' = "cancelled"
