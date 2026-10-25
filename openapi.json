@@ -12366,6 +12366,9 @@
                       "eng_lead",
                       "founder",
                       "product",
+                      "marketing",
+                      "sales",
+                      "research",
                       "ops",
                       "other"
                     ]

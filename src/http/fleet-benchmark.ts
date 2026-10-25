@@ -11,7 +11,7 @@ import {
   localTasksPerWeek,
 } from "../fleet-benchmark";
 import { isTelemetryEnabled } from "../telemetry";
-import { COMPANY_TEAM_SIZES, COMPANY_USE_CASES } from "../utils/company-profile";
+import { COMPANY_TEAM_SIZES, COMPANY_USE_CASES, reportedUseCase } from "../utils/company-profile";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { globalConfig } from "./global-config";
 import { rejectGuest } from "./request-principal";
@@ -188,6 +188,9 @@ export async function buildFleetBenchmarkResponse(
     normalizeOrgWebsite(website) && team.success && use.success
       ? { teamSize: team.data, useCase: use.data }
       : null;
+  // The proxy answers 400 for a use case its catalog does not list yet, so
+  // that use case compares against the whole fleet.
+  const proxyPeerGroup = peerGroup && reportedUseCase(peerGroup.useCase) ? peerGroup : null;
   const empty = {
     level: peerGroup ? ("full" as const) : ("basic" as const),
     peerGroup: null,
@@ -215,7 +218,7 @@ export async function buildFleetBenchmarkResponse(
   if (finishedTasks < FLEET_MIN_FINISHED_TASKS)
     return { ...empty, state: "not_enough_tasks", local };
 
-  const fleet = await fleetBenchmarks(now.getTime(), peerGroup);
+  const fleet = await fleetBenchmarks(now.getTime(), proxyPeerGroup);
   const responsePeerGroup =
     peerGroup && fleet?.peer_group
       ? {

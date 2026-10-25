@@ -22,6 +22,18 @@ export const AVATAR_SUGGESTED_SWATCHES: string[] = [
   "#64748b", // action-default
 ];
 
+/** Names of `AVATAR_SUGGESTED_SWATCHES` for screen readers and tooltips. */
+export const AVATAR_SWATCH_NAMES: Record<string, string> = {
+  "#f59e0b": "Amber",
+  "#3b82f6": "Blue",
+  "#8b5cf6": "Violet",
+  "#ec4899": "Pink",
+  "#10b981": "Emerald",
+  "#06b6d4": "Cyan",
+  "#6366f1": "Indigo",
+  "#64748b": "Slate",
+};
+
 /** Fallback for the native `<input type="color">`, which only accepts a
  * concrete hex — it has no token form. Lives here so the picker component
  * stays free of hex literals. */

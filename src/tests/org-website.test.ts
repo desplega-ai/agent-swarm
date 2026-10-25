@@ -5,6 +5,8 @@ import {
   COMPANY_ACQUISITION_SOURCES,
   COMPANY_TEAM_SIZES,
   COMPANY_USE_CASES,
+  reportedUseCase,
+  reportedUserFunction,
 } from "../utils/company-profile";
 import {
   isFilledOrgLogoUrl,
@@ -155,6 +157,40 @@ describe("company profile config guards", () => {
       }
     });
   }
+});
+
+describe("profile values the telemetry catalog does not list yet", () => {
+  const input = {
+    orgId: "org_0123456789abcdef",
+    installationId: "install_0123456789abcdef",
+    isCloud: false,
+    isE2b: false,
+    swarmVersion: "1.0.0",
+    actor: { userId: "user-1" },
+  };
+
+  test("the config guards accept them", () => {
+    for (const value of ["content", "research", "seo", "admin"]) {
+      expect(validateConfigValue("SWARM_ORG_USE_CASE", value)).toBeNull();
+    }
+  });
+
+  test("stay out of the telemetry context, as if unset", () => {
+    for (const useCase of ["content", "research", "seo", "admin"]) {
+      expect(reportedUseCase(useCase)).toBeUndefined();
+      expect(buildContext({ ...input, useCase })).not.toHaveProperty("use_case");
+    }
+    for (const userFunction of ["marketing", "sales", "research"]) {
+      expect(reportedUserFunction(userFunction)).toBeUndefined();
+      expect(buildContext({ ...input, userFunction })).not.toHaveProperty("user_function");
+    }
+  });
+
+  test("the catalog values still report", () => {
+    const context = buildContext({ ...input, useCase: "docs", userFunction: "founder" });
+    expect(context.use_case).toBe("docs");
+    expect(context.user_function).toBe("founder");
+  });
 });
 
 describe("org_website in the telemetry context", () => {

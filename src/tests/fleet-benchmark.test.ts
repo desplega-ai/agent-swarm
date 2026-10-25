@@ -326,6 +326,14 @@ describe("GET /api/fleet-benchmark", () => {
     expect(fetched).toHaveLength(1);
   });
 
+  test("a use case the catalog does not list yet compares against the whole fleet", async () => {
+    await addTasks(10, "completed", 1);
+    await setProfile("2-10", "content");
+    const response = await buildFleetBenchmarkResponse(NOW);
+    expect(response).toMatchObject({ state: "ready", level: "full", peerGroup: null });
+    expect(fetched).toEqual(["http://proxy.test/v1/fleet/benchmarks?window=30d"]);
+  });
+
   test("full profile tolerates absent or null peer_group from the proxy", async () => {
     await addTasks(10, "completed", 1);
     await setProfile();

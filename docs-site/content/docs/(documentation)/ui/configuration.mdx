@@ -550,11 +550,11 @@ These optional global settings use the existing `PUT /api/config` endpoint. An e
 | Key | Values |
 | --- | --- |
 | `SWARM_ORG_TEAM_SIZE` | `1` (Just me), `2-10`, `11-50`, `51+` |
-| `SWARM_ORG_USE_CASE` | `features`, `bugs`, `review`, `ops`, `docs`, `data` |
+| `SWARM_ORG_USE_CASE` | `features`, `bugs`, `review`, `ops`, `docs`, `data`, `content`, `research`, `seo`, `admin` |
 | `SWARM_ORG_ACQUISITION_SOURCE` | `search`, `github`, `social`, `colleague`, `newsletter`, `event`, `ai_assistant`, `hacker_news`, `other` |
 
-A website, team size, and use case enable the full fleet benchmark. The API sends team size and use case as peer filters only when telemetry is on.
+A website, team size, and use case enable the full fleet benchmark. The API sends team size and use case as peer filters only when telemetry is on. The use cases `content`, `research`, `seo`, and `admin` compare against the whole fleet until the telemetry catalog lists them.
 
-`POST /api/used-by` accepts `{granted, contactEmail?, contactFunction?, quote?}`. A grant requires a valid contact email. The optional quote allows at most 280 characters. Contact function accepts `engineer`, `eng_lead`, `founder`, `product`, `ops`, or `other`.
+`POST /api/used-by` accepts `{granted, contactEmail?, contactFunction?, quote?}`. A grant requires a valid contact email. The optional quote allows at most 280 characters. Contact function accepts `engineer`, `eng_lead`, `founder`, `product`, `marketing`, `sales`, `research`, `ops`, or `other`.
 
 The explicit consent sends these details to Desplega, even when telemetry is off. The API stores them in `SWARM_USED_BY_CONTACT_EMAIL`, `SWARM_USED_BY_CONTACT_FUNCTION`, and `SWARM_USED_BY_QUOTE`. Revocation clears all three local values after the proxy accepts the request. Desplega keeps the earlier grant record because the proxy has no delete path. To request deletion of that record, contact [contact@desplega.sh](mailto:contact@desplega.sh).

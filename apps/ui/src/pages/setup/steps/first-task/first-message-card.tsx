@@ -16,7 +16,7 @@ import { StatusLine } from "@/components/shared/status-icon";
 import { SuggestionChips } from "@/components/shared/suggestion-chips";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { optionValue, SWARM_ORG_USE_CASE, USE_CASES } from "@/lib/company-profile";
+import { optionValue, SWARM_ORG_USE_CASE, storedOrgName, USE_CASES } from "@/lib/company-profile";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../../step-contract";
 import type { LeadReadiness } from "./agents-card";
@@ -53,9 +53,11 @@ export function FirstTaskComposer({
   const [error, setError] = useState<string | null>(null);
   // Step 2 asks for the use case; its starters replace the general ones.
   const { data: configs } = useConfigs({ scope: "global" });
-  const suggestions = firstTaskStarters(
-    optionValue(USE_CASES, configs?.find((entry) => entry.key === SWARM_ORG_USE_CASE)?.value),
-  );
+  const config = (key: string) => configs?.find((entry) => entry.key === key)?.value || null;
+  const suggestions = firstTaskStarters(optionValue(USE_CASES, config(SWARM_ORG_USE_CASE)), {
+    company: storedOrgName(config("SWARM_ORG_NAME")),
+    website: config("SWARM_ORG_WEBSITE"),
+  });
 
   const taskPath = (id: string) => (usersSupported ? `/sessions/${id}` : `/tasks/${id}`);
   // Step 1 picks the user. This is a fallback for a user that went missing

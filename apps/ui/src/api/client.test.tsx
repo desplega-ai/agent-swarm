@@ -251,6 +251,29 @@ describe("submitFeedback", () => {
     ).resolves.toBeUndefined();
   });
 
+  test("leaves out profile values the proxy catalog does not list yet", async () => {
+    let body: unknown;
+    globalThis.fetch = async (_url, init) => {
+      body = JSON.parse(String(init?.body));
+      return new Response(null, { status: 202 });
+    };
+
+    await api.submitFeedback("https://proxy.example.test/v1/feedback", {
+      ...input,
+      use_case: "content",
+      user_function: "marketing",
+      team_size: "2-10",
+    });
+    expect(body).toEqual({ ...input, team_size: "2-10" });
+
+    await api.submitFeedback("https://proxy.example.test/v1/feedback", {
+      ...input,
+      use_case: "docs",
+      user_function: "founder",
+    });
+    expect(body).toEqual({ ...input, use_case: "docs", user_function: "founder" });
+  });
+
   test("allows HTTP feedback submissions to loopback hosts", async () => {
     globalThis.fetch = async (url) => {
       expect(url).toBe("http://localhost:3013/v1/feedback");

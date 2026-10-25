@@ -12,8 +12,8 @@ import catalog from "./telemetry-contract/catalog.json";
 import {
   COMPANY_ACQUISITION_SOURCES,
   COMPANY_TEAM_SIZES,
-  COMPANY_USE_CASES,
-  USER_FUNCTIONS,
+  reportedUseCase,
+  reportedUserFunction,
 } from "./utils/company-profile";
 
 /** `org_` + 16 lowercase hex (self-host, minted here) or 27 alphanumerics (cloud). Same pattern the proxy enforces. */
@@ -115,10 +115,9 @@ export function buildContext(input: ContextInput): EventContext {
   const orgDomain = validOrgDomain(input.orgDomain);
   const orgWebsite = validOrgDomain(input.orgWebsite);
   const teamSize = COMPANY_TEAM_SIZES.find((value) => value === input.teamSize);
-  const useCase = COMPANY_USE_CASES.find((value) => value === input.useCase);
-  const userFunction = userId
-    ? USER_FUNCTIONS.find((value) => value === input.userFunction)
-    : undefined;
+  // A value the catalog does not list yet is left out, as if unset.
+  const useCase = reportedUseCase(input.useCase);
+  const userFunction = userId ? reportedUserFunction(input.userFunction) : undefined;
   return {
     org_id: input.orgId,
     org_name: orgName ? orgName : null,

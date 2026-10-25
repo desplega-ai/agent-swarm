@@ -154,8 +154,8 @@ And these to `metadata`:
 | `install_preset` | The onboard wizard preset | Same as the `metadata` field. `null` when there is none. |
 | `acquisition_source` | How the organization discovered Agent Swarm | `SWARM_ORG_ACQUISITION_SOURCE`: `search`, `github`, `social`, `colleague`, `newsletter`, `event`, `ai_assistant`, `hacker_news`, or `other`. `null` when unset or invalid. |
 | `team_size` | The organization's team size | `SWARM_ORG_TEAM_SIZE`: `1`, `2-10`, `11-50`, or `51+`. Omitted when unset or invalid. |
-| `use_case` | The organization's main use case | `SWARM_ORG_USE_CASE`: `features`, `bugs`, `review`, `ops`, `docs`, or `data`. Omitted when unset or invalid. |
-| `user_function` | The actor's job function, separate from RBAC role | `users.metadata.jobFunction`: `engineer`, `eng_lead`, `founder`, `product`, `ops`, or `other`. Cached with the RBAC role and invalidated after user updates. Omitted without an actor or a valid function. |
+| `use_case` | The organization's main use case | `SWARM_ORG_USE_CASE`: `features`, `bugs`, `review`, `ops`, `docs`, or `data`. Omitted when unset or invalid, and for `content`, `research`, `seo` and `admin` until the catalog lists them. |
+| `user_function` | The actor's job function, separate from RBAC role | `users.metadata.jobFunction`: `engineer`, `eng_lead`, `founder`, `product`, `ops`, or `other`. Cached with the RBAC role and invalidated after user updates. Omitted without an actor or a valid function, and for `marketing`, `sales` and `research` until the catalog lists them. |
 
 Workers receive company profile settings through the resolved configuration at boot and during reload. They read `telemetry_org_domain` through the API. Workers do not query users for job functions. The API resolves those functions for events with user actors.
 

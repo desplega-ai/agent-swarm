@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * The operator's theme choices from `useTheme()` (localStorage, never swarm
- * state). Settings > Appearance and the `/setup` identity step render them.
+ * state). Settings > Appearance renders them.
  */
 
 export const THEME_MODES: Array<{ id: ThemeMode; label: string; icon: typeof Sun; hint: string }> =
