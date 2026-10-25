@@ -43,10 +43,11 @@ describe("recently viewed", () => {
     expect(forgetViewed([{ path: "/a.md", at: 1 }], "/a.md")).toEqual([]);
   });
 
-  test("the key is per swarm and per drive", () => {
-    const a = viewedStorageKey("https://api.one", { orgId: "o", driveId: "d1" });
-    expect(a).not.toBe(viewedStorageKey("https://api.two", { orgId: "o", driveId: "d1" }));
-    expect(a).not.toBe(viewedStorageKey("https://api.one", { orgId: "o", driveId: "d2" }));
+  test("the key is per swarm, per agent-fs user, and per drive", () => {
+    const a = viewedStorageKey("https://api.one", "u1", { orgId: "o", driveId: "d1" });
+    expect(a).not.toBe(viewedStorageKey("https://api.two", "u1", { orgId: "o", driveId: "d1" }));
+    expect(a).not.toBe(viewedStorageKey("https://api.one", "u2", { orgId: "o", driveId: "d1" }));
+    expect(a).not.toBe(viewedStorageKey("https://api.one", "u1", { orgId: "o", driveId: "d2" }));
   });
 
   test("reads back what it wrote, and reads junk as an empty list", () => {

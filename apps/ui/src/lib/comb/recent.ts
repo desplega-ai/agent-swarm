@@ -2,9 +2,9 @@
 // and the files that changed in the drive ("Recently changed", from the
 // agent-fs `recent` op).
 //
-// Recently viewed lives in localStorage, one key per swarm and drive,
-// namespaced by the swarm API URL like the other Comb keys. It never leaves
-// the browser.
+// Recently viewed lives in localStorage, one key per swarm, agent-fs user,
+// and drive, namespaced by the swarm API URL like the other Comb keys. It
+// never leaves the browser.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
@@ -31,8 +31,9 @@ export interface Drive {
   driveId: string;
 }
 
-export function viewedStorageKey(apiUrl: string, drive: Drive): string {
-  return deriveStorageKey(apiUrl, `comb:viewed:${drive.orgId}/${drive.driveId}`);
+/** The list's key: one per swarm (`apiUrl`), connected agent-fs user, and drive. */
+export function viewedStorageKey(apiUrl: string, userId: string, drive: Drive): string {
+  return deriveStorageKey(apiUrl, `comb:viewed:${userId}:${drive.orgId}/${drive.driveId}`);
 }
 
 /** `list` with `path` first (opened at `at`), without its older entry, at most `max` long. */

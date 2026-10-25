@@ -289,12 +289,12 @@ const LINE_TAB =
 
 /** Below `md`: the left panel opens in a sheet from a header button. */
 export function LeftPanelSheet({ location }: { location: CombLocation }) {
-  const layout = useCombLayout();
   const [open, setOpen] = useState(false);
   const navigated = useRef(false);
   const label = "Show the files panel";
-  // The icon of the tab the sheet opens on (the top bar's sidebar button is a panel icon).
-  const Icon = TAB_ICON[layout?.left.tab ?? "files"];
+  // The files icon: a panel icon is the top bar's sidebar button, and the
+  // Recent icon is the versions button next to it.
+  const Icon = FolderTree;
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <Tooltip>

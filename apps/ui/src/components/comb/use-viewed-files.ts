@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { useConfig } from "@/hooks/use-config";
 import { browserStorage } from "@/lib/comb/drafts";
 import type { DrivePath } from "@/lib/comb/paths";
@@ -12,8 +13,8 @@ import {
   writeViewed,
 } from "@/lib/comb/recent";
 
-// This browser's Recently viewed lists (`lib/comb/recent.ts`), one per swarm
-// and drive. One snapshot per storage key, so `useSyncExternalStore` gets the
+// This browser's Recently viewed lists (`lib/comb/recent.ts`), one per swarm,
+// connected agent-fs user, and drive. One snapshot per storage key, so `useSyncExternalStore` gets the
 // same array until the list changes. Another tab's change arrives as a
 // `storage` event.
 
@@ -51,21 +52,26 @@ function subscribe(listener: () => void) {
   };
 }
 
-/** The files this browser opened on `drive`, newest first. */
-export function useViewedFiles(drive: Drive): ViewedFile[] {
+/** The key of the connected person's list for `drive`. Null while Comb is not connected. */
+function useViewedKey(drive: Drive | null): string | null {
   const { apiUrl } = useConfig().config;
-  const key = viewedStorageKey(apiUrl, drive);
+  const { userId } = useAgentFsAccess();
+  return drive && userId ? viewedStorageKey(apiUrl, userId, drive) : null;
+}
+
+/** The files the connected person opened on `drive` in this browser, newest first. */
+export function useViewedFiles(drive: Drive): ViewedFile[] {
+  const key = useViewedKey(drive);
   return useSyncExternalStore(
     subscribe,
-    () => snapshot(key),
+    () => (key ? snapshot(key) : NONE),
     () => NONE,
   );
 }
 
 /** Puts `file` on top of Recently viewed when it opens. Null: nothing to remember yet. */
 export function useRememberViewed(file: DrivePath | null) {
-  const { apiUrl } = useConfig().config;
-  const key = file ? viewedStorageKey(apiUrl, file) : null;
+  const key = useViewedKey(file);
   const path = file?.path ?? null;
   useEffect(() => {
     if (key && path) update(key, rememberViewed(snapshot(key), path, Date.now()));
@@ -74,8 +80,7 @@ export function useRememberViewed(file: DrivePath | null) {
 
 /** Drops `file` from Recently viewed: it is gone (a 404). Null: nothing to drop. */
 export function useForgetViewed(file: DrivePath | null) {
-  const { apiUrl } = useConfig().config;
-  const key = file ? viewedStorageKey(apiUrl, file) : null;
+  const key = useViewedKey(file);
   const path = file?.path ?? null;
   useEffect(() => {
     if (!key || !path) return;
