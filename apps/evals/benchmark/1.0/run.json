@@ -4,11 +4,11 @@
     "id": "swarm-evals",
     "version": "1.0"
   },
-  "publishedAt": "2026-10-18T06:30:16.827Z",
+  "publishedAt": "2026-10-25T07:30:19.353Z",
   "run": {
-    "id": "run-202610180100-ad8351",
-    "createdAt": "2026-10-18T01:00:12.285Z",
-    "finishedAt": "2026-10-18T04:07:34.128Z",
+    "id": "run-202610250200-3822d6",
+    "createdAt": "2026-10-25T02:00:16.936Z",
+    "finishedAt": "2026-10-25T05:05:09.591Z",
     "attemptsPerCell": 5,
     "configIds": [
       "claude-opus-5.5",
@@ -18,7 +18,7 @@
       "pi-deepseek-v4.1-flash"
     ],
     "judgeModel": "deepseek/deepseek-v4-pro",
-    "harnessCommit": "67d6bc112af3171f2379ed30a237186f2423605f"
+    "harnessCommit": "7e50487f2a769dad4414e3f20741e6d069281b68"
   },
   "minAttemptsPerCell": 5,
   "cells": [
@@ -33,20 +33,20 @@
     },
     {
       "scenarioId": "sql-audit",
-      "configId": "pi-deepseek-v4.1-flash",
+      "configId": "codex-6.1-sol",
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9974999999999999,
+      "meanScore": 1,
       "passRate": 1
     },
     {
       "scenarioId": "sql-audit",
-      "configId": "codex-6.1-sol",
+      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9949999999999999,
+      "meanScore": 1,
       "passRate": 1
     },
     {
@@ -55,7 +55,7 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9974999999999999,
+      "meanScore": 0.99,
       "passRate": 1
     },
     {
@@ -64,7 +64,7 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9875,
+      "meanScore": 0.99,
       "passRate": 1
     },
     {
@@ -78,7 +78,7 @@
     },
     {
       "scenarioId": "delegation-probe",
-      "configId": "pi-deepseek-v4.1-flash",
+      "configId": "codex-6.1-sol",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -87,7 +87,7 @@
     },
     {
       "scenarioId": "delegation-probe",
-      "configId": "codex-6.1-sol",
+      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -107,10 +107,10 @@
       "scenarioId": "delegation-probe",
       "configId": "codex-6-luna",
       "graded": 5,
-      "passed": 4,
+      "passed": 5,
       "errors": 0,
-      "meanScore": 0.9285714285714285,
-      "passRate": 0.8
+      "meanScore": 0.9857142857142858,
+      "passRate": 1
     },
     {
       "scenarioId": "workflow-authoring",
@@ -123,7 +123,7 @@
     },
     {
       "scenarioId": "workflow-authoring",
-      "configId": "pi-deepseek-v4.1-flash",
+      "configId": "codex-6.1-sol",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -132,7 +132,7 @@
     },
     {
       "scenarioId": "workflow-authoring",
-      "configId": "codex-6.1-sol",
+      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -152,32 +152,32 @@
       "scenarioId": "workflow-authoring",
       "configId": "codex-6-luna",
       "graded": 5,
-      "passed": 4,
+      "passed": 5,
       "errors": 0,
-      "meanScore": 0.949206349206349,
-      "passRate": 0.8
+      "meanScore": 0.9619047619047617,
+      "passRate": 1
     },
     {
       "scenarioId": "script-authoring",
       "configId": "claude-opus-5.5",
       "graded": 5,
-      "passed": 4,
+      "passed": 5,
       "errors": 0,
-      "meanScore": 0.9285714285714286,
-      "passRate": 0.8
-    },
-    {
-      "scenarioId": "script-authoring",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 4,
-      "errors": 0,
-      "meanScore": 0.9428571428571428,
-      "passRate": 0.8
+      "meanScore": 0.9714285714285715,
+      "passRate": 1
     },
     {
       "scenarioId": "script-authoring",
       "configId": "codex-6.1-sol",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 1,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "script-authoring",
+      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -208,39 +208,12 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.888888888888889,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "tool-routing",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.9454545454545455,
+      "meanScore": 0.905050505050505,
       "passRate": 1
     },
     {
       "scenarioId": "tool-routing",
       "configId": "codex-6.1-sol",
-      "graded": 5,
-      "passed": 3,
-      "errors": 0,
-      "meanScore": 0.7717171717171717,
-      "passRate": 0.6
-    },
-    {
-      "scenarioId": "tool-routing",
-      "configId": "codex-6-astra",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.8080808080808082,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "tool-routing",
-      "configId": "codex-6-luna",
       "graded": 5,
       "passed": 4,
       "errors": 0,
@@ -248,31 +221,58 @@
       "passRate": 0.8
     },
     {
+      "scenarioId": "tool-routing",
+      "configId": "pi-deepseek-v4.1-flash",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 0.8666666666666666,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "tool-routing",
+      "configId": "codex-6-astra",
+      "graded": 5,
+      "passed": 2,
+      "errors": 0,
+      "meanScore": 0.7535353535353535,
+      "passRate": 0.4
+    },
+    {
+      "scenarioId": "tool-routing",
+      "configId": "codex-6-luna",
+      "graded": 5,
+      "passed": 3,
+      "errors": 0,
+      "meanScore": 0.7608080808080808,
+      "passRate": 0.6
+    },
+    {
       "scenarioId": "fanout-research",
       "configId": "claude-opus-5.5",
       "graded": 5,
       "passed": 3,
       "errors": 0,
-      "meanScore": 0.7676969696969698,
+      "meanScore": 0.8,
       "passRate": 0.6
-    },
-    {
-      "scenarioId": "fanout-research",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 4,
-      "errors": 0,
-      "meanScore": 0.898,
-      "passRate": 0.8
     },
     {
       "scenarioId": "fanout-research",
       "configId": "codex-6.1-sol",
       "graded": 5,
-      "passed": 0,
+      "passed": 1,
       "errors": 0,
-      "meanScore": 0.5,
-      "passRate": 0
+      "meanScore": 0.5909090909090908,
+      "passRate": 0.2
+    },
+    {
+      "scenarioId": "fanout-research",
+      "configId": "pi-deepseek-v4.1-flash",
+      "graded": 5,
+      "passed": 2,
+      "errors": 0,
+      "meanScore": 0.7,
+      "passRate": 0.4
     },
     {
       "scenarioId": "fanout-research",
@@ -280,17 +280,17 @@
       "graded": 5,
       "passed": 0,
       "errors": 0,
-      "meanScore": 0.4887322666666667,
+      "meanScore": 0.4873561333333333,
       "passRate": 0
     },
     {
       "scenarioId": "fanout-research",
       "configId": "codex-6-luna",
       "graded": 5,
-      "passed": 1,
+      "passed": 2,
       "errors": 0,
-      "meanScore": 0.5810000000000001,
-      "passRate": 0.2
+      "meanScore": 0.6789090909090909,
+      "passRate": 0.4
     },
     {
       "scenarioId": "fanout-research-solo",
@@ -298,16 +298,7 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.998,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "fanout-research-solo",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.998,
+      "meanScore": 1,
       "passRate": 1
     },
     {
@@ -316,21 +307,21 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9940000000000001,
+      "meanScore": 1,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "fanout-research-solo",
+      "configId": "pi-deepseek-v4.1-flash",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 1,
       "passRate": 1
     },
     {
       "scenarioId": "fanout-research-solo",
       "configId": "codex-6-astra",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.9946118933333332,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "fanout-research-solo",
-      "configId": "codex-6-luna",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -338,26 +329,35 @@
       "passRate": 1
     },
     {
+      "scenarioId": "fanout-research-solo",
+      "configId": "codex-6-luna",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 1,
+      "passRate": 1
+    },
+    {
       "scenarioId": "worker-recovery",
       "configId": "claude-opus-5.5",
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9550000000000001,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "worker-recovery",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.9640000000000001,
+      "meanScore": 0.9620000000000001,
       "passRate": 1
     },
     {
       "scenarioId": "worker-recovery",
       "configId": "codex-6.1-sol",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 0.958,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "worker-recovery",
+      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -370,75 +370,75 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.94643984,
+      "meanScore": 0.9406387466666668,
       "passRate": 1
     },
     {
       "scenarioId": "worker-recovery",
       "configId": "codex-6-luna",
       "graded": 5,
+      "passed": 3,
+      "errors": 0,
+      "meanScore": 0.6373333333333333,
+      "passRate": 0.6
+    },
+    {
+      "scenarioId": "worker-recovery-solo",
+      "configId": "claude-opus-5.5",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 0.932,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "worker-recovery-solo",
+      "configId": "codex-6.1-sol",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 0.9400000000000001,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "worker-recovery-solo",
+      "configId": "pi-deepseek-v4.1-flash",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 0.96,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "worker-recovery-solo",
+      "configId": "codex-6-astra",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 0.9259999999999999,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "worker-recovery-solo",
+      "configId": "codex-6-luna",
+      "graded": 5,
       "passed": 4,
       "errors": 0,
-      "meanScore": 0.7999999999999999,
+      "meanScore": 0.766,
       "passRate": 0.8
     },
     {
-      "scenarioId": "worker-recovery-solo",
+      "scenarioId": "implement-review",
       "configId": "claude-opus-5.5",
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.966,
+      "meanScore": 0.9968409259259259,
       "passRate": 1
     },
     {
-      "scenarioId": "worker-recovery-solo",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.9559999999999998,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "worker-recovery-solo",
+      "scenarioId": "implement-review",
       "configId": "codex-6.1-sol",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.9480000000000001,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "worker-recovery-solo",
-      "configId": "codex-6-astra",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.968,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "worker-recovery-solo",
-      "configId": "codex-6-luna",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.954,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "implement-review",
-      "configId": "claude-opus-5.5",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.9951732037037037,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "implement-review",
-      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -447,7 +447,7 @@
     },
     {
       "scenarioId": "implement-review",
-      "configId": "codex-6.1-sol",
+      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -460,17 +460,17 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9799038888888887,
+      "meanScore": 0.964224,
       "passRate": 1
     },
     {
       "scenarioId": "implement-review",
       "configId": "codex-6-luna",
       "graded": 5,
-      "passed": 1,
+      "passed": 0,
       "errors": 0,
-      "meanScore": 0.35555555555555557,
-      "passRate": 0.2
+      "meanScore": 0.19444444444444445,
+      "passRate": 0
     },
     {
       "scenarioId": "implement-review-solo",
@@ -483,7 +483,7 @@
     },
     {
       "scenarioId": "implement-review-solo",
-      "configId": "pi-deepseek-v4.1-flash",
+      "configId": "codex-6.1-sol",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -492,7 +492,7 @@
     },
     {
       "scenarioId": "implement-review-solo",
-      "configId": "codex-6.1-sol",
+      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 5,
       "errors": 0,
@@ -523,16 +523,7 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9663988555555555,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "human-in-loop",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.9750077160493827,
+      "meanScore": 0.9986024611111113,
       "passRate": 1
     },
     {
@@ -546,11 +537,20 @@
     },
     {
       "scenarioId": "human-in-loop",
+      "configId": "pi-deepseek-v4.1-flash",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 1,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "human-in-loop",
       "configId": "codex-6-astra",
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.9581830555555555,
+      "meanScore": 0.9942894444444444,
       "passRate": 1
     },
     {
@@ -559,7 +559,7 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 1,
+      "meanScore": 0.9283333333333333,
       "passRate": 1
     },
     {
@@ -573,15 +573,6 @@
     },
     {
       "scenarioId": "human-in-loop-solo",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 2,
-      "errors": 0,
-      "meanScore": 0.7,
-      "passRate": 0.4
-    },
-    {
-      "scenarioId": "human-in-loop-solo",
       "configId": "codex-6.1-sol",
       "graded": 5,
       "passed": 5,
@@ -591,16 +582,7 @@
     },
     {
       "scenarioId": "human-in-loop-solo",
-      "configId": "codex-6-astra",
-      "graded": 5,
-      "passed": 5,
-      "errors": 0,
-      "meanScore": 0.9994910833333333,
-      "passRate": 1
-    },
-    {
-      "scenarioId": "human-in-loop-solo",
-      "configId": "codex-6-luna",
+      "configId": "pi-deepseek-v4.1-flash",
       "graded": 5,
       "passed": 4,
       "errors": 0,
@@ -608,22 +590,31 @@
       "passRate": 0.8
     },
     {
+      "scenarioId": "human-in-loop-solo",
+      "configId": "codex-6-astra",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 1,
+      "passRate": 1
+    },
+    {
+      "scenarioId": "human-in-loop-solo",
+      "configId": "codex-6-luna",
+      "graded": 5,
+      "passed": 5,
+      "errors": 0,
+      "meanScore": 1,
+      "passRate": 1
+    },
+    {
       "scenarioId": "real-diff-agent-fs",
       "configId": "claude-opus-5.5",
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.8400000000000001,
+      "meanScore": 0.9314285714285715,
       "passRate": 1
-    },
-    {
-      "scenarioId": "real-diff-agent-fs",
-      "configId": "pi-deepseek-v4.1-flash",
-      "graded": 5,
-      "passed": 3,
-      "errors": 0,
-      "meanScore": 0.7257142857142858,
-      "passRate": 0.6
     },
     {
       "scenarioId": "real-diff-agent-fs",
@@ -631,8 +622,17 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.862857142857143,
+      "meanScore": 0.7942857142857143,
       "passRate": 1
+    },
+    {
+      "scenarioId": "real-diff-agent-fs",
+      "configId": "pi-deepseek-v4.1-flash",
+      "graded": 5,
+      "passed": 1,
+      "errors": 0,
+      "meanScore": 0.6799999999999999,
+      "passRate": 0.2
     },
     {
       "scenarioId": "real-diff-agent-fs",
@@ -640,7 +640,7 @@
       "graded": 5,
       "passed": 5,
       "errors": 0,
-      "meanScore": 0.8857142857142858,
+      "meanScore": 0.9085714285714286,
       "passRate": 1
     },
     {

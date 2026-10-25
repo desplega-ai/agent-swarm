@@ -21,12 +21,18 @@
   "budgetUsd": null,
   "budgetMs": null,
   "passThreshold": 0.75,
-  "gates": ["file-contains:/workspace/audit/report.md"],
+  "gates": [
+    "file-contains:/workspace/audit/report.md"
+  ],
   "dimensions": [
     {
       "name": "correctness",
       "weight": 3,
-      "checks": ["audit:completed-count", "audit:top-priority-completed", "audit:anomaly"],
+      "checks": [
+        "audit:completed-count",
+        "audit:top-priority-completed",
+        "audit:anomaly"
+      ],
       "judge": null
     },
     {

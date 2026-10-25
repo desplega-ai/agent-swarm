@@ -21,12 +21,16 @@
   "budgetUsd": 0.75,
   "budgetMs": 600000,
   "passThreshold": 0.75,
-  "gates": ["report-exists[w0]:/workspace/research/incident-review.md"],
+  "gates": [
+    "report-exists[w0]:/workspace/research/incident-review.md"
+  ],
   "dimensions": [
     {
       "name": "correctness",
       "weight": 3,
-      "checks": ["merged-answer-key"],
+      "checks": [
+        "merged-answer-key"
+      ],
       "judge": null
     },
     {

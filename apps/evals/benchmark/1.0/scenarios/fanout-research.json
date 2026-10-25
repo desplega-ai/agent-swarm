@@ -21,18 +21,24 @@
   "budgetUsd": 0.75,
   "budgetMs": 600000,
   "passThreshold": 0.75,
-  "gates": ["report-exists[w3]:/workspace/research/incident-review.md"],
+  "gates": [
+    "report-exists[w3]:/workspace/research/incident-review.md"
+  ],
   "dimensions": [
     {
       "name": "delegation",
       "weight": 5,
-      "checks": ["fanout-paper-trail"],
+      "checks": [
+        "fanout-paper-trail"
+      ],
       "judge": null
     },
     {
       "name": "correctness",
       "weight": 3,
-      "checks": ["merged-answer-key"],
+      "checks": [
+        "merged-answer-key"
+      ],
       "judge": null
     },
     {

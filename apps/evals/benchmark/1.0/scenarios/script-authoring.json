@@ -21,24 +21,32 @@
   "budgetUsd": null,
   "budgetMs": null,
   "passThreshold": 0.75,
-  "gates": ["script-created"],
+  "gates": [
+    "script-created"
+  ],
   "dimensions": [
     {
       "name": "script-behavior",
       "weight": 4,
-      "checks": ["script-sdk-usage"],
+      "checks": [
+        "script-sdk-usage"
+      ],
       "judge": null
     },
     {
       "name": "correctness",
       "weight": 2,
-      "checks": ["script-run-output"],
+      "checks": [
+        "script-run-output"
+      ],
       "judge": null
     },
     {
       "name": "reusability",
       "weight": 1,
-      "checks": ["script-reusable"],
+      "checks": [
+        "script-reusable"
+      ],
       "judge": null
     }
   ]

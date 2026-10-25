@@ -21,24 +21,32 @@
   "budgetUsd": null,
   "budgetMs": null,
   "passThreshold": 0.9,
-  "gates": ["workflow-exists"],
+  "gates": [
+    "workflow-exists"
+  ],
   "dimensions": [
     {
       "name": "workflow-dag",
       "weight": 4,
-      "checks": ["workflow-dag-behavior"],
+      "checks": [
+        "workflow-dag-behavior"
+      ],
       "judge": null
     },
     {
       "name": "trigger-schema",
       "weight": 2,
-      "checks": ["trigger-schema-supported"],
+      "checks": [
+        "trigger-schema-supported"
+      ],
       "judge": null
     },
     {
       "name": "correctness",
       "weight": 1,
-      "checks": ["workflow-correctness"],
+      "checks": [
+        "workflow-correctness"
+      ],
       "judge": null
     }
   ]
