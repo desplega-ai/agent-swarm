@@ -9,7 +9,6 @@ import {
   getWorkflow,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
-  getWorkflowRunTree,
   getWorkflowVersion,
   getWorkflowVersions,
   listWorkflowRunsPage,
@@ -26,6 +25,7 @@ import {
 } from "../be/db/workflow-idempotency";
 import {
   getWorkflowRunParent,
+  getWorkflowRunTree,
   WORKFLOW_RUN_TREE_MAX_DEPTH,
   WorkflowRunTreeError,
 } from "../be/db/workflow-runs";
@@ -114,7 +114,7 @@ const WorkflowRunPageSchema = z.object({
   }),
 });
 
-/** Mirrors `WorkflowRunTree` in src/be/db.ts. */
+/** Mirrors `WorkflowRunTree` in src/be/db/workflow-runs.ts. */
 const WorkflowRunTreeSchema = z.object({
   rootRunId: z.string(),
   runs: z.array(WorkflowRunSummarySchema),

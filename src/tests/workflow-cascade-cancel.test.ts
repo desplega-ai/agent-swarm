@@ -1285,6 +1285,36 @@ describe("run tree read (GET /api/workflow-runs/{id}/tree)", () => {
     expect(subtree.body!.runs.map((run) => run.id)).toEqual([childRun.id, grandchildRun.id]);
   });
 
+  test("a tree wider than one summary query returns every run once, in walk order", async () => {
+    const wf = await makeWorkflow({ nodes: [] });
+    const rootId = await linkedRun({ workflowId: wf.id, status: "completed" });
+    const step = await linkedStep(rootId, {
+      nodeId: "fan",
+      nodeType: "sub-workflow",
+      status: "completed",
+    });
+    // One child per attempt, over two 500-id summary chunks, so a dropped or
+    // repeated chunk shows.
+    const childCount = 1_100;
+    await getDbClient().transaction(async () => {
+      for (let i = 0; i < childCount; i++) {
+        await createWorkflowRun({
+          id: crypto.randomUUID(),
+          workflowId: wf.id,
+          parentStepId: step,
+          parentStepAttempt: i,
+        });
+      }
+    });
+
+    const walk = await getWorkflowRunTreeIds(rootId);
+    expect(walk).toHaveLength(childCount + 1);
+    const tree = await getTree(rootId);
+    expect(tree.status).toBe(200);
+    expect(tree.body!.runs.map((run) => run.id)).toEqual(walk);
+    expect(tree.body!.hasOpenWork).toBe(true);
+  });
+
   test("a run without children is its own tree", async () => {
     const wf = await makeWorkflow({ nodes: [] });
     const runId = await linkedRun({ workflowId: wf.id, status: "completed" });

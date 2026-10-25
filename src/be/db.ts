@@ -229,10 +229,11 @@ import {
   emitChildRunFinished,
   getRunLineageBlock,
   getStepExecutionBlock,
-  getWorkflowRunTreeIds,
+  rowToWorkflowRun,
+  WORKFLOW_RUN_SUMMARY_COLUMNS,
+  type WorkflowRunRow,
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
-  workflowRunTreeHasOpenWork,
 } from "./db/workflow-runs";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
@@ -7890,53 +7891,6 @@ export async function getWorkflowsByScheduleId(scheduleId: string): Promise<Work
 // Workflow Run CRUD
 // ============================================================================
 
-type WorkflowRunRow = {
-  id: string;
-  workflowId: string;
-  status: string;
-  triggerType: string;
-  triggerData: string | null;
-  /** Absent from list rows: see `WORKFLOW_RUN_SUMMARY_COLUMNS`. */
-  context?: string | null;
-  /** Sealed exact `context` (migration 201). Absent from list rows. */
-  context_replay?: string | null;
-  error: string | null;
-  created_by: string | null;
-  startedAt: string;
-  lastUpdatedAt: string;
-  finishedAt: string | null;
-  /** The `sub-workflow` step that started this run (migration 203). */
-  parentStepId?: string | null;
-  /** That step's attempt (`retryCount`) when it started this run (migration 240). */
-  parentStepAttempt?: number | null;
-};
-
-/**
- * `view` picks the `context` copy: `replay` (default) is the exact sealed value
- * the engine resumes from; `display` is the scrubbed column for API, MCP and UI
- * responses. See `src/be/workflow-replay.ts`.
- */
-function rowToWorkflowRun(row: WorkflowRunRow, view: WorkflowPayloadView = "replay"): WorkflowRun {
-  const run: WorkflowRun = {
-    id: row.id,
-    workflowId: row.workflowId,
-    status: row.status as WorkflowRunStatus,
-    triggerData: row.triggerData ? JSON.parse(row.triggerData) : undefined,
-    context: undefined,
-    error: row.error ?? undefined,
-    createdBy: row.created_by ?? undefined,
-    startedAt: normalizeDateRequired(row.startedAt),
-    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
-    finishedAt: normalizeDate(row.finishedAt) ?? undefined,
-    parentStepId: row.parentStepId ?? undefined,
-    parentStepAttempt: row.parentStepId ? (row.parentStepAttempt ?? 0) : undefined,
-  };
-  return defineWorkflowPayload(run, "context", row.context, row.context_replay, view, {
-    runId: row.id,
-    target: "its context",
-  });
-}
-
 export async function createWorkflowRun(data: {
   id: string;
   workflowId: string;
@@ -8062,12 +8016,6 @@ export type WorkflowRunListOptions = {
   includeContext?: boolean;
 };
 
-// Everything but `context`. `triggerData` stays: it is small, and stored
-// scripts read it off list rows (dedupe by trigger, failure reports). The
-// parent link and attempt stay so a list row identifies a child's invocation.
-const WORKFLOW_RUN_SUMMARY_COLUMNS =
-  "id, workflowId, status, triggerType, triggerData, error, created_by, startedAt, lastUpdatedAt, finishedAt, parentStepId, parentStepAttempt";
-
 export type WorkflowRunPage = {
   runs: WorkflowRun[];
   page: {
@@ -8146,48 +8094,6 @@ export async function listWorkflowRunsPage(
       ...(hasMore ? { nextOffset } : {}),
     },
   };
-}
-
-export type WorkflowRunTree = {
-  rootRunId: string;
-  /** Root first, in `getWorkflowRunTreeIds` order. List rows: no `context`. */
-  runs: WorkflowRun[];
-  hasOpenWork: boolean;
-};
-
-/** Run ids per summary query, well under SQLite's bound-parameter limit. */
-const RUN_SUMMARY_QUERY_CHUNK = 500;
-
-/**
- * The run and every run below it, with whether any of them still has open
- * work (see `workflowRunTreeHasOpenWork`). One read transaction, so `runs` and
- * `hasOpenWork` come from the same snapshot. Null when the root is missing.
- * Throws WorkflowRunTreeError on a cycle or a chain past the depth bound.
- */
-export async function getWorkflowRunTree(rootRunId: string): Promise<WorkflowRunTree | null> {
-  return getDbClient().transaction(
-    async () => {
-      const root = await getDbClient().get<{ id: string }>(
-        "SELECT id FROM workflow_runs WHERE id = ?",
-        [rootRunId],
-      );
-      if (!root) return null;
-      const ids = await getWorkflowRunTreeIds(rootRunId);
-      const byId = new Map<string, WorkflowRun>();
-      for (let i = 0; i < ids.length; i += RUN_SUMMARY_QUERY_CHUNK) {
-        const chunk = ids.slice(i, i + RUN_SUMMARY_QUERY_CHUNK);
-        const rows = await getDbClient().query<WorkflowRunRow>(
-          `SELECT ${WORKFLOW_RUN_SUMMARY_COLUMNS} FROM workflow_runs
-            WHERE id IN (${chunk.map(() => "?").join(", ")})`,
-          chunk,
-        );
-        for (const row of rows) byId.set(row.id, rowToWorkflowRun(row, "display"));
-      }
-      const runs = ids.flatMap((id) => byId.get(id) ?? []);
-      return { rootRunId, runs, hasOpenWork: await workflowRunTreeHasOpenWork(ids) };
-    },
-    { readOnly: true },
-  );
 }
 
 // ============================================================================
