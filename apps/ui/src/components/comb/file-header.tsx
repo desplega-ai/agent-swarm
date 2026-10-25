@@ -1,7 +1,7 @@
 import { useAgentFsStat } from "@/api/hooks/use-agent-fs";
 import { FolderTrail } from "@/components/comb/breadcrumbs";
 import { DownloadButton, OpenInAgentFsButton } from "@/components/comb/file-actions";
-import { CopyPathButton } from "@/components/comb/file-menu";
+import { CopyPathButton, FileMenuButton } from "@/components/comb/file-menu";
 import { UpdatedChip } from "@/components/comb/live-indicator";
 import { PinButton } from "@/components/comb/pin-button";
 import { PresenceAvatars } from "@/components/comb/presence-avatars";
@@ -63,7 +63,7 @@ function FileFacts({ file, stat }: { file: DrivePath; stat: StatResult }) {
 
 /**
  * The other people on the file, then its actions as icon buttons: Versions,
- * Pin, Share link, Copy path, Download, Open in agent-fs.
+ * Pin, Share link, Copy path, Download, Open in agent-fs, and the file menu.
  */
 export function FileActions({ file }: { file: DrivePath }) {
   const stat = useFileStat(file);
@@ -78,6 +78,7 @@ export function FileActions({ file }: { file: DrivePath }) {
       <CopyPathButton target={file} />
       <DownloadButton file={file} bytes={stat.size} iconOnly />
       <OpenInAgentFsButton target={file} iconOnly />
+      <FileMenuButton target={file} header />
     </>
   );
 }

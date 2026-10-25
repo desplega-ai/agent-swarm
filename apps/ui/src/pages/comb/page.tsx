@@ -127,7 +127,7 @@ function ConnectedView() {
         orgId={location.orgId}
         driveId={location.driveId}
       >
-        <FileDialogsProvider>
+        <FileDialogsProvider current={location.path}>
           <CombWorkspace location={location} />
         </FileDialogsProvider>
       </CombPresenceProvider>

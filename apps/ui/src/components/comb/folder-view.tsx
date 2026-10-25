@@ -6,7 +6,12 @@ import { useAgentFsLs } from "@/api/hooks/use-agent-fs";
 import { CombHome } from "@/components/comb/comb-home";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileKindIcon } from "@/components/comb/file-icon";
-import { CopyPathButton, FileContextMenu, FileMenuButton } from "@/components/comb/file-menu";
+import {
+  CopyPathButton,
+  FileContextMenu,
+  FileMenuButton,
+  NewEntryButton,
+} from "@/components/comb/file-menu";
 import { FolderComments } from "@/components/comb/folder-comments";
 import { PinButton } from "@/components/comb/pin-button";
 import { UploadButton, UploadDropZone, UploadList } from "@/components/comb/upload-zone";
@@ -147,6 +152,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         description={count}
         action={
           <>
+            <NewEntryButton folder={folder} />
             <UploadButton folder={folder} />
             {/* The root is the Comb item, so no pin. */}
             {folder.path === "/" ? null : <PinButton target={folder} className="size-8" />}

@@ -4,13 +4,18 @@ import {
   Download,
   Ellipsis,
   ExternalLink,
+  FilePlus,
   FolderOpen,
+  FolderPlus,
   Link,
   Link2,
   type LucideIcon,
+  Pencil,
+  Plus,
   SquareArrowOutUpRight,
   Star,
   StarOff,
+  Trash2,
 } from "lucide-react";
 import {
   createContext,
@@ -27,6 +32,7 @@ import { toast } from "sonner";
 import { useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { isCombFavorite, useCombFavorites } from "@/api/hooks/use-comb-favorites";
 import { downloadDriveFile } from "@/components/comb/file-actions";
+import { DeleteDialog, NewEntryDialog, RenameDialog } from "@/components/comb/file-dialogs";
 import { ShareDialog } from "@/components/comb/share-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,23 +57,54 @@ import { baseName, combPath, type DrivePath, isFolderPath } from "@/lib/comb/pat
 import { SHARE_LINKS_FEATURE } from "@/lib/comb/share";
 import { cn } from "@/lib/utils";
 
-// The file menu of a tree row or a folder row: a hover "..." button and a
-// right click, one item list (like the agent-fs live UI). Dialogs that an item
-// opens (Share) live in `FileDialogsProvider`, so they outlive the menu.
+// The file menu of a tree row, a folder row, or the file header: a "..."
+// button and a right click, one item list (like the agent-fs live UI).
+// Dialogs that an item opens live in `FileDialogsProvider`, so they outlive
+// the menu.
 
 /** A dialog that a menu item opens. */
-export type FileDialog = { kind: "share"; target: DrivePath };
+export type FileDialog = {
+  kind: "share" | "new-file" | "new-folder" | "rename" | "delete";
+  target: DrivePath;
+};
 
 const FileDialogsContext = createContext<((dialog: FileDialog) => void) | null>(null);
 
-/** Holds the one dialog a file menu opened. Wrap the Comb page with it. */
-export function FileDialogsProvider({ children }: { children: ReactNode }) {
+/** Opens a file dialog. Null outside `FileDialogsProvider`. */
+export function useFileDialogs(): ((dialog: FileDialog) => void) | null {
+  return useContext(FileDialogsContext);
+}
+
+/**
+ * Holds the one dialog a file menu opened. Wrap the Comb page with it.
+ * `current` is the path the page shows: renaming or deleting it moves the page.
+ */
+export function FileDialogsProvider({
+  current,
+  children,
+}: {
+  current: string;
+  children: ReactNode;
+}) {
   const [dialog, setDialog] = useState<FileDialog | null>(null);
   const close = useCallback(() => setDialog(null), []);
   return (
     <FileDialogsContext.Provider value={setDialog}>
       {children}
       {dialog?.kind === "share" ? <ShareDialog file={dialog.target} onClose={close} /> : null}
+      {dialog?.kind === "new-file" || dialog?.kind === "new-folder" ? (
+        <NewEntryDialog
+          kind={dialog.kind === "new-file" ? "file" : "folder"}
+          folder={dialog.target}
+          onClose={close}
+        />
+      ) : null}
+      {dialog?.kind === "rename" ? (
+        <RenameDialog file={dialog.target} current={current} onClose={close} />
+      ) : null}
+      {dialog?.kind === "delete" ? (
+        <DeleteDialog file={dialog.target} current={current} onClose={close} />
+      ) : null}
     </FileDialogsContext.Provider>
   );
 }
@@ -169,6 +206,42 @@ function useFileMenuGroups(target: DrivePath): MenuAction[][] {
     });
   }
 
+  // Write actions, as in the live UI: new entries in a folder, rename and delete for a file.
+  const edit: MenuAction[] = [];
+  if (openDialog && isFolder) {
+    edit.push(
+      {
+        id: "new-file",
+        label: "New file…",
+        icon: FilePlus,
+        onSelect: () => openDialog({ kind: "new-file", target }),
+      },
+      {
+        id: "new-folder",
+        label: "New folder…",
+        icon: FolderPlus,
+        onSelect: () => openDialog({ kind: "new-folder", target }),
+      },
+    );
+  }
+  if (openDialog && !isFolder) {
+    edit.push(
+      {
+        id: "rename",
+        label: "Rename…",
+        icon: Pencil,
+        onSelect: () => openDialog({ kind: "rename", target }),
+      },
+      {
+        id: "delete",
+        label: "Delete…",
+        icon: Trash2,
+        destructive: true,
+        onSelect: () => openDialog({ kind: "delete", target }),
+      },
+    );
+  }
+
   const elsewhere: MenuAction[] = liveHref
     ? [
         {
@@ -180,7 +253,7 @@ function useFileMenuGroups(target: DrivePath): MenuAction[][] {
       ]
     : [];
 
-  return [open, share, elsewhere].filter((group) => group.length > 0);
+  return [open, share, edit, elsewhere].filter((group) => group.length > 0);
 }
 
 /** The menu's items, as dropdown or context menu items. */
@@ -210,7 +283,16 @@ function FileMenuItems({ target, as }: { target: DrivePath; as: "dropdown" | "co
  * The hover "..." button of a row. Mouse only (`tabIndex={-1}`): keyboard
  * users open the same menu with the context menu key on the row.
  */
-export function FileMenuButton({ target, className }: { target: DrivePath; className?: string }) {
+export function FileMenuButton({
+  target,
+  className,
+  header = false,
+}: {
+  target: DrivePath;
+  className?: string;
+  /** The file header's button: a keyboard stop, icon size, a menu below it. */
+  header?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const name = baseName(target.path) || "Drive";
   return (
@@ -219,20 +301,25 @@ export function FileMenuButton({ target, className }: { target: DrivePath; class
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          tabIndex={-1}
-          aria-label={`More actions for ${name}`}
+          size={header ? "icon-sm" : "icon"}
+          tabIndex={header ? undefined : -1}
+          aria-label={header ? "More actions" : `More actions for ${name}`}
           // A click on the button must not reach the row link.
           onClick={(event: MouseEvent) => event.stopPropagation()}
           className={cn(
-            "size-6 shrink-0 text-muted-foreground hover:text-foreground data-[state=open]:opacity-100",
+            !header && "size-6 shrink-0",
+            "text-muted-foreground hover:text-foreground data-[state=open]:opacity-100",
             className,
           )}
         >
           <Ellipsis />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right" className="min-w-48">
+      <DropdownMenuContent
+        align={header ? "end" : "start"}
+        side={header ? "bottom" : "right"}
+        className="min-w-48"
+      >
         <FileMenuItems target={target} as="dropdown" />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -304,5 +391,31 @@ export function CopyPathButton({ target }: { target: DrivePath }) {
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+/** The folder header's New menu: New file and New folder in `folder`. */
+export function NewEntryButton({ folder }: { folder: DrivePath }) {
+  const openDialog = useFileDialogs();
+  if (!openDialog) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" aria-label="New">
+          <Plus />
+          <span className="hidden sm:inline">New</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-40">
+        <DropdownMenuItem onSelect={() => openDialog({ kind: "new-file", target: folder })}>
+          <FilePlus aria-hidden />
+          New file…
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => openDialog({ kind: "new-folder", target: folder })}>
+          <FolderPlus aria-hidden />
+          New folder…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
