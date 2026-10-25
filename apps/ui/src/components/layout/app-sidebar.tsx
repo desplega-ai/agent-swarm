@@ -192,7 +192,7 @@ const footerNav: FooterItem[] = [
       { title: "Connections", path: "/settings/connections" },
       { title: "Appearance", path: "/settings/appearance" },
       { title: "Secrets", path: "/settings/secrets" },
-      { title: "API Keys", path: "/settings/api-keys" },
+      { title: "Provider keys", path: "/settings/api-keys" },
       { title: "Integrations", path: "/settings/integrations" },
       { title: "Configuration", path: "/settings/configuration" },
       { title: "Extensions", path: "/settings/extensions" },

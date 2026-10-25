@@ -45,7 +45,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   { title: "Setup", path: SETUP_PATH, icon: ListChecks },
   { title: "Appearance", path: "/settings/appearance", icon: Palette },
   { title: "Secrets", path: "/settings/secrets", icon: KeyRound },
-  { title: "API Keys", path: "/settings/api-keys", icon: Key },
+  { title: "Provider keys", path: "/settings/api-keys", icon: Key },
   { title: "Integrations", path: "/settings/integrations", icon: Plug },
   { title: "Configuration", path: "/settings/configuration", icon: SlidersHorizontal },
   { title: "Extensions", path: "/settings/extensions", icon: Blocks },

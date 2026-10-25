@@ -7,6 +7,7 @@ import type {
   ProviderName,
   SwarmConfig,
 } from "@/api/types";
+import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import type { DialContext } from "@/lib/model-dial";
 import { httpUrlError } from "../../components/http-url";
 
@@ -20,6 +21,16 @@ export const CARD_HARNESSES: Record<AiCardId, readonly ProviderName[]> = {
   open: ["pi", "opencode", "dsh"],
   devin: ["devin"],
 };
+
+/**
+ * The harnesses of a card by their dashboard names (`HARNESS_LABEL`), so the
+ * step uses one name per harness: "Codex", or "Pi-Mono, Opencode, or DeepSeek (dsh)".
+ */
+export function harnessNames(card: AiCardId, conjunction: "or" | "and" = "or"): string {
+  const names = CARD_HARNESSES[card].map((h) => HARNESS_LABEL[h] ?? h);
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")}, ${conjunction} ${names[names.length - 1]}`;
+}
 
 /** Which card a recorded method belongs to. */
 export const METHOD_CARD: Record<OnboardingAiMethod, AiCardId> = {

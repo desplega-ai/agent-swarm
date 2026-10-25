@@ -1,4 +1,10 @@
-import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../client";
 import type { SwarmConfig, SwarmConfigsResponse } from "../types";
@@ -45,6 +51,22 @@ export function useResolvedConfigs(
   return useQuery({ ...resolvedConfigsQuery(filters), enabled: options?.enabled ?? true });
 }
 
+/** The query of `useModelTiers`. */
+const MODEL_TIERS_KEY = ["models-catalog", "tiers"];
+/** The API reloads its env about 250 ms after a global write (debounced): wait past it. */
+const ENV_RELOAD_MS = 1000;
+
+/**
+ * Refetch the model tiers after a global config write, so a tier edit shows
+ * in about a second instead of on the next 15 s poll. The tiers read the API
+ * env, and the env changes only after the server's debounced reload.
+ */
+function refreshModelTiersAfterReload(queryClient: QueryClient) {
+  setTimeout(() => {
+    void queryClient.invalidateQueries({ queryKey: MODEL_TIERS_KEY });
+  }, ENV_RELOAD_MS);
+}
+
 export function useUpsertConfig() {
   const queryClient = useQueryClient();
 
@@ -59,8 +81,9 @@ export function useUpsertConfig() {
       description?: string | null;
       exportToEnv?: boolean;
     }) => api.upsertConfig(data),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["configs"] });
+      if (variables.scope === "global") refreshModelTiersAfterReload(queryClient);
     },
   });
 }
@@ -72,6 +95,8 @@ export function useDeleteConfig() {
     mutationFn: (id: string) => api.deleteConfig(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["configs"] });
+      // A reset tier falls back to its default.
+      refreshModelTiersAfterReload(queryClient);
     },
   });
 }
