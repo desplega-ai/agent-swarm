@@ -10,3 +10,5 @@ d3278a2a25c12bcea63157ff4d8b561ed7862a40:apps/ui/src/lib/configuration-catalog.t
 04441aa7e80f77bfb7b9c053fac73d140be06496:src/tests/entrypoint-gitlab-credential-helper.test.ts:gitlab-pat:30
 # Example Idempotency-Key UUID in the workflows concept doc, not a secret. The current example uses $(uuidgen).
 4b225fe28726fc515431ff2a3063df6639d21322:docs-site/content/docs/(documentation)/concepts/workflows.mdx:generic-api-key:420
+# A fake PEM shape in a secret-field test (AAAA/BBBB body), not a key. The current line carries an inline gitleaks:allow.
+050ed6d37aceffac97a6a33eca40b2d558ac7a6a:apps/ui/src/components/onboarding/autosave-secret-field.test.ts:private-key:45

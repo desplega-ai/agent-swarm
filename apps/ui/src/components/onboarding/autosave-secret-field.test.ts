@@ -42,7 +42,7 @@ describe("checkSecret", () => {
   });
 
   test("a multi-line pattern (PEM) keeps its line breaks", () => {
-    const pem = "-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\n-----END PRIVATE KEY-----";
+    const pem = "-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\n-----END PRIVATE KEY-----"; // gitleaks:allow (fake PEM shape)
     const rule = {
       pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----/,
     };
