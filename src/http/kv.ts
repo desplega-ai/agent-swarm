@@ -12,7 +12,11 @@ import {
   upsertKv,
 } from "../be/db";
 import { mcpOverflowAuthError } from "../kv-overflow";
-import { reservedNamespaceError, reservedRoomKeyError } from "../kv-reserved-namespaces";
+import {
+  privateNamespaceError,
+  reservedNamespaceError,
+  reservedRoomKeyError,
+} from "../kv-reserved-namespaces";
 import { hasKvViewArgs, resolveKvView } from "../kv-view";
 import { can } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
@@ -405,8 +409,9 @@ function authorizeRead(
   namespace: string,
   ctx: AuthCtx,
 ): { status: number; message: string } | null {
-  const overflowAuthErr = mcpOverflowAuthError(namespace, ctx.callerAgentId);
-  return overflowAuthErr ? { status: 403, message: overflowAuthErr } : null;
+  const readErr =
+    privateNamespaceError(namespace) ?? mcpOverflowAuthError(namespace, ctx.callerAgentId);
+  return readErr ? { status: 403, message: readErr } : null;
 }
 
 function encodeValueOrError(
