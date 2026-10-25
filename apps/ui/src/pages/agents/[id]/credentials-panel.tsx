@@ -213,6 +213,26 @@ export function CredentialsPanel({ agent }: { agent: Agent }) {
                       {cred.liveTest.error}
                     </pre>
                   ) : null}
+                  {cred.liveTest.warning ? (
+                    <p className="text-xs text-status-warning-strong">{cred.liveTest.warning}</p>
+                  ) : null}
+                  {cred.liveTest.keys && cred.liveTest.keys.length > 1 ? (
+                    <ul className="space-y-0.5 text-xs">
+                      {cred.liveTest.keys.map((key) => (
+                        <li key={`${key.keyType}:${key.index}`} className="flex items-center gap-2">
+                          <StatusIcon tone={key.ok ? "success" : "error"} />
+                          <span className="font-mono">…{key.suffix}</span>
+                          <span className="text-muted-foreground">
+                            {key.ok
+                              ? `${key.latency_ms}ms`
+                              : key.httpStatus
+                                ? `HTTP ${key.httpStatus}`
+                                : (key.error ?? "failed")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ) : (
                 <span className="text-muted-foreground">not run</span>

@@ -2984,6 +2984,9 @@ export interface ApiKeyStatus {
   /** Subscription plan id (see `GET /api/keys/plans`), when known. */
   plan: string | null;
   planSource: "manual" | "detected" | "estimated" | null;
+  /** The provider rejected this key in a worker live test (`HTTP 401`), until it passes or leaves the pool. */
+  lastValidationError?: string | null;
+  lastValidationFailedAt?: string | null;
   rateLimitWindows: Record<
     string,
     {
