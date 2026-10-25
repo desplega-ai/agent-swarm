@@ -204,6 +204,45 @@ describe("SubWorkflowOutput", () => {
     expect(html).toContain("summarize");
   });
 
+  test("reads the child run from the slim query, not the full one", () => {
+    const childRunId = "61a5d1a2-0000-4000-8000-000000000004";
+    const subWorkflowStep: WorkflowRunStep = {
+      id: "step-3",
+      runId: "run-1",
+      nodeId: "call",
+      nodeType: "sub-workflow",
+      status: "completed",
+      output: { runId: childRunId, outputs: { check: { passed: false } } },
+      startedAt: "2026-09-28T10:00:00.000Z",
+    };
+    const childRun = {
+      id: childRunId,
+      workflowId: "wf-child",
+      status: "failed",
+      startedAt: "2026-09-28T10:00:00.000Z",
+      lastUpdatedAt: "2026-09-28T10:01:00.000Z",
+      steps: [{ id: "child-step", runId: childRunId, nodeId: "check", status: "failed" }],
+    };
+    const renderSeeded = (key: unknown[]) => {
+      const client = new QueryClient();
+      client.setQueryData(key, childRun);
+      return renderToStaticMarkup(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <SubWorkflowOutput step={subWorkflowStep} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    };
+
+    const slim = renderSeeded(["workflow-run", childRunId, "slim"]);
+    const full = renderSeeded(["workflow-run", childRunId]);
+    // Two badges from the slim entry (the child run and its `check` step), none from the full one.
+    const failedBadges = (html: string) => html.split('data-variant="failed"').length - 1;
+    expect(failedBadges(slim)).toBe(2);
+    expect(failedBadges(full)).toBe(0);
+  });
+
   test("a waiting step says it waits for the child run", () => {
     const html = renderWithQuery(
       <SubWorkflowOutput

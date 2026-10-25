@@ -1759,6 +1759,15 @@ export interface WorkflowsResponse {
 /** List row of a run: no `context`, which `GET /api/workflow-runs/{id}` serves. */
 export type WorkflowRunSummary = Omit<WorkflowRun, "context">;
 
+/** Step of `GET /api/workflow-runs/{id}?fields=slim`: no `input`, the context snapshot. */
+export type WorkflowRunStepSlim = Omit<WorkflowRunStep, "input">;
+
+/** `GET /api/workflow-runs/{id}?fields=slim`: the run without `context`, steps without `input`. */
+export interface WorkflowRunSlimWithSteps extends WorkflowRunSummary {
+  steps: WorkflowRunStepSlim[];
+  parent?: WorkflowRunParent;
+}
+
 /** One page of `GET /api/workflows/{id}/runs`, newest first. */
 export interface WorkflowRunsPage {
   runs: WorkflowRunSummary[];

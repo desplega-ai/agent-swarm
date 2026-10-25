@@ -182,7 +182,9 @@ import type {
   Workflow,
   WorkflowRun,
   WorkflowRunParent,
+  WorkflowRunSlimWithSteps,
   WorkflowRunStep,
+  WorkflowRunStepSlim,
   WorkflowRunSummary,
   WorkflowRunsPage,
   WorkflowRunWithSteps,
@@ -1536,15 +1538,23 @@ class ApiClient {
   }
 
   async fetchWorkflowRun(id: string): Promise<WorkflowRunWithSteps> {
-    const url = `${this.getBaseUrl()}/api/workflow-runs/${id}`;
+    return this.fetchWorkflowRunDetail<WorkflowRun, WorkflowRunStep>(id, "");
+  }
+
+  /** The run without its `context` and its steps without `input`, for views that show statuses. */
+  async fetchWorkflowRunSlim(id: string): Promise<WorkflowRunSlimWithSteps> {
+    return this.fetchWorkflowRunDetail<WorkflowRunSummary, WorkflowRunStepSlim>(id, "?fields=slim");
+  }
+
+  private async fetchWorkflowRunDetail<Run, Step>(
+    id: string,
+    query: string,
+  ): Promise<Run & { steps: Step[]; parent?: WorkflowRunParent }> {
+    const url = `${this.getBaseUrl()}/api/workflow-runs/${id}${query}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflow run: ${res.status}`);
-    const data = (await res.json()) as {
-      run: WorkflowRun;
-      steps: WorkflowRunStep[];
-      parent?: WorkflowRunParent;
-    };
-    // Reshape { run, steps, parent } into WorkflowRunWithSteps
+    const data = (await res.json()) as { run: Run; steps: Step[]; parent?: WorkflowRunParent };
+    // Reshape { run, steps, parent } into one object
     return { ...data.run, steps: data.steps, parent: data.parent };
   }
 

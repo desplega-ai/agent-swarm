@@ -2,7 +2,7 @@ import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight, Code2, Timer } f
 import { forwardRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApprovalRequests } from "@/api/hooks/use-approval-requests";
-import { useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
+import { useWorkflow, useWorkflowRunSlim } from "@/api/hooks/use-workflows";
 import type { WorkflowNode, WorkflowRunStep } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { AgentLink } from "@/components/shared/agent-link";
@@ -886,7 +886,8 @@ type SubWorkflowStepOutput = {
 export function SubWorkflowOutput({ step }: { step: WorkflowRunStep }) {
   const output = step.output as SubWorkflowStepOutput | null | undefined;
   const runId = output && typeof output.runId === "string" ? output.runId : "";
-  const { data: childRun } = useWorkflowRun(runId);
+  // Only the child's status and step statuses are shown, so skip its context and step inputs.
+  const { data: childRun } = useWorkflowRunSlim(runId);
   const { data: childWorkflow } = useWorkflow(childRun?.workflowId ?? "");
 
   if (output == null || !runId) {

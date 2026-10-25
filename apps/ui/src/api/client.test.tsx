@@ -335,3 +335,36 @@ describe("submitFeedback", () => {
     expect(call).toBe(1);
   });
 });
+
+describe("fetchWorkflowRun", () => {
+  const body = {
+    run: { id: "run-1", workflowId: "wf-1", status: "completed" },
+    steps: [{ id: "step-1", runId: "run-1", nodeId: "poll", status: "completed" }],
+  };
+
+  function captureUrl(): { url?: string } {
+    const seen: { url?: string } = {};
+    globalThis.fetch = (async (url: string) => {
+      seen.url = url;
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    return seen;
+  }
+
+  test("reads the full run by default", async () => {
+    const seen = captureUrl();
+    const run = await api.fetchWorkflowRun("run-1");
+    expect(seen.url).toBe("https://api.example.test/api/workflow-runs/run-1");
+    expect(run).toEqual({ ...body.run, steps: body.steps, parent: undefined });
+  });
+
+  test("the slim read asks for fields=slim and keeps the same shape", async () => {
+    const seen = captureUrl();
+    const run = await api.fetchWorkflowRunSlim("run-1");
+    expect(seen.url).toBe("https://api.example.test/api/workflow-runs/run-1?fields=slim");
+    expect(run).toEqual({ ...body.run, steps: body.steps, parent: undefined });
+  });
+});
