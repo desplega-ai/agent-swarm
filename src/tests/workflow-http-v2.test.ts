@@ -1059,9 +1059,6 @@ describe("Workflow HTTP API v2", () => {
       return { workflow, runId, context };
     }
 
-    const byKey = (a: WorkflowRunStep, b: WorkflowRunStep) =>
-      (a.idempotencyKey ?? "").localeCompare(b.idempotencyKey ?? "");
-
     test("fields=slim omits run.context and steps[].input, keeps every other field", async () => {
       const { runId, context } = await createLoopRun(3);
 
@@ -1081,14 +1078,15 @@ describe("Workflow HTTP API v2", () => {
       const { context: _context, ...fullRunRest } = full.run;
       expect(slim.run).toEqual(fullRunRest);
       const fullStepsRest = full.steps.map(({ input: _input, ...rest }) => rest);
-      expect([...slim.steps].sort(byKey)).toEqual([...fullStepsRest].sort(byKey));
+      // Same steps in the same order: both reads break `startedAt` ties by rowid.
+      expect(slim.steps).toEqual(fullStepsRest);
       // The retry and result fields the slim view exists to serve.
-      const last = [...slim.steps].sort(byKey).at(-1)!;
+      const last = slim.steps.at(-1)!;
       expect(last.output).toEqual({ iteration: 2, ready: true });
       expect(last.retryCount).toBe(2);
       expect(last.diagnostics).toBe("iteration 2");
       expect(last.nextRetryAt).toBeDefined();
-      expect([...slim.steps].sort(byKey)[0]!.error).toBe("not ready (0)");
+      expect(slim.steps[0]!.error).toBe("not ready (0)");
 
       expect(JSON.stringify(slim).length).toBeLessThan(JSON.stringify(full).length / 4);
     });

@@ -139,12 +139,15 @@ export async function getWorkflowRunSummary(id: string): Promise<WorkflowRunSumm
   return row ? rowToWorkflowRun(row, "display") : null;
 }
 
-/** `getWorkflowRunStepsByRunId` without `input`, in the display view. */
+/**
+ * `getWorkflowRunStepsByRunId` without `input`, in the display view. Same
+ * order, including the rowid tie-break for steps that share `startedAt`.
+ */
 export async function getWorkflowRunStepsSlimByRunId(
   runId: string,
 ): Promise<WorkflowRunStepSlim[]> {
   const rows = await getDbClient().query<WorkflowRunStepRow>(
-    `SELECT ${WORKFLOW_RUN_STEP_SLIM_COLUMNS} FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC`,
+    `SELECT ${WORKFLOW_RUN_STEP_SLIM_COLUMNS} FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC, rowid ASC`,
     [runId],
   );
   return rows.map((row) => rowToWorkflowRunStep(row, "display"));
