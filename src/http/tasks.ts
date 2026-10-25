@@ -227,6 +227,8 @@ const listTasks = route({
     status: z.string().optional(),
     agentId: z.string().optional(),
     scheduleId: z.string().optional(),
+    /** Only tasks of this workflow run (indexed; independent of fleet size). */
+    workflowRunId: z.string().uuid().optional(),
     key: AssetKeySchema.optional(),
     keyPrefix: AssetKeySchema.optional(),
     search: z.string().optional(),
@@ -976,6 +978,7 @@ export async function handleTasks(
       status,
       agentId: parsed.query.agentId || undefined,
       scheduleId: parsed.query.scheduleId || undefined,
+      workflowRunId: parsed.query.workflowRunId,
       key: parsed.query.key,
       keyPrefix: parsed.query.keyPrefix,
       search: parsed.query.search || undefined,

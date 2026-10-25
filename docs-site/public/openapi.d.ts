@@ -12780,6 +12780,7 @@ export interface paths {
                     status?: string;
                     agentId?: string;
                     scheduleId?: string;
+                    workflowRunId?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     key?: string;
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */

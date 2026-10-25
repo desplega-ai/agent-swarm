@@ -50,6 +50,11 @@ export const getTasksInputSchema = z.object({
     .uuid()
     .optional()
     .describe("Filter by schedule ID to find tasks created by a specific schedule."),
+  workflowRunId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Filter by workflow run ID to find the tasks of a single run."),
   key: AssetKeySchema.optional().describe("Filter by exact logical namespace."),
   keyPrefix: AssetKeySchema.optional().describe("Filter by namespace subtree."),
   includeHeartbeat: z
@@ -130,6 +135,7 @@ export async function getTasksHandler(
     tags,
     search,
     scheduleId,
+    workflowRunId,
     key,
     keyPrefix,
     includeHeartbeat,
@@ -151,6 +157,7 @@ export async function getTasksHandler(
     tags,
     search,
     scheduleId,
+    workflowRunId,
     key,
     keyPrefix,
     includeHeartbeat,
@@ -192,6 +199,7 @@ export async function getTasksHandler(
   if (tags?.length) filters.push(`tags=[${tags.join(", ")}]`);
   if (search) filters.push(`search='${search}'`);
   if (scheduleId) filters.push(`scheduleId='${scheduleId}'`);
+  if (workflowRunId) filters.push(`workflowRunId='${workflowRunId}'`);
   if (key) filters.push(`key='${key}'`);
   if (keyPrefix) filters.push(`keyPrefix='${keyPrefix}'`);
 
