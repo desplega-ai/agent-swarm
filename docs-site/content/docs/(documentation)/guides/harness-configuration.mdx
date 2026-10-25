@@ -702,7 +702,9 @@ Cognition's cloud and bills in ACUs rather than worker-side tokens.
 
 ## Multi-Credential Pools
 
-Workers test every key in a pool at boot and within about 10 seconds of a change.
+Workers test every key in a pool at boot and again when a key changes.
+A worker that waits for its first key sees it within about 10 seconds.
+A running worker sees a changed key when its idle poll returns, within about a minute.
 Workers repeat the tests every 10 minutes while a key is rejected.
 A key that the provider rejects with HTTP 401 or 403 is skipped until it passes or leaves the pool.
 The Provider keys page and the setup step show these results.

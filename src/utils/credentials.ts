@@ -429,7 +429,7 @@ async function fetchAvailableIndices(
           };
           if (data.availableIndices.length < totalKeys) {
             console.log(
-              `[credentials] ${envVar}: ${data.availableIndices.length}/${totalKeys} keys available (${totalKeys - data.availableIndices.length} rate-limited)`,
+              `[credentials] ${envVar}: ${data.availableIndices.length}/${totalKeys} keys available (${totalKeys - data.availableIndices.length} unavailable)`,
             );
           }
         }

@@ -43,7 +43,7 @@ export const claudeSubscriptionProvider = defineRouteProvider({
       return {
         status: "failed",
         reason:
-          "Anthropic rejected the Claude subscription token (HTTP 401). Make a new one with `claude setup-token`.",
+          "Anthropic rejected the Claude subscription token (HTTP 401). Make a new one with the claude setup-token command.",
         httpStatus: 401,
       };
     }

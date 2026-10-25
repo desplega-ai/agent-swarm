@@ -71,25 +71,20 @@ function isRejected(key: ApiKeyStatus): boolean {
 }
 
 function RejectedBadge({ keyStatus }: { keyStatus: ApiKeyStatus }) {
+  const reason = keyStatus.lastValidationError ?? "Rejected";
   const when = keyStatus.lastValidationFailedAt
-    ? formatSmartTime(keyStatus.lastValidationFailedAt)
+    ? `, ${formatSmartTime(keyStatus.lastValidationFailedAt)}`
     : "";
   return (
-    <div className="flex flex-col gap-0.5">
-      <Badge
-        variant="outline"
-        size="tag"
-        className="gap-1.5 border-status-error/30 text-status-error-strong"
-        title="The provider rejected this key in the last check. Agents skip it until it passes."
-      >
-        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-status-error" />
-        REJECTED
-      </Badge>
-      <span className="text-[11px] text-muted-foreground">
-        {keyStatus.lastValidationError ?? "Rejected"}
-        {when ? ` · ${when}` : ""}
-      </span>
-    </div>
+    <Badge
+      variant="outline"
+      size="tag"
+      className="gap-1.5 border-status-error/30 text-status-error-strong"
+      title={`The provider rejected this key in the last check (${reason}${when}). Agents skip it until it passes.`}
+    >
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-status-error" />
+      REJECTED
+    </Badge>
   );
 }
 

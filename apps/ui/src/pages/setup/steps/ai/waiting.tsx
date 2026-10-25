@@ -2,8 +2,12 @@ import { StatusLine } from "@/components/shared/status-icon";
 import { InfoTip } from "@/components/ui/info-tip";
 import { type CardRollup, rejectionText } from "./model";
 
-/** Workers test a changed key on their next config reload. */
-const RECHECK_TIP = "Agents check a changed key again within about 10 seconds.";
+/**
+ * A worker that waits for its first key re-reads config every 10 s at most. A
+ * running worker re-reads it when its idle poll returns, up to a minute later.
+ */
+const NEW_KEY_TIP = "Agents check a new key within about 10 seconds.";
+const CHANGED_KEY_TIP = "Running agents check a changed key within about a minute.";
 
 /** Shown in a card once its key is saved: waits for a worker, then confirms. */
 export function WaitingPanel({
@@ -28,16 +32,16 @@ export function WaitingPanel({
   }
   if (rollup.error) {
     return (
-      <output className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <output className="block space-y-1">
         <StatusLine tone="error">{rejectionText(rollup.error)}</StatusLine>
-        <InfoTip content={`Fix the key and save it. ${RECHECK_TIP}`} />
+        <p className="text-xs text-muted-foreground">Fix the key and save it. {CHANGED_KEY_TIP}</p>
       </output>
     );
   }
   return (
     <output className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <StatusLine tone="busy">Waiting for a worker to check this key</StatusLine>
-      <InfoTip content={RECHECK_TIP} />
+      <InfoTip content={`${NEW_KEY_TIP} ${CHANGED_KEY_TIP}`} />
       <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
         {rollup.workers > 0
           ? `${rollup.verifiedWorkers}/${rollup.workers} ${harnessLabel} agents`
