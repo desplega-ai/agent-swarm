@@ -4,6 +4,14 @@ import {
   SESSION_LEAF_KINDS,
   sessionGroupKey,
 } from "../../assets/key";
+import {
+  effectiveSource,
+  isSourceThreadKey,
+  NESTED_THREAD_MIN_ROOTS,
+  SESSION_SOURCES,
+  sessionThreadGroupKey,
+  sourceOfKey,
+} from "../../assets/source-key";
 import { isTerminalTaskStatus, TERMINAL_TASK_STATUSES } from "../../types";
 import { getDbClient, literalPrefixPattern } from "../db";
 import {
@@ -14,13 +22,17 @@ import {
 
 export type SessionReadState = "unread" | "read" | "later" | "done";
 export interface SessionFilters {
-  /** Restrict roots to these task sources. */
+  /** Restrict roots to these raw task sources (`agent_tasks.source`). */
   source?: string[];
-  /** Leave out roots of these task sources (the older sessions v2 source filter). */
+  /**
+   * Leave out roots of these effective sources (the older sessions v2 source
+   * filter). The effective source of a root under a source key prefix such as
+   * `shared/slack/` is that source, else its raw task source.
+   */
   hideSource?: string[];
   /**
-   * Keep only roots of these task sources (the sessions v2 source filter).
-   * Unlike `source`, an empty list matches no root.
+   * Keep only roots of these effective sources (the sessions v2 source filter,
+   * see `hideSource`). Unlike `source`, an empty list matches no root.
    */
   showSource?: string[];
   /** Match root task text or title with a case-insensitive substring. */
@@ -74,15 +86,47 @@ function sessionReadStateSql(now = new Date().toISOString()): SqlFragment {
   };
 }
 
+function sourceKeyRanges() {
+  return SESSION_SOURCES.map((source) => ({ source, ...keyPrefixRange(`shared/${source}/`) }));
+}
+
+/** Count every owned root at the exact source thread key, independent of viewer filters. */
+export function threadRootsSql(): SqlFragment {
+  const key = 'r."key"';
+  // Trim the final slash, then all non-slash characters to locate the last segment.
+  // For example, shared/slack/c1/thread:1.2/ gives thread:1.2/.
+  const leaf = `substr(${key}, length(rtrim(rtrim(${key}, '/'), replace(${key}, '/', ''))) + 1)`;
+  const ranges = sourceKeyRanges();
+  return {
+    sql: `(CASE WHEN (${ranges.map(() => `(${key} >= ? AND ${key} < ?)`).join(" OR ")}) AND ${leaf} GLOB 'thread:?*/'
+      THEN (SELECT COUNT(*) FROM agent_tasks session_thread_root WHERE session_thread_root."key" = ${key}
+        AND session_thread_root.parentTaskId IS NULL AND session_thread_root.requestedByUserId IS NOT NULL)
+      ELSE 0 END)`,
+    params: ranges.flatMap(({ lo, hi }) => [lo, hi]),
+  };
+}
+
+/** A task's group with the list row's rule (`groupKey` on `GET /api/sessions`). */
+export async function getSessionGroupKey(task: { id: string; key: string }): Promise<string> {
+  const threadRoots = threadRootsSql();
+  const row = await getDbClient().get<{ threadRoots: number }>(
+    `SELECT ${threadRoots.sql} AS threadRoots FROM agent_tasks r WHERE r.id = ?`,
+    [...threadRoots.params, task.id],
+  );
+  return sessionThreadGroupKey(task.key, row?.threadRoots ?? 0);
+}
+
 function groupCondition(group: string): SqlFragment {
   const { lo, hi } = keyPrefixRange(group);
   // The remaining key must be one resource leaf, with no nested path.
   // SQLite substr/length count code points, so count them here too (not UTF-16 units).
   const start = [...lo].length + 1;
+  const threadRoots = threadRootsSql();
   return {
     sql: `(r."key" >= ? AND r."key" < ? AND (r."key" = ? OR (
       instr(substr(r."key", ?, length(r."key") - ?), '/') = 0 AND
-      (${SESSION_LEAF_KINDS.map(() => 'substr(r."key", ?) GLOB ?').join(" OR ")})
+      (${SESSION_LEAF_KINDS.map(() => 'substr(r."key", ?) GLOB ?').join(" OR ")}) AND
+      ${threadRoots.sql} < ?
     )))`,
     params: [
       lo,
@@ -91,7 +135,18 @@ function groupCondition(group: string): SqlFragment {
       start,
       start,
       ...SESSION_LEAF_KINDS.flatMap((kind) => [start, `${kind}:?*/`]),
+      ...threadRoots.params,
+      NESTED_THREAD_MIN_ROOTS,
     ],
+  };
+}
+
+/** `effectiveSource` of the root `r` in SQL, with key ranges so the key index still serves it. */
+function effectiveSourceSql(): SqlFragment {
+  const ranges = sourceKeyRanges();
+  return {
+    sql: `(CASE ${ranges.map(() => `WHEN r."key" >= ? AND r."key" < ? THEN ?`).join(" ")} ELSE r.source END)`,
+    params: ranges.flatMap(({ source, lo, hi }) => [lo, hi, source]),
   };
 }
 
@@ -107,13 +162,22 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   if (sources.length)
     add({ sql: `r.source IN (${sources.map(() => "?").join(",")})`, params: sources });
   const hidden = opts.hideSource?.filter(Boolean) ?? [];
-  if (hidden.length)
-    add({ sql: `r.source NOT IN (${hidden.map(() => "?").join(",")})`, params: hidden });
+  if (hidden.length) {
+    const source = effectiveSourceSql();
+    add({
+      sql: `${source.sql} NOT IN (${hidden.map(() => "?").join(",")})`,
+      params: [...source.params, ...hidden],
+    });
+  }
   if (opts.showSource) {
     const shown = opts.showSource.filter(Boolean);
+    const source = effectiveSourceSql();
     add(
       shown.length
-        ? { sql: `r.source IN (${shown.map(() => "?").join(",")})`, params: shown }
+        ? {
+            sql: `${source.sql} IN (${shown.map(() => "?").join(",")})`,
+            params: [...source.params, ...shown],
+          }
         : { sql: "0", params: [] },
     );
   }
@@ -388,8 +452,14 @@ export interface SessionTree {
   later: SessionSectionCounts;
   done: SessionSectionCounts;
   noGroup: SessionSectionCounts;
-  /** Each root source in this view with its session count, hidden sources included, most first. */
+  /** Each effective root source in this view with its session count, hidden sources included, most first. */
   sources: { source: string; total: number }[];
+  /** Every source group key in this view, hidden sources included, so a pane of a hidden source still gets its label. */
+  sourceGroups: string[];
+  /** Slack channel ids backed by visible roots with matching Slack fields, including hidden sources. */
+  slackChannels: string[];
+  /** Titles of the oldest visible roots in nested source threads, including hidden sources. */
+  threadLabels: Record<string, string>;
 }
 
 export async function getSessionTree(
@@ -405,17 +475,22 @@ export async function getSessionTree(
     tree: true,
     mine: opts.mine,
   });
+  const threadRoots = threadRootsSql();
   const rows = await getDbClient().query<{
+    id: string;
     key: string;
     source: string;
+    slackChannelId: string | null;
     lastActivityAt: string;
     latestStatus: string;
     readState: SessionReadState | null;
     needsYou: number;
+    threadRoots: number;
   }>(
-    `SELECT r."key", r.source, a.lastActivityAt, a.latestStatus, a.readState, a.needsYou
+    `SELECT r.id, r."key", r.source, r.slackChannelId, a.lastActivityAt, a.latestStatus, a.readState, a.needsYou,
+      ${threadRoots.sql} AS threadRoots
     FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id`,
-    query.params,
+    [...threadRoots.params, ...query.params],
   );
   const counts = (): SessionSectionCounts => ({ total: 0, unread: 0, running: 0, needsYou: 0 });
   const result: SessionTree = {
@@ -425,10 +500,16 @@ export async function getSessionTree(
     done: counts(),
     noGroup: counts(),
     sources: [],
+    sourceGroups: [],
+    slackChannels: [],
+    threadLabels: {},
   };
   const hidden = new Set(opts.hideSource);
   const shown = opts.showSource ? new Set(opts.showSource) : null;
   const sources = new Map<string, number>();
+  const sourceGroups = new Set<string>();
+  const slackChannels = new Set<string>();
+  const threadRootIds: string[] = [];
   const groups = new Map<string, SessionTreeGroup>();
   const add = (section: SessionSectionCounts, row: (typeof rows)[number]) => {
     section.total++;
@@ -437,9 +518,20 @@ export async function getSessionTree(
     if (row.needsYou) section.needsYou++;
   };
   for (const row of rows) {
-    sources.set(row.source, (sources.get(row.source) ?? 0) + 1);
-    if (hidden.has(row.source) || (shown && !shown.has(row.source))) continue;
-    const key = sessionGroupKey(row.key);
+    const source = effectiveSource(row.key, row.source);
+    sources.set(source, (sources.get(source) ?? 0) + 1);
+    const key = sessionThreadGroupKey(row.key, row.threadRoots);
+    const sourceGroupKey = sessionGroupKey(row.key);
+    const channelId = /^shared\/slack\/([^/]+)\/$/.exec(sourceGroupKey)?.[1];
+    if (channelId && row.slackChannelId?.toLowerCase() === channelId) {
+      slackChannels.add(channelId);
+    }
+    if (row.threadRoots >= NESTED_THREAD_MIN_ROOTS && isSourceThreadKey(row.key)) {
+      threadRootIds.push(row.id);
+      sourceGroups.add(sourceGroupKey);
+    }
+    if (sourceOfKey(key)) sourceGroups.add(key);
+    if (hidden.has(source) || (shown && !shown.has(source))) continue;
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);
     let group: SessionTreeGroup | undefined;
@@ -462,6 +554,20 @@ export async function getSessionTree(
   result.sources = [...sources]
     .map(([source, total]) => ({ source, total }))
     .sort((a, b) => b.total - a.total || a.source.localeCompare(b.source));
+  result.sourceGroups = [...sourceGroups].sort();
+  result.slackChannels = [...slackChannels].sort();
+  if (threadRootIds.length) {
+    // A missing or empty title falls back to the first 80 task characters.
+    const labels = await getDbClient().query<{ key: string; label: string }>(
+      `SELECT "key", label FROM (
+        SELECT r."key", COALESCE(NULLIF(r.title, ''), substr(r.task, 1, 80)) AS label,
+          ROW_NUMBER() OVER (PARTITION BY r."key" ORDER BY r.createdAt, r.rowid) AS ordinal
+        FROM agent_tasks r WHERE r.id IN (${threadRootIds.map(() => "?").join(",")})
+      ) WHERE ordinal = 1`,
+      threadRootIds,
+    );
+    result.threadLabels = Object.fromEntries(labels.map((row) => [row.key, row.label]));
+  }
   return result;
 }
 

@@ -31,8 +31,8 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { MAIN_BLEED } from "@/lib/main-gutter";
-import { groupKeyOf } from "@/lib/session-groups";
 import {
+  detailGroupKey,
   GROUP_TAB,
   isSessionTab,
   NEW_SESSION_TAB,
@@ -272,11 +272,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   }).data;
   const startGroupOfPane = (): string | null => {
     const key =
-      current === GROUP_TAB
-        ? view
-        : currentDetail?.root.key
-          ? groupKeyOf(currentDetail.root.key)
-          : null;
+      current === GROUP_TAB ? view : currentDetail ? (detailGroupKey(currentDetail) ?? null) : null;
     return key && targets.some((target) => target.key === key) && !writeBlock(key) ? key : null;
   };
   // A new New session tab in the split starts in the group of the pane's

@@ -5,6 +5,7 @@
  * control), the group menu "⋯" and a "+" on hover or on the keyboard
  * cursor, and the counts. The actions sit next to the counts and never
  * cover them. My groups and No group take dropped rows (plan Phase 5).
+ * Source groups are read-only: no menu, no "+", and no drops.
  */
 
 import {
@@ -16,8 +17,10 @@ import {
   Inbox,
   Lock,
   type LucideIcon,
+  MessagesSquare,
   Plus,
   SquareDashed,
+  User,
 } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, memo, type ReactNode, useRef, useState } from "react";
 import type { SessionSectionCounts } from "@/api/types";
@@ -304,7 +307,10 @@ function RowAction({
   );
 }
 
-/** The icon of a container row: the section's, a hash, or the owner's avatar. `touch`: a size larger. */
+/**
+ * The icon of a container row: the section's, a hash, a person for a source
+ * DM, a conversation for a thread, or the owner's avatar. `touch`: a size larger.
+ */
 export function RowIcon({
   row,
   ownerName,
@@ -317,7 +323,10 @@ export function RowIcon({
   if (row.type === "owner") {
     return <UserAvatar id={row.ownerId} name={ownerName ?? row.ownerId} size="xs" />;
   }
-  const Icon = row.type === "box" ? SECTION_META[row.id].icon : Hash;
+  let Icon: LucideIcon = Hash;
+  if (row.type === "box") Icon = SECTION_META[row.id].icon;
+  else if (row.node.thread) Icon = MessagesSquare;
+  else if (row.node.dm) Icon = User;
   return (
     <Icon aria-hidden className={cn("text-muted-foreground", touch ? "size-4" : "size-3.5")} />
   );
@@ -463,6 +472,8 @@ function GroupNodeView({
         className={cn(
           "relative flex min-w-0 grow basis-0 items-center justify-end",
           actionCount === 2 ? "min-w-12.5" : actionCount === 1 && "min-w-6",
+          // A thread's name is a session title: it truncates, and its counts stay whole.
+          row.type === "group" && row.node.thread && "min-w-max",
         )}
       >
         {counts ? (

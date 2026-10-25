@@ -362,6 +362,38 @@ describe("/api/kv REST — auth on writes", () => {
     expect(intruderWrite.status).toBe(403);
   });
 
+  test("session source labels are private: generic callers cannot read, list, or write them", async () => {
+    const namespace = "session-labels";
+    const key = encodeURIComponent("shared/slack/d0private1/");
+    await upsertKv({
+      namespace,
+      key: "shared/slack/d0private1/",
+      value: "DM · Lena",
+      valueType: "string",
+    });
+    for (const as of [agentId, leadAgentId]) {
+      expect((await authedFetch(`/api/kv/_/${namespace}/${key}`, { agentId: as })).status).toBe(
+        403,
+      );
+      expect((await authedFetch(`/api/kv/_/${namespace}`, { agentId: as })).status).toBe(403);
+      for (const method of ["PUT", "DELETE"]) {
+        const res = await authedFetch(`/api/kv/_/${namespace}/${key}`, {
+          method,
+          body:
+            method === "PUT" ? JSON.stringify({ value: "forged", valueType: "string" }) : undefined,
+          agentId: as,
+        });
+        expect(res.status).toBe(403);
+      }
+    }
+    expect(
+      await getDbClient().get<{ value: string }>(
+        "SELECT value FROM kv_entries WHERE namespace = ? AND key = ?",
+        [namespace, "shared/slack/d0private1/"],
+      ),
+    ).toEqual({ value: "DM · Lena" });
+  });
+
   test("403 when writing to task:page:* without an X-Page-Id header", async () => {
     const ns = "task:page:abc";
     const res = await authedFetch(`/api/kv/_/${encodeURIComponent(ns)}/k`, {

@@ -320,6 +320,11 @@ export function itemFromDetail(
       (detail.approvals?.length ?? 0) > 0 ||
       (detail.readState === "unread" && last.status === "failed"),
     snoozeUntil,
-    groupKey: detail.root.key ? groupKeyOf(detail.root.key) : undefined,
+    groupKey: detailGroupKey(detail),
   };
+}
+
+/** The group of a session detail: the server's, else the key rule of older servers. */
+export function detailGroupKey(detail: SessionDetailResponse): string | undefined {
+  return detail.groupKey ?? (detail.root.key ? groupKeyOf(detail.root.key) : undefined);
 }

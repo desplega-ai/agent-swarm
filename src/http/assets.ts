@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getApp } from "../apps/store";
+import { normalizeAssetKey } from "../assets/key";
+import { sourceMoveError, sourceOfKey } from "../assets/source-key";
 import { auditAssetKeys } from "../be/asset-key-audit";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
@@ -15,6 +17,7 @@ import {
   upsertAssetKeyMapping,
 } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
+import { getSessionRoot } from "../be/session-shares";
 import { can, type RbacResource } from "../rbac";
 import {
   type AssetEntityType,
@@ -333,6 +336,18 @@ export async function handleAssets(
           403,
         );
         return true;
+      }
+      const destination = normalizeAssetKey(parsed.body.key);
+      if (sourceOfKey(destination)) {
+        // The session root's own source key is the only allowed source key
+        // (Undo). A root we cannot load allows none.
+        const rootId = task.parentTaskId ? (await getSessionRoot(task.id))?.id : task.id;
+        const root = rootId === task.id ? task : rootId ? await getTaskById(rootId) : null;
+        const sourceError = sourceMoveError(destination, root ?? { id: task.id });
+        if (sourceError) {
+          jsonError(res, sourceError, 400);
+          return true;
+        }
       }
       // Only the tasks checked here move: a subtask created after this read stays put.
       const tasks = parsed.body.cascade ? await getRootTaskChain(task.id) : [task];

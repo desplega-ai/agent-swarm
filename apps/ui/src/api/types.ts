@@ -862,6 +862,7 @@ export interface SessionTreeGroup extends SessionSectionCounts {
 
 /** `GET /api/session-tree`: every visible group plus the section counts. */
 export interface SessionTreeResponse {
+  labels?: Record<string, string>;
   groups: SessionTreeGroup[];
   inbox: SessionSectionCounts;
   later: SessionSectionCounts;
@@ -1043,6 +1044,11 @@ export interface SessionDetailResponse {
   access?: SessionAccess;
   /** The root's requester. Null for Slack/schedule sessions; omitted by older servers. */
   owner?: SessionOwner | null;
+  /**
+   * The root's group with the list's rule: a source thread with two or more
+   * roots is its own group. Omitted by older servers (use `detailGroupKey`).
+   */
+  groupKey?: string;
   /** Pending approval requests in the chain. Missing means none. */
   approvals?: SessionApproval[];
   /** The viewer's read state (the list's rule). Omitted with no picked user. */

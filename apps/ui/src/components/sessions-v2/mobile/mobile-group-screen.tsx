@@ -7,6 +7,7 @@
  */
 
 import { useId, useMemo, useRef, useState } from "react";
+import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import type { SessionListItem } from "@/api/types";
 import { MobileList } from "@/components/shared/mobile-list";
 import { useCurrentUser } from "@/contexts/current-user-context";
@@ -99,6 +100,7 @@ function GroupRows({
   const { userId } = useCurrentUser();
   const me = userId ?? null;
   const now = useMinuteClock();
+  const labels = useSessionLabels();
   const baseId = useId();
   // The selection keeps only rows on this page (`useSessionSelection` over the same row model).
   const treeRows = useMemo(
@@ -168,6 +170,7 @@ function GroupRows({
             flat
             me={me}
             now={now}
+            labels={labels}
             selected={selection.selected.has(session.root.id)}
             selecting={selection.selectionMode}
             canTriage={triage.canTriage}

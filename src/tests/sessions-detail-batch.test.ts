@@ -14,6 +14,7 @@ import {
   getTaskById,
   initDb,
 } from "../be/db";
+import { getSessionGroupKey } from "../be/db/session-tree";
 import { getTaskSteeringFields, getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitations, getTaskCitationsForTasks } from "../be/task-citations";
 import { handleSessions } from "../http/sessions";
@@ -56,6 +57,7 @@ async function unbatchedSession(id: string) {
     // Session sharing: the bare operator key bypasses access checks, and the fixture root has no owner.
     access: "owner",
     owner: null,
+    groupKey: await getSessionGroupKey(root),
   };
 }
 

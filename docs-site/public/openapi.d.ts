@@ -19265,6 +19265,9 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
+                            labels?: {
+                                [key: string]: string;
+                            };
                             groups: {
                                 total: number;
                                 unread: number;
@@ -19618,6 +19621,7 @@ export interface paths {
                             /** @enum {string} */
                             access: "owner" | "write" | "read";
                             owner: components["schemas"]["SessionOwner"];
+                            groupKey: string;
                             approvals?: {
                                 id: string;
                                 /** @enum {string} */

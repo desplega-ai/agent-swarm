@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import pkg from "../../package.json";
-import { defaultAssetKey, normalizeAssetKey, sessionGroupKey } from "../assets/key";
+import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
+import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -207,6 +208,7 @@ import {
   sessionCountQuery,
   sessionPageFields,
   sessionSummaryQuery,
+  threadRootsSql,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
@@ -2497,6 +2499,8 @@ export async function createTaskExtended(
     );
   }
   let requestedByUserIdInherited = false;
+  // The parent key is read again inside the INSERT transaction (see below).
+  let keyInherited = false;
   // True only when `options.routingAffinity` ends up populated purely via
   // the plain parent-fallback inherit below (child declared no affinity of
   // its own, the parent wasn't lead-only, AND the parent's affinity actually
@@ -2661,6 +2665,7 @@ export async function createTaskExtended(
       }
       if (parent.key && !options.key) {
         options.key = parent.key;
+        keyInherited = true;
       }
       if (parent.contextKey && !options.contextKey) {
         options.contextKey = parent.contextKey;
@@ -2850,7 +2855,18 @@ export async function createTaskExtended(
   }
 
   const auditUserId = getCurrentRequestUserId() ?? null;
-  const assetKey = normalizeAssetKey(options?.key ?? defaultAssetKey("task", id));
+  const assetKey = normalizeAssetKey(
+    options?.key ??
+      (options?.parentTaskId
+        ? null
+        : sessionSourceKey({
+            id,
+            slackChannelId: options?.slackChannelId,
+            slackThreadTs: options?.slackThreadTs,
+            contextKey: options?.contextKey,
+          })) ??
+      defaultAssetKey("task", id),
+  );
   // The Linear tracker dedup guard and the INSERT commit as one unit. Two
   // distinct webhook deliveries for the same issue are dispatched
   // fire-and-forget (src/linear/webhook.ts), nothing serializes them, and
@@ -2874,6 +2890,19 @@ export async function createTaskExtended(
       ? null
       : await findExistingLinearTrackerContextWork(options?.contextKey);
     if (existingTrackerWork) return { existing: existingTrackerWork };
+
+    // A chain move (a user move, the source key backfill) can commit between
+    // the parent read above and this write lock. Its chain query did not see
+    // this child, so take the parent's key as it is now.
+    const parentKey =
+      keyInherited && options?.parentTaskId
+        ? (
+            await getDbClient().get<{ key: string }>('SELECT "key" FROM agent_tasks WHERE id = ?', [
+              options.parentTaskId,
+            ])
+          )?.key
+        : undefined;
+    const insertKey = parentKey ? normalizeAssetKey(parentKey) : assetKey;
 
     let routingDecisionSnapshot: RoutingDecisionSnapshot | null = null;
     try {
@@ -2905,7 +2934,7 @@ export async function createTaskExtended(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
-        assetKey,
+        insertKey,
         options?.agentId ?? null,
         options?.creatorAgentId ?? null,
         // Free text from every task source; scrub at the single INSERT.
@@ -13008,6 +13037,7 @@ export async function listRecentSessions(
   opts: ListRecentSessionsOpts = {},
 ): Promise<SessionListItem[] | SessionListItemSummary[]> {
   const query = sessionSummaryQuery(opts);
+  const threadRoots = threadRootsSql();
   const rootRows = await getDbClient().query<
     AgentTaskRow & {
       __chainCount: number;
@@ -13016,15 +13046,17 @@ export async function listRecentSessions(
       __readState: SessionReadState | null;
       __snoozeUntil: string | null;
       __needsYou: number;
+      __threadRoots: number;
     }
   >(
     `SELECT r.*, a.chainCount AS __chainCount, a.lastActivityAt AS __lastActivityAt,
       a.latestStatus AS __latestStatus, a.readState AS __readState,
-      a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou
+      a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou,
+      ${threadRoots.sql} AS __threadRoots
     FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id
     ORDER BY ${opts.triage === "later" ? "a.snoozeUntil ASC," : ""}
       a.lastActivityAt DESC, r.createdAt DESC, r.id DESC LIMIT ? OFFSET ?`,
-    [...query.params, opts.limit ?? 25, opts.offset ?? 0],
+    [...threadRoots.params, ...query.params, opts.limit ?? 25, opts.offset ?? 0],
   );
   const fields = await sessionPageFields(
     rootRows.map((row) => ({
@@ -13040,7 +13072,7 @@ export async function listRecentSessions(
     ...(row.__readState ? { readState: row.__readState } : {}),
     snoozeUntil: row.__snoozeUntil,
     needsYou: !!row.__needsYou,
-    groupKey: sessionGroupKey(row.key),
+    groupKey: sessionThreadGroupKey(row.key, row.__threadRoots),
     ...fields.get(row.id),
   }));
 }

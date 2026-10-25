@@ -49842,6 +49842,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "labels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
                     "groups": {
                       "type": "array",
                       "items": {
@@ -50599,6 +50605,9 @@
                     "owner": {
                       "$ref": "#/components/schemas/SessionOwner"
                     },
+                    "groupKey": {
+                      "type": "string"
+                    },
                     "approvals": {
                       "type": "array",
                       "items": {
@@ -50645,7 +50654,8 @@
                     "root",
                     "chain",
                     "access",
-                    "owner"
+                    "owner",
+                    "groupKey"
                   ]
                 }
               }

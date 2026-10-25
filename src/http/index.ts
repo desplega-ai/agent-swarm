@@ -898,6 +898,13 @@ httpServer
       .catch((err) => {
         console.error("[boot-scrub-sweep] startup scrub failed (non-fatal):", err);
       });
+
+    // Source key backfill is idempotent, resumable, and non-fatal.
+    import("../be/session-source-backfill")
+      .then(({ runSessionSourceBackfill }) => runSessionSourceBackfill())
+      .catch((err) => {
+        console.error("[session-source-backfill] startup run failed (non-fatal):", err);
+      });
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);

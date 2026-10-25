@@ -6,6 +6,7 @@ import type {
   SessionMoveSkip,
   SessionPrefixMoveResult,
 } from "@/api/types";
+import { taskSourceLabel } from "@/components/shared/task-source-mark";
 import type { EmptyGroups } from "@/lib/empty-groups";
 import {
   childGroupKey,
@@ -14,10 +15,11 @@ import {
   personalOwner,
   renamedGroupKey,
   restoreKey,
+  sourceOfGroupKey,
 } from "@/lib/session-groups";
 import { plural, SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
-import { ownerFoldId } from "./tree-rows";
+import { ownerFoldId, sourceFoldId } from "./tree-rows";
 
 /** An Undo toast stays long enough to reach (UX review R9 P0). */
 const UNDO_TOAST_MS = 5200;
@@ -41,7 +43,7 @@ function skippedText(skipped: SessionMoveSkip[]): string {
 /** Each key and its parent groups, so a landing row is on screen. */
 function withParents(key: string): string[] {
   const parts = key.split("/").filter(Boolean);
-  const base = parts[0] === "personal" ? 2 : 1;
+  const base = parts[0] === "personal" || sourceOfGroupKey(key) ? 2 : 1;
   const keys: string[] = [];
   for (let i = base + 1; i <= parts.length; i++) keys.push(`${parts.slice(0, i).join("/")}/`);
   return keys;
@@ -71,6 +73,7 @@ async function settle<T>(run: Promise<T>): Promise<T | null> {
 export function useTreeMoves({
   me,
   nameOf,
+  labels,
   emptyGroups,
   serverKeys,
   targetKeys,
@@ -81,6 +84,8 @@ export function useTreeMoves({
 }: {
   me: string | null;
   nameOf: (userId: string) => string;
+  /** The source group labels of the tree (`#eng`), for the toasts. */
+  labels: Readonly<Record<string, string>>;
   emptyGroups: EmptyGroups;
   /** Group keys the server has. */
   serverKeys: readonly string[];
@@ -95,14 +100,15 @@ export function useTreeMoves({
   const moveSessions = useMoveSessions();
   const movePrefix = useMovePrefix();
 
-  const labelOf = (key: string | null) => (key === null ? "No group" : groupCrumb(key, me, nameOf));
+  const labelOf = (key: string | null) =>
+    key === null ? "No group" : groupCrumb(key, me, nameOf, labels);
   /** The group a session sits in, null for No group. */
   const groupOf = (session: SessionListItem) =>
     session.groupKey && !isNoGroupKey(session.groupKey, me) ? session.groupKey : null;
   /**
    * Open a group and its parents (No group for null), so a landing row is
    * on screen. Another person's group also opens its owner under Shared
-   * with me.
+   * with me, and a source group its source section.
    */
   const reveal = (key: string | null) => {
     if (key === null) {
@@ -111,6 +117,8 @@ export function useTreeMoves({
     }
     const owner = personalOwner(key);
     if (owner && owner !== me) setOpen(ownerFoldId(owner), true);
+    const source = sourceOfGroupKey(key);
+    if (source) setOpen(sourceFoldId(source), true);
     for (const id of withParents(key)) setOpen(id, true);
   };
   const hasServerSessions = (key: string) => serverKeys.some((server) => server.startsWith(key));
@@ -119,6 +127,12 @@ export function useTreeMoves({
     const reason = writeBlock(key);
     if (reason) say(reason);
     return reason !== null;
+  };
+  /** A new name that lands in a source section (`slack` at the top level) toasts and stops. */
+  const sourceName = (key: string) => {
+    const source = sourceOfGroupKey(key);
+    if (source) say(`${taskSourceLabel(source)} is a source section. Use another name.`);
+    return source !== null;
   };
 
   /**
@@ -177,7 +191,8 @@ export function useTreeMoves({
 
   /**
    * A new group under `parent`. It lives in this browser until a session
-   * moves in. Null for a name with no letters or numbers (said in a toast).
+   * moves in. Null for a name with no letters or numbers, or a source name
+   * (`slack` at the top level), each said in a toast.
    */
   const create = (parent: string, name: string): { key: string; existed: boolean } | null => {
     const key = childGroupKey(parent, name);
@@ -185,6 +200,7 @@ export function useTreeMoves({
       if (name.trim()) say("Use letters or numbers in a group name.");
       return null;
     }
+    if (sourceName(key)) return null;
     const existed = targetKeys.has(key);
     if (!existed) emptyGroups.add(key);
     reveal(key);
@@ -197,7 +213,7 @@ export function useTreeMoves({
       if (name.trim()) say("Use letters or numbers in a group name.");
       return;
     }
-    if (to === key || blocked(to)) return;
+    if (to === key || blocked(to) || sourceName(to)) return;
     if (targetKeys.has(to)) {
       say("A group with that name already exists.");
       return;

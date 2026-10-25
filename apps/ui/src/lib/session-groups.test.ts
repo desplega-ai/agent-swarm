@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionTreeGroup } from "../api/types";
+import type { AgentTaskSource, SessionTreeGroup } from "../api/types";
 import { stillEmpty, withEmptyGroups } from "./empty-groups";
 import {
   buildSessionGroupTree,
+  chatSourceOf,
   defaultSessionKey,
   groupCrumb,
   groupKeyOf,
@@ -15,6 +16,9 @@ import {
   personalOwner,
   renamedGroupKey,
   restoreKey,
+  sessionSourceOf,
+  sourceGroupLabel,
+  sourceOfGroupKey,
 } from "./session-groups";
 
 const ME = "me-1";
@@ -231,5 +235,182 @@ describe("Undo keys and personal writes (Phase 5 fixes)", () => {
     expect(groupWriteBlock("shared/infra/", false)).toBeNull();
     // No group (a move out of a personal group) works on the operator key.
     expect(groupWriteBlock(null, false)).toBeNull();
+  });
+});
+
+describe("source sections (sources Phase 5)", () => {
+  const at = (hour: number) => `2026-10-25T${String(hour).padStart(2, "0")}:00:00.000Z`;
+  const labels = {
+    "shared/slack/c0eng00001/": "#eng",
+    "shared/slack/d0dm000001/": "DM · Lena",
+    "shared/telegram/-1001/": "Northwind ops",
+  };
+  const tree = buildSessionGroupTree(
+    [
+      group("shared/telegram/-1001/", at(9), { total: 2 }),
+      group("shared/slack/c0eng00001/", at(8), { total: 3, unread: 1 }),
+      group("shared/slack/d0dm000001/", at(11), { total: 1, running: 1 }),
+      group("shared/slack/c0ops00001/", at(7)),
+      group("shared/infra/", at(6)),
+    ],
+    ME,
+    labels,
+  );
+
+  test("source keys leave My groups, and so every move and Start in target", () => {
+    expect(tree.myGroups.map((node) => node.key)).toEqual(["shared/infra/"]);
+    expect(tree.myGroupsTotal).toBe(1);
+    expect(groupTargets(tree, ME).map((target) => target.key)).toEqual(["shared/infra/"]);
+  });
+
+  test("one section per source with groups, in source order, newest group first", () => {
+    expect(tree.sources.map((section) => section.source)).toEqual(["slack", "telegram"]);
+    const slack = tree.sources[0];
+    // The row's `#` icon says channel: the name drops the label's `#`.
+    expect(slack.nodes.map((node) => node.name)).toEqual(["DM · Lena", "eng", "C0OPS00001"]);
+    expect(slack.counts).toEqual({ total: 5, unread: 1, running: 1, needsYou: 0 });
+    expect(tree.sources[1].nodes.map((node) => node.name)).toEqual(["Northwind ops"]);
+  });
+
+  test("a DM gets the person icon, a channel the hash", () => {
+    const slack = new Map(tree.sources[0].nodes.map((node) => [node.key, node.dm]));
+    expect(slack.get("shared/slack/d0dm000001/")).toBe(true);
+    expect(slack.get("shared/slack/c0eng00001/")).toBe(false);
+    // A Telegram private chat has a positive id, a group a negative one.
+    const telegram = buildSessionGroupTree(
+      [group("shared/telegram/42/", at(9)), group("shared/telegram/-1001/", at(8))],
+      ME,
+    ).sources[0].nodes;
+    expect(telegram.map((node) => [node.key, node.dm])).toEqual([
+      ["shared/telegram/42/", true],
+      ["shared/telegram/-1001/", false],
+    ]);
+    // A Discord DM is known by its label only.
+    const discord = buildSessionGroupTree([group("shared/discord/77/", at(9))], ME, {
+      "shared/discord/77/": "DM · Marco",
+    }).sources[0].nodes;
+    expect(discord[0].dm).toBe(true);
+  });
+
+  test("a thread nests under its channel with its title and conversation icon", () => {
+    const thread = "shared/slack/c1/thread:1.2/";
+    const nested = buildSessionGroupTree(
+      [group("shared/slack/c1/", at(8)), group(thread, at(9), { total: 2, unread: 1 })],
+      ME,
+      { "shared/slack/c1/": "#eng", [thread]: "#Review the release" },
+    );
+    expect(nested.myGroups).toEqual([]);
+    const channel = nested.sources[0].nodes[0];
+    expect(channel.key).toBe("shared/slack/c1/");
+    expect(channel.name).toBe("eng");
+    expect(channel.own.total).toBe(1);
+    expect(channel.subtree.total).toBe(3);
+    expect(channel.children[0]).toMatchObject({
+      key: thread,
+      name: "#Review the release",
+      thread: true,
+      dm: false,
+      own: { total: 2, unread: 1, running: 0, needsYou: 0 },
+    });
+    expect(nested.sources[0].counts.total).toBe(3);
+    expect(groupTargets(nested, ME)).toEqual([]);
+    expect(groupLabel(thread, ME, { [thread]: "Review the release" })).toBe("Review the release");
+    expect(groupCrumb(thread, ME, () => "", { [thread]: "Review the release" })).toBe(
+      "Slack › Review the release",
+    );
+  });
+
+  test("thread groups have a readable fallback and never use the DM icon", () => {
+    for (const base of ["shared/slack/d1/", "shared/telegram/42/", "shared/discord/77/"]) {
+      const key = `${base}thread:1.2/`;
+      const tree = buildSessionGroupTree([group(key, at(9), { total: 2 })], ME, {
+        [key]: "DM · Discuss the release",
+      });
+      const parent = tree.sources[0].nodes[0];
+      expect(parent.children[0]).toMatchObject({
+        name: "DM · Discuss the release",
+        thread: true,
+        dm: false,
+      });
+      expect(sourceGroupLabel(key)).toBe("Thread · 1.2");
+      expect(groupLabel(key, ME)).toBe("Thread · 1.2");
+      expect(groupCrumb(key, ME, () => "")).toEndWith(" › Thread · 1.2");
+    }
+  });
+
+  test("no source groups: no sections", () => {
+    expect(buildSessionGroupTree([group("shared/a/", at(8))], ME).sources).toEqual([]);
+  });
+
+  test("sourceOfGroupKey reads the source prefix only", () => {
+    expect(sourceOfGroupKey("shared/slack/c1/")).toBe("slack");
+    expect(sourceOfGroupKey("shared/telegram/-1001/")).toBe("telegram");
+    expect(sourceOfGroupKey("shared/discord/77/")).toBe("discord");
+    expect(sourceOfGroupKey("shared/slackers/")).toBeNull();
+    expect(sourceOfGroupKey("shared/teams/x/")).toBeNull();
+    expect(sourceOfGroupKey("personal/me-1/slack/x/")).toBeNull();
+  });
+
+  test("sourceGroupLabel: the label, else a name from the id", () => {
+    expect(sourceGroupLabel("shared/slack/c0ar967k0kz/", labels)).toBe("#C0AR967K0KZ");
+    expect(sourceGroupLabel("shared/slack/c0eng00001/", labels)).toBe("#eng");
+    expect(sourceGroupLabel("shared/slack/g0private1/")).toBe("#G0PRIVATE1");
+    expect(sourceGroupLabel("shared/slack/d0dm000002/")).toBe("DM");
+    expect(sourceGroupLabel("shared/telegram/-1002/")).toBe("-1002");
+    expect(sourceGroupLabel("shared/discord/123456/")).toBe("123456");
+    expect(sourceGroupLabel("shared/slack/c1/thread:1.2/")).toBe("Thread · 1.2");
+  });
+
+  test("flat rows, cards, toasts, and crumbs name a source group by its label (sources Phase 6)", () => {
+    // The flat row label keeps the `#`: no hash icon sits next to it.
+    expect(groupLabel("shared/slack/c0eng00001/", ME, labels)).toBe("#eng");
+    expect(groupLabel("shared/slack/d0dm000001/", ME, labels)).toBe("DM · Lena");
+    expect(groupLabel("shared/telegram/-1001/", ME, labels)).toBe("Northwind ops");
+    expect(groupLabel("shared/slack/c0ar967k0kz/", ME)).toBe("#C0AR967K0KZ");
+    expect(groupLabel("shared/slack/", ME)).toBe("Slack");
+    expect(groupCrumb("shared/slack/c0eng00001/", ME, () => "", labels)).toBe("Slack › #eng");
+    expect(groupCrumb("shared/telegram/-1001/", ME, () => "", labels)).toBe(
+      "Telegram › Northwind ops",
+    );
+    expect(groupCrumb("shared/discord/123456/", ME, () => "")).toBe("Discord › 123456");
+    expect(groupCrumb("shared/slack/", ME, () => "")).toBe("Slack");
+    // Other keys keep their path.
+    expect(groupCrumb("shared/infra/", ME, () => "", labels)).toBe("infra");
+  });
+
+  test("groupWriteBlock has no source rule, so Undo after a move out still works", () => {
+    // Read-only shows in the tree (no menu, "+", or drop) and in the server guard.
+    expect(groupWriteBlock("shared/slack/c0eng00001/", false)).toBeNull();
+    expect(groupWriteBlock("shared/slack/c0eng00001/thread:1.2/", true)).toBeNull();
+  });
+});
+
+describe("session source marks (sources Phase 6)", () => {
+  const root = (key: string, source: string, tags: string[] = []) => ({
+    key,
+    source: source as AgentTaskSource,
+    tags,
+  });
+
+  test("a source key wins, so an agent session in a Slack thread is Slack", () => {
+    expect(sessionSourceOf(root("shared/slack/c1/thread:1.2/", "mcp"))).toBe("slack");
+    expect(sessionSourceOf(root("shared/telegram/-1001/task:t1/", "chat"))).toBe("telegram");
+  });
+
+  test("a chat root out of its section keeps its adapter, else it is chat", () => {
+    expect(sessionSourceOf(root("shared/infra/", "chat", ["chat-sdk", "discord"]))).toBe("discord");
+    expect(sessionSourceOf(root("shared/", "chat", ["chat-sdk", "teams"]))).toBe("chat");
+  });
+
+  test("any other root keeps its task source", () => {
+    expect(sessionSourceOf(root("shared/infra/", "slack"))).toBe("slack");
+    expect(sessionSourceOf(root("shared/task:t1/", "ui"))).toBe("ui");
+  });
+
+  test("only chat sessions show a mark on a row", () => {
+    expect(chatSourceOf(root("shared/slack/c1/thread:1.2/", "mcp"))).toBe("slack");
+    expect(chatSourceOf(root("shared/", "chat", ["chat-sdk", "teams"]))).toBe("chat");
+    expect(chatSourceOf(root("shared/task:t1/", "ui"))).toBeNull();
+    expect(chatSourceOf(root("shared/task:t1/", "github"))).toBeNull();
   });
 });

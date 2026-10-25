@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentTask } from "../api/types";
+import type { AgentTask, SessionDetailResponse } from "../api/types";
 import {
   closeSplit,
   closeTab,
   closeUrlTab,
+  detailGroupKey,
   focusedTab,
   GROUP_TAB,
   isSessionTab,
@@ -231,5 +232,20 @@ describe("latestTask", () => {
       task("b", "r", "2026-10-21T10:00:00.000Z", "in_progress"),
     ];
     expect(latestTask({ root, chain }).id).toBe("b");
+  });
+});
+
+describe("detailGroupKey", () => {
+  const detail = (key: string | undefined, groupKey?: string) =>
+    ({ root: { key }, groupKey }) as unknown as SessionDetailResponse;
+
+  test("the server's group wins, so a shared thread opens its own group", () => {
+    const thread = "shared/slack/c1/thread:1.2/";
+    expect(detailGroupKey(detail(thread, thread))).toBe(thread);
+  });
+
+  test("an older server's detail falls back to the key rule", () => {
+    expect(detailGroupKey(detail("shared/slack/c1/thread:1.2/"))).toBe("shared/slack/c1/");
+    expect(detailGroupKey(detail(undefined))).toBeUndefined();
   });
 });

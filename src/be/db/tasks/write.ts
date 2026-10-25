@@ -1,5 +1,6 @@
 import pkg from "../../../../package.json";
 import { defaultAssetKey } from "../../../assets/key";
+import { sessionSourceKey } from "../../../assets/source-key";
 import type { TaskTelemetryEvent, TaskTelemetryInput } from "../../../telemetry-trigger";
 import type {
   Agent,
@@ -89,7 +90,11 @@ export async function createTask(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
     [
       id,
-      defaultAssetKey("task", id),
+      sessionSourceKey({
+        id,
+        slackChannelId: options?.slackChannelId,
+        slackThreadTs: options?.slackThreadTs,
+      }) ?? defaultAssetKey("task", id),
       agentId,
       scrubSecrets(task),
       "pending",

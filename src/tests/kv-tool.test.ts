@@ -133,6 +133,31 @@ describe("kv MCP tools", () => {
     ).toBeNull();
   });
 
+  test("kv-get, kv-list, and kv-set refuse the private session-labels namespace, even for lead", async () => {
+    const namespace = "session-labels";
+    const key = "shared/slack/d0private1/";
+    await getDbClient().run(
+      `INSERT INTO kv_entries (namespace, key, value, value_type, created_at, updated_at)
+       VALUES (?, ?, 'DM · Lena', 'string', 0, 0)`,
+      [namespace, key],
+    );
+    const tools = buildServer();
+    for (const result of [
+      await tools.get.handler({ namespace, key }, meta(lead)),
+      await tools.list.handler({ namespace }, meta(lead)),
+      await tools.set.handler({ namespace, key, value: "forged" }, meta(lead)),
+    ] as StructuredResult<{ success: boolean; message: string }>[]) {
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toContain("reserved for session source labels");
+    }
+    expect(
+      await getDbClient().get("SELECT value FROM kv_entries WHERE namespace = ? AND key = ?", [
+        namespace,
+        key,
+      ]),
+    ).toEqual({ value: "DM · Lena" });
+  });
+
   test("kv-get returns entry=null for missing keys", async () => {
     const tools = buildServer();
     const getRes = (await tools.get.handler({ key: "nope" }, meta(agentA))) as StructuredResult<{

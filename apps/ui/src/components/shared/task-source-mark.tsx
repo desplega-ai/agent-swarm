@@ -12,6 +12,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { BrandLogo } from "@/components/shared/brand-logo";
+import { cn } from "@/lib/utils";
 
 const TASK_SOURCE_LABELS: Record<string, string> = {
   agentmail: "Email",
@@ -19,6 +20,7 @@ const TASK_SOURCE_LABELS: Record<string, string> = {
   bitbucket: "Bitbucket",
   chat: "Chat",
   comb: "Comb",
+  discord: "Discord",
   github: "GitHub",
   gitlab: "GitLab",
   jira: "Jira",
@@ -27,6 +29,7 @@ const TASK_SOURCE_LABELS: Record<string, string> = {
   schedule: "Schedule",
   slack: "Slack",
   system: "System",
+  telegram: "Telegram",
   ui: "Dashboard",
   workflow: "Workflow",
 };
@@ -39,6 +42,8 @@ export function taskSourceLabel(source: string): string {
 /** Monochrome marks in `public/integration-logos/`. */
 const SOURCE_LOGOS: Record<string, string> = {
   slack: "/integration-logos/slack.svg",
+  telegram: "/integration-logos/telegram.svg",
+  discord: "/integration-logos/discord.svg",
   github: "/integration-logos/github.svg",
   gitlab: "/integration-logos/gitlab.svg",
   bitbucket: "/integration-logos/bitbucket.svg",
@@ -59,10 +64,10 @@ const SOURCE_ICONS: Record<string, LucideIcon> = {
   workflow: Workflow,
 };
 
-/** The mark of a task source: its brand logo, else a matching icon. */
-export function TaskSourceMark({ source }: { source: string }) {
+/** The mark of a task source: its brand logo, else a matching icon. 14 px unless `className` sizes it. */
+export function TaskSourceMark({ source, className }: { source: string; className?: string }) {
   const logo = SOURCE_LOGOS[source];
-  if (logo) return <BrandLogo src={logo} className="size-3.5" />;
+  if (logo) return <BrandLogo src={logo} className={cn("size-3.5", className)} />;
   const Icon = SOURCE_ICONS[source] ?? CircleDot;
-  return <Icon aria-hidden className="size-3.5 shrink-0" />;
+  return <Icon aria-hidden className={cn("size-3.5 shrink-0", className)} />;
 }
