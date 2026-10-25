@@ -173,6 +173,47 @@ test.describe("desktop", () => {
     await clean.assertClean();
   });
 
+  test("the pane crumb of a session in a shared Slack thread opens the thread group", async ({
+    page,
+    api,
+    seed,
+    clean,
+  }) => {
+    // Two owned roots in one Slack thread nest as a thread group under the channel.
+    const run = randomUUID().slice(0, 8);
+    const prefix = `e2e v2 thread ${run}`;
+    const key = `shared/slack/c0e2e${run}/thread:1729000000.${run}/`;
+    const roots: { id: string }[] = [];
+    for (const name of ["a", "b"]) {
+      roots.push(
+        await api.post<{ id: string }>("/api/tasks", {
+          task: `${prefix} ${name}`,
+          source: "slack",
+          key,
+          requestedByUserId: seed!.user.id,
+          tags: ["e2e"],
+        }),
+      );
+    }
+    await page.addInitScript(() =>
+      localStorage.setItem("swarm:v1:sessions-v2:shown-sources", "ui,slack"),
+    );
+    await page.goto(`/sessions/${roots[0]!.id}`);
+    const tree = page.getByRole("tree", { name: "Sessions" });
+    // The thread group takes the text of its oldest root, and the folded Slack section hides it.
+    const threadGroup = tree.getByRole("treeitem", { name: new RegExp(`^${prefix}`), level: 3 });
+    await expect(threadGroup).toBeHidden();
+
+    await page
+      .getByRole("tabpanel", { name: `${prefix} a` })
+      .getByRole("button", { name: new RegExp(`^Slack › ${prefix}`) })
+      .click();
+    await expect(threadGroup).toHaveAttribute("aria-expanded", "true");
+    // Unread session rows start with "Unread.", so this name is not anchored.
+    await expect(tree.getByRole("treeitem", { name: new RegExp(prefix), level: 4 })).toHaveCount(2);
+    await clean.assertClean();
+  });
+
   test("the Legacy toggle switches the view and back", async ({ page, seed, clean }) => {
     const { title, root } = seed!.sessionChain;
     await page.goto("/sessions");

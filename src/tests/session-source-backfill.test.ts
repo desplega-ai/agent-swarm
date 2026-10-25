@@ -4,6 +4,7 @@ import { sessionSourceKey } from "../assets/source-key";
 import * as audit from "../be/asset-key-audit";
 import {
   closeDb,
+  createTaskExtended,
   createUser,
   getDbClient,
   getTaskById,
@@ -322,6 +323,29 @@ test("preserves a user move and includes a child created after the batch read", 
   expect((await getTaskById(movedByUser.id))?.key).toBe("shared/research/");
   expect((await getTaskById(root.id))?.key).toBe(sessionSourceKey(root));
   expect((await getTaskById(childId!))?.key).toBe(sessionSourceKey(root));
+});
+
+test("a child whose parent moves after the parent read still inherits the moved key", async () => {
+  const root = await seedTask(slack);
+  const client = getDbClient();
+  const transaction = client.transaction.bind(client);
+  let backfilled = false;
+  // The first transaction is the child's INSERT: the backfill commits first.
+  const txSpy = spyOn(client, "transaction").mockImplementationOnce(async (fn, opts) => {
+    txSpy.mockRestore();
+    backfilled = true;
+    expect(await runSessionSourceBackfill()).toMatchObject({ moved: 1, failed: 0 });
+    return transaction(fn, opts);
+  });
+  let child: Awaited<ReturnType<typeof createTaskExtended>>;
+  try {
+    child = await createTaskExtended("Child", { parentTaskId: root.id });
+  } finally {
+    txSpy.mockRestore();
+  }
+  expect(backfilled).toBe(true);
+  expect((await getTaskById(root.id))?.key).toBe(sessionSourceKey(root));
+  expect(child.key).toBe(sessionSourceKey(root));
 });
 
 test("resumes after a committed cursor, including skipped roots, when afterBatch throws once", async () => {

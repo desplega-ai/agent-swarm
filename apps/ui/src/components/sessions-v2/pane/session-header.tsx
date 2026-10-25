@@ -22,7 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { groupCrumb, groupKeyOf, isNoGroupKey } from "@/lib/session-groups";
+import { groupCrumb, isNoGroupKey } from "@/lib/session-groups";
 import { itemFromDetail, userName } from "@/lib/sessions-v2";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 import { GroupCrumbIcon } from "../group-crumb-icon";
@@ -147,11 +147,7 @@ export function SessionHeader({
     <TooltipProvider delayDuration={300} skipDelayDuration={300}>
       <header className={cn("group/header", HEADER)}>
         <div className={ROW_1}>
-          <GroupCrumb
-            groupKey={detail.root.key ? groupKeyOf(detail.root.key) : undefined}
-            me={me}
-            onReveal={onRevealGroup}
-          />
+          <GroupCrumb groupKey={session.groupKey} me={me} onReveal={onRevealGroup} />
           {sharedBy ? (
             <p className="min-w-0 shrink truncate text-xs text-muted-foreground before:mr-2 before:content-['·']">
               {sharedBy}

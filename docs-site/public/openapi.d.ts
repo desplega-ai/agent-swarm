@@ -19536,6 +19536,7 @@ export interface paths {
                             /** @enum {string} */
                             access: "owner" | "write" | "read";
                             owner: components["schemas"]["SessionOwner"];
+                            groupKey: string;
                             approvals?: {
                                 id: string;
                                 /** @enum {string} */

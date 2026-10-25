@@ -202,6 +202,13 @@ describe("session groups and prefix bounds", () => {
 describe("nested source thread groups", () => {
   const channel = "shared/slack/c1/";
   const thread = `${channel}thread:1.2/`;
+  const detailGroupKey = async (id: string) => {
+    const res = await fetch(`${baseUrl}/api/sessions/${id}`, {
+      headers: { "x-swarm-user-id": owner.id },
+    });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { groupKey: string }).groupKey;
+  };
 
   test("two owned roots nest, lists agree, and a move collapses the group", async () => {
     const first = await task(thread, { source: "slack" });
@@ -230,6 +237,9 @@ describe("nested source thread groups", () => {
     const rows = await listRecentSessions(filters());
     expect(rows.find((r) => r.root.id === first.id)?.groupKey).toBe(thread);
     expect(rows.find((r) => r.root.id === single.id)?.groupKey).toBe(channel);
+    // The session pane reveals the detail's group: the same rule as the list rows.
+    expect(await detailGroupKey(first.id)).toBe(thread);
+    expect(await detailGroupKey(single.id)).toBe(channel);
 
     const moved = await fetch(`${baseUrl}/api/session-moves`, {
       method: "POST",
@@ -244,6 +254,7 @@ describe("nested source thread groups", () => {
     expect(
       (await listRecentSessions(filters())).find((r) => r.root.id === first.id)?.groupKey,
     ).toBe(channel);
+    expect(await detailGroupKey(first.id)).toBe(channel);
   });
 
   test("one owned root stays a channel row despite children and ownerless roots", async () => {

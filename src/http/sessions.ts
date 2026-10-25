@@ -28,7 +28,12 @@ import {
   moveSessionChains,
   type SessionKeyMove,
 } from "../be/db/session-moves";
-import { getSessionReadState, getSessionTree, triageSessionList } from "../be/db/session-tree";
+import {
+  getSessionGroupKey,
+  getSessionReadState,
+  getSessionTree,
+  triageSessionList,
+} from "../be/db/session-tree";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   getSessionRoot,
@@ -784,6 +789,8 @@ const getSession = route({
         chain: z.array(TaskWithSteeringSchema),
         access: SessionAccessSchema,
         owner: SessionOwnerSchema.nullable(),
+        /** The group of `root` with the list's rule: a source thread with two or more roots is its own group. */
+        groupKey: z.string(),
         approvals: z.array(SessionApprovalSchema).optional(),
         /** The viewer's read state, with the list's rule. Omitted for callers that act for no user. */
         readState: z.enum(["unread", "read", "later", "done"]).optional(),
@@ -1191,7 +1198,7 @@ export async function handleSessions(
     const chain = await getRootTaskChain(parsed.params.rootTaskId);
     // Load steering, citations and pending approvals for the already loaded chain.
     const tasks = [root, ...chain];
-    const [steering, citations, approvals, read] = await Promise.all([
+    const [steering, citations, approvals, read, groupKey] = await Promise.all([
       getTaskSteeringFieldsForTasks(tasks),
       getTaskCitationsForTasks(tasks.map((task) => task.id)),
       getPendingApprovalsForTasks(tasks.map((task) => task.id)),
@@ -1200,6 +1207,7 @@ export async function handleSessions(
       actor.kind === "user" && actor.userId
         ? getSessionReadState(sessionRoot.id, actor.userId)
         : Promise.resolve(null),
+      getSessionGroupKey(root),
     ]);
     const decorate = (task: AgentTask) => ({
       ...task,
@@ -1211,6 +1219,7 @@ export async function handleSessions(
       chain: chain.map(decorate),
       access,
       owner,
+      groupKey,
       ...(approvals.length ? { approvals } : {}),
       ...(read ?? {}),
     });

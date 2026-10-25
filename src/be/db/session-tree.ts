@@ -106,6 +106,16 @@ export function threadRootsSql(): SqlFragment {
   };
 }
 
+/** A task's group with the list row's rule (`groupKey` on `GET /api/sessions`). */
+export async function getSessionGroupKey(task: { id: string; key: string }): Promise<string> {
+  const threadRoots = threadRootsSql();
+  const row = await getDbClient().get<{ threadRoots: number }>(
+    `SELECT ${threadRoots.sql} AS threadRoots FROM agent_tasks r WHERE r.id = ?`,
+    [...threadRoots.params, task.id],
+  );
+  return sessionThreadGroupKey(task.key, row?.threadRoots ?? 0);
+}
+
 function groupCondition(group: string): SqlFragment {
   const { lo, hi } = keyPrefixRange(group);
   // The remaining key must be one resource leaf, with no nested path.

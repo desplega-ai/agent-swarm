@@ -2499,6 +2499,8 @@ export async function createTaskExtended(
     );
   }
   let requestedByUserIdInherited = false;
+  // The parent key is read again inside the INSERT transaction (see below).
+  let keyInherited = false;
   // True only when `options.routingAffinity` ends up populated purely via
   // the plain parent-fallback inherit below (child declared no affinity of
   // its own, the parent wasn't lead-only, AND the parent's affinity actually
@@ -2663,6 +2665,7 @@ export async function createTaskExtended(
       }
       if (parent.key && !options.key) {
         options.key = parent.key;
+        keyInherited = true;
       }
       if (parent.contextKey && !options.contextKey) {
         options.contextKey = parent.contextKey;
@@ -2888,6 +2891,19 @@ export async function createTaskExtended(
       : await findExistingLinearTrackerContextWork(options?.contextKey);
     if (existingTrackerWork) return { existing: existingTrackerWork };
 
+    // A chain move (a user move, the source key backfill) can commit between
+    // the parent read above and this write lock. Its chain query did not see
+    // this child, so take the parent's key as it is now.
+    const parentKey =
+      keyInherited && options?.parentTaskId
+        ? (
+            await getDbClient().get<{ key: string }>('SELECT "key" FROM agent_tasks WHERE id = ?', [
+              options.parentTaskId,
+            ])
+          )?.key
+        : undefined;
+    const insertKey = parentKey ? normalizeAssetKey(parentKey) : assetKey;
+
     let routingDecisionSnapshot: RoutingDecisionSnapshot | null = null;
     try {
       routingDecisionSnapshot = await captureRoutingDecisionSnapshot(options);
@@ -2918,7 +2934,7 @@ export async function createTaskExtended(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
-        assetKey,
+        insertKey,
         options?.agentId ?? null,
         options?.creatorAgentId ?? null,
         // Free text from every task source; scrub at the single INSERT.
