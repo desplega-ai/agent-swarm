@@ -71,6 +71,10 @@ After boot, a live provider change triggers a fresh credential report. A not-rea
 
 Ready workers retain the five-minute Bedrock enumeration refresh. `CRED_CHECK_DISABLE=1` disables both boot checks and steady-state refreshes.
 
+Codex subprocesses and Claude Managed sessions prefer the runner's selected task key over container credentials.
+If only a comma-separated container pool is available, these consumers select one member before provider authentication.
+Internal AI calls also select one member for each resolved provider key, including the Claude CLI fallback.
+
 ## 1. The `ProviderAdapter` contract
 
 ### Claude execution transports

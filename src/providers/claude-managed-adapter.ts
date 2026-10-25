@@ -64,6 +64,7 @@ import {
   computeContextUsedUnified,
   getContextWindowSize,
 } from "../utils/context-window";
+import { selectCredential } from "../utils/credentials";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { computeClaudeManagedCostUsd } from "./claude-managed-models";
 import { getRuntimeFeePerHour } from "./claude-managed-pricing";
@@ -862,7 +863,11 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
       );
     }
 
-    this.apiKey = process.env.ANTHROPIC_API_KEY as string;
+    this.apiKey = selectCredential(
+      process.env.ANTHROPIC_API_KEY as string,
+      undefined,
+      "ANTHROPIC_API_KEY",
+    ).selected;
     this.agentId = process.env.MANAGED_AGENT_ID as string;
     this.environmentId = process.env.MANAGED_ENVIRONMENT_ID as string;
 
@@ -879,6 +884,14 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
   }
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
+    // Keep the runner's task selection instead of the container's pool.
+    const taskKey = config.env?.ANTHROPIC_API_KEY;
+    const client =
+      taskKey && this.client instanceof Anthropic
+        ? this.client.withOptions({
+            apiKey: selectCredential(taskKey, undefined, "ANTHROPIC_API_KEY").selected,
+          })
+        : this.client;
     // Native resume is deprecated. Follow-up continuity is delivered via the
     // context preamble (see src/commands/context-preamble.ts). Any stray
     // resumeSessionId is logged and ignored — we always create a fresh session.
@@ -942,16 +955,10 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
     if (vaultIds.length > 0) {
       createParams.vault_ids = Array.from(new Set(vaultIds));
     }
-    const created = await Promise.resolve(this.client.beta.sessions.create(createParams));
+    const created = await Promise.resolve(client.beta.sessions.create(createParams));
     const sessionId = created.id;
 
-    return new ClaudeManagedSession(
-      this.client,
-      sessionId,
-      config,
-      userMessageContent,
-      seenEventIds,
-    );
+    return new ClaudeManagedSession(client, sessionId, config, userMessageContent, seenEventIds);
   }
 
   /**

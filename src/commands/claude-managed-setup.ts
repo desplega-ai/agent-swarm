@@ -36,6 +36,7 @@ import { toFile } from "@anthropic-ai/sdk/uploads";
 import { buildSkillContent, type SkillTemplateConfig } from "../be/seed-skills/render";
 import { DEFAULT_MODEL_TIER_MAP } from "../types";
 import { getApiKey } from "../utils/api-key";
+import { selectCredential } from "../utils/credentials";
 import { promptHiddenInput } from "./codex-login.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -518,7 +519,12 @@ export async function runClaudeManagedSetupFlow(
     }
   }
 
-  const client = deps.client ?? new Anthropic({ apiKey: config.anthropicApiKey });
+  // Call Anthropic with one pool member. The stored value keeps the whole pool.
+  const client =
+    deps.client ??
+    new Anthropic({
+      apiKey: selectCredential(config.anthropicApiKey, undefined, "ANTHROPIC_API_KEY").selected,
+    });
 
   // 1. Create the environment.
   log("Creating Anthropic-side environment (swarm-worker-env)...");

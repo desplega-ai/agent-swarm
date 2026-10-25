@@ -911,6 +911,55 @@ describe("onboarding memory probe", () => {
     expect((await getState()).steps.memory.status).toBe("todo");
   });
 
+  test("probes and saves the first member of a reused OpenAI pool", async () => {
+    const originalFetch = globalThis.fetch;
+    let authorization: string | null = null;
+    process.env.OPENAI_API_KEY = "example-first, example-second";
+    globalThis.fetch = (async (input, init) => {
+      const req = new Request(input, init);
+      if (new URL(req.url).hostname !== "api.openai.com") return originalFetch(input, init);
+      authorization = req.headers.get("authorization");
+      return embeddingResponse(512);
+    }) as typeof fetch;
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "openai", reuseKey: "OPENAI_API_KEY" },
+      });
+      expect(await response.json()).toMatchObject({ ok: true, dimensions: 512 });
+      expect(authorization).toBe("Bearer example-first");
+      const configs = await getSwarmConfigs({ scope: "global", key: "EMBEDDING_API_KEY" });
+      expect(configs[0]?.value).toBe("example-first");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  for (const keyVar of ["EMBEDDING_API_KEY", "OPENAI_API_KEY"]) {
+    test(`existing memory probes the first member of ${keyVar}`, async () => {
+      const originalFetch = globalThis.fetch;
+      let authorization: string | null = null;
+      process.env[keyVar] = "example-first, example-second";
+      process.env.EMBEDDING_API_BASE_URL = "https://api.openai.com/v1";
+      globalThis.fetch = (async (input, init) => {
+        const req = new Request(input, init);
+        if (new URL(req.url).hostname !== "api.openai.com") return originalFetch(input, init);
+        authorization = req.headers.get("authorization");
+        return embeddingResponse(512);
+      }) as typeof fetch;
+      try {
+        const response = await request("/api/onboarding/memory", {
+          method: "POST",
+          body: { preset: "existing" },
+        });
+        expect(await response.json()).toMatchObject({ ok: true, dimensions: 512 });
+        expect(authorization).toBe("Bearer example-first");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
   test("does not send a reused OpenAI key to another host", async () => {
     let hits = 0;
     const fake = startEmbeddingServer(() => {

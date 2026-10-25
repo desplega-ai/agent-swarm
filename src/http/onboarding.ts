@@ -21,6 +21,7 @@ import {
 } from "../be/onboarding";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { ProviderNameSchema } from "../types";
+import { splitCredentialPool } from "../utils/credentials";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
@@ -244,7 +245,8 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
     body.preset === "existing"
       ? (process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY)
       : undefined;
-  const apiKey = explicitKey ?? reusedKey ?? implicitKey;
+  // Test and save the same pool member.
+  const apiKey = splitCredentialPool(explicitKey ?? reusedKey ?? implicitKey ?? "")[0];
 
   if (!apiKey) {
     return {

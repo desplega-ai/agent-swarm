@@ -38,6 +38,7 @@ import {
   clampContextPercent,
   computeContextUsedUnified,
 } from "../utils/context-window";
+import { selectCredential } from "../utils/credentials";
 import { isEnvFlagEnabled, isSessionSummarySkipped } from "../utils/env-flag";
 import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
@@ -2000,6 +2001,9 @@ export async function createInProcessCodexSession(
     SWARM_CODEX_APP_SERVER: "1",
   };
   if (authMode === "chatgpt") delete env.OPENAI_API_KEY;
+  else if (env.OPENAI_API_KEY) {
+    env.OPENAI_API_KEY = selectCredential(env.OPENAI_API_KEY, undefined, "OPENAI_API_KEY").selected;
+  }
 
   const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
 
@@ -2151,6 +2155,11 @@ class CodexSubprocessSession implements ProviderSession {
     };
 
     const apiKey = getApiKey();
+    const providerKeys: Record<string, string> = {};
+    for (const keyVar of ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]) {
+      const value = config.env?.[keyVar] ?? process.env[keyVar];
+      if (value) providerKeys[keyVar] = selectCredential(value, undefined, keyVar).selected;
+    }
 
     this.proc = registerProcessGroup(
       Bun.spawn(argv, {
@@ -2168,13 +2177,7 @@ class CodexSubprocessSession implements ProviderSession {
           ...(process.env.MCP_BASE_URL ? { MCP_BASE_URL: process.env.MCP_BASE_URL } : {}),
           ...(apiKey ? { AGENT_SWARM_API_KEY: apiKey, API_KEY: apiKey } : {}),
           // Embedding / summarization paths read these:
-          ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
-          ...(process.env.OPENROUTER_API_KEY
-            ? { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY }
-            : {}),
-          ...(process.env.ANTHROPIC_API_KEY
-            ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
-            : {}),
+          ...providerKeys,
           ...(process.env.CODEX_PATH_OVERRIDE
             ? { CODEX_PATH_OVERRIDE: process.env.CODEX_PATH_OVERRIDE }
             : {}),

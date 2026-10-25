@@ -20,6 +20,7 @@ import { complete } from "@earendil-works/pi-ai/compat";
 import { getBuiltinModel as getModel } from "@earendil-works/pi-ai/providers/all";
 import type { TSchema } from "typebox";
 import { z } from "zod";
+import { selectCredential } from "../credentials.js";
 import {
   DEFAULT_OPENROUTER_BASE_URL,
   getOpenRouterAttributionHeaders,
@@ -133,6 +134,10 @@ export async function defaultSpawnClaudeCli(
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
   if (!env.CLAUDE_CODE_OAUTH_TOKEN && env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN) {
     env.CLAUDE_CODE_OAUTH_TOKEN = env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN;
+  }
+  // API calls and restarted workers can inherit raw pools.
+  for (const keyVar of ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]) {
+    if (env[keyVar]) env[keyVar] = selectCredential(env[keyVar], undefined, keyVar).selected;
   }
   // Recursion guard: this shellout is itself a full claude session — on exit it
   // fires the same global Stop hook, whose session-summary path would spawn

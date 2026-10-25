@@ -25,6 +25,29 @@ function makeOpts(
 }
 
 describe("resolveCredential", () => {
+  for (const [keyVar, kind] of [
+    ["OPENROUTER_API_KEY", "openrouter"],
+    ["ANTHROPIC_API_KEY", "anthropic"],
+    ["OPENAI_API_KEY", "openai"],
+  ] as const) {
+    for (const source of ["env", "fallback"] as const) {
+      test(`${keyVar} selects one pool member from ${source}`, async () => {
+        const pool = "example-first, example-second";
+        const cred = await resolveCredential(
+          makeOpts({
+            env: source === "env" ? { [keyVar]: pool } : {},
+            _getEnvApiKey: (provider) =>
+              source === "fallback" && provider === kind ? pool : undefined,
+          }),
+        );
+        expect(cred?.kind).toBe(kind);
+        expect(
+          cred && "apiKey" in cred && ["example-first", "example-second"].includes(cred.apiKey),
+        ).toBe(true);
+      });
+    }
+  }
+
   test("OPENROUTER_API_KEY wins", async () => {
     const cred = await resolveCredential(makeOpts({ env: { OPENROUTER_API_KEY: "or-1" } }));
     expect(cred).not.toBeNull();

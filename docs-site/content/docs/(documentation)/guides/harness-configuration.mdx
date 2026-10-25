@@ -709,6 +709,8 @@ Workers repeat the tests every 10 minutes while a key is rejected.
 A key that the provider rejects with HTTP 401 is skipped until it passes or leaves the pool.
 A key that gets HTTP 403 shows a failed check, but workers keep using it: a valid key can lack the scope that the check endpoint needs.
 The Provider keys page and the setup step show these results.
+Other users of a pooled key also send one member per call: memory embeddings, internal AI calls (memory rating, session summaries, workflow LLM nodes), audio transcription, and the claude-managed integration test.
+When the memory setup step reuses a pooled key, it tests and saves the first member.
 
 ### Claude Code
 

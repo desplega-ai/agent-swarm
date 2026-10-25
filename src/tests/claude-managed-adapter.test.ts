@@ -59,6 +59,52 @@ describe("ClaudeManagedAdapter (Phase 1 skeleton)", () => {
     expect(adapter.formatCommand("plan")).toBe("/plan");
   });
 
+  for (const source of ["container", "task", "task-pool"] as const) {
+    test(`uses one Anthropic key from ${source}`, async () => {
+      const originalFetch = globalThis.fetch;
+      const originalKey = process.env.ANTHROPIC_API_KEY;
+      let apiKey: string | null = null;
+      process.env.ANTHROPIC_API_KEY = "example-container-first,example-container-second";
+      globalThis.fetch = (async (input, init) => {
+        apiKey =
+          new Request(input, init).headers.get("authorization")?.slice("Bearer ".length) ?? null;
+        return Response.json(
+          { error: { type: "authentication_error", message: "test rejection" } },
+          { status: 401 },
+        );
+      }) as typeof fetch;
+      try {
+        const adapter = new ClaudeManagedAdapter();
+        await expect(
+          adapter.createSession(
+            tConfig({
+              env:
+                source === "container"
+                  ? {}
+                  : {
+                      ANTHROPIC_API_KEY:
+                        source === "task"
+                          ? "example-task"
+                          : "example-task-first,example-task-second",
+                    },
+            }),
+          ),
+        ).rejects.toThrow("test rejection");
+        expect(
+          source === "container"
+            ? ["example-container-first", "example-container-second"]
+            : source === "task"
+              ? ["example-task"]
+              : ["example-task-first", "example-task-second"],
+        ).toContain(apiKey);
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+        else process.env.ANTHROPIC_API_KEY = originalKey;
+      }
+    });
+  }
+
   test("ctor throws when MANAGED_AGENT_ID is missing", () => {
     const saved = process.env.MANAGED_AGENT_ID;
     delete process.env.MANAGED_AGENT_ID;

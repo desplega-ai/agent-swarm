@@ -20,6 +20,7 @@
  * auto-detected key always goes to its provider's own endpoint. Deepgram and AssemblyAI use other request shapes and are not
  * supported. Read at call time, so a config reload applies without a restart.
  */
+import { selectCredential } from "./credentials";
 import { createValueScrubber, scrubSecrets } from "./secret-scrubber";
 
 const TRANSCRIPTION_TIMEOUT_MS = 60_000;
@@ -119,7 +120,9 @@ export function resolveTranscriptionConfig(): TranscriptionConfig | null {
     : AUTO_DETECT_ORDER;
   for (const name of candidates) {
     const { keyEnv } = PROVIDERS[name];
-    const apiKey = envValue(keyEnv);
+    const value = envValue(keyEnv);
+    // OPENAI_API_KEY may be a comma pool: send one member.
+    const apiKey = value ? selectCredential(value, undefined, keyEnv).selected : undefined;
     if (apiKey) return { provider: name, apiKey, keyEnv, source: "auto" };
   }
   return null;

@@ -8,6 +8,7 @@ import {
   registerTelegramWebhook,
 } from "../integrations/chat-sdk/status";
 import { buildSlackManifest } from "../slack/manifest";
+import { selectCredential } from "../utils/credentials";
 import { ensureHttpPermission } from "./config";
 import { resolveConfigValue, resolveMcpBaseUrl } from "./config-values";
 import { route } from "./route-def";
@@ -231,7 +232,10 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
       }
 
       try {
-        const client = buildClient(apiKey);
+        // A comma pool is one key per call, as the runner does.
+        const client = buildClient(
+          selectCredential(apiKey, undefined, "ANTHROPIC_API_KEY").selected,
+        );
         const agent = await client.beta.agents.retrieve(agentId);
         // `agent.model` is `BetaManagedAgentsModelConfig` ({id, speed}). Flatten
         // to a string so the UI can render it directly without type guards.
