@@ -54036,6 +54036,17 @@
                       "workspace-rw"
                     ],
                     "default": "none"
+                  },
+                  "executor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "native",
+                      "quickjs",
+                      null
+                    ]
                   }
                 },
                 "required": [
@@ -54162,6 +54173,17 @@
                       "workspace-rw"
                     ],
                     "default": "none"
+                  },
+                  "executor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "native",
+                      "quickjs",
+                      null
+                    ]
                   },
                   "idempotencyKey": {
                     "type": "string",
@@ -54749,6 +54771,18 @@
                               "workspace-rw"
                             ]
                           },
+                          "executor": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "native",
+                              "quickjs",
+                              null
+                            ],
+                            "default": null
+                          },
                           "createdByAgentId": {
                             "type": [
                               "string",
@@ -54923,6 +54957,18 @@
                             "none",
                             "workspace-rw"
                           ]
+                        },
+                        "executor": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "native",
+                            "quickjs",
+                            null
+                          ],
+                          "default": null
                         },
                         "createdByAgentId": {
                           "type": [

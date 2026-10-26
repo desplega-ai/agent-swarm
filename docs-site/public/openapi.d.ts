@@ -31632,6 +31632,8 @@ export interface operations {
                      * @enum {string}
                      */
                     fsMode?: "none" | "workspace-rw";
+                    /** @enum {string|null} */
+                    executor?: "native" | "quickjs" | null;
                 };
             };
         };
@@ -31696,6 +31698,8 @@ export interface operations {
                      * @enum {string}
                      */
                     fsMode?: "none" | "workspace-rw";
+                    /** @enum {string|null} */
+                    executor?: "native" | "quickjs" | null;
                     idempotencyKey?: string;
                 };
             };
@@ -31955,6 +31959,11 @@ export interface operations {
                             typeChecked: boolean;
                             /** @enum {string} */
                             fsMode: "none" | "workspace-rw";
+                            /**
+                             * @default null
+                             * @enum {string|null}
+                             */
+                            executor: "native" | "quickjs" | null;
                             createdByAgentId: string | null;
                             createdAt: string;
                             updatedAt: string;
@@ -32030,6 +32039,11 @@ export interface operations {
                             typeChecked: boolean;
                             /** @enum {string} */
                             fsMode: "none" | "workspace-rw";
+                            /**
+                             * @default null
+                             * @enum {string|null}
+                             */
+                            executor: "native" | "quickjs" | null;
                             createdByAgentId: string | null;
                             createdAt: string;
                             updatedAt: string;

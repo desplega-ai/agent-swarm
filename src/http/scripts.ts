@@ -40,6 +40,7 @@ import {
   typecheckScript,
 } from "../be/scripts/typecheck";
 import { can } from "../rbac";
+import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
 import { extractScriptSignature, type ScriptSignature } from "../scripts-runtime/extract-signature";
 import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
 import {
@@ -674,6 +675,15 @@ export async function handleScripts(
       }
     }
 
+    if (parsed.body.executor && !isExecutorAllowedByDeployment(parsed.body.executor)) {
+      jsonError(
+        res,
+        'Executor "native" is not permitted when deployment SCRIPT_EXECUTOR="quickjs"',
+        400,
+      );
+      return true;
+    }
+
     const secretRefusal = refuseSourceWithSecrets(parsed.body.source);
     if (secretRefusal) {
       json(res, secretRefusal, 400);
@@ -778,6 +788,15 @@ export async function handleScripts(
 
     if (fsMode === "workspace-rw") {
       jsonError(res, "workspace-rw scripts are not supported by /api/scripts/run in v1", 501);
+      return true;
+    }
+
+    if (executor && !isExecutorAllowedByDeployment(executor)) {
+      jsonError(
+        res,
+        'Executor "native" is not permitted when deployment SCRIPT_EXECUTOR="quickjs"',
+        400,
+      );
       return true;
     }
 
@@ -961,6 +980,7 @@ export async function handleScripts(
       isScratch: script.isScratch,
       typeChecked: script.typeChecked,
       fsMode: script.fsMode,
+      executor: script.executor,
       createdByAgentId: script.createdByAgentId,
       createdAt: script.createdAt,
       updatedAt: script.updatedAt,

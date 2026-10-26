@@ -123,6 +123,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
       source: resolved.source,
       args: config.args,
       fsMode: "none",
+      executor: resolved.script.executor,
       agentId: agentId ?? "workflow",
       mcpBaseUrl: getMcpBaseUrl(),
       egressSecrets: credentials.egressSecrets,
