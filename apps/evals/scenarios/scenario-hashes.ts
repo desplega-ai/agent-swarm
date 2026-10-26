@@ -39,6 +39,6 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
   "real-diff-agent-fs": [{ version: 1, hash: "66cd830c80ac1e4b" }],
   "docs-suggestion": [
     { version: 1, hash: "8c5077d6ea442fc6" },
-    { version: 2, hash: "077c3c3323a2a72f" },
+    { version: 2, hash: "32d131bdab3b2e4b" },
   ],
 };

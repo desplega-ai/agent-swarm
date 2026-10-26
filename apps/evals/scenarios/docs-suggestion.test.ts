@@ -141,6 +141,26 @@ describe("docs-suggestion rubric", () => {
         }),
       ],
       [
+        "Codex shell cat on the second line of the command",
+        codexItem({
+          type: "command_execution",
+          command: "/bin/bash -lc 'pwd\ncat /home/worker/.codex/skills/swarm-docs/SKILL.md'",
+          exit_code: 0,
+        }),
+      ],
+      [
+        "Pi bash cat after a newline",
+        piToolUse("bash", {
+          command: "pwd\ncat /home/worker/.pi/agent/skills/swarm-docs/SKILL.md",
+        }),
+      ],
+      [
+        "Pi bash cat after && and an env assignment",
+        piToolUse("bash", {
+          command: "cd /tmp && LC_ALL=C head -50 /home/worker/.pi/agent/skills/swarm-docs/SKILL.md",
+        }),
+      ],
+      [
         "Pi bash cat of the skill file",
         piToolUse("bash", { command: "cat /home/worker/.pi/agent/skills/swarm-docs/SKILL.md" }),
       ],
@@ -200,6 +220,23 @@ describe("docs-suggestion rubric", () => {
           command: "grep -n cron /home/worker/.codex/skills/swarm-docs/SKILL.md",
           exit_code: 0,
         }),
+      ],
+      [
+        "Codex shell grep whose quoted pattern names a cat of the skill file",
+        codexItem({
+          type: "command_execution",
+          command:
+            "/bin/bash -lc \"grep 'cat /home/worker/.codex/skills/swarm-docs/SKILL.md' notes\"",
+          exit_code: 0,
+        }),
+      ],
+      [
+        "Pi bash grep whose quoted pattern names a cat of the skill file",
+        piToolUse("bash", { command: "grep 'cat /x/swarm-docs/SKILL.md' notes" }),
+      ],
+      [
+        "Pi bash echo of a cat command",
+        piToolUse("bash", { command: 'echo "cat /x/swarm-docs/SKILL.md"' }),
       ],
       [
         "Pi bash ls of the skill file",

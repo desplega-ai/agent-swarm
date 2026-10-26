@@ -95,12 +95,65 @@ function brief(request: Request): string {
 
 const SWARM_DOCS_SKILL_FILE = /(^|[\\/])swarm-docs[\\/]SKILL\.md$/i;
 
+const SHELL_READERS = new Set(["cat", "bat", "sed", "head", "tail", "nl", "less", "more", "awk"]);
+const SHELL_WRAPPERS = new Set(["bash", "sh", "zsh", "dash"]);
+
 /**
- * A shell command that prints the skill file: a file reader (cat, sed, head, ...) whose
- * arguments include a path ending in `swarm-docs/SKILL.md`. Tolerates a `bash -lc '...'` wrapper.
+ * Splits a shell command into simple commands, each a list of unquoted words. Newlines and
+ * unquoted `; & | ( )` end a command; quotes group a word and never end one.
  */
-const SWARM_DOCS_SHELL_READ =
-  /(^|[;&|('"/])\s*(cat|bat|sed|head|tail|nl|less|more|awk)\s(?:[^;&|]*?[\s'"=])?(?:[^\s'";&|]*[\\/])?swarm-docs[\\/]SKILL\.md(?=$|[\s'";&|)])/i;
+export function shellSegments(command: string): string[][] {
+  const segments: string[][] = [];
+  let words: string[] = [];
+  let word: string | null = null;
+  let quote: "'" | '"' | null = null;
+  const endWord = () => {
+    if (word !== null) words.push(word);
+    word = null;
+  };
+  const endSegment = () => {
+    endWord();
+    if (words.length) segments.push(words);
+    words = [];
+  };
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i] as string;
+    if (quote) {
+      if (ch === quote) quote = null;
+      else if (ch === "\\" && quote === '"' && i + 1 < command.length)
+        word = (word ?? "") + command[++i];
+      else word = (word ?? "") + ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      word ??= "";
+    } else if (ch === "\\" && i + 1 < command.length) {
+      const next = command[++i] as string;
+      if (next !== "\n") word = (word ?? "") + next;
+    } else if (/[\n;&|()]/.test(ch)) endSegment();
+    else if (/\s/.test(ch)) endWord();
+    else word = (word ?? "") + ch;
+  }
+  endSegment();
+  return segments;
+}
+
+/**
+ * True when a shell command prints the skill file: a simple command led by a file reader (cat,
+ * sed, head, ...) with an argument ending in `swarm-docs/SKILL.md`. A `bash -lc '...'` or
+ * `sh -c` wrapper is unwrapped first; a reader named inside another command's argument is not.
+ */
+export function shellReadsSwarmDocs(command: string, depth = 0): boolean {
+  return shellSegments(command).some((segment) => {
+    const words = segment.filter((w, i) => i > 0 || !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+    const program = (words[0] ?? "").split("/").pop() ?? "";
+    if (SHELL_WRAPPERS.has(program)) {
+      const flag = words.findIndex((w, i) => i > 0 && /^-[a-z]*c[a-z]*$/i.test(w));
+      const script = flag > 0 ? words[flag + 1] : undefined;
+      return script !== undefined && depth < 3 && shellReadsSwarmDocs(script, depth + 1);
+    }
+    return SHELL_READERS.has(program) && words.slice(1).some((w) => SWARM_DOCS_SKILL_FILE.test(w));
+  });
+}
 
 function field(input: unknown, key: string): string {
   const value = (input as Record<string, unknown> | null | undefined)?.[key];
@@ -130,7 +183,7 @@ export function loadedSwarmDocs(uses: { toolName: string; input: unknown }[]): b
       );
     }
     if (/(^|[_-])(bash|shell|exec_command)$/.test(tool)) {
-      return SWARM_DOCS_SHELL_READ.test(field(args, "command") || field(args, "cmd"));
+      return shellReadsSwarmDocs(field(args, "command") || field(args, "cmd"));
     }
     return false;
   });
