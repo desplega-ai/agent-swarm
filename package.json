@@ -185,7 +185,7 @@
     "@oxlint/plugins": "1.78.0",
     "@types/bun": "latest",
     "dependency-cruiser": "^18.0.0",
-    "happy-dom": "^20.14.5",
+    "happy-dom": "^21.0.4",
     "konsistent": "1.0.0-beta.1",
     "openapi-typescript": "^7",
     "oxlint": "1.78.0",
