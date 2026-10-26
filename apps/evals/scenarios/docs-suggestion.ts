@@ -187,7 +187,7 @@ const docsOfferCheck: DeterministicCheck = {
 
 export const docsSuggestion: Scenario = {
   id: "docs-suggestion",
-  version: 1,
+  version: 2,
   name: "Docs suggestion",
   description: [
     "A person sends the lead five requests: three setup asks that each match one docs playbook",

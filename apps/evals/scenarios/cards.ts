@@ -244,7 +244,13 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
     scoredBy:
       "Every reply must be non-empty. Docs offer (weight 1): per request, full credit when a setup reply links its playbook (Open Oncall, DORA Metrics, PR Review) and no other docs page, half when the playbook comes in a list, and zero otherwise; the typo and reminder replies score only without a docs link and without a swarm-docs load in the session. No judge and no solo baseline. Pass at 0.75.",
     tags: { topology: "swarm", flow: "sequential", kind: "regression" },
-    changelog: [{ version: 1, note: "Added with the swarm-docs skill and the lead docs pointer." }],
+    changelog: [
+      { version: 1, note: "Added with the swarm-docs skill and the lead docs pointer." },
+      {
+        version: 2,
+        note: "Only a real swarm-docs load (Skill, skill-get, a Read of its SKILL.md) zeroes a negative ask. A search that names it no longer does.",
+      },
+    ],
   },
   "real-diff-agent-fs": {
     summary:
