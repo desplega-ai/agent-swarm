@@ -120,6 +120,21 @@ export function _resetAgentFsRegisterRateLimitForTests(): void {
   registerRateLimiter.reset();
 }
 
+/**
+ * The path as an upstream router would match it: percent-decoded, repeated
+ * slashes collapsed, trailing slash dropped. `/auth/%72egister` and
+ * `//auth/register/` must still hit the register limit.
+ */
+function routedPath(pathOnly: string): string {
+  let decoded = pathOnly;
+  try {
+    decoded = decodeURIComponent(pathOnly);
+  } catch {
+    // A malformed escape: compare the raw bytes.
+  }
+  return decoded.replace(/\/{2,}/g, "/").replace(/\/+$/, "");
+}
+
 function isTraversal(pathOnly: string): boolean {
   return pathOnly.split("/").some((s) => s === ".." || s.toLowerCase() === "%2e%2e");
 }
@@ -149,7 +164,7 @@ export async function handleAgentFsProxy(
   if (
     isApi &&
     method === "POST" &&
-    pathOnly.replace(/\/+$/, "") === "/auth/register" &&
+    routedPath(pathOnly) === "/auth/register" &&
     !registerRateLimiter.take(clientIp(req))
   ) {
     res.setHeader("Retry-After", "12");

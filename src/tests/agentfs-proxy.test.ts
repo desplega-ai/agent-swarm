@@ -650,6 +650,30 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
     expect(res.status).toBe(404);
   });
 
+  test("encoded and doubled-slash register paths share the same per-IP limit", async () => {
+    const paths = [
+      "/agentfs/auth/%72egister",
+      "/agentfs//auth/register",
+      "/agentfs/auth/register/",
+      "/agentfs/auth%2Fregister",
+      "/agentfs/auth/register",
+    ];
+    for (const path of paths) {
+      const res = await fetch(`${proxyUrl}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.9" },
+        body: JSON.stringify({ email: "a@example.test" }),
+      });
+      expect({ path, limited: res.status === 429 }).toEqual({ path, limited: false });
+    }
+    const sixth = await fetch(`${proxyUrl}/agentfs/auth/%72egister`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.9" },
+      body: JSON.stringify({ email: "a@example.test" }),
+    });
+    expect(sixth.status).toBe(429);
+  });
+
   test("the sixth POST /agentfs/auth/register from one IP within a minute gets 429", async () => {
     const register = (ip: string) =>
       fetch(`${proxyUrl}/agentfs/auth/register`, {
