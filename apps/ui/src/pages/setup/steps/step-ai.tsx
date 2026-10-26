@@ -11,6 +11,8 @@ import type { ModelTierPreview, OnboardingAiMethod, SwarmConfig } from "@/api/ty
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { Button } from "@/components/ui/button";
 import { AutosaveScopeContext, useAutosaveScope } from "@/hooks/use-autosave";
+import { useConfig } from "@/hooks/use-config";
+import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { hasRuntimeCredential } from "@/lib/agent-runtime-models";
 import { type DialContext, dialHarness } from "@/lib/model-dial";
 import type { StepProps } from "../step-contract";
@@ -35,6 +37,27 @@ const NO_TIER_ROWS: ModelTierPreview[] = [];
 const NO_PRESENCE: EnvPresenceMap = {};
 const NO_CONFIGS: SwarmConfig[] = [];
 
+/** The stored mark that the switch on the first credential ran for `card` (one per API). */
+function switchMarkKey(apiUrl: string, card: AiCardId): string {
+  return deriveStorageKey(apiUrl, `setup-first-credential-switch:${card}`);
+}
+
+function hasSwitchMark(key: string): boolean {
+  try {
+    return localStorage.getItem(key) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function writeSwitchMark(key: string): void {
+  try {
+    localStorage.setItem(key, new Date().toISOString());
+  } catch {
+    // Storage is off: the mark in memory still holds until a reload.
+  }
+}
+
 export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
   const queryClient = useQueryClient();
@@ -44,12 +67,12 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const presence = presenceQuery.data ?? NO_PRESENCE;
   const configs = configsQuery.data ?? NO_CONFIGS;
   // The cards' saved state comes from these two. Restored cache data can be
-  // old, so a card counts as empty only when both have loaded and do not fetch.
-  const savedStateSettled =
-    presenceQuery.data !== undefined &&
-    configsQuery.data !== undefined &&
-    !presenceQuery.isFetching &&
-    !configsQuery.isFetching;
+  // old, so the state is final only when both have loaded and do not fetch.
+  const savedStateSettled = [presenceQuery, configsQuery].every(
+    (q) => q.status !== "pending" && !q.isFetching,
+  );
+  const { config } = useConfig();
+  const apiUrl = config.apiUrl || window.location.origin;
   const [openCard, setOpenCard] = useState<AiCardId | null>("claude");
   const [deviceDone, setDeviceDone] = useState(false);
   // The card the user saved on, and the method that save completes the step with.
@@ -102,47 +125,42 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
 
   // Each card's saved state, as its header shows it.
   const savedCards = useRef<Partial<Record<AiCardId, boolean>>>({});
-  // The cards that showed no credential: their next save is a first credential.
-  // A card that loads with a key never arms, so a second key does not switch.
-  const armed = useRef<Partial<Record<AiCardId, boolean>>>({});
-  // A save that came while the tier models load: its switch runs when they arrive.
-  const waitingForTiers = useRef<{ card: AiCardId; method: OnboardingAiMethod } | null>(null);
-  const reportSaved = useCallback(
-    (card: AiCardId, saved: boolean) => {
-      savedCards.current[card] = saved;
-      if (saved) return;
-      // The key of a queued switch is gone: drop the switch.
-      if (waitingForTiers.current?.card === card) waitingForTiers.current = null;
-      if (savedStateSettled) armed.current[card] = true;
-    },
-    [savedStateSettled],
-  );
+  // A save waits here while the cards' saved state or the tier models load.
+  const queued = useRef<{ card: AiCardId; method: OnboardingAiMethod } | null>(null);
+  const reportSaved = useCallback((card: AiCardId, saved: boolean) => {
+    savedCards.current[card] = saved;
+    // The key of a queued switch is gone: drop the switch.
+    if (!saved && queued.current?.card === card) queued.current = null;
+  }, []);
   // The switch runs from save callbacks: it reads the latest data from here.
-  const latest = useRef({ agents, rollups, dialContext });
+  const latest = useRef({ agents, rollups, dialContext, savedStateSettled });
   useEffect(() => {
-    latest.current = { agents, rollups, dialContext };
+    latest.current = { agents, rollups, dialContext, savedStateSettled };
   });
   const [autoSwitch, setAutoSwitch] = useState<FirstCredentialSwitch | null>(null);
   const autoSwitchRunning = useRef(false);
+  // The cards the switch ran for. The stored mark keeps this across reloads, so
+  // agents that the user moved back stay where they are.
+  const switched = useRef<Partial<Record<AiCardId, boolean>>>({});
 
   /**
-   * The first credential moves every agent to its card's harness, so that a
-   * worker can check the key. It runs once per save, never on view, and only
-   * for the first key of a card that showed no credential. A save that finds
-   * agents on the harness, or a credential on another card, keeps the manual
-   * switch list.
+   * Runs the queued switch when its data is there. `afterWait`: the save came
+   * earlier, so its key must still be saved.
    */
-  const runSwitch = useCallback(
-    async (method: OnboardingAiMethod) => {
-      if (autoSwitchRunning.current) return;
-      const { agents, rollups, dialContext } = latest.current;
-      const plan = firstCredentialSwitch(method, savedCards.current, rollups, agents);
-      if (!plan) return;
+  const runQueuedSwitch = useCallback(
+    async (afterWait: boolean) => {
+      const job = queued.current;
+      if (!job || autoSwitchRunning.current) return;
+      const { agents, rollups, dialContext, savedStateSettled } = latest.current;
+      // The other cards' saved state decides the switch: wait until it loads.
+      if (!savedStateSettled) return;
+      const plan = firstCredentialSwitch(job.method, savedCards.current, rollups, agents);
       // The carried model level needs the tier models: wait for them, then switch.
-      if (!dialContext.tiers && dialHarness(plan.target)) {
-        waitingForTiers.current = { card: plan.card, method };
-        return;
-      }
+      if (plan && !dialContext.tiers && dialHarness(plan.target)) return;
+      queued.current = null;
+      if (!plan || (afterWait && !savedCards.current[job.card])) return;
+      switched.current[job.card] = true;
+      writeSwitchMark(switchMarkKey(apiUrl, job.card));
       autoSwitchRunning.current = true;
       setAutoSwitch(plan);
       try {
@@ -152,24 +170,28 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
         setAutoSwitch(null);
       }
     },
-    [queryClient],
+    [queryClient, apiUrl],
   );
+  useEffect(() => {
+    if (tiers && savedStateSettled) void runQueuedSwitch(true);
+  }, [tiers, savedStateSettled, runQueuedSwitch]);
+
+  /**
+   * The first credential moves every agent to its card's harness, so that a
+   * worker can check the key. It runs on a save, never on view, and once per
+   * card. A save that finds agents on the harness, or a credential on another
+   * card, keeps the manual switch list.
+   */
   const switchOnFirstCredential = useCallback(
     (method: OnboardingAiMethod) => {
       const card = METHOD_CARD[method];
-      if (!armed.current[card]) return;
-      // The card holds a credential now: a later key is not the first.
-      armed.current[card] = false;
-      void runSwitch(method);
+      if (autoSwitchRunning.current || switched.current[card]) return;
+      if (hasSwitchMark(switchMarkKey(apiUrl, card))) return;
+      queued.current = { card, method };
+      void runQueuedSwitch(false);
     },
-    [runSwitch],
+    [apiUrl, runQueuedSwitch],
   );
-  useEffect(() => {
-    const waiting = waitingForTiers.current;
-    if (!waiting || !tiers) return;
-    waitingForTiers.current = null;
-    if (savedCards.current[waiting.card]) void runSwitch(waiting.method);
-  }, [tiers, runSwitch]);
 
   const aiDone = aiStep.status === "done";
   // The card's save already refreshed env presence and the onboarding signals.

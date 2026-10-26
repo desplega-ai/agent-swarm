@@ -19,7 +19,7 @@ afterAll(async () => {
 
 let agents: AgentWithTasks[] = [];
 let tiers: ModelTierPreview[] | undefined;
-let presenceFetching = false;
+let presencePending = false;
 const harnessCalls: Array<[string, string]> = [];
 
 mock.module("@/api/client", () => ({
@@ -34,13 +34,16 @@ mock.module("@/api/client", () => ({
 // process the first file to register a specifier fixes its export names, and a
 // later file importing another name fails to link.
 mock.module("@/lib/config", () => require("../../../lib/config"));
+mock.module("@/hooks/use-config", () => ({
+  useConfig: () => ({ config: { apiUrl: "http://swarm.test" } }),
+}));
 mock.module("@/api/hooks/use-agents", () => ({
   ...require("../../../api/hooks/use-agents"),
   useAgents: () => ({ data: agents }),
 }));
 mock.module("@/api/hooks/use-config-api", () => ({
   ...require("../../../api/hooks/use-config-api"),
-  useConfigs: () => ({ data: [], isFetching: false }),
+  useConfigs: () => ({ data: [], status: "success", isFetching: false }),
   // No agent-scope model: the switch changes only the harness.
   resolvedConfigsQuery: (filters: { agentId: string }) =>
     queryOptions({
@@ -49,7 +52,11 @@ mock.module("@/api/hooks/use-config-api", () => ({
     }),
 }));
 mock.module("@/api/hooks/use-integrations-meta", () => ({
-  useEnvPresence: () => ({ data: {}, isFetching: presenceFetching }),
+  // `presencePending`: the first env presence answer has not come yet.
+  useEnvPresence: () =>
+    presencePending
+      ? { data: undefined, status: "pending", isFetching: true }
+      : { data: {}, status: "success", isFetching: false },
 }));
 mock.module("@/api/hooks/use-model-tiers", () => ({
   useModelTiers: () => ({ data: tiers, isError: false }),
@@ -67,6 +74,7 @@ for (const [alias, path] of [
   ["@/api/types", "../../../api/types"],
   ["@/api/hooks/use-onboarding", "../../../api/hooks/use-onboarding"],
   ["@/hooks/use-autosave", "../../../hooks/use-autosave"],
+  ["@/hooks/use-dismissible-card-key", "../../../hooks/use-dismissible-card-key"],
   ["@/lib/utils", "../../../lib/utils"],
   ["@/lib/agent-runtime-models", "../../../lib/agent-runtime-models"],
   ["@/lib/model-dial", "../../../lib/model-dial"],
@@ -87,15 +95,15 @@ interface CardStubProps {
 }
 
 // The cards are stubs: each reports the saved state in `savedState` (nothing
-// saved by default, like a card on a fresh swarm). The open harnesses card
-// hands out its `onSaved`, which a key save calls.
+// saved by default, like a card on a fresh swarm) and hands out its `onSaved`,
+// which a key save calls.
 const savedState: Record<string, boolean> = {};
-let saveOpenKey: CardStubProps["onSaved"] = () => {};
+const cardOnSaved: Record<string, CardStubProps["onSaved"]> = {};
 function stubCard(card: string) {
   return function Card({ onSaved, reportSaved }: CardStubProps) {
     const saved = savedState[card] ?? false;
     useEffect(() => reportSaved(card, saved), [reportSaved, saved]);
-    if (card === "open") saveOpenKey = onSaved;
+    cardOnSaved[card] = onSaved;
     return null;
   };
 }
@@ -147,16 +155,16 @@ async function mount() {
   const rerender = () => act(async () => root.render(element()));
   return {
     rerender,
-    /** An OpenRouter key save: the card marks the key saved, then calls `onSaved`. */
-    saveKey: async () => {
-      savedState.open = true;
-      await act(async () => saveOpenKey("openrouter"));
+    /** A key save (OpenRouter by default): the card marks the key saved, then calls `onSaved`. */
+    saveKey: async (card = "open", method = "openrouter") => {
+      savedState[card] = true;
+      await act(async () => cardOnSaved[card]?.(method));
       await rerender();
       await settle();
     },
-    /** The last key goes: the card header shows nothing saved. */
-    removeKey: async () => {
-      savedState.open = false;
+    /** The last key of a card goes: the card header shows nothing saved. */
+    removeKey: async (card = "open") => {
+      savedState[card] = false;
       await rerender();
     },
     unmount: () => act(async () => root.unmount()),
@@ -167,9 +175,10 @@ const onPi = fleet.map((a) => [a.id, "pi"]);
 
 beforeEach(() => {
   for (const card of Object.keys(savedState)) delete savedState[card];
+  localStorage.clear();
   agents = fleet;
   tiers = tierRows();
-  presenceFetching = false;
+  presencePending = false;
   harnessCalls.length = 0;
   document.body.innerHTML = "";
 });
@@ -194,14 +203,6 @@ describe("StepAi: the switch on the first credential", () => {
     await view.unmount();
   });
 
-  test("a card that loads with a key: another key keeps every agent where it is", async () => {
-    savedState.open = true;
-    const view = await mount();
-    await view.saveKey();
-    expect(harnessCalls).toEqual([]);
-    await view.unmount();
-  });
-
   test("a second key after the agents moved back to Claude keeps them on Claude", async () => {
     const view = await mount();
     await view.saveKey();
@@ -209,6 +210,19 @@ describe("StepAi: the switch on the first credential", () => {
     harnessCalls.length = 0;
     agents = fleet.map((a) => ({ ...a }));
     await view.rerender();
+    await view.saveKey();
+    expect(harnessCalls).toEqual([]);
+    await view.unmount();
+  });
+
+  test("after a reload, a second key keeps the agents the user moved back", async () => {
+    const first = await mount();
+    await first.saveKey();
+    expect(harnessCalls).toEqual(onPi);
+    await first.unmount();
+    harnessCalls.length = 0;
+    // The reload: a new page with the key saved and every agent back on Claude.
+    const view = await mount();
     await view.saveKey();
     expect(harnessCalls).toEqual([]);
     await view.unmount();
@@ -226,24 +240,53 @@ describe("StepAi: the switch on the first credential", () => {
     await view.unmount();
   });
 
-  test("a card that shows no key only while env presence loads does not arm", async () => {
-    // Restored cache data shows no key while the fetch runs; the fetch finds one.
-    presenceFetching = true;
+  test("a save before env presence loads switches once it loads", async () => {
+    presencePending = true;
     const view = await mount();
-    presenceFetching = false;
+    await view.saveKey();
+    expect(harnessCalls).toEqual([]);
+    presencePending = false;
+    await view.rerender();
+    await settle();
+    expect(harnessCalls).toEqual(onPi);
+    await view.unmount();
+  });
+
+  test("a save that calls back after env presence loaded with its key switches", async () => {
+    presencePending = true;
+    const view = await mount();
+    // The save refreshes env presence before it calls `onSaved`.
+    presencePending = false;
     savedState.open = true;
     await view.rerender();
+    await act(async () => cardOnSaved.open?.("openrouter"));
+    await settle();
+    expect(harnessCalls).toEqual(onPi);
+    await view.unmount();
+  });
+
+  test("a key removed while env presence loads drops the queued switch", async () => {
+    presencePending = true;
+    const view = await mount();
     await view.saveKey();
+    await view.removeKey();
+    presencePending = false;
+    await view.rerender();
+    await settle();
     expect(harnessCalls).toEqual([]);
     await view.unmount();
   });
 
-  test("a new key after the last one went is a first credential again", async () => {
-    savedState.open = true;
+  test("a first key on another card still switches after the open harness switch", async () => {
     const view = await mount();
-    await view.removeKey();
     await view.saveKey();
     expect(harnessCalls).toEqual(onPi);
+    harnessCalls.length = 0;
+    // Every agent runs Pi-Mono now. The OpenRouter key goes and a Claude token comes.
+    agents = fleet.map((a) => ({ ...a, harnessProvider: "pi" }) as unknown as AgentWithTasks);
+    await view.removeKey();
+    await view.saveKey("claude", "claude_setup_token");
+    expect(harnessCalls).toEqual(fleet.map((a) => [a.id, "claude"]));
     await view.unmount();
   });
 });
