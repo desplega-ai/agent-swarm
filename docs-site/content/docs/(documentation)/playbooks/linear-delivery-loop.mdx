@@ -45,17 +45,17 @@ One script, the tick, runs every five minutes. It reads each enrolled Linear pro
 - **Todo waits for blockers.** An open issue that `blocks` this one keeps it in Todo. Otherwise a coder agent starts on the issue's Linear `branchName`.
 - **CI failures go back to the coder.** A merge conflict or a failed required check dispatches a fix task on the same branch.
 - **An agent review gate guards the human.** With CI green, a reviewer agent returns a verdict for the exact head commit. Approved moves the issue to Ready for owner review and pings the owner once per commit. Changes requested goes back to the coder.
-- **Human review is answered, not escalated.** An open review thread, or a human "changes requested" at the head commit, dispatches a coder fix and moves the issue to Applying feedback. A new push moves it back to review.
+- **Human review is answered, not escalated.** An open review thread, or a human "changes requested" at the head commit, dispatches a coder fix and moves the issue to Applying feedback. With the review gate on, the fixed head goes back through Pending CI, so the agent approves every head a human sees.
 - **Approved arms auto-merge.** Conflicts or a failed run after approval dispatch a merge-queue fix. GitHub merges.
 - **Escalation parks the issue.** It sets Requires human action, comments the attempt log on the issue, sends the project lead a Slack DM and resets the attempt counters. The tick then ignores the issue until a human moves it back.
 - **A project completes itself.** When every issue is Done, Canceled or Duplicate, the tick marks the project completed and removes the label.
 
-<Mermaid title="The fix loop: CI conflicts and failures dispatch a coder fix without a state change; review threads and change requests dispatch a fix and move the issue to Applying feedback; a push moves it back to Ready for owner review." chart={`flowchart LR
+<Mermaid title="The fix loop: CI conflicts and failures dispatch a coder fix without a state change; review threads and change requests dispatch a fix and move the issue to Applying feedback; a push goes back to Pending CI for CI and the agent review." chart={`flowchart LR
   CI["Pending CI"] -- "DIRTY: fix conflicts<br/>red: fix ci" --> CI
   CI -- "bot thread or agent asks" --> AF["Applying feedback<br/>coder fix runs"]
   OR["Ready for owner review"] -- "thread open or human asks" --> AF
   ER["External review required"] -- "thread open" --> AF
-  AF -- "pushed, or threads resolved" --> OR
+  AF -- "pushed, or threads resolved" --> CI
   AF -- "no push, thread open: fix again" --> AF
   AP["Approved"] -- "DIRTY or red: fix mq" --> AP
 `} />
@@ -201,12 +201,13 @@ curl -s "${H[@]}" -X PATCH $SWARM_URL/api/schedules/$ID -d '{"scriptArgs":{"dryR
 2. **Backlog:** one pre-flight review, then nothing.
 3. **A stuck live task** escalates. Stuck means no update for 30 minutes and older than 120 minutes (240 for a coder task).
 4. **A human change request** at the head commit overrides the state action. The latest trusted review among CHANGES_REQUESTED, APPROVED and DISMISSED decides.
-5. **The state action** (the flowcharts above).
-6. **The dispatch guard:** a live task means wait, a missing `branchName` escalates, and an attempt over its cap escalates.
+5. **A merged pull request:** nothing past In Progress. Linear's Done can lag the merge by a tick.
+6. **The state action** (the flowcharts above).
+7. **The dispatch guard:** a live task means wait, a missing `branchName` escalates, and an attempt over its cap escalates.
 
 ### Trusted reviewers
 
-Only a trusted human's review moves an issue or dispatches a coder: a login in `github.ownerLogins` when that list is set, else an owner, member or collaborator of the repo (GitHub `authorAssociation`). The same rule applies to owner approval and to open review threads. Anyone can review a pull request on a public repo, so an outsider's approval never arms auto-merge and an outsider's comment never reaches a coder. The fix prompt quotes review text in a block that the coder treats as data, not instructions.
+Only a trusted human's review moves an issue or dispatches a coder: a login in `github.ownerLogins` when that list is set, else an owner, member or collaborator of the repo (GitHub `authorAssociation`). The same rule applies to owner approval and to open review threads: a thread counts when any of its comments is by a bot or a trusted human, so an outsider's reply cannot hide it. A thread with more than 30 comments counts without the check. Anyone can review a pull request on a public repo, so an outsider's approval never arms auto-merge and an outsider's comment never reaches a coder. The fix prompt quotes review text in a block that the coder treats as data, not instructions.
 
 ### Pull request lookup
 

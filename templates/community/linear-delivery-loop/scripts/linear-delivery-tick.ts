@@ -35,6 +35,8 @@ export const DEFAULT_STATES = {
 
 export type StateKey = keyof typeof DEFAULT_STATES;
 export const TERMINAL_STATES: StateKey[] = ["done", "canceled", "duplicate"];
+/** States that act before a PR exists; every later state skips a merged PR. */
+const PRE_PR_STATES: StateKey[] = ["todo", "inProgress"];
 /** Linear workflow state types that end an issue. */
 export const TERMINAL_TYPES = ["completed", "canceled", "duplicate"];
 
@@ -169,9 +171,10 @@ export type PrView = {
   }>;
   threads: Array<{
     isResolved: boolean;
-    lastAuthor: string;
-    lastAuthorIsBot: boolean;
-    lastAuthorAssociation: string;
+    /** Every fetched comment's author, so a later reply cannot hide who opened the thread. */
+    authors: Array<{ login: string; isBot: boolean; association: string }>;
+    /** The thread has more comments than `authors` covers. */
+    truncated: boolean;
   }>;
   requestedTeams: string[];
   autoMergeEnabled: boolean;
@@ -335,14 +338,33 @@ export function isTrustedHuman(
     : TRUSTED_ASSOCIATIONS.includes(association);
 }
 
-/** Unresolved threads whose last comment is by a bot or a trusted human. */
+type ThreadAuthor = PrView["threads"][number]["authors"][number];
+
+function isBotAuthor(a: ThreadAuthor, github: Config["github"]): boolean {
+  return a.isBot || isBotLogin(a.login, github.botLogins);
+}
+
+/**
+ * Unresolved threads with a comment by a bot or a trusted human. A truncated
+ * thread counts too: its unread comments may be trusted, so it blocks approval.
+ */
 function openThreads(pr: PrView, github: Config["github"]) {
   return pr.threads.filter(
     (t) =>
       !t.isResolved &&
-      (t.lastAuthorIsBot ||
-        isBotLogin(t.lastAuthor, github.botLogins) ||
-        isTrustedHuman(t.lastAuthor, t.lastAuthorAssociation, github)),
+      (t.truncated ||
+        t.authors.some(
+          (a) => isBotAuthor(a, github) || isTrustedHuman(a.login, a.association, github),
+        )),
+  );
+}
+
+/** With the review gate on, a human sees only a head the agent approved. */
+function agentApprovedHead(input: DecideInput, pr: PrView): boolean {
+  const review = input.record.agentReview;
+  return (
+    !input.config.reviewGate ||
+    (review?.sha === pr.headSha && review.verdict?.verdict === "approved")
   );
 }
 
@@ -421,6 +443,11 @@ export function decide(input: DecideInput): Action {
     }
   }
 
+  // GitHub merged it and Linear's Done can lag a tick: no review or fix action on a merged PR.
+  if (pr && !input.prError && pr.state === "MERGED" && !PRE_PR_STATES.includes(state)) {
+    return { type: "skip", reason: "merged" };
+  }
+
   return guard(stateAction(input), input);
 }
 
@@ -456,7 +483,6 @@ function stateAction(input: DecideInput): Action {
 
     case "pendingCi": {
       if (noPr || !pr) return { type: "escalate", reason: prError ?? "no PR in Pending CI" };
-      if (pr.state === "MERGED") return { type: "skip", reason: "merged" };
       if (pr.mergeStateStatus === "DIRTY") {
         return { type: "dispatch", kind: "fix", fixKind: "conflicts", reason: "merge conflict" };
       }
@@ -506,6 +532,9 @@ function stateAction(input: DecideInput): Action {
           text: threadText(pr, github),
         };
       }
+      if (!agentApprovedHead(input, pr)) {
+        return { type: "setState", to: "pendingCi", reason: "no agent approval for the head" };
+      }
       if (issue.state === "ownerReview" && !ownerApproved(pr, github)) {
         return { type: "wait", reason: "waiting for owner approval" };
       }
@@ -532,8 +561,10 @@ function stateAction(input: DecideInput): Action {
     case "applyingFeedback": {
       if (liveTask) return { type: "skip", reason: "coder fix runs" };
       if (noPr || !pr) return { type: "escalate", reason: prError ?? "no PR in Applying feedback" };
+      // Back to review only on a head the agent approved; otherwise CI and the gate run again.
+      const next = agentApprovedHead(input, pr) ? "ownerReview" : "pendingCi";
       if (record.fixSha && pr.headSha !== record.fixSha) {
-        return { type: "setState", to: "ownerReview", reason: "coder pushed" };
+        return { type: "setState", to: next, reason: "coder pushed" };
       }
       if (openThreads(pr, github).length > 0) {
         return {
@@ -544,12 +575,11 @@ function stateAction(input: DecideInput): Action {
           text: threadText(pr, github),
         };
       }
-      return { type: "setState", to: "ownerReview", reason: "no open thread" };
+      return { type: "setState", to: next, reason: "no open thread" };
     }
 
     case "approved": {
       if (noPr || !pr) return { type: "escalate", reason: prError ?? "no PR in Approved" };
-      if (pr.state === "MERGED") return { type: "skip", reason: "merged" };
       const failed = failedRequired(pr, github);
       if (pr.mergeStateStatus === "DIRTY" || failed.length > 0) {
         return {
@@ -574,17 +604,17 @@ function stateAction(input: DecideInput): Action {
 /** Spec Figure 8: bot threads first, then the agent review gate. */
 function ciGreen(input: DecideInput, pr: PrView): Action {
   const { record, config, caps } = input;
-  const botThread = pr.threads.find(
-    (t) =>
-      !t.isResolved && (t.lastAuthorIsBot || isBotLogin(t.lastAuthor, config.github.botLogins)),
-  );
-  if (botThread) {
+  const botAuthor = pr.threads
+    .filter((t) => !t.isResolved)
+    .flatMap((t) => t.authors)
+    .find((a) => isBotAuthor(a, config.github));
+  if (botAuthor) {
     return {
       type: "dispatch",
       kind: "fix",
       fixKind: "review",
       moveTo: "applyingFeedback",
-      reason: `unresolved bot thread by ${botThread.lastAuthor}`,
+      reason: `unresolved bot thread by ${botAuthor.login}`,
       text: threadText(pr, config.github),
     };
   }
@@ -1031,7 +1061,7 @@ const GITHUB_PR = `query LdlPr($owner: String!, $name: String!, $number: Int!) {
         } }
       } } } }
       reviews(last: 50) { nodes { author { login __typename } authorAssociation state body commit { oid } } }
-      reviewThreads(last: 50) { nodes { isResolved comments(last: 1) { nodes { author { login __typename } authorAssociation } } } }
+      reviewThreads(last: 50) { nodes { isResolved comments(first: 30) { totalCount nodes { author { login __typename } authorAssociation } } } }
       reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on Team { slug } } } }
     }
   }
@@ -1119,12 +1149,15 @@ export async function readPr(
       association: str(r.authorAssociation),
     })),
     threads: nodes(pr, "reviewThreads").map((t) => {
-      const last = nodes(t, "comments")[0];
+      const comments = nodes(t, "comments");
       return {
         isResolved: t.isResolved === true,
-        lastAuthor: str(get(last, "author.login")),
-        lastAuthorIsBot: authorBot(get(last, "author")),
-        lastAuthorAssociation: str(get(last, "authorAssociation")),
+        authors: comments.map((c) => ({
+          login: str(get(c, "author.login")),
+          isBot: authorBot(get(c, "author")),
+          association: str(get(c, "authorAssociation")),
+        })),
+        truncated: Number(get(t, "comments.totalCount")) > comments.length,
       };
     }),
     requestedTeams: nodes(pr, "reviewRequests")

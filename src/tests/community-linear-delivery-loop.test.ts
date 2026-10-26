@@ -25,6 +25,7 @@ import tick, {
   PROMPTS,
   type PrRef,
   type PrView,
+  readPr,
   resolveCaps,
   type StateKey,
   settleLastTask,
@@ -123,20 +124,18 @@ const approvedReview = {
   body: "",
   association: "MEMBER",
 };
-const openThread = {
-  isResolved: false,
-  lastAuthor: "owner",
-  lastAuthorIsBot: false,
-  lastAuthorAssociation: "MEMBER",
-};
+const ownerComment = { login: "owner", isBot: false, association: "MEMBER" };
+const outsiderComment = { login: "drive-by", isBot: false, association: "NONE" };
+const openThread = { isResolved: false, authors: [ownerComment], truncated: false };
 const botThread = {
   isResolved: false,
-  lastAuthor: "review-bot",
-  lastAuthorIsBot: true,
-  lastAuthorAssociation: "NONE",
+  authors: [{ login: "review-bot", isBot: true, association: "NONE" }],
+  truncated: false,
 };
 const outsider = { author: "drive-by", association: "NONE" };
 const approvedVerdict = { verdict: "approved" as const, headSha: HEAD, summary: "ok" };
+/** The agent review gate approved the current head. */
+const reviewedHead = { agentReview: { sha: HEAD, taskId: "r1", verdict: approvedVerdict } };
 
 type Expect = Partial<Action> & { type: Action["type"] };
 
@@ -346,6 +345,7 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   [
     "spec: Ready for owner review / no non-bot APPROVED -> nothing",
     input({
+      record: record(reviewedHead),
       issue: issue("ownerReview"),
       pr: pr({ reviews: [{ ...approvedReview, author: "review-bot", isBot: true }] }),
     }),
@@ -354,6 +354,7 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   [
     "spec: Ready for owner review / a team still requested -> External review required and post",
     input({
+      record: record(reviewedHead),
       issue: issue("ownerReview"),
       pr: pr({ reviews: [approvedReview], requestedTeams: ["infra"] }),
     }),
@@ -361,7 +362,11 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   ],
   [
     "spec: Ready for owner review / owner approved, no team -> Approved",
-    input({ issue: issue("ownerReview"), pr: pr({ reviews: [approvedReview] }) }),
+    input({
+      record: record(reviewedHead),
+      issue: issue("ownerReview"),
+      pr: pr({ reviews: [approvedReview] }),
+    }),
     { type: "setState", to: "approved" },
   ],
   [
@@ -369,7 +374,10 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
     input({
       issue: issue("externalReview"),
       pr: pr({ requestedTeams: ["infra"] }),
-      record: record({ posted: { ownerPing: [], teams: [{ sha: HEAD, teams: "infra" }] } }),
+      record: record({
+        ...reviewedHead,
+        posted: { ownerPing: [], teams: [{ sha: HEAD, teams: "infra" }] },
+      }),
     }),
     { type: "wait" },
   ],
@@ -378,13 +386,16 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
     input({
       issue: issue("externalReview"),
       pr: pr({ requestedTeams: ["infra", "security"] }),
-      record: record({ posted: { ownerPing: [], teams: [{ sha: HEAD, teams: "infra" }] } }),
+      record: record({
+        ...reviewedHead,
+        posted: { ownerPing: [], teams: [{ sha: HEAD, teams: "infra" }] },
+      }),
     }),
     { type: "setState", to: "externalReview", post: { sha: HEAD, teams: ["infra", "security"] } },
   ],
   [
     "spec: External review required / teams covered, no owner approval needed -> Approved",
-    input({ issue: issue("externalReview"), pr: pr() }),
+    input({ record: record(reviewedHead), issue: issue("externalReview"), pr: pr() }),
     { type: "setState", to: "approved" },
   ],
   [
@@ -403,11 +414,21 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
     { type: "skip" },
   ],
   [
-    "spec: Applying feedback / head differs from fix sha -> Ready for owner review",
+    "spec: Applying feedback / head differs from fix sha -> Pending CI: CI and the agent gate rerun",
     input({
       issue: issue("applyingFeedback"),
       pr: pr({ threads: [openThread] }),
       record: record({ fixSha: "older" }),
+    }),
+    { type: "setState", to: "pendingCi" },
+  ],
+  [
+    "spec: Applying feedback / head differs from fix sha, gate off -> Ready for owner review",
+    input({
+      issue: issue("applyingFeedback"),
+      pr: pr({ threads: [openThread] }),
+      record: record({ fixSha: "older" }),
+      config: { ...CONFIG, reviewGate: false },
     }),
     { type: "setState", to: "ownerReview" },
   ],
@@ -421,9 +442,41 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
     { type: "dispatch", fixKind: "review" },
   ],
   [
-    "spec: Applying feedback / no push and no unresolved thread -> Ready for owner review",
-    input({ issue: issue("applyingFeedback"), pr: pr(), record: record({ fixSha: HEAD }) }),
+    "spec: Applying feedback / no push, no thread, head agent-approved -> Ready for owner review",
+    input({
+      issue: issue("applyingFeedback"),
+      pr: pr(),
+      record: record({ ...reviewedHead, fixSha: HEAD }),
+    }),
     { type: "setState", to: "ownerReview" },
+  ],
+  [
+    "spec: Applying feedback / no push, no thread, head not agent-approved -> Pending CI",
+    input({ issue: issue("applyingFeedback"), pr: pr(), record: record({ fixSha: HEAD }) }),
+    { type: "setState", to: "pendingCi" },
+  ],
+  [
+    "spec: Ready for owner review / owner approved but no agent approval for the head -> Pending CI",
+    input({ issue: issue("ownerReview"), pr: pr({ reviews: [approvedReview] }) }),
+    { type: "setState", to: "pendingCi" },
+  ],
+  [
+    "spec: External review required / agent approved an older head -> Pending CI",
+    input({
+      issue: issue("externalReview"),
+      pr: pr(),
+      record: record({ agentReview: { ...reviewedHead.agentReview, sha: "older" } }),
+    }),
+    { type: "setState", to: "pendingCi" },
+  ],
+  [
+    "spec: Ready for owner review / owner approved, gate off -> Approved",
+    input({
+      issue: issue("ownerReview"),
+      pr: pr({ reviews: [approvedReview] }),
+      config: { ...CONFIG, reviewGate: false },
+    }),
+    { type: "setState", to: "approved" },
   ],
   [
     "spec: Approved / PR MERGED -> nothing",
@@ -495,6 +548,7 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   [
     "spec: Any active state / CHANGES_REQUESTED on an older commit -> state action",
     input({
+      record: record(reviewedHead),
       issue: issue("ownerReview"),
       pr: pr({
         reviews: [
@@ -518,6 +572,7 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   [
     "spec: Any active state / with ownerLogins set, a reviewer outside it is ignored",
     input({
+      record: record(reviewedHead),
       issue: issue("ownerReview"),
       config: { ...CONFIG, github: { ...GITHUB, ownerLogins: ["lead-dev"] } },
       pr: pr({
@@ -544,6 +599,7 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   [
     "spec: Ready for owner review / an outsider's APPROVED is not the owner's",
     input({
+      record: record(reviewedHead),
       issue: issue("ownerReview"),
       pr: pr({ reviews: [{ ...approvedReview, ...outsider }] }),
     }),
@@ -552,10 +608,11 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   [
     "spec: Ready for owner review / an outsider's open thread is not review",
     input({
+      record: record(reviewedHead),
       issue: issue("ownerReview"),
       pr: pr({
         reviews: [approvedReview],
-        threads: [{ ...openThread, lastAuthor: "drive-by", lastAuthorAssociation: "NONE" }],
+        threads: [{ ...openThread, authors: [outsiderComment] }],
       }),
     }),
     { type: "setState", to: "approved" },
@@ -563,6 +620,7 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   [
     "spec: Ready for owner review / ownerLogins set: a listed login approves -> Approved",
     input({
+      record: record(reviewedHead),
       issue: issue("ownerReview"),
       config: { ...CONFIG, github: { ...GITHUB, ownerLogins: ["drive-by"] } },
       pr: pr({ reviews: [{ ...approvedReview, ...outsider }] }),
@@ -661,6 +719,140 @@ describe("decide(): the spec reference table", () => {
 
   test("unknown Linear state is skipped, not guessed", () => {
     expect(decide(input({ issue: issue("unknown") })).type).toBe("skip");
+  });
+});
+
+describe("decide(): review sequences", () => {
+  const rejected = {
+    agentReview: {
+      sha: HEAD,
+      taskId: "r1",
+      verdict: { ...approvedVerdict, verdict: "changes_requested" as const },
+    },
+  };
+
+  test("agent rejects, coder finishes with no push: back to the fix loop, never Approved", () => {
+    const owner = pr({ reviews: [approvedReview] });
+    const first = decide(input({ issue: issue("pendingCi"), pr: owner, record: record(rejected) }));
+    expect(first).toMatchObject({
+      type: "dispatch",
+      fixKind: "review",
+      moveTo: "applyingFeedback",
+    });
+    const after = record({ ...rejected, fixSha: HEAD });
+    expect(
+      decide(input({ issue: issue("applyingFeedback"), pr: owner, record: after })),
+    ).toMatchObject({ type: "setState", to: "pendingCi" });
+    expect(decide(input({ issue: issue("pendingCi"), pr: owner, record: after }))).toMatchObject({
+      type: "dispatch",
+      fixKind: "review",
+    });
+  });
+
+  test("agent rejects, coder pushes a new head: the new head is reviewed before the owner", () => {
+    const pushed = pr({ headSha: "b2", reviews: [approvedReview] });
+    const after = record({ ...rejected, fixSha: HEAD });
+    expect(
+      decide(input({ issue: issue("applyingFeedback"), pr: pushed, record: after })),
+    ).toMatchObject({ type: "setState", to: "pendingCi" });
+    expect(decide(input({ issue: issue("pendingCi"), pr: pushed, record: after }))).toMatchObject({
+      type: "dispatch",
+      kind: "review",
+    });
+    // Even if the issue sits in owner review, an old owner approval does not arm auto-merge.
+    expect(decide(input({ issue: issue("ownerReview"), pr: pushed, record: after }))).toMatchObject(
+      { type: "setState", to: "pendingCi" },
+    );
+  });
+
+  test.each([
+    "ownerReview",
+    "externalReview",
+    "applyingFeedback",
+  ] as const)("%s: a merged PR with an open trusted thread dispatches nothing", (state) => {
+    const action = decide(
+      input({
+        issue: issue(state),
+        pr: pr({ state: "MERGED", threads: [openThread] }),
+        record: record({ ...reviewedHead, fixSha: HEAD }),
+      }),
+    );
+    expect(action).toMatchObject({ type: "skip", reason: "merged" });
+  });
+});
+
+describe("readPr(): thread provenance", () => {
+  function client(comments: Array<{ login: string; association: string }>, totalCount: number) {
+    return {
+      graphql: async () => ({
+        repository: {
+          pullRequest: {
+            id: "PR_1",
+            url: "https://github.com/acme/app/pull/7",
+            state: "OPEN",
+            mergeStateStatus: "CLEAN",
+            headRefOid: HEAD,
+            commits: { nodes: [] },
+            reviews: {
+              nodes: [
+                {
+                  author: { login: "owner", __typename: "User" },
+                  authorAssociation: "MEMBER",
+                  state: "APPROVED",
+                  body: "",
+                  commit: { oid: HEAD },
+                },
+              ],
+            },
+            reviewThreads: {
+              nodes: [
+                {
+                  isResolved: false,
+                  comments: {
+                    totalCount,
+                    nodes: comments.map((c) => ({
+                      author: { login: c.login, __typename: "User" },
+                      authorAssociation: c.association,
+                    })),
+                  },
+                },
+              ],
+            },
+            reviewRequests: { nodes: [] },
+          },
+        },
+      }),
+    };
+  }
+  const ref: PrRef = { repo: "acme/app", number: 7, headRefName: "eng-12", state: "OPEN" };
+  const ownerAt = (view: PrView) =>
+    decide(input({ issue: issue("ownerReview"), pr: view, record: record(reviewedHead) }));
+
+  test("an outsider's reply does not hide a trusted thread", async () => {
+    const view = await readPr(
+      client(
+        [
+          { login: "owner", association: "MEMBER" },
+          { login: "drive-by", association: "NONE" },
+        ],
+        2,
+      ),
+      ref,
+      [],
+    );
+    expect(view.threads[0]?.authors.map((a) => a.login)).toEqual(["owner", "drive-by"]);
+    expect(ownerAt(view)).toMatchObject({ type: "dispatch", fixKind: "review" });
+  });
+
+  test("a thread only an outsider wrote is not review", async () => {
+    const view = await readPr(client([{ login: "drive-by", association: "NONE" }], 1), ref, []);
+    expect(ownerAt(view)).toMatchObject({ type: "setState", to: "approved" });
+  });
+
+  test("a thread with more comments than were read blocks approval", async () => {
+    const view = await readPr(client([{ login: "drive-by", association: "NONE" }], 31), ref, []);
+    expect(view.threads[0]?.truncated).toBe(true);
+    expect(ownerAt(view)).toMatchObject({ type: "dispatch", fixKind: "review" });
   });
 });
 
