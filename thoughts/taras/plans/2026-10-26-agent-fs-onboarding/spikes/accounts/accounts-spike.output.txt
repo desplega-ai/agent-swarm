@@ -1,0 +1,51 @@
+
+=== 1. bootstrap admin ===
+POST /auth/register (admin)                                -> 200 {"apiKey":"<redacted>","userId":"165e255a-f1bd-4e3a-a4ce-35fd41d6e58a","orgId":"01690f02-481d-4323-96f3-4e55305b6bff"}
+GET /orgs                                                  -> 200 {"orgs":[{"id":"01690f02-481d-4323-96f3-4e55305b6bff","name":"agent-fs-admin-spikedpyucq","role":"admin","isPersonal":true}]}
+POST /orgs {name:swarm}                                    -> 201 {"id":"b0e3796a-b806-47fd-9804-8a27da554ef2","name":"swarm"}
+GET /orgs/:o/drives                                        -> 200 {"drives":[{"id":"1f6e4da2-99bd-4d04-a131-948963518713","name":"default","isDefault":true}]}
+shared drive = the default drive of the org: default
+GET /orgs/:o/members                                       -> 200 {"members":[{"userId":"165e255a-f1bd-4e3a-a4ce-35fd41d6e58a","email":"agent-fs-admin-spikedpyucq@swarm.local","role":"admin"}]}
+
+=== 2. new person: register, invite, list ===
+invite BEFORE register (seeder boot path)                  -> 500 {"error":"INTERNAL_ERROR","message":"User with email ada-dpyucq@x.com not found"}
+POST /auth/register (ada)                                  -> 200 {"apiKey":"<redacted>","userId":"b0416fe0-ca86-4f81-8d91-defca972d820","orgId":"b8607e10-264e-4a8d-bb3b-9993e6bac6e5"}
+ada ls shared BEFORE invite                                -> 404 {"error":"NOT_FOUND","message":"Drive not found: 1f6e4da2-99bd-4d04-a131-948963518713","suggestion":"Check the driveId belongs to the org you are addressing"}
+ada GET /orgs/:o/drives BEFORE invite                      -> 404 {"error":"NOT_FOUND","message":"Org not found: b0e3796a-b806-47fd-9804-8a27da554ef2","suggestion":"Check the org id or ask an org admin for access"}
+invite ada editor (admin key)                              -> 200 {"ok":true}
+ada GET /orgs/:o/drives AFTER invite                       -> 200 {"drives":[{"id":"1f6e4da2-99bd-4d04-a131-948963518713","name":"default","isDefault":true}]}
+ada ls shared AFTER invite                                 -> 200 {"entries":[]}
+ada GET /auth/me                                           -> 200 {"userId":"b0416fe0-ca86-4f81-8d91-defca972d820","email":"ada-dpyucq@x.com","displayName":null,"defaultOrgId":"b8607e10-264e-4a8d-bb3b-9993e6bac6e5",
+ada write (editor can write)                               -> 200 {"version":1,"path":"/hello.md","size":2,"contentHash":"8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4","deduped":false}
+invite ada again (idempotent?)                             -> 200 {"ok":true}
+
+=== 3. registered, not a member ===
+POST /auth/register (bob, first)                           -> 200 {"apiKey":"<redacted>","userId":"9d84f92e-1057-4c3d-b9f8-d5511fda9925","orgId":"3b021a95-4b77-43a9-9859-008b6bde0d1d"}
+bob ls shared (non-member)                                 -> 404 {"error":"NOT_FOUND","message":"Drive not found: 1f6e4da2-99bd-4d04-a131-948963518713","suggestion":"Check the driveId belongs to the org you are addressing"}
+POST /auth/register (bob, again)                           -> 409 {"error":"CONFLICT","message":"User with this email already exists"}
+invite bob editor                                          -> 200 {"ok":true}
+bob ls shared (member)                                     -> 200 {"entries":[{"name":"hello.md","type":"file","size":2,"author":"b0416fe0-ca86-4f81-8d91-defca972d820","modifiedAt":"2026-10-26T01:10:33.000Z"}]}
+bob member row keys: userId,email,role role: editor
+admin reset-key for bob                                    -> 200 {"apiKey":"<redacted>","userId":"9d84f92e-1057-4c3d-b9f8-d5511fda9925","email":"bob-dpyucq@x.com"}
+bob OLD key ls                                             -> 401 {"error":"UNAUTHORIZED","message":"Invalid API key","suggestion":"Register with POST /auth/register"}
+bob OLD key /auth/me                                       -> 401 {"error":"UNAUTHORIZED","message":"Invalid API key","suggestion":"Register with POST /auth/register"}
+bob NEW key ls                                             -> 200 {"entries":[{"name":"hello.md","type":"file","size":2,"author":"b0416fe0-ca86-4f81-8d91-defca972d820","modifiedAt":"2026-10-26T01:10:33.000Z"}]}
+admin reset-key for NON-member eve                         -> 404 {"error":"NOT_FOUND","message":"Org not found: b0e3796a-b806-47fd-9804-8a27da554ef2","suggestion":"Check the org id or ask an org admin for access"}
+ada (editor) tries invite                                  -> 403 {"error":"PERMISSION_DENIED","message":"This operation requires 'admin' role in the org","suggestion":"Ask an org admin to perform this operation","required_role":"admin","your_role":"editor"}
+ada (editor) tries list members                            -> 403 {"error":"PERMISSION_DENIED","message":"This operation requires 'admin' role in the org","suggestion":"Ask an org admin to perform this operation","required_role":"admin","your_role":"editor"}
+
+=== 4. case differences ===
+register Foo (mixed)                                       -> 200 {"apiKey":"<redacted>","userId":"42fd2ee5-bfb5-48e2-bf3e-06875a324508","orgId":"37619174-52cd-4fd5-980b-d1ed42c651e3"}
+register foo (lower)                                       -> 200 {"apiKey":"<redacted>","userId":"04d9861c-33c3-45e7-8c00-c3e75160f782","orgId":"e11ad27b-0da6-44a4-939b-9ac03d9b238d"}
+invite lower-case when account is mixed-case               -> 200 {"ok":true}
+invite exact mixed-case                                    -> 200 {"ok":true}
+members matching case-insensitively: [{"email":"foo-dpyucq@x.com","role":"editor"},{"email":"Foo-dpyucq@x.com","role":"editor"}]
+invite upper-case of lower-case account                    -> 500 {"error":"INTERNAL_ERROR","message":"User with email BAR-DPYUCQ@X.COM not found"}
+invite with trailing space                                 -> 500 {"error":"INTERNAL_ERROR","message":"User with email ws-dpyucq@x.com  not found"}
+
+=== 5. person email equals bootstrap email ===
+register bootstrap email again                             -> 409 {"error":"CONFLICT","message":"User with this email already exists"}
+invite bootstrap email as editor (raw, no guard)           -> 200 {"ok":true}
+bootstrap role before=admin after=undefined
+bootstrap admin lists members after demotion?              -> 403 {"error":"PERMISSION_DENIED","message":"This operation requires 'admin' role in the org","suggestion":"Ask an org admin to perform this operation","required_role":"admin","your_role":"editor"}
+register upper-case bootstrap email                        -> 200 {"apiKey":"<redacted>","userId":"2299b3ac-857e-48c6-80e4-13364d9cce26","orgId":"c0fb7d72-4933-442d-ab4d-22f360b4ad67"}

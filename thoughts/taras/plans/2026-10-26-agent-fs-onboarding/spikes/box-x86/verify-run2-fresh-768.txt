@@ -1,0 +1,79 @@
+## IDLE (after boot settle)
+swarm-agent-fs 281.1MiB 0.03%
+swarm-api 338.7MiB 0.09%
+swarm-lead 203.7MiB 7.62%
+swarm-tei 653.6MiB 0.32%
+swarm-worker-coder 160.4MiB 0.24%
+               total        used        free      shared  buff/cache   available
+Mem:            7745        3348         277           5        4436        4397
+
+## MEMORY: index 12 notes (swarm scope), wait for async embedding via TEI
+vec retrieval ready after .177158240 s
+health(last): {"sqliteVec":{"extensionLoaded":true,"tableExists":true,"initialized":true,"vectorDimensions":768,"distanceMetric":"cosine","schema":"CREATE VIRTUAL TABLE memory_vec USING vec0(\n          memory_id TEXT PRIMARY KEY,\n          embedding float[768] distance_metric=cosine\n        )","lastPopulate":null},"counts":{"total":12,"withEmbedding":1,"validEmbedding":1,"invalidEmbedding":0,"searchable":1,"memoryVec":1,"missingFromVec":0,"extraInVec":0},"retrievalMode":"vec","reasons":[]}
+Q: how do I publish a release
+   deploy-runbook   sim=1.075 src=hybrid
+   onboarding-faq   sim=0.671 src=hybrid
+   slack-setup      sim=0.661 src=hybrid
+Q: feline resting near the window
+   cat-habits       sim=1.077 src=hybrid
+   coffee           sim=0.580 src=hybrid
+   slack-setup      sim=0.526 src=hybrid
+Q: who do I ask about money back
+   billing-owner    sim=0.676 src=vec
+   incident-2026    sim=0.549 src=hybrid
+   hiring           sim=0.542 src=vec
+Q: connect our team chat
+   slack-setup      sim=0.883 src=hybrid
+   hiring           sim=0.779 src=hybrid
+   security         sim=0.683 src=hybrid
+Q: keep copies of the database
+   db-backup        sim=1.003 src=hybrid
+   deploy-runbook   sim=0.677 src=hybrid
+   onboarding-faq   sim=0.631 src=hybrid
+Q: the system went down because workers disconnected
+   incident-2026    sim=1.086 src=hybrid
+   onboarding-faq   sim=0.669 src=hybrid
+   coffee           sim=0.646 src=hybrid
+
+## AGENT-FS: write 20 files with the lead's agent key, then semantic search
+agent key length: 67 (value not printed)
+me:
+   {'email': '3db4610d-a403-406f-840e-fb08dc2e9b1f@swarm.local'} orgs: 0
+200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 
+20 writes done in 10.403285139 s
+first semantic hit after 10.908558010 s total
+Q: feline resting near the window
+  [vec-search] /notes/cat.md 0.81 | /notes/coffee.md 0.60 | /notes/security.md 0.59
+  [search] /notes/cat.md 1.00 | /notes/coffee.md 0.98 | /notes/outage.md 0.95
+Q: how do I publish a new version
+  [vec-search] /notes/release.md 0.67 | /notes/roadmap.md 0.66 | /notes/chat.md 0.61
+  [search] /notes/roadmap.md 0.96 | /notes/chat.md 0.95 | /notes/wizard.md 0.94
+Q: who do I ask to get my money back
+  [vec-search] /notes/refunds.md 0.79 | /notes/legal.md 0.62 | /notes/support.md 0.61
+  [search] /notes/refunds.md 1.00 | /notes/support.md 0.97 | /notes/outage.md 0.94
+Q: connect our team chat
+  [vec-search] /notes/chat.md 0.73 | /notes/security.md 0.67 | /notes/support.md 0.66
+  [search] /notes/security.md 0.98 | /notes/chat.md 0.98 | /notes/pricing.md 0.96
+Q: keep copies of the database
+  [vec-search] /notes/backup.md 0.81 | /notes/security.md 0.67 | /notes/data.md 0.66
+  [search] /notes/backup.md 1.00 | /notes/cat.md 0.96 | /notes/coffee.md 0.95
+Q: the system went down because agents disconnected
+  [vec-search] /notes/outage.md 0.77 | /notes/support.md 0.67 | /notes/cat.md 0.66
+  [search] /notes/outage.md 1.00 | /notes/cat.md 0.98 | /notes/coffee.md 0.95
+Q: when do new hires get equipment
+  [vec-search] /notes/onboard-staff.md 0.75 | /notes/coffee.md 0.61 | /notes/wizard.md 0.61
+  [search] /notes/onboard-staff.md 1.00 | /notes/coffee.md 0.49 | /notes/wizard.md 0.48
+
+## PEAKS during agent-fs writes + search
+  peak swarm-agent-fs: 334 MiB, cpu 159%
+  peak swarm-api: 346 MiB, cpu 4%
+  peak swarm-tei: 659 MiB, cpu 3%
+
+## IDLE again
+swarm-agent-fs 326.9MiB 0.34%
+swarm-api 344.1MiB 0.09%
+swarm-lead 201.8MiB 0.02%
+swarm-tei 659.3MiB 0.29%
+swarm-worker-coder 156.4MiB 0.02%
+               total        used        free      shared  buff/cache   available
+Mem:            7745        3348         247           5        4466        4397

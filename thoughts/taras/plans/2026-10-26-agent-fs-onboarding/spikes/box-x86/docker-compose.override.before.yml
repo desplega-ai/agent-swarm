@@ -1,0 +1,6 @@
+# Written by install.sh --tunnel. Compose merges this file into
+# docker-compose.yml automatically.
+services:
+  swarm-api:
+    environment:
+      - PUBLIC_MCP_BASE_URL=${PUBLIC_MCP_BASE_URL:-}
