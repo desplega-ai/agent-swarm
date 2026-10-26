@@ -179,6 +179,8 @@ Which credentials you need depends on your selected harness provider:
 | `OPENAI_API_KEY` | Optional | — | Standard OpenAI API key for Codex |
 | `API_KEY` | Yes | — | Swarm API key used to fetch `codex_oauth` from the config store |
 | `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
+| `CODEX_GATEWAY_BASE_URL` | No | — | OpenAI base URL of a model gateway, including the version prefix (`https://gw.example.com/v1`). Any host except `api.openai.com` selects the gateway route, which wins over Codex OAuth, `OPENAI_API_KEY` and `~/.codex/auth.json`. See [Model Gateways](/docs/guides/provider-auth/model-gateways) |
+| `CODEX_GATEWAY_API_KEY` | With `CODEX_GATEWAY_BASE_URL` | — | Gateway key, sent as `Authorization: Bearer`. The gateway route fails closed without it |
 | `CODEX_SKILLS_DIR` | No | `~/.codex/skills` | Directory used by the Codex inline slash-command resolver to find `<name>/SKILL.md` (mirrors `OPENCODE_SKILLS_DIR`) |
 | `CODEX_PATH_OVERRIDE` | No | Set automatically in the Docker image (`/usr/bin/codex`) | Absolute path to the Codex CLI wrapper or binary. The app-server transport invokes this path with `app-server --listen stdio://`. Use it for non-Docker or custom installs. |
 | `AGENT_SWARM_CODEX_RUNNER_ARGV` | No | Inferred from `process.argv` (dev vs. compiled-binary layout) | JSON-encoded string array overriding the argv prefix used to re-launch the `codex-session-runner` subprocess. Niche escape hatch for nonstandard install/packaging layouts |

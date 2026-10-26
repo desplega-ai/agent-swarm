@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-26
+
+### Added
+- Workflows: `GET /api/workflow-runs/{id}/tree` returns a run with all its child runs (#2419); `fields=slim` on `GET /api/workflow-runs/{id}` and the `get-workflow-run` tool drops `run.context` and per-step inputs for cheap polling (#2418).
+- Tasks: `GET /api/tasks` and the `get-tasks` tool filter by `workflowRunId` (#2417).
+- Codex: route Codex through an OpenAI-compatible gateway with `CODEX_GATEWAY_BASE_URL` and `CODEX_GATEWAY_API_KEY`; the route wins over Codex OAuth and `OPENAI_API_KEY` (#2426).
+- Credentials: list, add and remove single pool keys, with an instant key check (#2430).
+- Sessions: Slack and chat source sections, source keys, and a backfill (#2408).
+- Extensions: task creation hooks expose the Slack messages of the task (#2412).
+- DB retention: opt-in `SCRIPT_RUNS_RETENTION_DAYS` prunes finished script runs; running, paused and keyed runs are kept (#2404).
+- Comb: search, share links, audio and HTML preview, uploads (#2406); send any comment, bulk resolve, an In progress home, Recent and Favorites (#2420); a file menu, filters, search in the URL, agent-fs stars and asset comments (#2428).
+- Skills: an `onboarding-qa` maintainer skill with install, ui and stack modes (#2362).
+
+### Changed
+- Worker image bumps amp and qwen (#2411, #2421).
+- Evals: benchmark 1.0 published from the weekly run (#2414).
+- Skills: researching skill retrieval guidance re-pinned (#2410).
+- Docs: release notes for the week of 2026-10-26 (#2434), the launch video as the README hero (#2429, #2431), skill-write verification in the script guide (#2409), and TLA+ specs synced with main (#2413).
+
+### Fixed
+- Workflows: a sub-workflow step whose child run was deleted is not retried (#2433); run steps with equal `startedAt` are ordered by rowid (#2416).
+- Credentials: each pool key is tested, re-tested on change, and Claude tokens are checked (#2422).
+- Claude: workspace trust is seeded in the session HOME, not the host `~/.claude.json` (#2424).
+- Onboarding: clean install and `/setup` flow for new users (#2405).
+- Sessions: readable thread group labels and the phone filter button (#2423).
+- Tests: the API spawn retries when its free port is taken (#2427).
+
 ## [2.5.4] - 2026-10-25
 
 ### Added

@@ -272,6 +272,7 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 | `tags` | `array` | No | - | Filter by any matching tag. |
 | `search` | `string` | No | - | Search in task description. |
 | `scheduleId` | `string` | No | - | Filter by schedule ID to find tasks created by a specific schedule. |
+| `workflowRunId` | `string` | No | - | Filter by workflow run ID to find the tasks of a single run. |
 | `key` | `unknown` | No | - | Filter by exact logical namespace. |
 | `keyPrefix` | `unknown` | No | - | Filter by namespace subtree. |
 | `includeHeartbeat` | `boolean` | No | - | Include heartbeat/system tasks in results (excluded by default). |
