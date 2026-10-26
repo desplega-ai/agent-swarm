@@ -308,13 +308,45 @@ function getAppBaseUrl(): string {
   return getAppUrl(LOCAL_PAGE_APP_URL);
 }
 
+// CSP host-source without a path: optional http(s) scheme, a host that may
+// start with a `*.` wildcard label, and an optional port (digits or `*`).
+// Bare `*`, keywords (`'none'`, `'self'`) and anything carrying `;` or a path
+// are rejected so a bad env value cannot widen or break the policy.
+const FRAME_ANCESTOR_SOURCE_RE =
+  /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::(?:\d{1,5}|\*))?$/i;
+
+let cachedFrameAncestors: { raw: string; origins: string[] } | null = null;
+
+/**
+ * Parse `PAGES_FRAME_ANCESTORS`: extra origins allowed to iframe PUBLIC pages
+ * (for example a marketing site embedding a chart). Comma or space separated.
+ * Invalid entries are dropped with one warning per distinct env value; the
+ * parse is cached on the raw string so a config reload picks up changes
+ * without re-warning on every request.
+ */
+export function getPageFrameAncestors(): string[] {
+  const raw = process.env.PAGES_FRAME_ANCESTORS ?? "";
+  if (cachedFrameAncestors?.raw === raw) return cachedFrameAncestors.origins;
+  const origins: string[] = [];
+  for (const entry of raw.split(/[\s,]+/)) {
+    const value = entry.replace(/\/+$/, "");
+    if (!value) continue;
+    if (FRAME_ANCESTOR_SOURCE_RE.test(value)) origins.push(value);
+    else console.warn(`[pages] ignoring invalid PAGES_FRAME_ANCESTORS entry: ${entry}`);
+  }
+  cachedFrameAncestors = { raw, origins };
+  return origins;
+}
+
 /**
  * Build the `Content-Security-Policy` for the served HTML. Allows inline
  * scripts (required for `BROWSER_SDK_JS`) but locks down everything else to
  * `'self'`. The SPA iframes the page in step-6 with `sandbox="allow-scripts
- * allow-forms"`; the CSP is a defence-in-depth layer.
+ * allow-forms"`; the CSP is a defence-in-depth layer. `PAGES_FRAME_ANCESTORS`
+ * applies only to public pages: authed and password pages stay embeddable by
+ * the app origins alone.
  */
-function buildCsp(): string {
+function buildCsp(page: Page): string {
   // `frame-ancestors` lists every origin allowed to iframe `/p/:id`. We must
   // include the SPA origin(s). Configured app URLs may be comma-separated so
   // portless dev (`https://ui.swarm.localhost`), a Vite port (`http://localhost:5274`),
@@ -333,7 +365,8 @@ function buildCsp(): string {
           "https://*.localhost",
           "http://*.localhost",
         ];
-  const ancestors = Array.from(new Set([...configured, ...devFallbacks]));
+  const embedders = page.authMode === "public" ? getPageFrameAncestors() : [];
+  const ancestors = Array.from(new Set([...configured, ...devFallbacks, ...embedders]));
   // Allow Tailwind Play CDN (`cdn.tailwindcss.com`) for scripts, Google
   // Fonts (`fonts.googleapis.com` stylesheets + `fonts.gstatic.com` font
   // files) for the swarm default typography, and same-origin /@swarm/api/*
@@ -609,7 +642,7 @@ export async function handlePagesPublic(
       const headers: Record<string, string | string[]> = {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
-        "Content-Security-Policy": buildCsp(),
+        "Content-Security-Policy": buildCsp(page),
         "X-Content-Type-Options": "nosniff",
       };
       if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
@@ -642,7 +675,7 @@ export async function handlePagesPublic(
   const headers: Record<string, string | string[]> = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",
-    "Content-Security-Policy": buildCsp(),
+    "Content-Security-Policy": buildCsp(page),
     // Defence-in-depth: prevent MIME sniffing and clickjacking outside the SPA.
     "X-Content-Type-Options": "nosniff",
   };

@@ -279,6 +279,14 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       }),
     );
     prompt += toolsResult.text;
+
+    // Lead docs pointer: only when the lead has the `swarm-docs` skill. The
+    // skill list is unknown on claude-managed (the cloud sandbox owns skill
+    // delivery) and before the first skill load, so render it then.
+    if (role === "lead" && hasSwarmDocsSkill(args.skillsSummary)) {
+      const docsResult = await resolveTemplateAsync("system.agent.lead.docs", {});
+      prompt += docsResult.text;
+    }
   }
 
   // J. Agent notes (CLAUDE.md), only when it differs from the generated
@@ -340,6 +348,11 @@ export const getTaskContextPrompt = async (args: TaskContextPromptArgs): Promise
 
   return prompt.replace(/\n{3,}/g, "\n\n").trim();
 };
+
+/** True when the skill list includes `swarm-docs`, or when the list is unknown. */
+function hasSwarmDocsSkill(skills: { name: string }[] | undefined): boolean {
+  return skills === undefined || skills.some((skill) => skill.name === "swarm-docs");
+}
 
 /**
  * Dynamic lines for `system.agent.tools_skills`. The static text lives in the

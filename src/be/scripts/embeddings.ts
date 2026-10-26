@@ -28,6 +28,7 @@ type ScriptEmbeddingCandidateRow = ScriptEmbeddingRow & {
   isScratch: number;
   typeChecked: number;
   fsMode: "none" | "workspace-rw";
+  executor: "native" | "quickjs" | null;
   createdByAgentId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -70,6 +71,7 @@ function rowToScript(row: ScriptEmbeddingCandidateRow): ScriptRecord {
     isScratch: row.isScratch === 1,
     typeChecked: row.typeChecked === 1,
     fsMode: row.fsMode,
+    executor: row.executor ?? null,
     createdByAgentId: row.createdByAgentId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

@@ -1,6 +1,9 @@
 ---
 title: Open Oncall
 description: An alert lands in Slack, the swarm finds the root cause, a person approves the fix in one click, and the swarm opens the PR. If one AI provider is down, the step reroutes to another. One workflow, one failover sub-workflow, one script and an app, ready to import.
+agent:
+  when: "Someone wants alerts from PagerDuty, Datadog, Sentry or a webhook investigated and fixed, with a person approving each fix"
+  notWhen: "A one-off question about a single incident"
 ---
 
 <img src="/playbooks/open-oncall/open-oncall-lockup-light.svg" alt="Open Oncall, an Agent Swarm workflow" width="420" className="dark:hidden" />

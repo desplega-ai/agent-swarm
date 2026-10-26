@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { invalidateStatusQuery } from "@/api/hooks/status-query";
 import { getConfig } from "@/lib/config";
+import { type EnvPresenceMap, fetchEnvPresenceBatched } from "@/lib/env-presence-batch";
 
 // ---------------------------------------------------------------------------
 // Integrations-page support hooks
@@ -37,10 +38,7 @@ function getHeaders(): HeadersInit {
   return headers;
 }
 
-export type EnvPresenceMap = Record<string, boolean>;
-
-/** The API answers 400 above this many keys (`MAX_ENV_PRESENCE_KEYS` in src/http/config.ts). */
-const ENV_PRESENCE_BATCH = 200;
+export type { EnvPresenceMap };
 
 async function fetchEnvPresenceBatch(keys: string[]): Promise<EnvPresenceMap> {
   const url = `${getBaseUrl()}/api/config/env-presence?keys=${encodeURIComponent(keys.join(","))}`;
@@ -52,16 +50,8 @@ async function fetchEnvPresenceBatch(keys: string[]): Promise<EnvPresenceMap> {
   return data.presence ?? {};
 }
 
-async function fetchEnvPresence(keys: string[]): Promise<EnvPresenceMap> {
-  const unique = [...new Set(keys)];
-  if (unique.length === 0) return {};
-  // Split so a catalog past the server cap still works, also on older APIs.
-  const batches: string[][] = [];
-  for (let i = 0; i < unique.length; i += ENV_PRESENCE_BATCH) {
-    batches.push(unique.slice(i, i + ENV_PRESENCE_BATCH));
-  }
-  const results = await Promise.all(batches.map(fetchEnvPresenceBatch));
-  return Object.assign({}, ...results);
+function fetchEnvPresence(keys: string[]): Promise<EnvPresenceMap> {
+  return fetchEnvPresenceBatched(keys, fetchEnvPresenceBatch);
 }
 
 export function useEnvPresence(keys: string[]) {

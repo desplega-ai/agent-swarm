@@ -104,3 +104,53 @@ describe("QuickJS pool configuration", () => {
     );
   }
 });
+
+// A fresh pool spawns its first worker, so the run waits on the worker's boot
+// (`slot.ready`) when the abort lands. The server counts the script's fetch.
+const abortDuringBootProbe = `
+import { QuickJSScriptExecutor } from "./src/scripts-runtime/executors/quickjs";
+import { DEFAULT_SCRIPT_RESOURCES } from "./src/scripts-runtime/executors/types";
+let hits = 0;
+const server = Bun.serve({ port: 0, fetch() { hits++; return new Response("ran"); } });
+try {
+  const controller = new AbortController();
+  const run = new QuickJSScriptExecutor().run({
+    source: 'export default async (args) => (await fetch(args.url)).text();',
+    args: { url: "http://127.0.0.1:" + server.port },
+    configPayload: { system: {
+      apiKey: { value: "pool-test", isSecret: true },
+      agentId: { value: crypto.randomUUID(), isSecret: false },
+      mcpBaseUrl: { value: "http://127.0.0.1:" + server.port, isSecret: false },
+    }, user: {} },
+    resources: DEFAULT_SCRIPT_RESOURCES,
+    fsMode: "none", network: "open", signal: controller.signal,
+  });
+  // One macrotask: the run has its slot and awaits the worker's boot.
+  await Bun.sleep(0);
+  controller.abort();
+  const output = await run;
+  await Bun.sleep(200);
+  console.log(JSON.stringify({ error: output.error ?? null, result: output.result ?? null, hits }));
+} finally {
+  server.stop(true);
+}
+`;
+
+describe("QuickJS abort while the worker boots", () => {
+  test(
+    "an abort before the worker is ready kills the run and the script never runs",
+    async () => {
+      const result = expectChildOk(
+        await runChild([process.execPath, "--eval", abortDuringBootProbe], { env: process.env }),
+        "QuickJS abort-during-boot probe",
+      );
+      const out = JSON.parse(result.stdout.trim()) as {
+        error: string | null;
+        result: string | null;
+        hits: number;
+      };
+      expect(out).toEqual({ error: "killed", result: null, hits: 0 });
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+});

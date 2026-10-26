@@ -35,6 +35,7 @@ export const SUITE_SCENARIO_VERSIONS: Readonly<Record<string, number>> = {
   "human-in-loop": 1,
   "human-in-loop-solo": 1,
   "real-diff-agent-fs": 1,
+  "docs-suggestion": 2,
 };
 
 /**
@@ -47,9 +48,15 @@ export const SUITE_SCENARIO_VERSIONS: Readonly<Record<string, number>> = {
  * delegation-chain mirrors delegation-probe (delegation, single agent) and
  * capability-routing mirrors the four public swarm scenarios; it is also the one
  * swarm scenario without a solo baseline, so holding it out costs no published
- * swarm-vs-solo delta.
+ * swarm-vs-solo delta. docs-suggestion grades this product's lead prompt (does
+ * the lead offer the matching docs playbook), not a model capability, so it
+ * stays out of published snapshots and the nightly canary.
  */
-export const HELD_OUT_SCENARIO_IDS: readonly string[] = ["delegation-chain", "capability-routing"];
+export const HELD_OUT_SCENARIO_IDS: readonly string[] = [
+  "delegation-chain",
+  "capability-routing",
+  "docs-suggestion",
+];
 
 const SOLO_SUFFIX = "-solo";
 

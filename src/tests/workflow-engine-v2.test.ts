@@ -21,7 +21,7 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
-import type { Workflow, WorkflowDefinition } from "../types";
+import type { ExecutorMeta, Workflow, WorkflowDefinition } from "../types";
 import { shouldSkipCooldown } from "../workflows/cooldown";
 import {
   findReadyNodes,
@@ -143,6 +143,45 @@ class SlowExecutor extends BaseExecutor<typeof SlowExecutor.schema, typeof SlowE
   }
 }
 
+/** What the last `signal-probe` step saw: its abort signal and whether it got to its side effect. */
+const signalProbe: { signal?: AbortSignal; sideEffect: boolean } = { sideEffect: false };
+
+class SignalProbeExecutor extends BaseExecutor<
+  typeof SignalProbeExecutor.schema,
+  typeof SignalProbeExecutor.outSchema
+> {
+  static readonly schema = z.object({ delayMs: z.number() });
+  static readonly outSchema = z.object({ finished: z.boolean() });
+
+  readonly type = "signal-probe";
+  readonly mode = "instant" as const;
+  readonly configSchema = SignalProbeExecutor.schema;
+  readonly outputSchema = SignalProbeExecutor.outSchema;
+
+  protected async execute(
+    config: z.infer<typeof SignalProbeExecutor.schema>,
+    _context: Readonly<Record<string, unknown>>,
+    meta: ExecutorMeta,
+  ): Promise<ExecutorResult<z.infer<typeof SignalProbeExecutor.outSchema>>> {
+    const signal = meta.signal;
+    signalProbe.signal = signal;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, config.delayMs);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+    // A one-shot action, like the review trigger a claim script fires.
+    if (!signal?.aborted) signalProbe.sideEffect = true;
+    return { status: "success", output: { finished: true } };
+  }
+}
+
 class FailingExecutor extends BaseExecutor<
   typeof FailingExecutor.schema,
   typeof FailingExecutor.outSchema
@@ -216,6 +255,7 @@ function createTestRegistry(): ExecutorRegistry {
   registry.register(new SlowExecutor(mockDeps));
   registry.register(new FailingExecutor(mockDeps));
   registry.register(new ValidatePassExecutor(mockDeps));
+  registry.register(new SignalProbeExecutor(mockDeps));
   return registry;
 }
 
@@ -561,6 +601,41 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       expect(run!.error).toContain("timed out");
     }, 5_000); // Allow test up to 5s
 
+    test("a timed-out step aborts its executor, so the side effect never happens", async () => {
+      signalProbe.signal = undefined;
+      signalProbe.sideEffect = false;
+      const registry = createTestRegistry();
+      const workflow = await makeWorkflow({
+        nodes: [{ id: "probe", type: "signal-probe", config: { delayMs: 600, timeoutMs: 100 } }],
+      });
+
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+
+      const run = await getWorkflowRun(runId);
+      expect(run!.status).toBe("failed");
+      expect(run!.error).toContain("Step timed out after 100ms");
+      expect(signalProbe.signal?.aborted).toBe(true);
+      // Past the executor's own delay: without the abort it would have fired.
+      await Bun.sleep(700);
+      expect(signalProbe.sideEffect).toBe(false);
+    }, 5_000);
+
+    test("a step that finishes in budget is never aborted afterwards", async () => {
+      signalProbe.signal = undefined;
+      signalProbe.sideEffect = false;
+      const registry = createTestRegistry();
+      const workflow = await makeWorkflow({
+        nodes: [{ id: "probe", type: "signal-probe", config: { delayMs: 10, timeoutMs: 150 } }],
+      });
+
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+
+      expect((await getWorkflowRun(runId))!.status).toBe("completed");
+      expect(signalProbe.sideEffect).toBe(true);
+      await Bun.sleep(250);
+      expect(signalProbe.signal?.aborted).toBe(false);
+    }, 5_000);
+
     // The inline runtime's ulimit preamble fails on macOS (no usable
     // RLIMIT_AS), so the script dies before the watchdog behavior under test.
     // Linux CI is the enforcing environment; the skip only unblocks local
@@ -597,6 +672,46 @@ describe("Workflow Engine v2 (Phase 3)", () => {
   });
 
   // ─── Validation ───────────────────────────────────────────
+
+  describe("Detached start", () => {
+    test("detach returns once the run is committed and walks its instant steps in the background", async () => {
+      const registry = createTestRegistry();
+      const workflow = await makeWorkflow({
+        nodes: [
+          { id: "slow", type: "slow", config: { delayMs: 400 }, next: "after" },
+          { id: "after", type: "echo", config: { message: "done" } },
+        ],
+      });
+
+      const started = performance.now();
+      const runId = await startWorkflowExecution(workflow, {}, registry, { detach: true });
+      const returnedAfterMs = performance.now() - started;
+
+      expect(returnedAfterMs).toBeLessThan(300);
+      expect((await getWorkflowRun(runId))!.status).toBe("running");
+
+      const deadline = Date.now() + 3_000;
+      while ((await getWorkflowRun(runId))!.status === "running" && Date.now() < deadline) {
+        await Bun.sleep(25);
+      }
+      expect((await getWorkflowRun(runId))!.status).toBe("completed");
+      const steps = await getWorkflowRunStepsByRunId(runId);
+      expect(steps.map((step) => step.nodeId).sort()).toEqual(["after", "slow"]);
+    }, 5_000);
+
+    test("without detach the start resolves only after the instant steps ran", async () => {
+      const registry = createTestRegistry();
+      const workflow = await makeWorkflow({
+        nodes: [{ id: "slow", type: "slow", config: { delayMs: 300 } }],
+      });
+
+      const started = performance.now();
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+
+      expect(performance.now() - started).toBeGreaterThanOrEqual(290);
+      expect((await getWorkflowRun(runId))!.status).toBe("completed");
+    }, 5_000);
+  });
 
   describe("Validation", () => {
     test("validation pass allows step to complete", async () => {

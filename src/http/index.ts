@@ -520,7 +520,7 @@ async function shutdown() {
   await stopChatSdk();
 
   // Stop OAuth keepalive
-  if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+  if (!isEnvFlagEnabled("OAUTH_KEEPALIVE_DISABLE", false)) {
     const { stopOAuthKeepalive } = await import("../oauth/keepalive");
     await stopOAuthKeepalive();
   }
@@ -850,7 +850,7 @@ httpServer
     startRuntimeSupervisor();
 
     // Start OAuth token keepalive (proactive refresh to prevent expiry)
-    if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+    if (!isEnvFlagEnabled("OAUTH_KEEPALIVE_DISABLE", false)) {
       const { startOAuthKeepalive } = await import("../oauth/keepalive");
       startOAuthKeepalive();
     }
@@ -858,7 +858,7 @@ httpServer
     // Start generic OAuth token refresh sweep (all oauth_apps providers,
     // 15-min tick, first run ~1 min after boot). Complements the tracker-only
     // keepalive above — see src/be/oauth-refresh-sweep.ts.
-    if (process.env.OAUTH_REFRESH_SWEEP_DISABLE !== "true") {
+    if (!isEnvFlagEnabled("OAUTH_REFRESH_SWEEP_DISABLE", false)) {
       const { startOAuthRefreshSweep } = await import("../be/oauth-refresh-sweep");
       startOAuthRefreshSweep();
     }

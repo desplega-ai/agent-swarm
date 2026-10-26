@@ -2493,6 +2493,9 @@
     "fsMode": {
       "exempt": "enum or fixed-format value"
     },
+    "executor": {
+      "exempt": "enum or fixed-format value"
+    },
     "createdByAgentId": {
       "exempt": "identifier"
     },

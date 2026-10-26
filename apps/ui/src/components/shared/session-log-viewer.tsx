@@ -43,10 +43,15 @@ import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code";
 import { JsonTree } from "@/components/shared/json-tree";
 import {
+  CallCompositionBar,
+  useCallComposition,
+} from "@/components/shared/request-composition-bar";
+import {
   type EndSummary,
   formatDur,
   type SessionLogView,
   type StreamRow,
+  spawnCallUsage,
   summarizeActivity,
   summarizeEnd,
   summaryText,
@@ -69,7 +74,9 @@ import {
   SteeringLine,
   steeringMessageTimestamp,
 } from "@/components/steering/steering-message-chips";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -86,14 +93,19 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";
+import { useUsageDetails } from "@/lib/session-log-usage-details";
 import { statusLabel } from "@/lib/status-labels";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import {
+  type CallUsage,
+  type CallUsageTotals,
+  cacheHitRatio,
   extractSubagentRuns,
   type ParsedMessage,
   type ProviderMetaBlock,
   parseSessionLogs,
   type SubagentRun,
+  sumCallUsage,
 } from "@/logs-parser";
 import { imageResultPreview } from "@/logs-parser/result-images";
 
@@ -427,6 +439,47 @@ function isToolProgressBlock(block: ProviderMetaBlock): boolean {
   return block.kind === "helper" && block.data.helperType === "tool_progress";
 }
 
+function callUsageOf(block: ProviderMetaBlock): CallUsage | undefined {
+  if (block.kind !== "helper" || block.data.helperType !== "call_usage") return undefined;
+  return block.data.usage as CallUsage | undefined;
+}
+
+/**
+ * The log with usage details off: no `call_usage` blocks, and no message
+ * that held only them, so the rows match a log without per-call usage.
+ */
+function withoutCallUsage(messages: ParsedMessage[]): ParsedMessage[] {
+  const out: ParsedMessage[] = [];
+  for (const m of messages) {
+    const content = m.content.filter((b) => b.type !== "provider_meta" || !callUsageOf(b));
+    if (content.length === m.content.length) out.push(m);
+    else if (content.length > 0) out.push({ ...m, content });
+  }
+  return out;
+}
+
+/**
+ * Each result block's calls: the `call_usage` blocks since the previous
+ * result, sub-agent calls included. Keyed by block, so the classic and the
+ * trace layouts show the same totals.
+ */
+function resultCallTotals(messages: ParsedMessage[]): Map<ProviderMetaBlock, CallUsageTotals> {
+  const totals = new Map<ProviderMetaBlock, CallUsageTotals>();
+  let calls: CallUsage[] = [];
+  for (const m of messages) {
+    for (const b of m.content) {
+      if (b.type !== "provider_meta") continue;
+      const usage = callUsageOf(b);
+      if (usage) calls.push(usage);
+      if (b.kind !== "result") continue;
+      const sum = sumCallUsage(calls);
+      if (sum) totals.set(b, sum);
+      calls = [];
+    }
+  }
+  return totals;
+}
+
 function appendProviderMetaRow(rows: StreamRow[], row: MetaRow) {
   if (isThinkingTokensBlock(row.block)) {
     appendThinkingTokenRow(rows, row);
@@ -561,6 +614,8 @@ function buildStream(
 ): StreamRow[] {
   const subagentById = new Map(subagents.map((run) => [run.id, run]));
   const subagentSourceIds = new Set(subagents.flatMap((run) => run.sourceRecordIds));
+  // The call that spawned a run shows its usage on the run's row.
+  const spawnUsage = spawnCallUsage(messages, new Set(subagentById.keys()));
   // Index every tool_result by the id of the call it answers (+ its timestamp).
   const resultById = new Map<string, { content: string; isError: boolean; at: number }>();
   const progressById = new Map<
@@ -625,6 +680,27 @@ function buildStream(
     }
   };
 
+  // A call's usage rides on one row of that call, so it adds no row and never
+  // splits a tool group. `start` usage (claude, pi) waits for the call's
+  // first row; `end` usage (codex, opencode) lands on the call's last row.
+  // Lanes keep a sub-agent's calls off the main thread's rows.
+  type UsageTarget = { usage?: CallUsage };
+  const pendingUsage = new Map<string, MetaRow>();
+  const lastTarget = new Map<string, UsageTarget>();
+  const takeUsage = (lane: string, target: UsageTarget) => {
+    const pending = pendingUsage.get(lane);
+    if (pending) {
+      target.usage = callUsageOf(pending.block);
+      pendingUsage.delete(lane);
+    }
+    lastTarget.set(lane, target);
+  };
+  // No row to ride on: the usage shows as its own line.
+  const pushUsageRow = (row: MetaRow) => {
+    closeGroup();
+    rows.push(row);
+  };
+
   for (const item of tl) {
     if (item.kind === "snap") {
       closeGroup();
@@ -657,14 +733,38 @@ function buildStream(
         iso: item.run.startedAt,
         run: item.run,
         isNew: item.run.sourceRecordIds.some((id) => newIds.has(id)),
+        usage: spawnUsage.get(item.run.id),
       });
       continue;
     }
 
     const m = item.m;
     const time = fmtClock(m.timestamp);
+    const lane = m.parentToolUseId ?? "";
     m.content.forEach((b, i) => {
       const blockId = `${m.id}-${i}`;
+      const usage = b.type === "provider_meta" ? callUsageOf(b) : undefined;
+      if (b.type === "provider_meta" && usage) {
+        if (subagentSourceIds.has(m.id)) return;
+        const row: MetaRow = {
+          type: "meta",
+          id: blockId,
+          time,
+          iso: m.timestamp,
+          block: b,
+          isNew: newIds.has(m.id),
+        };
+        if (usage.reportedAt === "end") {
+          const target = lastTarget.get(lane);
+          if (target && !target.usage) target.usage = usage;
+          else pushUsageRow(row);
+          return;
+        }
+        const previous = pendingUsage.get(lane);
+        if (previous) pushUsageRow(previous);
+        pendingUsage.set(lane, row);
+        return;
+      }
       if (b.type === "tool_result") {
         if (b.tool_use_id && subagentById.has(b.tool_use_id)) return;
         if (!b.tool_use_id || callIds.has(b.tool_use_id)) return; // folded into its tool_use group
@@ -726,6 +826,7 @@ function buildStream(
           hasResult: !!res,
           durMs,
         };
+        takeUsage(lane, entry);
         if (!curGroup) {
           curGroup = {
             type: "toolgroup",
@@ -754,7 +855,7 @@ function buildStream(
       const isNew = newIds.has(m.id);
       if (b.type === "text") {
         if (!b.text.trim()) return;
-        rows.push({
+        const row: Extract<StreamRow, { type: "agent" }> = {
           type: "agent",
           id: blockId,
           role: m.role,
@@ -762,17 +863,21 @@ function buildStream(
           iso: m.timestamp,
           md: b.text,
           isNew,
-        });
+        };
+        if (m.role === "assistant") takeUsage(lane, row);
+        rows.push(row);
       } else if (b.type === "thinking") {
         if (!b.thinking.trim()) return;
-        rows.push({
+        const row: Extract<StreamRow, { type: "thinking" }> = {
           type: "thinking",
           id: blockId,
           time,
           iso: m.timestamp,
           text: b.thinking,
           isNew,
-        });
+        };
+        takeUsage(lane, row);
+        rows.push(row);
       } else if (b.type === "provider_meta") {
         if (subagentSourceIds.has(m.id)) return;
         const parentId = isToolProgressBlock(b) ? stringValue(b.data.parentToolUseId) : undefined;
@@ -788,6 +893,7 @@ function buildStream(
       }
     });
   }
+  for (const row of pendingUsage.values()) pushUsageRow(row);
   closeGroup();
   markLiveThinkingGroup(rows, isRunning);
 
@@ -929,6 +1035,10 @@ function metaOutlineLabel(block: ProviderMetaBlock): string {
       return `Context · ${formatPercent(numberValue(block.data.contextPercent)) ?? "usage"}`;
     }
     if (block.data.helperType === "turn_usage") return "Turn usage";
+    if (block.data.helperType === "call_usage") {
+      const usage = callUsageOf(block);
+      return `LLM call · ${usage ? callUsageLabel(usage) : "usage"}`;
+    }
     if (block.data.helperType === "tool_progress") {
       const tool = stringValue(block.data.toolName) ?? "Tool";
       const elapsed = numberValue(block.data.elapsedSeconds);
@@ -1187,11 +1297,22 @@ function ProviderStatusPill({ value }: { value: string }) {
   );
 }
 
-function ProviderMetaBubble({ block }: { block: ProviderMetaBlock }) {
+function ProviderMetaBubble({
+  block,
+  callTotals,
+  cacheHit = false,
+}: {
+  block: ProviderMetaBlock;
+  /** Result blocks: the session's per-call usage. */
+  callTotals?: CallUsageTotals;
+  /** Result blocks: show the cache hit (the usage details view). */
+  cacheHit?: boolean;
+}) {
   if (block.kind === "status") return <ProviderStatusMeta block={block} />;
   if (block.kind === "helper") return <HelperMetaBubble block={block} />;
   if (block.kind === "internal") return <InternalMetaBubble block={block} />;
-  if (block.kind === "result") return <ResultMetaBubble block={block} />;
+  if (block.kind === "result")
+    return <ResultMetaBubble block={block} callTotals={callTotals} cacheHit={cacheHit} />;
   if (block.kind === "file_change") return <FileChangeMeta block={block} />;
   if (block.kind !== "structured_output") return <GenericMetaBubble block={block} />;
 
@@ -1252,6 +1373,7 @@ function HelperMetaBubble({ block }: { block: ProviderMetaBlock }) {
   }
   if (block.data.helperType === "context_usage") return <ContextUsageMeta block={block} />;
   if (block.data.helperType === "turn_usage") return <TurnUsageMeta block={block} />;
+  if (block.data.helperType === "call_usage") return <CallUsageMeta block={block} />;
   if (block.data.helperType === "tool_progress") return <ToolProgressMeta block={block} />;
   return <GenericMetaBubble block={block} />;
 }
@@ -1511,6 +1633,154 @@ function TurnUsageMeta({ block }: { block: ProviderMetaBlock }) {
   );
 }
 
+function callUsageCacheReported(usage: CallUsage): boolean {
+  return usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0;
+}
+
+/** Floored, so a call shows 100% only when every prompt token was cached. */
+function formatCacheHit(ratio: number | null): string {
+  return ratio === null ? "—" : `${Math.floor(ratio * 100)}%`;
+}
+
+function cacheHitTone(ratio: number | null, cacheReported: boolean): string {
+  if (!cacheReported || ratio === null) return "text-muted-foreground";
+  if (ratio < 0.5) return "text-status-error-strong";
+  if (ratio < 0.9) return "text-status-warning-strong";
+  return "text-status-success-strong";
+}
+
+/** "99% cached · 92.9K in · +684 written". */
+function callUsageLabel(usage: CallUsage): string {
+  const parts = [
+    callUsageCacheReported(usage)
+      ? `${formatCacheHit(cacheHitRatio(usage))} cached`
+      : "no cache reported",
+    `${formatTokens(usage.promptTokens)} in`,
+  ];
+  if (usage.cacheWriteTokens > 0) parts.push(`+${formatTokens(usage.cacheWriteTokens)} written`);
+  return parts.join(" · ");
+}
+
+/**
+ * One LLM call's cache hit and prompt size. The tooltip has the raw numbers.
+ * With the session's request composition, a click opens the call's prompt
+ * split as a stacked bar.
+ */
+function CallUsageChip({ usage, className }: { usage: CallUsage; className?: string }) {
+  const ratio = cacheHitRatio(usage);
+  const reported = callUsageCacheReported(usage);
+  const label = callUsageLabel(usage);
+  const composition = useCallComposition(usage.callId);
+  const chipClass = cn(
+    "inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono text-meta tabular-nums",
+    cacheHitTone(ratio, reported),
+    className,
+  );
+  const content = (
+    <>
+      <Gauge className="size-2.5" aria-hidden />
+      {label}
+    </>
+  );
+  if (!composition) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("cursor-help", chipClass)}>{content}</span>
+        </TooltipTrigger>
+        <CallUsageTooltip usage={usage} />
+      </Tooltip>
+    );
+  }
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            {/* biome-ignore lint/a11y/useSemanticElements: the chip often sits in a row's own <button>, and a button cannot nest */}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`${label}. Show prompt composition`}
+              data-testid="call-usage-chip"
+              // The chip sits on rows that toggle on click.
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.currentTarget.click();
+              }}
+              className={cn(
+                "cursor-pointer rounded-sm underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                chipClass,
+              )}
+            >
+              {content}
+            </span>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <CallUsageTooltip usage={usage} />
+      </Tooltip>
+      <PopoverContent
+        align="end"
+        className="w-80 p-3 font-mono text-meta tabular-nums"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <CallCompositionBar composition={composition} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CallUsageTooltip({ usage }: { usage: CallUsage }) {
+  return (
+    <TooltipContent className="font-mono text-meta tabular-nums">
+      <div>Cache read {usage.cacheReadTokens.toLocaleString()}</div>
+      <div>Cache write {usage.cacheWriteTokens.toLocaleString()}</div>
+      <div>Uncached input {usage.uncachedInputTokens.toLocaleString()}</div>
+      <div>
+        Output {usage.outputTokens.toLocaleString()}
+        {usage.reasoningTokens ? ` (reasoning ${usage.reasoningTokens.toLocaleString()})` : ""}
+      </div>
+      <div className="mt-1 opacity-80">
+        Hit = cache read ÷ prompt ({usage.promptTokens.toLocaleString()})
+        {usage.sidechain ? " · sub-agent call" : ""}
+      </div>
+    </TooltipContent>
+  );
+}
+
+/**
+ * A tool group's worst call, when it broke the cache (under 90%): groups start
+ * closed, so this keeps the calls that matter visible.
+ */
+function worstCacheUsage(tools: ToolEntry[]): CallUsage | undefined {
+  let worst: CallUsage | undefined;
+  let worstRatio = 0.9;
+  for (const tool of tools) {
+    if (!tool.usage || !callUsageCacheReported(tool.usage)) continue;
+    const ratio = cacheHitRatio(tool.usage);
+    if (ratio !== null && ratio < worstRatio) {
+      worst = tool.usage;
+      worstRatio = ratio;
+    }
+  }
+  return worst;
+}
+
+function CallUsageMeta({ block }: { block: ProviderMetaBlock }) {
+  const usage = callUsageOf(block);
+  return (
+    <LowKeyMetaLine
+      icon={<Gauge className="size-3" />}
+      title="LLM call"
+      raw={block.data}
+      stats={usage ? <CallUsageChip usage={usage} /> : undefined}
+    />
+  );
+}
+
 function RateLimitMeta({ block }: { block: ProviderMetaBlock }) {
   const info = recordValue(block.data.rate_limit_info) ?? block.data;
   const status = stringValue(info.status) ?? "rate limit";
@@ -1629,7 +1899,37 @@ function RuntimeInternalMeta({ block }: { block: ProviderMetaBlock }) {
   );
 }
 
-function ResultMetaBubble({ block }: { block: ProviderMetaBlock }) {
+/**
+ * The session's cache hit: Σ cache read / Σ prompt over the parsed calls.
+ * Without per-call usage, the result's own claude-shaped `usage` totals.
+ */
+function sessionCacheHit(
+  callTotals: CallUsageTotals | undefined,
+  usage: Record<string, unknown>,
+): string | undefined {
+  if (callTotals) {
+    if (!callTotals.cacheReported) return "no cache reported";
+    return `${formatCacheHit(callTotals.ratio)} · ${callTotals.calls} ${callTotals.calls === 1 ? "call" : "calls"}`;
+  }
+  const input = numberValue(usage.input_tokens);
+  if (input === undefined) return undefined;
+  const read = numberValue(usage.cache_read_input_tokens) ?? 0;
+  const write = numberValue(usage.cache_creation_input_tokens) ?? 0;
+  if (read === 0 && write === 0) return "no cache reported";
+  return formatCacheHit(
+    cacheHitRatio({ promptTokens: input + read + write, cacheReadTokens: read }),
+  );
+}
+
+function ResultMetaBubble({
+  block,
+  callTotals,
+  cacheHit,
+}: {
+  block: ProviderMetaBlock;
+  callTotals?: CallUsageTotals;
+  cacheHit: boolean;
+}) {
   const data = block.data;
   const cost: Record<string, unknown> = recordValue(data.cost) ?? {};
   const usage: Record<string, unknown> = recordValue(data.usage) ?? {};
@@ -1683,6 +1983,7 @@ function ResultMetaBubble({ block }: { block: ProviderMetaBlock }) {
             numberValue(cost.cacheWriteTokens) ?? numberValue(usage.cache_creation_input_tokens),
           )}
         />
+        {cacheHit && <MetaStat label="Cache hit" value={sessionCacheHit(callTotals, usage)} />}
       </div>
       {output && (
         <div className="prose-chat prose-session-log mt-2 border-t border-border/50 pt-2 text-sm text-foreground">
@@ -2023,6 +2324,7 @@ function ToolRow({
           )}
           {tool.preview}
         </span>
+        {tool.usage && <CallUsageChip usage={tool.usage} className="max-sm:hidden" />}
         {dur && (
           <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
             {dur}
@@ -2119,6 +2421,7 @@ function TraceToolItem({
             {tool.kind === "mcp" && tool.server ? `${tool.server}.${tool.name}` : tool.title}
             {tool.detail && <span className="opacity-70"> {tool.detail}</span>}
           </TraceTitle>
+          {tool.usage && <CallUsageChip usage={tool.usage} className="max-sm:hidden" />}
           {dur && <TraceDescription className="font-mono text-meta">{dur}</TraceDescription>}
         </TraceLine>
       </TraceCollapsibleTrigger>
@@ -2132,7 +2435,7 @@ function TraceToolItem({
 }
 
 /** A reasoning block as a Trace line; the one-line preview hides when open. */
-function TraceThinkingItem({ text }: { text: string }) {
+function TraceThinkingItem({ text, usage }: { text: string; usage?: CallUsage }) {
   const [open, setOpen] = useState(false);
   const preview = truncate(text.replace(/\s+/g, " ").trim(), 90);
   return (
@@ -2146,6 +2449,7 @@ function TraceThinkingItem({ text }: { text: string }) {
             <span className="font-medium italic">Thinking</span>
             {!open && <span className="opacity-70"> {preview}</span>}
           </TraceTitle>
+          {usage && <CallUsageChip usage={usage} className="max-sm:hidden" />}
         </TraceLine>
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
@@ -2382,6 +2686,14 @@ export function SessionLogViewer({
 }: SessionLogViewerProps) {
   const safeLogs = logs ?? [];
   const messages = useMemo(() => parseSessionLogs(safeLogs), [safeLogs]);
+  // Power-user token view, off by default: per-call chips, "LLM call" lines,
+  // and the result card's cache hit.
+  const [usageDetails, setUsageDetails] = useUsageDetails();
+  const streamMessages = useMemo(
+    () => (usageDetails ? messages : withoutCallUsage(messages)),
+    [messages, usageDetails],
+  );
+  const resultTotals = useMemo(() => resultCallTotals(messages), [messages]);
   const subagents = useMemo(() => extractSubagentRuns(safeLogs), [safeLogs]);
   const [activeView, setActiveView] = useState<"logs" | "agents">("logs");
 
@@ -2426,7 +2738,7 @@ export function SessionLogViewer({
     () =>
       trace
         ? buildNestedStream(
-            messages,
+            streamMessages,
             subagents,
             compactionSnapshots ?? [],
             newIds,
@@ -2434,14 +2746,14 @@ export function SessionLogViewer({
             streamSteering,
           )
         : buildStream(
-            messages,
+            streamMessages,
             subagents,
             compactionSnapshots ?? [],
             newIds,
             isRunning,
             streamSteering,
           ),
-    [trace, messages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
+    [trace, streamMessages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
   );
 
   // Messages folds the rows before the filter, so a folded line matches by
@@ -2685,6 +2997,7 @@ export function SessionLogViewer({
             <div className="prose-chat prose-session-log mt-[3px] break-words text-foreground">
               <LogMarkdown>{slashCommand ? slashCommand.rest || row.md : row.md}</LogMarkdown>
             </div>
+            {row.usage && <CallUsageChip usage={row.usage} className="mt-0.5" />}
             <CopyIconButton
               text={row.md}
               className="absolute right-0 top-px cursor-pointer bg-card opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
@@ -2702,7 +3015,11 @@ export function SessionLogViewer({
             highlight={row.isNew && atBottomRef.current}
             streamDelayMs={streamDelayMs}
           >
-            {trace ? <TraceThinkingItem text={row.text} /> : <ThinkingRow text={row.text} />}
+            {trace ? (
+              <TraceThinkingItem text={row.text} usage={row.usage} />
+            ) : (
+              <ThinkingRow text={row.text} usage={row.usage} />
+            )}
           </RowShell>
         );
       }
@@ -2716,7 +3033,11 @@ export function SessionLogViewer({
             highlight={row.isNew && atBottomRef.current}
             streamDelayMs={streamDelayMs}
           >
-            <ProviderMetaBubble block={row.block} />
+            <ProviderMetaBubble
+              block={row.block}
+              callTotals={resultTotals.get(row.block)}
+              cacheHit={usageDetails}
+            />
           </RowShell>
         );
       }
@@ -2792,6 +3113,7 @@ export function SessionLogViewer({
                         {row.run.agentType}
                       </span>
                     </TraceTitle>
+                    {row.usage && <CallUsageChip usage={row.usage} className="max-sm:hidden" />}
                     {description && (
                       <TraceDescription className="font-mono text-meta">
                         {description}
@@ -2812,11 +3134,23 @@ export function SessionLogViewer({
                       <Trace className="gap-1.5">
                         {children.map((child) => {
                           if (child.type === "thinking")
-                            return <TraceThinkingItem key={child.id} text={child.text} />;
+                            return (
+                              <TraceThinkingItem
+                                key={child.id}
+                                text={child.text}
+                                usage={child.usage}
+                              />
+                            );
                           if (child.type === "toolgroup")
                             return child.tools.map((t) => traceTool(t, childRunning));
                           if (child.type === "meta")
-                            return <ProviderMetaBubble key={child.id} block={child.block} />;
+                            return (
+                              <ProviderMetaBubble
+                                key={child.id}
+                                block={child.block}
+                                cacheHit={usageDetails}
+                              />
+                            );
                           // The sub-agent's user turn is its prompt, shown as Input.
                           if (child.type === "agent" && child.role === "assistant")
                             return (
@@ -2825,6 +3159,7 @@ export function SessionLogViewer({
                                 className="prose-chat prose-session-log break-words text-xs text-foreground"
                               >
                                 <LogMarkdown>{child.md}</LogMarkdown>
+                                {child.usage && <CallUsageChip usage={child.usage} />}
                               </div>
                             );
                           return null;
@@ -2872,6 +3207,7 @@ export function SessionLogViewer({
               <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted-foreground max-sm:hidden">
                 {row.run.agentType}
               </span>
+              {row.usage && <CallUsageChip usage={row.usage} className="max-sm:hidden" />}
               <SubagentStatus run={row.run} />
               {duration && (
                 <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
@@ -2932,9 +3268,13 @@ export function SessionLogViewer({
                 {row.rows.map((child) => (
                   <Fragment key={child.id}>
                     {child.type === "thinking" ? (
-                      <ThinkingRow text={child.text} />
+                      <ThinkingRow text={child.text} usage={child.usage} />
                     ) : child.type === "meta" ? (
-                      <ProviderMetaBubble block={child.block} />
+                      <ProviderMetaBubble
+                        block={child.block}
+                        callTotals={resultTotals.get(child.block)}
+                        cacheHit={usageDetails}
+                      />
                     ) : child.type === "toolgroup" ? (
                       child.tools.map((t) => (
                         <ToolRow
@@ -2991,6 +3331,7 @@ export function SessionLogViewer({
       }
       const open = isGroupOpen(row);
       const dur = formatDur(row.durMs);
+      const worstUsage = worstCacheUsage(row.tools);
       if (trace) {
         // One call needs no group line: it is its own trace line.
         if (row.tools.length === 1) {
@@ -3030,6 +3371,9 @@ export function SessionLogViewer({
                     <span className="font-semibold">{row.tools.length} steps</span>
                     <span className="font-mono opacity-70"> {groupHeader(row.names)}</span>
                   </TraceTitle>
+                  {!open && worstUsage && (
+                    <CallUsageChip usage={worstUsage} className="max-sm:hidden" />
+                  )}
                   {(dur || failed > 0) && (
                     <TraceDescription className="font-mono text-meta">
                       {failed > 0 && (
@@ -3078,6 +3422,7 @@ export function SessionLogViewer({
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
               {groupHeader(row.names)}
             </span>
+            {!open && worstUsage && <CallUsageChip usage={worstUsage} className="max-sm:hidden" />}
           </button>
           <AnimatedReveal open={open} speed="fast">
             <div className="mt-1.5 flex flex-col gap-1.5 pl-0.5">
@@ -3112,6 +3457,8 @@ export function SessionLogViewer({
       atBottomRef,
       trace,
       isRunning,
+      resultTotals,
+      usageDetails,
     ],
   );
 
@@ -3217,6 +3564,27 @@ export function SessionLogViewer({
                 // Touch: 44 px options inside the control's border and padding.
                 className={cn(touchTargets && "h-12.5")}
               />
+            )}
+            {activeView === "logs" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant={usageDetails ? "secondary" : "ghost"}
+                    size="xs"
+                    aria-pressed={usageDetails}
+                    aria-label="Usage details"
+                    onClick={() => setUsageDetails(!usageDetails)}
+                    className={cn("shrink-0", touchTargets ? "h-11 min-w-11" : "h-7")}
+                  >
+                    <Gauge aria-hidden />
+                    <span className="max-sm:hidden">Usage</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {usageDetails ? "Hide" : "Show"} each LLM call's cache hit and prompt size
+                </TooltipContent>
+              </Tooltip>
             )}
             {activeView === "logs" && (
               <div
@@ -3368,7 +3736,7 @@ export function SessionLogViewer({
 // inline one-line preview, body behind a border-t) so thinking reads as part of
 // the same visual family, just recessed (muted surface, no accent color) to
 // signal it's internal reasoning rather than output.
-function ThinkingRow({ text }: { text: string }) {
+function ThinkingRow({ text, usage }: { text: string; usage?: CallUsage }) {
   const [open, setOpen] = useState(false);
   const preview = truncate(text.replace(/\s+/g, " ").trim(), 90);
   return (
@@ -3389,6 +3757,7 @@ function ThinkingRow({ text }: { text: string }) {
         {!open && (
           <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">{preview}</span>
         )}
+        {usage && <CallUsageChip usage={usage} className="ml-auto max-sm:hidden" />}
       </button>
       <AnimatedReveal open={open} speed="fast">
         <div className="border-t border-border/60 px-2.5 py-2">

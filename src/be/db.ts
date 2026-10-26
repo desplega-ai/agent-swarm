@@ -227,8 +227,10 @@ import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import {
   emitChildRunFinished,
+  emitRunFinished,
   getRunLineageBlock,
   getStepExecutionBlock,
+  isTerminalWorkflowRunStatus,
   rowToWorkflowRun,
   rowToWorkflowRunStep,
   WORKFLOW_RUN_SUMMARY_COLUMNS,
@@ -7994,16 +7996,33 @@ export async function updateWorkflowRun(
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = await getDbClient().get<WorkflowRunRow>(
-    `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const update = () =>
+    getDbClient().get<WorkflowRunRow>(
+      `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+      params,
+    );
+  const endsRun = data.status !== undefined && isTerminalWorkflowRunStatus(data.status);
+  // A run that ends reads the status it replaces in the same transaction, so
+  // only a change out of a live status announces the end: a later terminal
+  // write, same status or not, does not announce it again.
+  const [previousStatus, row] = endsRun
+    ? await getDbClient().transaction(async () => {
+        const previous = await getDbClient().get<{ status: WorkflowRunStatus }>(
+          "SELECT status FROM workflow_runs WHERE id = ?",
+          [id],
+        );
+        return [previous?.status, await update()] as const;
+      })
+    : [undefined, await update()];
   if (!row) return null;
   const run = rowToWorkflowRun(row);
   if (data.status === "completed" || data.status === "failed") {
     emitWorkflowTerminalTelemetry(run);
   }
   if (row.parentStepId) emitChildRunFinished(id, row.parentStepId, run.status);
+  if (endsRun && previousStatus && !isTerminalWorkflowRunStatus(previousStatus)) {
+    emitRunFinished(id, run.workflowId, run.status);
+  }
   return run;
 }
 
@@ -11721,6 +11740,14 @@ export interface AvailableKeyIndicesResult {
  * whose `plan` cannot run the family (`planAllowsModelFamily`) is excluded
  * and reported in `seatBlockedIndices`, also when it is key-wide or
  * model-window blocked; a seat block has no reset time.
+ *
+ * With `keySuffixes` (the caller's own pool, in order), rows are matched by
+ * key suffix instead of the stored `keyIndex`, across every scope: a key has
+ * one state wherever it is pooled, and a key at the same index in another
+ * agent's pool is never blocked by it. A suffix listed more than once is read
+ * by `keyIndex` in `scope`/`scopeId`, as without the list. Returned indices
+ * are positions in `keySuffixes`. Without it, rows of `scope`/`scopeId` are
+ * read by `keyIndex`.
  */
 export async function getAvailableKeyIndices(
   keyType: string,
@@ -11728,41 +11755,58 @@ export async function getAvailableKeyIndices(
   scope = "global",
   scopeId: string | null = null,
   modelFamily?: ModelFamily,
+  keySuffixes?: string[],
 ): Promise<AvailableKeyIndicesResult> {
   const now = new Date().toISOString();
   const nowMs = Date.now();
   const client = getDbClient();
   const effectiveScopeId = scopeId ?? "";
+  const suffixes = keySuffixes?.length ? keySuffixes : undefined;
+  const rowFilter = suffixes
+    ? `keyType = ? AND keySuffix IN (${suffixes.map(() => "?").join(", ")})`
+    : "keyType = ? AND scope = ? AND scopeId = ?";
+  const rowParams = suffixes ? [keyType, ...suffixes] : [keyType, scope, effectiveScopeId];
 
   // Auto-clear expired rate limits. Never an auth bench: only `clearAuthBench` lifts it.
   await client.run(
     `UPDATE api_key_status
      SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
-     WHERE keyType = ? AND scope = ? AND scopeId = ?
+     WHERE ${rowFilter}
        AND status = 'rate_limited' AND rateLimitedUntil <= ? AND consecutiveAuthFailures < ?`,
-    [now, keyType, scope, effectiveScopeId, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
+    [now, ...rowParams, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
   );
 
   const rows = await client.query<{
     keyIndex: number;
+    keySuffix: string;
+    scope: string;
+    scopeId: string;
     status: string;
     rateLimitWindows: string | null;
     plan: string | null;
     authFailureSeq: number;
     lastValidationFailedAt: string | null;
   }>(
-    `SELECT keyIndex, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
-       WHERE keyType = ? AND scope = ? AND scopeId = ?`,
-    [keyType, scope, effectiveScopeId],
+    `SELECT keyIndex, keySuffix, scope, scopeId, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
+       WHERE ${rowFilter}`,
+    rowParams,
   );
+  // Pool positions a row applies to: the position holding its suffix, or its stored index.
+  // A suffix held by several pool members cannot tell them apart, so it falls back to
+  // the index read: only a row of the requested scope, at its stored index.
+  const positionsOf = (row: (typeof rows)[number]): number[] => {
+    if (!suffixes) return [row.keyIndex];
+    const positions = suffixes.flatMap((suffix, i) => (suffix === row.keySuffix ? [i] : []));
+    if (positions.length < 2) return positions;
+    const sameScope = row.scope === scope && row.scopeId === effectiveScopeId;
+    return sameScope && positions.includes(row.keyIndex) ? [row.keyIndex] : [];
+  };
 
   const blockedIndices = new Set(
-    rows.filter((r) => r.status === "rate_limited").map((r) => r.keyIndex),
+    rows.filter((r) => r.status === "rate_limited").flatMap(positionsOf),
   );
   const rejectedIndices = [
-    ...new Set(
-      rows.filter((row) => row.lastValidationFailedAt !== null).map((row) => row.keyIndex),
-    ),
+    ...new Set(rows.filter((row) => row.lastValidationFailedAt !== null).flatMap(positionsOf)),
   ];
   for (const index of rejectedIndices) blockedIndices.add(index);
 
@@ -11773,14 +11817,17 @@ export async function getAvailableKeyIndices(
       // A key already blocked key-wide doesn't need a separate model-block
       // entry — it's excluded from availableIndices either way, and
       // modelBlockedIndices means "excluded only by a model-scoped block".
-      if (blockedIndices.has(row.keyIndex)) continue;
+      const positions = positionsOf(row).filter(
+        (i) => !blockedIndices.has(i) && !modelBlockedIndices.includes(i),
+      );
+      if (positions.length === 0) continue;
       const block = activeModelBlock(
         parseRateLimitWindowsJson(row.rateLimitWindows),
         modelFamily,
         nowMs,
       );
       if (!block) continue;
-      modelBlockedIndices.push(row.keyIndex);
+      modelBlockedIndices.push(...positions);
       if (earliestModelResetsAtSec === undefined || block.resetsAt < earliestModelResetsAtSec) {
         earliestModelResetsAtSec = block.resetsAt;
       }
@@ -11794,7 +11841,10 @@ export async function getAvailableKeyIndices(
   const seatBlockedIndices: number[] = [];
   if (modelFamily) {
     for (const row of rows) {
-      if (!planAllowsModelFamily(row.plan, modelFamily)) seatBlockedIndices.push(row.keyIndex);
+      if (planAllowsModelFamily(row.plan, modelFamily)) continue;
+      for (const i of positionsOf(row)) {
+        if (!seatBlockedIndices.includes(i)) seatBlockedIndices.push(i);
+      }
     }
   }
   const seatBlockedSet = new Set(seatBlockedIndices);
@@ -12143,22 +12193,30 @@ export async function clearKeyRateLimit(
   const effectiveScopeId = scopeId ?? "";
   const { keyIndex = -1, authFence = null } = opts;
   const clearAuthBench = opts.clearAuthBench === true && authFence !== null;
-  const key = [keyType, keySuffix, scope, effectiveScopeId];
   return await getDbClient().transaction(async (tx) => {
+    // The key's rows in every scope: `getAvailableKeyIndices` reads them all by suffix.
     const result = await tx.run(
       `UPDATE api_key_status
          SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
-         WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?
+         WHERE keyType = ? AND keySuffix = ?
            AND status = 'rate_limited' AND ((? AND authFailureSeq <= ?) OR consecutiveAuthFailures < ?)`,
-      [now, ...key, clearAuthBench ? 1 : 0, authFence, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
+      [
+        now,
+        keyType,
+        keySuffix,
+        clearAuthBench ? 1 : 0,
+        authFence,
+        CODEX_AUTH_FAILURE_BENCH_THRESHOLD,
+      ],
     );
     const cleared = result.changes > 0;
     if (!clearAuthBench) return cleared;
     const lifted = await tx.query<{ keySuffix: string }>(
       `UPDATE api_key_status SET consecutiveAuthFailures = 0, updatedAt = ?1,
            status = CASE WHEN keySuffix = ?2 THEN status ELSE 'available' END, rateLimitedUntil = CASE WHEN keySuffix = ?2 THEN rateLimitedUntil END
-         WHERE keyType = ?3 AND scope = ?4 AND scopeId = ?5 AND (consecutiveAuthFailures > 0 OR status = 'rate_limited')
-           AND ((keySuffix = ?2 AND authFailureSeq <= ?7) OR (keySuffix != ?2 AND keyIndex = ?6)) RETURNING keySuffix`,
+         WHERE keyType = ?3 AND (consecutiveAuthFailures > 0 OR status = 'rate_limited')
+           AND ((keySuffix = ?2 AND authFailureSeq <= ?7)
+             OR (keySuffix != ?2 AND keyIndex = ?6 AND scope = ?4 AND scopeId = ?5)) RETURNING keySuffix`,
       [now, keySuffix, keyType, scope, effectiveScopeId, keyIndex, authFence],
     );
     const retired = lifted.filter((row) => row.keySuffix !== keySuffix);

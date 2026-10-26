@@ -291,8 +291,9 @@ describe("script SDK allowlist", () => {
 
   test("bundled swarm-sdk.d.ts uses triggerData (not input) for workflow_trigger", async () => {
     const types = await Bun.file("src/scripts-runtime/types/swarm-sdk.d.ts").text();
-    expect(types).toContain("workflow_trigger(args: { id: string; triggerData?");
-    expect(types).not.toContain("workflow_trigger(args: { id: string; input?");
+    expect(types).toMatch(/workflow_trigger\(args: \{\s*id: string;\s*triggerData\?/);
+    expect(types).toMatch(/workflow_trigger\(args: \{[^}]*\bwait\?: boolean;/);
+    expect(types).not.toMatch(/workflow_trigger\(args: \{\s*id: string;\s*input\?/);
   });
 });
 

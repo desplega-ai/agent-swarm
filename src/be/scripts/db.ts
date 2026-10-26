@@ -3,6 +3,7 @@ import type {
   ScriptApiAuthMode,
   ScriptApiRecord,
   ScriptApiWithSecret,
+  ScriptExecutorName,
   ScriptFsMode,
   ScriptRecord,
   ScriptScope,
@@ -36,6 +37,7 @@ type ScriptWriteArgs = ScriptIdentity & {
   isScratch?: boolean;
   typeChecked?: boolean;
   fsMode?: ScriptFsMode;
+  executor?: ScriptExecutorName | null;
   agentId?: string | null;
   changeReason?: string | null;
   embeddingMode?: "sync" | "skip";
@@ -62,6 +64,7 @@ function rowToScript(row: ScriptRow): ScriptRecord {
     scopeId: row.scopeId ?? null,
     isScratch: row.isScratch === 1,
     typeChecked: row.typeChecked === 1,
+    executor: row.executor ?? null,
     createdByAgentId: row.createdByAgentId ?? null,
   };
 }
@@ -113,6 +116,7 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
   const scopeId = normalizeScopeId(args.scope, args.scopeId);
   const contentHash = computeContentHash(args.source);
   const fsMode = args.fsMode ?? "none";
+  const executor = args.executor ?? null;
   const isScratch = args.isScratch ? 1 : 0;
   const typeChecked = args.typeChecked ? 1 : 0;
 
@@ -120,10 +124,10 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
     const row = await tx.get<ScriptRow>(
       `INSERT INTO scripts (
           id, "key", name, scope, scopeId, source, description, intent, signatureJson,
-          argsJsonSchema, contentHash, isScratch, typeChecked, fsMode, createdByAgentId, createdAt, updatedAt,
+          argsJsonSchema, contentHash, isScratch, typeChecked, fsMode, executor, createdByAgentId, createdAt, updatedAt,
           created_by, updated_by
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *`,
       [
         id,
@@ -140,6 +144,7 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
         isScratch,
         typeChecked,
         fsMode,
+        executor,
         args.agentId ?? null,
         now,
         now,
@@ -189,6 +194,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   const contentHash = computeContentHash(args.source);
   if (existing.contentHash === contentHash) {
     const fsMode = args.fsMode ?? existing.fsMode;
+    const executor = args.executor !== undefined ? args.executor : existing.executor;
     const isScratch = args.isScratch ?? existing.isScratch;
     const typeChecked = args.typeChecked ?? existing.typeChecked;
     const argsJsonSchema =
@@ -206,6 +212,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
       isScratch;
     if (
       fsMode !== existing.fsMode ||
+      executor !== existing.executor ||
       isScratch !== existing.isScratch ||
       typeChecked !== existing.typeChecked ||
       trackedMetadataChanged ||
@@ -214,7 +221,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
       const row = await getDbClient().get<ScriptRow>(
         `UPDATE scripts
         SET description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
-          isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
+          isScratch = ?, typeChecked = ?, fsMode = ?, executor = ?, updatedAt = ?, updated_by = ?
         WHERE id = ?
         RETURNING *`,
         [
@@ -225,6 +232,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
           isScratch ? 1 : 0,
           typeChecked ? 1 : 0,
           fsMode,
+          executor ?? null,
           new Date().toISOString(),
           args.createdBy ?? null,
           existing.id,
@@ -253,6 +261,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   const now = new Date().toISOString();
   const newVersion = existing.version + 1;
   const fsMode = args.fsMode ?? existing.fsMode;
+  const executor = args.executor !== undefined ? args.executor : existing.executor;
   const isScratch = args.isScratch ?? existing.isScratch;
   const typeChecked = args.typeChecked ?? existing.typeChecked;
   const argsJsonSchema =
@@ -262,7 +271,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
     const row = await tx.get<ScriptRow>(
       `UPDATE scripts
         SET source = ?, description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
-          contentHash = ?, version = ?, isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
+          contentHash = ?, version = ?, isScratch = ?, typeChecked = ?, fsMode = ?, executor = ?, updatedAt = ?, updated_by = ?
         WHERE id = ?
         RETURNING *`,
       [
@@ -276,6 +285,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
         isScratch ? 1 : 0,
         typeChecked ? 1 : 0,
         fsMode,
+        executor ?? null,
         now,
         args.createdBy ?? null,
         existing.id,

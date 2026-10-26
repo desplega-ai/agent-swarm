@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -401,6 +401,41 @@ describe("native-only executor behavior", () => {
     const output = await new NativeScriptExecutor().run(input({ signal: controller.signal }));
     expect(output.error).toBe("killed");
   });
+
+  // Before the fix the abort listener was added after the file writes, so an
+  // abort that landed during them was missed and the script ran to the end.
+  test.skipIf(SKIP_SANDBOX_SPAWN_TESTS)(
+    "an abort while args.json is written kills the run before the script starts",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "native-abort-"));
+      const marker = join(dir, "side-effect.marker");
+      const controller = new AbortController();
+      const write = Bun.write;
+      const spy = spyOn(Bun, "write").mockImplementation((async (
+        ...writeArgs: Parameters<typeof Bun.write>
+      ) => {
+        const written = await write(...writeArgs);
+        if (String(writeArgs[0]).endsWith("/args.json")) controller.abort();
+        return written;
+      }) as typeof Bun.write);
+      try {
+        const output = await new NativeScriptExecutor().run(
+          input({
+            source: `export default async () => { await Bun.write(${JSON.stringify(marker)}, "ran"); return "ran"; };`,
+            signal: controller.signal,
+            resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 10_000 },
+          }),
+        );
+        expect(output.error).toBe("killed");
+        expect(output.result).toBeUndefined();
+        expect(await Bun.file(marker).exists()).toBe(false);
+      } finally {
+        spy.mockRestore();
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   // PR #1326 review finding: exit 134 (SIGABRT) was classified `capacity_exceeded`
   // — and therefore retried by `runScript` — purely from the exit code, with no

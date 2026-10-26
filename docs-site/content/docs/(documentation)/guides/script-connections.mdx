@@ -1,6 +1,9 @@
 ---
 title: Script connections
 description: Register OpenAPI, GraphQL, and MCP APIs once — with optional OAuth or config-backed credentials — and call them from any swarm script via typed ctx.api / ctx.mcp clients.
+agent:
+  offer: true
+  when: "Someone wants the swarm to call an external API, with credentials kept out of the code"
 ---
 
 Script connections turn external APIs into first-class, typed clients inside

@@ -18,6 +18,7 @@
     "task-steering",
     "claude-code-mod",
     "observability-opentelemetry",
+    "host-requirements",
     "performance-resource-sizing",
     "cost-and-context-computation",
     "extensions",

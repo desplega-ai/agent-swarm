@@ -31,6 +31,8 @@ import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
 import { taskDisplayEffort } from "@/lib/task-model-resolution";
 import { cn, formatElapsed, formatRelativeTime, formatSmartTime, parseUTCDate } from "@/lib/utils";
+import type { CallUsageTotals } from "@/logs-parser";
+import { type RailComposition, RequestCompositionSection } from "./request-composition-section";
 import { NARROW_ICON_TARGET, NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
 
 // Below this, harness-vs-recomputed divergence is rounding noise; above it,
@@ -286,11 +288,13 @@ function ContextSection({
   context,
   isLoading,
   costs,
+  callUsage,
 }: {
   task: TaskWithLogs;
   context: TaskContextResponse | undefined;
   isLoading: boolean;
   costs: CostStats | null;
+  callUsage: CallUsageTotals | null;
 }) {
   if (task.provider === "devin") {
     const meta = task.providerMeta as DevinProviderMeta | undefined;
@@ -317,35 +321,65 @@ function ContextSection({
     );
   }
 
-  if (!context || context.summary.snapshotCount === 0) return null;
+  const hasSnapshots = !!context && context.summary.snapshotCount > 0;
+  if (!hasSnapshots && !callUsage) return null;
 
-  const { summary } = context;
-  const latest = findLatestUsableContextSnapshot(context.snapshots);
+  const summary = context?.summary;
+  const latest = context ? findLatestUsableContextSnapshot(context.snapshots) : undefined;
   const peak =
-    summary.peakContextPercent != null ? `peak ${summary.peakContextPercent.toFixed(0)}%` : null;
+    summary?.peakContextPercent != null ? `peak ${summary.peakContextPercent.toFixed(0)}%` : null;
 
   return (
     <RailSection title="Context">
-      {latest ? <ContextBar percent={latest.contextPercent} label="Context used" /> : null}
-      <p className="flex items-baseline justify-between gap-3 font-mono text-data tabular-nums">
-        {latest ? (
-          <span>
-            {shortTokens(latest.contextUsedTokens)} of {shortTokens(latest.contextTotalTokens)}{" "}
-            tokens
-          </span>
-        ) : (
-          <span className="font-sans text-muted-foreground">Unavailable</span>
-        )}
-        {peak ? <span className="text-muted-foreground">{peak}</span> : null}
-      </p>
-      {summary.compactionCount > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {summary.compactionCount === 1
-            ? "Compacted once"
-            : `Compacted ${summary.compactionCount} times`}
-        </p>
+      {hasSnapshots ? (
+        <>
+          {latest ? <ContextBar percent={latest.contextPercent} label="Context used" /> : null}
+          <p className="flex items-baseline justify-between gap-3 font-mono text-data tabular-nums">
+            {latest ? (
+              <span>
+                {shortTokens(latest.contextUsedTokens)} of {shortTokens(latest.contextTotalTokens)}{" "}
+                tokens
+              </span>
+            ) : (
+              <span className="font-sans text-muted-foreground">Unavailable</span>
+            )}
+            {peak ? <span className="text-muted-foreground">{peak}</span> : null}
+          </p>
+          {summary && summary.compactionCount > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {summary.compactionCount === 1
+                ? "Compacted once"
+                : `Compacted ${summary.compactionCount} times`}
+            </p>
+          ) : null}
+        </>
       ) : null}
+      {callUsage ? <CacheHitRow totals={callUsage} /> : null}
     </RailSection>
+  );
+}
+
+/** Σ cache read / Σ prompt tokens over the session log's LLM calls. */
+function CacheHitRow({ totals }: { totals: CallUsageTotals }) {
+  const calls = `${totals.calls} ${totals.calls === 1 ? "call" : "calls"}`;
+  return (
+    <p className="flex items-baseline justify-between gap-3 font-mono text-data tabular-nums">
+      <span>
+        <span className="font-sans text-muted-foreground">Cache hit </span>
+        {totals.cacheReported && totals.ratio !== null
+          ? `${Math.floor(totals.ratio * 100)}%`
+          : "no cache reported"}
+      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="cursor-help text-muted-foreground">{calls}</span>
+        </TooltipTrigger>
+        <TooltipContent className="font-mono tabular-nums">
+          {shortTokens(totals.cacheReadTokens)} read of {shortTokens(totals.promptTokens)} prompt
+          tokens
+        </TooltipContent>
+      </Tooltip>
+    </p>
   );
 }
 
@@ -447,6 +481,10 @@ interface TaskDetailsRailProps {
   costsLoading: boolean;
   context: TaskContextResponse | undefined;
   contextLoading: boolean;
+  /** Per-call usage parsed from the session log the page already loads. */
+  callUsage?: CallUsageTotals | null;
+  /** The latest session's request composition, with usage details on. */
+  composition?: RailComposition | null;
 }
 
 /**
@@ -464,6 +502,8 @@ export function TaskDetailsRail({
   costsLoading,
   context,
   contextLoading,
+  callUsage = null,
+  composition = null,
 }: TaskDetailsRailProps) {
   const stats = summarizeCosts(costs);
   const isTerminal = TERMINAL_STATUSES.has(task.status);
@@ -594,7 +634,15 @@ export function TaskDetailsRail({
         </RailSection>
       ) : null}
 
-      <ContextSection task={task} context={context} isLoading={contextLoading} costs={stats} />
+      <ContextSection
+        task={task}
+        context={context}
+        isLoading={contextLoading}
+        costs={stats}
+        callUsage={callUsage}
+      />
+
+      {composition ? <RequestCompositionSection composition={composition} /> : null}
 
       {hasEvents ? (
         <RailSection title={`Activity (${task.logs.length})`}>
