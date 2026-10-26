@@ -1,4 +1,13 @@
-import { Check, RotateCw, SlidersHorizontal, TextCursorInput, TextSearch } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Cloud,
+  RotateCw,
+  Server,
+  SlidersHorizontal,
+  TextCursorInput,
+  TextSearch,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { type EnvPresenceMap, useEnvPresence } from "@/api/hooks/use-integrations-meta";
@@ -237,7 +246,7 @@ function defaultMemoryChoice(
 
 /** Step 5: memory. */
 export function StepMemory({ onboarding, act, setContinueBlocker, setContinueAction }: StepProps) {
-  const { configured, dimensions } = onboarding.signals.embeddings;
+  const { configured, dimensions, model, local } = onboarding.signals.embeddings;
   const status = onboarding.state.steps.memory.status;
   const presenceQ = useEnvPresence(REUSE_KEYS);
   // The default choice reads the step 3 keys once. Wait for a fresh read (a
@@ -249,6 +258,8 @@ export function StepMemory({ onboarding, act, setContinueBlocker, setContinueAct
     <EmbeddingsSetup
       configured={configured}
       dimensions={dimensions}
+      model={model}
+      local={local}
       done={status === "done"}
       keySource="step 3"
       setContinueBlocker={setContinueBlocker}
@@ -285,10 +296,15 @@ interface SetupOptions {
  * With `setup` (`/setup` step 5): a "Keyword search only" choice, reuse of a
  * step 3 key on by default, and Continue tests the untouched default (never
  * on view). The settings page leaves `setup` out.
+ *
+ * When the server names its model (newer APIs), a configured server shows
+ * that setup first and keeps the form behind "Use another provider".
  */
 export function EmbeddingsSetup({
   configured,
   dimensions,
+  model: currentModel,
+  local = false,
   done = false,
   keySource,
   setContinueBlocker,
@@ -297,6 +313,10 @@ export function EmbeddingsSetup({
   /** The server already has an embeddings key. */
   configured: boolean;
   dimensions: number;
+  /** The model the server uses. Absent on an older API: the form shows as before. */
+  model?: string | null;
+  /** The server's endpoint is local (no hosted provider). */
+  local?: boolean;
   /** A probe already passed (the setup step is done). */
   done?: boolean;
   /** Where a reusable key comes from, as in "Reuse key from step 3". Default: saved. */
@@ -321,6 +341,11 @@ export function EmbeddingsSetup({
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const test = useTestOnboardingMemory();
   const presenceQ = useEnvPresence(REUSE_KEYS);
+  // The setup the server runs, when it says which. It stays the answer until
+  // the person asks for another provider.
+  const current = configured && currentModel ? currentModel : null;
+  const [formOpen, setFormOpen] = useState(current === null);
+  const showForm = formOpen || current === null;
 
   // No key to fall back to: keyword search is what memory does without one.
   const offerKeyword = setup !== undefined && !configured;
@@ -398,14 +423,17 @@ export function EmbeddingsSetup({
   const paste = usePasteCommit(probe.commit);
 
   // `/setup` Continue: keyword search only skips the step. An untouched
-  // default tests first (the reused key, or the setup the server has).
-  const continueRequest: OnboardingMemoryTestRequest | null = !untouched
-    ? null
-    : usingReuse && fieldsOk
-      ? body
-      : configured
-        ? { preset: "existing" }
-        : null;
+  // default tests first (the reused key, or the setup the server has). With
+  // the form closed, the server's setup is the one on screen: test it.
+  const continueRequest: OnboardingMemoryTestRequest | null = !showForm
+    ? { preset: "existing" }
+    : !untouched
+      ? null
+      : usingReuse && fieldsOk
+        ? body
+        : configured
+          ? { preset: "existing" }
+          : null;
   useContinueAction(
     setup?.setContinueAction ?? noContinueAction,
     // A settled step needs no action: Continue moves on, as before.
@@ -517,10 +545,38 @@ export function EmbeddingsSetup({
             <InfoTip content="With a key, agents find past work by meaning, not only by exact words. The test sends one sample text, then discards it." />
           </span>
         }
+        actions={
+          current ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              aria-expanded={formOpen}
+              onClick={() => setFormOpen((open) => !open)}
+              className="text-muted-foreground"
+            >
+              <ChevronDown
+                className={cn(
+                  "transition-transform duration-150 ease-snappy motion-reduce:transition-none",
+                  formOpen && "rotate-180",
+                )}
+              />
+              Use another provider
+            </Button>
+          ) : undefined
+        }
         status={<StatusIcon tone={header.tone} label={header.label} />}
         bodyClassName="space-y-4"
       >
-        {configured ? (
+        {current ? (
+          <CurrentSetup
+            model={current}
+            local={local}
+            testing={testingExisting}
+            busy={test.isPending}
+            onTest={() => void run({ preset: "existing" }).catch(() => undefined)}
+          />
+        ) : configured ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2">
             <span className="text-sm">Memory is already set up on the server.</span>
             <Button
@@ -536,192 +592,199 @@ export function EmbeddingsSetup({
           </div>
         ) : null}
 
-        <div role="radiogroup" aria-label="Provider" className="flex flex-wrap gap-2">
-          {PRESETS.map((p) => {
-            const active = !keywordOnly && p.id === preset.id;
-            return (
-              <Button
-                key={p.id}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                variant="outline"
-                size="sm"
-                onClick={() => selectPreset(p)}
-                className={cn(active && SELECTED)}
-              >
-                {p.logo ? (
-                  <BrandLogo src={p.logo} className="size-4" />
-                ) : (
-                  <SlidersHorizontal className="size-4" />
-                )}
-                {p.label}
-              </Button>
-            );
-          })}
-          {offerKeyword ? (
-            <Button
-              type="button"
-              role="radio"
-              aria-checked={keywordOnly}
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setKeyword(true);
-                setOutcome(null);
-              }}
-              className={cn(keywordOnly && SELECTED)}
-            >
-              <TextSearch className="size-4" />
-              Keyword search only
-            </Button>
-          ) : null}
-        </div>
-
-        {keywordOnly ? (
-          <FadeIn key="keyword" className="space-y-1 text-sm">
-            <p>No key needed. Agents save memories and find them by keyword.</p>
-            <p className="text-muted-foreground">
-              Search by meaning stays off. Add a key later in{" "}
-              {/* A new tab keeps setup open in this one. */}
-              <Link
-                to={setupExitHref("/settings/integrations/memory")}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-primary underline-offset-4 hover:underline"
-              >
-                Settings, Integrations, Memory
-              </Link>
-              . Earlier memories are indexed then.
-            </p>
-          </FadeIn>
-        ) : (
-          <>
-            <SettingsRow
-              label={preset.modelLabel ?? "Model"}
-              htmlFor={freeText ? "memory-model" : undefined}
-            >
-              {preset.models.length > 0 ? (
-                <div role="radiogroup" aria-label="Model" className="flex flex-wrap gap-2">
-                  {preset.models.map((m, i) => (
-                    <ChoiceChip
-                      key={m.id}
-                      selected={!other && m.id === model}
-                      onClick={() => pickModel(m.id)}
-                      tip={
-                        <span className="flex flex-col gap-0.5">
-                          <span className="font-mono">{m.id}</span>
-                          <span>{m.tradeoff}</span>
-                        </span>
-                      }
-                    >
-                      <ModelLogo model={m.id} className="size-4" />
-                      {modelDisplayName(m.id)}
-                      {i === 0 ? <SetupChip tone="info">Recommended</SetupChip> : null}
-                    </ChoiceChip>
-                  ))}
-                  <ChoiceChip
-                    selected={other}
-                    onClick={pickOther}
-                    tip={`Type any model id. It must support ${dimensions} dimensions.`}
-                  >
-                    <TextCursorInput className="size-4" />
-                    Other
-                  </ChoiceChip>
-                </div>
-              ) : null}
-              {/* The padding keeps the focus ring inside the reveal's clip. */}
-              <AnimatedReveal open={freeText} className="-m-1 p-1">
-                <Input
-                  id="memory-model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  onBlur={probe.commit}
-                  placeholder={preset.models[0]?.id ?? "text-embedding-3-small"}
-                  spellCheck={false}
-                  autoFocus={other}
-                  className="font-mono"
-                />
-              </AnimatedReveal>
-            </SettingsRow>
-
-            {urlInline ? urlRow : null}
-
-            <SettingsRow
-              label={preset.keyLabel}
-              htmlFor="memory-api-key"
-              helper={
-                keyProblem ? (
-                  <span className="text-status-error-strong">{keyProblem}</span>
-                ) : shown || probing ? undefined : setup && usingReuse ? (
-                  untouched ? (
-                    "Continue tests this key, then saves it."
-                  ) : undefined
-                ) : (
-                  "Paste the key, or type it and leave the field, to test and save it."
-                )
-              }
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-0 flex-1 basis-60">
-                  <SecretInput
-                    id="memory-api-key"
-                    value={usingReuse ? "" : apiKey}
-                    onChange={(next) => {
-                      paste.afterChange(apiKey, next);
-                      setApiKey(next);
-                    }}
-                    onBlur={() => {
-                      setKeyBlurred(true);
-                      probe.commit();
-                    }}
-                    onPaste={paste.onPaste}
-                    autoComplete="new-password"
-                    placeholder={
-                      usingReuse
-                        ? keySource
-                          ? `Using the key from ${keySource}`
-                          : "Using the saved key"
-                        : preset.placeholder
-                    }
-                    disabled={usingReuse}
-                    invalid={Boolean(keyProblem)}
-                  />
-                </div>
-                {reuseKey ? (
+        {/* The padding keeps the focus rings inside the reveal's clip. */}
+        <AnimatedReveal open={showForm} className="-mx-1">
+          <div className="space-y-4 p-1">
+            <div role="radiogroup" aria-label="Provider" className="flex flex-wrap gap-2">
+              {PRESETS.map((p) => {
+                const active = !keywordOnly && p.id === preset.id;
+                return (
                   <Button
+                    key={p.id}
                     type="button"
+                    role="radio"
+                    aria-checked={active}
                     variant="outline"
                     size="sm"
-                    aria-pressed={usingReuse}
-                    onClick={() => setReuse((v) => !v)}
-                    className={cn(usingReuse && SELECTED)}
+                    onClick={() => selectPreset(p)}
+                    className={cn(active && SELECTED)}
                   >
-                    {usingReuse ? <Check /> : null}
-                    {keySource ? `Reuse key from ${keySource}` : "Reuse saved key"}
+                    {p.logo ? (
+                      <BrandLogo src={p.logo} className="size-4" />
+                    ) : (
+                      <SlidersHorizontal className="size-4" />
+                    )}
+                    {p.label}
                   </Button>
-                ) : null}
-                {preset.keyUrl && !usingReuse ? (
-                  <span className="text-sm">
-                    <ExternalTextLink href={preset.keyUrl}>Get a key</ExternalTextLink>
-                  </span>
-                ) : null}
-              </div>
-            </SettingsRow>
+                );
+              })}
+              {offerKeyword ? (
+                <Button
+                  type="button"
+                  role="radio"
+                  aria-checked={keywordOnly}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setKeyword(true);
+                    setOutcome(null);
+                  }}
+                  className={cn(keywordOnly && SELECTED)}
+                >
+                  <TextSearch className="size-4" />
+                  Keyword search only
+                </Button>
+              ) : null}
+            </div>
 
-            {urlInline ? null : (
-              <CollapsibleSection key={preset.id} title="Advanced">
-                <div className="pt-2">{urlRow}</div>
-              </CollapsibleSection>
+            {keywordOnly ? (
+              <FadeIn key="keyword" className="space-y-1 text-sm">
+                <p>No key needed. Agents save memories and find them by keyword.</p>
+                <p className="text-muted-foreground">
+                  Search by meaning stays off. Add a key later in{" "}
+                  {/* A new tab keeps setup open in this one. */}
+                  <Link
+                    to={setupExitHref("/settings/integrations/memory")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    Settings, Integrations, Memory
+                  </Link>
+                  . Earlier memories are indexed then.
+                </p>
+              </FadeIn>
+            ) : (
+              <>
+                <SettingsRow
+                  label={preset.modelLabel ?? "Model"}
+                  htmlFor={freeText ? "memory-model" : undefined}
+                >
+                  {preset.models.length > 0 ? (
+                    <div role="radiogroup" aria-label="Model" className="flex flex-wrap gap-2">
+                      {preset.models.map((m, i) => (
+                        <ChoiceChip
+                          key={m.id}
+                          selected={!other && m.id === model}
+                          onClick={() => pickModel(m.id)}
+                          tip={
+                            <span className="flex flex-col gap-0.5">
+                              <span className="font-mono">{m.id}</span>
+                              <span>{m.tradeoff}</span>
+                            </span>
+                          }
+                        >
+                          <ModelLogo model={m.id} className="size-4" />
+                          {modelDisplayName(m.id)}
+                          {i === 0 ? <SetupChip tone="info">Recommended</SetupChip> : null}
+                        </ChoiceChip>
+                      ))}
+                      <ChoiceChip
+                        selected={other}
+                        onClick={pickOther}
+                        tip={`Type any model id. It must support ${dimensions} dimensions.`}
+                      >
+                        <TextCursorInput className="size-4" />
+                        Other
+                      </ChoiceChip>
+                    </div>
+                  ) : null}
+                  {/* The padding keeps the focus ring inside the reveal's clip. */}
+                  <AnimatedReveal open={freeText} className="-m-1 p-1">
+                    <Input
+                      id="memory-model"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      onBlur={probe.commit}
+                      placeholder={preset.models[0]?.id ?? "text-embedding-3-small"}
+                      spellCheck={false}
+                      autoFocus={other}
+                      className="font-mono"
+                    />
+                  </AnimatedReveal>
+                </SettingsRow>
+
+                {urlInline ? urlRow : null}
+
+                <SettingsRow
+                  label={preset.keyLabel}
+                  htmlFor="memory-api-key"
+                  helper={
+                    keyProblem ? (
+                      <span className="text-status-error-strong">{keyProblem}</span>
+                    ) : shown || probing ? undefined : setup && usingReuse ? (
+                      untouched ? (
+                        "Continue tests this key, then saves it."
+                      ) : undefined
+                    ) : (
+                      "Paste the key, or type it and leave the field, to test and save it."
+                    )
+                  }
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-0 flex-1 basis-60">
+                      <SecretInput
+                        id="memory-api-key"
+                        value={usingReuse ? "" : apiKey}
+                        onChange={(next) => {
+                          paste.afterChange(apiKey, next);
+                          setApiKey(next);
+                        }}
+                        onBlur={() => {
+                          setKeyBlurred(true);
+                          probe.commit();
+                        }}
+                        onPaste={paste.onPaste}
+                        autoComplete="new-password"
+                        placeholder={
+                          usingReuse
+                            ? keySource
+                              ? `Using the key from ${keySource}`
+                              : "Using the saved key"
+                            : preset.placeholder
+                        }
+                        disabled={usingReuse}
+                        invalid={Boolean(keyProblem)}
+                      />
+                    </div>
+                    {reuseKey ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-pressed={usingReuse}
+                        onClick={() => setReuse((v) => !v)}
+                        className={cn(usingReuse && SELECTED)}
+                      >
+                        {usingReuse ? <Check /> : null}
+                        {keySource ? `Reuse key from ${keySource}` : "Reuse saved key"}
+                      </Button>
+                    ) : null}
+                    {preset.keyUrl && !usingReuse ? (
+                      <span className="text-sm">
+                        <ExternalTextLink href={preset.keyUrl}>Get a key</ExternalTextLink>
+                      </span>
+                    ) : null}
+                  </div>
+                </SettingsRow>
+
+                {urlInline ? null : (
+                  <CollapsibleSection key={preset.id} title="Advanced">
+                    <div className="pt-2">{urlRow}</div>
+                  </CollapsibleSection>
+                )}
+              </>
             )}
+          </div>
+        </AnimatedReveal>
 
-            <ProbeResult
-              probing={probing}
-              outcome={shown}
-              dimensions={dimensions}
-              onRetry={shown && isRetryable(shown) && !test.isPending ? retry : undefined}
-            />
-          </>
+        {keywordOnly ? null : (
+          <ProbeResult
+            probing={probing}
+            outcome={shown}
+            dimensions={dimensions}
+            onRetry={shown && isRetryable(shown) && !test.isPending ? retry : undefined}
+          />
         )}
       </SetupCard>
     </AutosaveScopeContext.Provider>
@@ -730,6 +793,62 @@ export function EmbeddingsSetup({
 
 /** The settings page has no Continue to act on. */
 function noContinueAction() {}
+
+/**
+ * The setup the server runs, shown as the answer: memory search is on, with
+ * which model, and where it runs. The provider form waits behind "Use
+ * another provider" in the card header.
+ */
+function CurrentSetup({
+  model,
+  local,
+  testing,
+  busy,
+  onTest,
+}: {
+  model: string;
+  local: boolean;
+  /** "Test current setup" is running. */
+  testing: boolean;
+  /** Any probe is running. */
+  busy: boolean;
+  onTest: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border-subtle bg-surface p-3">
+      <span
+        aria-hidden="true"
+        className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border-subtle bg-card text-muted-foreground"
+      >
+        {local ? <Server className="size-4" /> : <Cloud className="size-4" />}
+      </span>
+      <div className="min-w-0 flex-1 basis-56 space-y-1">
+        <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+          Memory search is on
+          <SetupChip>{local ? "Local" : "Hosted"}</SetupChip>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex items-center gap-1 align-bottom font-medium text-foreground">
+                <ModelLogo model={model} className="size-3.5" />
+                {modelDisplayName(model)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="font-mono">{model}</TooltipContent>
+          </Tooltip>{" "}
+          {local
+            ? "runs on your server. No API key needed."
+            : "runs on a hosted provider with the server's API key."}
+        </p>
+      </div>
+      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onTest}>
+        {testing ? <Spinner className="size-3.5" /> : null}
+        Test current setup
+      </Button>
+    </div>
+  );
+}
 
 /** One option of a radiogroup, styled like the preset buttons, with a tooltip. */
 function ChoiceChip({

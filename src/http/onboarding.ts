@@ -23,6 +23,7 @@ import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { ProviderNameSchema } from "../types";
 import { isCombEnabled } from "../utils/constants";
 import { splitCredentialPool } from "../utils/credentials";
+import { isPrivateAddress } from "../utils/egress-guard";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
@@ -31,6 +32,26 @@ import { rollupCredStatusForProvider } from "./status";
 import { jsonError } from "./utils";
 
 export type { OnboardingState } from "../be/onboarding";
+
+/**
+ * The embeddings endpoint runs on this server or its private network: a
+ * loopback name, a private IP, or a single-label host such as the bundled
+ * `tei` service. Unset means the hosted OpenAI default.
+ */
+function isLocalEndpoint(baseUrl: string | undefined): boolean {
+  if (!baseUrl?.trim()) return false;
+  let host: string;
+  try {
+    host = new URL(baseUrl.trim()).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return false;
+  }
+  if (!host) return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (isPrivateAddress(host)) return true;
+  // IPv6 literals hold colons: only a plain name can be a single label.
+  return !host.includes(".") && !host.includes(":");
+}
 
 async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> {
   const providers: OnboardingSignals["providers"] = [];
@@ -52,12 +73,16 @@ async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> 
   const integrations = await getAutomationSetupStates();
   const agentCounts = await getReadyAgentCounts();
   const firstTask = state.firstTaskId ? await getTaskById(state.firstTaskId) : null;
+  const embeddingsOn = getEmbeddingProvider().isConfigured();
 
   return {
     providers,
     embeddings: {
-      configured: getEmbeddingProvider().isConfigured(),
+      configured: embeddingsOn,
       dimensions: EMBEDDING_DIMENSIONS,
+      // The model id and the host class only: never the key or the URL.
+      model: embeddingsOn ? (process.env.EMBEDDING_MODEL ?? "text-embedding-3-small") : null,
+      local: embeddingsOn && isLocalEndpoint(process.env.EMBEDDING_API_BASE_URL),
     },
     integrations: {
       slack: integrations.slack === "configured",

@@ -31728,11 +31728,22 @@
                             "dimensions": {
                               "type": "integer",
                               "exclusiveMinimum": 0
+                            },
+                            "model": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "local": {
+                              "type": "boolean"
                             }
                           },
                           "required": [
                             "configured",
-                            "dimensions"
+                            "dimensions",
+                            "model",
+                            "local"
                           ]
                         },
                         "integrations": {
@@ -32845,11 +32856,22 @@
                             "dimensions": {
                               "type": "integer",
                               "exclusiveMinimum": 0
+                            },
+                            "model": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "local": {
+                              "type": "boolean"
                             }
                           },
                           "required": [
                             "configured",
-                            "dimensions"
+                            "dimensions",
+                            "model",
+                            "local"
                           ]
                         },
                         "integrations": {

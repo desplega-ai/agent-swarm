@@ -12752,6 +12752,8 @@ export interface paths {
                                 embeddings: {
                                     configured: boolean;
                                     dimensions: number;
+                                    model: string | null;
+                                    local: boolean;
                                 };
                                 integrations: {
                                     slack: boolean;
@@ -12985,6 +12987,8 @@ export interface paths {
                                 embeddings: {
                                     configured: boolean;
                                     dimensions: number;
+                                    model: string | null;
+                                    local: boolean;
                                 };
                                 integrations: {
                                     slack: boolean;

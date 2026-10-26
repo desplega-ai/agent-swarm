@@ -13,11 +13,13 @@ export function MemoryEmbeddingsSection() {
   const { data } = useOnboarding();
   // Without the onboarding API (an older server) only the Advanced fields show.
   if (!data) return null;
-  const { configured, dimensions } = data.signals.embeddings;
+  const { configured, dimensions, model, local } = data.signals.embeddings;
   return (
     <EmbeddingsSetup
       configured={configured}
       dimensions={dimensions}
+      model={model}
+      local={local}
       setContinueBlocker={noContinueBlocker}
     />
   );

@@ -1,4 +1,4 @@
-import { AlertCircle, Check, FolderOpen, RotateCw } from "lucide-react";
+import { AlertCircle, ArrowUpRight, FolderOpen, RotateCw } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { StatusProvider } from "@/app/status-context";
@@ -9,15 +9,18 @@ import {
   createAndConnect,
 } from "@/components/comb/connect-flow";
 import { useConnectFlowDeps } from "@/components/comb/use-connect-flow-deps";
+import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { setupStepHref } from "@/components/onboarding/step-status";
 import { CopyButton } from "@/components/shared/copy-button";
 import { SetupCard } from "@/components/shared/setup-card";
+import { StatusIcon } from "@/components/shared/status-icon";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { AgentFsProvider, useAgentFs } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useContinueBlocker } from "@/hooks/use-autosave";
 import type { StepProps } from "../step-contract";
+import { CombPreview } from "./files/comb-preview";
 
 type FilesMethod = "created" | "connected";
 
@@ -151,6 +154,9 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
   // A saved key agent-fs rejects means the account exists: paste its key, as Comb does.
   const pasting =
     phase.kind === "email-taken" || (phase.kind === "idle" && state === "invalid-key");
+  // The picture explains the step. A state that needs the person's action shows alone.
+  const showPreview =
+    !pasting && phase.kind !== "new-key" && phase.kind !== "failed" && state !== "disabled";
 
   return (
     <div className="flex flex-col gap-4">
@@ -165,12 +171,23 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
         <SetupCard
           icon={<FolderOpen className="size-5" />}
           title="Your files account is ready."
-          description={
-            <Link to="/file" className="underline underline-offset-2">
-              Open your files
-            </Link>
+          description={email ? `Connected as ${email}.` : "Comb is connected in this browser."}
+          actions={
+            <Button asChild variant="outline" size="sm">
+              {/* A new tab keeps setup open in this one. */}
+              <Link
+                to={setupExitHref("/file")}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open your files"
+              >
+                {/* A phone keeps the title room: the button says "Open". */}
+                Open<span className="hidden sm:inline"> your files</span>
+                <ArrowUpRight />
+              </Link>
+            </Button>
           }
-          status={<Check className="size-4 text-primary" aria-hidden="true" />}
+          status={<StatusIcon tone="done" label="Connected" />}
         />
       ) : !email ? (
         <AlertCallout tone="info" icon={AlertCircle}>
@@ -251,8 +268,12 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
           icon={<FolderOpen className="size-5" />}
           title="Creating your files account…"
           description="This takes a few seconds."
+          status={<StatusIcon tone="busy" label="Creating your files account" />}
         />
       )}
+
+      {/* Stays mounted from creating to done, so its beats play once. */}
+      {showPreview ? <CombPreview /> : null}
     </div>
   );
 }

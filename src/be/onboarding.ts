@@ -145,6 +145,13 @@ export const OnboardingSignalsSchema = z.object({
   embeddings: z.object({
     configured: z.boolean(),
     dimensions: z.number().int().positive(),
+    /** The embedding model memory search uses. Null while it is off. */
+    model: z.string().nullable(),
+    /**
+     * The endpoint runs on this server or its private network (loopback, a
+     * private address, or a single-label host such as `tei`). False while off.
+     */
+    local: z.boolean(),
   }),
   integrations: z.object({
     slack: z.boolean(),

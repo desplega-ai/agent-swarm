@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { MotionGlobalConfig } from "motion/react";
 import { act, createContext, type FormEvent, type ReactNode, StrictMode, useContext } from "react";
 import type { OnboardingAction, OnboardingResponse } from "../../../api/types";
 import { AgentFsError } from "../../../lib/agent-fs/client";
@@ -11,7 +12,10 @@ GlobalRegistrator.register();
 // react-dom reads the DOM when it first loads: import it after the DOM exists.
 const { createRoot } = await import("react-dom/client");
 const { MemoryRouter } = await import("react-router-dom");
+// happy-dom rejects a cancelled Web Animation, which motion does on unmount.
+MotionGlobalConfig.skipAnimations = true;
 afterAll(async () => {
+  MotionGlobalConfig.skipAnimations = false;
   await GlobalRegistrator.unregister();
 });
 
@@ -95,6 +99,14 @@ mock.module("@/components/comb/connect-card", () => ({
       <input value={apiKey} onChange={(e) => onApiKeyChange(e.target.value)} />
     </form>
   ),
+}));
+// Its tooltip needs the app's TooltipProvider: the label is enough here.
+mock.module("@/components/shared/status-icon", () => ({
+  StatusIcon: ({ label }: { label?: string }) => <span>{label}</span>,
+}));
+// The real module pulls the onboarding query and the config hooks: keep only the link helper.
+mock.module("@/components/onboarding/onboarding-redirect", () => ({
+  setupExitHref: (path: string) => `${path}?fromSetup=1`,
 }));
 mock.module("@/hooks/use-autosave", () => ({
   ...require("../../../hooks/use-autosave"),
@@ -204,7 +216,15 @@ describe("StepFiles", () => {
     expect(calls).toContain("connect");
     expect(acts).toEqual([{ action: "complete", step: "files", method: "created" }]);
     expect(view.container.textContent).toContain("Your files account is ready.");
-    expect(view.container.querySelector('a[href="/file"]')).not.toBeNull();
+    expect(view.container.textContent).toContain("Connected as qa+files@example.com.");
+    // Comb opens in a new tab, marked so the landing redirect does not send it back to setup.
+    const open = view.container.querySelector('a[href="/file?fromSetup=1"]');
+    expect(open?.getAttribute("target")).toBe("_blank");
+    expect(open?.getAttribute("aria-label")).toBe("Open your files");
+    // The Comb picture explains the step while it runs and once it is done.
+    expect(view.container.querySelector("figure")?.textContent).toContain(
+      "Send it back to an agent",
+    );
     // Continue held while the flow ran, then released.
     expect(holds).toContain("Creating your files account…");
     expect(holds.at(-1)).toBeNull();
@@ -218,6 +238,8 @@ describe("StepFiles", () => {
     const view = await mount();
     expect(view.container.querySelector('[data-testid="paste-form"]')).not.toBeNull();
     expect(view.container.textContent).toContain("This email already has an agent-fs account");
+    // A state that needs the person shows alone, without the picture.
+    expect(view.container.querySelector("figure")).toBeNull();
     expect(acts).toEqual([]);
     await view.unmount();
   });
@@ -240,6 +262,7 @@ describe("StepFiles", () => {
     };
     const view = await mount();
     expect(view.container.textContent).toContain("Could not create your files account");
+    expect(view.container.querySelector("figure")).toBeNull();
     const retry = [...view.container.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("Retry"),
     );

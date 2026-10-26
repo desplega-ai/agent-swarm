@@ -4072,7 +4072,14 @@ export interface OnboardingProviderSignal {
 
 export interface OnboardingSignals {
   providers: OnboardingProviderSignal[];
-  embeddings: { configured: boolean; dimensions: number };
+  embeddings: {
+    configured: boolean;
+    dimensions: number;
+    /** The model memory search uses. Null while off, absent on an older API. */
+    model?: string | null;
+    /** The endpoint runs on the server or its private network. Absent on an older API. */
+    local?: boolean;
+  };
   integrations: {
     slack: boolean;
     github: boolean;

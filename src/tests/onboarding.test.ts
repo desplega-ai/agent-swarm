@@ -370,13 +370,60 @@ describe("onboarding state", () => {
   test("GET derives the authenticated connection", async () => {
     const body = (await (await request("/api/onboarding")).json()) as {
       state: OnboardingState;
-      signals: { providers: unknown[]; embeddings: { configured: boolean; dimensions: number } };
+      signals: { providers: unknown[]; embeddings: Record<string, unknown> };
     };
 
     expect(body.state.steps.connect).toMatchObject({ status: "done", method: "api_key" });
     expect(body.signals.providers).toEqual([]);
-    expect(body.signals.embeddings).toEqual({ configured: false, dimensions: 512 });
+    expect(body.signals.embeddings).toEqual({
+      configured: false,
+      dimensions: 512,
+      model: null,
+      local: false,
+    });
     expect((await getState()).steps.connect.status).toBe("done");
+  });
+
+  test("embedding signals name the model and say whether the endpoint is local", async () => {
+    const cases: Array<[string | undefined, boolean]> = [
+      ["http://tei:80/v1", true],
+      ["http://localhost:8080/v1", true],
+      ["http://127.0.0.1:8091/v1", true],
+      ["http://10.0.4.2/v1", true],
+      ["http://[::1]:8080/v1", true],
+      ["https://api.openai.com/v1", false],
+      ["https://openrouter.ai/api/v1", false],
+      ["http://[2001:db8::1]/v1", false],
+      [undefined, false],
+    ];
+    process.env.EMBEDDING_API_KEY = "local-tei";
+    process.env.EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5";
+    for (const [baseUrl, local] of cases) {
+      if (baseUrl === undefined) delete process.env.EMBEDDING_API_BASE_URL;
+      else process.env.EMBEDDING_API_BASE_URL = baseUrl;
+      const body = (await (await request("/api/onboarding")).json()) as {
+        signals: { embeddings: Record<string, unknown> };
+      };
+      expect({ baseUrl, embeddings: body.signals.embeddings }).toEqual({
+        baseUrl,
+        embeddings: {
+          configured: true,
+          dimensions: 512,
+          model: "nomic-ai/nomic-embed-text-v1.5",
+          local,
+        },
+      });
+      // The signal never carries the key or the URL.
+      expect(JSON.stringify(body.signals.embeddings)).not.toContain("local-tei");
+      if (baseUrl) expect(JSON.stringify(body.signals.embeddings)).not.toContain(baseUrl);
+    }
+
+    // No model set: the provider's default model.
+    delete process.env.EMBEDDING_MODEL;
+    const fallback = (await (await request("/api/onboarding")).json()) as {
+      signals: { embeddings: { model: string | null } };
+    };
+    expect(fallback.signals.embeddings.model).toBe("text-embedding-3-small");
   });
 
   test("agent signals count idle or busy agents as ready", async () => {
