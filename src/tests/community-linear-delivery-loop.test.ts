@@ -816,6 +816,23 @@ describe("decide(): review sequences", () => {
     expect(action).toMatchObject({ type: "setState", to: "pendingCi", disarm: true });
   });
 
+  test("Approved, armed and DIRTY: the merge-queue fix disarms auto-merge before the push", () => {
+    const armed = pr({ mergeStateStatus: "DIRTY", autoMergeEnabled: true });
+    expect(
+      decide(input({ issue: issue("approved"), pr: armed, record: record(reviewedHead) })),
+    ).toMatchObject({ type: "dispatch", fixKind: "mq", disarm: true });
+    const gateOff = decide(
+      input({
+        issue: issue("approved"),
+        pr: armed,
+        record: record(reviewedHead),
+        config: { ...CONFIG, reviewGate: false },
+      }),
+    );
+    expect(gateOff).toMatchObject({ type: "dispatch", fixKind: "mq" });
+    expect(gateOff).not.toHaveProperty("disarm", true);
+  });
+
   test("Approved with the review gate off arms auto-merge without an agent verdict", () => {
     expect(
       decide(
@@ -1772,6 +1789,36 @@ describe("tick shell", () => {
     expect(mutations).toEqual([
       { kind: "github:mutation", detail: "LdlDisarm" },
       { kind: "linear:mutation", detail: "LdlSetState" },
+    ]);
+  });
+
+  test("Approved, armed and DIRTY: disable auto-merge, then send the merge-queue fix", async () => {
+    const kv = new Map<string, KvRow>();
+    kv.set(`${NAMESPACE}/issue/i9`, {
+      value: { ...emptyRecord(), ...reviewedHead },
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const f = fakeCtx({
+      kv,
+      linear: linearFixture([{ id: "i9", key: "ENG-9", state: "Approved" }]),
+      github: githubFixture([
+        {
+          number: 9,
+          branch: "eng-9-work",
+          detail: {
+            mergeStateStatus: "DIRTY",
+            autoMergeRequest: { enabledAt: "2026-10-26T09:00:00Z" },
+          },
+        },
+      ]),
+    });
+    const out = await tick({ dryRun: false, config: TICK_CONFIG }, f.ctx);
+    expect(out.projects[0]?.issues[0]).toMatchObject({ action: "dispatch" });
+    const steps = f.writes.filter((w) => w.kind.endsWith(":mutation") || w.kind === "task_send");
+    expect(steps.slice(0, 2)).toEqual([
+      { kind: "github:mutation", detail: "LdlDisarm" },
+      { kind: "task_send", detail: expect.any(String) },
     ]);
   });
 

@@ -287,6 +287,8 @@ export type Action =
       reason: string;
       text?: string;
       redispatch?: boolean;
+      /** Turn off GitHub auto-merge first, so the fix's new head cannot merge unreviewed. */
+      disarm?: boolean;
     }
   | { type: "armAutoMerge"; reason: string }
   | { type: "escalate"; reason: string };
@@ -588,6 +590,7 @@ function stateAction(input: DecideInput): Action {
           type: "dispatch",
           kind: "fix",
           fixKind: "mq",
+          disarm: (config.reviewGate && pr.autoMergeEnabled) || undefined,
           reason:
             pr.mergeStateStatus === "DIRTY" ? "merge conflict" : `failed: ${failed.join(", ")}`,
           text: `mergeStateStatus ${pr.mergeStateStatus}; failed required checks: ${failed.join(", ") || "none"}`,
@@ -1563,30 +1566,29 @@ async function runTick(t: TickContext): Promise<TickOutput> {
       if (action.unknownCi === "bump") next.attempts.unknownCi += 1;
       return next;
     }
+    if ((action.type === "setState" || action.type === "dispatch") && action.disarm) {
+      if (!pr) return escalate(issue, project, next, "no PR to disarm");
+      try {
+        const data = await github.graphql(
+          `mutation LdlDisarm($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { number } } }`,
+          { id: pr.id },
+        );
+        if (!get(data, "disablePullRequestAutoMerge.pullRequest")) throw new Error("no PR returned");
+      } catch (err) {
+        return escalate(
+          issue,
+          project,
+          next,
+          `GitHub refused to disable auto-merge: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
     switch (action.type) {
       case "skip":
         return next;
       case "escalate":
         return escalate(issue, project, next, action.reason);
       case "setState": {
-        if (action.disarm) {
-          if (!pr) return escalate(issue, project, next, "no PR to disarm");
-          try {
-            const data = await github.graphql(
-              `mutation LdlDisarm($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { number } } }`,
-              { id: pr.id },
-            );
-            if (!get(data, "disablePullRequestAutoMerge.pullRequest"))
-              throw new Error("no PR returned");
-          } catch (err) {
-            return escalate(
-              issue,
-              project,
-              next,
-              `GitHub refused to disable auto-merge: ${err instanceof Error ? err.message : err}`,
-            );
-          }
-        }
         await setState(issue, action.to);
         if (action.ping) {
           await slack(
