@@ -9,13 +9,20 @@ import { type CardRollup, rejectionText } from "./model";
 const NEW_KEY_TIP = "Agents check a new key within about 10 seconds.";
 const CHANGED_KEY_TIP = "Running agents check a changed key within about a minute.";
 
-/** Shown in a card once its key is saved: waits for a worker, then confirms. */
+/**
+ * Shown in a card once its key is saved: waits for a worker, then confirms.
+ * With no agent on the card's harness nothing can check the key, so the line
+ * stays static (the switch list under it is the way out).
+ */
 export function WaitingPanel({
   rollup,
   harnessLabel,
+  noWorker,
 }: {
   rollup: CardRollup;
   harnessLabel: string;
+  /** No agent runs the card's harness. */
+  noWorker: boolean;
 }) {
   if (rollup.verified) {
     const n = rollup.verifiedWorkers;
@@ -37,6 +44,13 @@ export function WaitingPanel({
       <output className="block space-y-1">
         <StatusLine tone="error">{rejectionText(rollup.error)}</StatusLine>
         <p className="text-xs text-muted-foreground">Fix the key and save it. {CHANGED_KEY_TIP}</p>
+      </output>
+    );
+  }
+  if (noWorker) {
+    return (
+      <output className="block">
+        <StatusLine tone="warning">Not checked yet: no {harnessLabel} agents</StatusLine>
       </output>
     );
   }

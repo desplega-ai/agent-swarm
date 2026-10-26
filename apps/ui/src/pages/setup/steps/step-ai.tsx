@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -11,15 +12,18 @@ import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { Button } from "@/components/ui/button";
 import { AutosaveScopeContext, useAutosaveScope } from "@/hooks/use-autosave";
 import { hasRuntimeCredential } from "@/lib/agent-runtime-models";
-import type { DialContext } from "@/lib/model-dial";
+import { type DialContext, dialHarness } from "@/lib/model-dial";
 import type { StepProps } from "../step-contract";
 import { ClaudeCard } from "./ai/claude-card";
 import { CodexCard } from "./ai/codex-card";
 import { DevinCard } from "./ai/devin-card";
+import { switchAgentsTo } from "./ai/harness-switch";
 import {
   type AiCardId,
   type AiCardProps,
   cardRollup,
+  type FirstCredentialSwitch,
+  firstCredentialSwitch,
   isAiMethod,
   METHOD_CARD,
   PRESENCE_KEYS,
@@ -31,6 +35,7 @@ const NO_TIER_ROWS: ModelTierPreview[] = [];
 
 export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
+  const queryClient = useQueryClient();
   const { data: agents = [] } = useAgents();
   const { data: presence = {} } = useEnvPresence(PRESENCE_KEYS);
   const { data: configs = [] } = useConfigs({ scope: "global" });
@@ -84,16 +89,58 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     act({ action: "complete", step: "ai", method: "codex_cli" }).catch(() => {});
   }, [rollups, deviceDone, recorded, act]);
 
+  // Each card's saved state, as its header shows it.
+  const savedCards = useRef<Partial<Record<AiCardId, boolean>>>({});
+  const reportSaved = useCallback((card: AiCardId, saved: boolean) => {
+    savedCards.current[card] = saved;
+  }, []);
+  // The switch runs from save callbacks: it reads the latest data from here.
+  const latest = useRef({ agents, rollups, dialContext });
+  useEffect(() => {
+    latest.current = { agents, rollups, dialContext };
+  });
+  const [autoSwitch, setAutoSwitch] = useState<FirstCredentialSwitch | null>(null);
+  const autoSwitchRunning = useRef(false);
+
+  /**
+   * The first credential moves every agent to its card's harness, so that a
+   * worker can check the key. It runs once per save, never on view. A save
+   * that finds agents on the harness, or a credential on another card, keeps
+   * the manual switch list.
+   */
+  const switchOnFirstCredential = useCallback(
+    async (method: OnboardingAiMethod) => {
+      if (autoSwitchRunning.current) return;
+      const { agents, rollups, dialContext } = latest.current;
+      const plan = firstCredentialSwitch(method, savedCards.current, rollups, agents);
+      // The carried model level needs the tier models: while they load, keep the list.
+      if (!plan || (!dialContext.tiers && dialHarness(plan.target))) return;
+      autoSwitchRunning.current = true;
+      setAutoSwitch(plan);
+      try {
+        await switchAgentsTo(queryClient, plan.agentIds, plan.target, dialContext, true);
+      } finally {
+        autoSwitchRunning.current = false;
+        setAutoSwitch(null);
+      }
+    },
+    [queryClient],
+  );
+
   const aiDone = aiStep.status === "done";
   // The card's save already refreshed env presence and the onboarding signals.
   const onSaved = useCallback(
     (method: OnboardingAiMethod) => {
       // A save after the step is done adds a provider. It never rewrites the method.
       pending.current = aiDone ? null : { card: METHOD_CARD[method], method };
+      void switchOnFirstCredential(method);
     },
-    [aiDone],
+    [aiDone, switchOnFirstCredential],
   );
-  const onDeviceComplete = useCallback(() => setDeviceDone(true), []);
+  const onDeviceComplete = useCallback(() => {
+    setDeviceDone(true);
+    void switchOnFirstCredential("codex_device");
+  }, [switchOnFirstCredential]);
 
   const cardProps = (card: AiCardId): AiCardProps => ({
     open: openCard === card,
@@ -104,6 +151,8 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     agents,
     onSaved,
     dialContext,
+    reportSaved,
+    autoSwitching: autoSwitch?.card === card ? autoSwitch.target : null,
   });
 
   return (
