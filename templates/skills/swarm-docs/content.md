@@ -74,6 +74,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Steer a Running Task](https://docs.agent-swarm.dev/docs/guides/task-steering). Reference.
 - [Claude Code Mod](https://docs.agent-swarm.dev/docs/guides/claude-code-mod). Reference.
 - [Observability with OpenTelemetry](https://docs.agent-swarm.dev/docs/guides/observability-opentelemetry). When: Someone wants swarm traces and metrics in SigNoz or another OpenTelemetry backend.
+- [Host Requirements & Disk Cleanup](https://docs.agent-swarm.dev/docs/guides/host-requirements). When: Someone asks how big a host their self-hosted swarm needs, or their disk is filling up with Docker images.
 - [Performance & Resource Sizing](https://docs.agent-swarm.dev/docs/guides/performance-resource-sizing). Reference.
 - [Cost & context computation](https://docs.agent-swarm.dev/docs/guides/cost-and-context-computation). Reference.
 - [Extensions](https://docs.agent-swarm.dev/docs/guides/extensions). Reference.
