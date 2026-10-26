@@ -18,6 +18,10 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
 
+## Tool-schema cost on harness bumps
+
+On a codex, opencode or pi bump, run `bun scripts/probe-tool-schema-tokens.ts --harness <name>` and paste its table into the PR. It reports provider-reported turn-1 input tokens with and without the swarm MCP server, and how many swarm tools the request declares. On codex, a swarm-MCP delta above 2k tokens blocks the bump; on opencode, any declared swarm tool does: the new version stopped deferring MCP tools. On pi, the deferral-on leg must declare only the core set (`CORE_TOOLS`, 26 today). A `FAIL` in "swarm tool reached" means the MCP leg never connected, so its numbers do not count.
+
 ## NaN and Helmcode (pi, opencode)
 
 NaN and Helmcode are OpenAI-compatible, flat-rate providers. Their models run
