@@ -590,7 +590,6 @@ function stateAction(input: DecideInput): Action {
           type: "dispatch",
           kind: "fix",
           fixKind: "mq",
-          disarm: (config.reviewGate && pr.autoMergeEnabled) || undefined,
           reason:
             pr.mergeStateStatus === "DIRTY" ? "merge conflict" : `failed: ${failed.join(", ")}`,
           text: `mergeStateStatus ${pr.mergeStateStatus}; failed required checks: ${failed.join(", ") || "none"}`,
@@ -666,7 +665,7 @@ function ciGreen(input: DecideInput, pr: PrView): Action {
   return { type: "dispatch", kind: "review", reason: "no verdict for this head" };
 }
 
-/** Step 6: one live task per issue, a branch name, and the per-issue caps. */
+/** Step 6: one live task per issue, a branch name, the per-issue caps, and disarm before a coder. */
 function guard(action: Action, input: DecideInput): Action {
   if (action.type !== "dispatch") return action;
   if (input.liveTask) return { type: "wait", reason: `a task runs (${action.reason})` };
@@ -679,6 +678,8 @@ function guard(action: Action, input: DecideInput): Action {
   if (a.total + 1 > input.caps.total) {
     return { type: "escalate", reason: `cap total: ${input.caps.total} attempts spent` };
   }
+  // Every coder dispatch can push a new head: disarm first, or that head can merge unreviewed.
+  if (action.kind !== "review" && input.pr?.autoMergeEnabled) return { ...action, disarm: true };
   return action;
 }
 

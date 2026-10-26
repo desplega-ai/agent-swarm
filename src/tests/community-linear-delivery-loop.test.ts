@@ -829,8 +829,40 @@ describe("decide(): review sequences", () => {
         config: { ...CONFIG, reviewGate: false },
       }),
     );
-    expect(gateOff).toMatchObject({ type: "dispatch", fixKind: "mq" });
-    expect(gateOff).not.toHaveProperty("disarm", true);
+    expect(gateOff).toMatchObject({ type: "dispatch", fixKind: "mq", disarm: true });
+  });
+
+  const armedAsk = pr({
+    autoMergeEnabled: true,
+    reviews: [{ ...approvedReview, state: "CHANGES_REQUESTED", body: "fix the export" }],
+  });
+  const armedThread = pr({ autoMergeEnabled: true, threads: [openThread] });
+  const armedRed = pr({ autoMergeEnabled: true, checks: [{ ...green, result: "failure" }] });
+  test.each([
+    ["Approved, human CHANGES_REQUESTED", "approved", armedAsk],
+    ["Owner review, human CHANGES_REQUESTED", "ownerReview", armedAsk],
+    ["Pending CI, human CHANGES_REQUESTED", "pendingCi", armedAsk],
+    ["Owner review, open thread", "ownerReview", armedThread],
+    ["Applying feedback, open thread", "applyingFeedback", armedThread],
+    ["Pending CI, failed check", "pendingCi", armedRed],
+  ] as const)("%s with auto-merge armed: the coder fix disarms first", (_, state, view) => {
+    const action = decide(input({ issue: issue(state), pr: view, record: record(reviewedHead) }));
+    expect(action).toMatchObject({ type: "dispatch", kind: "fix", disarm: true });
+  });
+
+  test("a coder fix on a PR with auto-merge off does not disarm", () => {
+    const view = pr({ reviews: armedAsk.reviews });
+    const action = decide(
+      input({ issue: issue("approved"), pr: view, record: record(reviewedHead) }),
+    );
+    expect(action).toMatchObject({ type: "dispatch", kind: "fix" });
+    expect(action).not.toHaveProperty("disarm");
+  });
+
+  test("an agent review dispatch never disarms", () => {
+    const action = decide(input({ issue: issue("pendingCi"), pr: pr({ autoMergeEnabled: true }) }));
+    expect(action).toMatchObject({ type: "dispatch", kind: "review" });
+    expect(action).not.toHaveProperty("disarm");
   });
 
   test("Approved with the review gate off arms auto-merge without an agent verdict", () => {
@@ -1815,6 +1847,47 @@ describe("tick shell", () => {
     });
     const out = await tick({ dryRun: false, config: TICK_CONFIG }, f.ctx);
     expect(out.projects[0]?.issues[0]).toMatchObject({ action: "dispatch" });
+    const steps = f.writes.filter((w) => w.kind.endsWith(":mutation") || w.kind === "task_send");
+    expect(steps.slice(0, 2)).toEqual([
+      { kind: "github:mutation", detail: "LdlDisarm" },
+      { kind: "task_send", detail: expect.any(String) },
+    ]);
+  });
+
+  test("Approved, armed, human CHANGES_REQUESTED: disable auto-merge, then send the fix", async () => {
+    const kv = new Map<string, KvRow>();
+    kv.set(`${NAMESPACE}/issue/i9`, {
+      value: { ...emptyRecord(), ...reviewedHead },
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const f = fakeCtx({
+      kv,
+      linear: linearFixture([{ id: "i9", key: "ENG-9", state: "Approved" }]),
+      github: githubFixture([
+        {
+          number: 9,
+          branch: "eng-9-work",
+          detail: {
+            autoMergeRequest: { enabledAt: "2026-10-26T09:00:00Z" },
+            reviews: {
+              nodes: [
+                {
+                  author: { login: "owner", __typename: "User" },
+                  authorAssociation: "MEMBER",
+                  state: "CHANGES_REQUESTED",
+                  body: "Fix the export",
+                  commit: { oid: HEAD },
+                },
+              ],
+            },
+          },
+        },
+      ]),
+    });
+    const out = await tick({ dryRun: false, config: TICK_CONFIG }, f.ctx);
+    expect(out.controls.ok).toBe(true);
+    expect(out.projects[0]?.issues[0]).toMatchObject({ action: "dispatch", kind: "review" });
     const steps = f.writes.filter((w) => w.kind.endsWith(":mutation") || w.kind === "task_send");
     expect(steps.slice(0, 2)).toEqual([
       { kind: "github:mutation", detail: "LdlDisarm" },
