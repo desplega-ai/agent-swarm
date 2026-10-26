@@ -67,9 +67,10 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const presence = presenceQuery.data ?? NO_PRESENCE;
   const configs = configsQuery.data ?? NO_CONFIGS;
   // The cards' saved state comes from these two. Restored cache data can be
-  // old, so the state is final only when both have loaded and do not fetch.
+  // old, and a failed load has no data, so the state is final only when both
+  // hold data and do not fetch.
   const savedStateSettled = [presenceQuery, configsQuery].every(
-    (q) => q.status !== "pending" && !q.isFetching,
+    (q) => q.data !== undefined && !q.isFetching,
   );
   const { config } = useConfig();
   const apiUrl = config.apiUrl || window.location.origin;

@@ -20,6 +20,7 @@ afterAll(async () => {
 let agents: AgentWithTasks[] = [];
 let tiers: ModelTierPreview[] | undefined;
 let presencePending = false;
+let presenceFailed = false;
 const harnessCalls: Array<[string, string]> = [];
 
 mock.module("@/api/client", () => ({
@@ -53,10 +54,13 @@ mock.module("@/api/hooks/use-config-api", () => ({
 }));
 mock.module("@/api/hooks/use-integrations-meta", () => ({
   // `presencePending`: the first env presence answer has not come yet.
+  // `presenceFailed`: the env presence load failed, so there is no data.
   useEnvPresence: () =>
     presencePending
       ? { data: undefined, status: "pending", isFetching: true }
-      : { data: {}, status: "success", isFetching: false },
+      : presenceFailed
+        ? { data: undefined, status: "error", isFetching: false }
+        : { data: {}, status: "success", isFetching: false },
 }));
 mock.module("@/api/hooks/use-model-tiers", () => ({
   useModelTiers: () => ({ data: tiers, isError: false }),
@@ -179,6 +183,7 @@ beforeEach(() => {
   agents = fleet;
   tiers = tierRows();
   presencePending = false;
+  presenceFailed = false;
   harnessCalls.length = 0;
   document.body.innerHTML = "";
 });
@@ -274,6 +279,19 @@ describe("StepAi: the switch on the first credential", () => {
     await view.rerender();
     await settle();
     expect(harnessCalls).toEqual([]);
+    await view.unmount();
+  });
+
+  test("a save while env presence fails waits, and switches once it loads", async () => {
+    presenceFailed = true;
+    const view = await mount();
+    await view.saveKey();
+    // No data: another card may hold a key, so the switch waits.
+    expect(harnessCalls).toEqual([]);
+    presenceFailed = false;
+    await view.rerender();
+    await settle();
+    expect(harnessCalls).toEqual(onPi);
     await view.unmount();
   });
 
