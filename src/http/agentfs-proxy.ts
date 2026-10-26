@@ -179,10 +179,23 @@ export async function handleAgentFsProxy(
     jsonError(res, "Invalid path", 400);
     return true;
   }
+  // Limit on the path fetch() will send, not on our own parse of the raw
+  // target: fetch drops a raw `#fragment`, so `/auth/register#x` reaches
+  // upstream `/auth/register`.
+  const upstreamUrl = `${base}${upstreamPath}`;
+  let sentPath: string;
+  try {
+    // Strip the base URL's own path prefix, if AGENT_FS_API_URL carries one.
+    const basePath = new URL(base).pathname.replace(/\/+$/, "");
+    sentPath = new URL(upstreamUrl).pathname.slice(basePath.length);
+  } catch {
+    jsonError(res, "Invalid path", 400);
+    return true;
+  }
   if (
     isApi &&
     method === "POST" &&
-    routedPath(pathOnly) === "/auth/register" &&
+    routedPath(sentPath) === "/auth/register" &&
     !registerRateLimiter.take(clientIp(req))
   ) {
     res.setHeader("Retry-After", "12");
@@ -219,7 +232,7 @@ export async function handleAgentFsProxy(
       init.body = Readable.toWeb(req) as RequestInit["body"];
       init.duplex = "half";
     }
-    upstream = await fetch(`${base}${upstreamPath}`, init);
+    upstream = await fetch(upstreamUrl, init);
   } catch {
     if (!res.headersSent && !res.destroyed) jsonError(res, "agent-fs upstream unavailable", 502);
     else res.destroy();

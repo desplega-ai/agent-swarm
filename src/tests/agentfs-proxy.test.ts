@@ -728,6 +728,30 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
     expect(await rawPostStatus(proxyUrl, "/agentfs/auth/register", ip)).toBe(429);
   });
 
+  test("a raw #fragment on the register path still hits the register limit", async () => {
+    for (const [path, ip] of [
+      ["/agentfs/auth/register#x", "203.0.113.11"],
+      ["/agentfs/auth/register?a=1#x", "203.0.113.12"],
+    ] as const) {
+      // fetch() drops the fragment, so these reach upstream /auth/register.
+      for (let i = 0; i < 5; i++) {
+        expect({ path, status: await rawPostStatus(proxyUrl, path, ip) }).toEqual({
+          path,
+          status: 200,
+        });
+        expect(fake.last?.url.split("?")[0]).toBe("/auth/register");
+      }
+      for (let i = 0; i < 2; i++) {
+        fake.last = null;
+        expect({ path, status: await rawPostStatus(proxyUrl, path, ip) }).toEqual({
+          path,
+          status: 429,
+        });
+        expect(fake.last).toBeNull();
+      }
+    }
+  });
+
   test("the sixth POST /agentfs/auth/register from one IP within a minute gets 429", async () => {
     const register = (ip: string) =>
       fetch(`${proxyUrl}/agentfs/auth/register`, {
