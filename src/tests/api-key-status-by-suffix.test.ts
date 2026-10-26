@@ -150,6 +150,63 @@ describe("key status by suffix", () => {
     expect(b.modelBlockedIndices).toEqual([]);
   });
 
+  test("two pool keys with the same suffix keep the index read: one bench does not bench both", async () => {
+    // a-same1 and b-same1 share one status row; a rate limit at index 0 must leave index 1.
+    await markKeyRateLimited("MISTRAL_API_KEY", "same1", 0, FUTURE());
+
+    const res = await getAvailable("keyType=MISTRAL_API_KEY&totalKeys=2&keySuffixes=same1,same1");
+    expect(res.body).toMatchObject({ availableIndices: [1] });
+    // Control: the index read gives the same answer.
+    const legacy = await getAvailableKeyIndices("MISTRAL_API_KEY", 2);
+    expect(legacy.availableIndices).toEqual([1]);
+  });
+
+  test("validation success and a rate-limit clear at global scope reach the key's agent-scoped rows", async () => {
+    const post = (path: string, body: unknown) =>
+      fetch(`${baseUrl}/api/keys/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const available = () =>
+      getAvailable(
+        `keyType=DEEPSEEK_API_KEY&totalKeys=2&keySuffixes=${suffixes(POOL_A).join(",")}`,
+      );
+
+    // 401 for aaaa1 at agent scope, then OK at global scope.
+    const keys = (ok: boolean) => [
+      { keyIndex: 1, keySuffix: "aaaa1", ok, ...(ok ? {} : { httpStatus: 401 }) },
+    ];
+    expect(
+      (
+        await post("report-validation", {
+          keyType: "DEEPSEEK_API_KEY",
+          keys: keys(false),
+          scope: "agent",
+          scopeId: "agent-a",
+        })
+      ).status,
+    ).toBe(200);
+    expect((await available()).body).toMatchObject({ rejectedIndices: [1] });
+    expect(
+      (await post("report-validation", { keyType: "DEEPSEEK_API_KEY", keys: keys(true) })).status,
+    ).toBe(200);
+    expect((await available()).body).toMatchObject({
+      availableIndices: [0, 1],
+      rejectedIndices: [],
+    });
+
+    // A rate limit on the agent-scoped row, cleared by the worker's global-scope recheck.
+    await markKeyRateLimited("DEEPSEEK_API_KEY", "aaaa1", 1, FUTURE(), "agent", "agent-a");
+    expect((await available()).body).toMatchObject({ availableIndices: [0] });
+    const clear = await post("clear-rate-limit", {
+      keyType: "DEEPSEEK_API_KEY",
+      keySuffix: "aaaa1",
+    });
+    expect(((await clear.json()) as { cleared: boolean }).cleared).toBe(true);
+    expect((await available()).body).toMatchObject({ availableIndices: [0, 1] });
+  });
+
   test("the route rejects a suffix list that does not match totalKeys", async () => {
     const res = await getAvailable("keyType=OPENAI_API_KEY&totalKeys=3&keySuffixes=hared,aaaa1");
     expect(res.status).toBe(400);

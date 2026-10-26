@@ -11725,8 +11725,10 @@ export interface AvailableKeyIndicesResult {
  * With `keySuffixes` (the caller's own pool, in order), rows are matched by
  * key suffix instead of the stored `keyIndex`, across every scope: a key has
  * one state wherever it is pooled, and a key at the same index in another
- * agent's pool is never blocked by it. Returned indices are positions in
- * `keySuffixes`. Without it, rows of `scope`/`scopeId` are read by `keyIndex`.
+ * agent's pool is never blocked by it. A suffix listed more than once is read
+ * by `keyIndex` in `scope`/`scopeId`, as without the list. Returned indices
+ * are positions in `keySuffixes`. Without it, rows of `scope`/`scopeId` are
+ * read by `keyIndex`.
  */
 export async function getAvailableKeyIndices(
   keyType: string,
@@ -11758,21 +11760,28 @@ export async function getAvailableKeyIndices(
   const rows = await client.query<{
     keyIndex: number;
     keySuffix: string;
+    scope: string;
+    scopeId: string;
     status: string;
     rateLimitWindows: string | null;
     plan: string | null;
     authFailureSeq: number;
     lastValidationFailedAt: string | null;
   }>(
-    `SELECT keyIndex, keySuffix, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
+    `SELECT keyIndex, keySuffix, scope, scopeId, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
        WHERE ${rowFilter}`,
     rowParams,
   );
-  // Pool positions a row applies to: every position holding its suffix, or its stored index.
-  const positionsOf = (row: { keyIndex: number; keySuffix: string }): number[] =>
-    suffixes
-      ? suffixes.flatMap((suffix, i) => (suffix === row.keySuffix ? [i] : []))
-      : [row.keyIndex];
+  // Pool positions a row applies to: the position holding its suffix, or its stored index.
+  // A suffix held by several pool members cannot tell them apart, so it falls back to
+  // the index read: only a row of the requested scope, at its stored index.
+  const positionsOf = (row: (typeof rows)[number]): number[] => {
+    if (!suffixes) return [row.keyIndex];
+    const positions = suffixes.flatMap((suffix, i) => (suffix === row.keySuffix ? [i] : []));
+    if (positions.length < 2) return positions;
+    const sameScope = row.scope === scope && row.scopeId === effectiveScopeId;
+    return sameScope && positions.includes(row.keyIndex) ? [row.keyIndex] : [];
+  };
 
   const blockedIndices = new Set(
     rows.filter((r) => r.status === "rate_limited").flatMap(positionsOf),
@@ -12165,22 +12174,30 @@ export async function clearKeyRateLimit(
   const effectiveScopeId = scopeId ?? "";
   const { keyIndex = -1, authFence = null } = opts;
   const clearAuthBench = opts.clearAuthBench === true && authFence !== null;
-  const key = [keyType, keySuffix, scope, effectiveScopeId];
   return await getDbClient().transaction(async (tx) => {
+    // The key's rows in every scope: `getAvailableKeyIndices` reads them all by suffix.
     const result = await tx.run(
       `UPDATE api_key_status
          SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
-         WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?
+         WHERE keyType = ? AND keySuffix = ?
            AND status = 'rate_limited' AND ((? AND authFailureSeq <= ?) OR consecutiveAuthFailures < ?)`,
-      [now, ...key, clearAuthBench ? 1 : 0, authFence, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
+      [
+        now,
+        keyType,
+        keySuffix,
+        clearAuthBench ? 1 : 0,
+        authFence,
+        CODEX_AUTH_FAILURE_BENCH_THRESHOLD,
+      ],
     );
     const cleared = result.changes > 0;
     if (!clearAuthBench) return cleared;
     const lifted = await tx.query<{ keySuffix: string }>(
       `UPDATE api_key_status SET consecutiveAuthFailures = 0, updatedAt = ?1,
            status = CASE WHEN keySuffix = ?2 THEN status ELSE 'available' END, rateLimitedUntil = CASE WHEN keySuffix = ?2 THEN rateLimitedUntil END
-         WHERE keyType = ?3 AND scope = ?4 AND scopeId = ?5 AND (consecutiveAuthFailures > 0 OR status = 'rate_limited')
-           AND ((keySuffix = ?2 AND authFailureSeq <= ?7) OR (keySuffix != ?2 AND keyIndex = ?6)) RETURNING keySuffix`,
+         WHERE keyType = ?3 AND (consecutiveAuthFailures > 0 OR status = 'rate_limited')
+           AND ((keySuffix = ?2 AND authFailureSeq <= ?7)
+             OR (keySuffix != ?2 AND keyIndex = ?6 AND scope = ?4 AND scopeId = ?5)) RETURNING keySuffix`,
       [now, keySuffix, keyType, scope, effectiveScopeId, keyIndex, authFence],
     );
     const retired = lifted.filter((row) => row.keySuffix !== keySuffix);
