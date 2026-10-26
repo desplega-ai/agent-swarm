@@ -11,7 +11,8 @@ Ask me first for anything below that is missing:
   (map them in config.linear.states).
 - GitHub repos (owner/name) the issues' pull requests live in, and the login of any
   review bot whose threads the coder should answer (github.botLogins).
-- Optional: the GitHub logins whose approval counts as the owner's (github.ownerLogins).
+- Optional: the GitHub logins whose reviews count as the owner's (github.ownerLogins).
+  Empty means the repo's owners, members and collaborators.
 - Agent ids for coders, reviewers and researchers.
 - Slack ids: the owner-ping channel, the escalation target (a user id DMs that user),
   the team-review channel and the error channel.

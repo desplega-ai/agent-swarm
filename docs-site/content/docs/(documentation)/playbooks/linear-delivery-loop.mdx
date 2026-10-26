@@ -200,9 +200,13 @@ curl -s "${H[@]}" -X PATCH $SWARM_URL/api/schedules/$ID -d '{"scriptArgs":{"dryR
 1. **Requires human action** and terminal states: nothing.
 2. **Backlog:** one pre-flight review, then nothing.
 3. **A stuck live task** escalates. Stuck means no update for 30 minutes and older than 120 minutes (240 for a coder task).
-4. **A human change request** at the head commit overrides the state action. The latest non-bot review among CHANGES_REQUESTED, APPROVED and DISMISSED decides. With `github.ownerLogins` set, only those logins count in Ready for owner review.
+4. **A human change request** at the head commit overrides the state action. The latest trusted review among CHANGES_REQUESTED, APPROVED and DISMISSED decides.
 5. **The state action** (the flowcharts above).
 6. **The dispatch guard:** a live task means wait, a missing `branchName` escalates, and an attempt over its cap escalates.
+
+### Trusted reviewers
+
+Only a trusted human's review moves an issue or dispatches a coder: a login in `github.ownerLogins` when that list is set, else an owner, member or collaborator of the repo (GitHub `authorAssociation`). The same rule applies to owner approval and to open review threads. Anyone can review a pull request on a public repo, so an outsider's approval never arms auto-merge and an outsider's comment never reaches a coder. The fix prompt quotes review text in a block that the coder treats as data, not instructions.
 
 ### Pull request lookup
 
@@ -307,7 +311,7 @@ Agents were active for 7.4% of the issue-hours. The pipeline waited on people an
 |---|---|
 | A merge-queue fix carries recent messages from a merge-queue status channel | It carries `mergeStateStatus` and the failed required checks. Reading a Slack channel needs the Lead. |
 | A shared agent-picker script | Round-robin over `agents.coders`, `agents.reviewers` and `agents.researchers`. |
-| The human reviewer must be a Linear project member | Optional `github.ownerLogins` allowlist. Empty means any non-bot author. |
+| The human reviewer must be a Linear project member | `github.ownerLogins`, or the repo's owners, members and collaborators when that list is empty. |
 | A named approval-gate job is dropped from failed jobs | Generic `github.ignoredChecks`. |
 | CI read from the Actions run named after the PR | The head commit's check rollup, required checks only. |
 | Separate error-log and alert keys | One `errors` record and one Slack alert per error streak. |
