@@ -1,4 +1,14 @@
-import { AlertCircle, AlertTriangle, Check, Copy, Send } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Check,
+  Copy,
+  Eye,
+  type LucideIcon,
+  Send,
+  ShieldCheck,
+  SquarePen,
+} from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { InviteApiError } from "@/api/client";
 import { useUpsertConfig } from "@/api/hooks/use-config-api";
@@ -20,12 +30,25 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { inviteDestination } from "./invite-destination";
 
-/** The three primary roles `POST /api/invites` accepts, Requester first (the default). */
-const INVITE_ROLES: ReadonlyArray<{ value: InviteRole; label: string; help: string }> = [
-  { value: "requester", label: "Requester", help: "creates and follows own tasks" },
-  { value: "viewer", label: "Viewer", help: "reads only" },
-  { value: "admin", label: "Admin", help: "full control" },
+/** The three primary roles `POST /api/invites` accepts, from the most access to the least. */
+const INVITE_ROLES: ReadonlyArray<{
+  value: InviteRole;
+  label: string;
+  help: string;
+  icon: LucideIcon;
+}> = [
+  { value: "admin", label: "Admin", help: "full control", icon: ShieldCheck },
+  {
+    value: "requester",
+    label: "Requester",
+    help: "creates and follows own tasks",
+    icon: SquarePen,
+  },
+  { value: "viewer", label: "Viewer", help: "reads only", icon: Eye },
 ];
+
+/** The role the form opens with. The API default stays Requester. */
+const DEFAULT_ROLE: InviteRole = "admin";
 
 function roleLabel(role: InviteRole): string {
   return INVITE_ROLES.find((r) => r.value === role)?.label ?? role;
@@ -81,14 +104,14 @@ export function InviteDialog({
   const roles = useRbacRoles({ enabled: open });
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<InviteRole>("requester");
+  const [role, setRole] = useState<InviteRole>(DEFAULT_ROLE);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InviteResult | null>(null);
 
   function reset() {
     setEmail("");
     setName("");
-    setRole("requester");
+    setRole(DEFAULT_ROLE);
     setError(null);
     setResult(null);
     createInvite.reset();
@@ -177,7 +200,12 @@ export function InviteDialog({
                 onValueChange={setRole}
                 options={INVITE_ROLES.map((r) => ({
                   value: r.value,
-                  label: r.label,
+                  label: (
+                    <>
+                      <r.icon aria-hidden="true" />
+                      {r.label}
+                    </>
+                  ),
                   tooltip: description(r.value),
                 }))}
               />

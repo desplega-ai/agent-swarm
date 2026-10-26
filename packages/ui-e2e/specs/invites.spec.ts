@@ -19,7 +19,9 @@ test.describe("invites", () => {
     await expect(dialog.getByRole("heading", { name: "Invite a teammate" })).toBeVisible();
     await dialog.getByLabel("Email").fill(EMAIL);
     await dialog.getByLabel("Name (optional)").fill("Ada E2E");
-    // Requester is preselected.
+    // Admin is preselected: pick Requester.
+    await expect(dialog.getByRole("radio", { name: "Admin" })).toBeChecked();
+    await dialog.getByRole("radio", { name: "Requester" }).click();
     await expect(dialog.getByRole("radio", { name: "Requester" })).toBeChecked();
     await dialog.getByRole("button", { name: "Create invite link" }).click();
 
