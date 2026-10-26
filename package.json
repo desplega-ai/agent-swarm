@@ -80,6 +80,8 @@
     "sync:ai-toolbox-skills": "bun scripts/sync-ai-toolbox-skills.ts",
     "check:ai-toolbox-skills": "bun scripts/sync-ai-toolbox-skills.ts --check",
     "check:skill-sources": "bun scripts/check-skill-sources.ts",
+    "build:docs-index": "bun scripts/build-docs-index.ts",
+    "check:docs-index": "bun scripts/build-docs-index.ts --check",
     "check:operator-skill": "bun scripts/check-operator-skill.ts",
     "sync:telemetry-contract": "bun scripts/sync-telemetry-contract.ts",
     "check:telemetry-contract": "bun scripts/sync-telemetry-contract.ts --check",

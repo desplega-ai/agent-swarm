@@ -15,6 +15,8 @@ They are **not** interchangeable. Pick deliberately.
 
 **For worker skills, prefer path 1.** Seeded skills are live-updatable without an image rebuild, listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation. Baked skills have none of that.
 
+> The `swarm-docs` skill body carries a generated docs index between the `docs-index` markers in its `content.md`. Edited a docs page's frontmatter, or added, moved or removed a page? Run `bun run build:docs-index` and commit the result. CI (`bun run check:docs-index`) rejects drift and enforces the `agent` frontmatter rules in `docs-site/CLAUDE.md`.
+
 > Paths 1 and 3 can coexist in the same directory. In that case, `SKILL.md` is a **generated artifact** of `config.json` + `content.md`; never hand-edit it. Run `bun run build:skill-md` and commit the result. CI (`bun run check:skill-md`) rejects drift.
 
 ## Public operator skills

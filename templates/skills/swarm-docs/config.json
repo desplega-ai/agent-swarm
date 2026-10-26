@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "swarm-docs",
+  "displayName": "Swarm Docs",
+  "slug": "swarm-docs",
+  "title": "Swarm Docs",
+  "description": "docs.agent-swarm.dev index: general docs, guides and playbooks, when to offer a playbook or guide to a person, and how to fetch a page. Use when a request touches how the swarm works or asks to set up, automate or schedule something.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["docs", "playbooks", "guides", "lead"]
+}
