@@ -246,6 +246,7 @@ export async function handleX(
     source: script.source,
     args: args ?? null,
     fsMode: "none",
+    executor: script.executor,
     agentId: endpoint.agentId,
     // timeoutMs only raises the wall-clock limit (network-bound scripts can use
     // the full window); the CPU ulimit (`ulimit -t`) is intentionally left at

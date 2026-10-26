@@ -3,6 +3,7 @@ import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } fro
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "../credential-broker";
 
 export type ScriptFsMode = "none" | "workspace-rw";
+export type ScriptExecutorName = "native" | "quickjs";
 
 export type EgressSecretEntry = ResolvedCredentialBinding;
 

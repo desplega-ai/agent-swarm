@@ -12,6 +12,7 @@ import {
   type EgressSecretEntry,
   type ExecutorOutput,
   type ScriptAgentFsDescriptor,
+  type ScriptExecutorName,
   type ScriptFsMode,
   type ScriptResourcePolicy,
   type SwarmConfigPayload,
@@ -39,6 +40,11 @@ export type RunScriptInput = {
   source: string;
   args?: unknown;
   fsMode?: ScriptFsMode;
+  /**
+   * Optional per-script executor override ("native" | "quickjs"). When null or
+   * undefined, `getScriptExecutor` falls back to `SCRIPT_EXECUTOR ?? "native"`.
+   */
+  executor?: ScriptExecutorName | null;
   agentId: string;
   /**
    * Bearer for the run's `ctx.swarm` SDK calls. Api-side callers pass a
@@ -157,11 +163,12 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     signal: input.signal,
   };
 
-  let output = await getScriptExecutor().run(executorInput);
+  const executorName = input.executor ?? undefined;
+  let output = await getScriptExecutor(executorName).run(executorInput);
   for (const delayMs of CAPACITY_EXCEEDED_RETRY_DELAYS_MS) {
     if (output.error !== "capacity_exceeded" || input.signal?.aborted) break;
     await Bun.sleep(delayMs);
-    output = await getScriptExecutor().run(executorInput);
+    output = await getScriptExecutor(executorName).run(executorInput);
   }
 
   return {

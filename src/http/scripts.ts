@@ -46,6 +46,7 @@ import {
   ScriptApiAuthModeSchema,
   ScriptApiRecordSchema,
   type ScriptDetail,
+  ScriptExecutorNameSchema,
   ScriptFsModeSchema,
   type ScriptListItem,
   type ScriptRecord,
@@ -67,6 +68,7 @@ const upsertBodySchema = z.object({
   intent: z.string().default(""),
   scope: ScriptScopeSchema.default("agent"),
   fsMode: ScriptFsModeSchema.default("none"),
+  executor: ScriptExecutorNameSchema.nullable().optional(),
 });
 
 const runBodySchema = z
@@ -77,6 +79,7 @@ const runBodySchema = z
     intent: z.string().default(""),
     scope: ScriptScopeSchema.optional(),
     fsMode: ScriptFsModeSchema.default("none"),
+    executor: ScriptExecutorNameSchema.nullable().optional(),
     idempotencyKey: z.string().max(200).optional(),
   })
   .refine((body) => Boolean(body.name) !== Boolean(body.source), {
@@ -708,6 +711,7 @@ export async function handleScripts(
       signatureJson: signatureJsonFor(parsed.body.source),
       argsJsonSchema,
       fsMode: parsed.body.fsMode,
+      executor: parsed.body.executor,
       agentId: agent.id,
       isScratch: false,
       typeChecked: true,
@@ -758,6 +762,7 @@ export async function handleScripts(
 
     let source = parsed.body.source;
     let fsMode = parsed.body.fsMode;
+    let executor = parsed.body.executor ?? null;
     let namedScript: ScriptRecord | null = null;
     if (parsed.body.name) {
       const script = await resolveScript(parsed.body.name, agent.id, parsed.body.scope);
@@ -768,6 +773,7 @@ export async function handleScripts(
       namedScript = script;
       source = script.source;
       fsMode = script.fsMode;
+      executor = parsed.body.executor !== undefined ? parsed.body.executor : script.executor;
     }
 
     if (fsMode === "workspace-rw") {
@@ -786,6 +792,7 @@ export async function handleScripts(
       source: source as string,
       args: parsed.body.args,
       fsMode,
+      executor,
       agentId: agent.id,
       runtimeInstanceId,
       egressSecrets: credentials.egressSecrets,
