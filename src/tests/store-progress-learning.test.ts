@@ -165,6 +165,55 @@ describe("store-progress learning", () => {
     expect(learningRows(t.id)).toHaveLength(1);
   });
 
+  test("overlapping calls with the same learning store it once", async () => {
+    const t = await task();
+    const learning = "Concurrent replay\nKeep exactly one copy of this lesson.";
+    const results = await Promise.all([
+      call({ taskId: t.id, learning }),
+      call({ taskId: t.id, learning }),
+    ]);
+
+    expect(learningRows(t.id)).toHaveLength(1);
+    expect(results.map((result) => learningData(result)?.status).sort()).toEqual([
+      "replayed",
+      "stored",
+    ]);
+  });
+
+  // Synthetic token, built at runtime so no literal credential sits in the repo.
+  const token = `ghp_${"abcd1234".repeat(5)}`;
+  const kebabToken = token.replace("_", "-");
+
+  test("a secret in the title, workstream or tags never reaches the key or tags", async () => {
+    const t = await task();
+    const result = await call({
+      taskId: t.id,
+      learning: {
+        text: `${token}\nKeep credentials out of memory.`,
+        workstream: token,
+        tags: [token],
+      },
+    });
+
+    expect(learningData(result)?.status).toBe("stored");
+    const [row] = learningRows(t.id);
+    for (const field of [row!.key, row!.name, row!.tags, row!.content, learningData(result)?.key]) {
+      expect(field).not.toContain(token);
+      expect(field).not.toContain(kebabToken);
+    }
+    expect(row!.content).toContain("[REDACTED:");
+  });
+
+  test("a replay of a secret-bearing learning is still detected", async () => {
+    const t = await task();
+    const learning = `Redact diagnostic tokens\nExample token: ${token}`;
+    await call({ taskId: t.id, learning });
+    const replay = await call({ taskId: t.id, learning });
+
+    expect(learningData(replay)?.status).toBe("replayed");
+    expect(learningRows(t.id)).toHaveLength(1);
+  });
+
   test("a failed learning write leaves the progress write intact", async () => {
     const t = await task();
     getDb().run(

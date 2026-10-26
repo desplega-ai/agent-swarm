@@ -62,7 +62,10 @@ export async function storeTaskLearning(params: {
 }): Promise<TaskLearningResult> {
   const { agentId, isLead, task } = params;
   const input = typeof params.learning === "string" ? { text: params.learning } : params.learning;
-  const text = input.text.trim();
+  // Scrub before anything is derived: a token in the title, workstream or a tag
+  // would otherwise survive (kebab-cased) in the key and tags, and the replay
+  // hash must match the hash of the scrubbed content the store persists.
+  const text = scrubSecrets(input.text).trim();
   if (!text) return { status: "failed", error: "learning text is empty" };
   if (text.length > LEARNING_MAX_CHARS) {
     return {
@@ -70,63 +73,83 @@ export async function storeTaskLearning(params: {
       error: `learning text is over ~500 tokens (${LEARNING_MAX_CHARS} characters); shorten it`,
     };
   }
-  const tags = [...new Set((input.tags ?? []).map((tag) => toKebab(tag)).filter(Boolean))].filter(
-    (tag) => tag !== "learning",
-  );
+  const tags = [
+    ...new Set((input.tags ?? []).map((tag) => toKebab(scrubSecrets(tag))).filter(Boolean)),
+  ].filter((tag) => tag !== "learning");
   if (tags.length > LEARNING_MAX_TAGS) {
     return { status: "failed", error: `learning takes at most ${LEARNING_MAX_TAGS} tags` };
   }
 
+  const workstream = resolveLearningWorkstream(
+    input.workstream === undefined ? undefined : scrubSecrets(input.workstream),
+    task.vcsRepo === undefined ? undefined : scrubSecrets(task.vcsRepo),
+  );
+
   try {
-    // indexMemoryContent stores text this short as one trimmed chunk, so this
-    // hash is the row's contentHash: a replayed call finds its own earlier write.
-    const contentHash = contentSha256(text);
-    const replay = await getDbClient().get<{ id: string; key: string }>(
-      `SELECT id, key FROM agent_memory
-       WHERE sourceTaskId = ? AND contentHash = ? AND key LIKE '${LEARNINGS_ROOT}/%'
-       LIMIT 1`,
-      [task.id, contentHash],
+    // One write transaction for the replay check and the insert, so two
+    // overlapping calls with the same learning store it once.
+    return await getDbClient().transaction(() =>
+      insertLearning({ agentId, isLead, taskId: task.id, text, tags, workstream }),
     );
-    if (replay) return { status: "replayed", memoryId: replay.id, key: replay.key };
-
-    const title = text.split(/\r?\n/, 1)[0]!.trim().slice(0, 200);
-    const workstream = resolveLearningWorkstream(input.workstream, task.vcsRepo);
-    const baseKey = `${LEARNINGS_ROOT}/${workstream}/${toKebab(title) || "learning"}`;
-
-    // Keys are unique per owner and a reused key fails rather than upserts.
-    // Keep the path unique across the swarm: on a taken key, add a short suffix.
-    for (let attempt = 0; attempt < KEY_ATTEMPTS; attempt++) {
-      const key = attempt === 0 ? baseKey : `${baseKey}-${crypto.randomUUID().slice(0, 6)}`;
-      const taken = await getDbClient().get<{ id: string }>(
-        "SELECT id FROM agent_memory WHERE scope = 'swarm' AND key = ? LIMIT 1",
-        [key],
-      );
-      if (taken) continue;
-      try {
-        const result = await indexMemoryContent({
-          agentId,
-          content: text,
-          name: title,
-          scope: "swarm",
-          source: "manual",
-          sourceTaskId: task.id,
-          tags: ["learning", ...tags],
-          intent: "store-progress learning",
-          key,
-          writer: { principal: { kind: "agent", agentId, isLead }, source: "mcp" },
-        });
-        return { status: "stored", memoryId: result.memoryIds[0]!, key, workstream };
-      } catch (err) {
-        // Lost a race for the same key: try a suffixed one.
-        if (/UNIQUE constraint failed/i.test((err as Error).message)) continue;
-        throw err;
-      }
-    }
-    return { status: "failed", error: `no free key under ${baseKey}` };
   } catch (err) {
     return {
       status: "failed",
       error: scrubSecrets(err instanceof Error ? err.message : String(err)),
     };
   }
+}
+
+async function insertLearning(params: {
+  agentId: string;
+  isLead: boolean;
+  taskId: string;
+  text: string;
+  tags: string[];
+  workstream: string;
+}): Promise<TaskLearningResult> {
+  const { agentId, isLead, taskId, text, tags, workstream } = params;
+  // indexMemoryContent stores text this short as one trimmed chunk, so this
+  // hash is the row's contentHash: a replayed call finds its own earlier write.
+  const contentHash = contentSha256(text);
+  const replay = await getDbClient().get<{ id: string; key: string }>(
+    `SELECT id, key FROM agent_memory
+     WHERE sourceTaskId = ? AND contentHash = ? AND key LIKE '${LEARNINGS_ROOT}/%'
+     LIMIT 1`,
+    [taskId, contentHash],
+  );
+  if (replay) return { status: "replayed", memoryId: replay.id, key: replay.key };
+
+  const title = text.split(/\r?\n/, 1)[0]!.trim().slice(0, 200);
+  const baseKey = `${LEARNINGS_ROOT}/${workstream}/${toKebab(title) || "learning"}`;
+
+  // Keys are unique per owner and a reused key fails rather than upserts.
+  // Keep the path unique across the swarm: on a taken key, add a short suffix.
+  for (let attempt = 0; attempt < KEY_ATTEMPTS; attempt++) {
+    const key = attempt === 0 ? baseKey : `${baseKey}-${crypto.randomUUID().slice(0, 6)}`;
+    const taken = await getDbClient().get<{ id: string }>(
+      "SELECT id FROM agent_memory WHERE scope = 'swarm' AND key = ? LIMIT 1",
+      [key],
+    );
+    if (taken) continue;
+    try {
+      const result = await indexMemoryContent({
+        agentId,
+        content: text,
+        name: title,
+        scope: "swarm",
+        source: "manual",
+        sourceTaskId: taskId,
+        tags: ["learning", ...tags],
+        intent: "store-progress learning",
+        key,
+        writer: { principal: { kind: "agent", agentId, isLead }, source: "mcp" },
+      });
+      return { status: "stored", memoryId: result.memoryIds[0]!, key, workstream };
+    } catch (err) {
+      // The key is taken after all: try a suffixed one.
+      if (/UNIQUE constraint failed/i.test((err as Error).message)) continue;
+      throw err;
+    }
+  }
+  return { status: "failed", error: `no free key under ${baseKey}` };
 }
