@@ -21,23 +21,36 @@ export interface RailComposition {
   sessions: number;
 }
 
-type Fidelity = CompositionPart["fidelity"] | "derived";
-
 interface Row {
   key: string;
   label: string;
+  /** The full name, on hover. */
+  title: string;
   tokens: number;
-  fidelity: Fidelity;
+  estimate: boolean;
   swatch: string;
   children?: Row[];
 }
 
+const SHORT_LABEL: Record<CompositionPart["kind"], string | null> = {
+  system_section: null,
+  persona: "Persona",
+  claude_md: "CLAUDE.md",
+  operator_prompt: "Operator prompt",
+  tool_schemas: "Tool schemas",
+  skills_listing: "Skills listing",
+  task_prompt: "Task prompt",
+  memories: "Memories",
+};
+
 function partRow(part: CompositionPart, manifest: CompositionManifest): Row {
   return {
     key: `${part.kind}:${part.id}`,
-    label: part.label,
+    // A system section is named by its template id, `system.` dropped.
+    label: SHORT_LABEL[part.kind] ?? part.id.replace(/^system\./, ""),
+    title: part.label,
     tokens: partTokens(part, manifest),
-    fidelity: part.fidelity,
+    estimate: part.fidelity === "estimate",
     swatch: COMPOSITION_SWATCH[compositionGroupOf(part.kind)],
   };
 }
@@ -53,9 +66,10 @@ function compositionRows(manifest: CompositionManifest, anchor?: CompositionAnch
   if (sections.length > 0) {
     rows.push({
       key: "system",
-      label: `System prompt sections (${sections.length})`,
+      label: `System prompt (${sections.length})`,
+      title: `${sections.length} system prompt sections`,
       tokens: sections.reduce((sum, r) => sum + r.tokens, 0),
-      fidelity: sections.some((r) => r.fidelity === "estimate") ? "estimate" : "exact",
+      estimate: sections.some((r) => r.estimate),
       swatch: COMPOSITION_SWATCH.system,
       children: sections.sort(byTokens),
     });
@@ -64,34 +78,14 @@ function compositionRows(manifest: CompositionManifest, anchor?: CompositionAnch
   if (anchor) {
     rows.push({
       key: "harness",
-      label: "Harness base (unattributed)",
+      label: "Harness base",
+      title: "Harness base (unattributed): the first call minus our parts",
       tokens: anchor.residualTokens,
-      fidelity: "derived",
+      estimate: true,
       swatch: COMPOSITION_SWATCH.harness,
     });
   }
   return rows;
-}
-
-const FIDELITY_LABEL: Record<Fidelity, string> = {
-  exact: "exact",
-  estimate: "est.",
-  derived: "derived",
-};
-
-function FidelityBadge({ fidelity }: { fidelity: Fidelity }) {
-  return (
-    <span
-      className={cn(
-        "rounded-sm border px-1 font-sans text-meta leading-4",
-        fidelity === "exact"
-          ? "border-status-success/40 text-status-success-strong"
-          : "border-border text-muted-foreground",
-      )}
-    >
-      {FIDELITY_LABEL[fidelity]}
-    </span>
-  );
 }
 
 function CompositionRow({
@@ -114,7 +108,7 @@ function CompositionRow({
         />
       ) : null}
       <span className={cn("size-2 shrink-0 rounded-sm", row.swatch)} aria-hidden />
-      <span className="truncate font-sans" title={row.label}>
+      <span className="truncate font-sans" title={row.title}>
         {row.label}
       </span>
     </span>
@@ -138,11 +132,8 @@ function CompositionRow({
         ) : (
           label
         )}
-        <span className="shrink-0">{compositionTokens(row.tokens, row.fidelity !== "exact")}</span>
-        <span className="w-8 shrink-0 text-right text-muted-foreground">{share}</span>
-        <span className="w-12 shrink-0 text-right">
-          <FidelityBadge fidelity={row.fidelity} />
-        </span>
+        <span className="shrink-0">{compositionTokens(row.tokens, row.estimate)}</span>
+        <span className="w-9 shrink-0 text-right text-muted-foreground">{share}</span>
       </li>
       {open && row.children
         ? row.children.map((child) => (
@@ -181,6 +172,11 @@ export function RequestCompositionSection({ composition }: { composition: RailCo
           </span>
         </p>
         <ul className="space-y-1 font-mono text-meta tabular-nums">
+          <li className="flex items-center gap-2 font-sans text-muted-foreground" aria-hidden>
+            <span className="flex-1">Part</span>
+            <span>Tokens</span>
+            <span className="w-9 text-right">Share</span>
+          </li>
           {rows.map((row) => (
             <CompositionRow key={row.key} row={row} firstCall={firstCall} />
           ))}
@@ -188,7 +184,7 @@ export function RequestCompositionSection({ composition }: { composition: RailCo
         <p className="text-xs text-muted-foreground">
           {manifest.source === "harness-hook"
             ? "Measured from the request the harness sent."
-            : "Estimates are characters ÷ 4. The harness base is the first call minus our parts."}
+            : "Share is of the first call. Est. means characters ÷ 4; the harness base is the first call minus our parts."}
         </p>
       </div>
     </CollapsibleSection>
