@@ -10,6 +10,7 @@ import {
 import { SetupChip } from "@/components/shared/setup-chip";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import { STEP_STATUS_WORD, StepStatusGlyph, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
@@ -20,8 +21,10 @@ export function SetupPill() {
   const steps = useVisibleOnboardingSteps();
   const { resume, isPending } = useResumeSetup();
   const [open, setOpen] = useState(false);
+  // Setup writes swarm config: only an admin can finish it.
+  const canSetup = useCan("config.write.any");
 
-  if (!data || !isOnboardingOpen(data)) return null;
+  if (!canSetup || !data || !isOnboardingOpen(data)) return null;
   const { state } = data;
   // Pill, ring, and popover all count done steps ("Setup 3/7", "3 / 7 verified").
   const done = onboardingDoneCount(state, steps);

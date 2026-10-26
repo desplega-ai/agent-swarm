@@ -50,7 +50,13 @@ import {
   updateUser,
   upsertBudget,
 } from "../be/db";
-import { assertNotLastAdmin, LastAdminError, setUserRoles } from "../be/rbac-roles";
+import {
+  assertNotLastAdmin,
+  getUserGrant,
+  LastAdminError,
+  listUserRoles,
+  setUserRoles,
+} from "../be/rbac-roles";
 import {
   findUserByEmail,
   getUserIdentities,
@@ -63,6 +69,7 @@ import {
   revokeToken,
   unlinkIdentity,
 } from "../be/users";
+import { isRbacEnabled } from "../rbac";
 import { UserCommsPrefsSchema, UserSchema } from "../types";
 import { DEFAULT_APP_URL } from "../utils/constants";
 import { assertUrlSafe } from "../utils/egress-guard";
@@ -181,6 +188,15 @@ const whoamiRoute = route({
         // `components.schemas.User` to `object | null` for every consumer;
         // the union keeps nullability local to this response field.
         user: z.union([UserSchema, z.null()]),
+        // Optional so older clients and older servers stay compatible. The
+        // dashboard hides what the caller cannot do; the server still gates.
+        grants: z
+          .object({
+            grantsAll: z.boolean(),
+            verbs: z.array(z.string()),
+            roles: z.array(z.string()),
+          })
+          .optional(),
       }),
     },
     401: { description: "Unauthorized" },
@@ -790,9 +806,26 @@ export async function handleUsers(
     if (!parsed) return true;
     const auth = getRequestAuth(req);
     if (auth?.kind === "user") {
-      whoamiRoute.respond(res, 200, { kind: "user", user: auth.user });
+      const [grant, roles] = await Promise.all([
+        getUserGrant(auth.user.id),
+        listUserRoles(auth.user.id),
+      ]);
+      const grantsAll = !isRbacEnabled() || grant.grantsAll;
+      whoamiRoute.respond(res, 200, {
+        kind: "user",
+        user: auth.user,
+        grants: {
+          grantsAll,
+          verbs: grantsAll ? [] : [...grant.verbs].sort(),
+          roles: roles.map((role) => role.name),
+        },
+      });
     } else {
-      whoamiRoute.respond(res, 200, { kind: "operator", user: null });
+      whoamiRoute.respond(res, 200, {
+        kind: "operator",
+        user: null,
+        grants: { grantsAll: true, verbs: [], roles: [] },
+      });
     }
     return true;
   }

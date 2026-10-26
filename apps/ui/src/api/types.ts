@@ -562,14 +562,6 @@ export interface UserIdentity {
   externalId: string;
 }
 
-/**
- * Coarse user-role union. The backend stores `role` as a free-form string;
- * this union captures the values the UI currently reasons about and gives a
- * declarative type for future RBAC (e.g. `NavItem.minRole`). Loosened to
- * `string` on the `User` row since the wire value is not constrained.
- */
-export type UserRole = "admin" | "member" | "viewer";
-
 export interface User {
   id: string;
   name: string;
@@ -609,6 +601,16 @@ export interface UserResponse {
 export interface WhoamiResponse {
   kind: "operator" | "user";
   user: User | null;
+  /** The caller's RBAC grants. Absent on APIs older than 2.6.1. */
+  grants?: WhoamiGrants;
+}
+
+/** RBAC grants from whoami. `grantsAll` is also true when RBAC is off. */
+export interface WhoamiGrants {
+  grantsAll: boolean;
+  verbs: string[];
+  /** Role names, e.g. `["requester"]`. */
+  roles: string[];
 }
 
 export interface MintTokenResponse {

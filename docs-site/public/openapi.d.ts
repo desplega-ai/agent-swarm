@@ -24059,6 +24059,11 @@ export interface paths {
                             /** @enum {string} */
                             kind: "operator" | "user";
                             user: components["schemas"]["User"] | null;
+                            grants?: {
+                                grantsAll: boolean;
+                                verbs: string[];
+                                roles: string[];
+                            };
                         };
                     };
                 };

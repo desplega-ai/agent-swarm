@@ -40,6 +40,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import {
   WORKER_HARNESSES,
@@ -173,7 +174,10 @@ function HealthPopoverBody({
   const firstTask = live.setup.find((milestone) => milestone.id === "first_task");
   const provider = live.setup.find((milestone) => milestone.id === "harness")?.provider;
   const onboarding = useOnboarding().data;
-  const setupUnfinished = Boolean(onboarding && !isOnboardingFinished(onboarding.state));
+  // Setup writes swarm config: only an admin is pointed at it.
+  const canSetup = useCan("config.write.any");
+  const setupUnfinished =
+    canSetup && Boolean(onboarding && !isOnboardingFinished(onboarding.state));
 
   return (
     <>

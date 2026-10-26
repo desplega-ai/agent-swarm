@@ -59588,6 +59588,31 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "grants": {
+                      "type": "object",
+                      "properties": {
+                        "grantsAll": {
+                          "type": "boolean"
+                        },
+                        "verbs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "roles": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "grantsAll",
+                        "verbs",
+                        "roles"
+                      ]
                     }
                   },
                   "required": [

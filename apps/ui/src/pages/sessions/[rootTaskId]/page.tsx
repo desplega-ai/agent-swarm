@@ -28,6 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import type { NewViewLink } from "@/hooks/use-sessions-view";
 import { SESSION_SHARING_MIN_VERSION } from "@/lib/session-sharing";
+import { useCan } from "@/lib/use-can";
 import { sessionDisplayTitle } from "@/lib/utils";
 
 /**
@@ -39,6 +40,8 @@ export default function SessionDetailPage({ newView }: { newView?: NewViewLink }
   const { rootTaskId } = useParams<{ rootTaskId: string }>();
   const gate = useFeatureGate("1.76.0");
   const renameGate = useFeatureGate("1.120.0");
+  // Renaming is a task action: a Viewer's role does not hold it.
+  const canRename = useCan("task.action.own");
   const sharingGate = useFeatureGate(SESSION_SHARING_MIN_VERSION);
   const { data: detail, isLoading: detailLoading, error: detailError } = useSession(rootTaskId);
   const noAccess = sessionErrorStatus(detailError) === 403;
@@ -134,7 +137,7 @@ export default function SessionDetailPage({ newView }: { newView?: NewViewLink }
                     >
                       {sessionDisplayTitle(detail.root)}
                     </h1>
-                    {renameGate.supported ? (
+                    {renameGate.supported && canRename ? (
                       <button
                         type="button"
                         onClick={startEditingTitle}

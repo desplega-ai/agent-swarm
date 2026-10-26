@@ -19,6 +19,7 @@ import { useConfig } from "@/hooks/use-config";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { DIAL_LEVEL_LABEL, type DialLevel } from "@/lib/model-dial";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import { SKIPPED_HATCH, STEP_TONE_CLASS, StepStatusChip, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
@@ -37,8 +38,10 @@ export function SetupChecklistCard() {
   const { config } = useConfig();
   const { resume, isPending: resuming } = useResumeSetup();
   const dismiss = useOnboardingAction();
+  // Setup writes swarm config: only an admin can finish it.
+  const canSetup = useCan("config.write.any");
 
-  if (!data || !isOnboardingOpen(data)) return null;
+  if (!canSetup || !data || !isOnboardingOpen(data)) return null;
   const { state } = data;
   const done = onboardingDoneCount(state, steps);
   const resumeStep = onboardingResumeStep(state, steps);

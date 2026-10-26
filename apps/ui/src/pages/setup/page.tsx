@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, RotateCw } from "lucide-react";
+import { AlertTriangle, Lock, RotateCw } from "lucide-react";
 import {
   type ComponentType,
   useCallback,
@@ -33,6 +33,7 @@ import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { useConfig } from "@/hooks/use-config";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import { type SetupBusyAction, SetupFooter } from "./components/setup-footer";
 import { SETUP_COLUMN } from "./components/setup-layout";
@@ -241,9 +242,11 @@ function useStepDirection(index: number): 1 | -1 {
 /** First-run onboarding: a full page outside the app shell (no sidebar, no header). */
 export default function SetupPage() {
   const { pendingConnection } = useConfig();
+  const canSetup = useCan("config.write.any");
   // A connection from URL params is not stored yet, and the API client only
   // reads stored connections. The shell's `NameConnectionModal` stores it.
   if (pendingConnection) return <Navigate to="/" replace />;
+  if (!canSetup) return <SetupForAdminsOnly />;
   return (
     <ErrorBoundary>
       {/* The `?step=` sync copies the router's search params: drop a setup link's key first. */}
@@ -581,6 +584,22 @@ function SetupFlow() {
         }
         primary={primary}
       />
+    </div>
+  );
+}
+
+/** A Requester or Viewer opened `/setup` directly: setup writes swarm config. */
+function SetupForAdminsOnly() {
+  return (
+    <div className="flex min-h-svh items-center justify-center bg-background p-4">
+      <AlertCallout tone="info" icon={Lock} title="Setup is for admins" className="w-full max-w-md">
+        <p>Setup is for admins. Ask an admin of this swarm to finish it.</p>
+        <div className="mt-3">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/">Go to dashboard</Link>
+          </Button>
+        </div>
+      </AlertCallout>
     </div>
   );
 }

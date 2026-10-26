@@ -38,6 +38,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useTaskSheetParam } from "@/hooks/use-task-sheet-param";
 import { parsePromptDisplay } from "@/lib/prompt-display";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
+import { useCan } from "@/lib/use-can";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ChainOfThought } from "./chain-of-thought";
 import { ReviewAck } from "./review-ack";
@@ -111,10 +112,13 @@ export function TaskCard({
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
 
+  // The role's verbs: a Viewer sees the task but not the controls.
+  const mayCancel = useCan("task.cancel.own");
+  const mayAct = useCan("task.action.own");
   const isTerminal = TERMINAL_STATUSES.has(task.status);
-  const canCancel = !isTerminal && task.status !== "paused";
-  const canPause = task.status === "in_progress";
-  const canResume = task.status === "paused";
+  const canCancel = mayCancel && !isTerminal && task.status !== "paused";
+  const canPause = mayAct && task.status === "in_progress";
+  const canResume = mayAct && task.status === "paused";
 
   const { data: agent } = useAgent(task.agentId ?? "");
   const showDelegation = !!parentAgentId && !!task.agentId && parentAgentId !== task.agentId;

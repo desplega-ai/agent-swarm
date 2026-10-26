@@ -2,7 +2,7 @@
 id: step-7
 name: Role-aware dashboard
 depends_on: [step-6]
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -56,22 +56,22 @@ Facts (non-admin research and spike):
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] whoami: `bun run test:root -- src/tests/whoami-route.test.ts` (new: a Requester token gets `grants.roles` `["requester"]` and `grantsAll: false`; the operator key gets `grantsAll: true`; `RBAC_ENABLED=false` gives `grantsAll: true`)
-- [ ] Hook logic: `bun run test:root -- apps/ui/src/lib/use-can.test.ts` (new; test the pure decision function `canWithGrants(grants, verb, { operatorTab, pending })` that `useCan` wraps; cases: operator, pending, absent grants, a Requester verb, a missing verb)
-- [ ] Settings layout: `bun run test:root -- apps/ui/src/pages/settings/settings-layout.test.tsx` (mock the new hook there; add a non-admin case that lists only Appearance and Connections)
-- [ ] Onboarding redirect: `bun run test:root -- apps/ui/src/components/onboarding/onboarding-redirect.test.tsx` (new; copy the mock.module pattern of `apps/ui/src/pages/settings/settings-layout.test.tsx`; a non-admin is not redirected, an admin is, a token-bound tab with pending whoami is not)
-- [ ] Routes and docs: `bun run docs:openapi && bun run check:openapi-response-coverage`
-- [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
-- [ ] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] whoami: `bun run test:root -- src/tests/whoami-route.test.ts` (new: a Requester token gets `grants.roles` `["requester"]` and `grantsAll: false`; the operator key gets `grantsAll: true`; `RBAC_ENABLED=false` gives `grantsAll: true`)
+- [x] Hook logic: `bun run test:root -- apps/ui/src/lib/use-can.test.ts` (new; test the pure decision function `canWithGrants(grants, verb, { operatorTab, pending })` that `useCan` wraps; cases: operator, pending, absent grants, a Requester verb, a missing verb)
+- [x] Settings layout: `bun run test:root -- apps/ui/src/pages/settings/settings-layout.test.tsx` (mock the new hook there; add a non-admin case that lists only Appearance and Connections)
+- [x] Onboarding redirect: `bun run test:root -- apps/ui/src/components/onboarding/onboarding-redirect.test.tsx` (new; copy the mock.module pattern of `apps/ui/src/pages/settings/settings-layout.test.tsx`; a non-admin is not redirected, an admin is, a token-bound tab with pending whoami is not)
+- [x] Routes and docs: `bun run docs:openapi && bun run check:openapi-response-coverage`
+- [x] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
+- [x] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
 
 #### Automated QA:
-- [ ] agent-browser walk with three tabs on a local stack, each with its own session name (`afo-step-7-admin`, `afo-step-7-requester`, `afo-step-7-viewer`). Mint the two tokens with `POST /api/users`, `PUT /api/users/{id}/roles` and `POST /api/users/{id}/mcp-tokens` in a script that never prints them, and open `http://localhost:5274/?apiUrl=http://localhost:3013&apiKey=<token>`. With onboarding still open:
+- [x] agent-browser walk with three tabs on a local stack, each with its own session name (`afo-step-7-admin`, `afo-step-7-requester`, `afo-step-7-viewer`). Mint the two tokens with `POST /api/users`, `PUT /api/users/{id}/roles` and `POST /api/users/{id}/mcp-tokens` in a script that never prints them, and open `http://localhost:5274/?apiUrl=http://localhost:3013&apiKey=<token>`. With onboarding still open:
   - the admin is sent to `/setup`;
   - the Requester and the Viewer land on Home;
   - the Requester's sidebar has no People or Workflows, and it creates a task from the composer;
   - the Viewer sees no composer;
   - Screenshot each sidebar for the PR.
-- [ ] Demotion: change the Requester to Viewer with `PUT /api/users/{id}/roles`, focus the tab again, and the composer disappears within one refetch.
+- [x] Demotion: change the Requester to Viewer with `PUT /api/users/{id}/roles`, focus the tab again, and the composer disappears within one refetch.
 
 #### Manual Verification:
 - [ ] Taras checks the admin-only page list once.

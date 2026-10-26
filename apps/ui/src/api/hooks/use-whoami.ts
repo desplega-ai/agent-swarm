@@ -23,7 +23,11 @@ export function useWhoami(enabled: boolean) {
     queryKey: ["whoami", config.apiUrl, config.apiKey.slice(-4)],
     queryFn: () => api.whoami(),
     enabled,
-    // The token→user binding is fixed for the life of the tab; no polling.
+    // The token→user binding is fixed for the life of the tab, but its role
+    // is not: refetch on focus (at most once a minute) so a promotion or a
+    // demotion shows up without a reload. No polling.
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
     refetchInterval: false,
   });
 }
