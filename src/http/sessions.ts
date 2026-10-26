@@ -77,7 +77,13 @@ import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { canMutateTaskNamespace } from "./assets";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
-import { resolveSessionActor, type SessionActor, sessionAccessFor } from "./session-access";
+import {
+  deniesNonOwnerTaskWrite,
+  NOT_YOUR_TASK_DENIED,
+  resolveSessionActor,
+  type SessionActor,
+  sessionAccessFor,
+} from "./session-access";
 import { jsonError } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -756,6 +762,7 @@ async function checkSessionMove(
     const access = await sessionAccessFor(actor, root.id);
     if (access === "none") return { reason: SESSION_MOVE_UNAVAILABLE };
     if (!hasSessionAccess(access, "write")) return { reason: "Session write access required" };
+    if (await deniesNonOwnerTaskWrite(req, root)) return { reason: NOT_YOUR_TASK_DENIED };
   }
   if (root.parentTaskId) return { reason: "Task is not a session root" };
   const sourceError = sourceMoveError(options.destination ?? null, root);

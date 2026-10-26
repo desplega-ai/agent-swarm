@@ -593,6 +593,57 @@ describe("requester and viewer task lifecycle", () => {
     expect(task?.title).not.toBe("not mine");
   });
 
+  // Regression: the session wall reads an ownerless root (Slack, schedules,
+  // operator key) as everyone's, so without the handler ownership check a
+  // requester could cancel, pause, resume or rename any such task.
+  test("a requester cannot change an ownerless task, an admin user still can", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const { userId, plaintext } = await createTokenForUser("Ownerless Requester");
+    await narrowUserToRequester(userId);
+    const admin = await createTokenForUser("Ownerless Admin");
+
+    const taskId = await createTask(API_KEY, "operator task with no owner");
+    const owner = await getDbClient().get<{ requestedByUserId: string | null }>(
+      "SELECT requestedByUserId FROM agent_tasks WHERE id = ?",
+      [taskId],
+    );
+    expect(owner?.requestedByUserId).toBeNull();
+
+    await setStatus(taskId, "in_progress");
+    const pause = await api(port, "POST", `/api/tasks/${taskId}/pause`, { bearer: plaintext });
+    await setStatus(taskId, "paused");
+    const resume = await api(port, "POST", `/api/tasks/${taskId}/resume`, { bearer: plaintext });
+    const title = await api(port, "PATCH", `/api/tasks/${taskId}/title`, {
+      bearer: plaintext,
+      body: { title: "not mine" },
+    });
+    const cancel = await api(port, "POST", `/api/tasks/${taskId}/cancel`, { bearer: plaintext });
+    expect({
+      pause: pause.status,
+      resume: resume.status,
+      title: title.status,
+      cancel: cancel.status,
+    }).toEqual({ pause: 403, resume: 403, title: 403, cancel: 403 });
+    const task = await getDbClient().get<{ status: string; title: string | null }>(
+      "SELECT status, title FROM agent_tasks WHERE id = ?",
+      [taskId],
+    );
+    expect(task?.status).toBe("paused");
+    expect(task?.title).not.toBe("not mine");
+
+    const adminTitle = await api(port, "PATCH", `/api/tasks/${taskId}/title`, {
+      bearer: admin.plaintext,
+      body: { title: "admin title" },
+    });
+    const adminCancel = await api(port, "POST", `/api/tasks/${taskId}/cancel`, {
+      bearer: admin.plaintext,
+    });
+    expect({ title: adminTitle.status, cancel: adminCancel.status }).toEqual({
+      title: 200,
+      cancel: 200,
+    });
+  });
+
   test("a viewer cannot create a task", async () => {
     process.env.RBAC_ENABLED = "true";
     const { userId, plaintext } = await createTokenForUser("Viewer User");

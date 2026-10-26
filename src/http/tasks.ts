@@ -87,7 +87,9 @@ import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { bodyTask, route } from "./route-def";
 import {
   canReadSession,
+  deniesNonOwnerTaskWrite,
   denyParentAttach,
+  NOT_YOUR_TASK_DENIED,
   readableByFor,
   resolveSessionActor,
   SESSION_READ_DENIED,
@@ -1242,7 +1244,12 @@ export async function handleTasks(
       return true;
     }
 
-    // Humans may cancel any task. Agents get the MCP cancel-task policy:
+    if (await deniesNonOwnerTaskWrite(req, task)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
+      return true;
+    }
+
+    // Admins may cancel any task. Agents get the MCP cancel-task policy:
     // lead or task creator.
     const principal = await resolveTaskWritePrincipal(req, myAgentId);
     if (
@@ -1884,6 +1891,11 @@ export async function handleTasks(
       return true;
     }
 
+    if (await deniesNonOwnerTaskWrite(req, task)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
+      return true;
+    }
+
     if (myAgentId && task.agentId !== myAgentId) {
       jsonError(res, "Task belongs to another agent", 403);
       return true;
@@ -1947,6 +1959,15 @@ export async function handleTasks(
   if (updateTaskTitleRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskTitleRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const existing = await getTaskById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (await deniesNonOwnerTaskWrite(req, existing)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
+      return true;
+    }
     const task = await updateTaskTitle(parsed.params.id, parsed.body.title);
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -1963,6 +1984,11 @@ export async function handleTasks(
 
     if (!task) {
       jsonError(res, "Task not found", 404);
+      return true;
+    }
+
+    if (await deniesNonOwnerTaskWrite(req, task)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
       return true;
     }
 
