@@ -2,6 +2,8 @@
 
 One cron script, the tick, moves each issue of an enrolled Linear project one step every five minutes: agents implement, fix CI and answer review, a reviewer agent approves the head commit, and a human approves before GitHub merges. Full guide: [PLAYBOOK.md](./PLAYBOOK.md) or https://docs.agent-swarm.dev/playbooks/linear-delivery-loop.
 
+The first project run on these rules, 14 issues closed in 7 days, is written up in [Software factories are workflows](https://www.pleasedontdeploy.com/p/software-factories-are-workflows).
+
 ## Files
 
 | File | What it is |

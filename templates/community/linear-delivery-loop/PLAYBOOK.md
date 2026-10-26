@@ -4,6 +4,8 @@ An Agent Swarm playbook template that moves Linear issues to merged pull request
 
 One script, the tick, runs every five minutes. It reads each enrolled Linear project and the pull requests on GitHub, then takes **one action per issue per tick**. The Linear workflow state is the state machine. Agents implement, fix CI and answer review. A reviewer agent approves the exact head commit before a human is pinged. A human decides what starts (Backlog to Todo) and approves the pull request. GitHub merges it, and the Linear GitHub integration sets Done. **The tick never sets Done.**
 
+The first project run on these rules is written up in [Software factories are workflows](https://www.pleasedontdeploy.com/p/software-factories-are-workflows).
+
 ```mermaid
 flowchart LR
   B["Backlog<br/>one pre-flight review"] -- "human releases" --> T["Todo"]
@@ -28,7 +30,7 @@ flowchart LR
 - **CI failures go back to the coder.** A merge conflict or a failed required check dispatches a fix task on the same branch.
 - **An agent review gate guards the human.** With CI green, a reviewer agent returns a verdict for the exact head commit. Approved moves the issue to Ready for owner review and pings the owner once per commit. Changes requested goes back to the coder.
 - **Human review is answered, not escalated.** An open review thread, or a human "changes requested" at the head commit, dispatches a coder fix and moves the issue to Applying feedback. With the review gate on, the fixed head goes back through Pending CI, so the agent approves every head a human sees.
-- **Approved arms auto-merge.** Conflicts or a failed run after approval dispatch a merge-queue fix. GitHub merges.
+- **Approved arms auto-merge on an agent-approved head only.** Conflicts or a failed run after approval dispatch a merge-queue fix. With the review gate on, the fix's new head is never armed as is: the tick disables auto-merge if it is armed and moves the issue back to Pending CI, where CI and the reviewer agent run on the new head. The owner's earlier approval still counts unless GitHub dismissed it. GitHub merges.
 - **Escalation parks the issue.** It sets Requires human action, comments the attempt log on the issue, sends the project lead a Slack DM and resets the attempt counters. The tick then ignores the issue until a human moves it back.
 - **A project completes itself.** When every issue is Done, Canceled or Duplicate, the tick marks the project completed and removes the label.
 
@@ -41,6 +43,7 @@ flowchart LR
   AF -- "pushed, or threads resolved" --> CI
   AF -- "no push, thread open: fix again" --> AF
   AP["Approved"] -- "DIRTY or red: fix mq" --> AP
+  AP -- "new head, no agent approval:<br/>disarm auto-merge" --> CI
 ```
 
 One fix runs at a time per issue: a live task under the issue's key blocks a second dispatch.
@@ -231,7 +234,7 @@ Tasks fail for reasons that have nothing to do with the work: provider auth erro
 
 ### The lock
 
-The tick takes the lock with an atomic `kv_incr` on `lock`. The first caller gets 1 and runs; it deletes the key when it ends. A later caller reads the lock row's `createdAt`, which `kv_incr` never moves. If the lock is older than 180 s, its owner died, so the caller deletes it and stops; the next tick acquires cleanly. The lock has no TTL, because a re-created expired row would keep its old `createdAt`.
+The tick takes the lock with an atomic `kv_incr` on `lock`. The first caller gets 1 and runs; it deletes the key when it ends. A later caller reads the lock row's `createdAt`, which `kv_incr` never moves. If the lock is older than 180 s (3 minutes), its owner died, so the caller deletes it and stops; the next tick acquires cleanly. The lock has no TTL, because a re-created expired row would keep its old `createdAt`.
 
 ### Output
 
@@ -251,16 +254,16 @@ The tick takes the lock with an atomic `kv_incr` on `lock`. The first caller get
 
 ## Results from a first project
 
-The state machine this template implements ran a 14-issue feature project on a production codebase across two repos, with one human code owner reviewing every pull request. The template is a fresh implementation of the same rules.
+The full story is in [Software factories are workflows](https://www.pleasedontdeploy.com/p/software-factories-are-workflows). The project ran with a partner: a software company with more than 80 employees and a B2B product more than 4 years old. The feature was scoped as a two-week sprint for two people: 14 non-trivial issues across multiple repos, including sensitive data and operations areas. One human owner reviewed every key pull request and decision. The template is a fresh implementation of the same rules.
 
 | Metric | Value |
 |---|---|
-| Issues done | 13 of 14 |
-| Project wall clock | 7.8 days |
-| Tick dispatches | 103 |
+| Issues closed | 14 of 14 |
+| Cycle | 7 days |
+| Automated iterations (tick dispatches) | 103 |
 | Agent tasks behind them | 640: 44 failed, 30 superseded |
-| Human code-owner reviews | 43: 14 approved, 21 changes requested |
-| Median first review | 3.1 h after the PR was ready |
+| Human reviews | 43: 14 approved, 21 changes requested |
+| Owner feedback | about 15 minutes when asked during working hours |
 | Agent fix after a change request | pushed a median 16 min later |
 | Runaway loops | none |
 
@@ -274,24 +277,27 @@ pie showData
   "Waiting on CI" : 8.0
 ```
 
-```mermaid
-xychart-beta
-  title "Burn-up: issues released and done"
-  x-axis ["Sep 3", "Sep 4", "Sep 5", "Sep 6", "Sep 7", "Sep 8", "Sep 9", "Sep 10", "Sep 11"]
-  y-axis "Issues" 0 --> 15
-  line [11, 11, 11, 11, 11, 13, 14, 14, 14]
-  line [3, 4, 4, 5, 6, 9, 12, 13, 13]
-```
+Of about 1,100 issue-hours, agents worked about 80. The rest was mostly waiting for people or for CI, directly or behind a blocking issue that was itself waiting. Issues 1 to 11 were released at once as a stacked sequence with `blocks` relations, and the system created smaller sub-issues along the way. When agents were active, they usually worked on about 14 issues in parallel.
 
-Agents were active for 7.4% of the issue-hours. The pipeline waited on people and on its own plan: issues 1 to 11 were released at once as a stacked sequence with `blocks` relations, so most of the time went to blockers. Every failed task cost an attempt in that run, and the failures were infrastructure; the infra classifier above came from that.
+### Lessons
+
+- **Infrastructure caused most task failures.** That grows as the loop speeds up, so the team needs room to scale its infrastructure. Every failed task cost an attempt in that run; the infra classifier above came from it.
+- **Idempotency needs proof.** Overloading the system produced repeated tasks, broken states and unnecessary iterations. Modelling the task states in TLA+ fixed that. This template does not ship a TLA+ model. It keeps one action per issue per tick, one live task per issue, one lock per tick, and one owner ping per head commit.
+- **Budgets counter AI slop.** Agents ignored issues or posted fake progress, and some avoided implementing a hard fix. The caps turn that into an escalation to a human instead of a loop.
+
+### Setup notes
+
+- **A dashboard.** The first project used a custom view of the state machine for debugging and for following the project. The template ships none: the tick's output and the `issue/<id>` KV records are the data to build one on.
+- **Deterministic validation.** Scripts, CI checks and litmus gates meant a human was pinged only when the work was ready. Here, that is the required checks and the agent review gate.
+- **Only selected projects.** Choosing the project was the main team discussion: complex enough to matter, not too complicated for a first run. The `delivery-loop` label keeps enrolment a human choice.
 
 ## Limits
 
 - **The tick never sets Done.** GitHub merges and the Linear GitHub integration closes the issue. Without that integration, issues stay in Approved.
 - **Tested scope.** The decision logic, the lock, escalation, project completion and the setup script are covered by fixture tests. A read-only dry run ran against a real Linear project and GitHub repo. The setup script's Linear writes and live mode are tested against fixtures only.
-- **Scheduled runs stop at 60 s.** The tick budgets 25 s and defers the remaining issues to the next tick.
+- **Scheduled runs stop at 60 s.** The tick budgets 25 s and defers the remaining issues to the next tick. The write-up describes a 5-minute maximum per loop, the tick interval; here, one tick stops at 25 s, and the stuck rule bounds each agent task.
 - **KV has no compare-and-set.** Only the lock owner writes, and each issue has its own key. A stale-lock clear and a fresh acquire can still race inside one request round trip after a crash.
-- **One reviewer gate per head commit.** A new push needs a new verdict.
+- **One reviewer gate per head commit.** A new push needs a new verdict, including a merge-queue fix pushed after approval.
 - **Changed from the original rules:**
 
 | Original behaviour | Here |
