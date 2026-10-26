@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { selectCredential } from "../../../utils/credentials";
 import { getOpenRouterAttributionHeaders } from "../../../utils/openrouter-base-url";
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../constants";
+import { noteEmbeddingFailure, noteEmbeddingSuccess } from "../embedding-recovery";
 import type { EmbeddingInputKind, EmbeddingProvider, EmbedOptions } from "../types";
 
 // text-embedding-3-* reject any input over 8,192 tokens with a 400, and one
@@ -55,6 +56,17 @@ function isInputTooLong(err: unknown): boolean {
   return (
     isInputRejection(err) && /maximum (context|input) length/i.test((err as Error).message ?? "")
   );
+}
+
+/**
+ * The endpoint was down or overloaded (no HTTP response, a 5xx or a 429), so the
+ * same input can embed later. Only these start a backfill once calls work again:
+ * an input the endpoint rejects would fail again on every backfill.
+ */
+function isOutage(err: unknown): boolean {
+  if (!(err instanceof OpenAI.APIError)) return true;
+  const status = err.status;
+  return status === undefined || status === 429 || status >= 500;
 }
 
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
@@ -139,7 +151,9 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     while (true) {
       try {
         const response = await this.request(client, input);
-        return this.toVector(response.data[0]?.embedding, "Embedding");
+        const vector = this.toVector(response.data[0]?.embedding, "Embedding");
+        if (vector) noteEmbeddingSuccess();
+        return vector;
       } catch (err) {
         const message = (err as Error).message;
         if (isInputTooLong(err) && input.length > MIN_EMBEDDING_INPUT_CHARS) {
@@ -151,6 +165,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
           continue;
         }
         console.error("[memory] Embedding failed:", message);
+        if (isOutage(err)) noteEmbeddingFailure();
         return null;
       }
     }
@@ -199,9 +214,11 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
           if (originalIndex === undefined) continue;
           results[originalIndex] = this.toVector(item.embedding, "Batch embedding");
         }
+        if (indices.some((i) => results[i])) noteEmbeddingSuccess();
       } catch (err) {
         if (!isInputRejection(err) && !isBatchTooLarge(err)) {
           console.error("[memory] Batch embedding failed:", (err as Error).message);
+          if (isOutage(err)) noteEmbeddingFailure();
           continue;
         }
         // One rejected input fails the whole request, and a server with a low
