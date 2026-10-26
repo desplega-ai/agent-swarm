@@ -2,7 +2,7 @@
 id: step-1
 name: File link target + Comb out of beta
 depends_on: []
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -62,18 +62,18 @@ Today (main `4b88368b5`):
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Link tests: `bun run test:root -- src/tests/comb-links.test.ts src/tests/agent-fs-live-url.test.ts` (add a `describe("AGENT_FS_LINK_TARGET")` with cases unset, `live` on a Comb + APP_URL install, `dashboard` with and without Comb, invalid value, `comb: false` still live)
-- [ ] Prompt tests: `bun run test:root -- src/tests/base-prompt.test.ts src/tests/prompt-template-session.test.ts` (unset gives the exact old sentence; `dashboard` with `APP_URL` gives `<APP_URL>/file/~/`; `dashboard` without `APP_URL` gives the live base)
-- [ ] Validator: `bun run test:root -- src/tests/comb-config-guard.test.ts` (accepts `dashboard`, `live`, blank; rejects `Dashboard2`)
-- [ ] Preload lists: `bun run test:root -- src/tests/preload-env.test.ts`
-- [ ] Catalog sanity: `bun run test:root -- apps/ui/src/lib/configuration-values.test.tsx`
+- [x] Link tests: `bun run test:root -- src/tests/comb-links.test.ts src/tests/agent-fs-live-url.test.ts` (add a `describe("AGENT_FS_LINK_TARGET")` with cases unset, `live` on a Comb + APP_URL install, `dashboard` with and without Comb, invalid value, `comb: false` still live)
+- [x] Prompt tests: `bun run test:root -- src/tests/base-prompt.test.ts src/tests/prompt-template-session.test.ts` (unset gives the exact old sentence; `dashboard` with `APP_URL` gives `<APP_URL>/file/~/`; `dashboard` without `APP_URL` gives the live base)
+- [x] Validator: `bun run test:root -- src/tests/comb-config-guard.test.ts` (accepts `dashboard`, `live`, blank; rejects `Dashboard2`)
+- [x] Preload lists: `bun run test:root -- src/tests/preload-env.test.ts`
+- [x] Catalog sanity: `bun run test:root -- apps/ui/src/lib/configuration-values.test.tsx`
 - [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
-- [ ] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
 
 #### Automated QA:
-- [ ] Settings round trip with the Playwright template: `bun run e2e:ui -- --no-build specs/configuration.spec.ts` after adding a case that sets `AGENT_FS_LINK_TARGET` to `dashboard`, reloads, and reads it back through `GET /api/config?scope=global`
-- [ ] Template check on a booted API (fresh worktree, no `.env`, `DATABASE_PATH` in `/tmp/afo-step-1/`): `POST /api/prompt-templates/render` (`src/http/prompt-templates.ts:135`, read its body schema) renders `system.agent.outputs` with `fileLinkBase=http://localhost:5274`, and the text contains `http://localhost:5274/file/~/`. `PUT /api/config` with `{"scope":"global","key":"AGENT_FS_LINK_TARGET","value":"Dashboard2"}` returns 400.
-- [ ] agent-browser screenshot of Settings > Configuration showing the new row and the Comb label without "beta" (`AGENT_BROWSER_SESSION=afo-step-1`)
+- [x] Settings round trip with the Playwright template: `bun run e2e:ui -- --no-build specs/configuration.spec.ts` after adding a case that sets `AGENT_FS_LINK_TARGET` to `dashboard`, reloads, and reads it back through `GET /api/config?scope=global`
+- [x] Template check on a booted API (fresh worktree, no `.env`, `DATABASE_PATH` in `/tmp/afo-step-1/`): `POST /api/prompt-templates/render` (`src/http/prompt-templates.ts:135`, read its body schema) renders `system.agent.outputs` with `fileLinkBase=http://localhost:5274`, and the text contains `http://localhost:5274/file/~/`. `PUT /api/config` with `{"scope":"global","key":"AGENT_FS_LINK_TARGET","value":"Dashboard2"}` returns 400.
+- [x] agent-browser screenshot of Settings > Configuration showing the new row and the Comb label without "beta" (`AGENT_BROWSER_SESSION=afo-step-1`)
 
 #### Manual Verification:
 - [ ] Taras reads the new prompt sentence once and accepts the wording

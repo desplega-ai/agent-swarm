@@ -1,5 +1,11 @@
 import type { TaskAttachment } from "../types";
-import { buildAgentFsLiveUrl, buildCombFileUrl, getAppUrl } from "./constants";
+import {
+  agentFsFileRoute,
+  buildAgentFsLiveUrl,
+  buildCombFileUrl,
+  getAppUrl,
+  resolveAgentFsLinkBase,
+} from "./constants";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -26,8 +32,9 @@ export function taskAttachmentFetchCommand(
 /**
  * The link a human (Slack, prompts, citations) sees for an attachment. An
  * agent-fs file links to the dashboard (Comb) when Comb is on and `APP_URL` is
- * set, else to the agent-fs live UI, else to the raw `agent-fs:<path>`.
- * `comb: false` skips the dashboard link.
+ * set, else to the agent-fs live UI, else to the raw `agent-fs:<path>`. An
+ * explicit `AGENT_FS_LINK_TARGET` picks the base instead (see
+ * `resolveAgentFsLinkBase`). `comb: false` always links to the live UI.
  */
 export function taskAttachmentDisplayUrl(
   attachment: TaskAttachment,
@@ -40,6 +47,11 @@ export function taskAttachmentDisplayUrl(
 
   if (attachment.providerId === "agent-fs" || attachment.kind === "agent-fs") {
     const file = { path: attachment.path, orgId: attachment.orgId, driveId: attachment.driveId };
+    const linkBase = opts.comb === false ? null : resolveAgentFsLinkBase("attachment");
+    if (linkBase !== null) {
+      const route = agentFsFileRoute(file);
+      return route ? `${linkBase}/file/~/${route}` : `agent-fs:${attachment.path ?? ""}`;
+    }
     const combUrl = opts.comb === false ? null : buildCombFileUrl(file);
     return combUrl ?? buildAgentFsLiveUrl(file) ?? `agent-fs:${attachment.path ?? ""}`;
   }

@@ -33,6 +33,7 @@ for (const key of Object.keys(process.env)) {
       "APP_URL",
       "AGENT_FS_API_URL",
       "AGENT_FS_LIVE_URL",
+      "AGENT_FS_LINK_TARGET",
       "AGENT_FS_DEFAULT_ORG_ID",
       "AGENT_FS_DEFAULT_DRIVE_ID",
       "SWARM_ORG_NAME",

@@ -1382,11 +1382,20 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "COMB_ENABLED",
-        label: "Comb (beta)",
+        label: "Comb",
         description: "Show the agent-fs review space in the dashboard. Needs agent-fs.",
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}ui/comb`,
+      },
+      {
+        key: "AGENT_FS_LINK_TARGET",
+        label: "File link target",
+        description:
+          "Where agents and task attachments link people for files. dashboard opens Comb at APP_URL and needs Comb on. Workers need APP_URL in their own environment (a saved APP_URL does not reach them). live opens the agent-fs live app. Unset keeps the automatic choice.",
+        kind: "enum",
+        options: ["live", "dashboard"],
+        docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
       },
       {
         key: "AGENT_FS_PUBLIC_URL",

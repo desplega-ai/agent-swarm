@@ -146,7 +146,6 @@ const navGroups: NavGroup[] = [
         title: "Comb",
         path: "/file",
         icon: FolderOpenIcon,
-        beta: { tooltip: "Review agent-fs files with the swarm" },
         requires: "comb",
       },
       { title: "Approvals", path: "/approval-requests", icon: ClipboardCheckIcon },

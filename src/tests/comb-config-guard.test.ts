@@ -28,6 +28,17 @@ describe("Comb config keys", () => {
     }
   });
 
+  test("AGENT_FS_LINK_TARGET accepts dashboard, live, or blank", () => {
+    for (const value of ["dashboard", "live", "", " live "]) {
+      expect(validateConfigValue("AGENT_FS_LINK_TARGET", value)).toBeNull();
+    }
+    for (const value of ["Dashboard2", "comb", true]) {
+      expect(validateConfigValue("AGENT_FS_LINK_TARGET", value)).toContain(
+        "Invalid AGENT_FS_LINK_TARGET",
+      );
+    }
+  });
+
   test("OPENROUTER_BASE_URL keeps its rules after sharing the URL validator", () => {
     expect(validateConfigValue("OPENROUTER_BASE_URL", "")).toBeNull();
     expect(validateConfigValue("OPENROUTER_BASE_URL", "https://api.example.com/v1")).toBeNull();

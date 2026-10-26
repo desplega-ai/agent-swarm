@@ -410,6 +410,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       value,
       "Invalid AGENT_FS_PUBLIC_URL (must be an http(s) URL with no query string or fragment, e.g. https://agent-fs.example.com. Leave blank to use AGENT_FS_API_URL)",
     ),
+  // Where people-facing file links point. Blank keeps the automatic choice.
+  ...enumValidator("AGENT_FS_LINK_TARGET", ["dashboard", "live", ""]),
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
