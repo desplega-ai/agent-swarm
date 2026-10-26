@@ -429,6 +429,24 @@ registerTemplate({
 });
 
 registerTemplate({
+  eventType: "system.agent.tool_discovery.codex",
+  header: "",
+  defaultBody:
+    "Swarm tools are not in your tool list. Call them from `exec` on the `tools` object, with dashes turned into underscores: `store-progress` is `await tools.mcp__agent_swarm__store_progress({ ... })`. Call a tool you know by that name directly. To find one, filter `ALL_TOOLS` by `name` and `description`.",
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.tool_discovery.opencode",
+  header: "",
+  defaultBody:
+    'Swarm tools are not in your tool list. Call them from `execute` under `tools.swarm`, by their exact names: `store-progress` is `await tools.swarm["store-progress"]({ ... })`. To find one, use `search({ query })` inside `execute`.',
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "system.agent.tool_discovery.direct",
   header: "",
   defaultBody: "Swarm tools are already in your tool list.",
