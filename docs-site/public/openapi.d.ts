@@ -26047,7 +26047,10 @@ export interface paths {
          */
         post: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Default true: respond after the run's instant steps ran, when it finishes or parks at its first async step. false: respond as soon as the run is committed and walk it in the background. */
+                    wait?: "true" | "false";
+                };
                 header?: {
                     /** @description Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key starts one run; a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire. */
                     "Idempotency-Key"?: string;
@@ -31632,6 +31635,8 @@ export interface operations {
                      * @enum {string}
                      */
                     fsMode?: "none" | "workspace-rw";
+                    /** @enum {string|null} */
+                    executor?: "native" | "quickjs" | null;
                 };
             };
         };
@@ -31696,6 +31701,8 @@ export interface operations {
                      * @enum {string}
                      */
                     fsMode?: "none" | "workspace-rw";
+                    /** @enum {string|null} */
+                    executor?: "native" | "quickjs" | null;
                     idempotencyKey?: string;
                 };
             };
@@ -31955,6 +31962,11 @@ export interface operations {
                             typeChecked: boolean;
                             /** @enum {string} */
                             fsMode: "none" | "workspace-rw";
+                            /**
+                             * @default null
+                             * @enum {string|null}
+                             */
+                            executor: "native" | "quickjs" | null;
                             createdByAgentId: string | null;
                             createdAt: string;
                             updatedAt: string;
@@ -32030,6 +32042,11 @@ export interface operations {
                             typeChecked: boolean;
                             /** @enum {string} */
                             fsMode: "none" | "workspace-rw";
+                            /**
+                             * @default null
+                             * @enum {string|null}
+                             */
+                            executor: "native" | "quickjs" | null;
                             createdByAgentId: string | null;
                             createdAt: string;
                             updatedAt: string;

@@ -760,6 +760,40 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.exitCode).not.toBe(0);
   });
 
+  skip(
+    "meta.signal abort kills the script before its side effect",
+    async () => {
+      const marker = `/tmp/swarm-script-abort-${crypto.randomUUID()}`;
+      await saveScript(
+        "one-shot",
+        `export default async () => { await new Promise(r => setTimeout(r, 1500)); await Bun.write(${JSON.stringify(marker)}, "ran"); return { done: true }; };`,
+      );
+      const executor = new SwarmScriptExecutor(deps);
+      const wf = await makeWorkflow({ nodes: [] });
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error("Step timed out")), 300);
+      const result = await executor.run({
+        config: { scriptName: "one-shot", timeoutMs: 30_000 },
+        context: {},
+        meta: {
+          runId: crypto.randomUUID(),
+          stepId: crypto.randomUUID(),
+          nodeId: "script",
+          workflowId: wf.id,
+          dryRun: false,
+          signal: controller.signal,
+        },
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("killed");
+      // Past the point where the script would have written the marker.
+      await Bun.sleep(1_800);
+      expect(await Bun.file(marker).exists()).toBe(false);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
   skip("Failure in the script surfaces as a workflow-node failure", async () => {
     await saveScript("throws", `export default async () => { throw new Error("boom"); };`);
     const executor = new SwarmScriptExecutor(deps);

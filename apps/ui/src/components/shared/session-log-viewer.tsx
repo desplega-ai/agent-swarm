@@ -43,6 +43,10 @@ import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code";
 import { JsonTree } from "@/components/shared/json-tree";
 import {
+  CallCompositionBar,
+  useCallComposition,
+} from "@/components/shared/request-composition-bar";
+import {
   type EndSummary,
   formatDur,
   type SessionLogView,
@@ -72,6 +76,7 @@ import {
 } from "@/components/steering/steering-message-chips";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -1656,39 +1661,93 @@ function callUsageLabel(usage: CallUsage): string {
   return parts.join(" · ");
 }
 
-/** One LLM call's cache hit and prompt size. The tooltip has the raw numbers. */
+/**
+ * One LLM call's cache hit and prompt size. The tooltip has the raw numbers.
+ * With the session's request composition, a click opens the call's prompt
+ * split as a stacked bar.
+ */
 function CallUsageChip({ usage, className }: { usage: CallUsage; className?: string }) {
   const ratio = cacheHitRatio(usage);
   const reported = callUsageCacheReported(usage);
   const label = callUsageLabel(usage);
+  const composition = useCallComposition(usage.callId);
+  const chipClass = cn(
+    "inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono text-meta tabular-nums",
+    cacheHitTone(ratio, reported),
+    className,
+  );
+  const content = (
+    <>
+      <Gauge className="size-2.5" aria-hidden />
+      {label}
+    </>
+  );
+  if (!composition) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("cursor-help", chipClass)}>{content}</span>
+        </TooltipTrigger>
+        <CallUsageTooltip usage={usage} />
+      </Tooltip>
+    );
+  }
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={cn(
-            "inline-flex shrink-0 cursor-help items-center gap-1 whitespace-nowrap font-mono text-meta tabular-nums",
-            cacheHitTone(ratio, reported),
-            className,
-          )}
-        >
-          <Gauge className="size-2.5" aria-hidden />
-          {label}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent className="font-mono text-meta tabular-nums">
-        <div>Cache read {usage.cacheReadTokens.toLocaleString()}</div>
-        <div>Cache write {usage.cacheWriteTokens.toLocaleString()}</div>
-        <div>Uncached input {usage.uncachedInputTokens.toLocaleString()}</div>
-        <div>
-          Output {usage.outputTokens.toLocaleString()}
-          {usage.reasoningTokens ? ` (reasoning ${usage.reasoningTokens.toLocaleString()})` : ""}
-        </div>
-        <div className="mt-1 opacity-80">
-          Hit = cache read ÷ prompt ({usage.promptTokens.toLocaleString()})
-          {usage.sidechain ? " · sub-agent call" : ""}
-        </div>
-      </TooltipContent>
-    </Tooltip>
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            {/* biome-ignore lint/a11y/useSemanticElements: the chip often sits in a row's own <button>, and a button cannot nest */}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`${label}. Show prompt composition`}
+              data-testid="call-usage-chip"
+              // The chip sits on rows that toggle on click.
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.currentTarget.click();
+              }}
+              className={cn(
+                "cursor-pointer rounded-sm underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                chipClass,
+              )}
+            >
+              {content}
+            </span>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <CallUsageTooltip usage={usage} />
+      </Tooltip>
+      <PopoverContent
+        align="end"
+        className="w-80 p-3 font-mono text-meta tabular-nums"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <CallCompositionBar composition={composition} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CallUsageTooltip({ usage }: { usage: CallUsage }) {
+  return (
+    <TooltipContent className="font-mono text-meta tabular-nums">
+      <div>Cache read {usage.cacheReadTokens.toLocaleString()}</div>
+      <div>Cache write {usage.cacheWriteTokens.toLocaleString()}</div>
+      <div>Uncached input {usage.uncachedInputTokens.toLocaleString()}</div>
+      <div>
+        Output {usage.outputTokens.toLocaleString()}
+        {usage.reasoningTokens ? ` (reasoning ${usage.reasoningTokens.toLocaleString()})` : ""}
+      </div>
+      <div className="mt-1 opacity-80">
+        Hit = cache read ÷ prompt ({usage.promptTokens.toLocaleString()})
+        {usage.sidechain ? " · sub-agent call" : ""}
+      </div>
+    </TooltipContent>
   );
 }
 

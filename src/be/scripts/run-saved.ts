@@ -50,6 +50,7 @@ export async function runSavedScriptAsAgent(
         source: args.script.source,
         args: args.input,
         fsMode: args.script.fsMode,
+        executor: args.script.executor,
         agentId: args.agentId,
         egressSecrets: credentials.egressSecrets,
         failedBindings: credentials.failedBindings,

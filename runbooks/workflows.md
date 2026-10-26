@@ -430,7 +430,7 @@ Inline executable source may interpolate only `input`, `workflow`, `swarm`, and 
 - `pinHash`: optional script content hash. When set, execution uses the matching `script_versions` row instead of the latest live source.
 - `args`: optional JSON object passed to the script as its first argument. Values support normal workflow interpolation.
 - `fsMode`: optional, defaults to `none`. `workspace-rw` is reserved for v2 worker-side execution and fails in v1 with a clear workflow-node error.
-- `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `300000` (5m), and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget.
+- `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `300000` (5m), and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget. When the step watchdog fires first (for example because the API was slow to reach the spawn), it aborts the executor and the script process is killed, so a step reported as timed out does not go on to perform the script's side effects.
 
 Catalog script source is never workflow-interpolated. If it contains a token rooted at a built-in workflow value or a declared input alias, the node fails with guidance to pass that value through `config.args`; unrelated mustache text remains literal script data.
 
@@ -792,11 +792,19 @@ Each workflow run persists the trusted human requester in `workflow_runs.created
 
 Retry, resume, and recovery reconstruct requester context from the workflow run. Agent-task nodes created after a restart therefore keep the original `requestedByUserId` instead of losing attribution at the checkpoint boundary. Historical runs with `created_by = NULL` are not backfilled because no trustworthy requester can be recovered.
 
+## Waiting on a trigger
+
+A top-level trigger (MCP `trigger-workflow`, `POST /api/workflows/{id}/trigger`, webhooks) resolves only after the new run walks its instant steps, up to the end of the run or its first async step (`agent-task`, `foreach`, `wait`, ...). A caller that needs only the `runId` waits for all of that. MCP `trigger-workflow` and `ctx.swarm.workflow_trigger` in a script take `wait: false` (the REST route takes `?wait=false`) to return once the run is committed and walk it in the background, as a `sub-workflow` child does. A script step that fires another workflow should pass it, or the step's timeout covers the other workflow's steps too.
+
 ## Idempotent create and trigger
 
 `POST /api/workflows` and `POST /api/workflows/{id}/trigger` take an optional `Idempotency-Key` header (1-255 visible ASCII characters). Without it, nothing changes. With it, the server accepts one operation per key and answers every retry with that operation's original status and body, plus `Idempotent-Replayed: true`.
 
+MCP `trigger-workflow` and `ctx.swarm.workflow_trigger` take the same key as `idempotencyKey`, with the same record, scope (`agent:<calling agent>`) and rules. The tool reports a replay as `replayed: true` and a different body as an error with `idempotencyConflict: true`; the script SDK sends the header to the REST route and returns its status and body.
+
 Guarantee boundary: the server accepts the request once. Node side effects inside the run are not made exactly-once by this.
+
+A script step that triggers another workflow at most once per business key (a PR head, an order id) should pass that key as `idempotencyKey` instead of claiming the key in KV first. A step timeout kills the script, and a kill between a KV claim and the trigger leaves the claim held with no run, so a retry skips the work. With the key, a kill before the run commits leaves nothing behind, and a retry after it commits gets the same run back. Give the node a `retry` policy so a timed-out attempt runs again.
 
 | Request | Result |
 |---|---|

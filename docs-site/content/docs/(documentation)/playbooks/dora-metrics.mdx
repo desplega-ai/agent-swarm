@@ -1,6 +1,9 @@
 ---
 title: DORA Metrics
 description: Run recurring DORA metrics reports for any Git repository. The swarm computes exact deployment frequency and lead time from release tags, labels CFR and recovery time as proxy estimates, and updates one stable Page URL in place.
+agent:
+  when: "Someone wants deploy frequency, lead time or other DORA metrics reported on a schedule"
+  template: "community/dora-metrics"
 ---
 
 <JsonLd

@@ -421,6 +421,51 @@ describe("public execution route", () => {
     expect(body.error.type).toBe("args_validation");
   });
 
+  test("POST {} against z.object with inherited Object.prototype keys (constructor, toString) retains Zod rejection under quickjs", async () => {
+    const prevExecutor = process.env.SCRIPT_EXECUTOR;
+    process.env.SCRIPT_EXECUTOR = "quickjs";
+    try {
+      for (const propName of ["constructor", "toString"] as const) {
+        const script = await insertScript({
+          name: `proto-${propName}-${crypto.randomUUID().slice(0, 8)}`,
+          scope: "agent",
+          scopeId: workerId,
+          source: `import { z } from "zod";\nexport const argsSchema = z.object({ ${propName}: z.string().nullable().optional() });\nexport default async function (args: z.infer<typeof argsSchema>) { return { ok: true, val: args.${propName} ?? null }; }`,
+          description: "Prototype key test",
+          intent: "test fixture",
+          signatureJson: "{}",
+          argsJsonSchema: JSON.stringify({
+            type: "object",
+            properties: { [propName]: { type: ["string", "null"] } },
+          }),
+          agentId: workerId,
+          typeChecked: true,
+        });
+        const endpoint = await createScriptApi({
+          scriptId: script.id,
+          agentId: workerId,
+          authMode: "none",
+        });
+
+        const res = await dispatch(`/api/x/script/${endpoint.id}`, {
+          method: "POST",
+          body: JSON.stringify({}),
+          auth: null,
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          ok: boolean;
+          error: { type: string; message: string } | null;
+        };
+        expect(body.ok).toBe(false);
+        expect(body.error?.type).toBe("runtime_error");
+      }
+    } finally {
+      if (prevExecutor === undefined) delete process.env.SCRIPT_EXECUTOR;
+      else process.env.SCRIPT_EXECUTOR = prevExecutor;
+    }
+  });
+
   test("disabled endpoint → 404", async () => {
     const script = await insertDoubler();
     const endpoint = await createScriptApi({

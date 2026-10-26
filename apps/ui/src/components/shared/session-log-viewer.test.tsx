@@ -31,6 +31,7 @@ for (const alias of [
   "@/components/shared/animated-reveal",
   "@/components/shared/inline-identifier-code",
   "@/components/shared/json-tree",
+  "@/components/shared/request-composition-bar",
   "@/components/shared/session-log-messages",
   "@/components/shared/subagent-waterfall",
   "@/components/shared/task-status-icon",
@@ -43,6 +44,7 @@ for (const alias of [
   "@/components/ui/collapsible",
   "@/components/ui/dialog",
   "@/components/ui/input",
+  "@/components/ui/popover",
   "@/components/ui/segmented-control",
   "@/components/ui/spinner",
   "@/components/ui/tabs",
@@ -53,6 +55,7 @@ for (const alias of [
   "@/hooks/use-url-search-state",
   "@/lib/format-tokens",
   "@/lib/json-output",
+  "@/lib/request-composition",
   "@/lib/session-log-usage-details",
   "@/lib/status-labels",
   "@/lib/themes",
@@ -69,6 +72,8 @@ const { createRoot } = await import("react-dom/client");
 const { createMemoryRouter, RouterProvider } = await import("react-router-dom");
 const { SessionLogViewer } = await import("./session-log-viewer");
 const { setUsageDetails } = await import("@/lib/session-log-usage-details");
+const { deriveCallCompositions } = await import("@/lib/request-composition");
+const { CallCompositionContext } = await import("@/components/shared/request-composition-bar");
 
 const ISO = "2026-10-05T11:36:33.000Z";
 
@@ -133,9 +138,24 @@ afterEach(async () => {
   localStorage.clear();
 });
 
-async function mount(trace: boolean) {
+async function mount(
+  trace: boolean,
+  callCompositions?: ReturnType<typeof deriveCallCompositions>["byCall"],
+) {
+  const viewer = <SessionLogViewer logs={logs} trace={trace} />;
   const router = createMemoryRouter(
-    [{ path: "/", element: <SessionLogViewer logs={logs} trace={trace} /> }],
+    [
+      {
+        path: "/",
+        element: callCompositions ? (
+          <CallCompositionContext.Provider value={callCompositions}>
+            {viewer}
+          </CallCompositionContext.Provider>
+        ) : (
+          viewer
+        ),
+      },
+    ],
     { initialEntries: ["/"] },
   );
   const container = document.createElement("div");
@@ -169,4 +189,83 @@ describe("SessionLogViewer sub-agent row usage", () => {
       expect(runRowText()).not.toContain("cached");
     });
   }
+});
+
+describe("SessionLogViewer call composition", () => {
+  const { byCall } = deriveCallCompositions(
+    [
+      {
+        sessionId: "session-1",
+        t: Date.parse(at(1)),
+        usage: {
+          callId: "msg_spawn",
+          promptTokens: 90_690,
+          cacheReadTokens: 90_000,
+          cacheWriteTokens: 684,
+          uncachedInputTokens: 6,
+          outputTokens: 120,
+          sidechain: false,
+          harness: "claude",
+          reportedAt: "start",
+        },
+      },
+    ],
+    [
+      {
+        id: "m-0",
+        taskId: "task-1",
+        agentId: "agent-1",
+        sessionId: "session-1",
+        seq: 0,
+        provider: "claude",
+        model: null,
+        source: "worker",
+        parts: [
+          {
+            kind: "system_section",
+            id: "s",
+            label: "s",
+            chars: 4000,
+            estTokens: 1000,
+            fidelity: "exact",
+          },
+          {
+            kind: "tool_schemas",
+            id: "t",
+            label: "t",
+            chars: 48_000,
+            estTokens: 12_000,
+            fidelity: "estimate",
+          },
+        ],
+        staticEstTokens: 13_000,
+        tokenRatio: 1,
+        createdAt: ISO,
+      },
+    ],
+  );
+
+  test("the chip opens the call's stacked bar, whose segments sum to its prompt", async () => {
+    setUsageDetails(true);
+    const runRowText = await mount(false, byCall);
+    expect(runRowText()).toContain(SPAWN_CHIP);
+    const chip = document.querySelector<HTMLButtonElement>('[data-testid="call-usage-chip"]');
+    expect(chip).not.toBeNull();
+    await act(async () => chip!.click());
+    const segments = [...document.querySelectorAll('[data-testid="call-composition-segment"]')];
+    expect(segments.map((s) => s.getAttribute("data-group"))).toEqual([
+      "system",
+      "tools",
+      "harness",
+    ]);
+    const total = segments.reduce((sum, s) => sum + Number(s.getAttribute("data-tokens")), 0);
+    expect(total).toBeCloseTo(90_690, 6);
+    expect(document.body.textContent).toContain("12.0K est.");
+  });
+
+  test("without a composition the chip stays a plain tooltip", async () => {
+    setUsageDetails(true);
+    await mount(false);
+    expect(document.querySelector('[data-testid="call-usage-chip"]')).toBeNull();
+  });
 });

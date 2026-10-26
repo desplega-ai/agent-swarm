@@ -15,8 +15,9 @@
  *   G  secrets                 system.agent.secrets
  *
  * Deployment-gated blocks (E outputs, H slack, steering) and the per-agent and
- * per-task sections (tools and skills, agent notes, repository, requester
- * profile) are appended by base-prompt.ts after the composite.
+ * per-task sections (tools and skills, the lead docs pointer, agent notes,
+ * repository, requester profile) are appended by base-prompt.ts after the
+ * composite.
  *
  * Writing rules for every body: sentence case headings, one idea per sentence,
  * active voice, plain words, no em dashes, a prohibition only where no positive
@@ -109,6 +110,19 @@ Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`upda
   category: "system",
 });
 
+// Lead docs pointer. base-prompt.ts appends it after the tools and skills
+// section when the lead has the `swarm-docs` skill (or when the skill list is
+// unknown). An operator override with an empty body switches it off.
+registerTemplate({
+  eventType: "system.agent.lead.docs",
+  header: "",
+  defaultBody: `
+Load the \`swarm-docs\` skill only when a person asks for something no skill, workflow, schedule or memory of yours covers, or asks where something is documented. Then follow its offer rules.
+`,
+  variables: [],
+  category: "system",
+});
+
 // Remote providers (no MCP, no container): the task arrives in the session
 // prompt and the final message is the output. No tools to name.
 registerTemplate({
@@ -168,7 +182,7 @@ registerTemplate({
 ## Memory
 
 Memories from past sessions are in your task message. Read them before you start. For a wider search, run the \`task-context-gathering\` script with the task ID and two to four queries.
-Store a learning with \`memory-store\` when you solve something that will come back: a fix, a pattern, a gotcha. Completed task outputs are stored for you.
+When you learn something that would change how the next agent works (a fix, a pattern, a gotcha), pass it as \`learning\` on a \`store-progress\` call before the task ends. Completed task outputs are stored for you.
 You MUST use the \`memory\` skill before you store, edit, or delete a memory.
 `,
   variables: [],

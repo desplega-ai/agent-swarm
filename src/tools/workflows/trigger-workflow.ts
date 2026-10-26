@@ -2,9 +2,41 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, getWorkflowRun } from "@/be/db";
+import {
+  findAcceptedWorkflowOperation,
+  IdempotencyKeyTakenError,
+  recordAcceptedWorkflowOperation,
+  type WorkflowIdempotencyClaim,
+  workflowRequestFingerprint,
+} from "@/be/db/workflow-idempotency";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/http/idempotency-key";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getExecutorRegistry, startWorkflowExecution } from "@/workflows";
 import { TriggerSchemaError } from "@/workflows/engine";
+
+/**
+ * Answer from the run already accepted under this key, or null when there is
+ * none. Same record and rules as the HTTP trigger's `Idempotency-Key`.
+ */
+async function replayAcceptedTrigger(claim: WorkflowIdempotencyClaim) {
+  const accepted = await findAcceptedWorkflowOperation(claim);
+  if (!accepted) return null;
+  if (accepted.fingerprint !== claim.fingerprint) {
+    return toolErr("idempotencyKey was already used to trigger this workflow with other data.", {
+      data: { idempotencyConflict: true },
+    });
+  }
+  if (accepted.resourceDeletedAt !== null) {
+    return toolErr(
+      "The workflow this idempotencyKey triggered was deleted; send a new key to start over.",
+    );
+  }
+  const { runId, skipped } = accepted.body as { runId: string; skipped: boolean };
+  return toolOk("Run already accepted under this idempotencyKey; nothing new was started.", {
+    details: `Replayed the run accepted under this idempotencyKey — run ID: ${runId}.`,
+    data: { runId, skipped, replayed: true },
+  });
+}
 
 export const registerTriggerWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -21,16 +53,55 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
           .record(z.string(), z.unknown())
           .optional()
           .describe("Optional data to pass as trigger context to the workflow"),
+        wait: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default true: return after the run's instant steps ran, when it finishes or parks at its first async step. " +
+              "false: return as soon as the run is created and walk it in the background. Use false from a script or step that only needs the runId.",
+          ),
+        idempotencyKey: z
+          .string()
+          .regex(IDEMPOTENCY_KEY_PATTERN)
+          .optional()
+          .describe(
+            "Optional, 1-255 visible ASCII characters, scoped to the calling agent and this workflow. " +
+              "The first trigger accepted under a key starts one run; the key is recorded in the run's own transaction and never expires. " +
+              "A retry with the same key and triggerData starts nothing and returns that run (replayed: true), even if the earlier call was killed before it saw the answer. " +
+              "The same key with other triggerData is an error with idempotencyConflict: true.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         runId: z.string().optional(),
         skipped: z.boolean().optional(),
+        replayed: z.boolean().optional(),
+        idempotencyConflict: z.boolean().optional(),
         validationErrors: z.array(z.string()).optional(),
         triggerSchema: z.record(z.string(), z.unknown()).optional(),
       }),
     },
-    async ({ id, triggerData }, requestInfo) => {
+    async ({ id, triggerData, wait, idempotencyKey }, requestInfo) => {
       try {
+        if (idempotencyKey !== undefined && !requestInfo.agentId) {
+          return toolErr("idempotencyKey needs an identified caller (X-Agent-ID).");
+        }
+        const claim: WorkflowIdempotencyClaim | undefined =
+          idempotencyKey === undefined
+            ? undefined
+            : {
+                principal: `agent:${requestInfo.agentId}`,
+                key: idempotencyKey,
+                operation: "workflow.trigger",
+                targetId: id,
+                fingerprint: workflowRequestFingerprint("workflow.trigger", triggerData ?? {}),
+              };
+        if (claim) {
+          // Before the enabled, cooldown and trigger-schema checks: an
+          // accepted trigger replays even after the workflow changed.
+          const replayed = await replayAcceptedTrigger(claim);
+          if (replayed) return replayed;
+        }
+
         const workflow = await getWorkflow(id);
         if (!workflow) {
           return toolErr(`Workflow not found: ${id}`);
@@ -38,21 +109,44 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         if (!workflow.enabled) {
           return toolErr(`Workflow "${workflow.name}" is disabled.`);
         }
-        const runId = await startWorkflowExecution(
-          workflow,
-          triggerData ?? {},
-          getExecutorRegistry(),
-          {
+        let accepted: { runId: string; skipped: boolean } | undefined;
+        let runId: string;
+        try {
+          runId = await startWorkflowExecution(workflow, triggerData ?? {}, getExecutorRegistry(), {
             triggerType: "manual",
             requestedByUserId:
               (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
               undefined,
-          },
-        );
+            detach: wait === false,
+            // Recorded in the run's own transaction: the key exists if and
+            // only if the run committed.
+            accept: claim
+              ? async (run) => {
+                  const response = { runId: run.runId, skipped: run.skipped };
+                  await recordAcceptedWorkflowOperation(claim, {
+                    workflowId: workflow.id,
+                    runId: run.runId,
+                    status: 201,
+                    body: response,
+                  });
+                  accepted = response;
+                }
+              : undefined,
+          });
+        } catch (err) {
+          // A concurrent call with this key committed its run first; this one
+          // created none.
+          if (claim && err instanceof IdempotencyKeyTakenError) {
+            const replayed = await replayAcceptedTrigger(claim);
+            if (replayed) return replayed;
+          }
+          throw err;
+        }
 
         // Check if the run was skipped due to cooldown
-        const run = await getWorkflowRun(runId);
-        const skipped = run?.status === "skipped";
+        const skipped = accepted
+          ? accepted.skipped
+          : (await getWorkflowRun(runId))?.status === "skipped";
 
         if (skipped) {
           return toolOk(`Workflow "${workflow.name}" skipped (cooldown).`, {

@@ -8,6 +8,7 @@ declare module "swarm-sdk" {
     | { [key: string]: JsonValue };
   export type ScriptScope = "agent" | "global";
   export type ScriptFsMode = "none" | "workspace-rw";
+  export type ScriptExecutorName = "native" | "quickjs";
   export type ScriptApiRawOptions = { raw: true };
   export type ScriptApiDefaultOptions = { raw?: false };
   export type RoutingReason =
@@ -286,6 +287,7 @@ declare module "swarm-sdk" {
       intent?: string;
       scope?: ScriptScope;
       fsMode?: ScriptFsMode;
+      executor?: ScriptExecutorName | null;
       idempotencyKey?: string;
     }): Promise<unknown>;
     // --- swarm / agent ---
@@ -517,7 +519,12 @@ declare module "swarm-sdk" {
     workflow_patch(args: Record<string, unknown>): Promise<unknown>;
     workflow_patchNode(args: Record<string, unknown>): Promise<unknown>;
     workflow_delete(args: { id: string }): Promise<unknown>;
-    workflow_trigger(args: { id: string; triggerData?: Record<string, unknown> }): Promise<unknown>;
+    workflow_trigger(args: {
+      id: string;
+      triggerData?: Record<string, unknown>;
+      wait?: boolean;
+      idempotencyKey?: string;
+    }): Promise<unknown>;
     workflow_retryRun(args: { id: string }): Promise<unknown>;
     workflow_cancelRun(args: { id: string }): Promise<unknown>;
 
@@ -534,6 +541,7 @@ declare module "swarm-sdk" {
       intent?: string;
       scope?: ScriptScope;
       fsMode?: ScriptFsMode;
+      executor?: ScriptExecutorName | null;
     }): Promise<unknown>;
     script_delete(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
     script_queryTypes(args: { name: string; scope?: ScriptScope }): Promise<unknown>;

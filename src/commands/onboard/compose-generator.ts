@@ -243,9 +243,11 @@ export function generateCompose(state: OnboardState): string {
     lines.push(`      - "${port}:3000"`);
     lines.push("");
     lines.push("    volumes:");
-    lines.push("      - swarm_logs:/app/logs");
-    lines.push("      - swarm_shared:/app/shared");
-    lines.push(`      - swarm_${svc.sanitizedName}:/app/agent`);
+    // Same targets as docker-compose.example.yml: the worker logs to /logs and
+    // keeps its clones and files under /workspace.
+    lines.push("      - swarm_logs:/logs");
+    lines.push("      - swarm_shared:/workspace/shared");
+    lines.push(`      - swarm_${svc.sanitizedName}:/workspace/personal`);
     if (state.provider === "bedrock" && state.awsProfile) {
       lines.push(engine === "podman" ? AWS_PROFILE_VOLUME_SELINUX : AWS_PROFILE_VOLUME);
     }

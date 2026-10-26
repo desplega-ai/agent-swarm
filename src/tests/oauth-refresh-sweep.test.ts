@@ -8,7 +8,11 @@ import {
   storeOAuthTokens,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
-import { sweepOAuthTokenRefresh } from "../be/oauth-refresh-sweep";
+import {
+  startOAuthRefreshSweep,
+  stopOAuthRefreshSweep,
+  sweepOAuthTokenRefresh,
+} from "../be/oauth-refresh-sweep";
 
 async function authorizationStatus(provider: string): Promise<string | undefined> {
   const id = await getDefaultAuthorizationIdForProvider(provider);
@@ -241,4 +245,33 @@ describe("sweepOAuthTokenRefresh", () => {
     expect(await authorizationStatus("vendor_a")).toBe("active");
     expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("example-new-access-token");
   });
+});
+
+describe("startOAuthRefreshSweep", () => {
+  const originalDisable = process.env.OAUTH_REFRESH_SWEEP_DISABLE;
+
+  afterAll(async () => {
+    await stopOAuthRefreshSweep();
+    if (originalDisable === undefined) {
+      delete process.env.OAUTH_REFRESH_SWEEP_DISABLE;
+    } else {
+      process.env.OAUTH_REFRESH_SWEEP_DISABLE = originalDisable;
+    }
+  });
+
+  for (const val of ["true", "1", "TRUE"]) {
+    test(`does not start when OAUTH_REFRESH_SWEEP_DISABLE=${val}`, async () => {
+      process.env.OAUTH_REFRESH_SWEEP_DISABLE = val;
+      const logs: string[] = [];
+      const origLog = console.log;
+      console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
+      try {
+        startOAuthRefreshSweep();
+      } finally {
+        console.log = origLog;
+        await stopOAuthRefreshSweep();
+      }
+      expect(logs).toEqual(["[oauth-refresh-sweep] Disabled via OAUTH_REFRESH_SWEEP_DISABLE"]);
+    });
+  }
 });

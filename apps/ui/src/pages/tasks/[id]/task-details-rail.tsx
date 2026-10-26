@@ -32,6 +32,7 @@ import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-e
 import { taskDisplayEffort } from "@/lib/task-model-resolution";
 import { cn, formatElapsed, formatRelativeTime, formatSmartTime, parseUTCDate } from "@/lib/utils";
 import type { CallUsageTotals } from "@/logs-parser";
+import { type RailComposition, RequestCompositionSection } from "./request-composition-section";
 import { NARROW_ICON_TARGET, NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
 
 // Below this, harness-vs-recomputed divergence is rounding noise; above it,
@@ -482,6 +483,8 @@ interface TaskDetailsRailProps {
   contextLoading: boolean;
   /** Per-call usage parsed from the session log the page already loads. */
   callUsage?: CallUsageTotals | null;
+  /** The latest session's request composition, with usage details on. */
+  composition?: RailComposition | null;
 }
 
 /**
@@ -500,6 +503,7 @@ export function TaskDetailsRail({
   context,
   contextLoading,
   callUsage = null,
+  composition = null,
 }: TaskDetailsRailProps) {
   const stats = summarizeCosts(costs);
   const isTerminal = TERMINAL_STATUSES.has(task.status);
@@ -637,6 +641,8 @@ export function TaskDetailsRail({
         costs={stats}
         callUsage={callUsage}
       />
+
+      {composition ? <RequestCompositionSection composition={composition} /> : null}
 
       {hasEvents ? (
         <RailSection title={`Activity (${task.logs.length})`}>

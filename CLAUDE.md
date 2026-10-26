@@ -345,6 +345,7 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 
 - Edited `plugin/commands/*.md`? → `bun run build:pi-skills`
 - Edited `content.md` or `config.json` under `templates/skills/` in a directory with a `SKILL.md`? → `bun run build:skill-md` and commit the generated file
+- Edited the frontmatter of a page under `docs-site/content/docs/`, or added, moved or removed a page? → `bun run build:docs-index` and commit `templates/skills/swarm-docs/content.md`
 - Added/edited a file under `templates/skills/*/files/`? → `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json` (NEVER hand-edit that JSON)
 - Edited `src/be/scripts/typecheck.ts` or `src/scripts-runtime/sdk-allowlist.ts`? → `bun run build:script-types` and commit `src/scripts-runtime/types/*.d.ts` (NEVER edit those `.d.ts` files directly — they're generated from `typecheck.ts`)
 - Edited `apps/ui/src/logs-parser/**` or `src/utils/dsh-usage.ts`? → `bun run build:claude-mod` and commit `claude-mod/vendor/logs-parser.js` (the Claude Code mod's bundle of the parser)

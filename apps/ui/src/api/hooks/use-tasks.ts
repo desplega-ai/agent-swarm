@@ -5,6 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { allTasksTerminal } from "../../lib/task-activity";
 import { buildRetryInput } from "../../lib/task-retry";
@@ -18,6 +19,10 @@ import type {
   SteerResult,
   TaskWithLogs,
 } from "../types";
+import {
+  type RequestCompositionQueryInput,
+  requestCompositionQuery,
+} from "./request-composition-query";
 
 export interface TaskFilters {
   status?: string;
@@ -153,6 +158,25 @@ export function useTaskContext(taskId: string, opts?: TaskLiveReadOptions) {
     refetchInterval: opts?.refetchInterval ?? 10000,
     ...(opts?.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });
+}
+
+/**
+ * The task's request composition manifests: polled while a session has none
+ * or a harness hook may still post a later seq, and read once more when the
+ * task ends. Policy in `request-composition-query.ts`.
+ */
+export function useRequestComposition(taskId: string, opts: RequestCompositionQueryInput) {
+  const queryClient = useQueryClient();
+  const wasLive = useRef(opts.live);
+  useEffect(() => {
+    if (wasLive.current && !opts.live) {
+      void queryClient.invalidateQueries({ queryKey: ["task", taskId, "request-composition"] });
+    }
+    wasLive.current = opts.live;
+  }, [opts.live, queryClient, taskId]);
+  return useQuery(
+    requestCompositionQuery(taskId, opts, (id) => api.fetchTaskRequestComposition(id)),
+  );
 }
 
 interface CreateTaskInput {

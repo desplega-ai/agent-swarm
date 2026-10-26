@@ -173,23 +173,21 @@ export class NativeScriptExecutor implements ScriptExecutor {
     let removeAbortListener: (() => void) | undefined;
     let proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
 
+    const killedOutput = (): ExecutorOutput => ({
+      result: undefined,
+      stdout: "",
+      stderr: "",
+      truncated: { stdout: false, stderr: false },
+      durationMs: Date.now() - start,
+      exitCode: 1,
+      error: "killed",
+    });
+
     try {
-      if (killed) {
-        return {
-          result: undefined,
-          stdout: "",
-          stderr: "",
-          truncated: { stdout: false, stderr: false },
-          durationMs: Date.now() - start,
-          exitCode: 1,
-          error: "killed",
-        };
-      }
+      if (killed) return killedOutput();
 
-      await Bun.write(argsFile, JSON.stringify(input.args ?? null));
-      await Bun.write(sourceFile, input.source);
-      await writeBareImportShims(tmpdir);
-
+      // Listen before the first await: an abort during the file writes below
+      // must stop the spawn, not land between the writes and the listener.
       const onExternalAbort = () => {
         killed = true;
         if (proc) void terminateProcessGroup(proc.pid);
@@ -197,12 +195,19 @@ export class NativeScriptExecutor implements ScriptExecutor {
       input.signal?.addEventListener("abort", onExternalAbort, { once: true });
       removeAbortListener = () => input.signal?.removeEventListener("abort", onExternalAbort);
 
+      await Bun.write(argsFile, JSON.stringify(input.args ?? null));
+      await Bun.write(sourceFile, input.source);
+      await writeBareImportShims(tmpdir);
+
+      // No await between this check and the spawn below.
+      if (killed) return killedOutput();
+
       const timeout = setTimeout(() => {
         timedOut = true;
         if (proc) void terminateProcessGroup(proc.pid);
       }, input.resources.wallClockMs);
 
-      const harnessEnv = {
+      const harnessEnv: Record<string, string> = {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         HOME: process.env.HOME ?? "/tmp",
         LANG: process.env.LANG ?? "C.UTF-8",
@@ -214,6 +219,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
         SWARM_SCRIPT_RESULT_FILE: resultFile,
         SWARM_SCRIPT_ERROR_FILE: errorFile,
         SWARM_SCRIPT_STARTED_FILE: startedFile,
+        ...(input.hostValidatedArgs ? { SWARM_SCRIPT_HOST_VALIDATED_ARGS: "1" } : {}),
       };
 
       proc = registerProcessGroup(

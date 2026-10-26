@@ -350,7 +350,7 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     DSH_BIN="${DSH_BINARY:-dsh}"
     if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
-        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-rc.3 during image provisioning."
+        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.1-rc.4 during image provisioning."
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
@@ -487,6 +487,8 @@ mkdir -p /workspace/personal/memory 2>/dev/null || true
 # chown individual dirs (not -R) to avoid EPERM on mount-managed system files
 chown worker:worker /workspace/personal 2>/dev/null || true
 chown worker:worker /workspace/personal/memory 2>/dev/null || true
+# A reused named volume keeps the owner from its first mount, which may be root.
+chown worker:worker /logs 2>/dev/null || true
 
 # ROLE and MCP_URL are resolved earlier (see the API readiness gate above),
 # before any provider-specific block can read the control-plane API.
