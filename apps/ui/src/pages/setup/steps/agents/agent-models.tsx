@@ -48,6 +48,7 @@ import {
   dialSettingApplied,
 } from "@/lib/model-dial";
 import { cn } from "@/lib/utils";
+import { AgentRoleChip } from "../../components/agent-role-chip";
 import type { StepProps } from "../../step-contract";
 
 /** Who picks the model for a harness without a dial. */
@@ -747,7 +748,7 @@ function AgentModelRow({
     <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
       <span className="flex min-w-0 flex-1 basis-48 items-center gap-2.5">
         <span className="w-14 shrink-0">
-          <SetupChip>{agent.isLead ? "Lead" : "Worker"}</SetupChip>
+          <AgentRoleChip isLead={agent.isLead} />
         </span>
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate text-sm font-medium">{agent.name}</span>

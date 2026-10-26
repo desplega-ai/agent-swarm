@@ -79,6 +79,23 @@ describe("firstCredentialSwitch", () => {
     );
   });
 
+  test("a fresh full swarm: an OpenRouter key first moves the lead and all 10 workers to Pi-Mono", () => {
+    // `--preset full`: 1 lead and 10 workers, all on Claude, no credential anywhere.
+    const fleet = [
+      { id: "lead", harnessProvider: "claude" as const, isLead: true },
+      ...Array.from({ length: 10 }, (_, i) => ({
+        id: `worker-${i + 1}`,
+        harnessProvider: "claude" as const,
+        isLead: false,
+      })),
+    ];
+    expect(firstCredentialSwitch("openrouter", {}, unverified, fleet)).toEqual({
+      card: "open",
+      target: "pi",
+      agentIds: fleet.map((a) => a.id),
+    });
+  });
+
   test("a DeepSeek key moves agents to dsh, the one harness that runs it", () => {
     expect(firstCredentialSwitch("deepseek", {}, unverified, onClaude)?.target).toBe("dsh");
   });

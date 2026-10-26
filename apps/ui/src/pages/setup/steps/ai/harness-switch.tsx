@@ -1,5 +1,5 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
@@ -7,7 +7,6 @@ import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { AgentWithTasks, ProviderName } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { HarnessIcon } from "@/components/shared/harness-icon";
-import { SetupChip } from "@/components/shared/setup-chip";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -23,6 +22,7 @@ import {
   dialLevelOfAnyHarness,
   dialSetting,
 } from "@/lib/model-dial";
+import { AgentRoleChip } from "../../components/agent-role-chip";
 
 const CHECKBOX = "size-4 shrink-0 rounded border-input accent-primary";
 
@@ -118,6 +118,11 @@ export function HarnessSwitch({
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
 
+  // The lead first, then the other agents in the order the API lists them.
+  const listed = useMemo(
+    () => [...agents].sort((a, b) => Number(b.isLead) - Number(a.isLead)),
+    [agents],
+  );
   const count = checked.size;
   const allChecked = agents.length > 0 && agents.every((a) => checked.has(a.id));
   const someChecked = !allChecked && agents.some((a) => checked.has(a.id));
@@ -169,7 +174,7 @@ export function HarnessSwitch({
           Select all
         </label>
         <ul className="max-h-48 divide-y divide-border-subtle overflow-y-auto">
-          {agents.map((agent) => (
+          {listed.map((agent) => (
             <li key={agent.id}>
               <label className="flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent/50 hover-linger transition-colors">
                 <input
@@ -179,7 +184,7 @@ export function HarnessSwitch({
                   className={CHECKBOX}
                 />
                 <span className="min-w-0 truncate font-medium">{agent.name}</span>
-                <SetupChip>{agent.isLead ? "Lead" : "Worker"}</SetupChip>
+                <AgentRoleChip isLead={agent.isLead} />
                 <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
                   <HarnessIcon harness={agent.harnessProvider} />
                   {agent.harnessProvider

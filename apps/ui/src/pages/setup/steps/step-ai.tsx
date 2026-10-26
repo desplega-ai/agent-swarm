@@ -101,6 +101,8 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   });
   const [autoSwitch, setAutoSwitch] = useState<FirstCredentialSwitch | null>(null);
   const autoSwitchRunning = useRef(false);
+  // A save that came while the tier models load: its switch runs when they arrive.
+  const waitingForTiers = useRef<OnboardingAiMethod | null>(null);
 
   /**
    * The first credential moves every agent to its card's harness, so that a
@@ -113,8 +115,12 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
       if (autoSwitchRunning.current) return;
       const { agents, rollups, dialContext } = latest.current;
       const plan = firstCredentialSwitch(method, savedCards.current, rollups, agents);
-      // The carried model level needs the tier models: while they load, keep the list.
-      if (!plan || (!dialContext.tiers && dialHarness(plan.target))) return;
+      if (!plan) return;
+      // The carried model level needs the tier models: wait for them, then switch.
+      if (!dialContext.tiers && dialHarness(plan.target)) {
+        waitingForTiers.current = method;
+        return;
+      }
       autoSwitchRunning.current = true;
       setAutoSwitch(plan);
       try {
@@ -126,6 +132,12 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     },
     [queryClient],
   );
+  useEffect(() => {
+    const method = waitingForTiers.current;
+    if (!method || !tiers) return;
+    waitingForTiers.current = null;
+    void switchOnFirstCredential(method);
+  }, [tiers, switchOnFirstCredential]);
 
   const aiDone = aiStep.status === "done";
   // The card's save already refreshed env presence and the onboarding signals.
