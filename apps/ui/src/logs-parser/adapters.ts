@@ -5,7 +5,7 @@ import {
 } from "../../../../src/utils/dsh-usage";
 import { asString, isRecord, makeItem, resultBlockText, stringifyForDisplay } from "./helpers";
 import { resultImages } from "./result-images";
-import type { DecodedRecord, LogRole, NormalizedItem } from "./types";
+import type { CallUsage, DecodedRecord, LogRole, NormalizedItem } from "./types";
 
 // Exact Codex CLI advisories only; unknown error items must remain errors.
 const CODEX_ADVISORIES = new Set([
@@ -14,6 +14,9 @@ const CODEX_ADVISORIES = new Set([
 
 export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
   const items: NormalizedItem[] = [];
+  // Claude logs one assistant line per content block. The lines of one API
+  // response share `message.id` and carry the same usage: count it once.
+  const seenMessageIds = new Set<string>();
 
   for (const d of ordered) {
     const ev = d.event;
@@ -38,6 +41,16 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
       continue;
     }
 
+    if (ev.type === "call_usage") {
+      const usage = piCallUsage(ev, d.rec.id);
+      items.push(
+        usage
+          ? makeItem(d, "call_usage", { role: "assistant", usage })
+          : makeItem(d, "unknown", { role: "system", raw: ev }),
+      );
+      continue;
+    }
+
     const message = isRecord(ev.message) ? ev.message : undefined;
     const rawContent = message?.content;
     const role = roleFromAnthropicEvent(ev, message);
@@ -47,6 +60,17 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
       typeof ev.parent_tool_use_id === "string" && ev.parent_tool_use_id
         ? ev.parent_tool_use_id
         : undefined;
+
+    if (ev.type === "assistant" && message) {
+      const messageId = asString(message.id);
+      if (!messageId || !seenMessageIds.has(messageId)) {
+        const usage = anthropicCallUsage(message, messageId ?? d.rec.id, parentToolUseId);
+        if (usage) {
+          if (messageId) seenMessageIds.add(messageId);
+          items.push(makeItem(d, "call_usage", { role: "assistant", usage, parentToolUseId }));
+        }
+      }
+    }
 
     if (typeof rawContent === "string") {
       items.push(makeItem(d, "text", { role, text: rawContent, parentToolUseId }));
@@ -532,6 +556,15 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
         items.push(makeItem(d, "lifecycle", { role: "system", meta: ev }));
         break;
       }
+      case "context.updated": {
+        const usage = codexCallUsage(ev, d.rec.id);
+        items.push(
+          usage
+            ? makeItem(d, "call_usage", { role: "assistant", usage })
+            : makeItem(d, "lifecycle", { role: "system", meta: ev }),
+        );
+        break;
+      }
       case "thread.started":
       case "turn.started":
       case "turn.failed": {
@@ -907,6 +940,15 @@ function emitOpencodeEvent(
     case "file.edited":
     case "session.diff": {
       items.push(makeItem(d, "file_change", { role: "system", diff: event.properties ?? event }));
+      break;
+    }
+    case "session.step.ended": {
+      const usage = opencodeCallUsage(event, d.rec.id);
+      items.push(
+        usage
+          ? makeItem(d, "call_usage", { role: "assistant", usage })
+          : makeItem(d, "lifecycle", { role: "system", meta: event }),
+      );
       break;
     }
     case "session.error": {
@@ -1487,6 +1529,99 @@ function upsertCodexUnknown(
   const normalized = makeItem(d, "unknown", { role: "system", raw: ev, status });
   items.push(normalized);
   if (key) unknownById.set(key, normalized);
+}
+
+function tokenCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+// Claude `message.usage`: input_tokens excludes cache reads and writes.
+function anthropicCallUsage(
+  message: Record<string, unknown>,
+  callId: string,
+  parentToolUseId: string | undefined,
+): CallUsage | undefined {
+  const usage = isRecord(message.usage) ? message.usage : undefined;
+  if (typeof usage?.input_tokens !== "number") return undefined;
+  const uncached = tokenCount(usage.input_tokens);
+  const read = tokenCount(usage.cache_read_input_tokens);
+  const write = tokenCount(usage.cache_creation_input_tokens);
+  return {
+    callId,
+    promptTokens: uncached + read + write,
+    cacheReadTokens: read,
+    cacheWriteTokens: write,
+    uncachedInputTokens: uncached,
+    outputTokens: tokenCount(usage.output_tokens),
+    sidechain: parentToolUseId !== undefined,
+    harness: "claude",
+    reportedAt: "start",
+  };
+}
+
+// Codex `context.updated` carries the last request: input_tokens includes cached.
+function codexCallUsage(ev: Record<string, unknown>, callId: string): CallUsage | undefined {
+  const usage = isRecord(ev.usage) ? ev.usage : undefined;
+  if (typeof usage?.input_tokens !== "number") return undefined;
+  const prompt = tokenCount(usage.input_tokens);
+  const read = tokenCount(usage.cached_input_tokens);
+  const write = tokenCount(usage.cache_write_input_tokens);
+  return {
+    callId,
+    promptTokens: prompt,
+    cacheReadTokens: read,
+    cacheWriteTokens: write,
+    uncachedInputTokens: Math.max(0, prompt - read - write),
+    outputTokens: tokenCount(usage.output_tokens),
+    reasoningTokens: tokenCount(usage.reasoning_output_tokens),
+    sidechain: false,
+    harness: "codex",
+    reportedAt: "end",
+  };
+}
+
+// OpenCode `session.step.ended`: tokens.input excludes cache reads and writes.
+function opencodeCallUsage(ev: Record<string, unknown>, callId: string): CallUsage | undefined {
+  const data = isRecord(ev.data) ? ev.data : undefined;
+  const tokens = isRecord(data?.tokens) ? data.tokens : undefined;
+  if (typeof tokens?.input !== "number") return undefined;
+  const cache = isRecord(tokens.cache) ? tokens.cache : {};
+  const uncached = tokenCount(tokens.input);
+  const read = tokenCount(cache.read);
+  const write = tokenCount(cache.write);
+  return {
+    callId,
+    promptTokens: uncached + read + write,
+    cacheReadTokens: read,
+    cacheWriteTokens: write,
+    uncachedInputTokens: uncached,
+    outputTokens: tokenCount(tokens.output),
+    reasoningTokens: tokenCount(tokens.reasoning),
+    sidechain: false,
+    harness: "opencode",
+    reportedAt: "end",
+  };
+}
+
+// The pi adapter's `call_usage` line: input excludes cache reads and writes.
+function piCallUsage(ev: Record<string, unknown>, callId: string): CallUsage | undefined {
+  const usage = isRecord(ev.usage) ? ev.usage : undefined;
+  if (typeof usage?.input !== "number") return undefined;
+  const uncached = tokenCount(usage.input);
+  const read = tokenCount(usage.cacheRead);
+  const write = tokenCount(usage.cacheWrite);
+  return {
+    callId,
+    promptTokens: uncached + read + write,
+    cacheReadTokens: read,
+    cacheWriteTokens: write,
+    uncachedInputTokens: uncached,
+    outputTokens: tokenCount(usage.output),
+    reasoningTokens: tokenCount(usage.reasoning),
+    sidechain: false,
+    harness: "pi",
+    reportedAt: "start",
+  };
 }
 
 function emitStderr(

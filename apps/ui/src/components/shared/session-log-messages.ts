@@ -1,5 +1,5 @@
 import type { ContextSnapshot, SteeringMessage } from "@/api/types";
-import type { ProviderMetaBlock, SubagentRun } from "@/logs-parser";
+import type { CallUsage, CallUsageTotals, ProviderMetaBlock, SubagentRun } from "@/logs-parser";
 // Relative, so the root `bun test` resolves it (the `@/` alias is UI-only).
 import { formatCost } from "../../lib/cost-format";
 
@@ -29,6 +29,8 @@ export interface ToolEntry {
   ok: boolean;
   hasResult: boolean;
   durMs: number;
+  /** The LLM call that emitted this tool call, when it is the call's first row. */
+  usage?: CallUsage;
 }
 
 export type StreamRow =
@@ -49,8 +51,18 @@ export type StreamRow =
       iso: string;
       md: string;
       isNew: boolean;
+      /** The LLM call that emitted this text, when it is the call's first row. */
+      usage?: CallUsage;
     }
-  | { type: "thinking"; id: string; time: string; iso: string; text: string; isNew: boolean }
+  | {
+      type: "thinking";
+      id: string;
+      time: string;
+      iso: string;
+      text: string;
+      isNew: boolean;
+      usage?: CallUsage;
+    }
   | {
       type: "meta";
       id: string;
@@ -58,6 +70,8 @@ export type StreamRow =
       iso: string;
       block: ProviderMetaBlock;
       isNew: boolean;
+      /** Result rows: the calls since the previous result. */
+      callTotals?: CallUsageTotals;
     }
   | {
       type: "subagent";

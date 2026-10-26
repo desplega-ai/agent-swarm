@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { normalizeSessionLogs as normalizeEvalLogs } from "../../apps/evals/ui/src/logs-parser";
 import {
+  cacheHitRatio,
   extractSubagentRuns,
   normalizeSessionLogs,
   parseSessionLogs,
   type SessionLogRecord,
+  sumItemCallUsage,
   unwrapResult,
 } from "../../apps/ui/src/logs-parser";
 
@@ -1694,5 +1696,183 @@ describe.each([
     ]).items[0];
     expect(item?.kind).toBe("result");
     expect(item?.meta).toMatchObject({ type: "codex_error", isError: true });
+  });
+});
+
+describe("per-call usage", () => {
+  const claudeUsage = {
+    input_tokens: 6,
+    cache_read_input_tokens: 90_000,
+    cache_creation_input_tokens: 684,
+    output_tokens: 120,
+  };
+  function claudeLine(
+    id: string,
+    line: number,
+    messageId: string,
+    block: unknown,
+    extra: Record<string, unknown> = {},
+  ) {
+    return log(id, "claude", line, {
+      type: "assistant",
+      message: { id: messageId, role: "assistant", content: [block], usage: claudeUsage },
+      ...extra,
+    });
+  }
+  const usages = (logs: SessionLogRecord[]) =>
+    normalizeSessionLogs(logs)
+      .items.filter((item) => item.kind === "call_usage")
+      .map((item) => item.usage);
+
+  test("claude: one call_usage per message.id, not per content-block line", () => {
+    const result = usages([
+      claudeLine("a1", 1, "msg_1", { type: "thinking", thinking: "" }),
+      claudeLine("a2", 2, "msg_1", { type: "text", text: "Looking." }),
+      claudeLine("a3", 3, "msg_1", { type: "tool_use", id: "t1", name: "Read", input: {} }),
+      claudeLine(
+        "s1",
+        4,
+        "msg_2",
+        { type: "text", text: "sub" },
+        {
+          parent_tool_use_id: "toolu_agent",
+        },
+      ),
+    ]);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({
+      callId: "msg_1",
+      promptTokens: 90_690,
+      cacheReadTokens: 90_000,
+      cacheWriteTokens: 684,
+      uncachedInputTokens: 6,
+      outputTokens: 120,
+      sidechain: false,
+      harness: "claude",
+      reportedAt: "start",
+    });
+    expect(result[1]).toMatchObject({ callId: "msg_2", sidechain: true });
+    expect(cacheHitRatio(result[0]!)).toBeCloseTo(90_000 / 90_690);
+  });
+
+  test("claude: an assistant line without usage emits no call_usage", () => {
+    const result = usages([
+      log("a1", "claude", 1, {
+        type: "assistant",
+        message: { id: "msg_1", role: "assistant", content: [{ type: "text", text: "hi" }] },
+      }),
+    ]);
+    expect(result).toEqual([]);
+  });
+
+  test("the call_usage block shares the call's message, ahead of its content", () => {
+    const messages = parseSessionLogs([
+      claudeLine("a1", 1, "msg_1", { type: "text", text: "Looking." }),
+    ]);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.role).toBe("assistant");
+    expect(messages[0]?.content.map((b) => b.type)).toEqual(["provider_meta", "text"]);
+    expect(messages[0]?.content[0]).toMatchObject({
+      kind: "helper",
+      data: { helperType: "call_usage" },
+    });
+  });
+
+  test("codex: context.updated input_tokens already includes cached tokens", () => {
+    const result = usages([
+      log("c1", "codex", 1, {
+        type: "context.updated",
+        usage: {
+          input_tokens: 49_300,
+          cached_input_tokens: 12_000,
+          cache_write_input_tokens: 0,
+          output_tokens: 300,
+          reasoning_output_tokens: 40,
+        },
+        contextWindow: 272_000,
+      }),
+    ]);
+    expect(result).toEqual([
+      {
+        callId: "c1",
+        promptTokens: 49_300,
+        cacheReadTokens: 12_000,
+        cacheWriteTokens: 0,
+        uncachedInputTokens: 37_300,
+        outputTokens: 300,
+        reasoningTokens: 40,
+        sidechain: false,
+        harness: "codex",
+        reportedAt: "end",
+      },
+    ]);
+    expect(cacheHitRatio(result[0]!)).toBeCloseTo(12_000 / 49_300);
+  });
+
+  test("opencode: session.step.ended input excludes cache", () => {
+    const result = usages([
+      log("o1", "opencode", 1, {
+        type: "session.step.ended",
+        data: {
+          sessionID: "ses_1",
+          tokens: { input: 200, output: 50, reasoning: 5, cache: { read: 9_000, write: 800 } },
+        },
+      }),
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      promptTokens: 10_000,
+      cacheReadTokens: 9_000,
+      cacheWriteTokens: 800,
+      uncachedInputTokens: 200,
+      harness: "opencode",
+      reportedAt: "end",
+    });
+    expect(cacheHitRatio(result[0]!)).toBeCloseTo(0.9);
+  });
+
+  test("pi: the adapter's call_usage line", () => {
+    const result = usages([
+      log("p1", "pi", 1, {
+        type: "call_usage",
+        harness: "pi",
+        usage: { input: 100, cacheRead: 300, cacheWrite: 100, output: 20, reasoning: 0 },
+      }),
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      promptTokens: 500,
+      cacheReadTokens: 300,
+      harness: "pi",
+      reportedAt: "start",
+    });
+    expect(cacheHitRatio(result[0]!)).toBeCloseTo(0.6);
+  });
+
+  test("session totals: Σ read / Σ prompt, and no-cache sessions say so", () => {
+    const totals = sumItemCallUsage(
+      normalizeSessionLogs([
+        claudeLine("a1", 1, "msg_1", { type: "text", text: "one" }),
+        claudeLine("a2", 2, "msg_2", { type: "text", text: "two" }),
+      ]).items,
+    );
+    expect(totals).toMatchObject({
+      calls: 2,
+      promptTokens: 181_380,
+      cacheReadTokens: 180_000,
+      cacheReported: true,
+    });
+    expect(totals?.ratio).toBeCloseTo(180_000 / 181_380);
+
+    const uncached = sumItemCallUsage(
+      normalizeSessionLogs([
+        log("o1", "opencode", 1, {
+          type: "session.step.ended",
+          data: { tokens: { input: 500, output: 5, reasoning: 0, cache: { read: 0, write: 0 } } },
+        }),
+      ]).items,
+    );
+    expect(uncached).toMatchObject({ calls: 1, cacheReported: false, ratio: 0 });
+    expect(sumItemCallUsage([])).toBeNull();
   });
 });

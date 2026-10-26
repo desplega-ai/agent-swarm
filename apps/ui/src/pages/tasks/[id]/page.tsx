@@ -66,6 +66,7 @@ import {
 import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { normalizeSessionLogs, sumItemCallUsage } from "@/logs-parser";
 import { directChildren, SpawnedTasks } from "./spawned-tasks";
 import {
   TaskActions,
@@ -455,6 +456,11 @@ export default function TaskDetailPage() {
     () => (task ? (taskRunSummary(task, costs) ?? undefined) : undefined),
     [task, costs],
   );
+  // The rail's cache hit, from the session log this page already loads.
+  const callUsage = useMemo(
+    () => sumItemCallUsage(normalizeSessionLogs(sessionLogs ?? []).items),
+    [sessionLogs],
+  );
 
   if (isLoading) {
     return (
@@ -512,6 +518,7 @@ export default function TaskDetailPage() {
       costsLoading={costsLoading}
       context={contextData}
       contextLoading={contextLoading}
+      callUsage={callUsage}
     />
   );
 
