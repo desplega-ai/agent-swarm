@@ -202,7 +202,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
         if (proc) void terminateProcessGroup(proc.pid);
       }, input.resources.wallClockMs);
 
-      const harnessEnv = {
+      const harnessEnv: Record<string, string> = {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         HOME: process.env.HOME ?? "/tmp",
         LANG: process.env.LANG ?? "C.UTF-8",
@@ -214,6 +214,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
         SWARM_SCRIPT_RESULT_FILE: resultFile,
         SWARM_SCRIPT_ERROR_FILE: errorFile,
         SWARM_SCRIPT_STARTED_FILE: startedFile,
+        ...(input.hostValidatedArgs ? { SWARM_SCRIPT_HOST_VALIDATED_ARGS: "1" } : {}),
       };
 
       proc = registerProcessGroup(

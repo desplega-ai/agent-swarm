@@ -214,6 +214,7 @@ export async function handleX(
   // Scripts predating the schema column, or where extraction failed, have a
   // null schema — we skip and let the in-subprocess Zod check surface as a
   // runtime_error instead.
+  let hostValidatedArgs = false;
   if (script.argsJsonSchema) {
     try {
       const schema = JSON.parse(script.argsJsonSchema) as Record<string, unknown>;
@@ -227,6 +228,7 @@ export async function handleX(
         });
         return true;
       }
+      hostValidatedArgs = true;
     } catch {
       // Malformed stored schema — don't block execution on it.
     }
@@ -245,6 +247,7 @@ export async function handleX(
   const output = await runScriptWithRunCredential({
     source: script.source,
     args: args ?? null,
+    hostValidatedArgs,
     fsMode: "none",
     agentId: endpoint.agentId,
     // timeoutMs only raises the wall-clock limit (network-bound scripts can use

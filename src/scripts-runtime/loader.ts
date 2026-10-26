@@ -38,6 +38,12 @@ const CAPACITY_EXCEEDED_RETRY_DELAYS_MS = [200, 750];
 export type RunScriptInput = {
   source: string;
   args?: unknown;
+  /**
+   * Trusted internal flag set only when the host has already validated `args`
+   * against the script's `argsJsonSchema` (e.g. `POST /api/x/script/{endpointId}`).
+   * Never populated from external request JSON payloads.
+   */
+  hostValidatedArgs?: boolean;
   fsMode?: ScriptFsMode;
   agentId: string;
   /**
@@ -150,6 +156,7 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
   const executorInput = {
     source: input.source,
     args: input.args ?? null,
+    ...(input.hostValidatedArgs ? { hostValidatedArgs: true } : {}),
     configPayload,
     resources,
     fsMode: input.fsMode ?? "none",
