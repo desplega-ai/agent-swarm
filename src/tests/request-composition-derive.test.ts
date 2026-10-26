@@ -168,7 +168,8 @@ describe("deriveCallCompositions", () => {
     const post = grown.byCall.get("c3")!;
     expect(tokensOf(post.segments, "harness")).toBe(25_000);
     expect(tokensOf(post.segments, "history")).toBe(6_000);
-    expect(grown.anchors.get("m-0")?.callId).toBe("c3");
+    // The rail's "first call" stays the session's first call.
+    expect(grown.anchors.get("m-0")?.callId).toBe("c1");
 
     // The harness dropped part of its base after compacting: the base shrinks.
     const shrunk = deriveCallCompositions(

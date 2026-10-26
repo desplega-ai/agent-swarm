@@ -7,10 +7,13 @@ import {
 } from "@/lib/request-composition";
 import { cn } from "@/lib/utils";
 
-/** Each LLM call's composition, by `CallUsage.callId`. Empty: chips show no bar. */
-export const CallCompositionContext = createContext<ReadonlyMap<string, CallComposition>>(
-  new Map(),
-);
+export const NO_CALL_COMPOSITIONS: ReadonlyMap<string, CallComposition> = new Map();
+
+/**
+ * Each LLM call's composition, by `CallUsage.callId`, for the session log's
+ * cache chips. Empty: the chips show no bar.
+ */
+export const CallCompositionContext = createContext(NO_CALL_COMPOSITIONS);
 
 export function useCallComposition(callId: string): CallComposition | undefined {
   return useContext(CallCompositionContext).get(callId);

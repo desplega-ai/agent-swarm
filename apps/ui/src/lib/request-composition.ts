@@ -136,7 +136,7 @@ export interface CompositionAnchor {
 
 export interface DerivedCompositions {
   byCall: Map<string, CallComposition>;
-  /** Per manifest id: the anchor of its latest compaction epoch. */
+  /** Per manifest id: its first main call, before any compaction. */
   anchors: Map<string, CompositionAnchor>;
 }
 
@@ -231,7 +231,7 @@ export function deriveCallCompositions(
         },
       };
       current.set(sessionId, state);
-      anchors.set(manifest.id, state.anchor);
+      if (!anchors.has(manifest.id)) anchors.set(manifest.id, state.anchor);
     }
 
     const groups = groupManifest(manifest);

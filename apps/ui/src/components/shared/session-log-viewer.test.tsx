@@ -73,6 +73,7 @@ const { createMemoryRouter, RouterProvider } = await import("react-router-dom");
 const { SessionLogViewer } = await import("./session-log-viewer");
 const { setUsageDetails } = await import("@/lib/session-log-usage-details");
 const { deriveCallCompositions } = await import("@/lib/request-composition");
+const { CallCompositionContext } = await import("@/components/shared/request-composition-bar");
 
 const ISO = "2026-10-05T11:36:33.000Z";
 
@@ -139,13 +140,20 @@ afterEach(async () => {
 
 async function mount(
   trace: boolean,
-  callCompositions?: Parameters<typeof SessionLogViewer>[0]["callCompositions"],
+  callCompositions?: ReturnType<typeof deriveCallCompositions>["byCall"],
 ) {
+  const viewer = <SessionLogViewer logs={logs} trace={trace} />;
   const router = createMemoryRouter(
     [
       {
         path: "/",
-        element: <SessionLogViewer logs={logs} trace={trace} callCompositions={callCompositions} />,
+        element: callCompositions ? (
+          <CallCompositionContext.Provider value={callCompositions}>
+            {viewer}
+          </CallCompositionContext.Provider>
+        ) : (
+          viewer
+        ),
       },
     ],
     { initialEntries: ["/"] },

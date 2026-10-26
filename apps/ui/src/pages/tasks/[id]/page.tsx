@@ -37,6 +37,10 @@ import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
+import {
+  CallCompositionContext,
+  NO_CALL_COMPOSITIONS,
+} from "@/components/shared/request-composition-bar";
 import type { SessionLogView } from "@/components/shared/session-log-messages";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -656,7 +660,9 @@ export default function TaskDetailPage() {
   const renderSessionLogs = (scrollElement: HTMLElement | null, touchTargets = false) => (
     <>
       <h2 className="sr-only">Session log</h2>
-      {renderSessionLogBody(scrollElement, touchTargets)}
+      <CallCompositionContext.Provider value={compositions?.byCall ?? NO_CALL_COMPOSITIONS}>
+        {renderSessionLogBody(scrollElement, touchTargets)}
+      </CallCompositionContext.Provider>
     </>
   );
   const renderSessionLogBody = (scrollElement: HTMLElement | null, touchTargets: boolean) =>
@@ -664,7 +670,6 @@ export default function TaskDetailPage() {
       <SessionLogViewer
         logs={sessionLogs ?? []}
         compactionSnapshots={contextData?.snapshots}
-        callCompositions={compositions?.byCall}
         isRunning={taskIsRunning(task.status)}
         steeringMessages={steeringForViewer}
         scrollElement={scrollElement}
