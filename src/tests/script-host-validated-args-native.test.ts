@@ -4,7 +4,10 @@ import { z } from "zod";
 import * as zm from "zod/mini";
 import { NativeScriptExecutor } from "../scripts-runtime/executors/native";
 import { DEFAULT_SCRIPT_RESOURCES, type ExecutorInput } from "../scripts-runtime/executors/types";
-import { isHostValidationEquivalent } from "../scripts-runtime/host-validated-args";
+import {
+  HOST_VALIDATED_ARGS,
+  isHostValidationEquivalent,
+} from "../scripts-runtime/host-validated-args";
 
 process.env.TMPDIR ??= os.tmpdir().replaceAll("\\", "/");
 
@@ -178,6 +181,8 @@ export default async function (args: z.infer<typeof argsSchema>) {
   });
 
   test("caller-supplied args payload cannot spoof the trusted host validation marker", async () => {
+    expect(Symbol.keyFor(HOST_VALIDATED_ARGS)).toBeUndefined();
+    expect(Symbol.for("swarm.hostValidatedArgs")).not.toBe(HOST_VALIDATED_ARGS);
     const out = await executor.run(
       makeInput(countedStructuralScript, {
         value: 7,

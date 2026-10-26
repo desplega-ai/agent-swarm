@@ -5,7 +5,7 @@
  * callers that forward request-shaped JSON fields into `RunScriptInput` can
  * never opt out of `argsSchema` validation.
  */
-export const HOST_VALIDATED_ARGS = Symbol.for("swarm.hostValidatedArgs");
+export const HOST_VALIDATED_ARGS = Symbol("swarm.hostValidatedArgs");
 
 /**
  * Checks whether a runtime `argsSchema` (Zod v4 / `zod/mini` schema) and its
