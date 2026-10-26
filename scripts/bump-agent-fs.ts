@@ -33,6 +33,11 @@ const COMPOSE_IMAGE_PATTERN = new RegExp(`(ghcr\\.io/${AGENT_FS_IMAGE}:)(\\S+)`,
 
 const PINS: Pin[] = [
   { path: "Dockerfile.worker", pattern: /^(ARG AGENT_FS_VERSION=)(\S+)$/m },
+  {
+    path: "src/commands/onboard/agent-fs-version.ts",
+    // Quote-safe: COMPOSE_IMAGE_PATTERN's \S+ would also eat the closing quote.
+    pattern: /^(export const AGENT_FS_VERSION = ")([^"]+)/m,
+  },
   { path: "docker-compose.local.yml", pattern: COMPOSE_IMAGE_PATTERN },
   { path: "docker-compose.example.yml", pattern: COMPOSE_IMAGE_PATTERN },
   { path: "docker-compose.scripts-only.yml", pattern: COMPOSE_IMAGE_PATTERN },

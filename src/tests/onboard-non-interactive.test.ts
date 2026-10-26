@@ -95,6 +95,34 @@ describe("non-interactive onboarding CLI", () => {
   );
 
   test(
+    "--yes bundles agent-fs by default and --no-agent-fs turns it off (dry run writes nothing)",
+    async () => {
+      const outputDir = await mkdtemp(join(tmpdir(), "onboard-agent-fs-"));
+      const env = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth" };
+      try {
+        const bundled = await runChild(
+          ["bun", CLI_PATH, "onboard", "--yes", "--preset=solo", "--dry-run"],
+          { cwd: outputDir, env },
+        );
+        expect(bundled.exitCode).toBe(0);
+        expect(bundled.stdout).toContain("Bundling agent-fs and TEI");
+
+        const skipped = await runChild(
+          ["bun", CLI_PATH, "onboard", "--yes", "--preset=solo", "--dry-run", "--no-agent-fs"],
+          { cwd: outputDir, env },
+        );
+        expect(skipped.exitCode).toBe(0);
+        expect(skipped.stdout).toContain("Write docker-compose.yml");
+        expect(skipped.stdout).not.toContain("Bundling agent-fs");
+        expect(await readdir(outputDir)).toEqual([]);
+      } finally {
+        await rm(outputDir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
     "documents explicit unattended presets and conservative concurrency",
     async () => {
       const result = await runChild(["bun", CLI_PATH, "onboard", "--help"]);
@@ -104,6 +132,7 @@ describe("non-interactive onboarding CLI", () => {
       expect(result.stdout).toContain("onboard --yes --preset=full");
       expect(result.stdout).toContain("default: lead 2, worker 1");
       expect(result.stdout).not.toContain("default: full");
+      expect(result.stdout).toContain("--no-agent-fs");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

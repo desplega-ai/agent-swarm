@@ -2,7 +2,7 @@
 id: step-4
 name: Bundle agent-fs and TEI in new installs
 depends_on: [step-1, step-2, step-3]
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -132,15 +132,15 @@ Rules the YAML needs:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Onboard tests: `bun run test:root -- src/tests/onboard-compose.test.ts src/tests/onboard-env.test.ts src/tests/onboard-manifest.test.ts src/tests/onboard-non-interactive.test.ts src/tests/onboard-tei-image.test.ts` (the last one is new). New cases (start from `spikes/onboard/onboard-agent-fs.test.sketch.ts`):
+- [x] Onboard tests: `bun run test:root -- src/tests/onboard-compose.test.ts src/tests/onboard-env.test.ts src/tests/onboard-manifest.test.ts src/tests/onboard-non-interactive.test.ts src/tests/onboard-tei-image.test.ts` (the last one is new). New cases (start from `spikes/onboard/onboard-agent-fs.test.sketch.ts`):
   - flag off: output equals the output on main for every preset (snapshot the main output in the test);
   - flag on: `agent-fs` and `tei` headers, local storage env, no `minio`, no host port on either, `AGENT_FS_API_URL` on the API and on every agent, the quoted prefix lines, `depends_on` as above;
   - `teiImageForArch`: `arm64` and `aarch64` give the arm64 tag, `x64` gives `null`; `TEI_IMAGE` appears in `.env` only with the arm64 tag;
   - the agent-fs pin equals the chart tag;
   - `onboard --yes --preset=solo --dry-run --no-agent-fs` exits 0 and writes nothing.
 - [ ] Rendered compose is valid: render `generateCompose()` with the flag on for `solo` and `full` into `/tmp/afo-step-4/`, then `docker compose -f /tmp/afo-step-4/full.yml config --quiet && docker compose -f /tmp/afo-step-4/solo.yml config --quiet`. Also `docker compose -f /tmp/afo-step-4/full.yml config | grep -c 'search_query: '` prints 1.
-- [ ] Installer dry run: `bash install.sh --dry-run --tunnel` and `bash install.sh --dry-run --no-agent-fs` print the expected onboard command and compose calls
-- [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
+- [x] Installer dry run: `bash install.sh --dry-run --tunnel` and `bash install.sh --dry-run --no-agent-fs` print the expected onboard command and compose calls
+- [x] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
 
 #### Automated QA:
 - [ ] Local bundle run on a Docker host with released images: in `/tmp/afo-step-4/run`, write the flag-on `solo` output (not `full`: it pulls the worker image for 11 agents) plus a `.env` from `generateEnv()`, set `AGENT_SWARM_VERSION` to the latest release, `docker compose up -d`, and wait for health. Check the API log for `[seed:agent-fs-provision] created=1 failed=0`, `docker inspect --format '{{.State.Health.Status}}' swarm-agent-fs swarm-tei` prints `healthy` twice, and `docker stats --no-stream` stays under 4 GB in total. `docker stats --no-stream swarm-tei` stays under the 2 GB `mem_limit` after 50 memory writes (the box spike measured a 1.0 GiB peak with `--max-batch-tokens 2048`, without a limit). The released API image does not have steps 1 to 3 yet, so Comb proxy checks belong to root Manual E2E. Then `docker compose down -v`, remove the pulled images, and report `df -h /`.
