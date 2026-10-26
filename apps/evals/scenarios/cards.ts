@@ -236,6 +236,16 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
     tags: { topology: "single-agent", flow: "sequential", kind: "capability" },
     changelog: [{ version: 1, note: "Baseline of human-in-loop (Phase 8, plan Q6)." }],
   },
+  "docs-suggestion": {
+    summary:
+      "When a person asks the swarm to set something up, does the lead offer the one matching docs playbook, and stay quiet when nothing matches?",
+    agentDoes:
+      "The lead gets four direct-chat requests from a person: on-call alerts to triage, a weekly delivery report, reviews on every PR, and a README typo. None names a playbook or the docs. The lead replies to each in its task output.",
+    scoredBy:
+      "Every reply must be non-empty. Docs offer (weight 1): per request, full credit when a setup reply links its playbook (Open Oncall, DORA Metrics, PR Review) and no other docs page, half when the playbook comes in a list, and zero otherwise; the typo reply scores only without a docs link. No judge and no solo baseline. Pass at 0.75.",
+    tags: { topology: "swarm", flow: "sequential", kind: "regression" },
+    changelog: [{ version: 1, note: "Added with the swarm-docs skill and the lead docs pointer." }],
+  },
   "real-diff-agent-fs": {
     summary:
       "Can one agent ship a real code change: read a bug report, fix a repo it has never seen, and push a branch that passes tests it never saw?",
