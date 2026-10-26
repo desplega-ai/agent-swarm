@@ -328,6 +328,37 @@ const PARITY_PROBES: Record<string, string> = {
     quota,
   };
 }`,
+  structuredClone: `async () => {
+  const buffer = new Uint8Array([3, 7, 11]).buffer;
+  const source = {
+    nested: { value: 1 },
+    date: new Date("2026-01-02T03:04:05.000Z"),
+    regexp: /parity/gi,
+    bytes: new Uint8Array(buffer),
+    view: new DataView(buffer),
+    error: new TypeError("failed"),
+  };
+  source.self = source;
+  source.map = new Map([[source.nested, source]]);
+  source.set = new Set([source.nested]);
+  const copy = structuredClone(source);
+  copy.nested.value = 2;
+  let functionError = "accepted";
+  try { structuredClone(() => {}); } catch (error) { functionError = error.name; }
+  return {
+    distinct: copy !== source && copy.nested !== source.nested,
+    cycle: copy.self === copy,
+    sharedReferences: copy.map.get(copy.nested) === copy && copy.set.has(copy.nested),
+    sharedBuffer: copy.bytes.buffer === copy.view.buffer && copy.view.buffer !== buffer,
+    isolated: source.nested.value === 1 && copy.nested.value === 2,
+    date: copy.date.toISOString(),
+    regexp: [copy.regexp.source, copy.regexp.flags, copy.regexp.lastIndex],
+    bytes: Array.from(copy.bytes),
+    view: [copy.view.getUint8(0), copy.view.byteLength],
+    error: [copy.error.name, copy.error.message],
+    functionError,
+  };
+}`,
   "fetch bodies": `async ({ base }) => {
   const send = async (body, headers) => (await fetch(base, { method: "POST", body, headers })).json();
   return {
@@ -380,6 +411,80 @@ describe("quickjs parity shims match native and Bun", () => {
         CHILD_PROCESS_TEST_BUDGET_MS,
       );
     }
+  }
+});
+
+test("quickjs structuredClone rejects transfer lists with DataCloneError", async () => {
+  const output = await new QuickJSScriptExecutor().run(
+    input({
+      source: `export default () => {
+        try {
+          structuredClone(new ArrayBuffer(1), { transfer: [new ArrayBuffer(1)] });
+          return "accepted";
+        } catch (error) {
+          return error.name;
+        }
+      };`,
+    }),
+  );
+  expect(output.error).toBeUndefined();
+  expect(output.result).toBe("DataCloneError");
+});
+
+test("quickjs structuredClone clones arrays and rejects unsupported values", async () => {
+  const output = await new QuickJSScriptExecutor().run(
+    input({
+      source: `export default () => {
+        const array = structuredClone([1, { value: 2 }]);
+        const rejected = [Symbol("value"), new WeakMap(), new WeakSet(), Promise.resolve(1),
+          new URL("https://example.com"), new URLSearchParams("a=1")].map((value) => {
+          try {
+            structuredClone(value);
+            return "accepted";
+          } catch (error) {
+            return error.name;
+          }
+        });
+        return { array, rejected };
+      };`,
+    }),
+  );
+  expect(output.error).toBeUndefined();
+  expect(output.result).toEqual({
+    array: [1, { value: 2 }],
+    rejected: Array(6).fill("DataCloneError"),
+  });
+});
+
+test("quickjs timers do not call the host after a script completes", async () => {
+  let requests = 0;
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      requests++;
+      return new Response("ok");
+    },
+  });
+
+  try {
+    const output = await new QuickJSScriptExecutor().run(
+      input({
+        args: { url: `http://127.0.0.1:${server.port}/` },
+        source: `export default async ({ url }) => {
+          setTimeout(() => { void fetch(url); }, 30);
+          setInterval(() => { void fetch(url); }, 30);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return true;
+        };`,
+      }),
+    );
+    expect(output.error).toBeUndefined();
+    const requestsAtCompletion = requests;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(requestsAtCompletion).toBe(0);
+    expect(requests).toBe(requestsAtCompletion);
+  } finally {
+    server.stop(true);
   }
 });
 
