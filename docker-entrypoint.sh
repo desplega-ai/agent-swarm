@@ -487,6 +487,8 @@ mkdir -p /workspace/personal/memory 2>/dev/null || true
 # chown individual dirs (not -R) to avoid EPERM on mount-managed system files
 chown worker:worker /workspace/personal 2>/dev/null || true
 chown worker:worker /workspace/personal/memory 2>/dev/null || true
+# A reused named volume keeps the owner from its first mount, which may be root.
+chown worker:worker /logs 2>/dev/null || true
 
 # ROLE and MCP_URL are resolved earlier (see the API readiness gate above),
 # before any provider-specific block can read the control-plane API.
