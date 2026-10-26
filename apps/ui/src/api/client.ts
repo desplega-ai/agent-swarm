@@ -3,6 +3,7 @@ import { getActiveConnection, getConfig } from "@/lib/config";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import { withAddressSpace } from "../lib/local-network";
+import { type AccessConnection, noteUnauthorized } from "./access-rejection";
 import type {
   AcpRuntimeConfig,
   Agent,
@@ -201,12 +202,18 @@ import type {
  * With no stored connection it fails without a request: a request to the
  * default address would open the browser's local network prompt before the
  * `/setup` connect step explains it. A request to a local API gets the Local
- * Network Access hint (`lib/local-network.ts`).
+ * Network Access hint (`lib/local-network.ts`). A 401 from the swarm API goes
+ * to `noteUnauthorized`: the app shell then checks if the saved key still works.
  */
-const fetch = (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
-  if (!getActiveConnection()) return Promise.reject(new Error("Not connected to an API yet"));
+const fetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+  if (!getActiveConnection()) throw new Error("Not connected to an API yet");
   const url = input instanceof Request ? input.url : String(input);
-  return globalThis.fetch(input, withAddressSpace(url, init));
+  const res = await globalThis.fetch(input, withAddressSpace(url, init));
+  if (res.status === 401) {
+    const headers = init.headers ?? (input instanceof Request ? input.headers : undefined);
+    noteUnauthorized(url, headers, getConfig(), globalThis.location?.origin ?? "http://localhost");
+  }
+  return res;
 };
 
 /**
@@ -3254,6 +3261,24 @@ class ApiClient {
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`Failed to resolve whoami: ${res.status}`);
     return (await res.json()) as WhoamiResponse;
+  }
+
+  /**
+   * Does the API still accept `connection`'s key? `rejected` only on a 401.
+   * Any other answer is `accepted`: the server checks the key before it
+   * routes, so an older API without `/api/whoami` answers 404. Throws on a
+   * network failure. It bypasses this file's `fetch`, so the check never
+   * reports itself as a rejection.
+   */
+  async checkAccess(connection: AccessConnection): Promise<"accepted" | "rejected"> {
+    const base =
+      import.meta.env.DEV && connection.apiUrl === "http://localhost:3013" ? "" : connection.apiUrl;
+    const url = `${base.replace(/\/+$/, "")}/api/whoami`;
+    const res = await globalThis.fetch(
+      url,
+      withAddressSpace(url, { headers: { Authorization: `Bearer ${connection.apiKey}` } }),
+    );
+    return res.status === 401 ? "rejected" : "accepted";
   }
 
   /**

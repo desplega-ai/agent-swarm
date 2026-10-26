@@ -23,9 +23,11 @@ import { useLaterNotifier } from "@/hooks/use-later-notifier";
 import { CREDENTIAL_URL_PARAMS, withoutConnectionParams } from "@/lib/connection-url-params";
 import { MAIN_GUTTER, MAIN_GUTTER_NO_TOP } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
+import { AccessEndedScreen } from "./access-ended-screen";
 import { AppFooter } from "./app-footer";
 import { AppHeader } from "./app-header";
 import { AppSidebar } from "./app-sidebar";
+import { useAccessCheck } from "./use-access-check";
 
 /**
  * Phase 3: auto-pop the identity modal whenever:
@@ -93,10 +95,17 @@ export function RootLayout() {
         ? MAIN_GUTTER_NO_TOP
         : MAIN_GUTTER;
 
+  const access = useAccessCheck();
+
   // No connection yet: the full-page `/setup` flow starts at step 1 (connect)
   // and returns here after connecting.
   if (!isConfigured) {
     return <Navigate to="/setup" replace state={{ from: `${pathname}${search}${hash}` }} />;
+  }
+
+  // The API rejects the saved key: no cached pages, no polling, only the way out.
+  if (access.ended) {
+    return <AccessEndedScreen checking={access.checking} onRetry={access.retry} />;
   }
 
   return (
