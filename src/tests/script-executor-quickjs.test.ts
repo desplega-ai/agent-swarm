@@ -730,4 +730,53 @@ export default async function (args: z.infer<typeof argsSchema>) {
     expect(out.exitCode).toBe(0);
     expect(out.result).toEqual({ doubled: 14, label: null, parseCalls: 1 });
   });
+
+  test("retains Zod property semantics on inherited Object.prototype keys (constructor, toString) and reverse numeric enum keys", async () => {
+    for (const propName of ["constructor", "toString"] as const) {
+      const protoScript = `
+import { z } from "zod";
+export const argsSchema = z.object({
+  ${propName}: z.string().nullable().optional(),
+});
+export default async function (args: z.infer<typeof argsSchema>) {
+  return { val: args.${propName} ?? null };
+}
+`;
+      const out = await executor.run(
+        input(protoScript, {
+          args: {},
+          hostValidatedArgs: true,
+        }),
+      );
+      expect(out.exitCode).toBe(1);
+      expect(out.stderr).toContain("argsSchema validation failed");
+    }
+
+    const numericEnumScript = `
+import { z } from "zod";
+export const argsSchema = z.object({
+  mode: z.enum({ 0: "Read", Read: 0 }).nullable(),
+});
+export default async function (args: z.infer<typeof argsSchema>) {
+  return { mode: args.mode };
+}
+`;
+    const rejected = await executor.run(
+      input(numericEnumScript, {
+        args: { mode: "Read" },
+        hostValidatedArgs: true,
+      }),
+    );
+    expect(rejected.exitCode).toBe(1);
+    expect(rejected.stderr).toContain("argsSchema validation failed");
+
+    const accepted = await executor.run(
+      input(numericEnumScript, {
+        args: { mode: 0 },
+        hostValidatedArgs: true,
+      }),
+    );
+    expect(accepted.exitCode).toBe(0);
+    expect(accepted.result).toEqual({ mode: 0 });
+  });
 });

@@ -362,7 +362,14 @@ export const SANDBOX_EPILOGUE = String.raw`(async () => {
         );
       }
       case "enum": {
-        const entries = def.entries && typeof def.entries === "object" ? Object.values(def.entries) : [];
+        if (schema._zod && schema._zod.values instanceof Set) {
+          return schema._zod.values.has(value);
+        }
+        const entriesObj = def.entries && typeof def.entries === "object" ? def.entries : null;
+        if (!entriesObj) return false;
+        const entries = Object.values(entriesObj).filter(
+          (v) => !(typeof v === "string" && typeof entriesObj[v] === "number"),
+        );
         return entries.length > 0 && entries.includes(value);
       }
       case "optional":
@@ -387,7 +394,8 @@ export const SANDBOX_EPILOGUE = String.raw`(async () => {
           if (!Object.hasOwn(shape, key)) return false;
         }
         for (const [key, propSchema] of Object.entries(shape)) {
-          const propValue = Object.hasOwn(value, key) ? value[key] : undefined;
+          if (!Object.hasOwn(value, key) && key in value) return false;
+          const propValue = value[key];
           if (!isHostValidationEquivalent(propSchema, propValue)) return false;
         }
         return true;
