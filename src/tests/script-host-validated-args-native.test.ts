@@ -65,39 +65,41 @@ describe("isHostValidationEquivalent", () => {
   });
 
   test("rejects schemas with defaults, transforms, refinements, coercions, checks, or unknown keys", () => {
-    expect(
-      isHostValidationEquivalent(z.object({ x: z.string().default("hi") }), {}),
-    ).toBe(false);
+    expect(isHostValidationEquivalent(z.object({ x: z.string().default("hi") }), {})).toBe(false);
     expect(
       isHostValidationEquivalent(z.object({ x: z.string().default("hi").optional() }), {}),
     ).toBe(false);
     expect(
-      isHostValidationEquivalent(
-        z.object({ x: z.string().transform((s) => s.trim()) }),
-        { x: "  hi  " },
-      ),
+      isHostValidationEquivalent(z.object({ x: z.string().transform((s) => s.trim()) }), {
+        x: "  hi  ",
+      }),
     ).toBe(false);
     expect(
-      isHostValidationEquivalent(
-        z.object({ x: z.string().refine((s) => s.length > 0) }),
-        { x: "hi" },
-      ),
+      isHostValidationEquivalent(z.object({ x: z.string().refine((s) => s.length > 0) }), {
+        x: "hi",
+      }),
     ).toBe(false);
-    expect(
-      isHostValidationEquivalent(z.object({ x: z.coerce.number() }), { x: 42 }),
-    ).toBe(false);
-    expect(
-      isHostValidationEquivalent(z.object({ x: z.string().min(1) }), { x: "hi" }),
-    ).toBe(false);
-    expect(
-      isHostValidationEquivalent(z.object({ x: z.string().email() }), { x: "a@b.co" }),
-    ).toBe(false);
-    expect(
-      isHostValidationEquivalent(z.object({ x: z.number().int() }), { x: 5 }),
-    ).toBe(false);
+    expect(isHostValidationEquivalent(z.object({ x: z.coerce.number() }), { x: 42 })).toBe(false);
+    expect(isHostValidationEquivalent(z.object({ x: z.string().min(1) }), { x: "hi" })).toBe(false);
+    expect(isHostValidationEquivalent(z.object({ x: z.string().email() }), { x: "a@b.co" })).toBe(
+      false,
+    );
+    expect(isHostValidationEquivalent(z.object({ x: z.number().int() }), { x: 5 })).toBe(false);
     // Extra unknown keys require .parse() so z.object strips them (or z.strictObject rejects them)
+    expect(isHostValidationEquivalent(z.object({ x: z.string() }), { x: "hi", extra: 1 })).toBe(
+      false,
+    );
+    // Reverse numeric enum keys (e.g. { 0: "Read", Read: 0 }) must not pass as valid values
+    const numericEnumSchema = z.enum({ 0: "Read", Read: 0 }).nullable();
+    expect(isHostValidationEquivalent(numericEnumSchema, 0)).toBe(true);
+    expect(isHostValidationEquivalent(numericEnumSchema, null)).toBe(true);
+    expect(isHostValidationEquivalent(numericEnumSchema, "Read")).toBe(false);
+    // Inherited Object.prototype properties (constructor, toString) on `{}` must fall back to .parse()
     expect(
-      isHostValidationEquivalent(z.object({ x: z.string() }), { x: "hi", extra: 1 }),
+      isHostValidationEquivalent(z.object({ constructor: z.string().nullable().optional() }), {}),
+    ).toBe(false);
+    expect(
+      isHostValidationEquivalent(z.object({ toString: z.string().nullable().optional() }), {}),
     ).toBe(false);
   });
 });

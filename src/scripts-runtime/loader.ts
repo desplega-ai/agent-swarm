@@ -16,6 +16,7 @@ import {
   type ScriptResourcePolicy,
   type SwarmConfigPayload,
 } from "./executors/types";
+import { HOST_VALIDATED_ARGS } from "./host-validated-args";
 import { validateScriptImports } from "./import-allowlist";
 
 /**
@@ -39,11 +40,12 @@ export type RunScriptInput = {
   source: string;
   args?: unknown;
   /**
-   * Trusted internal flag set only when the host has already validated `args`
-   * against the script's `argsJsonSchema` (e.g. `POST /api/x/script/{endpointId}`).
-   * Never populated from external request JSON payloads.
+   * Unforgeable host-only capability symbol set only when the host has already
+   * validated `args` against the script's `argsJsonSchema` (e.g. `POST /api/x/script/{endpointId}`).
+   * Keyed by a `Symbol` so request-shaped JSON inputs forwarded into `RunScriptInput`
+   * can never opt out of `argsSchema` validation.
    */
-  hostValidatedArgs?: boolean;
+  [HOST_VALIDATED_ARGS]?: boolean;
   fsMode?: ScriptFsMode;
   agentId: string;
   /**
@@ -156,7 +158,7 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
   const executorInput = {
     source: input.source,
     args: input.args ?? null,
-    ...(input.hostValidatedArgs ? { hostValidatedArgs: true } : {}),
+    ...(input[HOST_VALIDATED_ARGS] === true ? { hostValidatedArgs: true } : {}),
     configPayload,
     resources,
     fsMode: input.fsMode ?? "none",
