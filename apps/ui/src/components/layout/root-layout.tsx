@@ -7,6 +7,7 @@ import { ContextPanelProvider } from "@/components/context-panel/context-panel-s
 import { ContextSessionPanel } from "@/components/context-panel/context-session-panel";
 import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { IdentityModal } from "@/components/identity/identity-modal";
+import { FirstTaskInvitePrompt } from "@/components/onboarding/first-task-invite-prompt";
 import { OnboardingRedirect } from "@/components/onboarding/onboarding-redirect";
 import { CommandMenu, CommandMenuProvider } from "@/components/shared/command-menu";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
@@ -154,6 +155,7 @@ export function RootLayout() {
         <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
         <LeadCredentialDialog key={config.apiUrl} />
         <FeedbackDialog key={`feedback:${config.apiUrl}`} />
+        <FirstTaskInvitePrompt key={`first-task-invite:${config.apiUrl}`} />
       </AgentFsProvider>
     </StatusProvider>
   );

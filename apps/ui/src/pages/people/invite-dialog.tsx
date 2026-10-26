@@ -56,6 +56,14 @@ interface InviteResult {
   role: InviteRole;
 }
 
+/** Other words for the form stage, for a dialog that opens on its own (the first-task pop-up). */
+export interface InviteDialogIntro {
+  title: string;
+  description: string;
+  /** The label of the button that closes the form. Default "Cancel". */
+  cancelLabel?: string;
+}
+
 /**
  * Invite a teammate: email, optional name, role. On success the one-time link
  * shows once, with a copy button. No email is sent: the admin sends the link.
@@ -63,9 +71,11 @@ interface InviteResult {
 export function InviteDialog({
   open,
   onOpenChange,
+  intro,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  intro?: InviteDialogIntro;
 }) {
   const createInvite = useCreateInvite();
   const roles = useRbacRoles({ enabled: open });
@@ -119,11 +129,14 @@ export function InviteDialog({
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{result ? "Invite link ready" : "Invite a teammate"}</DialogTitle>
+          <DialogTitle>
+            {result ? "Invite link ready" : (intro?.title ?? "Invite a teammate")}
+          </DialogTitle>
           <DialogDescription>
             {result
               ? "Copy the link now. It is shown once."
-              : "They get their own access to this swarm. No email is sent: you send the link."}
+              : (intro?.description ??
+                "They get their own access to this swarm. No email is sent: you send the link.")}
           </DialogDescription>
         </DialogHeader>
 
@@ -191,7 +204,7 @@ export function InviteDialog({
           ) : (
             <>
               <Button variant="outline" onClick={() => close(false)}>
-                Cancel
+                {intro?.cancelLabel ?? "Cancel"}
               </Button>
               <Button
                 type="submit"

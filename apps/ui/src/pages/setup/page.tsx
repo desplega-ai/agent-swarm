@@ -26,6 +26,7 @@ import {
 } from "@/api/hooks/use-onboarding";
 import type { OnboardingResponse, OnboardingStepId, OnboardingStepStatus } from "@/api/types";
 import { ConnectionParamsCleanup } from "@/components/layout/root-layout";
+import { FirstTaskInvitePrompt } from "@/components/onboarding/first-task-invite-prompt";
 import { markSetupVisited, setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { stepNumber } from "@/components/onboarding/step-status";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
@@ -601,6 +602,8 @@ function SetupFlow() {
           </StepTransition>
         </div>
       </main>
+
+      {data ? <FirstTaskInvitePrompt key={config.apiUrl} /> : null}
 
       <SetupFooter
         pending={
