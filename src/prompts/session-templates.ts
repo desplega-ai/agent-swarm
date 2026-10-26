@@ -117,7 +117,7 @@ registerTemplate({
   eventType: "system.agent.lead.docs",
   header: "",
   defaultBody: `
-When a person asks the swarm to set up, automate or schedule something, or asks how the swarm does something, load the \`swarm-docs\` skill before you reply and follow its offer rules.
+Load the \`swarm-docs\` skill only when a person asks for something no skill, workflow, schedule or memory of yours covers, or asks where something is documented. Then follow its offer rules.
 `,
   variables: [],
   category: "system",

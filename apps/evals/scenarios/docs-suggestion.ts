@@ -1,3 +1,4 @@
+import { parseToolUses } from "../src/judge/session-log-parse.ts";
 import type {
   CheckResult,
   DeterministicCheck,
@@ -5,25 +6,30 @@ import type {
   Scenario,
   SwarmTask,
 } from "../src/types.ts";
+import { fetchSessionLogs } from "./orchestration-utils.ts";
 
 /**
  * docs-suggestion (lead + 1 worker)
  * ---------------------------------
- * The lead prompt tells the lead to load the seeded `swarm-docs` skill when a
- * person asks the swarm to set up, automate or schedule something, and the
- * skill tells it to offer the one matching playbook. Four requests from a
- * person, one task each, routed to the lead:
+ * The lead prompt tells the lead to load the seeded `swarm-docs` skill on
+ * demand: only when nothing it already has (skill, workflow, schedule, memory)
+ * covers a person's ask. The skill tells it to offer the one matching
+ * playbook. Five requests from a person, one task each, routed to the lead:
  *   - three setup asks that match one playbook each (open-oncall, dora-metrics,
  *     pr-review), worded as the person would say them, with no playbook name;
- *   - one small fix that matches nothing, where the right reply carries no docs
- *     link at all.
+ *   - one small fix that matches nothing;
+ *   - one schedule ask the seeded `scheduling` skill already covers.
+ * On the two negatives the right lead neither loads `swarm-docs` nor links
+ * the docs.
  *
- * Graded deterministically on the lead's own reply (the task output it wrote):
+ * Graded deterministically on the lead's reply (the task output it wrote) and,
+ * for the negatives, its session log:
  *   - gate: every reply is non-empty.
  *   - `docs-offer` (1): per request, 1 when a positive reply links the expected
  *     playbook and no other docs page, 0.5 when it links the playbook among
- *     others (a list, which the skill forbids), 0 otherwise; for the negative,
- *     1 when the reply carries no docs.agent-swarm.dev link. Mean over the four.
+ *     others (a list, which the skill forbids), 0 otherwise; for a negative,
+ *     1 when the reply carries no docs.agent-swarm.dev link and the session
+ *     never loaded `swarm-docs`. Mean over the five.
  * No efficiency dimension: one composite check keeps the score readable as
  * "requests handled right". No solo baseline: the behavior under test is the
  * lead prompt.
@@ -70,6 +76,12 @@ const REQUESTS: Request[] = [
     text: "Fix the typo in README line 3: 'recieve' should be 'receive'.",
     expect: null,
   },
+  {
+    id: "reminder",
+    title: "Request from Maya: standup reminder",
+    text: "Every weekday at 9:00, send me a one-line reminder to post my standup update.",
+    expect: null,
+  },
 ];
 
 function brief(request: Request): string {
@@ -79,6 +91,13 @@ function brief(request: Request): string {
     "",
     `Maya: ${request.text}`,
   ].join("\n");
+}
+
+/** True when a tool call names the `swarm-docs` skill (Skill tool, skill-get, or a read of its file). */
+export function loadedSwarmDocs(uses: { toolName: string; input: unknown }[]): boolean {
+  return uses.some((use) =>
+    /swarm-docs/i.test(`${use.toolName} ${JSON.stringify(use.input ?? {})}`),
+  );
 }
 
 function replyFor(ctx: JudgeContext, request: Request): string {
@@ -129,7 +148,15 @@ const docsOfferCheck: DeterministicCheck = {
     const parts: string[] = [];
     let total = 0;
     for (const request of REQUESTS) {
-      const { score, note } = scoreReply(replyFor(ctx, request), request.expect);
+      let { score, note } = scoreReply(replyFor(ctx, request), request.expect);
+      if (request.expect === null && score > 0) {
+        const task = ctx.tasks.find((t: SwarmTask) => t.title === request.title);
+        const uses = task ? parseToolUses(await fetchSessionLogs(ctx, task.id)) : [];
+        if (loadedSwarmDocs(uses)) {
+          score = 0;
+          note = "loaded swarm-docs for an ask it already covers";
+        }
+      }
       total += score;
       parts.push(`${request.id}=${score} (${note})`);
     }
@@ -147,10 +174,11 @@ export const docsSuggestion: Scenario = {
   version: 1,
   name: "Docs suggestion",
   description: [
-    "A person sends the lead four requests: three setup asks that each match one docs playbook",
-    "(Open Oncall, DORA metrics, PR review) and one typo fix that matches none. Graded on the",
-    "lead's replies: each setup reply offers the matching playbook link and no other docs page,",
-    "and the typo reply carries no docs link (docs-offer, 1).",
+    "A person sends the lead five requests: three setup asks that each match one docs playbook",
+    "(Open Oncall, DORA metrics, PR review), a typo fix that matches none, and a standup reminder",
+    "the scheduling skill already covers. Graded on the lead's replies: each setup reply offers",
+    "the matching playbook link and no other docs page, and the two other replies carry no docs",
+    "link with no swarm-docs load in the session (docs-offer, 1).",
   ].join(" "),
   workers: 1,
   lead: { name: "Lead", template: "lead" },

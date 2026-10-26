@@ -105,7 +105,7 @@ seeded skills are named by the prompt, five of them with a MUST pointer:
 | `slack-interaction` | MUST, before any Slack post | engine-owned posts, the one-message rule, tools, unknown users, standing orders |
 | `code-quality` | MUST, before push/PR/review (repository block) | gh/glab, PR checks, CI loop, merge policy, review rules, review-reply provenance |
 | `heartbeat-runbook` | MUST, lead heartbeat checklist | cap policy, lift triggers, checklist and boot-triage steps |
-| `swarm-docs` | lead, setup or how-to request (`system.agent.lead.docs`, rendered only when the lead has the skill) | offer rules, page fetch and offline fallback, generated docs index |
+| `swarm-docs` | lead, on demand: a request nothing the lead already has covers, or a where-is-it-documented question (`system.agent.lead.docs`, rendered only when the lead has the skill) | offer rules, page fetch and offline fallback, generated docs index |
 | `scheduling` | plain pointer | `create-schedule` target types, timing, verify and repair |
 | `pages`, `apps`, `agent-fs` | plain pointers (outputs block) | publishing, apps, the shared drive |
 | `workflow-iterate` | plain pointer (lead) | building workflows |

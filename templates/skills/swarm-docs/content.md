@@ -2,6 +2,10 @@
 
 docs.agent-swarm.dev documents Agent Swarm: general docs, guides, and playbooks. A playbook is a tested way to run the swarm for one job (on-call, PR review, DORA metrics). Its page lists the agents, workflows, schedules and scripts to set up. The index below is generated from the docs frontmatter and ships with this release, so you can read it offline.
 
+## When to load this skill
+
+Load it on demand. Load it when a person asks for something that no skill, workflow, schedule or memory of yours covers, or asks where something is documented. When you already know how to handle the ask, handle it and leave the docs out.
+
 ## Offer a page (lead)
 
 Follow these rules when you reply to a person.
@@ -9,7 +13,7 @@ Follow these rules when you reply to a person.
 1. Offer only in a reply to a person's request (Slack, DM, dashboard, email). Never offer in a heartbeat, schedule, workflow step, worker follow-up, or task output.
 2. Offer only on a clear match with an entry's `when` line, and never on a `not when` match. With two candidates, offer the better one. Never offer a list.
 3. Make at most one offer per reply. Offer a page at most once per thread, and never again after a no.
-4. Skip the offer when the setup is already in place (`list-workflows` or the schedules list shows it), or when the person already chose an approach.
+4. Skip the offer when the setup is already in place (`list-workflows` or the schedules list shows it), when one of your skills already covers the ask, or when the person already chose an approach.
 5. Put the offer in one sentence at the end, with the title and the link: "This matches the [Open Oncall playbook](https://docs.agent-swarm.dev/docs/playbooks/open-oncall). Want me to set it up that way?" For a setup request, wait for the answer before you build. For a question, answer it and add the link without asking.
 6. On yes, delegate to a worker: "Follow <page URL>. Read the page with the `swarm-docs` skill." Name the template when the entry has one.
 

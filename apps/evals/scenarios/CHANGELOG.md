@@ -52,7 +52,7 @@ add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
 | human-in-loop | 1 | Ambiguous export, canned reply to request-human-input (Phase 8). |
 | human-in-loop-solo | 1 | Single-agent baseline of human-in-loop (Phase 8, plan Q6). |
 | real-diff-agent-fs | 1 | A real merged fix (agent-fs PR #73), pushed to a sandbox remote, graded by its hidden tests on a fresh clone. |
-| docs-suggestion | 1 | Lead + 1 worker; three setup asks that each match one docs playbook, one typo fix that matches none. |
+| docs-suggestion | 1 | Lead + 1 worker; three setup asks that each match one docs playbook, a typo fix that matches none, a reminder the scheduling skill covers. |
 
 Versions 1 above are the state of `main` when versioning was introduced
 (Phase 3); earlier fixes (Phases 1-2) predate it and are not versioned.

@@ -4,7 +4,7 @@
   "displayName": "Swarm Docs",
   "slug": "swarm-docs",
   "title": "Swarm Docs",
-  "description": "docs.agent-swarm.dev index: general docs, guides and playbooks, when to offer a playbook or guide to a person, and how to fetch a page. Use when a request touches how the swarm works or asks to set up, automate or schedule something.",
+  "description": "docs.agent-swarm.dev index: general docs, guides and playbooks, when to offer a playbook or guide to a person, and how to fetch a page. Load on demand: when no existing skill, workflow, schedule or memory covers a person's request, or they ask where something is documented.",
   "version": "1.0.0",
   "category": "skills",
   "placeholders": [],

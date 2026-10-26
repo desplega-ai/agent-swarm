@@ -4,7 +4,8 @@ import { type GraderFixture, makeContext, nullTasks } from "../grader-validation
 
 /**
  * Reference: a lead that answers each setup ask with one sentence offering the
- * matching playbook, and fixes the typo without linking the docs.
+ * matching playbook, and handles the typo and the reminder without loading
+ * or linking the docs.
  */
 
 export const REFERENCE_REPLIES: Record<string, string> = {
@@ -14,14 +15,23 @@ export const REFERENCE_REPLIES: Record<string, string> = {
   "pr-review":
     "Yes. This matches the [PR Review playbook](https://docs.agent-swarm.dev/docs/playbooks/pr-review). Want me to set it up that way?",
   typo: "Done: README line 3 now reads 'receive'.",
+  reminder: "Done: you get a one-line standup reminder every weekday at 9:00.",
 };
 
-export function repliesContext(replies: Record<string, string>) {
+/** Task id the null context gives a request (`task-<i>`, in REQUESTS order). */
+export function taskIdFor(requestId: string): string {
+  return `task-${key.REQUESTS.findIndex((r) => r.id === requestId)}`;
+}
+
+export function repliesContext(
+  replies: Record<string, string>,
+  logs: Record<string, Record<string, unknown>[]> = {},
+) {
   const tasks = nullTasks(docsSuggestion).map((task): SwarmTask => {
     const request = key.REQUESTS.find((r) => r.title === task.title);
     return { ...task, agentId: "lead", result: replies[request?.id ?? ""] ?? "" };
   });
-  return makeContext(docsSuggestion, { tasks });
+  return makeContext(docsSuggestion, { tasks, logs });
 }
 
 export const fixture: GraderFixture = {
