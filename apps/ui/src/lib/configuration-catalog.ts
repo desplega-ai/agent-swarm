@@ -1467,6 +1467,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl:
           "https://github.com/desplega-ai/agent-swarm/blob/main/DEPLOYMENT.md#built-in-api-cors",
       },
+      {
+        key: "PAGES_FRAME_ANCESTORS",
+        label: "Public page embed origins",
+        description:
+          "Extra origins allowed to iframe public pages (/p/:id), for example a blog embedding a chart. Comma or space separated CSP host-sources; invalid entries are dropped with a warning. Authed and password pages ignore this list.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "https://www.example.com https://example.com",
+        docsUrl: `${DOCS}ui`,
+      },
     ],
   },
   {
