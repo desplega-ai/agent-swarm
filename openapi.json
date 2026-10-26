@@ -19601,6 +19601,14 @@
             "required": false,
             "name": "model",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "keySuffixes",
+            "in": "query"
           }
         ],
         "responses": {

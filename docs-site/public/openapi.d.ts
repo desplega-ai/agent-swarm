@@ -6720,6 +6720,7 @@ export interface paths {
                     scope?: string;
                     scopeId?: string;
                     model?: "fable" | "opus" | "sonnet" | "haiku";
+                    keySuffixes?: string;
                 };
                 header?: never;
                 path?: never;

@@ -11721,6 +11721,12 @@ export interface AvailableKeyIndicesResult {
  * whose `plan` cannot run the family (`planAllowsModelFamily`) is excluded
  * and reported in `seatBlockedIndices`, also when it is key-wide or
  * model-window blocked; a seat block has no reset time.
+ *
+ * With `keySuffixes` (the caller's own pool, in order), rows are matched by
+ * key suffix instead of the stored `keyIndex`, across every scope: a key has
+ * one state wherever it is pooled, and a key at the same index in another
+ * agent's pool is never blocked by it. Returned indices are positions in
+ * `keySuffixes`. Without it, rows of `scope`/`scopeId` are read by `keyIndex`.
  */
 export async function getAvailableKeyIndices(
   keyType: string,
@@ -11728,41 +11734,51 @@ export async function getAvailableKeyIndices(
   scope = "global",
   scopeId: string | null = null,
   modelFamily?: ModelFamily,
+  keySuffixes?: string[],
 ): Promise<AvailableKeyIndicesResult> {
   const now = new Date().toISOString();
   const nowMs = Date.now();
   const client = getDbClient();
   const effectiveScopeId = scopeId ?? "";
+  const suffixes = keySuffixes?.length ? keySuffixes : undefined;
+  const rowFilter = suffixes
+    ? `keyType = ? AND keySuffix IN (${suffixes.map(() => "?").join(", ")})`
+    : "keyType = ? AND scope = ? AND scopeId = ?";
+  const rowParams = suffixes ? [keyType, ...suffixes] : [keyType, scope, effectiveScopeId];
 
   // Auto-clear expired rate limits. Never an auth bench: only `clearAuthBench` lifts it.
   await client.run(
     `UPDATE api_key_status
      SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
-     WHERE keyType = ? AND scope = ? AND scopeId = ?
+     WHERE ${rowFilter}
        AND status = 'rate_limited' AND rateLimitedUntil <= ? AND consecutiveAuthFailures < ?`,
-    [now, keyType, scope, effectiveScopeId, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
+    [now, ...rowParams, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
   );
 
   const rows = await client.query<{
     keyIndex: number;
+    keySuffix: string;
     status: string;
     rateLimitWindows: string | null;
     plan: string | null;
     authFailureSeq: number;
     lastValidationFailedAt: string | null;
   }>(
-    `SELECT keyIndex, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
-       WHERE keyType = ? AND scope = ? AND scopeId = ?`,
-    [keyType, scope, effectiveScopeId],
+    `SELECT keyIndex, keySuffix, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
+       WHERE ${rowFilter}`,
+    rowParams,
   );
+  // Pool positions a row applies to: every position holding its suffix, or its stored index.
+  const positionsOf = (row: { keyIndex: number; keySuffix: string }): number[] =>
+    suffixes
+      ? suffixes.flatMap((suffix, i) => (suffix === row.keySuffix ? [i] : []))
+      : [row.keyIndex];
 
   const blockedIndices = new Set(
-    rows.filter((r) => r.status === "rate_limited").map((r) => r.keyIndex),
+    rows.filter((r) => r.status === "rate_limited").flatMap(positionsOf),
   );
   const rejectedIndices = [
-    ...new Set(
-      rows.filter((row) => row.lastValidationFailedAt !== null).map((row) => row.keyIndex),
-    ),
+    ...new Set(rows.filter((row) => row.lastValidationFailedAt !== null).flatMap(positionsOf)),
   ];
   for (const index of rejectedIndices) blockedIndices.add(index);
 
@@ -11773,14 +11789,17 @@ export async function getAvailableKeyIndices(
       // A key already blocked key-wide doesn't need a separate model-block
       // entry — it's excluded from availableIndices either way, and
       // modelBlockedIndices means "excluded only by a model-scoped block".
-      if (blockedIndices.has(row.keyIndex)) continue;
+      const positions = positionsOf(row).filter(
+        (i) => !blockedIndices.has(i) && !modelBlockedIndices.includes(i),
+      );
+      if (positions.length === 0) continue;
       const block = activeModelBlock(
         parseRateLimitWindowsJson(row.rateLimitWindows),
         modelFamily,
         nowMs,
       );
       if (!block) continue;
-      modelBlockedIndices.push(row.keyIndex);
+      modelBlockedIndices.push(...positions);
       if (earliestModelResetsAtSec === undefined || block.resetsAt < earliestModelResetsAtSec) {
         earliestModelResetsAtSec = block.resetsAt;
       }
@@ -11794,7 +11813,10 @@ export async function getAvailableKeyIndices(
   const seatBlockedIndices: number[] = [];
   if (modelFamily) {
     for (const row of rows) {
-      if (!planAllowsModelFamily(row.plan, modelFamily)) seatBlockedIndices.push(row.keyIndex);
+      if (planAllowsModelFamily(row.plan, modelFamily)) continue;
+      for (const i of positionsOf(row)) {
+        if (!seatBlockedIndices.includes(i)) seatBlockedIndices.push(i);
+      }
     }
   }
   const seatBlockedSet = new Set(seatBlockedIndices);
