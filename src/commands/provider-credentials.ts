@@ -60,6 +60,7 @@ import {
   type LiveValidationResult,
   timedFetch,
 } from "../utils/provider-key-probes";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export {
@@ -664,7 +665,7 @@ export async function validateProviderCredentials(
  * the dashboard surfaces "unreported".
  */
 export function isCredCheckDisabled(env: NodeJS.ProcessEnv): boolean {
-  return env.CRED_CHECK_DISABLE === "1";
+  return isEnvFlagEnabled("CRED_CHECK_DISABLE", false, env);
 }
 
 /**
