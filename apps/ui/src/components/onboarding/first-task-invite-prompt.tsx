@@ -30,6 +30,22 @@ function wasOffered(key: string): boolean {
   }
 }
 
+/**
+ * The swarms (API URLs) where this tab saw the first task not done in a
+ * fresh payload. Module state, not component state: `/setup` and the app
+ * shell each mount a prompt, and a first task can complete in the 2 s
+ * between the setup's last poll and the shell's first one.
+ */
+const pendingSeen = new Set<string>();
+
+/** Forget what an earlier test saw. */
+export function resetFirstTaskInviteWatchForTests() {
+  pendingSeen.clear();
+}
+
+/** How often a tab that waits for the first task reads the onboarding state. */
+const FIRST_TASK_POLL_MS = 5_000;
+
 function rememberOffer(key: string) {
   try {
     localStorage.setItem(key, "1");
@@ -40,20 +56,20 @@ function rememberOffer(key: string) {
 
 /**
  * Offers the invite dialog (the one of the People page) once, when this tab
- * sees the onboarding first task complete: a payload fetched after mount
+ * sees the onboarding first task complete: a payload fetched in this tab
  * shows `first_task` not done, and a later one shows it done. Mounted on
  * `/setup` and in the app shell, because sending the first task opens its
- * session. Only for admins on an API that serves invites (the People page
- * gate), not when the company profile says "Just me" (the setup invite card
- * hides then too), and only once a dashboard user is picked. The offer is remembered
- * per swarm and user (localStorage) as it opens, so it never opens again.
- * It waits while another dialog is open.
+ * session: the shell's prompt knows what the setup's prompt saw. While it
+ * waits for the task, it reads the onboarding state every 5 s. Only for
+ * admins on an API that serves invites (the People page gate), not when the
+ * company profile says "Solo" (the setup invite card hides then too), and
+ * only once a dashboard user is picked. The offer is remembered per swarm
+ * and user (localStorage) as it opens, so it never opens again. It waits
+ * while another dialog is open.
  */
 export function FirstTaskInvitePrompt() {
   const { config } = useConfig();
   const { userId } = useCurrentUser();
-  // Shares the onboarding cache: `/setup` and `OnboardingRedirect` poll it.
-  const { data, dataUpdatedAt, isFetchedAfterMount } = useOnboarding();
   const isAdmin = useIsAdmin();
   const supported = useInvitesSupport();
   // The raw config rows, as the setup invite card reads them: `/setup` has no StatusProvider.
@@ -63,17 +79,28 @@ export function FirstTaskInvitePrompt() {
     configs?.find((entry) => entry.key === SWARM_ORG_TEAM_SIZE)?.value,
   );
   const hasTeam = configs !== undefined && teamSize !== "1";
+  const [sawPending, setSawPending] = useState(() => pendingSeen.has(config.apiUrl));
+  const watching = sawPending && isAdmin && supported && hasTeam;
+  // Shares the onboarding cache with `/setup` and `OnboardingRedirect`. The
+  // shell polls it every 30 s only: poll faster while the first task runs.
+  const { data, dataUpdatedAt, isFetchedAfterMount } = useOnboarding({
+    refetchInterval: (query) =>
+      watching && query.state.data?.state.steps.first_task?.status !== "done"
+        ? FIRST_TASK_POLL_MS
+        : false,
+  });
   const otherDialogOpen = useOtherDialogOpen();
   const [mountedAt] = useState(Date.now);
-  const [sawPending, setSawPending] = useState(false);
   const [open, setOpen] = useState(false);
 
   const status = data?.state.steps.first_task.status;
   // Never decide on the persisted cache: hydration can count as fetched after mount.
   const fresh = isFetchedAfterMount && dataUpdatedAt >= mountedAt;
   useEffect(() => {
-    if (fresh && status !== undefined && status !== "done") setSawPending(true);
-  }, [fresh, status]);
+    if (!fresh || status === undefined || status === "done") return;
+    pendingSeen.add(config.apiUrl);
+    setSawPending(true);
+  }, [fresh, status, config.apiUrl]);
 
   const due =
     sawPending && status === "done" && isAdmin && supported && hasTeam && !otherDialogOpen;

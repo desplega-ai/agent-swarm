@@ -57,7 +57,8 @@ mock.module("@/pages/people/invite-dialog", () => ({
     open ? <p data-testid="invite">{intro?.title}</p> : null,
 }));
 
-const { FirstTaskInvitePrompt, firstTaskInviteKey } = await import("./first-task-invite-prompt");
+const { FirstTaskInvitePrompt, firstTaskInviteKey, resetFirstTaskInviteWatchForTests } =
+  await import("./first-task-invite-prompt");
 
 async function mount() {
   const container = document.createElement("div");
@@ -85,6 +86,7 @@ beforeEach(() => {
   fetchedAt = () => Date.now() + 60_000;
   localStorage.clear();
   document.body.innerHTML = "";
+  resetFirstTaskInviteWatchForTests();
 });
 
 describe("FirstTaskInvitePrompt", () => {
@@ -104,6 +106,22 @@ describe("FirstTaskInvitePrompt", () => {
     firstTask = "done";
     await again.rerender();
     expect(again.opened()).toBe(false);
+  });
+
+  test("opens in the app shell when /setup saw the first task pending", async () => {
+    // `/setup` sees the task pending, then sending it opens the session page.
+    const setup = await mount();
+    await setup.unmount();
+
+    // The shell's prompt mounts on the cache, and the task is done before
+    // its first own fetch.
+    fetchedAt = () => 0;
+    const shell = await mount();
+    expect(shell.opened()).toBe(false);
+    firstTask = "done";
+    fetchedAt = () => Date.now() + 60_000;
+    await shell.rerender();
+    expect(shell.opened()).toBe(true);
   });
 
   test("stays closed when the first task was already done before this tab", async () => {
@@ -138,7 +156,7 @@ describe("FirstTaskInvitePrompt", () => {
     expect(view.opened()).toBe(false);
   });
 
-  test("stays closed when the company profile says Just me", async () => {
+  test("stays closed when the company profile says Solo", async () => {
     teamSize = "1";
     const view = await mount();
     firstTask = "done";
