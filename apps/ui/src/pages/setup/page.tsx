@@ -75,7 +75,7 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
   },
   memory: {
     title: "Turn on memory",
-    description: "Agents remember past work. With a key, they find it by meaning.",
+    description: "Agents remember past work and find it by meaning.",
   },
   integrations: {
     title: "Connect your tools",

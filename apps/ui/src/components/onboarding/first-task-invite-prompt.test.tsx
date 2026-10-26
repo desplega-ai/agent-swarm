@@ -18,6 +18,7 @@ let firstTask: StepStatus = "todo";
 let isAdmin = true;
 let supported = true;
 let userId: string | null = USER_ID;
+let teamSize: string | null = null;
 // Payloads arrive after the prompt mounts, unless a test says otherwise.
 let fetchedAt = () => Date.now() + 60_000;
 
@@ -28,6 +29,12 @@ mock.module("@/api/hooks/use-onboarding", () => ({
     isFetchedAfterMount: true,
   }),
 }));
+mock.module("@/api/hooks/use-config-api", () => ({
+  useConfigs: () => ({
+    data: teamSize === null ? [] : [{ key: "SWARM_ORG_TEAM_SIZE", value: teamSize }],
+  }),
+}));
+mock.module("@/lib/company-profile", () => require("../../lib/company-profile"));
 mock.module("@/api/hooks/use-invites-support", () => ({ useInvitesSupport: () => supported }));
 mock.module("@/lib/use-can", () => ({
   ...require("../../lib/use-can"),
@@ -74,6 +81,7 @@ beforeEach(() => {
   isAdmin = true;
   supported = true;
   userId = USER_ID;
+  teamSize = null;
   fetchedAt = () => Date.now() + 60_000;
   localStorage.clear();
   document.body.innerHTML = "";
@@ -124,6 +132,14 @@ describe("FirstTaskInvitePrompt", () => {
 
   test("stays closed on an API without invites", async () => {
     supported = false;
+    const view = await mount();
+    firstTask = "done";
+    await view.rerender();
+    expect(view.opened()).toBe(false);
+  });
+
+  test("stays closed when the company profile says Just me", async () => {
+    teamSize = "1";
     const view = await mount();
     firstTask = "done";
     await view.rerender();

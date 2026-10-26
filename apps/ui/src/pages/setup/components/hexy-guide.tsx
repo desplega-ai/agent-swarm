@@ -62,7 +62,7 @@ export const SETUP_CREW: Record<OnboardingStepId, CrewMember> = {
   memory: {
     id: "researcher",
     name: "Researcher",
-    tip: "With an embeddings key, agents find past work by meaning, not only by keyword.",
+    tip: "Memory search finds past work by meaning, not only by keyword.",
     poses: ["busy", "done"],
   },
   // The marketer speaks in your team's channels.

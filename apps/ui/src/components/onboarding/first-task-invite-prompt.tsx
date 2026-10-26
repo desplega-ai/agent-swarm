@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useConfigs } from "@/api/hooks/use-config-api";
 import { useInvitesSupport } from "@/api/hooks/use-invites-support";
 import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { markPromptShownThisLoad, useOtherDialogOpen } from "@/hooks/use-other-dialog-open";
+import { optionValue, SWARM_ORG_TEAM_SIZE, TEAM_SIZES } from "@/lib/company-profile";
 import { useIsAdmin } from "@/lib/use-can";
 import { InviteDialog, type InviteDialogIntro } from "@/pages/people/invite-dialog";
 
@@ -42,7 +44,8 @@ function rememberOffer(key: string) {
  * shows `first_task` not done, and a later one shows it done. Mounted on
  * `/setup` and in the app shell, because sending the first task opens its
  * session. Only for admins on an API that serves invites (the People page
- * gate), and only once a dashboard user is picked. The offer is remembered
+ * gate), not when the company profile says "Just me" (the setup invite card
+ * hides then too), and only once a dashboard user is picked. The offer is remembered
  * per swarm and user (localStorage) as it opens, so it never opens again.
  * It waits while another dialog is open.
  */
@@ -53,6 +56,13 @@ export function FirstTaskInvitePrompt() {
   const { data, dataUpdatedAt, isFetchedAfterMount } = useOnboarding();
   const isAdmin = useIsAdmin();
   const supported = useInvitesSupport();
+  // The raw config rows, as the setup invite card reads them: `/setup` has no StatusProvider.
+  const { data: configs } = useConfigs({ scope: "global" });
+  const teamSize = optionValue(
+    TEAM_SIZES,
+    configs?.find((entry) => entry.key === SWARM_ORG_TEAM_SIZE)?.value,
+  );
+  const hasTeam = configs !== undefined && teamSize !== "1";
   const otherDialogOpen = useOtherDialogOpen();
   const [mountedAt] = useState(Date.now);
   const [sawPending, setSawPending] = useState(false);
@@ -65,7 +75,8 @@ export function FirstTaskInvitePrompt() {
     if (fresh && status !== undefined && status !== "done") setSawPending(true);
   }, [fresh, status]);
 
-  const due = sawPending && status === "done" && isAdmin && supported && !otherDialogOpen;
+  const due =
+    sawPending && status === "done" && isAdmin && supported && hasTeam && !otherDialogOpen;
   useEffect(() => {
     if (!due || open || userId === null) return;
     const key = firstTaskInviteKey(config.apiUrl, userId);
