@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
-import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
+import { type EnvPresenceMap, useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useModelTiers } from "@/api/hooks/use-model-tiers";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
-import type { ModelTierPreview, OnboardingAiMethod } from "@/api/types";
+import type { ModelTierPreview, OnboardingAiMethod, SwarmConfig } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { Button } from "@/components/ui/button";
 import { AutosaveScopeContext, useAutosaveScope } from "@/hooks/use-autosave";
@@ -32,13 +32,24 @@ import { OpenHarnessCard } from "./ai/open-harness-card";
 
 /** Stable, so a failed tier load does not rebuild the dial context on every render. */
 const NO_TIER_ROWS: ModelTierPreview[] = [];
+const NO_PRESENCE: EnvPresenceMap = {};
+const NO_CONFIGS: SwarmConfig[] = [];
 
 export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
   const queryClient = useQueryClient();
   const { data: agents = [] } = useAgents();
-  const { data: presence = {} } = useEnvPresence(PRESENCE_KEYS);
-  const { data: configs = [] } = useConfigs({ scope: "global" });
+  const presenceQuery = useEnvPresence(PRESENCE_KEYS);
+  const configsQuery = useConfigs({ scope: "global" });
+  const presence = presenceQuery.data ?? NO_PRESENCE;
+  const configs = configsQuery.data ?? NO_CONFIGS;
+  // The cards' saved state comes from these two. Restored cache data can be
+  // old, so a card counts as empty only when both have loaded and do not fetch.
+  const savedStateSettled =
+    presenceQuery.data !== undefined &&
+    configsQuery.data !== undefined &&
+    !presenceQuery.isFetching &&
+    !configsQuery.isFetching;
   const [openCard, setOpenCard] = useState<AiCardId | null>("claude");
   const [deviceDone, setDeviceDone] = useState(false);
   // The card the user saved on, and the method that save completes the step with.
@@ -91,9 +102,21 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
 
   // Each card's saved state, as its header shows it.
   const savedCards = useRef<Partial<Record<AiCardId, boolean>>>({});
-  const reportSaved = useCallback((card: AiCardId, saved: boolean) => {
-    savedCards.current[card] = saved;
-  }, []);
+  // The cards that showed no credential: their next save is a first credential.
+  // A card that loads with a key never arms, so a second key does not switch.
+  const armed = useRef<Partial<Record<AiCardId, boolean>>>({});
+  // A save that came while the tier models load: its switch runs when they arrive.
+  const waitingForTiers = useRef<{ card: AiCardId; method: OnboardingAiMethod } | null>(null);
+  const reportSaved = useCallback(
+    (card: AiCardId, saved: boolean) => {
+      savedCards.current[card] = saved;
+      if (saved) return;
+      // The key of a queued switch is gone: drop the switch.
+      if (waitingForTiers.current?.card === card) waitingForTiers.current = null;
+      if (savedStateSettled) armed.current[card] = true;
+    },
+    [savedStateSettled],
+  );
   // The switch runs from save callbacks: it reads the latest data from here.
   const latest = useRef({ agents, rollups, dialContext });
   useEffect(() => {
@@ -101,16 +124,15 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   });
   const [autoSwitch, setAutoSwitch] = useState<FirstCredentialSwitch | null>(null);
   const autoSwitchRunning = useRef(false);
-  // A save that came while the tier models load: its switch runs when they arrive.
-  const waitingForTiers = useRef<OnboardingAiMethod | null>(null);
 
   /**
    * The first credential moves every agent to its card's harness, so that a
-   * worker can check the key. It runs once per save, never on view. A save
-   * that finds agents on the harness, or a credential on another card, keeps
-   * the manual switch list.
+   * worker can check the key. It runs once per save, never on view, and only
+   * for the first key of a card that showed no credential. A save that finds
+   * agents on the harness, or a credential on another card, keeps the manual
+   * switch list.
    */
-  const switchOnFirstCredential = useCallback(
+  const runSwitch = useCallback(
     async (method: OnboardingAiMethod) => {
       if (autoSwitchRunning.current) return;
       const { agents, rollups, dialContext } = latest.current;
@@ -118,7 +140,7 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
       if (!plan) return;
       // The carried model level needs the tier models: wait for them, then switch.
       if (!dialContext.tiers && dialHarness(plan.target)) {
-        waitingForTiers.current = method;
+        waitingForTiers.current = { card: plan.card, method };
         return;
       }
       autoSwitchRunning.current = true;
@@ -132,12 +154,22 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     },
     [queryClient],
   );
+  const switchOnFirstCredential = useCallback(
+    (method: OnboardingAiMethod) => {
+      const card = METHOD_CARD[method];
+      if (!armed.current[card]) return;
+      // The card holds a credential now: a later key is not the first.
+      armed.current[card] = false;
+      void runSwitch(method);
+    },
+    [runSwitch],
+  );
   useEffect(() => {
-    const method = waitingForTiers.current;
-    if (!method || !tiers) return;
+    const waiting = waitingForTiers.current;
+    if (!waiting || !tiers) return;
     waitingForTiers.current = null;
-    void switchOnFirstCredential(method);
-  }, [tiers, switchOnFirstCredential]);
+    if (savedCards.current[waiting.card]) void runSwitch(waiting.method);
+  }, [tiers, runSwitch]);
 
   const aiDone = aiStep.status === "done";
   // The card's save already refreshed env presence and the onboarding signals.
@@ -145,13 +177,13 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     (method: OnboardingAiMethod) => {
       // A save after the step is done adds a provider. It never rewrites the method.
       pending.current = aiDone ? null : { card: METHOD_CARD[method], method };
-      void switchOnFirstCredential(method);
+      switchOnFirstCredential(method);
     },
     [aiDone, switchOnFirstCredential],
   );
   const onDeviceComplete = useCallback(() => {
     setDeviceDone(true);
-    void switchOnFirstCredential("codex_device");
+    switchOnFirstCredential("codex_device");
   }, [switchOnFirstCredential]);
 
   const cardProps = (card: AiCardId): AiCardProps => ({

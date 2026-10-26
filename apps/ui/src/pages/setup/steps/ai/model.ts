@@ -108,7 +108,8 @@ const METHOD_HARNESS: Partial<Record<OnboardingAiMethod, ProviderName>> = { deep
  * to the harness of its card (the card's default) when no agent can work yet:
  * no other card holds a credential (a saved key, or a worker that verified
  * one), and no agent runs a harness of this card (the case where the manual
- * switch list shows). Null keeps the manual list.
+ * switch list shows). Null keeps the manual list. The step calls it only for
+ * the first key of a card that showed no credential.
  */
 export function firstCredentialSwitch(
   method: OnboardingAiMethod,
