@@ -96,6 +96,128 @@ describe("docs-suggestion rubric", () => {
     ).toBe(false);
   });
 
+  describe("Codex and Pi session logs, parsed then graded", () => {
+    const taskId = taskIdFor("reminder");
+    const gradeRaw = (line: unknown) =>
+      docsOfferCheck.fn(
+        repliesContext(REFERENCE_REPLIES, {
+          [taskId]: [{ taskId, content: JSON.stringify(line) }],
+        }),
+      );
+    const codexItem = (item: Record<string, unknown>) => ({
+      type: "item.completed",
+      item: { id: "i1", status: "completed", ...item },
+    });
+    const piToolUse = (name: string, input: Record<string, unknown>) => ({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id: "p1", name, input }] },
+    });
+
+    const loads: [string, unknown][] = [
+      [
+        "Codex MCP skill-get",
+        codexItem({
+          type: "mcp_tool_call",
+          server: "agent-swarm",
+          tool: "skill-get",
+          arguments: { name: "swarm-docs" },
+          result: "loaded",
+        }),
+      ],
+      [
+        "Codex shell cat of the skill file",
+        codexItem({
+          type: "command_execution",
+          command: "/bin/bash -lc 'cat /home/worker/.codex/skills/swarm-docs/SKILL.md'",
+          exit_code: 0,
+        }),
+      ],
+      [
+        "Codex shell sed of the skill file",
+        codexItem({
+          type: "command_execution",
+          command: "sed -n '1,200p' /home/worker/.codex/skills/swarm-docs/SKILL.md",
+          exit_code: 0,
+        }),
+      ],
+      [
+        "Pi bash cat of the skill file",
+        piToolUse("bash", { command: "cat /home/worker/.pi/agent/skills/swarm-docs/SKILL.md" }),
+      ],
+      [
+        "Pi read of the skill file",
+        piToolUse("read", { path: "/home/worker/.pi/agent/skills/swarm-docs/SKILL.md" }),
+      ],
+      ["Pi skill-get", piToolUse("skill-get", { name: "swarm-docs" })],
+      [
+        "opencode read of the skill file",
+        {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              type: "tool",
+              tool: "read",
+              callID: "o1",
+              state: {
+                status: "completed",
+                input: { filePath: "/home/worker/.config/opencode/skills/swarm-docs/SKILL.md" },
+              },
+            },
+          },
+        },
+      ],
+    ];
+    for (const [name, line] of loads) {
+      test(`${name} counts as a swarm-docs load`, async () => {
+        const res = await gradeRaw(line);
+        expect(res.score).toBeCloseTo(4 / 5);
+        expect(res.detail).toContain("reminder=0 (loaded swarm-docs");
+      });
+    }
+
+    const nonLoads: [string, unknown][] = [
+      [
+        "Codex MCP skill-search",
+        codexItem({
+          type: "mcp_tool_call",
+          server: "agent-swarm",
+          tool: "skill-search",
+          arguments: { query: "swarm-docs" },
+        }),
+      ],
+      [
+        "Codex shell grep over the skills directory",
+        codexItem({
+          type: "command_execution",
+          command: "grep -rl swarm-docs /home/worker/.codex/skills",
+          exit_code: 0,
+        }),
+      ],
+      [
+        "Codex shell grep inside the skill file",
+        codexItem({
+          type: "command_execution",
+          command: "grep -n cron /home/worker/.codex/skills/swarm-docs/SKILL.md",
+          exit_code: 0,
+        }),
+      ],
+      [
+        "Pi bash ls of the skill file",
+        piToolUse("bash", { command: "ls /home/worker/.pi/agent/skills/swarm-docs/SKILL.md" }),
+      ],
+      [
+        "Pi bash cat of another file",
+        piToolUse("bash", { command: "cat /notes/swarm-docs-todo.md" }),
+      ],
+    ];
+    for (const [name, line] of nonLoads) {
+      test(`${name} is not a swarm-docs load`, async () => {
+        const res = await gradeRaw(line);
+        expect(res.score).toBe(1);
+      });
+    }
+  });
+
   test("a list of pages gets half; the wrong playbook gets zero", () => {
     const list =
       "Options: https://docs.agent-swarm.dev/docs/playbooks/open-oncall and https://docs.agent-swarm.dev/docs/playbooks/code-health-alert-management";

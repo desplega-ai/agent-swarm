@@ -63,9 +63,11 @@ Versions 1 above are the state of `main` when versioning was introduced
 
 `loadedSwarmDocs` matched `swarm-docs` anywhere in a tool's input, so a
 `skill-search`, `memory-search` or Grep that only named the skill zeroed a
-correct reply on the typo and reminder asks. It now counts only the three
-loading paths: the Skill tool, `skill-get` with name `swarm-docs`, and a Read of
-`swarm-docs/SKILL.md`. Scores can only rise on those two asks.
+correct reply on the typo and reminder asks. It now counts only real loads:
+the Skill tool, `skill-get` with name `swarm-docs` (flat, or under `arguments`
+on a Codex MCP call), a Read of `swarm-docs/SKILL.md`, and a shell reader (`cat`,
+`sed`, `head`, ...) of that file on Codex and Pi; opencode reads pass `filePath`. Searches and greps that only
+name the skill no longer zero a reply; Codex and Pi loads v1 missed now do.
 
 ### real-diff-agent-fs v1
 

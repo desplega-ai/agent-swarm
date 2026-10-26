@@ -95,22 +95,42 @@ function brief(request: Request): string {
 
 const SWARM_DOCS_SKILL_FILE = /(^|[\\/])swarm-docs[\\/]SKILL\.md$/i;
 
+/**
+ * A shell command that prints the skill file: a file reader (cat, sed, head, ...) whose
+ * arguments include a path ending in `swarm-docs/SKILL.md`. Tolerates a `bash -lc '...'` wrapper.
+ */
+const SWARM_DOCS_SHELL_READ =
+  /(^|[;&|('"/])\s*(cat|bat|sed|head|tail|nl|less|more|awk)\s(?:[^;&|]*?[\s'"=])?(?:[^\s'";&|]*[\\/])?swarm-docs[\\/]SKILL\.md(?=$|[\s'";&|)])/i;
+
 function field(input: unknown, key: string): string {
   const value = (input as Record<string, unknown> | null | undefined)?.[key];
   return typeof value === "string" ? value : "";
 }
 
+/** Tool arguments: Codex MCP calls nest them under `arguments`; other harnesses pass them flat. */
+function toolArgs(input: unknown): unknown {
+  const nested = (input as Record<string, unknown> | null | undefined)?.arguments;
+  return typeof nested === "object" && nested !== null ? nested : input;
+}
+
 /**
- * True when a tool call loads the `swarm-docs` skill: the Skill tool, skill-get, or a read of
- * its file. A search or grep that only mentions the name does not count.
+ * True when a tool call loads the `swarm-docs` skill: the Skill tool, skill-get, a read of its
+ * file, or a shell command that prints that file. A search or grep that only mentions the name
+ * does not count.
  */
 export function loadedSwarmDocs(uses: { toolName: string; input: unknown }[]): boolean {
   return uses.some(({ toolName, input }) => {
     const tool = toolName.toLowerCase();
-    if (tool === "skill") return field(input, "skill") === "swarm-docs";
-    if (/(^|[_-])skill-get$/.test(tool)) return field(input, "name") === "swarm-docs";
+    const args = toolArgs(input);
+    if (tool === "skill") return field(args, "skill") === "swarm-docs";
+    if (/(^|[_-])skill-get$/.test(tool)) return field(args, "name") === "swarm-docs";
     if (tool === "read") {
-      return SWARM_DOCS_SKILL_FILE.test(field(input, "file_path") || field(input, "path"));
+      return SWARM_DOCS_SKILL_FILE.test(
+        field(args, "file_path") || field(args, "filePath") || field(args, "path"),
+      );
+    }
+    if (/(^|[_-])(bash|shell|exec_command)$/.test(tool)) {
+      return SWARM_DOCS_SHELL_READ.test(field(args, "command") || field(args, "cmd"));
     }
     return false;
   });
