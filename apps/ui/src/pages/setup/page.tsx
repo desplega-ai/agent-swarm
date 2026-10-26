@@ -39,6 +39,7 @@ import { type SetupBusyAction, SetupFooter } from "./components/setup-footer";
 import { SETUP_COLUMN } from "./components/setup-layout";
 import { SetupStepper } from "./components/setup-stepper";
 import { SetupTopBar } from "./components/setup-top-bar";
+import { StepHeader } from "./components/step-header";
 import { StepTransition } from "./components/step-transition";
 import type { StepProps } from "./step-contract";
 import { PRESENCE_KEYS } from "./steps/ai/model";
@@ -57,33 +58,33 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
     description: "Point this dashboard at your Agent Swarm API, then pick who you are.",
   },
   name: {
-    title: "Give your swarm an identity",
-    description: "The name, mark, and color your team sees in the sidebar, in Slack, and on pages.",
+    title: "Name your swarm",
+    description: "Your team sees it in the sidebar, in Slack, and on pages.",
   },
   ai: {
-    title: "Choose the AI providers you want to use",
+    title: "Choose your AI providers",
     description: "One verified provider is enough to start.",
   },
   agents: {
     title: "Pick a model for each agent",
-    description: "Each agent runs its harness at one of three levels. Optimal fits most swarms.",
+    description: "Each agent runs at one of three levels. Optimal fits most swarms.",
   },
   memory: {
     title: "Turn on memory",
-    description: "Let agents remember past work.",
+    description: "Agents remember past work. With a key, they find it by meaning.",
   },
   integrations: {
     title: "Connect your tools",
     description: "All optional. Connect what your team already uses.",
   },
   files: {
-    title: "Files",
+    title: "Share files with agents",
     description:
-      "Agents save their work in agent-fs, the shared drive of your swarm. You read it, comment on it and send it back to agents in Comb.",
+      "Agents save their work in agent-fs, the shared drive of your swarm. You review it in Comb.",
   },
   first_task: {
     title: "Run your first task",
-    description: "Send your lead a first message. Setup is done when that task completes.",
+    description: "Send your lead a goal. Setup is done when that task completes.",
   },
 };
 
@@ -314,7 +315,7 @@ function SetupFlow() {
     if (focusedStep.current === stepId) return;
     focusedStep.current = stepId;
     const heading = mainRef.current?.querySelector<HTMLElement>(`[data-step-heading="${stepId}"]`);
-    if (!heading || heading.parentElement?.contains(document.activeElement)) return;
+    if (!heading || heading.closest("[data-step-root]")?.contains(document.activeElement)) return;
     heading.focus({ preventScroll: true });
   }, [stepId]);
 
@@ -516,31 +517,29 @@ function SetupFlow() {
             and scrolls. */}
         <div className={cn(SETUP_COLUMN, "flex min-h-full flex-col pt-8 pb-12 sm:pt-10")}>
           <StepTransition stepKey={stepId} direction={direction} className="flex-1">
-            <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-primary">
-              Step {index} <span className="text-muted-foreground">of {total}</span>
-            </p>
-            <h1
-              data-step-heading={stepId}
-              tabIndex={-1}
-              className="mb-1.5 text-xl font-semibold tracking-tight text-balance outline-none sm:text-2xl"
-            >
-              {copy.title}
-            </h1>
-            <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">{copy.description}</p>
-            <div className="flex flex-1 flex-col">
-              {Body === null ? (
-                <StepConnect
-                  onboarding={data ?? null}
-                  onConnected={() => void handleConnected()}
-                  act={data ? act : undefined}
-                  {...setters.connect}
-                />
-              ) : data ? (
-                // A failing step must not take the shell (navigation, Minimize) down with it.
-                <ErrorBoundary key={stepId}>
-                  <Body onboarding={data} act={act} {...setters[stepId]} />
-                </ErrorBoundary>
-              ) : null}
+            <div data-step-root className="flex flex-1 flex-col">
+              <StepHeader
+                stepId={stepId}
+                index={index}
+                total={total}
+                title={copy.title}
+                description={copy.description}
+              />
+              <div className="flex flex-1 flex-col">
+                {Body === null ? (
+                  <StepConnect
+                    onboarding={data ?? null}
+                    onConnected={() => void handleConnected()}
+                    act={data ? act : undefined}
+                    {...setters.connect}
+                  />
+                ) : data ? (
+                  // A failing step must not take the shell (navigation, Minimize) down with it.
+                  <ErrorBoundary key={stepId}>
+                    <Body onboarding={data} act={act} {...setters[stepId]} />
+                  </ErrorBoundary>
+                ) : null}
+              </div>
             </div>
           </StepTransition>
         </div>
