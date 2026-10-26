@@ -178,7 +178,7 @@ systemctl list-timers docker-prune.timer
 
 Or with cron, create `/etc/cron.d/docker-prune`:
 
-```cron
+```text
 30 4 * * * root /usr/bin/docker image prune -af >/dev/null 2>&1; /usr/bin/docker builder prune -af >/dev/null 2>&1
 ```
 
