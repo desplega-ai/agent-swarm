@@ -34,6 +34,8 @@ let tiersRefetches = 0;
 let skips = 0;
 // `true`: rows store through the real autosave hook instead of the idle stub.
 let liveAutosave = false;
+// Set by a test: each write waits for it, then stores its setting (as the API does).
+let writeGate: Promise<void> | null = null;
 
 mock.module("@/api/hooks/use-model-tiers", () => ({
   useModelTiers: () => ({
@@ -58,6 +60,12 @@ mock.module("@/api/hooks/use-agents", () => ({
   useUpdateAgentRuntime: () => ({
     mutateAsync: async (input: Record<string, unknown>) => {
       writes.push(input);
+      if (!writeGate) return;
+      await writeGate;
+      storedConfigs = [
+        { key: "MODEL_OVERRIDE", value: String(input.model) },
+        { key: "REASONING_EFFORT_OVERRIDE", value: String(input.reasoningEffort) },
+      ];
     },
   }),
 }));
@@ -192,6 +200,7 @@ beforeEach(() => {
   tiersRefetches = 0;
   skips = 0;
   liveAutosave = false;
+  writeGate = null;
   document.body.innerHTML = "";
 });
 
@@ -303,9 +312,9 @@ describe("AgentModels reads the model tiers", () => {
     await act(async () => {
       max.click();
     });
-    // The row saves wait 150 ms.
+    // The row saves wait 400 ms.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 600));
     });
     expect(writes.map((w) => [w.id, w.model, w.reasoningEffort])).toEqual([
       ["1", "gpt-5.6-sol", "xhigh"],
@@ -313,6 +322,58 @@ describe("AgentModels reads the model tiers", () => {
     ]);
     expect(view.container.querySelector('[role="radiogroup"]')).toBeNull();
     expect(customize(view.container).text).toContain("Saved. Applies to the next task.");
+    await view.unmount();
+  });
+
+  test("quick picks store only the last level", async () => {
+    liveAutosave = true;
+    const view = await mount([agent("1", "codex")]);
+    const [cheap, , max] = view.container.querySelectorAll<HTMLButtonElement>("fieldset button");
+    await act(async () => {
+      cheap.click();
+    });
+    await act(async () => {
+      max.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(writes.map((w) => w.reasoningEffort)).toEqual(["xhigh"]);
+    await view.unmount();
+  });
+
+  test("a pick back to the stored level while a write runs stores it again", async () => {
+    liveAutosave = true;
+    storedConfigs = [
+      { key: "MODEL_OVERRIDE", value: "gpt-5.6-sol" },
+      { key: "REASONING_EFFORT_OVERRIDE", value: "high" },
+    ];
+    let release = () => {};
+    writeGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const view = await mount([agent("1", "codex")]);
+    const [, optimal, max] = view.container.querySelectorAll<HTMLButtonElement>("fieldset button");
+    await act(async () => {
+      max.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    // The Max write runs. The row still reads Optimal from before it.
+    expect(writes.map((w) => w.reasoningEffort)).toEqual(["xhigh"]);
+    await act(async () => {
+      optimal.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(writes.map((w) => w.reasoningEffort)).toEqual(["xhigh", "high"]);
+    expect(storedConfigs).toContainEqual({ key: "REASONING_EFFORT_OVERRIDE", value: "high" });
     await view.unmount();
   });
 

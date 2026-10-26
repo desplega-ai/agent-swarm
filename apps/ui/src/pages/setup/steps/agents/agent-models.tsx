@@ -126,6 +126,8 @@ function buildRow(
   remembered: DialLevel | undefined,
   context: DialContext,
   tiers: TiersState,
+  /** A save of this agent is in flight: the stored setting can be stale. */
+  writing: boolean,
 ): Row {
   const harness = dialHarness(agent.harnessProvider);
   const configs = query.data;
@@ -161,7 +163,9 @@ function buildRow(
     position,
     intent,
     target,
-    applied: target ? dialSettingApplied(target, model, effort) : false,
+    // While a write runs, the stored setting is the one from before it. A pick
+    // that matches it is not applied yet: the write can still change it.
+    applied: target ? !writing && dialSettingApplied(target, model, effort) : false,
     shown: intent?.level ?? stored ?? (notApplied ? RECOMMENDED : null),
     notApplied,
   };
@@ -342,7 +346,15 @@ export function AgentModels({
   );
 
   const rows = listed.map((agent, index) =>
-    buildRow(agent, resolved[index], intents[agent.id], remembered[agent.id], context, tiersState),
+    buildRow(
+      agent,
+      resolved[index],
+      intents[agent.id],
+      remembered[agent.id],
+      context,
+      tiersState,
+      saves[agent.id]?.phase === "saving",
+    ),
   );
   const dialRows = rows.filter((row) => row.harness !== null);
   useContinueHold(
@@ -527,6 +539,9 @@ export function AgentModels({
   );
 }
 
+/** How long a level pick waits for another pick before it stores. */
+const PICK_DEBOUNCE_MS = 400;
+
 /**
  * The save of one agent's pick, with no markup. It stays mounted while the
  * per-agent rows are closed, so a level tile stores for every agent. The
@@ -550,11 +565,12 @@ function RowSave({
   }, [intent, row.applied, onSettle, agent.id]);
 
   // The value carries the pick nonce, so picking a level again retries a failed save.
+  // Quick picks in a row store only the last one.
   const save = useAutosave({
     value: target && intent ? JSON.stringify([intent.nonce, target]) : "",
     dirty: target !== null && !row.applied,
     ready: true,
-    delayMs: 150,
+    delayMs: PICK_DEBOUNCE_MS,
     save: async (value) => {
       const [, setting] = JSON.parse(value) as [unknown, DialSetting];
       await write(agent.id, setting);
