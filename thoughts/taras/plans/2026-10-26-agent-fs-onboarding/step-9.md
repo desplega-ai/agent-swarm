@@ -2,7 +2,7 @@
 id: step-9
 name: Invite UI and the teammate path
 depends_on: [step-5, step-7, step-8]
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -63,15 +63,15 @@ Facts:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Join flow logic: `bun run test:root -- apps/ui/src/pages/join/join-flow.test.ts` (new file; copy `apps/ui/src/pages/connect/connect-flow.test.ts`; cases: success saves a connection; 404 shows the expired copy; a baked deployment shows the managed message; Comb on gives `/file?connect=auto`)
-- [ ] Gate predicate: `bun run test:root -- apps/ui/src/api/hooks/use-invites-support.test.ts` (new; test the pure version check that the hook wraps; an older version hides the entry points. `SWARM_DEV_MODE` bypasses gates in ui-e2e, so this is the only proof)
-- [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
-- [ ] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
-- [ ] UI E2E: new `packages/ui-e2e/specs/invites.spec.ts` (copy `packages/ui-e2e/specs/connect.spec.ts`). The admin opens People, invites `e2e-ada@example.com` as Requester and reads the link. A second browser context opens it and lands on Home with the composer visible and no People item in the sidebar. Run: `bun run e2e:ui -- --no-build specs/invites.spec.ts`. Then `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e`.
+- [x] Join flow logic: `bun run test:root -- apps/ui/src/pages/join/join-flow.test.ts` (new file; copy `apps/ui/src/pages/connect/connect-flow.test.ts`; cases: success saves a connection; 404 shows the expired copy; a baked deployment shows the managed message; Comb on gives `/file?connect=auto`)
+- [x] Gate predicate: `bun run test:root -- apps/ui/src/api/hooks/use-invites-support.test.ts` (new; test the pure version check that the hook wraps; an older version hides the entry points. `SWARM_DEV_MODE` bypasses gates in ui-e2e, so this is the only proof)
+- [x] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
+- [x] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] UI E2E: new `packages/ui-e2e/specs/invites.spec.ts` (copy `packages/ui-e2e/specs/connect.spec.ts`). The admin opens People, invites `e2e-ada@example.com` as Requester and reads the link. A second browser context opens it and lands on Home with the composer visible and no People item in the sidebar. Run: `bun run e2e:ui -- --no-build specs/invites.spec.ts`. Then `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e`.
 
 #### Automated QA:
-- [ ] Recorded agent-browser walk on the root Manual E2E part A stack (sessions `afo-step-9-admin` and `afo-step-9-ada`), per LOCAL_TESTING.md "When you need to verify a UI change". Admin invites Ada from People. Ada opens the link, lands on Home, opens Comb, and Comb connects without a key. Ada creates a task. Attach the screenshots and the 1.5x recording to the PR.
-- [ ] Reuse the link in a third session: the expired copy shows.
+- [x] Recorded agent-browser walk on the root Manual E2E part A stack (sessions `afo-step-9-admin` and `afo-step-9-ada`), per LOCAL_TESTING.md "When you need to verify a UI change". Admin invites Ada from People. Ada opens the link, lands on Home, opens Comb, and Comb connects without a key. Ada creates a task. Attach the screenshots and the 1.5x recording to the PR.
+- [x] Reuse the link in a third session: the expired copy shows.
 
 #### Manual Verification:
 - [ ] Taras reads the dialog copy and the warning text once.

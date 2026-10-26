@@ -41,6 +41,8 @@ import type {
   CombReviewBatchInput,
   CombReviewBatchResult,
   CombSkippedComment,
+  CreateInviteInput,
+  CreateInviteResponse,
   CreateUserInput,
   CredentialMissingAgent,
   CredentialMissingAgentsResponse,
@@ -100,6 +102,7 @@ import type {
   PricingTokenClass,
   PromptTemplate,
   PromptTemplateHistory,
+  RbacRolesResponse,
   ReasoningEffortLevel,
   ResolveUnmappedInput,
   RuntimeController,
@@ -287,6 +290,21 @@ export class OnboardingApiError extends Error {
     super(message);
     this.name = "OnboardingApiError";
     this.status = status;
+  }
+}
+
+/**
+ * A failed `POST /api/invites`. `code` is the server's error string, so the
+ * dialog can tell `user_exists` (409) from other failures.
+ */
+export class InviteApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  constructor(message: string, status: number, code: string | null) {
+    super(message);
+    this.name = "InviteApiError";
+    this.status = status;
+    this.code = code;
   }
 }
 
@@ -3327,6 +3345,29 @@ class ApiClient {
       throw new Error(err.error || `Failed to mint token: ${res.status}`);
     }
     return (await res.json()) as MintTokenResponse;
+  }
+
+  /** Invite a teammate. The response's `inviteUrl` carries a one-time code: never log it. */
+  async createInvite(data: CreateInviteInput): Promise<CreateInviteResponse> {
+    const url = `${this.getBaseUrl()}/api/invites`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      const code = typeof body?.error === "string" ? body.error : null;
+      throw new InviteApiError(code ?? `Failed to create invite: ${res.status}`, res.status, code);
+    }
+    return (await res.json()) as CreateInviteResponse;
+  }
+
+  async fetchRbacRoles(): Promise<RbacRolesResponse> {
+    const url = `${this.getBaseUrl()}/api/rbac/roles`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch roles: ${res.status}`);
+    return (await res.json()) as RbacRolesResponse;
   }
 
   async revokeUserToken(id: string, tokenId: string): Promise<User> {

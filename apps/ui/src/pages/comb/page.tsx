@@ -1,6 +1,6 @@
 import { FolderOpen, HardDrive, Unplug } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { CombAccountMenu } from "@/components/comb/account-menu";
 import { CombBreadcrumbs } from "@/components/comb/breadcrumbs";
 import { CombLayoutProvider, useCombLayout } from "@/components/comb/comb-layout";
@@ -28,9 +28,11 @@ import { cn } from "@/lib/utils";
 export default function CombPage() {
   const agentFs = useAgentFs();
   const { orgId: routeOrgId } = useParams();
+  const { search } = useLocation();
 
   const redirect = fileRedirectPath(routeOrgId, agentFs);
-  if (redirect) return <Navigate to={redirect} replace />;
+  // Keep the query: `/join` sends teammates to `/file?connect=auto`.
+  if (redirect) return <Navigate to={`${redirect}${search}`} replace />;
 
   switch (agentFs.state) {
     case "loading":

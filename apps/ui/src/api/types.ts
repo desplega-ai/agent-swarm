@@ -625,6 +625,46 @@ export interface ConnectorCodeResponse {
   connectUrl: string;
 }
 
+/** The roles `POST /api/invites` accepts. */
+export type InviteRole = "requester" | "viewer" | "admin";
+
+/** `POST /api/invites` body. */
+export interface CreateInviteInput {
+  email: string;
+  name?: string;
+  role: InviteRole;
+}
+
+/** `POST /api/invites` 201. `inviteUrl` carries the one-time code: never log it. */
+export interface CreateInviteResponse {
+  user: User | null;
+  inviteUrl: string;
+  expiresAt: string;
+  /** `local` when teammates' browsers likely cannot reach the API URL. */
+  apiReachable: "public" | "local";
+}
+
+/** `POST /api/invites/exchange` 200. */
+export interface InviteExchangeResponse {
+  token: string;
+  userId: string;
+}
+
+/** One role of `GET /api/rbac/roles`. */
+export interface RbacRole {
+  id: string;
+  name: string;
+  description: string | null;
+  isBuiltin: boolean;
+  grantsAll: boolean;
+  primary: boolean;
+  verbs: string[];
+}
+
+export interface RbacRolesResponse {
+  roles: RbacRole[];
+}
+
 export interface McpUserConfigResponse {
   mcpBaseUrl: string;
   mcpUserUrl: string;

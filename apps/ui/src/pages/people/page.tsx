@@ -1,7 +1,8 @@
 import type { ColDef } from "ag-grid-community";
-import { GitMerge, Inbox, Search, UserPlus, Users } from "lucide-react";
+import { GitMerge, Inbox, Search, Send, UserPlus, Users } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useInvitesSupport } from "@/api/hooks/use-invites-support";
 import { useUnmapped, useUsers } from "@/api/hooks/use-users";
 import type { User } from "@/api/types";
 import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
@@ -13,7 +14,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelative } from "@/lib/relative-time";
+import { useIsAdmin } from "@/lib/use-can";
 import { IdentityBadgeList } from "./identity-badges";
+import { InviteDialog } from "./invite-dialog";
 import { MergeModal } from "./merge-modal";
 import { NewUserDialog } from "./new-user-dialog";
 import { UnmappedTab } from "./unmapped/unmapped-tab";
@@ -193,6 +196,11 @@ export default function PeoplePage() {
 
   const [newUserOpen, setNewUserOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  // Invites assign a role: admins only, on an API that serves them.
+  const isAdmin = useIsAdmin();
+  const invitesSupported = useInvitesSupport();
+  const canInvite = isAdmin && invitesSupported;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -286,6 +294,17 @@ export default function PeoplePage() {
             </TooltipTrigger>
             <TooltipContent>New user</TooltipContent>
           </Tooltip>
+          {canInvite ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0"
+              onClick={() => setInviteOpen(true)}
+            >
+              <Send />
+              Invite
+            </Button>
+          ) : null}
         </div>
 
         <TabsContent value="people" className="flex-1 min-h-0 flex flex-col">
@@ -302,6 +321,7 @@ export default function PeoplePage() {
       </Tabs>
 
       <NewUserDialog open={newUserOpen} onOpenChange={setNewUserOpen} />
+      {canInvite ? <InviteDialog open={inviteOpen} onOpenChange={setInviteOpen} /> : null}
       <MergeModal open={mergeOpen} onOpenChange={setMergeOpen} />
     </div>
   );

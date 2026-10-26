@@ -71,6 +71,7 @@ const admin = (element: ReactNode) => <AdminRoute>{element}</AdminRoute>;
 
 const SetupPage = lazyRoute(() => import("@/pages/setup/page"));
 const ConnectPage = lazyRoute(() => import("@/pages/connect/page"));
+const JoinPage = lazyRoute(() => import("@/pages/join/page"));
 
 /**
  * Dev-only routes. `/dev/embed-test` mounts an `<AppSurface>` outside the
@@ -137,6 +138,16 @@ export const router = createBrowserRouter([
     element: (
       <Suspense fallback={<HiveLoadingScreen />}>
         <ConnectPage />
+      </Suspense>
+    ),
+  },
+  // A teammate's invite link. Outside the app shell: it saves the connection
+  // the shell then uses, so it must work with no connection yet.
+  {
+    path: "/join",
+    element: (
+      <Suspense fallback={<HiveLoadingScreen />}>
+        <JoinPage />
       </Suspense>
     ),
   },

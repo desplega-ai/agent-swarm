@@ -20,6 +20,7 @@ import { optionValue, SWARM_ORG_USE_CASE, storedOrgName, USE_CASES } from "@/lib
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../../step-contract";
 import type { LeadReadiness } from "./agents-card";
+import { InviteTeamCard } from "./invite-team-card";
 import { firstTaskStarters } from "./starters";
 
 type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
@@ -126,6 +127,7 @@ export function FirstTaskComposer({
           }
         />
         {done ? <StatusLine tone="done">Setup is complete.</StatusLine> : null}
+        <InviteTeamCard />
       </div>
     );
   }

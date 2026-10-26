@@ -1,5 +1,6 @@
 import { AlertCircle, Info } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -38,9 +39,31 @@ export function ConnectCard() {
     if (userEmail) setEmail((current) => current || userEmail);
   }, [userEmail]);
 
+  // `?connect=auto` (a teammate fresh from `/join`): run "Create with my email"
+  // once with the token-bound user's email, then drop the parameter.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoConnect = searchParams.get("connect") === "auto";
+  const autoRan = useRef(false);
+  const driveReady = orgId !== null && driveId !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `run` is recreated each render; the ref guard makes this a one-shot
+  useEffect(() => {
+    if (!autoConnect || autoRan.current) return;
+    if (!deps || !driveReady || state !== "needs-connect" || !userEmail) return;
+    autoRan.current = true;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("connect");
+        return next;
+      },
+      { replace: true },
+    );
+    setTab("create");
+    void run(() => createAndConnect(deps, userEmail));
+  }, [autoConnect, deps, driveReady, state, userEmail, setSearchParams]);
+
   if (!deps) return null;
   const connectDeps = deps;
-  const driveReady = orgId !== null && driveId !== null;
 
   async function run(action: () => Promise<ConnectOutcome>) {
     setBusy(true);
