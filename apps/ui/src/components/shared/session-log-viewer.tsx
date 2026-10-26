@@ -47,6 +47,7 @@ import {
   formatDur,
   type SessionLogView,
   type StreamRow,
+  spawnCallUsage,
   summarizeActivity,
   summarizeEnd,
   summaryText,
@@ -69,6 +70,7 @@ import {
   SteeringLine,
   steeringMessageTimestamp,
 } from "@/components/steering/steering-message-chips";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -86,6 +88,7 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";
+import { useUsageDetails } from "@/lib/session-log-usage-details";
 import { statusLabel } from "@/lib/status-labels";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import {
@@ -437,6 +440,20 @@ function callUsageOf(block: ProviderMetaBlock): CallUsage | undefined {
 }
 
 /**
+ * The log with usage details off: no `call_usage` blocks, and no message
+ * that held only them, so the rows match a log without per-call usage.
+ */
+function withoutCallUsage(messages: ParsedMessage[]): ParsedMessage[] {
+  const out: ParsedMessage[] = [];
+  for (const m of messages) {
+    const content = m.content.filter((b) => b.type !== "provider_meta" || !callUsageOf(b));
+    if (content.length === m.content.length) out.push(m);
+    else if (content.length > 0) out.push({ ...m, content });
+  }
+  return out;
+}
+
+/**
  * Each result block's calls: the `call_usage` blocks since the previous
  * result, sub-agent calls included. Keyed by block, so the classic and the
  * trace layouts show the same totals.
@@ -592,6 +609,8 @@ function buildStream(
 ): StreamRow[] {
   const subagentById = new Map(subagents.map((run) => [run.id, run]));
   const subagentSourceIds = new Set(subagents.flatMap((run) => run.sourceRecordIds));
+  // The call that spawned a run shows its usage on the run's row.
+  const spawnUsage = spawnCallUsage(messages, new Set(subagentById.keys()));
   // Index every tool_result by the id of the call it answers (+ its timestamp).
   const resultById = new Map<string, { content: string; isError: boolean; at: number }>();
   const progressById = new Map<
@@ -709,6 +728,7 @@ function buildStream(
         iso: item.run.startedAt,
         run: item.run,
         isNew: item.run.sourceRecordIds.some((id) => newIds.has(id)),
+        usage: spawnUsage.get(item.run.id),
       });
       continue;
     }
@@ -1275,15 +1295,19 @@ function ProviderStatusPill({ value }: { value: string }) {
 function ProviderMetaBubble({
   block,
   callTotals,
+  cacheHit = false,
 }: {
   block: ProviderMetaBlock;
   /** Result blocks: the session's per-call usage. */
   callTotals?: CallUsageTotals;
+  /** Result blocks: show the cache hit (the usage details view). */
+  cacheHit?: boolean;
 }) {
   if (block.kind === "status") return <ProviderStatusMeta block={block} />;
   if (block.kind === "helper") return <HelperMetaBubble block={block} />;
   if (block.kind === "internal") return <InternalMetaBubble block={block} />;
-  if (block.kind === "result") return <ResultMetaBubble block={block} callTotals={callTotals} />;
+  if (block.kind === "result")
+    return <ResultMetaBubble block={block} callTotals={callTotals} cacheHit={cacheHit} />;
   if (block.kind === "file_change") return <FileChangeMeta block={block} />;
   if (block.kind !== "structured_output") return <GenericMetaBubble block={block} />;
 
@@ -1841,9 +1865,11 @@ function sessionCacheHit(
 function ResultMetaBubble({
   block,
   callTotals,
+  cacheHit,
 }: {
   block: ProviderMetaBlock;
   callTotals?: CallUsageTotals;
+  cacheHit: boolean;
 }) {
   const data = block.data;
   const cost: Record<string, unknown> = recordValue(data.cost) ?? {};
@@ -1898,7 +1924,7 @@ function ResultMetaBubble({
             numberValue(cost.cacheWriteTokens) ?? numberValue(usage.cache_creation_input_tokens),
           )}
         />
-        <MetaStat label="Cache hit" value={sessionCacheHit(callTotals, usage)} />
+        {cacheHit && <MetaStat label="Cache hit" value={sessionCacheHit(callTotals, usage)} />}
       </div>
       {output && (
         <div className="prose-chat prose-session-log mt-2 border-t border-border/50 pt-2 text-sm text-foreground">
@@ -2601,6 +2627,13 @@ export function SessionLogViewer({
 }: SessionLogViewerProps) {
   const safeLogs = logs ?? [];
   const messages = useMemo(() => parseSessionLogs(safeLogs), [safeLogs]);
+  // Power-user token view, off by default: per-call chips, "LLM call" lines,
+  // and the result card's cache hit.
+  const [usageDetails, setUsageDetails] = useUsageDetails();
+  const streamMessages = useMemo(
+    () => (usageDetails ? messages : withoutCallUsage(messages)),
+    [messages, usageDetails],
+  );
   const resultTotals = useMemo(() => resultCallTotals(messages), [messages]);
   const subagents = useMemo(() => extractSubagentRuns(safeLogs), [safeLogs]);
   const [activeView, setActiveView] = useState<"logs" | "agents">("logs");
@@ -2646,7 +2679,7 @@ export function SessionLogViewer({
     () =>
       trace
         ? buildNestedStream(
-            messages,
+            streamMessages,
             subagents,
             compactionSnapshots ?? [],
             newIds,
@@ -2654,14 +2687,14 @@ export function SessionLogViewer({
             streamSteering,
           )
         : buildStream(
-            messages,
+            streamMessages,
             subagents,
             compactionSnapshots ?? [],
             newIds,
             isRunning,
             streamSteering,
           ),
-    [trace, messages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
+    [trace, streamMessages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
   );
 
   // Messages folds the rows before the filter, so a folded line matches by
@@ -2941,7 +2974,11 @@ export function SessionLogViewer({
             highlight={row.isNew && atBottomRef.current}
             streamDelayMs={streamDelayMs}
           >
-            <ProviderMetaBubble block={row.block} callTotals={resultTotals.get(row.block)} />
+            <ProviderMetaBubble
+              block={row.block}
+              callTotals={resultTotals.get(row.block)}
+              cacheHit={usageDetails}
+            />
           </RowShell>
         );
       }
@@ -3017,6 +3054,7 @@ export function SessionLogViewer({
                         {row.run.agentType}
                       </span>
                     </TraceTitle>
+                    {row.usage && <CallUsageChip usage={row.usage} className="max-sm:hidden" />}
                     {description && (
                       <TraceDescription className="font-mono text-meta">
                         {description}
@@ -3047,7 +3085,13 @@ export function SessionLogViewer({
                           if (child.type === "toolgroup")
                             return child.tools.map((t) => traceTool(t, childRunning));
                           if (child.type === "meta")
-                            return <ProviderMetaBubble key={child.id} block={child.block} />;
+                            return (
+                              <ProviderMetaBubble
+                                key={child.id}
+                                block={child.block}
+                                cacheHit={usageDetails}
+                              />
+                            );
                           // The sub-agent's user turn is its prompt, shown as Input.
                           if (child.type === "agent" && child.role === "assistant")
                             return (
@@ -3104,6 +3148,7 @@ export function SessionLogViewer({
               <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted-foreground max-sm:hidden">
                 {row.run.agentType}
               </span>
+              {row.usage && <CallUsageChip usage={row.usage} className="max-sm:hidden" />}
               <SubagentStatus run={row.run} />
               {duration && (
                 <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
@@ -3169,6 +3214,7 @@ export function SessionLogViewer({
                       <ProviderMetaBubble
                         block={child.block}
                         callTotals={resultTotals.get(child.block)}
+                        cacheHit={usageDetails}
                       />
                     ) : child.type === "toolgroup" ? (
                       child.tools.map((t) => (
@@ -3353,6 +3399,7 @@ export function SessionLogViewer({
       trace,
       isRunning,
       resultTotals,
+      usageDetails,
     ],
   );
 
@@ -3458,6 +3505,27 @@ export function SessionLogViewer({
                 // Touch: 44 px options inside the control's border and padding.
                 className={cn(touchTargets && "h-12.5")}
               />
+            )}
+            {activeView === "logs" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant={usageDetails ? "secondary" : "ghost"}
+                    size="xs"
+                    aria-pressed={usageDetails}
+                    aria-label="Usage details"
+                    onClick={() => setUsageDetails(!usageDetails)}
+                    className={cn("shrink-0", touchTargets ? "h-11 min-w-11" : "h-7")}
+                  >
+                    <Gauge aria-hidden />
+                    <span className="max-sm:hidden">Usage</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {usageDetails ? "Hide" : "Show"} each LLM call's cache hit and prompt size
+                </TooltipContent>
+              </Tooltip>
             )}
             {activeView === "logs" && (
               <div

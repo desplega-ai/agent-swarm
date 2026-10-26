@@ -55,6 +55,7 @@ import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
+import { useUsageDetails } from "@/lib/session-log-usage-details";
 import { parseStructuredOutput } from "@/lib/structured-output";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { linkTaskIds } from "@/lib/task-links";
@@ -456,10 +457,12 @@ export default function TaskDetailPage() {
     () => (task ? (taskRunSummary(task, costs) ?? undefined) : undefined),
     [task, costs],
   );
-  // The rail's cache hit, from the session log this page already loads.
+  // The rail's cache hit, from the session log this page already loads. Only
+  // with the log's usage details on.
+  const [usageDetails] = useUsageDetails();
   const callUsage = useMemo(
-    () => sumItemCallUsage(normalizeSessionLogs(sessionLogs ?? []).items),
-    [sessionLogs],
+    () => (usageDetails ? sumItemCallUsage(normalizeSessionLogs(sessionLogs ?? []).items) : null),
+    [sessionLogs, usageDetails],
   );
 
   if (isLoading) {
