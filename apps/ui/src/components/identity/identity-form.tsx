@@ -29,7 +29,8 @@ import {
   optionValue,
   USER_FUNCTIONS,
 } from "@/lib/company-profile";
-import { normalizeOrgWebsite } from "../../../../../src/utils/org-website";
+import { cn } from "@/lib/utils";
+import { normalizeOrgWebsite, orgLogoUrl } from "../../../../../src/utils/org-website";
 
 /**
  * An outer primary button submits the form (the `/setup` footer Continue).
@@ -96,6 +97,48 @@ function detailQuestions(askWebsite: boolean): ApprovalQuestion[] {
   ];
 }
 
+/** Wait this long after the last keystroke before the logo of a domain loads. */
+const LOGO_DELAY_MS = 600;
+
+/** Domains whose logo did not load in this tab: never asked for again. */
+const failedLogos = new Set<string>();
+
+/**
+ * The logo of the company domain of a typed work address, at the right edge
+ * of the email field. It loads only after typing stops, and only with
+ * anonymous telemetry on (the logo proxy then sees the domain, as telemetry
+ * does). It shows once the image loads; a domain whose logo fails stays
+ * empty.
+ */
+function DomainLogo({ email }: { email: string }) {
+  const { data: status } = useStatus({ pollIntervalMs: 0 });
+  const domain = useDebouncedValue(companyDomain(email), LOGO_DELAY_MS);
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  // The typed address still has this domain (no flash of an old logo).
+  const current = companyDomain(email) === domain ? domain : null;
+  if (status?.telemetry?.enabled !== true || !current) return null;
+  if (failed === current || failedLogos.has(current)) return null;
+  return (
+    <img
+      key={current}
+      src={orgLogoUrl(current)}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      onLoad={() => setLoaded(current)}
+      onError={() => {
+        failedLogos.add(current);
+        setFailed(current);
+      }}
+      className={cn(
+        "pointer-events-none absolute top-1/2 right-2.5 size-5 -translate-y-1/2 rounded-sm object-contain transition-opacity duration-200 ease-snappy motion-reduce:transition-none",
+        loaded === current ? "opacity-100" : "opacity-0",
+      )}
+    />
+  );
+}
+
 function EmailInput({
   id,
   value,
@@ -118,16 +161,20 @@ function EmailInput({
       required
       helper={error ? <span className="text-status-error-strong">{error}</span> : helper}
     >
-      <Input
-        id={id}
-        type="email"
-        autoComplete="email"
-        autoFocus={autoFocus}
-        placeholder="ada@acme.com"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        aria-invalid={error ? true : undefined}
-      />
+      <div className="relative">
+        <Input
+          id={id}
+          type="email"
+          autoComplete="email"
+          autoFocus={autoFocus}
+          placeholder="ada@acme.com"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          aria-invalid={error ? true : undefined}
+          className="pr-10"
+        />
+        <DomainLogo email={value} />
+      </div>
     </SettingsRow>
   );
 }
