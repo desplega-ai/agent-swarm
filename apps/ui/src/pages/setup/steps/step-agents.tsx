@@ -34,6 +34,13 @@ export function StepAgents({ onboarding, act, setContinueBlocker, setContinueAct
   async function onComplete(method: OnboardingAgentsMethod) {
     await act({ action: "complete", step: "agents", method });
   }
+  // A settled step needs no action: Continue moves on, as before.
+  const onSkip =
+    step.status === "done" || step.status === "skipped"
+      ? null
+      : async () => {
+          await act({ action: "skip", step: "agents" });
+        };
 
   return (
     <AutosaveScopeContext.Provider value={scope}>
@@ -62,6 +69,7 @@ export function StepAgents({ onboarding, act, setContinueBlocker, setContinueAct
           presence={presence}
           completed={completed}
           onComplete={onComplete}
+          onSkip={onSkip}
           setContinueAction={setContinueAction}
         />
       </div>

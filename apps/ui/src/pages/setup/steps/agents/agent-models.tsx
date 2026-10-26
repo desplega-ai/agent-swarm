@@ -226,6 +226,7 @@ function levelOptions(
  * Optimal for them, then completes the step with the level every agent got.
  * Continue waits until every dial row and the model tiers have loaded: a level
  * is the model of a Model Tier, so nothing shows or stores before they do.
+ * When every agent picks its own model, Continue skips the step.
  */
 export function AgentModels({
   agents,
@@ -234,6 +235,7 @@ export function AgentModels({
   presence,
   completed,
   onComplete,
+  onSkip,
   setContinueAction,
 }: {
   agents: AgentWithTasks[];
@@ -244,6 +246,8 @@ export function AgentModels({
   /** The method the step is done with, `null` while it is not done. */
   completed: OnboardingAgentsMethod | null;
   onComplete: (method: OnboardingAgentsMethod) => Promise<void>;
+  /** Skip the step. `null` while it is settled. */
+  onSkip: (() => Promise<void>) | null;
   setContinueAction: StepProps["setContinueAction"];
 }) {
   const queryClient = useQueryClient();
@@ -398,7 +402,10 @@ export function AgentModels({
           }
           if (completed !== method) await onComplete(method);
         }
-      : null,
+      : // Every agent picks its own model: nothing to set, so Continue does what Skip does.
+        listed.length > 0 && !agentsLoading
+        ? onSkip
+        : null,
   );
 
   if (agentsLoading) {
@@ -510,7 +517,7 @@ export function AgentModels({
         <SetupCard
           icon={<Gauge className="size-4" />}
           title="Per agent"
-          description="These agents pick their own models. Skip this step."
+          description="These agents pick their own models. Continue skips this step."
           bodyClassName="p-0"
         >
           {rowList}

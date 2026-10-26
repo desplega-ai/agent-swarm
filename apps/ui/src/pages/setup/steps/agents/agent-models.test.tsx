@@ -31,6 +31,7 @@ const writes: Array<Record<string, unknown>> = [];
 const holds: Array<string | null> = [];
 let continueAction: (() => Promise<void>) | null = null;
 let tiersRefetches = 0;
+let skips = 0;
 // `true`: rows store through the real autosave hook instead of the idle stub.
 let liveAutosave = false;
 
@@ -138,6 +139,9 @@ async function mount(agents: AgentWithTasks[]) {
           presence={{}}
           completed={null}
           onComplete={async () => {}}
+          onSkip={async () => {
+            skips += 1;
+          }}
           setContinueAction={() => {}}
         />
       </TooltipProvider>
@@ -186,6 +190,7 @@ beforeEach(() => {
   holds.length = 0;
   continueAction = null;
   tiersRefetches = 0;
+  skips = 0;
   liveAutosave = false;
   document.body.innerHTML = "";
 });
@@ -308,6 +313,17 @@ describe("AgentModels reads the model tiers", () => {
     ]);
     expect(view.container.querySelector('[role="radiogroup"]')).toBeNull();
     expect(customize(view.container).text).toContain("Saved. Applies to the next task.");
+    await view.unmount();
+  });
+
+  test("agents that pick their own models: Continue skips the step and stores nothing", async () => {
+    const view = await mount([agent("1", "devin")]);
+    expect(view.container.textContent).toContain("These agents pick their own models.");
+    await act(async () => {
+      await continueAction?.();
+    });
+    expect(skips).toBe(1);
+    expect(writes).toEqual([]);
     await view.unmount();
   });
 
