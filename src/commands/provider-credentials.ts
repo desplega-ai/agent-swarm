@@ -49,6 +49,7 @@ import {
   CREDENTIAL_POOL_VARS,
   splitCredentialPool,
 } from "../utils/credentials";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import {
   checkAnthropicApiKey,
   checkDeepSeekApiKey,
@@ -60,7 +61,6 @@ import {
   type LiveValidationResult,
   timedFetch,
 } from "../utils/provider-key-probes";
-import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export {
