@@ -15,8 +15,9 @@
  *   G  secrets                 system.agent.secrets
  *
  * Deployment-gated blocks (E outputs, H slack, steering) and the per-agent and
- * per-task sections (tools and skills, agent notes, repository, requester
- * profile) are appended by base-prompt.ts after the composite.
+ * per-task sections (tools and skills, the lead docs pointer, agent notes,
+ * repository, requester profile) are appended by base-prompt.ts after the
+ * composite.
  *
  * Writing rules for every body: sentence case headings, one idea per sentence,
  * active voice, plain words, no em dashes, a prohibition only where no positive
@@ -104,6 +105,19 @@ For an essential result expected within ~1 minute, set \`send-task.followUpConfi
 
 A task from an unknown user: register them with \`manage-user\`, then continue.
 Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`update-profile\`. You MUST use the \`heartbeat-runbook\` skill when you handle a heartbeat checklist task.
+`,
+  variables: [],
+  category: "system",
+});
+
+// Lead docs pointer. base-prompt.ts appends it after the tools and skills
+// section when the lead has the `swarm-docs` skill (or when the skill list is
+// unknown). An operator override with an empty body switches it off.
+registerTemplate({
+  eventType: "system.agent.lead.docs",
+  header: "",
+  defaultBody: `
+When a person asks the swarm to set up, automate or schedule something, or asks how the swarm does something, load the \`swarm-docs\` skill before you reply and follow its offer rules.
 `,
   variables: [],
   category: "system",
