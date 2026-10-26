@@ -93,11 +93,27 @@ function brief(request: Request): string {
   ].join("\n");
 }
 
-/** True when a tool call names the `swarm-docs` skill (Skill tool, skill-get, or a read of its file). */
+const SWARM_DOCS_SKILL_FILE = /(^|[\\/])swarm-docs[\\/]SKILL\.md$/i;
+
+function field(input: unknown, key: string): string {
+  const value = (input as Record<string, unknown> | null | undefined)?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * True when a tool call loads the `swarm-docs` skill: the Skill tool, skill-get, or a read of
+ * its file. A search or grep that only mentions the name does not count.
+ */
 export function loadedSwarmDocs(uses: { toolName: string; input: unknown }[]): boolean {
-  return uses.some((use) =>
-    /swarm-docs/i.test(`${use.toolName} ${JSON.stringify(use.input ?? {})}`),
-  );
+  return uses.some(({ toolName, input }) => {
+    const tool = toolName.toLowerCase();
+    if (tool === "skill") return field(input, "skill") === "swarm-docs";
+    if (/(^|[_-])skill-get$/.test(tool)) return field(input, "name") === "swarm-docs";
+    if (tool === "read") {
+      return SWARM_DOCS_SKILL_FILE.test(field(input, "file_path") || field(input, "path"));
+    }
+    return false;
+  });
 }
 
 function replyFor(ctx: JudgeContext, request: Request): string {

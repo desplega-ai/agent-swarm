@@ -80,6 +80,22 @@ describe("docs-suggestion rubric", () => {
     expect(loadedSwarmDocs([{ toolName: "Skill", input: { skill: "scheduling" } }])).toBe(false);
   });
 
+  test("a search or grep that only mentions swarm-docs is not a skill load", () => {
+    expect(
+      loadedSwarmDocs([
+        { toolName: "mcp__agent-swarm__skill-search", input: { query: "swarm-docs" } },
+      ]),
+    ).toBe(false);
+    expect(
+      loadedSwarmDocs([
+        { toolName: "Grep", input: { pattern: "swarm-docs", path: "/home/worker/.claude/skills" } },
+      ]),
+    ).toBe(false);
+    expect(
+      loadedSwarmDocs([{ toolName: "Read", input: { file_path: "/notes/swarm-docs-todo.md" } }]),
+    ).toBe(false);
+  });
+
   test("a list of pages gets half; the wrong playbook gets zero", () => {
     const list =
       "Options: https://docs.agent-swarm.dev/docs/playbooks/open-oncall and https://docs.agent-swarm.dev/docs/playbooks/code-health-alert-management";
