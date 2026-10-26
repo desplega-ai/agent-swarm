@@ -112,6 +112,16 @@ describe("workflow.run.finished", () => {
     await updateWorkflowRun(runId, { status: "completed" });
     await waitFor(() => eventsFor(runId).length === 2);
     expect(eventsFor(runId)[1]?.status).toBe("completed");
+
+    // A terminal run moved to another terminal status, with no reopen, stays silent.
+    const relabelled = await newRun(wf.id);
+    await updateWorkflowRun(relabelled, { status: "completed" });
+    await waitFor(() => eventsFor(relabelled).length === 1);
+    await updateWorkflowRun(relabelled, { status: "failed", error: "late failure" });
+    await settle();
+    expect(eventsFor(relabelled)).toEqual([
+      { runId: relabelled, workflowId: wf.id, status: "completed" },
+    ]);
   });
 
   test("fires only after commit, and never for a rolled-back end", async () => {

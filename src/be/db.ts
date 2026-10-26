@@ -8003,7 +8003,8 @@ export async function updateWorkflowRun(
     );
   const endsRun = data.status !== undefined && isTerminalWorkflowRunStatus(data.status);
   // A run that ends reads the status it replaces in the same transaction, so
-  // a later write of the same terminal status does not announce the end again.
+  // only a change out of a live status announces the end: a later terminal
+  // write, same status or not, does not announce it again.
   const [previousStatus, row] = endsRun
     ? await getDbClient().transaction(async () => {
         const previous = await getDbClient().get<{ status: WorkflowRunStatus }>(
@@ -8019,7 +8020,9 @@ export async function updateWorkflowRun(
     emitWorkflowTerminalTelemetry(run);
   }
   if (row.parentStepId) emitChildRunFinished(id, row.parentStepId, run.status);
-  if (endsRun && previousStatus !== run.status) emitRunFinished(id, run.workflowId, run.status);
+  if (endsRun && previousStatus && !isTerminalWorkflowRunStatus(previousStatus)) {
+    emitRunFinished(id, run.workflowId, run.status);
+  }
   return run;
 }
 

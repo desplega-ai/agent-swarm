@@ -659,8 +659,8 @@ export function isTerminalWorkflowRunStatus(status: WorkflowRunStatus): boolean 
 /**
  * Announce after commit that a run turned terminal, top-level and child runs
  * alike, so an event-mode `wait` can resume when any run ends. Callers emit
- * only on a change into a terminal status, never on a later update of a run
- * already in that status. The id is `runId`, never `workflowRunId` or
+ * only when a live run (running or waiting) turns terminal, never on a later
+ * update of a run that is already terminal. The id is `runId`, never `workflowRunId` or
  * `_runId`: those would put the finished run in the waiting run's own `run`
  * scope, so waiters use scope `global` and filter on `runId`.
  */
