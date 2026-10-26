@@ -279,18 +279,23 @@ function FileMenuItems({ target, as }: { target: DrivePath; as: "dropdown" | "co
 }
 
 /**
- * The hover "..." button of a row. Mouse only (`tabIndex={-1}`): keyboard
- * users open the same menu with the context menu key on the row.
+ * The hover "..." button of a row. A row button is out of the Tab order
+ * unless the row passes `tabIndex`: the tree gives 0 to the focused row's
+ * button only, a list gives 0 to every row's button. Keyboards without a
+ * context menu key (macOS) reach the menu through it.
  */
 export function FileMenuButton({
   target,
   className,
   header = false,
+  tabIndex,
 }: {
   target: DrivePath;
   className?: string;
   /** The file header's button: a keyboard stop, icon size, a menu below it. */
   header?: boolean;
+  /** A row button's Tab order. Default: -1 (mouse only). */
+  tabIndex?: number;
 }) {
   const [open, setOpen] = useState(false);
   const name = baseName(target.path) || "Drive";
@@ -301,7 +306,7 @@ export function FileMenuButton({
           type="button"
           variant="ghost"
           size={header ? "icon-sm" : "icon"}
-          tabIndex={header ? undefined : -1}
+          tabIndex={header ? undefined : (tabIndex ?? -1)}
           aria-label={header ? "More actions" : `More actions for ${name}`}
           // A click on the button must not reach the row link.
           onClick={(event: MouseEvent) => event.stopPropagation()}

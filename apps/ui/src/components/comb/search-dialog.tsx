@@ -284,9 +284,15 @@ function SearchBody({
             : search.error.message || "Search failed."}
         </p>
         {unsupported ? null : (
-          <Button size="sm" variant="outline" onClick={() => void search.refetch()}>
-            Try again
-          </Button>
+          <>
+            {/* Tab switches the mode, so the button is out of keyboard reach: say how. */}
+            <p className="text-xs text-muted-foreground">
+              Press <Kbd>Enter</Kbd> to try again.
+            </p>
+            <Button size="sm" variant="outline" onClick={() => void search.refetch()}>
+              Try again
+            </Button>
+          </>
         )}
       </div>
     );
