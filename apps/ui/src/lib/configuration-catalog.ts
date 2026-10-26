@@ -1406,6 +1406,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "https://agent-fs.example.com",
         docsUrl: `${DOCS}ui/comb#turn-on-comb`,
       },
+      {
+        key: "AGENT_FS_PROXY",
+        label: "Serve agent-fs through the API",
+        description:
+          "Serve agent-fs through the swarm API at /agentfs, so the browser reaches a bundled agent-fs with no public port. Comb then uses <public API URL>/agentfs.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/agent-fs-co-deployment`,
+      },
     ],
   },
   {

@@ -522,6 +522,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "DB_RETENTION_DRY_RUN",
     "MODEL_AUTO_UPGRADE",
     "COMB_ENABLED",
+    "AGENT_FS_PROXY",
   ]),
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),

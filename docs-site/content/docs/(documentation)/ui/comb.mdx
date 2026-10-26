@@ -31,6 +31,7 @@ Set these on the API server, in **Settings → Configuration** or in the deploym
 | `COMB_ENABLED` | `true`. The flag has no effect until `AGENT_FS_API_URL` is set. |
 | `AGENT_FS_PUBLIC_URL` | The agent-fs URL that browsers use. It defaults to `AGENT_FS_API_URL`. Set it when the API reaches agent-fs on an internal hostname. In Docker Compose the API uses `http://agent-fs:7433`, and the browser needs `http://localhost:7433`. |
 | `APP_URL` | The dashboard URL. Slack messages and lead prompts link to Comb only when it is set. |
+| `AGENT_FS_PROXY` | Optional, default `false`. `true` makes the API serve agent-fs at `/agentfs`, so the browser reaches agent-fs through the API and agent-fs needs no public port. Comb then uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api). |
 
 A saved value reloads the API. The dashboard reads the new state on its next status poll, 30 seconds at most. The sidebar then shows **Comb**, and `/file` opens the swarm drive.
 
@@ -266,7 +267,7 @@ The dashboard and the API then behave as they do without Comb. Comments, mention
 
 **"Comb is off" after you set the flag.** `AGENT_FS_API_URL` is not set on the API, or the dashboard has not polled yet. Wait 30 seconds and reload.
 
-**"Cannot reach agent-fs".** The browser cannot reach `AGENT_FS_PUBLIC_URL`. Check the URL from the browser's machine. A self-hosted agent-fs allows every origin by default. If you set `server.cors.origins` in its `config.json`, add the dashboard origin.
+**"Cannot reach agent-fs".** The browser cannot reach `AGENT_FS_PUBLIC_URL` (or `<public API URL>/agentfs` with `AGENT_FS_PROXY=true`). Check the URL from the browser's machine. A self-hosted agent-fs allows every origin by default. If you set `server.cors.origins` in its `config.json`, add the dashboard origin.
 
 **The header shows "Polling" instead of "Live".** Hover the status for the reason. Common causes: agent-fs is older than 0.15.0, a proxy buffers the event stream, or you have more than 8 open streams.
 

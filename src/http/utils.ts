@@ -255,19 +255,35 @@ export function wireHttpSpanLifecycle(
   });
 }
 
+/**
+ * Redact the agent-fs share token in `/share/<token>/...` and `/site/<token>/...`
+ * paths, with or without the `/agentfs` proxy prefix. The token is the credential
+ * for a public share link, so it must not reach logs or traces.
+ */
+export function redactShareTokenInPath(pathname: string): string {
+  const segments = pathname.split("/");
+  const at = segments[1] === "agentfs" ? 2 : 1;
+  if ((segments[at] === "share" || segments[at] === "site") && segments[at + 1]) {
+    segments[at + 1] = "[REDACTED]";
+    return segments.join("/");
+  }
+  return pathname;
+}
+
 export function safeRequestUrlForLog(rawUrl: string | undefined): string {
   if (!rawUrl) return "";
 
   try {
     const url = new URL(rawUrl, "http://localhost");
+    const pathname = redactShareTokenInPath(url.pathname);
     const params = Array.from(url.searchParams.keys());
-    if (params.length === 0) return url.pathname;
+    if (params.length === 0) return pathname;
 
     const redactedQuery = params.map((key) => `${key}=[REDACTED]`).join("&");
-    return `${url.pathname}?${redactedQuery}`;
+    return `${pathname}?${redactedQuery}`;
   } catch {
     const pathOnly = rawUrl.split("?")[0] || rawUrl;
-    return scrubSecrets(pathOnly);
+    return scrubSecrets(redactShareTokenInPath(pathOnly));
   }
 }
 

@@ -197,6 +197,15 @@ export function isCombEnabled(): boolean {
 }
 
 /**
+ * `AGENT_FS_PROXY`: the API serves agent-fs at `/agentfs/*` (plus the public
+ * `/share/*` and `/site/*` pages), and Comb uses `<public API URL>/agentfs`.
+ * Read per request, so a config upsert applies without a restart. Off by default.
+ */
+export function isAgentFsProxyEnabled(): boolean {
+  return isEnvFlagEnabled("AGENT_FS_PROXY", false);
+}
+
+/**
  * The dashboard (Comb) URL for an agent-fs file, same id and encoding rules as
  * {@link buildAgentFsLiveUrl}. Null unless Comb is on AND an explicit
  * `APP_URL` / `DASHBOARD_URL` is set: the hosted default dashboard cannot open

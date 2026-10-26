@@ -21,4 +21,25 @@ describe("safeRequestUrlForLog", () => {
       "/mcp?session=[REDACTED]&session=[REDACTED]&token=[REDACTED]",
     );
   });
+
+  test("redacts the agent-fs share token after /share/ and /site/", () => {
+    expect(safeRequestUrlForLog("/share/tok_secret123/raw")).toBe("/share/[REDACTED]/raw");
+    expect(safeRequestUrlForLog("/site/tok_secret123/")).toBe("/site/[REDACTED]/");
+    expect(safeRequestUrlForLog("/site/tok_secret123/a/index.html?v=1")).toBe(
+      "/site/[REDACTED]/a/index.html?v=[REDACTED]",
+    );
+  });
+
+  test("redacts the share token behind the /agentfs proxy prefix", () => {
+    expect(safeRequestUrlForLog("/agentfs/share/tok_secret123")).toBe("/agentfs/share/[REDACTED]");
+    expect(safeRequestUrlForLog("/agentfs/site/tok_secret123/x.css")).toBe(
+      "/agentfs/site/[REDACTED]/x.css",
+    );
+  });
+
+  test("leaves other share-like paths alone", () => {
+    expect(safeRequestUrlForLog("/share")).toBe("/share");
+    expect(safeRequestUrlForLog("/api/share/abc")).toBe("/api/share/abc");
+    expect(safeRequestUrlForLog("/agentfs/orgs/o/share")).toBe("/agentfs/orgs/o/share");
+  });
 });

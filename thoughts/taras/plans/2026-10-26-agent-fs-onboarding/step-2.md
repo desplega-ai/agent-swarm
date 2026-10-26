@@ -2,7 +2,7 @@
 id: step-2
 name: agent-fs through the swarm API
 depends_on: []
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -59,20 +59,20 @@ Start from the spike, from the repo root: `PLAN=thoughts/taras/plans/2026-10-26-
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Proxy tests: `bun run test:root -- src/tests/agentfs-proxy.test.ts`
-- [ ] Real agent-fs leg, locally: `git clone --depth 1 --branch v0.18.5 https://github.com/desplega-ai/agent-fs /tmp/afo-step-2/agent-fs && (cd /tmp/afo-step-2/agent-fs && bun install --frozen-lockfile) && AGENT_FS_SRC=/tmp/afo-step-2/agent-fs bun run test:root -- src/tests/agentfs-proxy.test.ts` (13 spike tests plus the new ones pass, none skipped)
-- [ ] Comb config: `bun run test:root -- src/tests/comb-status.test.ts src/tests/comb-config-guard.test.ts` (new cases: flag on and blank public URL gives `<PUBLIC_MCP_BASE_URL>/agentfs`; public URL set wins; flag off unchanged)
-- [ ] Auth wiring: `bun run test:root -- src/tests/core-auth.test.ts src/tests/route-def-find-route.test.ts src/tests/cors-allowlist.test.ts`
-- [ ] Routes and docs: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && bun run test:root -- src/tests/docs-index-footprint.test.js`
+- [x] Proxy tests: `bun run test:root -- src/tests/agentfs-proxy.test.ts`
+- [x] Real agent-fs leg, locally: `git clone --depth 1 --branch v0.18.5 https://github.com/desplega-ai/agent-fs /tmp/afo-step-2/agent-fs && (cd /tmp/afo-step-2/agent-fs && bun install --frozen-lockfile) && AGENT_FS_SRC=/tmp/afo-step-2/agent-fs bun run test:root -- src/tests/agentfs-proxy.test.ts` (13 spike tests plus the new ones pass, none skipped)
+- [x] Comb config: `bun run test:root -- src/tests/comb-status.test.ts src/tests/comb-config-guard.test.ts` (new cases: flag on and blank public URL gives `<PUBLIC_MCP_BASE_URL>/agentfs`; public URL set wins; flag off unchanged)
+- [x] Auth wiring: `bun run test:root -- src/tests/core-auth.test.ts src/tests/route-def-find-route.test.ts src/tests/cors-allowlist.test.ts`
+- [x] Routes and docs: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && bun run test:root -- src/tests/docs-index-footprint.test.js`
 - [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
 
 #### Automated QA:
-- [ ] Live check with a real agent-fs and a booted API (both on free ports, temp dirs under `/tmp/afo-step-2/`, no `.env`, PIDs saved and killed at the end): start agent-fs from the `/tmp/afo-step-2/agent-fs` checkout above with `AGENT_FS_STORAGE_PROVIDER=local`, boot the API with `AGENT_FS_API_URL=<agent-fs>` `AGENT_FS_PROXY=true` `COMB_ENABLED=true`. Then:
+- [x] Live check with a real agent-fs and a booted API (both on free ports, temp dirs under `/tmp/afo-step-2/`, no `.env`, PIDs saved and killed at the end): start agent-fs from the `/tmp/afo-step-2/agent-fs` checkout above with `AGENT_FS_STORAGE_PROVIDER=local`, boot the API with `AGENT_FS_API_URL=<agent-fs>` `AGENT_FS_PROXY=true` `COMB_ENABLED=true`. Then:
   - `curl -s <api>/agentfs/health` answers from agent-fs;
   - `curl -s -o /dev/null -w '%{http_code}' <api>/agentfs/auth/me` prints `401` (agent-fs's own);
   - `curl -s -H "Authorization: Bearer <operator key>" <api>/status | jq .agent_fs.comb.api_url` prints `"<api>/agentfs"`;
   - a share link made with the `share-create` op opens through `<api>/share/<token>` and its embedded raw file loads.
-- [ ] Same API with `AGENT_FS_PROXY` unset: `/agentfs/health` returns the status pinned on main.
+- [x] Same API with `AGENT_FS_PROXY` unset: `/agentfs/health` returns the status pinned on main.
 
 #### Manual Verification:
 - [ ] None. Behavior behind Traefik, Cloudflare and HTTP/2 is checked in root Manual E2E part B (tunnel).

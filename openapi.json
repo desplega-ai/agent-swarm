@@ -33029,6 +33029,279 @@
         }
       }
     },
+    "/agentfs/{path}": {
+      "get": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/share/{path}": {
+      "get": {
+        "summary": "Public agent-fs share page, served through the API (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "agent-fs /share response, streamed verbatim"
+          },
+          "404": {
+            "description": "Unknown or expired link (from agent-fs), or the proxy is off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/site/{path}": {
+      "get": {
+        "summary": "Public agent-fs site page, served through the API (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "agent-fs /site response, streamed verbatim"
+          },
+          "404": {
+            "description": "Unknown or expired link (from agent-fs), or the proxy is off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks": {
       "get": {
         "summary": "List tasks with filters",
