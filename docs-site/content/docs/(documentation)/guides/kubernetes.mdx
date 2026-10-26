@@ -1,6 +1,9 @@
 ---
 title: Kubernetes and Helm
 description: Install Agent Swarm with Helm, expose the API through ingress, and connect the dashboard with working CORS
+agent:
+  offer: true
+  when: "Someone wants to install Agent Swarm on Kubernetes"
 ---
 
 The Helm chart deploys the API and agent pools to Kubernetes. The dashboard runs separately: use [app.agent-swarm.dev](https://app.agent-swarm.dev) or [self-host the dashboard](/docs/ui#self-hosting). Browser requests go directly to your API, so the API address must be reachable from the operator's browser.

@@ -885,7 +885,7 @@ Notes:
 
 ## 5b. Checklist gate: skipping quiet Lead ticks
 
-The recurring `HEARTBEAT.md` checklist tick (`checkHeartbeatChecklist`) can ask a global script whether the tick needs the Lead before it creates the `heartbeat-checklist` task. Owner code: `runChecklistGate` and `defaultChecklistGateRunner` in `src/heartbeat/heartbeat.ts`, `runSavedScriptAsAgent` in `src/be/scripts/run-saved.ts`, and the `heartbeat.checklist.gate_findings` template in `src/heartbeat/templates.ts`. Boot triage never runs the gate.
+The recurring `HEARTBEAT.md` checklist tick (`checkHeartbeatChecklist`) can ask a global script whether the tick needs the Lead before it creates the `heartbeat-checklist` task. Owner code: `runChecklistGate` and `defaultChecklistGateRunner` in `src/heartbeat/heartbeat.ts`, `probeScriptRunner` in `src/heartbeat/script-runner-probe.ts`, `runSavedScriptAsAgent` in `src/be/scripts/run-saved.ts`, and the `heartbeat.checklist.gate_findings` template in `src/heartbeat/templates.ts`. Boot triage never runs the gate.
 
 The seeded `heartbeat-jev-gate` reads the previous completed checklist's receipt from KV namespace `heartbeat-checklist:reported-failures`, keyed by checklist task ID. After creating a recurring checklist, `checkHeartbeatChecklist` writes the exact full IDs of up to ten failures rendered from the same `gatherSystemStatus` query, with a seven-day expiry. A write failure is logged without interrupting checklist creation. Boot triage writes no receipt. The namespace family is reserved against generic KV writes.
 
@@ -902,7 +902,11 @@ flowchart TD
   K -- yes --> RJ[script = heartbeat-jev-gate]
   RJ --> R
   G -- name --> R[run gate under one 60s deadline]
-  R --> V{verdict}
+  R --> P[runScript no-op as Lead,<br/>10s deadline]
+  P -- timeout / throw / unsuccessful output --> U[wake: script-runner-unhealthy,<br/>skip saved gate script]
+  P -- healthy --> L[look up global script,<br/>credential setup, run saved gate]
+  L --> V{verdict}
+  U --> V
   V -- quiet + enforce --> S[skip: no task]
   V -- quiet/wake/error + shadow --> CT[create task, tag heartbeat-gate:verdict,<br/>prompt unchanged]
   V -- wake + enforce --> CF[create task, tag heartbeat-gate:wake,<br/>append Gate Findings when summary is set]
@@ -925,11 +929,11 @@ mode   = HEARTBEAT_CHECKLIST_GATE_MODE == "enforce" ? enforce : shadow   # anyth
 if script:
   controller = AbortController()
   verdict = race(
-    runner(script, lead.id, controller.signal),   # getScript(global) -> credential setup -> runScript as the Lead
+    runner(script, lead.id, controller.signal),   # probe -> getScript(global) -> credential setup -> saved gate
     after 60s: controller.abort(); error "gate timed out after 60000ms",
   )
-  # The deadline covers script lookup AND credential setup (OAuth refresh can block),
-  # not just execution. The race returns at the deadline without waiting for the runner.
+  # The 60s deadline includes the probe, script lookup, credential setup, and execution.
+  # OAuth refresh can block. The race returns without waiting for the runner.
   # Abort during credential setup: runSavedScriptAsAgent returns killed and never starts the script.
   # Abort during execution: the executor kills the process group.
   result {quiet: true}            -> quiet
@@ -940,12 +944,26 @@ status = gatherSystemStatus()
 if mode == enforce and verdict == wake and summary:
   status += resolveTemplate("heartbeat.checklist.gate_findings", {gate_summary: summary})
 create heartbeat-checklist task, tags += "heartbeat-gate:<verdict>" when the gate ran
+
+# defaultChecklistGateRunner, before lookup of the saved global script:
+probeController = AbortController()
+probe = race(
+  runScript(no-op returning true, agentId=lead.id, fsMode=none,
+            timeoutMs=10000, signal=probeController.signal),
+  after 10s: probeController.abort(); throw "timeout after 10000ms",
+)
+if probe times out, throws, or returns nonzero exitCode / error / runtimeError:
+  return {quiet: false, reason: "script-runner-unhealthy: " + scrubbed reason capped at 300 chars}
+# An unexpected throw from the probe also returns the same wake result.
+look up global script -> runSavedScriptAsAgent with gate deadline and signal -> return saved result
 ```
 
 Notes:
 
 - Shadow is the default. It never changes the prompt, so the Lead's own "all clear" or action stays an independent check on the gate's verdict. Compare tags against outcomes before switching to enforce.
-- Every failure fails open in both modes: the checklist task is created and tagged `heartbeat-gate:error`.
+- The default runner probes the executor before saved-script lookup. It runs a no-op with a separate 10-second deadline and abort signal.
+- An unhealthy probe returns `wake` with a scrubbed `script-runner-unhealthy` reason and skips the saved script. Both modes create the checklist with `heartbeat-gate:wake`.
+- After a healthy probe, saved-script lookup, credential setup, execution, and result validation retain their existing behavior. Failures produce `heartbeat-gate:error` in both modes.
 - Both keys are read on every tick, so a config reload applies them without a restart. Config writes reject modes other than `shadow` and `enforce`.
 
 ---

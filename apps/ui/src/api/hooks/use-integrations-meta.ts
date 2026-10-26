@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { invalidateStatusQuery } from "@/api/hooks/status-query";
 import { getConfig } from "@/lib/config";
+import { type EnvPresenceMap, fetchEnvPresenceBatched } from "@/lib/env-presence-batch";
 
 // ---------------------------------------------------------------------------
 // Integrations-page support hooks
@@ -37,10 +38,9 @@ function getHeaders(): HeadersInit {
   return headers;
 }
 
-export type EnvPresenceMap = Record<string, boolean>;
+export type { EnvPresenceMap };
 
-async function fetchEnvPresence(keys: string[]): Promise<EnvPresenceMap> {
-  if (keys.length === 0) return {};
+async function fetchEnvPresenceBatch(keys: string[]): Promise<EnvPresenceMap> {
   const url = `${getBaseUrl()}/api/config/env-presence?keys=${encodeURIComponent(keys.join(","))}`;
   const res = await fetch(url, { headers: getHeaders() });
   if (!res.ok) {
@@ -48,6 +48,10 @@ async function fetchEnvPresence(keys: string[]): Promise<EnvPresenceMap> {
   }
   const data = (await res.json()) as { presence: EnvPresenceMap };
   return data.presence ?? {};
+}
+
+function fetchEnvPresence(keys: string[]): Promise<EnvPresenceMap> {
+  return fetchEnvPresenceBatched(keys, fetchEnvPresenceBatch);
 }
 
 export function useEnvPresence(keys: string[]) {

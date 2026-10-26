@@ -110,6 +110,15 @@ export async function recordKeyValidation(
           now,
         ],
       );
+      // A passing test clears the key's rejection in every scope, since the
+      // suffix read in `getAvailableKeyIndices` matches them all.
+      if (key.ok) {
+        await tx.run(
+          `UPDATE api_key_status SET lastValidationError = NULL, lastValidationFailedAt = NULL, updatedAt = ?
+           WHERE keyType = ? AND keySuffix = ? AND lastValidationFailedAt IS NOT NULL`,
+          [now, keyType, key.keySuffix],
+        );
+      }
     }
     if (options.retireAbsent === false) return;
     const placeholders = keys.map(() => "?").join(", ");

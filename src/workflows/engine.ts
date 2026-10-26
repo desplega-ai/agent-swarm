@@ -51,7 +51,7 @@ import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
-import { resolveNodeTimeoutMs } from "./node-timeout";
+import { resolveNodeTimeoutMs, startStepDeadline } from "./node-timeout";
 import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
@@ -78,6 +78,13 @@ export interface WorkflowExecutionOptions {
    * HTTP trigger records its `Idempotency-Key` here.
    */
   accept?: (run: { runId: string; skipped: boolean }) => Promise<void>;
+  /**
+   * Return once the run is committed and walk it in the background, as a
+   * child run does. By default a top-level start resolves only after the
+   * walk reaches its end or its first async step, so a caller that only
+   * needs the run id waits for every instant step before it.
+   */
+  detach?: boolean;
 }
 
 /**
@@ -209,9 +216,12 @@ export async function startWorkflowExecution(
       options,
     );
     // A child run walks on its own, outside the parent executor's timeout. Its
-    // terminal status wakes the parent step (`resumeFromChildRun`).
-    if (options.parentStepId) {
-      walk.catch((err) => console.error(`[workflows] Child workflow run ${runId} failed:`, err));
+    // terminal status wakes the parent step (`resumeFromChildRun`). A detached
+    // top-level run walks the same way; the walk holds the run before its
+    // first await, so releasing the start hold below leaves no gap.
+    if (options.parentStepId || options.detach) {
+      const kind = options.parentStepId ? "Child" : "Detached";
+      walk.catch((err) => console.error(`[workflows] ${kind} workflow run ${runId} failed:`, err));
       return runId;
     }
     await walk;
@@ -1045,7 +1055,7 @@ async function runClaimedStep(
     inputCtx: interpolationCtx,
   };
 
-  const timeoutMs = resolveNodeTimeoutMs(node);
+  const deadline = startStepDeadline(resolveNodeTimeoutMs(node));
 
   let result: Awaited<ReturnType<typeof executor.run>>;
   try {
@@ -1053,10 +1063,10 @@ async function runClaimedStep(
       executor.run({
         config: interpolatedConfig,
         context: executionCtx,
-        meta,
+        meta: { ...meta, signal: deadline.signal },
       }),
-      timeoutPromise(timeoutMs),
-    ]);
+      deadline.expired,
+    ]).finally(deadline.clear);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
 
@@ -1458,12 +1468,4 @@ export function scriptBodyInterpolationError(nodeId: string, tokens: string[]): 
     "Executable source may interpolate only input, workflow, swarm, or run values. " +
     "Pass dynamic trigger or upstream values through config.args and read them from argv."
   );
-}
-
-// ─── Helpers ───────────────────────────────────────────────
-
-function timeoutPromise(ms: number): Promise<never> {
-  return new Promise((_, reject) => {
-    setTimeout(() => reject(new Error(`Step timed out after ${ms}ms`)), ms);
-  });
 }

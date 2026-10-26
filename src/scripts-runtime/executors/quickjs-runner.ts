@@ -29,6 +29,7 @@ import type {
 export type QuickJSJob = {
   source: string;
   args: unknown;
+  hostValidatedArgs?: boolean;
   configPayload: SwarmConfigPayload;
   resources: ScriptResourcePolicy;
   network: ExecutorInput["network"];
@@ -656,7 +657,7 @@ async function evaluateJob(
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const init = `globalThis.__swarm_shape = ${JSON.stringify(shape)};\nglobalThis.__swarm_args = ${JSON.stringify(args)};`;
+    const init = `globalThis.__swarm_shape = ${JSON.stringify(shape)};\nglobalThis.__swarm_args = ${JSON.stringify(args)};\nglobalThis.__swarm_host_validated_args = ${Boolean(job.hostValidatedArgs)};`;
     const ok =
       evaluate(init, "swarm-init.js") &&
       evaluate(SANDBOX_WEB_SHIMS, "swarm-web-shims.js") &&

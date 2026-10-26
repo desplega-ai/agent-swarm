@@ -243,14 +243,28 @@ const getAvailable = route({
   pattern: ["api", "keys", "available"],
   summary: "Get available (non-rate-limited) key indices for a credential type",
   tags: ["API Keys"],
-  query: z.object({
-    keyType: z.string(),
-    totalKeys: z.coerce.number().int().min(1),
-    scope: z.string().optional(),
-    scopeId: z.string().optional(),
-    /** Model family the caller is about to run. Filters out keys with an active weekly window block for that family. */
-    model: z.enum(["fable", "opus", "sonnet", "haiku"]).optional(),
-  }),
+  query: z
+    .object({
+      keyType: z.string(),
+      totalKeys: z.coerce.number().int().min(1),
+      scope: z.string().optional(),
+      scopeId: z.string().optional(),
+      /** Model family the caller is about to run. Filters out keys with an active weekly window block for that family. */
+      model: z.enum(["fable", "opus", "sonnet", "haiku"]).optional(),
+      /**
+       * Comma-separated key suffixes of the caller's pool, in pool order. When set,
+       * key status is matched by suffix across all scopes (not by stored index or
+       * `scope`), and returned indices are positions in this list.
+       */
+      keySuffixes: z
+        .string()
+        .transform((value) => value.split(","))
+        .optional(),
+    })
+    .refine((query) => !query.keySuffixes || query.keySuffixes.length === query.totalKeys, {
+      message: "keySuffixes must list exactly totalKeys suffixes",
+      path: ["keySuffixes"],
+    }),
   responses: {
     200: {
       description: "List of available key indices",
@@ -690,7 +704,7 @@ export async function handleApiKeys(
     const parsed = await getAvailable.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, totalKeys, scope, scopeId, model } = parsed.query;
+    const { keyType, totalKeys, scope, scopeId, model, keySuffixes } = parsed.query;
     try {
       const result = await getAvailableKeyIndices(
         keyType,
@@ -698,6 +712,7 @@ export async function handleApiKeys(
         scope,
         scopeId ?? null,
         model,
+        keySuffixes,
       );
       getAvailable.respond(res, 200, {
         success: true,

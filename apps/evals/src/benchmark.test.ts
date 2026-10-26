@@ -178,8 +178,8 @@ function input(over: Partial<PublishInput> = {}): PublishInput {
 }
 
 describe("suite held-out set", () => {
-  test("holds out exactly 2 manifest scenarios, and publishes the rest", () => {
-    expect(HELD_OUT_SCENARIO_IDS.length).toBe(2);
+  test("holds out exactly 3 manifest scenarios, and publishes the rest", () => {
+    expect(HELD_OUT_SCENARIO_IDS.length).toBe(3);
     for (const id of HELD_OUT_SCENARIO_IDS) expect(SUITE_IDS).toContain(id);
     const published = publicSuiteScenarioIds();
     for (const id of HELD_OUT_SCENARIO_IDS) expect(published).not.toContain(id);
@@ -275,7 +275,7 @@ describe("snapshot and disclosure bundle", () => {
     expect(snapshot.scenarios.map((s) => s.id)).toEqual(publicSuiteScenarioIds());
     expect(snapshot.frontier.expectedScenarios).toEqual(publicSuiteScenarioIds());
     expect(snapshot.heatmap.scenarioIds).toEqual(publicSuiteScenarioIds());
-    expect(snapshot.heldOutCount).toBe(2);
+    expect(snapshot.heldOutCount).toBe(3);
     for (const [path, content] of Object.entries(bundleFiles(snapshot))) {
       expect({ path, leaks: heldOutLeaks(content) }).toEqual({ path, leaks: [] });
     }

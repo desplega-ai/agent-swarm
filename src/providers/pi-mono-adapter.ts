@@ -919,6 +919,28 @@ function requestContextTokens(message: unknown): number | undefined {
   return usage.input + cacheRead + cacheWrite;
 }
 
+/**
+ * The session-log line for one LLM call's usage (token counts only, never
+ * content). The dashboard reads it as that call's cache-hit chip.
+ */
+function callUsageLine(message: unknown): string | undefined {
+  const usage = (message as { usage?: Record<string, unknown> } | null)?.usage;
+  if (typeof usage?.input !== "number") return undefined;
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return JSON.stringify({
+    type: "call_usage",
+    harness: "pi",
+    usage: {
+      input: count(usage.input),
+      cacheRead: count(usage.cacheRead),
+      cacheWrite: count(usage.cacheWrite),
+      output: count(usage.output),
+      reasoning: count(usage.reasoning),
+    },
+  });
+}
+
 function describeAssistantTurn(message: unknown): AssistantTurnShape {
   const msg = (message ?? {}) as {
     content?: unknown;
@@ -1116,6 +1138,10 @@ export class PiMonoSession implements ProviderSession {
         if (endMsg.role === "assistant") {
           const turn = describeAssistantTurn(event.message);
           this.lastAssistantTurn = turn;
+          // Ahead of the turn's text and tool lines: the chip rides on the
+          // call's first row.
+          const usageLine = callUsageLine(event.message);
+          if (usageLine) this.emit({ type: "raw_log", content: usageLine });
           if (endMsg.stopReason === "error") {
             // Candidate terminal failure. May still be cleared by a successful
             // retry (auto_retry_end success / a later good message_end).

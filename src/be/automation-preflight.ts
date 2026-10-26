@@ -3,6 +3,7 @@ import { getSlackConfiguration, isSlackConfigured } from "../slack/config";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
+import { emitRunFinished } from "./db/workflow-runs";
 import { getOAuthApp, getOAuthTokens } from "./db-queries/oauth";
 import { scrubJsonValue } from "./scrub-json";
 
@@ -446,6 +447,7 @@ export async function recordWorkflowPreflightFailure(input: {
         timestamp,
       ],
     );
+    emitRunFinished(runId, input.workflowId, "failed");
     // Claimed in this transaction, which also sees every child failure run
     // committed before it: concurrent failures alert exactly once a day.
     return {

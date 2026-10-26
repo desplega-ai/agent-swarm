@@ -307,6 +307,15 @@ const triggerWorkflowRoute = route({
     "With an `Idempotency-Key`, a retry returns the accepted run's `runId` and `skipped` without starting, resuming or waiting for anything, even after the workflow was disabled or edited and whatever state the run is in now.",
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
+  query: z.object({
+    wait: z
+      .enum(["true", "false"])
+      .optional()
+      .describe(
+        "Default true: respond after the run's instant steps ran, when it finishes or parks at its first async step. " +
+          "false: respond as soon as the run is committed and walk it in the background.",
+      ),
+  }),
   headers: idempotencyKeyHeader("starts one run"),
   responses: {
     201: {
@@ -1002,6 +1011,7 @@ export async function handleWorkflows(
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
         triggerType: "api",
         requestedByUserId: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
+        detach: parsed.query.wait === "false",
         // Recorded in the run's own transaction, before the walk starts.
         accept: claim
           ? async (run) => {
