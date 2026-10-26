@@ -2,7 +2,13 @@ import { telemetry } from "../telemetry";
 import { ProviderNameSchema } from "../types";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { z } from "../utils/zod-openapi";
-import { getDbClient, getSwarmConfigs, getTaskById, upsertSwarmConfig } from "./db";
+import {
+  deleteSwarmConfigByKey,
+  getDbClient,
+  getSwarmConfigs,
+  getTaskById,
+  upsertSwarmConfig,
+} from "./db";
 import { validateConfigValue } from "./swarm-config-guard";
 
 const ONBOARDING_CONFIG_KEY = "onboarding_state";
@@ -55,6 +61,19 @@ export const OnboardingMemoryPresetSchema = z.enum([
   "custom",
   "existing",
 ]);
+/**
+ * Where the embeddings endpoint runs: `local` (this server or its private
+ * network), the hosted preset whose host it calls, or `custom` (another host).
+ */
+export const OnboardingMemoryProviderSchema = z.enum([
+  "local",
+  "openai",
+  "openrouter",
+  "vercel",
+  "azure",
+  "custom",
+]);
+export type OnboardingMemoryProvider = z.infer<typeof OnboardingMemoryProviderSchema>;
 export const OnboardingIntegrationMethodSchema = z.enum([
   "slack",
   "github",
@@ -152,6 +171,14 @@ export const OnboardingSignalsSchema = z.object({
      * private address, or a single-label host such as `tei`). False while off.
      */
     local: z.boolean(),
+    /** Where the endpoint runs, from its host only (never the URL). Null while off. */
+    provider: OnboardingMemoryProviderSchema.nullable(),
+    /**
+     * The local setup of the deployment environment, also while a stored
+     * hosted setup replaces it, so `/setup` can offer it again: the model of
+     * its local endpoint. Null when the environment has no local endpoint.
+     */
+    localDefault: z.object({ model: z.string() }).nullable(),
   }),
   integrations: z.object({
     slack: z.boolean(),
@@ -265,8 +292,18 @@ export const OnboardingMemoryRequestSchema = z
     model: z.string().trim().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     reuseKey: z.enum(["OPENAI_API_KEY", "OPENROUTER_API_KEY"]).optional(),
+    /**
+     * With preset `existing`: test the setup of the deployment environment,
+     * and when it works, delete the stored embeddings config so that setup
+     * applies again. A failed test changes no config.
+     */
+    restoreDefault: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => !body.restoreDefault || body.preset === "existing", {
+    message: "restoreDefault needs preset existing",
+    path: ["restoreDefault"],
+  });
 export type OnboardingMemoryRequest = z.infer<typeof OnboardingMemoryRequestSchema>;
 
 export const OnboardingMemoryResponseSchema = z.object({
@@ -669,10 +706,39 @@ export async function readOrUpdateOnboarding(
   });
 }
 
+/** The embeddings rows a memory probe writes or deletes. */
+export const EMBEDDING_PREFIX_KEYS = [
+  "EMBEDDING_QUERY_PREFIX",
+  "EMBEDDING_DOCUMENT_PREFIX",
+] as const;
+export const EMBEDDING_CONFIG_KEYS = [
+  "EMBEDDING_API_BASE_URL",
+  "EMBEDDING_MODEL",
+  "EMBEDDING_API_KEY",
+  ...EMBEDDING_PREFIX_KEYS,
+] as const;
+
+/**
+ * The config change of a passed memory probe:
+ * - `save`: store the tested endpoint. `prefixes` sets a task prefix to an
+ *   empty value (`""`), or deletes its stored row (`null`).
+ * - `restore`: delete the stored embeddings rows, so the deployment
+ *   environment applies again.
+ */
+export type MemoryConfigChange =
+  | {
+      kind: "save";
+      baseUrl: string;
+      model: string;
+      apiKey?: string;
+      prefixes: ReadonlyArray<{ key: (typeof EMBEDDING_PREFIX_KEYS)[number]; value: "" | null }>;
+    }
+  | { kind: "restore" };
+
 export async function updateOnboardingMemory(
   preset: OnboardingMemoryPreset,
   result: { ok: true } | { ok: false; errorClass: OnboardingErrorClass },
-  saveConfig?: { baseUrl: string; model: string; apiKey?: string },
+  change?: MemoryConfigChange,
 ): Promise<boolean> {
   return await getDbClient().transaction(async () => {
     const events: PendingTelemetry[] = [];
@@ -680,11 +746,11 @@ export async function updateOnboardingMemory(
     let dirty = loaded.dirty;
     const eventsForState = loaded.state.autoCompleted ? [] : events;
 
-    if (saveConfig) {
+    if (change?.kind === "save") {
       const configValues = [
-        ["EMBEDDING_API_BASE_URL", saveConfig.baseUrl],
-        ["EMBEDDING_MODEL", saveConfig.model],
-        ...(saveConfig.apiKey ? [["EMBEDDING_API_KEY", saveConfig.apiKey]] : []),
+        ["EMBEDDING_API_BASE_URL", change.baseUrl],
+        ["EMBEDDING_MODEL", change.model],
+        ...(change.apiKey ? [["EMBEDDING_API_KEY", change.apiKey]] : []),
       ] as const;
       for (const [key, value] of configValues) {
         const validationError = validateConfigValue(key, value);
@@ -693,17 +759,23 @@ export async function updateOnboardingMemory(
       await upsertSwarmConfig({
         scope: "global",
         key: "EMBEDDING_API_BASE_URL",
-        value: saveConfig.baseUrl,
+        value: change.baseUrl,
       });
-      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_MODEL", value: saveConfig.model });
-      if (saveConfig.apiKey) {
+      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_MODEL", value: change.model });
+      if (change.apiKey) {
         await upsertSwarmConfig({
           scope: "global",
           key: "EMBEDDING_API_KEY",
-          value: saveConfig.apiKey,
+          value: change.apiKey,
           isSecret: true,
         });
       }
+      for (const { key, value } of change.prefixes) {
+        if (value === null) await deleteSwarmConfigByKey("global", null, key);
+        else await upsertSwarmConfig({ scope: "global", key, value });
+      }
+    } else if (change?.kind === "restore") {
+      for (const key of EMBEDDING_CONFIG_KEYS) await deleteSwarmConfigByKey("global", null, key);
     }
 
     if (result.ok) {
@@ -714,7 +786,7 @@ export async function updateOnboardingMemory(
 
     if (dirty) await persistState(loaded.state);
     queueTelemetry(events);
-    return saveConfig !== undefined;
+    return change !== undefined;
   });
 }
 

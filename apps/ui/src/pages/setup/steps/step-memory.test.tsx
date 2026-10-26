@@ -89,9 +89,10 @@ mock.module("@/components/onboarding/onboarding-redirect", () => ({
   setupExitHref: (path: string) => `${path}?fromSetup=1`,
   OnboardingRedirect: () => null,
 }));
-// Every export of the real module. No step 3 key to reuse.
+// Every export of the real module. The step 3 keys the server has (none by default).
+let presence: Record<string, boolean> = {};
 mock.module("@/api/hooks/use-integrations-meta", () => ({
-  useEnvPresence: () => ({ data: {}, isPending: false, isFetching: false }),
+  useEnvPresence: () => ({ data: presence, isPending: false, isFetching: false }),
   useReloadConfig: () => ({ mutateAsync: async () => ({}) }),
   useMcpUserConfig: () => ({ data: undefined }),
   useTestClaudeManagedConnection: () => ({ mutateAsync: async () => ({}) }),
@@ -110,19 +111,40 @@ mock.module("@/api/hooks/use-onboarding", () => ({
 const { StepMemory } = await import("./step-memory");
 const { TooltipProvider } = await import("../../../components/ui/tooltip");
 
-function onboarding(status: OnboardingStepStatus = "todo"): OnboardingResponse {
+const NOMIC = "nomic-ai/nomic-embed-text-v1.5";
+
+/** The bundled install: the local setup runs, and the deployment names it as its local default. */
+const LOCAL_IN_USE = {
+  configured: true,
+  dimensions: 512,
+  model: NOMIC,
+  local: true,
+  provider: "local",
+  localDefault: { model: NOMIC },
+};
+
+/** A hosted setup stored over the deployment's local one. */
+const OPENROUTER_IN_USE = {
+  ...LOCAL_IN_USE,
+  model: "google/gemini-embedding-2",
+  local: false,
+  provider: "openrouter",
+};
+
+function onboarding(
+  status: OnboardingStepStatus = "todo",
+  embeddings: Record<string, unknown> = {
+    configured: true,
+    dimensions: 512,
+    model: NOMIC,
+    local: true,
+  },
+): OnboardingResponse {
   return {
     state: {
       steps: { memory: { status, at: null, method: null, errorClass: null } },
     },
-    signals: {
-      embeddings: {
-        configured: true,
-        dimensions: 512,
-        model: "nomic-ai/nomic-embed-text-v1.5",
-        local: true,
-      },
-    },
+    signals: { embeddings },
   } as unknown as OnboardingResponse;
 }
 
@@ -170,11 +192,36 @@ const providerForm = (container: HTMLElement) =>
 const buttonText = (container: HTMLElement, text: string) =>
   [...container.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
 
+/** A provider option by its label. */
+const providerOption = (container: HTMLElement, label: string) =>
+  [...(providerForm(container)?.querySelectorAll('[role="radio"]') ?? [])].find((b) =>
+    b.textContent?.startsWith(label),
+  ) as HTMLButtonElement | undefined;
+
+const modelForm = (container: HTMLElement) =>
+  container.querySelector('[role="radiogroup"][aria-label="Model"]');
+
+async function click(element: HTMLElement | undefined) {
+  expect(element).toBeDefined();
+  await act(async () => {
+    element?.click();
+  });
+  await settle();
+}
+
+const OPENROUTER_REQUEST: OnboardingMemoryTestRequest = {
+  preset: "openrouter",
+  baseUrl: "https://openrouter.ai/api/v1",
+  model: "openai/text-embedding-3-small",
+  reuseKey: "OPENROUTER_API_KEY",
+};
+
 beforeEach(() => {
   tests.length = 0;
   blockers.length = 0;
   continueAction = null;
   probe = async () => PASS;
+  presence = {};
   document.body.innerHTML = "";
 });
 
@@ -185,7 +232,9 @@ describe("StepMemory on a server that has memory search on", () => {
     expect(view.container.textContent).toContain("Memory search is on");
     expect(view.container.textContent).toContain("Memory works.");
     expect(buttonText(view.container, "Test again")).toBeDefined();
-    expect(providerForm(view.container)).toBeNull();
+    // The providers stay on screen; no provider form opens by itself.
+    expect(providerForm(view.container)).not.toBeNull();
+    expect(modelForm(view.container)).toBeNull();
     await view.unmount();
   });
 
@@ -215,7 +264,7 @@ describe("StepMemory on a server that has memory search on", () => {
     await view.unmount();
   });
 
-  test("a failed test shows the error and opens the provider form", async () => {
+  test("a failed test shows the error under the providers", async () => {
     probe = async () => UNREACHABLE;
     const view = await mount();
     expect(view.container.textContent).toContain("Could not reach the endpoint.");
@@ -236,6 +285,82 @@ describe("StepMemory on a server that has memory search on", () => {
     const view = await mount(onboarding("skipped"));
     expect(tests).toEqual([]);
     expect(buttonText(view.container, "Test current setup")).toBeDefined();
+    await view.unmount();
+  });
+});
+
+describe("StepMemory provider choice", () => {
+  test("marks the setup in use and offers Local beside the presets", async () => {
+    const view = await mount(onboarding("todo", LOCAL_IN_USE));
+    const local = providerOption(view.container, "Local");
+    expect(local?.getAttribute("aria-checked")).toBe("true");
+    expect(local?.textContent).toContain("In use");
+    expect(providerOption(view.container, "OpenRouter")?.textContent).not.toContain("In use");
+    // Local is in use: no switch test, only the test of the server's setup.
+    await click(local);
+    expect(tests).toEqual([{ preset: "existing" }]);
+    await view.unmount();
+  });
+
+  test("picking OpenRouter with a step 3 key tests and saves it at once", async () => {
+    presence = { OPENROUTER_API_KEY: true };
+    const view = await mount(onboarding("todo", LOCAL_IN_USE));
+    expect(tests).toEqual([{ preset: "existing" }]);
+    // No wait for the typing debounce: the pick commits.
+    await click(providerOption(view.container, "OpenRouter"));
+    expect(tests).toEqual([{ preset: "existing" }, OPENROUTER_REQUEST]);
+    expect(view.container.textContent).toContain("Memory works.");
+
+    // Back to Local (in use here), then OpenRouter again: it tests again.
+    await click(providerOption(view.container, "Local"));
+    await click(providerOption(view.container, "OpenRouter"));
+    expect(tests).toEqual([{ preset: "existing" }, OPENROUTER_REQUEST, OPENROUTER_REQUEST]);
+    await view.unmount();
+  });
+
+  test("picking Local while a hosted setup runs switches back at once", async () => {
+    const view = await mount(onboarding("todo", OPENROUTER_IN_USE));
+    const openrouter = providerOption(view.container, "OpenRouter");
+    expect(openrouter?.getAttribute("aria-checked")).toBe("true");
+    expect(openrouter?.textContent).toContain("In use");
+    await click(providerOption(view.container, "Local"));
+    expect(tests).toEqual([{ preset: "existing" }, { preset: "existing", restoreDefault: true }]);
+    expect(view.container.textContent).toContain("Switch back to Local");
+    expect(view.container.textContent).toContain("Memory works.");
+    // Continue keeps the pass of the switch: no second test.
+    await act(async () => {
+      await continueAction?.();
+    });
+    expect(tests).toHaveLength(2);
+    await view.unmount();
+  });
+
+  test("a failed switch to Local shows the error, and Continue tests it again", async () => {
+    const view = await mount(onboarding("todo", OPENROUTER_IN_USE));
+    probe = async (body) => (body.restoreDefault ? UNREACHABLE : PASS);
+    await click(providerOption(view.container, "Local"));
+    expect(view.container.textContent).toContain("Could not reach the endpoint.");
+    probe = async () => PASS;
+    await act(async () => {
+      await continueAction?.();
+    });
+    expect(tests.at(-1)).toEqual({ preset: "existing", restoreDefault: true });
+    await view.unmount();
+  });
+
+  test("Change model opens the form of the preset in use without a test", async () => {
+    presence = { OPENROUTER_API_KEY: true };
+    const view = await mount(onboarding("todo", OPENROUTER_IN_USE));
+    expect(modelForm(view.container)).toBeNull();
+    await click(buttonText(view.container, "Change model"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    });
+    expect(modelForm(view.container)).not.toBeNull();
+    // The model in use is picked, and opening the form tests nothing.
+    const picked = modelForm(view.container)?.querySelector('[aria-checked="true"]');
+    expect(picked?.textContent).toContain("Gemini Embedding 2");
+    expect(tests).toEqual([{ preset: "existing" }]);
     await view.unmount();
   });
 });

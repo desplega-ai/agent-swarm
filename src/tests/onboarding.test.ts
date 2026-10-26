@@ -17,7 +17,12 @@ import {
   OnboardingStateSchema,
   updateOnboardingAiFromCodexDevice,
 } from "../be/onboarding";
-import { _resetAutoReloadForTests, handleCore } from "../http/core";
+import {
+  __resetInjectedEnvTracking,
+  _resetAutoReloadForTests,
+  handleCore,
+  loadGlobalConfigsIntoEnv,
+} from "../http/core";
 import { handleOnboarding } from "../http/onboarding";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { telemetry } from "../telemetry";
@@ -32,6 +37,8 @@ const ENV_KEYS = [
   "EMBEDDING_API_KEY",
   "EMBEDDING_API_BASE_URL",
   "EMBEDDING_MODEL",
+  "EMBEDDING_QUERY_PREFIX",
+  "EMBEDDING_DOCUMENT_PREFIX",
   "GITHUB_TOKEN",
   "GITLAB_TOKEN",
   "BITBUCKET_TOKEN",
@@ -380,25 +387,29 @@ describe("onboarding state", () => {
       dimensions: 512,
       model: null,
       local: false,
+      provider: null,
+      localDefault: null,
     });
     expect((await getState()).steps.connect.status).toBe("done");
   });
 
   test("embedding signals name the model and say whether the endpoint is local", async () => {
-    const cases: Array<[string | undefined, boolean]> = [
-      ["http://tei:80/v1", true],
-      ["http://localhost:8080/v1", true],
-      ["http://127.0.0.1:8091/v1", true],
-      ["http://10.0.4.2/v1", true],
-      ["http://[::1]:8080/v1", true],
-      ["https://api.openai.com/v1", false],
-      ["https://openrouter.ai/api/v1", false],
-      ["http://[2001:db8::1]/v1", false],
-      [undefined, false],
+    const cases: Array<[string | undefined, boolean, string]> = [
+      ["http://tei:80/v1", true, "local"],
+      ["http://localhost:8080/v1", true, "local"],
+      ["http://127.0.0.1:8091/v1", true, "local"],
+      ["http://10.0.4.2/v1", true, "local"],
+      ["http://[::1]:8080/v1", true, "local"],
+      ["https://api.openai.com/v1", false, "openai"],
+      ["https://openrouter.ai/api/v1", false, "openrouter"],
+      ["https://ai-gateway.vercel.sh/v1", false, "vercel"],
+      ["https://my-resource.services.ai.azure.com/openai/v1", false, "azure"],
+      ["http://[2001:db8::1]/v1", false, "custom"],
+      [undefined, false, "openai"],
     ];
     process.env.EMBEDDING_API_KEY = "local-tei";
     process.env.EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5";
-    for (const [baseUrl, local] of cases) {
+    for (const [baseUrl, local, provider] of cases) {
       if (baseUrl === undefined) delete process.env.EMBEDDING_API_BASE_URL;
       else process.env.EMBEDDING_API_BASE_URL = baseUrl;
       const body = (await (await request("/api/onboarding")).json()) as {
@@ -411,6 +422,9 @@ describe("onboarding state", () => {
           dimensions: 512,
           model: "nomic-ai/nomic-embed-text-v1.5",
           local,
+          provider,
+          // The environment is the deployment's: a local endpoint is its local default.
+          localDefault: local ? { model: "nomic-ai/nomic-embed-text-v1.5" } : null,
         },
       });
       // The signal never carries the key or the URL.
@@ -1306,5 +1320,184 @@ describe("onboarding memory probe", () => {
       method: "existing",
       errorClass: null,
     });
+  });
+});
+
+describe("onboarding memory: the deployment's local setup", () => {
+  const NOMIC = "nomic-ai/nomic-embed-text-v1.5";
+
+  /** The bundled install: a local endpoint, its model, a key, and nomic's task prefixes. */
+  function setDeploymentEnv(localUrl: string) {
+    process.env.EMBEDDING_API_BASE_URL = localUrl;
+    process.env.EMBEDDING_MODEL = NOMIC;
+    process.env.EMBEDDING_API_KEY = "local-tei";
+    process.env.EMBEDDING_QUERY_PREFIX = "search_query: ";
+    process.env.EMBEDDING_DOCUMENT_PREFIX = "search_document: ";
+  }
+
+  async function storedEmbeddingRows(): Promise<Record<string, string>> {
+    const rows = await getSwarmConfigs({ scope: "global" });
+    return Object.fromEntries(
+      rows.filter((row) => row.key.startsWith("EMBEDDING_")).map((row) => [row.key, row.value]),
+    );
+  }
+
+  async function embeddingSignals(): Promise<Record<string, unknown>> {
+    const body = (await (await request("/api/onboarding")).json()) as {
+      signals: { embeddings: Record<string, unknown> };
+    };
+    return body.signals.embeddings;
+  }
+
+  test("a hosted save stores empty prefixes over the local model's prefixes", async () => {
+    const hosted = startEmbeddingServer(() => embeddingResponse(512));
+    setDeploymentEnv("http://tei:80/v1");
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: hosted.baseUrl,
+          model: "test-embedding-model",
+          apiKey: "example-hosted-key",
+        },
+      });
+      expect(await response.json()).toMatchObject({ ok: true });
+      expect(await storedEmbeddingRows()).toEqual({
+        EMBEDDING_API_BASE_URL: hosted.baseUrl,
+        EMBEDDING_MODEL: "test-embedding-model",
+        EMBEDDING_API_KEY: "example-hosted-key",
+        EMBEDDING_QUERY_PREFIX: "",
+        EMBEDDING_DOCUMENT_PREFIX: "",
+      });
+
+      // The deployment's own model keeps its prefixes: the empty rows go.
+      const same = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "custom", baseUrl: hosted.baseUrl, model: NOMIC, apiKey: "example-key" },
+      });
+      expect(await same.json()).toMatchObject({ ok: true });
+      const rows = await storedEmbeddingRows();
+      expect(rows.EMBEDDING_QUERY_PREFIX).toBeUndefined();
+      expect(rows.EMBEDDING_DOCUMENT_PREFIX).toBeUndefined();
+    } finally {
+      hosted.server.stop(true);
+    }
+  });
+
+  test("without deployment prefixes a hosted save stores none", async () => {
+    const hosted = startEmbeddingServer(() => embeddingResponse(512));
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: hosted.baseUrl,
+          model: "test-embedding-model",
+          apiKey: "example-hosted-key",
+        },
+      });
+      expect(await response.json()).toMatchObject({ ok: true });
+      expect(Object.keys(await storedEmbeddingRows()).sort()).toEqual([
+        "EMBEDDING_API_BASE_URL",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_MODEL",
+      ]);
+    } finally {
+      hosted.server.stop(true);
+    }
+  });
+
+  test("a stored hosted setup keeps the local default, and restore brings it back", async () => {
+    let localHits = 0;
+    const local = startEmbeddingServer(() => {
+      localHits += 1;
+      return embeddingResponse(512);
+    });
+    setDeploymentEnv(local.baseUrl);
+    try {
+      // A hosted setup stored earlier, applied as the boot or a reload does.
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "EMBEDDING_API_BASE_URL",
+        value: "https://openrouter.ai/api/v1",
+      });
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "EMBEDDING_MODEL",
+        value: "google/gemini-embedding-2",
+      });
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "EMBEDDING_API_KEY",
+        value: "example-openrouter-key",
+        isSecret: true,
+      });
+      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_QUERY_PREFIX", value: "" });
+      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_DOCUMENT_PREFIX", value: "" });
+      await loadGlobalConfigsIntoEnv(true);
+      resetEmbeddingProvider();
+
+      expect(await embeddingSignals()).toEqual({
+        configured: true,
+        dimensions: 512,
+        model: "google/gemini-embedding-2",
+        local: false,
+        provider: "openrouter",
+        localDefault: { model: NOMIC },
+      });
+
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing", restoreDefault: true },
+      });
+      expect(await response.json()).toMatchObject({ ok: true, dimensions: 512 });
+      // It tested the deployment's endpoint, not the stored one.
+      expect(localHits).toBe(1);
+      expect(await storedEmbeddingRows()).toEqual({});
+      expect(process.env.EMBEDDING_API_BASE_URL).toBe(local.baseUrl);
+      expect(process.env.EMBEDDING_QUERY_PREFIX).toBe("search_query: ");
+      expect(await embeddingSignals()).toMatchObject({
+        model: NOMIC,
+        local: true,
+        provider: "local",
+        localDefault: { model: NOMIC },
+      });
+      expect((await getState()).steps.memory).toMatchObject({ status: "done", method: "existing" });
+    } finally {
+      local.server.stop(true);
+      __resetInjectedEnvTracking();
+    }
+  });
+
+  test("a failed restore test keeps the stored setup", async () => {
+    const local = startEmbeddingServer(() => new Response("model loading", { status: 503 }));
+    setDeploymentEnv(local.baseUrl);
+    try {
+      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_MODEL", value: "stored-model" });
+      await loadGlobalConfigsIntoEnv(true);
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing", restoreDefault: true },
+      });
+      expect(await response.json()).toMatchObject({ ok: false });
+      expect(await storedEmbeddingRows()).toEqual({ EMBEDDING_MODEL: "stored-model" });
+      expect(process.env.EMBEDDING_MODEL).toBe("stored-model");
+    } finally {
+      local.server.stop(true);
+      __resetInjectedEnvTracking();
+    }
+  });
+
+  test("restoreDefault needs the existing preset", async () => {
+    const response = await request("/api/onboarding/memory", {
+      method: "POST",
+      body: {
+        preset: "custom",
+        baseUrl: "https://embeddings.example.com/v1",
+        restoreDefault: true,
+      },
+    });
+    expect(response.status).toBe(400);
   });
 });

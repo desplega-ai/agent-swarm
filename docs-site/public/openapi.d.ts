@@ -12754,6 +12754,11 @@ export interface paths {
                                     dimensions: number;
                                     model: string | null;
                                     local: boolean;
+                                    /** @enum {string|null} */
+                                    provider: "local" | "openai" | "openrouter" | "vercel" | "azure" | "custom" | null;
+                                    localDefault: {
+                                        model: string;
+                                    } | null;
                                 };
                                 integrations: {
                                     slack: boolean;
@@ -12989,6 +12994,11 @@ export interface paths {
                                     dimensions: number;
                                     model: string | null;
                                     local: boolean;
+                                    /** @enum {string|null} */
+                                    provider: "local" | "openai" | "openrouter" | "vercel" | "azure" | "custom" | null;
+                                    localDefault: {
+                                        model: string;
+                                    } | null;
                                 };
                                 integrations: {
                                     slack: boolean;
@@ -13068,6 +13078,7 @@ export interface paths {
                         apiKey?: string;
                         /** @enum {string} */
                         reuseKey?: "OPENAI_API_KEY" | "OPENROUTER_API_KEY";
+                        restoreDefault?: boolean;
                     };
                 };
             };

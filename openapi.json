@@ -31737,13 +31737,44 @@
                             },
                             "local": {
                               "type": "boolean"
+                            },
+                            "provider": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "enum": [
+                                "local",
+                                "openai",
+                                "openrouter",
+                                "vercel",
+                                "azure",
+                                "custom",
+                                null
+                              ]
+                            },
+                            "localDefault": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "model": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "model"
+                              ]
                             }
                           },
                           "required": [
                             "configured",
                             "dimensions",
                             "model",
-                            "local"
+                            "local",
+                            "provider",
+                            "localDefault"
                           ]
                         },
                         "integrations": {
@@ -32865,13 +32896,44 @@
                             },
                             "local": {
                               "type": "boolean"
+                            },
+                            "provider": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "enum": [
+                                "local",
+                                "openai",
+                                "openrouter",
+                                "vercel",
+                                "azure",
+                                "custom",
+                                null
+                              ]
+                            },
+                            "localDefault": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "model": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "model"
+                              ]
                             }
                           },
                           "required": [
                             "configured",
                             "dimensions",
                             "model",
-                            "local"
+                            "local",
+                            "provider",
+                            "localDefault"
                           ]
                         },
                         "integrations": {
@@ -33039,6 +33101,9 @@
                       "OPENAI_API_KEY",
                       "OPENROUTER_API_KEY"
                     ]
+                  },
+                  "restoreDefault": {
+                    "type": "boolean"
                   }
                 },
                 "required": [

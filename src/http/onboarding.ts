@@ -2,12 +2,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import OpenAI from "openai";
 import { getAutomationSetupStates } from "../be/automation-preflight";
 import { getAgentHarnessProviders, getReadyAgentCounts, getTaskById } from "../be/db";
-import { getEmbeddingProvider } from "../be/memory";
+import { getEmbeddingProvider, resetEmbeddingProvider } from "../be/memory";
 import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
 import {
+  EMBEDDING_PREFIX_KEYS,
+  type MemoryConfigChange,
   OnboardingActionSchema,
   type OnboardingErrorClass,
   type OnboardingMemoryPreset,
+  type OnboardingMemoryProvider,
   type OnboardingMemoryRequest,
   OnboardingMemoryRequestSchema,
   type OnboardingMemoryResponse,
@@ -26,7 +29,11 @@ import { splitCredentialPool } from "../utils/credentials";
 import { isPrivateAddress } from "../utils/egress-guard";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import { ensureConfigAdmin } from "./config";
-import { scheduleIntegrationsReload } from "./core";
+import {
+  getDeploymentEnvValue,
+  loadGlobalConfigsIntoEnv,
+  scheduleIntegrationsReload,
+} from "./core";
 import { route } from "./route-def";
 import { rollupCredStatusForProvider } from "./status";
 import { jsonError } from "./utils";
@@ -51,6 +58,53 @@ function isLocalEndpoint(baseUrl: string | undefined): boolean {
   if (isPrivateAddress(host)) return true;
   // IPv6 literals hold colons: only a plain name can be a single label.
   return !host.includes(".") && !host.includes(":");
+}
+
+/** The hosts of the hosted memory presets (the UI's preset list). */
+const PRESET_HOSTS: ReadonlyArray<[OnboardingMemoryProvider, (host: string) => boolean]> = [
+  ["openai", (host) => host === "api.openai.com"],
+  ["openrouter", (host) => host === "openrouter.ai"],
+  ["vercel", (host) => host === "ai-gateway.vercel.sh"],
+  [
+    "azure",
+    (host) =>
+      [".services.ai.azure.com", ".openai.azure.com", ".cognitiveservices.azure.com"].some(
+        (suffix) => host.endsWith(suffix),
+      ),
+  ],
+];
+
+/** Where an embeddings endpoint runs, from its host. Unset means the hosted OpenAI default. */
+function embeddingsProvider(baseUrl: string | undefined): OnboardingMemoryProvider {
+  if (isLocalEndpoint(baseUrl)) return "local";
+  if (!baseUrl?.trim()) return "openai";
+  let host: string;
+  try {
+    host = new URL(baseUrl.trim()).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return "custom";
+  }
+  return PRESET_HOSTS.find(([, matches]) => matches(host))?.[0] ?? "custom";
+}
+
+/**
+ * The deployment environment's own embeddings setup, before a stored config
+ * replaced it: its base URL, model, and key. The key can also be a stored
+ * OPENAI_API_KEY, as for the setup the server runs.
+ */
+function deploymentEmbeddings() {
+  return {
+    baseUrl: getDeploymentEnvValue("EMBEDDING_API_BASE_URL"),
+    model: getDeploymentEnvValue("EMBEDDING_MODEL") ?? "text-embedding-3-small",
+    apiKey: getDeploymentEnvValue("EMBEDDING_API_KEY") ?? process.env.OPENAI_API_KEY,
+  };
+}
+
+/** The local setup of the deployment environment, when it has a local endpoint and a key. */
+function localDefault(): { model: string } | null {
+  const deployment = deploymentEmbeddings();
+  if (!isLocalEndpoint(deployment.baseUrl) || !deployment.apiKey) return null;
+  return { model: deployment.model };
 }
 
 async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> {
@@ -83,6 +137,8 @@ async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> 
       // The model id and the host class only: never the key or the URL.
       model: embeddingsOn ? (process.env.EMBEDDING_MODEL ?? "text-embedding-3-small") : null,
       local: embeddingsOn && isLocalEndpoint(process.env.EMBEDDING_API_BASE_URL),
+      provider: embeddingsOn ? embeddingsProvider(process.env.EMBEDDING_API_BASE_URL) : null,
+      localDefault: localDefault(),
     },
     integrations: {
       slack: integrations.slack === "configured",
@@ -222,10 +278,31 @@ function memoryErrorMessage(errorClass: OnboardingErrorClass, status?: number): 
 async function updateMemoryState(
   preset: OnboardingMemoryPreset,
   result: { ok: true } | { ok: false; errorClass: OnboardingErrorClass },
-  saveConfig?: { baseUrl: string; model: string; apiKey?: string },
+  change?: MemoryConfigChange,
 ): Promise<void> {
-  const configSaved = await updateOnboardingMemory(preset, result, saveConfig);
-  if (configSaved) scheduleIntegrationsReload();
+  const configChanged = await updateOnboardingMemory(preset, result, change);
+  if (!configChanged) return;
+  if (change?.kind === "restore") {
+    // Apply the deployment setup before the response: the next GET shows it
+    // in use. Memory search stays on, so the reload starts no backfill.
+    await loadGlobalConfigsIntoEnv(true);
+    resetEmbeddingProvider();
+  }
+  scheduleIntegrationsReload();
+}
+
+/**
+ * The task prefixes of a saved setup. A prefix of the deployment environment
+ * belongs to its model (nomic needs `search_query: `): another model gets an
+ * empty stored prefix over it, and the same model gets the deployment prefix
+ * back (the stored row is deleted).
+ */
+function prefixChanges(model: string): Extract<MemoryConfigChange, { kind: "save" }>["prefixes"] {
+  const sameModel = model === getDeploymentEnvValue("EMBEDDING_MODEL");
+  return EMBEDDING_PREFIX_KEYS.filter((key) => getDeploymentEnvValue(key)).map((key) => ({
+    key,
+    value: sameModel ? null : "",
+  }));
 }
 
 async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<OnboardingMemoryResponse> {
@@ -234,23 +311,30 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
     body.preset === "openai" || body.preset === "openrouter" || body.preset === "vercel"
       ? MEMORY_PRESETS[body.preset]
       : undefined;
+  // `existing` tests the setup the server runs. With `restoreDefault` it
+  // tests the deployment environment's setup, which applies once the stored
+  // config is gone.
+  const restore = body.preset === "existing" && body.restoreDefault === true;
+  const deployment = restore ? deploymentEmbeddings() : null;
   const baseUrl =
     body.preset === "existing"
-      ? process.env.EMBEDDING_API_BASE_URL
+      ? deployment
+        ? deployment.baseUrl
+        : process.env.EMBEDDING_API_BASE_URL
       : (body.baseUrl ??
         preset?.baseUrl ??
         process.env.EMBEDDING_API_BASE_URL ??
         "https://api.openai.com/v1");
   const model =
     body.preset === "existing"
-      ? (process.env.EMBEDDING_MODEL ?? "text-embedding-3-small")
+      ? (deployment?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small")
       : (body.model ?? preset?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small");
 
   // Preset `existing` tests the server's own EMBEDDING_API_BASE_URL. When it is
   // set, the URL is operator config, not request input, so a private endpoint
   // (a local TEI at http://tei:80/v1) is allowed. Every URL that can come from
   // the request still passes the SSRF check.
-  const configuredEndpoint = body.preset === "existing" && !!process.env.EMBEDDING_API_BASE_URL;
+  const configuredEndpoint = body.preset === "existing" && !!baseUrl;
   let endpoint: URL;
   try {
     endpoint = configuredEndpoint
@@ -277,7 +361,9 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
     !explicitKey && body.reuseKey && canReuseKey ? process.env[body.reuseKey] : undefined;
   const implicitKey =
     body.preset === "existing"
-      ? (process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY)
+      ? deployment
+        ? deployment.apiKey
+        : (process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY)
       : undefined;
   // Test and save the same pool member.
   const apiKey = splitCredentialPool(explicitKey ?? reusedKey ?? implicitKey ?? "")[0];
@@ -324,11 +410,15 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
       body.preset,
       { ok: true },
       body.preset === "existing"
-        ? undefined
+        ? restore
+          ? { kind: "restore" }
+          : undefined
         : {
+            kind: "save",
             baseUrl: baseUrl ?? "https://api.openai.com/v1",
             model,
             apiKey: keyToSave,
+            prefixes: prefixChanges(model),
           },
     );
     return { ok: true, dimensions, latencyMs };

@@ -4032,6 +4032,18 @@ export type OnboardingMemoryPreset =
   | "custom"
   | "existing";
 
+/**
+ * Where the embeddings endpoint runs: `local` (the server or its private
+ * network), the hosted preset whose host it calls, or `custom`.
+ */
+export type OnboardingMemoryProvider =
+  | "local"
+  | "openai"
+  | "openrouter"
+  | "vercel"
+  | "azure"
+  | "custom";
+
 export type OnboardingIntegrationMethod =
   | "slack"
   | "github"
@@ -4079,6 +4091,13 @@ export interface OnboardingSignals {
     model?: string | null;
     /** The endpoint runs on the server or its private network. Absent on an older API. */
     local?: boolean;
+    /** Where the endpoint runs, from its host. Null while off, absent on an older API. */
+    provider?: OnboardingMemoryProvider | null;
+    /**
+     * The local setup of the deployment (its environment), also while a stored
+     * hosted setup replaces it. Null without one, absent on an older API.
+     */
+    localDefault?: { model: string } | null;
   };
   integrations: {
     slack: boolean;
@@ -4120,6 +4139,11 @@ export interface OnboardingMemoryTestRequest {
   model?: string;
   apiKey?: string;
   reuseKey?: "OPENAI_API_KEY" | "OPENROUTER_API_KEY";
+  /**
+   * With preset `existing`: test the deployment's own setup, and when it
+   * works, delete the stored embeddings config so it applies again.
+   */
+  restoreDefault?: boolean;
 }
 
 export interface OnboardingMemoryTestResponse {
