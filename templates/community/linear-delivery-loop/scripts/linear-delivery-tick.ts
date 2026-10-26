@@ -276,6 +276,8 @@ export type Action =
       reason: string;
       ping?: { sha: string };
       post?: { sha: string; teams: string[] };
+      /** Turn off GitHub auto-merge first: it was armed for an earlier head. */
+      disarm?: boolean;
     }
   | {
       type: "dispatch";
@@ -589,6 +591,15 @@ function stateAction(input: DecideInput): Action {
           reason:
             pr.mergeStateStatus === "DIRTY" ? "merge conflict" : `failed: ${failed.join(", ")}`,
           text: `mergeStateStatus ${pr.mergeStateStatus}; failed required checks: ${failed.join(", ") || "none"}`,
+        };
+      }
+      // A merge-queue fix pushed a head the agent never reviewed: disarm and run CI and the gate again.
+      if (!agentApprovedHead(input, pr)) {
+        return {
+          type: "setState",
+          to: "pendingCi",
+          reason: "no agent approval for the head",
+          disarm: pr.autoMergeEnabled || undefined,
         };
       }
       if (pr.autoMergeEnabled || pr.inMergeQueue)
@@ -1558,6 +1569,24 @@ async function runTick(t: TickContext): Promise<TickOutput> {
       case "escalate":
         return escalate(issue, project, next, action.reason);
       case "setState": {
+        if (action.disarm) {
+          if (!pr) return escalate(issue, project, next, "no PR to disarm");
+          try {
+            const data = await github.graphql(
+              `mutation LdlDisarm($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { number } } }`,
+              { id: pr.id },
+            );
+            if (!get(data, "disablePullRequestAutoMerge.pullRequest"))
+              throw new Error("no PR returned");
+          } catch (err) {
+            return escalate(
+              issue,
+              project,
+              next,
+              `GitHub refused to disable auto-merge: ${err instanceof Error ? err.message : err}`,
+            );
+          }
+        }
         await setState(issue, action.to);
         if (action.ping) {
           await slack(

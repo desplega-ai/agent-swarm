@@ -495,17 +495,25 @@ const SPEC_ROWS: Array<[string, DecideInput, Expect]> = [
   ],
   [
     "spec: Approved / auto-merge not armed, not queued -> arm auto-merge",
-    input({ issue: issue("approved"), pr: pr() }),
+    input({ issue: issue("approved"), pr: pr(), record: record(reviewedHead) }),
     { type: "armAutoMerge" },
   ],
   [
     "spec: Approved / auto-merge armed -> nothing",
-    input({ issue: issue("approved"), pr: pr({ autoMergeEnabled: true }) }),
+    input({
+      issue: issue("approved"),
+      pr: pr({ autoMergeEnabled: true }),
+      record: record(reviewedHead),
+    }),
     { type: "skip" },
   ],
   [
     "spec: Approved / PR in the merge queue -> nothing",
-    input({ issue: issue("approved"), pr: pr({ inMergeQueue: true }) }),
+    input({
+      issue: issue("approved"),
+      pr: pr({ inMergeQueue: true }),
+      record: record(reviewedHead),
+    }),
     { type: "skip" },
   ],
   [
@@ -763,6 +771,61 @@ describe("decide(): review sequences", () => {
     expect(decide(input({ issue: issue("ownerReview"), pr: pushed, record: after }))).toMatchObject(
       { type: "setState", to: "pendingCi" },
     );
+  });
+
+  test("Approved, a merge-queue fix pushes a new head: green CI never arms it unreviewed", () => {
+    const approvedA = record(reviewedHead);
+    expect(
+      decide(
+        input({
+          issue: issue("approved"),
+          pr: pr({ mergeStateStatus: "DIRTY" }),
+          record: approvedA,
+        }),
+      ),
+    ).toMatchObject({ type: "dispatch", fixKind: "mq" });
+    const pushedB = pr({ headSha: "b2", reviews: [approvedReview] });
+    expect(
+      decide(input({ issue: issue("approved"), pr: pushedB, record: approvedA })),
+    ).toMatchObject({
+      type: "setState",
+      to: "pendingCi",
+      reason: "no agent approval for the head",
+    });
+    expect(
+      decide(input({ issue: issue("pendingCi"), pr: pushedB, record: approvedA })),
+    ).toMatchObject({ type: "dispatch", kind: "review" });
+    const approvedB = record({
+      agentReview: { sha: "b2", taskId: "r2", verdict: { ...approvedVerdict, headSha: "b2" } },
+    });
+    expect(
+      decide(input({ issue: issue("approved"), pr: pushedB, record: approvedB })),
+    ).toMatchObject({
+      type: "armAutoMerge",
+    });
+  });
+
+  test("Approved, auto-merge armed for an earlier head: disarm and back to Pending CI", () => {
+    const action = decide(
+      input({
+        issue: issue("approved"),
+        pr: pr({ headSha: "b2", autoMergeEnabled: true }),
+        record: record(reviewedHead),
+      }),
+    );
+    expect(action).toMatchObject({ type: "setState", to: "pendingCi", disarm: true });
+  });
+
+  test("Approved with the review gate off arms auto-merge without an agent verdict", () => {
+    expect(
+      decide(
+        input({
+          issue: issue("approved"),
+          pr: pr({ headSha: "b2" }),
+          config: { ...CONFIG, reviewGate: false },
+        }),
+      ),
+    ).toMatchObject({ type: "armAutoMerge" });
   });
 
   test.each([
@@ -1483,6 +1546,7 @@ function githubFixture(
       };
     }
     if (op === "LdlArm") return { enablePullRequestAutoMerge: { pullRequest: { number: 1 } } };
+    if (op === "LdlDisarm") return { disablePullRequestAutoMerge: { pullRequest: { number: 1 } } };
     return {};
   };
 }
@@ -1506,7 +1570,14 @@ const EVERY_STATE_PRS = [4, 5, 6, 7, 8, 9].map((n) => ({ number: n, branch: `eng
 
 describe("tick shell", () => {
   test("dry run makes zero writes and plans one action per issue", async () => {
+    const kv = new Map<string, KvRow>();
+    kv.set(`${NAMESPACE}/issue/i9`, {
+      value: { ...emptyRecord(), ...reviewedHead },
+      createdAt: 0,
+      updatedAt: 0,
+    });
     const f = fakeCtx({
+      kv,
       linear: linearFixture(EVERY_STATE),
       github: githubFixture(EVERY_STATE_PRS),
     });
@@ -1675,6 +1746,33 @@ describe("tick shell", () => {
     ]);
     const saved = kv.get(`${NAMESPACE}/issue/i5`)?.value as IssueRecord;
     expect(saved.attempts).toEqual(emptyRecord().attempts);
+  });
+
+  test("Approved on an unreviewed head: disable auto-merge, then move to Pending CI", async () => {
+    const kv = new Map<string, KvRow>();
+    kv.set(`${NAMESPACE}/issue/i9`, {
+      value: { ...emptyRecord(), agentReview: { ...reviewedHead.agentReview, sha: "older" } },
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const f = fakeCtx({
+      kv,
+      linear: linearFixture([{ id: "i9", key: "ENG-9", state: "Approved" }]),
+      github: githubFixture([
+        {
+          number: 9,
+          branch: "eng-9-work",
+          detail: { autoMergeRequest: { enabledAt: "2026-10-26T09:00:00Z" } },
+        },
+      ]),
+    });
+    const out = await tick({ dryRun: false, config: TICK_CONFIG }, f.ctx);
+    expect(out.projects[0]?.issues[0]).toMatchObject({ action: "setState" });
+    const mutations = f.writes.filter((w) => w.kind.endsWith(":mutation"));
+    expect(mutations).toEqual([
+      { kind: "github:mutation", detail: "LdlDisarm" },
+      { kind: "linear:mutation", detail: "LdlSetState" },
+    ]);
   });
 
   test("live dispatch: one task under the issue key, attempt spent, state moved", async () => {
