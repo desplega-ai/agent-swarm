@@ -23,6 +23,7 @@ import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import {
+  useRequestComposition,
   useTask,
   useTaskContext,
   useTaskSessionLogs,
@@ -55,6 +56,7 @@ import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
+import { compositionCallsOf, deriveCallCompositions } from "@/lib/request-composition";
 import { useUsageDetails } from "@/lib/session-log-usage-details";
 import { parseStructuredOutput } from "@/lib/structured-output";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
@@ -460,10 +462,43 @@ export default function TaskDetailPage() {
   // The rail's cache hit, from the session log this page already loads. Only
   // with the log's usage details on.
   const [usageDetails] = useUsageDetails();
-  const callUsage = useMemo(
-    () => (usageDetails ? sumItemCallUsage(normalizeSessionLogs(sessionLogs ?? []).items) : null),
+  const usageItems = useMemo(
+    () => (usageDetails ? normalizeSessionLogs(sessionLogs ?? []).items : null),
     [sessionLogs, usageDetails],
   );
+  const callUsage = useMemo(() => (usageItems ? sumItemCallUsage(usageItems) : null), [usageItems]);
+  // The request composition: the rail's panel and each cache chip's bar.
+  // Also only with usage details on.
+  const logSessionIds = useMemo(
+    () => [...new Set((sessionLogs ?? []).map((log) => log.sessionId))],
+    [sessionLogs],
+  );
+  const { data: manifests } = useRequestComposition(id!, {
+    enabled: usageDetails && logSessionIds.length > 0,
+    sessionIds: logSessionIds,
+    live: taskLive,
+  });
+  const compositions = useMemo(() => {
+    if (!usageItems || !manifests?.length) return null;
+    const sessionOfRecord = new Map((sessionLogs ?? []).map((log) => [log.id, log.sessionId]));
+    const compactions = (contextData?.snapshots ?? [])
+      .filter((snap) => snap.eventType === "compaction")
+      .map((snap) => ({ sessionId: snap.sessionId, t: Date.parse(snap.createdAt) }));
+    const derived = deriveCallCompositions(
+      compositionCallsOf(usageItems, (recId) => sessionOfRecord.get(recId)),
+      manifests,
+      compactions,
+    );
+    const latest = manifests.reduce((a, b) =>
+      b.createdAt > a.createdAt || (b.createdAt === a.createdAt && b.seq > a.seq) ? b : a,
+    );
+    const rail = {
+      manifest: latest,
+      anchor: derived.anchors.get(latest.id),
+      sessions: new Set(manifests.map((m) => m.sessionId)).size,
+    };
+    return { byCall: derived.byCall, rail };
+  }, [usageItems, manifests, sessionLogs, contextData]);
 
   if (isLoading) {
     return (
@@ -522,6 +557,7 @@ export default function TaskDetailPage() {
       context={contextData}
       contextLoading={contextLoading}
       callUsage={callUsage}
+      composition={compositions?.rail}
     />
   );
 
@@ -628,6 +664,7 @@ export default function TaskDetailPage() {
       <SessionLogViewer
         logs={sessionLogs ?? []}
         compactionSnapshots={contextData?.snapshots}
+        callCompositions={compositions?.byCall}
         isRunning={taskIsRunning(task.status)}
         steeringMessages={steeringForViewer}
         scrollElement={scrollElement}

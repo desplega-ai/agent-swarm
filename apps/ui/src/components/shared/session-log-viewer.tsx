@@ -43,6 +43,11 @@ import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code";
 import { JsonTree } from "@/components/shared/json-tree";
 import {
+  CallCompositionBar,
+  CallCompositionContext,
+  useCallComposition,
+} from "@/components/shared/request-composition-bar";
+import {
   type EndSummary,
   formatDur,
   type SessionLogView,
@@ -72,6 +77,7 @@ import {
 } from "@/components/steering/steering-message-chips";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -88,6 +94,7 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";
+import type { CallComposition } from "@/lib/request-composition";
 import { useUsageDetails } from "@/lib/session-log-usage-details";
 import { statusLabel } from "@/lib/status-labels";
 import { cn, normalizeNewlines } from "@/lib/utils";
@@ -1656,39 +1663,93 @@ function callUsageLabel(usage: CallUsage): string {
   return parts.join(" · ");
 }
 
-/** One LLM call's cache hit and prompt size. The tooltip has the raw numbers. */
+/**
+ * One LLM call's cache hit and prompt size. The tooltip has the raw numbers.
+ * With the session's request composition, a click opens the call's prompt
+ * split as a stacked bar.
+ */
 function CallUsageChip({ usage, className }: { usage: CallUsage; className?: string }) {
   const ratio = cacheHitRatio(usage);
   const reported = callUsageCacheReported(usage);
   const label = callUsageLabel(usage);
+  const composition = useCallComposition(usage.callId);
+  const chipClass = cn(
+    "inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono text-meta tabular-nums",
+    cacheHitTone(ratio, reported),
+    className,
+  );
+  const content = (
+    <>
+      <Gauge className="size-2.5" aria-hidden />
+      {label}
+    </>
+  );
+  if (!composition) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("cursor-help", chipClass)}>{content}</span>
+        </TooltipTrigger>
+        <CallUsageTooltip usage={usage} />
+      </Tooltip>
+    );
+  }
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={cn(
-            "inline-flex shrink-0 cursor-help items-center gap-1 whitespace-nowrap font-mono text-meta tabular-nums",
-            cacheHitTone(ratio, reported),
-            className,
-          )}
-        >
-          <Gauge className="size-2.5" aria-hidden />
-          {label}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent className="font-mono text-meta tabular-nums">
-        <div>Cache read {usage.cacheReadTokens.toLocaleString()}</div>
-        <div>Cache write {usage.cacheWriteTokens.toLocaleString()}</div>
-        <div>Uncached input {usage.uncachedInputTokens.toLocaleString()}</div>
-        <div>
-          Output {usage.outputTokens.toLocaleString()}
-          {usage.reasoningTokens ? ` (reasoning ${usage.reasoningTokens.toLocaleString()})` : ""}
-        </div>
-        <div className="mt-1 opacity-80">
-          Hit = cache read ÷ prompt ({usage.promptTokens.toLocaleString()})
-          {usage.sidechain ? " · sub-agent call" : ""}
-        </div>
-      </TooltipContent>
-    </Tooltip>
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            {/* biome-ignore lint/a11y/useSemanticElements: the chip often sits in a row's own <button>, and a button cannot nest */}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`${label}. Show prompt composition`}
+              data-testid="call-usage-chip"
+              // The chip sits on rows that toggle on click.
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.currentTarget.click();
+              }}
+              className={cn(
+                "cursor-pointer rounded-sm underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                chipClass,
+              )}
+            >
+              {content}
+            </span>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <CallUsageTooltip usage={usage} />
+      </Tooltip>
+      <PopoverContent
+        align="end"
+        className="w-80 p-3 font-mono text-meta tabular-nums"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <CallCompositionBar composition={composition} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CallUsageTooltip({ usage }: { usage: CallUsage }) {
+  return (
+    <TooltipContent className="font-mono text-meta tabular-nums">
+      <div>Cache read {usage.cacheReadTokens.toLocaleString()}</div>
+      <div>Cache write {usage.cacheWriteTokens.toLocaleString()}</div>
+      <div>Uncached input {usage.uncachedInputTokens.toLocaleString()}</div>
+      <div>
+        Output {usage.outputTokens.toLocaleString()}
+        {usage.reasoningTokens ? ` (reasoning ${usage.reasoningTokens.toLocaleString()})` : ""}
+      </div>
+      <div className="mt-1 opacity-80">
+        Hit = cache read ÷ prompt ({usage.promptTokens.toLocaleString()})
+        {usage.sidechain ? " · sub-agent call" : ""}
+      </div>
+    </TooltipContent>
   );
 }
 
@@ -2609,11 +2670,19 @@ interface SessionLogViewerProps {
    * virtualization and scroll behave the same either way.
    */
   trace?: boolean;
+  /**
+   * Each LLM call's request composition, by call id. A cache chip with one
+   * opens the call's prompt split on click.
+   */
+  callCompositions?: ReadonlyMap<string, CallComposition>;
 }
+
+const NO_COMPOSITIONS: ReadonlyMap<string, CallComposition> = new Map();
 
 export function SessionLogViewer({
   logs,
   compactionSnapshots,
+  callCompositions = NO_COMPOSITIONS,
   className,
   isRunning,
   steeringMessages,
@@ -3440,235 +3509,242 @@ export function SessionLogViewer({
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div
-        className={cn(
-          "flex min-h-0 flex-col rounded-lg border border-border bg-card",
-          // Page mode: `overflow-clip` keeps the rounded corners without making
-          // the card a scroll container, which would stop the toolbar and the
-          // footer from sticking in the caller's scroller.
-          pageMode ? "overflow-clip" : "overflow-hidden",
-          className,
-        )}
-        style={pageStyle}
-      >
-        <Tabs
-          value={activeView}
-          onValueChange={(value) => setActiveView(value === "agents" ? "agents" : "logs")}
-          className="min-h-0 flex-1 gap-0"
+      <CallCompositionContext.Provider value={callCompositions}>
+        <div
+          className={cn(
+            "flex min-h-0 flex-col rounded-lg border border-border bg-card",
+            // Page mode: `overflow-clip` keeps the rounded corners without making
+            // the card a scroll container, which would stop the toolbar and the
+            // footer from sticking in the caller's scroller.
+            pageMode ? "overflow-clip" : "overflow-hidden",
+            className,
+          )}
+          style={pageStyle}
         >
-          {/* Toolbar */}
-          <div
-            ref={toolbarRef}
-            className={cn(
-              "flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2",
-              // Page mode: stick under the caller's sticky bar. The opaque card
-              // color under the same tint keeps rows from showing through.
-              pageMode &&
-                "sticky top-[var(--log-sticky-top,0px)] z-10 bg-card bg-linear-to-b from-muted/30 to-muted/30",
-            )}
+          <Tabs
+            value={activeView}
+            onValueChange={(value) => setActiveView(value === "agents" ? "agents" : "logs")}
+            className="min-h-0 flex-1 gap-0"
           >
-            {showTabList && (
-              <TabsList
-                variant="line"
-                className={cn("shrink-0 rounded-none p-0", touchTargets ? "h-11" : "h-[30px]")}
-              >
-                <TabsTrigger
-                  value="logs"
-                  className={cn(
-                    "flex-none rounded-none px-2 text-xs",
-                    touchTargets ? "h-11" : "h-7",
-                  )}
+            {/* Toolbar */}
+            <div
+              ref={toolbarRef}
+              className={cn(
+                "flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2",
+                // Page mode: stick under the caller's sticky bar. The opaque card
+                // color under the same tint keeps rows from showing through.
+                pageMode &&
+                  "sticky top-[var(--log-sticky-top,0px)] z-10 bg-card bg-linear-to-b from-muted/30 to-muted/30",
+              )}
+            >
+              {showTabList && (
+                <TabsList
+                  variant="line"
+                  className={cn("shrink-0 rounded-none p-0", touchTargets ? "h-11" : "h-[30px]")}
                 >
-                  Logs
-                </TabsTrigger>
-                {subagents.length > 0 && (
                   <TabsTrigger
-                    value="agents"
+                    value="logs"
                     className={cn(
                       "flex-none rounded-none px-2 text-xs",
                       touchTargets ? "h-11" : "h-7",
                     )}
                   >
-                    Agents{" "}
-                    <span className="font-mono text-meta tabular-nums">({subagents.length})</span>
+                    Logs
                   </TabsTrigger>
-                )}
-              </TabsList>
-            )}
-            {onViewChange && activeView === "logs" && (
-              <SegmentedControl
-                size="sm"
-                aria-label="Log view"
-                value={view}
-                onValueChange={changeView}
-                options={LOG_VIEW_OPTIONS}
-                // Touch: 44 px options inside the control's border and padding.
-                className={cn(touchTargets && "h-12.5")}
-              />
-            )}
-            {activeView === "logs" && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant={usageDetails ? "secondary" : "ghost"}
-                    size="xs"
-                    aria-pressed={usageDetails}
-                    aria-label="Usage details"
-                    onClick={() => setUsageDetails(!usageDetails)}
-                    className={cn("shrink-0", touchTargets ? "h-11 min-w-11" : "h-7")}
-                  >
-                    <Gauge aria-hidden />
-                    <span className="max-sm:hidden">Usage</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {usageDetails ? "Hide" : "Show"} each LLM call's cache hit and prompt size
-                </TooltipContent>
-              </Tooltip>
-            )}
-            {activeView === "logs" && (
-              <div
-                className={cn(
-                  "relative ml-auto",
-                  // With the view switch, a phone gives the filter the rest of
-                  // the row, so the toolbar stays one row.
-                  onViewChange && "min-w-24 flex-1 sm:flex-none",
-                )}
-              >
-                <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Filter…"
-                  aria-label="Filter session log"
-                  // Touch: 16 px text, or iOS Safari zooms the page on focus.
-                  className={cn(
-                    "pl-7 sm:w-52",
-                    onViewChange ? "w-full" : "w-40",
-                    touchTargets ? "h-11 text-base" : "h-[30px] text-xs",
+                  {subagents.length > 0 && (
+                    <TabsTrigger
+                      value="agents"
+                      className={cn(
+                        "flex-none rounded-none px-2 text-xs",
+                        touchTargets ? "h-11" : "h-7",
+                      )}
+                    >
+                      Agents{" "}
+                      <span className="font-mono text-meta tabular-nums">({subagents.length})</span>
+                    </TabsTrigger>
                   )}
+                </TabsList>
+              )}
+              {onViewChange && activeView === "logs" && (
+                <SegmentedControl
+                  size="sm"
+                  aria-label="Log view"
+                  value={view}
+                  onValueChange={changeView}
+                  options={LOG_VIEW_OPTIONS}
+                  // Touch: 44 px options inside the control's border and padding.
+                  className={cn(touchTargets && "h-12.5")}
                 />
-              </div>
-            )}
-          </div>
+              )}
+              {activeView === "logs" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant={usageDetails ? "secondary" : "ghost"}
+                      size="xs"
+                      aria-pressed={usageDetails}
+                      aria-label="Usage details"
+                      onClick={() => setUsageDetails(!usageDetails)}
+                      className={cn("shrink-0", touchTargets ? "h-11 min-w-11" : "h-7")}
+                    >
+                      <Gauge aria-hidden />
+                      <span className="max-sm:hidden">Usage</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {usageDetails ? "Hide" : "Show"} each LLM call's cache hit and prompt size
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {activeView === "logs" && (
+                <div
+                  className={cn(
+                    "relative ml-auto",
+                    // With the view switch, a phone gives the filter the rest of
+                    // the row, so the toolbar stays one row.
+                    onViewChange && "min-w-24 flex-1 sm:flex-none",
+                  )}
+                >
+                  <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Filter…"
+                    aria-label="Filter session log"
+                    // Touch: 16 px text, or iOS Safari zooms the page on focus.
+                    className={cn(
+                      "pl-7 sm:w-52",
+                      onViewChange ? "w-full" : "w-40",
+                      touchTargets ? "h-11 text-base" : "h-[30px] text-xs",
+                    )}
+                  />
+                </div>
+              )}
+            </div>
 
-          <TabsContent
-            value="logs"
-            forceMount
-            className={cn(
-              "flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden",
-              pageMode && LOG_FOCUS_RING,
-            )}
-            {...logPanelProps}
-          >
-            {/* Body */}
-            <div className="relative flex min-h-0 flex-1">
-              <div
-                ref={parentRef}
-                className={cn(
-                  "min-h-0 min-w-0 flex-1 px-3",
-                  // Page mode: no scroller here. `overflow-x-clip` (not
-                  // `hidden`) leaves the y axis visible, so the body stays out
-                  // of the scroll chain.
-                  pageMode
-                    ? "overflow-x-clip"
-                    : cn(
-                        "overflow-y-auto overflow-x-hidden [overflow-anchor:none]",
-                        LOG_FOCUS_RING,
-                      ),
-                )}
-                {...(pageMode ? {} : { tabIndex: 0, role: "region", "aria-label": "Session log" })}
-              >
-                {/* Page mode: keep the browser's scroll anchoring off the rows,
+            <TabsContent
+              value="logs"
+              forceMount
+              className={cn(
+                "flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden",
+                pageMode && LOG_FOCUS_RING,
+              )}
+              {...logPanelProps}
+            >
+              {/* Body */}
+              <div className="relative flex min-h-0 flex-1">
+                <div
+                  ref={parentRef}
+                  className={cn(
+                    "min-h-0 min-w-0 flex-1 px-3",
+                    // Page mode: no scroller here. `overflow-x-clip` (not
+                    // `hidden`) leaves the y axis visible, so the body stays out
+                    // of the scroll chain.
+                    pageMode
+                      ? "overflow-x-clip"
+                      : cn(
+                          "overflow-y-auto overflow-x-hidden [overflow-anchor:none]",
+                          LOG_FOCUS_RING,
+                        ),
+                  )}
+                  {...(pageMode
+                    ? {}
+                    : { tabIndex: 0, role: "region", "aria-label": "Session log" })}
+                >
+                  {/* Page mode: keep the browser's scroll anchoring off the rows,
                     as the own scroller does. The virtualizer corrects the
                     scroll position itself when rows measure. */}
-                <div ref={contentRef} className={cn(pageMode && "[overflow-anchor:none]")}>
-                  {visibleRows.length === 0 ? (
-                    <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
-                      {rows.length === 0 ? "No session data" : "No matching events"}
-                    </div>
-                  ) : virtualize ? (
-                    <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-                      {virtualItems.map((vi) => {
-                        const row = visibleRows[vi.index];
-                        if (!row) return null;
-                        const style: CSSProperties = {
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width: "100%",
-                          // `start` counts from the scroller's top, the list
-                          // from its own (page mode offsets it by the margin).
-                          transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
-                        };
-                        return (
-                          <div
-                            key={vi.key}
-                            ref={virtualizer.measureElement}
-                            data-index={vi.index}
-                            data-row-id={row.id}
-                            style={style}
-                          >
+                  <div ref={contentRef} className={cn(pageMode && "[overflow-anchor:none]")}>
+                    {visibleRows.length === 0 ? (
+                      <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
+                        {rows.length === 0 ? "No session data" : "No matching events"}
+                      </div>
+                    ) : virtualize ? (
+                      <div
+                        className="relative w-full"
+                        style={{ height: virtualizer.getTotalSize() }}
+                      >
+                        {virtualItems.map((vi) => {
+                          const row = visibleRows[vi.index];
+                          if (!row) return null;
+                          const style: CSSProperties = {
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            width: "100%",
+                            // `start` counts from the scroller's top, the list
+                            // from its own (page mode offsets it by the margin).
+                            transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
+                          };
+                          return (
+                            <div
+                              key={vi.key}
+                              ref={virtualizer.measureElement}
+                              data-index={vi.index}
+                              data-row-id={row.id}
+                              style={style}
+                            >
+                              {renderRow(row)}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col">
+                        {visibleRows.map((row) => (
+                          <div key={row.id} data-row-id={row.id}>
                             {renderRow(row)}
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col">
-                      {visibleRows.map((row) => (
-                        <div key={row.id} data-row-id={row.id}>
-                          {renderRow(row)}
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {pageMode && (
+                    // Page mode: a zero-height anchor sticks the pill above the
+                    // stuck footer and the caller's bottom bar.
+                    <div className="sticky bottom-[calc(var(--log-sticky-bottom,0px)+var(--log-tail-h,0px)+1rem)] z-10 h-0">
+                      {jumpPill}
                     </div>
                   )}
                 </div>
-                {pageMode && (
-                  // Page mode: a zero-height anchor sticks the pill above the
-                  // stuck footer and the caller's bottom bar.
-                  <div className="sticky bottom-[calc(var(--log-sticky-bottom,0px)+var(--log-tail-h,0px)+1rem)] z-10 h-0">
-                    {jumpPill}
-                  </div>
+
+                {/* Minimap rail */}
+                {visibleRows.length > 0 && (
+                  <MinimapRail
+                    rows={visibleRows}
+                    onJump={jumpTo}
+                    stickyHeight={minimapStickyHeight}
+                  />
                 )}
+
+                {/* Jump-to-latest pill */}
+                {!pageMode && jumpPill}
               </div>
 
-              {/* Minimap rail */}
-              {visibleRows.length > 0 && (
-                <MinimapRail
-                  rows={visibleRows}
-                  onJump={jumpTo}
-                  stickyHeight={minimapStickyHeight}
-                />
-              )}
-
-              {/* Jump-to-latest pill */}
-              {!pageMode && jumpPill}
-            </div>
-
-            <div
-              ref={tailRef}
-              className={cn(
-                "shrink-0",
-                stickyTail && "sticky bottom-[var(--log-sticky-bottom,0px)] z-10 bg-card",
-              )}
-            >
-              {/* Queued steering, pinned between the stream and the footer. Rows
+              <div
+                ref={tailRef}
+                className={cn(
+                  "shrink-0",
+                  stickyTail && "sticky bottom-[var(--log-sticky-bottom,0px)] z-10 bg-card",
+                )}
+              >
+                {/* Queued steering, pinned between the stream and the footer. Rows
                   leave this box on their own as soon as the worker delivers them. */}
-              <QueuedSteeringBox messages={pendingSteering} touchTargets={touchTargets} />
+                <QueuedSteeringBox messages={pendingSteering} touchTargets={touchTargets} />
 
-              {/* Footer */}
-              <RunningFooter count={eventCount} isRunning={isRunning} status={status} />
-            </div>
-          </TabsContent>
-          {subagents.length > 0 && (
-            <TabsContent value="agents" className="min-h-0 flex-1">
-              <SubagentWaterfall runs={subagents} />
+                {/* Footer */}
+                <RunningFooter count={eventCount} isRunning={isRunning} status={status} />
+              </div>
             </TabsContent>
-          )}
-        </Tabs>
-      </div>
+            {subagents.length > 0 && (
+              <TabsContent value="agents" className="min-h-0 flex-1">
+                <SubagentWaterfall runs={subagents} />
+              </TabsContent>
+            )}
+          </Tabs>
+        </div>
+      </CallCompositionContext.Provider>
     </TooltipProvider>
   );
 }
