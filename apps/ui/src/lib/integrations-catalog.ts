@@ -258,7 +258,7 @@ function openAICompatibleIntegrations(): IntegrationDef[] {
           placeholder: "sk-...",
           helpText: `${p.displayName} API key for \`${p.id}/<model>\` on pi and opencode.${aliases}${
             p.keyNote ? ` ${p.keyNote}` : ""
-          } Add one key at a time. Agents rotate across the keys.`,
+          } Agents rotate across the keys.`,
           credentialPool: true,
           aliasKeys: [...p.aliasEnvVars],
         },
@@ -1022,7 +1022,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         isSecret: true,
         placeholder: "sk-ant-oat01-...",
         helpText:
-          "Run `claude setup-token` (Claude Code CLI) to generate. Takes precedence over ANTHROPIC_API_KEY when both are set. Add one token at a time. Agents rotate across the tokens.",
+          "Run `claude setup-token` (Claude Code CLI) to generate. Takes precedence over ANTHROPIC_API_KEY when both are set. Agents rotate across the tokens.",
         credentialPool: true,
         affectsRestart: true,
       },
@@ -1033,7 +1033,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         isSecret: true,
         placeholder: "sk-ant-...",
         helpText:
-          "Anthropic API key. Used when no Claude Code OAuth token is set. Add one key at a time. Agents rotate across the keys.",
+          "Anthropic API key. Used when no Claude Code OAuth token is set. Agents rotate across the keys.",
         credentialPool: true,
         affectsRestart: true,
       },
@@ -1057,7 +1057,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         required: true,
         isSecret: true,
         placeholder: "sk-or-...",
-        helpText: "OpenRouter API key. Add one key at a time. Agents rotate across the keys.",
+        helpText: "OpenRouter API key. Agents rotate across the keys.",
         credentialPool: true,
         affectsRestart: true,
       },

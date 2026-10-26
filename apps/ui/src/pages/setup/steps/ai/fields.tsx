@@ -1,5 +1,6 @@
 import { Check, Copy } from "lucide-react";
 import { type ComponentProps, type ReactNode, useState } from "react";
+import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
 import { AutosaveSecretField } from "@/components/onboarding/autosave-secret-field";
 import { PoolKeysList, type PoolKeysListProps } from "@/components/onboarding/pool-keys-list";
 import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
@@ -7,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAutosave } from "@/hooks/use-autosave";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 
@@ -132,7 +134,8 @@ export function SecretKeyField({
 /**
  * A step 3 credential pool: the saved keys and an add field (`PoolKeysList`)
  * under its label. The label focuses the add field. `poolHint` is off when
- * one line above a group of fields says it.
+ * one line above a group of fields says it. An API older than
+ * `POOL_KEYS_MIN_VERSION` gets the comma-separated `SecretKeyField` instead.
  */
 export function PoolKeyField({
   label,
@@ -141,6 +144,7 @@ export function PoolKeyField({
   info,
   helper,
   poolHint = true,
+  legacy,
   ...list
 }: Omit<PoolKeysListProps, "envVar" | "label" | "describedBy"> & {
   label: string;
@@ -149,7 +153,35 @@ export function PoolKeyField({
   info?: ReactNode;
   helper?: ReactNode;
   poolHint?: boolean;
+  /** The comma-separated field for an older API: its saved state and its save. */
+  legacy: { saved: boolean; onSave: (value: string) => Promise<void> };
 }) {
+  const support = usePoolKeysSupport();
+  if (support === "legacy") {
+    return (
+      <SecretKeyField
+        id={list.inputId}
+        label={label}
+        envKey={envKey}
+        logo={logo}
+        info={info}
+        helper={helper}
+        poolHint={poolHint}
+        placeholder={list.placeholder}
+        rule={list.rule}
+        pool
+        saved={legacy.saved}
+        onSave={legacy.onSave}
+      />
+    );
+  }
+  if (support === "pending") {
+    return (
+      <KeyField id={list.inputId} label={label} envKey={envKey} logo={logo} info={info}>
+        <Skeleton className="h-9 w-full" />
+      </KeyField>
+    );
+  }
   const help =
     helper && poolHint ? (
       <>

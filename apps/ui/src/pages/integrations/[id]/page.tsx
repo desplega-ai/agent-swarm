@@ -36,6 +36,7 @@ import {
   useEnvPresence,
   useReloadConfig,
 } from "@/api/hooks/use-integrations-meta";
+import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
 import { useInstallRemoteSkill } from "@/api/hooks/use-skills";
 import type { SwarmConfig } from "@/api/types";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
@@ -223,7 +224,9 @@ function IntegrationDetailInner({
     }));
   }
 
-  const dirtyEntries = computeDirtyEntries(allFields, state, configs);
+  // An older API has no pool-keys route: its pool fields save with the page.
+  const poolLists = usePoolKeysSupport() !== "legacy";
+  const dirtyEntries = computeDirtyEntries(allFields, state, configs, { poolLists });
   const hasDirty = dirtyEntries.length > 0;
 
   const handleSave = useCallback(async () => {
@@ -670,6 +673,7 @@ function FieldGroup({
   onClearField,
   bare,
 }: FieldGroupProps) {
+  const poolLists = usePoolKeysSupport() !== "legacy";
   const content = (
     <div className="space-y-5">
       {fields.map((f) => {
@@ -689,7 +693,9 @@ function FieldGroup({
               onUpdate(f.key, { value: SECRET_MASK_SENTINEL, markedForReplace: false })
             }
             // A pool field removes its keys one at a time in its own list.
-            onClearExisting={existing && !f.credentialPool ? () => onClearField(f.key) : undefined}
+            onClearExisting={
+              existing && !(f.credentialPool && poolLists) ? () => onClearField(f.key) : undefined
+            }
           />
         );
       })}

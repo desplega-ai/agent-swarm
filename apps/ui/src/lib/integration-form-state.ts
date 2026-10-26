@@ -64,15 +64,17 @@ export function reconcileWithStored(
 //   - Secret + no existing row + non-empty value typed → send.
 //   - Non-secret + value differs from the stored value → send.
 // A credential pool field is never dirty: its list adds and removes one key
-// at a time through `/api/config/pool-keys`, outside the page Save.
+// at a time through `/api/config/pool-keys`, outside the page Save. With
+// `poolLists: false` (an API without that route) a pool is a plain secret.
 export function computeDirtyEntries(
   fields: IntegrationField[],
   state: DirtyState,
   configs: SwarmConfig[],
+  { poolLists = true }: { poolLists?: boolean } = {},
 ): UpsertConfigEntry[] {
   const entries: UpsertConfigEntry[] = [];
   for (const f of fields) {
-    if (f.credentialPool) continue;
+    if (f.credentialPool && poolLists) continue;
     const current = state[f.key];
     if (!current) continue;
     const existing = findConfigForKey(configs, f.key);

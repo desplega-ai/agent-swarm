@@ -1,4 +1,5 @@
 import { Check, Copy } from "lucide-react";
+import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
 import type { SwarmConfig } from "@/api/types";
 import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-secret-field";
 import { PoolKeysList } from "@/components/onboarding/pool-keys-list";
@@ -13,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -45,6 +47,16 @@ const POOL_RULES: Record<string, SecretRule> = {
   ANTHROPIC_API_KEY: KEY_RULES.anthropicKey,
 };
 
+// An API older than `POOL_KEYS_MIN_VERSION` keeps the comma-separated field.
+// A key never has a space or a line break inside. Each key of a credential
+// pool is checked on its own: the server splits on commas and trims each key.
+function poolSpaceWarning(v: string): string | null {
+  const keys = v.split(",").map((s) => s.trim());
+  return keys.some((key) => /\s/.test(key))
+    ? "Remove the space or line break from the key. Separate keys with commas."
+    : null;
+}
+
 interface FieldRendererProps {
   field: IntegrationField;
   existingConfig?: SwarmConfig;
@@ -71,6 +83,9 @@ export function FieldRenderer({
   onClearExisting,
 }: FieldRendererProps) {
   const { copied, copy } = useCopyToClipboard();
+  const poolSupport = usePoolKeysSupport();
+  const poolList = field.credentialPool === true && poolSupport !== "legacy";
+  const legacyPool = field.credentialPool === true && poolSupport === "legacy";
   const inputId = `field-${field.key}`;
   const handleCopyKey = () => copy(field.key);
 
@@ -82,10 +97,20 @@ export function FieldRenderer({
     field.isSecret === true && (existingConfig !== undefined || writeOnlyValuePresent);
   const showMaskedReadOnly = existingMasked && !markedForReplace;
 
+  const poolSize =
+    legacyPool && value.includes(",")
+      ? value
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean).length
+      : 0;
+
   // Skip warnings while showing the server-side mask sentinel: that value
   // isn't a real user input and would always fail prefix checks.
   const warningText =
-    value && value !== SECRET_MASK_SENTINEL ? (FORMAT_WARNINGS[field.key]?.(value) ?? null) : null;
+    value && value !== SECRET_MASK_SENTINEL
+      ? (FORMAT_WARNINGS[field.key]?.(value) ?? (legacyPool ? poolSpaceWarning(value) : null))
+      : null;
 
   // Source chip: distinguishes "set via deployment env only" from "persisted in
   // swarm_config". When both are true the DB row was already loaded into env at
@@ -161,17 +186,21 @@ export function FieldRenderer({
         )}
       </div>
 
-      {field.credentialPool ? (
+      {poolList ? (
         // A pool adds and removes one key at a time, on its own routes: it is
         // not part of the page Save, and it has no Clear.
-        <PoolKeysList
-          envVar={field.key}
-          inputId={inputId}
-          label={field.label}
-          rule={POOL_RULES[field.key]}
-          placeholder={field.placeholder}
-          describedBy={field.helpText ? `${inputId}-help` : undefined}
-        />
+        poolSupport === "supported" ? (
+          <PoolKeysList
+            envVar={field.key}
+            inputId={inputId}
+            label={field.label}
+            rule={POOL_RULES[field.key]}
+            placeholder={field.placeholder}
+            describedBy={`${inputId}-help`}
+          />
+        ) : (
+          <Skeleton className="h-9 w-full" />
+        )
       ) : showMaskedReadOnly ? (
         <div className="flex gap-2 items-center">
           <Input
@@ -216,11 +245,28 @@ export function FieldRenderer({
         </>
       )}
 
+      {poolSize > 1 && (
+        <div className="text-[10px] text-muted-foreground">
+          <span className="inline-flex items-center rounded-md bg-muted/60 px-1.5 py-0.5 font-medium">
+            {poolSize} keys in pool
+          </span>
+        </div>
+      )}
+
       {warningText && <p className="text-xs text-status-active-strong/90">{warningText}</p>}
 
-      {field.helpText && (
+      {(field.helpText || field.credentialPool) && (
         <p id={`${inputId}-help`} className="text-xs text-muted-foreground">
-          {field.helpText}
+          {[
+            field.helpText,
+            field.credentialPool
+              ? legacyPool
+                ? "Separate them with commas."
+                : "Add one at a time."
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" ")}
         </p>
       )}
     </div>

@@ -101,4 +101,11 @@ describe("credential pool fields", () => {
     };
     expect(computeDirtyEntries(anthropicFields, state, [])).toEqual([]);
   });
+
+  test("an API without the pool-keys route saves a typed pool with the page", () => {
+    const state = { ANTHROPIC_API_KEY: { value: "sk-ant-api03-first,sk-ant-api03-secnd" } };
+    expect(computeDirtyEntries(anthropicFields, state, [], { poolLists: false })).toMatchObject([
+      { key: "ANTHROPIC_API_KEY", value: "sk-ant-api03-first,sk-ant-api03-secnd", isSecret: true },
+    ]);
+  });
 });

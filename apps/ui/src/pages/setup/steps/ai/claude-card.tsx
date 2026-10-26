@@ -33,7 +33,7 @@ const TOKEN_TERMS =
 
 export function ClaudeCard({ presence, onSaved, ...card }: AiCardProps) {
   const [tab, setTab] = useState<ClaudeTab>("token");
-  const { markSaved, isSaved } = useSetupSave(presence);
+  const { save, markSaved, isSaved } = useSetupSave(presence);
 
   const field = (t: ClaudeTab, placeholder: string, helper: ReactNode, info?: string) => (
     <PoolKeyField
@@ -49,6 +49,13 @@ export function ClaudeCard({ presence, onSaved, ...card }: AiCardProps) {
         onSaved(t === "token" ? "claude_setup_token" : "claude_api_key");
       }}
       onRemoved={(list) => markSaved(TAB_KEY[t], list.keys.length > 0)}
+      legacy={{
+        saved: isSaved(TAB_KEY[t]),
+        onSave: async (value) => {
+          await save([{ key: TAB_KEY[t], value, isSecret: true }]);
+          onSaved(t === "token" ? "claude_setup_token" : "claude_api_key");
+        },
+      }}
     />
   );
 

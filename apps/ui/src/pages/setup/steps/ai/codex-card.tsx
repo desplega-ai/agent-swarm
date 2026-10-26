@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { CODEX_ACCOUNTS_QUERY_KEY } from "@/api/hooks/use-codex-accounts";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
+import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
 import type { CodexDeviceStartResponse } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { CodexAccountsList } from "@/components/onboarding/codex-accounts-list";
@@ -43,6 +44,7 @@ export function CodexCard({
   const queryClient = useQueryClient();
   const { config } = useConfig();
   const [flow, setFlow] = useState<CodexFlow>({ phase: "idle" });
+  const accountsSupport = usePoolKeysSupport();
   // Remounts the CLI fallback open after a failed start, and keeps it open.
   const [cliKey, setCliKey] = useState(0);
 
@@ -134,12 +136,15 @@ export function CodexCard({
       subtitle="Device code login. No terminal needed."
       saved={saved}
     >
-      <CodexAccountsList
-        onRemoved={(accounts) => {
-          // The last account is gone: the card offers the first sign-in again.
-          if (accounts.length === 0 && flow.phase === "complete") setFlow({ phase: "idle" });
-        }}
-      />
+      {/* An older API has no account list route. */}
+      {accountsSupport === "supported" ? (
+        <CodexAccountsList
+          onRemoved={(accounts) => {
+            // The last account is gone: the card offers the first sign-in again.
+            if (accounts.length === 0 && flow.phase === "complete") setFlow({ phase: "idle" });
+          }}
+        />
+      ) : null}
 
       {flow.phase === "idle" ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

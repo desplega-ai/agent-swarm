@@ -4,6 +4,7 @@ import {
   providerKeyVars,
 } from "@desplega/model-catalog";
 import { useState } from "react";
+import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
 import type { PoolKeysResponse } from "@/api/types";
 import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-secret-field";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
@@ -50,6 +51,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
   // An alias (HELMCODE_API_NAN) counts: the runner copies it into the canonical var.
   const directSaved = (p: (typeof DIRECT_PROVIDERS)[number]) => providerKeyVars(p).some(isSaved);
   const [mode, setMode] = useState<OpenMode | null>(null);
+  const poolSupport = usePoolKeysSupport();
 
   const gatewaySet = Boolean(presence[BASE_URL]);
   const currentUrl = globalConfigValue(configs, BASE_URL);
@@ -90,6 +92,21 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
       onAdded={() => {
         markSaved(OR_KEY, true);
         void afterOpenRouterAdd();
+      }}
+      legacy={{
+        saved: isSaved(OR_KEY),
+        onSave: async (value) => {
+          if (activeMode === "gateway") {
+            await save([{ key: OR_KEY, value, isSecret: true }]);
+            if (currentUrl || gatewaySet) onSaved("openai_gateway");
+            return;
+          }
+          await save([
+            { key: OR_KEY, value, isSecret: true },
+            ...(gatewaySet ? [{ key: BASE_URL, value: "", isSecret: false }] : []),
+          ]);
+          onSaved("openrouter");
+        },
       }}
     />
   );
@@ -137,7 +154,11 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
       {/* No onboarding method names the registry routes: a verified pi/opencode worker completes the step. */}
       <CollapsibleSection title="Direct keys instead" titleClassName={DISCLOSURE_TITLE}>
         <div className="space-y-3 pt-1.5">
-          <p className="text-xs text-muted-foreground">{POOL_LIST_HINT}</p>
+          <p className="text-xs text-muted-foreground">
+            {poolSupport === "legacy"
+              ? "Each field takes more than one key: separate them with commas."
+              : POOL_LIST_HINT}
+          </p>
           <PoolKeyField
             inputId="setup-ai-deepseek-key"
             label="DeepSeek API key"
@@ -151,6 +172,13 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
             onAdded={() => {
               markSaved(DS_KEY, true);
               onSaved("deepseek");
+            }}
+            legacy={{
+              saved: isSaved(DS_KEY),
+              onSave: async (value) => {
+                await save([{ key: DS_KEY, value, isSecret: true }]);
+                onSaved("deepseek");
+              },
             }}
           />
           {DIRECT_PROVIDERS.map((p) => (
@@ -173,6 +201,12 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
               }
               onRemoved={onPoolRemoved(p.envVar)}
               onAdded={() => markSaved(p.envVar, true)}
+              legacy={{
+                saved: directSaved(p),
+                onSave: async (value) => {
+                  await save([{ key: p.envVar, value, isSecret: true }]);
+                },
+              }}
             />
           ))}
         </div>
