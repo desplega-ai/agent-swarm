@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { OnboardingStepId } from "@/api/types";
 
 /**
@@ -14,11 +14,18 @@ export type HexyMood = "welcome" | "idle" | "busy" | "done";
 type Pose = Exclude<HexyMood, "idle">;
 
 /**
+ * One image of a crew member: the portrait (`base`), a mood pose, or an idle
+ * frame (`blink`: eyes closed, `glance`: looks at the step beside it).
+ */
+type Frame = "base" | "blink" | "glance" | Pose;
+
+/**
  * One crew member of the landing page (the hexagon jelly mascots) per setup
  * step, with a one-line tip. The portraits are 240 px WebP copies of the
  * landing's `public/yolo/agents/c/<id>.webp`, shown at 120 px. `poses` lists
  * the extra images in `public/setup-crew/<id>-<pose>.webp`. A mood with no
- * pose shows the portrait.
+ * pose shows the portrait. Every member also has the idle frames
+ * `<id>-blink.webp` and `<id>-glance.webp`.
  */
 interface CrewMember {
   /** File name under `public/setup-crew/`. */
@@ -100,14 +107,76 @@ const WIDE_QUERY = "(min-width: 1360px)";
 
 const SNAPPY = [0.2, 0, 0, 1] as const;
 
-/** The image file of a pose. */
-const POSE_FILE: Record<Pose, string> = { welcome: "wave", busy: "think", done: "cheer" };
+/** The file name suffix of a frame. */
+const FRAME_FILE: Record<Exclude<Frame, "base">, string> = {
+  welcome: "wave",
+  busy: "think",
+  done: "cheer",
+  blink: "blink",
+  glance: "glance",
+};
 
-function imageOf(member: CrewMember, mood: HexyMood): string {
-  const pose = mood === "idle" || !member.poses.includes(mood) ? null : mood;
-  return pose
-    ? `/setup-crew/${member.id}-${POSE_FILE[pose]}.webp`
+const IDLE_FRAMES: ReadonlyArray<Frame> = ["blink", "glance"];
+
+/** The image of a frame. A pose the member does not have shows the portrait. */
+function frameImage(member: CrewMember, frame: Frame): string {
+  const known =
+    frame !== "base" && (IDLE_FRAMES.includes(frame) || member.poses.includes(frame as Pose));
+  return known
+    ? `/setup-crew/${member.id}-${FRAME_FILE[frame as Exclude<Frame, "base">]}.webp`
     : `/setup-crew/${member.id}.webp`;
+}
+
+/**
+ * What a crew member does while the step waits, as frames and how long each
+ * one shows (ms). The loop starts with the mood's own pose and repeats. A
+ * running check (`busy`) holds its pose.
+ */
+const LOOPS: Record<HexyMood, ReadonlyArray<readonly [Frame, number]>> = {
+  idle: [
+    ["base", 3600],
+    ["blink", 450],
+    ["base", 3000],
+    ["glance", 1800],
+  ],
+  welcome: [
+    ["welcome", 2600],
+    ["base", 2400],
+    ["blink", 450],
+    ["base", 2000],
+  ],
+  done: [
+    ["done", 2600],
+    ["base", 2800],
+    ["blink", 450],
+    ["base", 2400],
+    ["glance", 1600],
+  ],
+  busy: [["busy", 0]],
+};
+
+/**
+ * The frame of the loop that shows now. Steps through the loop on timers
+ * while `animate` is true. A new loop (a mood change) starts at its first
+ * frame in the same render, so an old frame never flashes.
+ */
+function useFrameLoop(loop: ReadonlyArray<readonly [Frame, number]>, animate: boolean): Frame {
+  const [state, setState] = useState({ loop, index: 0 });
+  const current = state.loop === loop ? state : { loop, index: 0 };
+  if (current !== state) setState(current);
+  const { index } = current;
+  useEffect(() => {
+    if (!animate || loop.length < 2) return;
+    const timer = window.setTimeout(
+      () =>
+        setState((prev) =>
+          prev.loop === loop ? { loop, index: (prev.index + 1) % loop.length } : prev,
+        ),
+      loop[index][1],
+    );
+    return () => window.clearTimeout(timer);
+  }, [loop, index, animate]);
+  return loop[index][0];
 }
 
 function preload(src: string) {
@@ -117,11 +186,12 @@ function preload(src: string) {
 
 /**
  * The crew member of the current step, beside the centered setup column (in
- * its left gutter) on wide screens, with the tip in a speech bubble. Hidden
- * below 1360 px. A step change swaps it with a short pop-in. A mood change
- * swaps the pose with a crossfade and a small hop. Reduced motion swaps both
- * with no movement and no fade. Place it inside a `relative` container that
- * spans the step column.
+ * its left gutter, centered in the visible height) on wide screens, with the
+ * tip in a speech bubble. Hidden below 1360 px. A step change swaps it with a
+ * short pop-in. While it shows, it floats slowly and plays its mood's loop
+ * (`LOOPS`): each frame swap is a crossfade with a small hop. Reduced motion
+ * shows the mood's pose with no movement and no fade. Place it inside a
+ * `relative` container that spans the step column.
  */
 export function HexyGuide({
   stepId,
@@ -135,19 +205,22 @@ export function HexyGuide({
   const reduceMotion = useReducedMotion() ?? false;
   const member = SETUP_CREW[stepId];
   const text = tip ?? member.tip;
-  const src = imageOf(member, mood);
+  const [wide] = useState(() => window.matchMedia?.(WIDE_QUERY).matches ?? false);
+  // Reduced motion and narrow screens (the guide is hidden) keep the mood's pose.
+  const frame = useFrameLoop(LOOPS[mood], wide && !reduceMotion);
+  const src = frameImage(member, reduceMotion ? LOOPS[mood][0][0] : frame);
 
   // Warm the cache on a wide screen, so a swap never shows an empty slot:
-  // every portrait once (about 95 KB), and the poses of the current step.
+  // every portrait once (about 95 KB), and the frames of the current step.
   useEffect(() => {
-    if (!window.matchMedia?.(WIDE_QUERY).matches) return;
-    for (const crew of Object.values(SETUP_CREW)) preload(imageOf(crew, "idle"));
-  }, []);
+    if (!wide) return;
+    for (const crew of Object.values(SETUP_CREW)) preload(frameImage(crew, "base"));
+  }, [wide]);
   useEffect(() => {
-    if (!window.matchMedia?.(WIDE_QUERY).matches) return;
+    if (!wide) return;
     const crew = SETUP_CREW[stepId];
-    for (const pose of crew.poses) preload(imageOf(crew, pose));
-  }, [stepId]);
+    for (const extra of [...crew.poses, ...IDLE_FRAMES]) preload(frameImage(crew, extra));
+  }, [stepId, wide]);
 
   const image = (
     <img
@@ -183,25 +256,32 @@ export function HexyGuide({
         {reduceMotion ? (
           <div className="absolute inset-0">{image}</div>
         ) : (
-          // Both poses stay stacked while they crossfade: no empty frame.
-          <AnimatePresence initial={false}>
-            <motion.div
-              key={src}
-              className="absolute inset-0"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{
-                opacity: 1,
-                y: 0,
-                transition: {
-                  opacity: { duration: 0.18, ease: SNAPPY },
-                  y: { type: "spring", stiffness: 520, damping: 22, mass: 0.7 },
-                },
-              }}
-              exit={{ opacity: 0, transition: { duration: 0.16, ease: SNAPPY } }}
-            >
-              {image}
-            </motion.div>
-          </AnimatePresence>
+          // A slow float keeps the guide alive between frame swaps. Both
+          // frames stay stacked while they crossfade: no empty frame.
+          <motion.div
+            className="absolute inset-0"
+            animate={{ y: [0, -4, 0] }}
+            transition={{ duration: 3.2, ease: "easeInOut", repeat: Number.POSITIVE_INFINITY }}
+          >
+            <AnimatePresence initial={false}>
+              <motion.div
+                key={src}
+                className="absolute inset-0"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                  transition: {
+                    opacity: { duration: 0.18, ease: SNAPPY },
+                    y: { type: "spring", stiffness: 520, damping: 22, mass: 0.7 },
+                  },
+                }}
+                exit={{ opacity: 0, transition: { duration: 0.16, ease: SNAPPY } }}
+              >
+                {image}
+              </motion.div>
+            </AnimatePresence>
+          </motion.div>
         )}
       </div>
     </>
@@ -212,7 +292,8 @@ export function HexyGuide({
       aria-label="Setup tip"
       className="absolute inset-y-0 right-full mr-7 hidden w-48 min-[1360px]:block"
     >
-      <div className="sticky top-10">
+      {/* Centered in the visible height of the step, also while it scrolls. */}
+      <div className="sticky top-1/2 -translate-y-1/2">
         {reduceMotion ? (
           <div key={stepId}>{content}</div>
         ) : (
