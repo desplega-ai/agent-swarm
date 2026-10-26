@@ -20,7 +20,7 @@
  * keeps bodies, not headers. Captures go to ~/.cache/probe-tool-schema-tokens
  * (path printed) and stay there for inspection.
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -47,12 +47,13 @@ const PROMPT = "Reply with the single word OK. Do not call any tools.";
 /**
  * Positive control for MCP legs: a second session that must reach a swarm
  * tool. Without it, a zero delta cannot tell "deferred" from "never connected".
- * The tool result text ("Found N agent(s) in the swarm") then appears in a
- * later request body.
+ * A later request body then carries the tool output for that call, which
+ * starts with get-swarm's success message.
  */
 const CONTROL_PROMPT =
   "Call the agent-swarm tool get-swarm exactly once, then reply with the single word DONE.";
-const CONTROL_MARKER = "in the swarm";
+const CONTROL_TOOL = "get_swarm";
+const CONTROL_SUCCESS = /Found \d+ agent\(s\) in the swarm/;
 
 interface Leg {
   label: string;
@@ -136,11 +137,84 @@ export function countSwarmTools(names: string[], swarm: Set<string>): number {
   return names.filter((name) => swarm.has(bareToolName(name))).length;
 }
 
-/** Whether any captured request carries the control tool's result. */
+/** Text of a tool output: a string, or the text parts of a content array. */
+function outputText(output: unknown): string {
+  if (typeof output === "string") return output;
+  if (Array.isArray(output)) return output.map(outputText).join("");
+  if (output && typeof output === "object" && "text" in output) return String(output.text);
+  return "";
+}
+
+/**
+ * Whether a request body carries a successful get-swarm result: a tool output
+ * (`function_call_output` on Responses, a `tool` message on chat completions)
+ * whose call id belongs to a get-swarm call. A schema that only describes
+ * get-swarm does not count.
+ */
+export function hasControlResult(body: unknown): boolean {
+  const calls = new Set<string>();
+  const outputs: Array<{ id: string; text: string }> = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const item = node as Record<string, unknown>;
+    if (item.type === "function_call" && typeof item.name === "string") {
+      if (bareToolName(item.name) === CONTROL_TOOL) calls.add(String(item.call_id));
+    }
+    if (Array.isArray(item.tool_calls)) {
+      for (const call of item.tool_calls) {
+        if (bareToolName(String(call?.function?.name ?? "")) === CONTROL_TOOL) {
+          calls.add(String(call.id));
+        }
+      }
+    }
+    if (item.type === "function_call_output") {
+      outputs.push({ id: String(item.call_id), text: outputText(item.output) });
+    }
+    if (item.role === "tool") {
+      outputs.push({ id: String(item.tool_call_id), text: outputText(item.content) });
+    }
+    for (const child of Object.values(item)) walk(child);
+  };
+  walk(body);
+  return outputs.some((out) => calls.has(out.id) && CONTROL_SUCCESS.test(out.text));
+}
+
+/** Whether any captured request carries a successful get-swarm result. */
 export function controlReached(capDir: string): boolean {
   return readdirSync(capDir)
     .filter((f) => f.startsWith("req-"))
-    .some((f) => readFileSync(join(capDir, f), "utf8").includes(CONTROL_MARKER));
+    .some((f) => {
+      try {
+        return hasControlResult(JSON.parse(readFileSync(join(capDir, f), "utf8")));
+      } catch {
+        return false;
+      }
+    });
+}
+
+/**
+ * Creates `<name>-cap` and `<name>-home` under `root` and runs `fn` with them.
+ * The home is scratch (CODEX_HOME, config) and is removed on success and on
+ * error; the capture dir is the probe's output and stays.
+ */
+export async function withSessionDirs<T>(
+  root: string,
+  name: string,
+  fn: (capDir: string, home: string) => Promise<T>,
+): Promise<T> {
+  const capDir = join(root, `${name}-cap`);
+  const home = join(root, `${name}-home`);
+  mkdirSync(capDir, { recursive: true });
+  mkdirSync(home, { recursive: true });
+  try {
+    return await fn(capDir, home);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
 /** The last provider-reported input token count in a (streamed) response body. */
@@ -249,8 +323,12 @@ async function runAdapterLeg(
     logFile: join(cwd, "session.jsonl"),
     env: process.env as Record<string, string>,
   });
-  const result = await session.waitForCompletion();
-  if (result.isError) throw new Error(result.failureReason ?? "session failed");
+  try {
+    const result = await session.waitForCompletion();
+    if (result.isError) throw new Error(result.failureReason ?? "session failed");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 }
 
 async function main() {
@@ -292,39 +370,37 @@ async function main() {
 
   /** One session for `leg` behind a fresh proxy; returns the capture dir. */
   async function runSession(leg: Leg, name: string, control: boolean): Promise<string> {
-    const capDir = join(root, `${name}-cap`);
-    const home = join(root, `${name}-home`);
-    mkdirSync(capDir, { recursive: true });
-    mkdirSync(home, { recursive: true });
-    const proxy = startProxy(UPSTREAMS[harness], capDir);
-    const proxyUrl = `http://127.0.0.1:${proxy.port}`;
-    try {
-      if (harness === "codex") {
-        const prompt = control ? CONTROL_PROMPT : PROMPT;
-        await runCodex({ prompt, model, proxyUrl, leg, mcpBaseUrl, agentId, home });
+    return withSessionDirs(root, name, async (capDir, home) => {
+      const proxy = startProxy(UPSTREAMS[harness], capDir);
+      const proxyUrl = `http://127.0.0.1:${proxy.port}`;
+      try {
+        if (harness === "codex") {
+          const prompt = control ? CONTROL_PROMPT : PROMPT;
+          await runCodex({ prompt, model, proxyUrl, leg, mcpBaseUrl, agentId, home });
+          return capDir;
+        }
+        const args = ["--leg", "--harness", harness, "--model", model];
+        if (control) args.push("--control");
+        const proc = Bun.spawn(["bun", resolve(import.meta.path), ...args], {
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "pipe",
+          env: {
+            ...process.env,
+            ...leg.env,
+            AGENT_ID: agentId,
+            MCP_BASE_URL: mcpBaseUrl,
+            PROBE_MCP: leg.mcp ? "1" : "0",
+            OPENROUTER_BASE_URL: `${proxyUrl}/api/v1`,
+          },
+        });
+        const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+        if (code !== 0) throw new Error(`${harness} leg exited ${code}: ${stderr.slice(-500)}`);
         return capDir;
+      } finally {
+        proxy.stop(true);
       }
-      const args = ["--leg", "--harness", harness, "--model", model];
-      if (control) args.push("--control");
-      const proc = Bun.spawn(["bun", resolve(import.meta.path), ...args], {
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "pipe",
-        env: {
-          ...process.env,
-          ...leg.env,
-          AGENT_ID: agentId,
-          MCP_BASE_URL: mcpBaseUrl,
-          PROBE_MCP: leg.mcp ? "1" : "0",
-          OPENROUTER_BASE_URL: `${proxyUrl}/api/v1`,
-        },
-      });
-      const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-      if (code !== 0) throw new Error(`${harness} leg exited ${code}: ${stderr.slice(-500)}`);
-      return capDir;
-    } finally {
-      proxy.stop(true);
-    }
+    });
   }
 
   const client = new McpHttpClient(mcpBaseUrl, getApiKey(), agentId, crypto.randomUUID());
