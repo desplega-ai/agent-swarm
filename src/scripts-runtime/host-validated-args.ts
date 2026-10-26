@@ -1,4 +1,13 @@
 /**
+ * Unforgeable host-only capability symbol set on `RunScriptInput` strictly at
+ * the host boundary (`POST /api/x/script/{endpointId}`) after `validateJsonSchema`
+ * succeeds. Because `Symbol` keys cannot be produced by JSON deserialization,
+ * callers that forward request-shaped JSON fields into `RunScriptInput` can
+ * never opt out of `argsSchema` validation.
+ */
+export const HOST_VALIDATED_ARGS = Symbol.for("swarm.hostValidatedArgs");
+
+/**
  * Checks whether a runtime `argsSchema` (Zod v4 / `zod/mini` schema) and its
  * candidate `value` are semantically equivalent to the host-side JSON Schema
  * validation performed by `validateJsonSchema` in `src/http/x.ts`.
@@ -9,7 +18,8 @@
  */
 export function isHostValidationEquivalent(schema: unknown, value: unknown): boolean {
   if (!schema || typeof schema !== "object") return false;
-  const zodInternal = (schema as { _zod?: { def?: Record<string, unknown> } })._zod;
+  const zodInternal = (schema as { _zod?: { def?: Record<string, unknown>; values?: unknown } })
+    ._zod;
   const def = zodInternal?.def;
   if (!def || typeof def !== "object") return false;
 
@@ -36,10 +46,17 @@ export function isHostValidationEquivalent(schema: unknown, value: unknown): boo
       );
     }
     case "enum": {
-      const entries =
+      if (zodInternal?.values instanceof Set) {
+        return zodInternal.values.has(value);
+      }
+      const entriesObj =
         def.entries && typeof def.entries === "object"
-          ? Object.values(def.entries as Record<string, unknown>)
-          : [];
+          ? (def.entries as Record<string, unknown>)
+          : null;
+      if (!entriesObj) return false;
+      const entries = Object.values(entriesObj).filter(
+        (v) => !(typeof v === "string" && typeof entriesObj[v] === "number"),
+      );
       return entries.length > 0 && entries.includes(value);
     }
     case "optional":
@@ -53,7 +70,7 @@ export function isHostValidationEquivalent(schema: unknown, value: unknown): boo
     case "array":
       return (
         Array.isArray(value) &&
-         isStructuralSchemaNode(def.element) &&
+        isStructuralSchemaNode(def.element) &&
         value.every((item) => isHostValidationEquivalent(def.element, item))
       );
     case "object": {
@@ -71,7 +88,12 @@ export function isHostValidationEquivalent(schema: unknown, value: unknown): boo
       }
 
       for (const [key, propSchema] of Object.entries(shape)) {
-        const propValue = Object.hasOwn(obj, key) ? obj[key] : undefined;
+        // Retain Zod's property lookup semantics: if `key` is absent as an own
+        // property on `obj` but resolves via `Object.prototype` (e.g. `constructor`,
+        // `toString`), fall back to `.parse()` so Zod validates/rejects the
+        // inherited prototype value identically to `main`.
+        if (!Object.hasOwn(obj, key) && key in obj) return false;
+        const propValue = obj[key];
         if (!isHostValidationEquivalent(propSchema, propValue)) return false;
       }
       return true;

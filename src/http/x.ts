@@ -20,6 +20,7 @@ import {
   MAX_SCRIPT_WALL_CLOCK_MS,
   MIN_SCRIPT_WALL_CLOCK_MS,
 } from "../scripts-runtime/executors/types";
+import { HOST_VALIDATED_ARGS } from "../scripts-runtime/host-validated-args";
 import type { RunScriptOutput } from "../scripts-runtime/loader";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
@@ -247,7 +248,7 @@ export async function handleX(
   const output = await runScriptWithRunCredential({
     source: script.source,
     args: args ?? null,
-    hostValidatedArgs,
+    [HOST_VALIDATED_ARGS]: hostValidatedArgs,
     fsMode: "none",
     agentId: endpoint.agentId,
     // timeoutMs only raises the wall-clock limit (network-bound scripts can use
