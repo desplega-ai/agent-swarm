@@ -227,8 +227,10 @@ import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import {
   emitChildRunFinished,
+  emitRunFinished,
   getRunLineageBlock,
   getStepExecutionBlock,
+  isTerminalWorkflowRunStatus,
   rowToWorkflowRun,
   rowToWorkflowRunStep,
   WORKFLOW_RUN_SUMMARY_COLUMNS,
@@ -7994,16 +7996,30 @@ export async function updateWorkflowRun(
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = await getDbClient().get<WorkflowRunRow>(
-    `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const update = () =>
+    getDbClient().get<WorkflowRunRow>(
+      `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+      params,
+    );
+  const endsRun = data.status !== undefined && isTerminalWorkflowRunStatus(data.status);
+  // A run that ends reads the status it replaces in the same transaction, so
+  // a later write of the same terminal status does not announce the end again.
+  const [previousStatus, row] = endsRun
+    ? await getDbClient().transaction(async () => {
+        const previous = await getDbClient().get<{ status: WorkflowRunStatus }>(
+          "SELECT status FROM workflow_runs WHERE id = ?",
+          [id],
+        );
+        return [previous?.status, await update()] as const;
+      })
+    : [undefined, await update()];
   if (!row) return null;
   const run = rowToWorkflowRun(row);
   if (data.status === "completed" || data.status === "failed") {
     emitWorkflowTerminalTelemetry(run);
   }
   if (row.parentStepId) emitChildRunFinished(id, row.parentStepId, run.status);
+  if (endsRun && previousStatus !== run.status) emitRunFinished(id, run.workflowId, run.status);
   return run;
 }
 

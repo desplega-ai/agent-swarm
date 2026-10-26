@@ -987,6 +987,7 @@ The following events are already emitted on `workflowEventBus` today and are usa
 | `task.created` / `task.progress` / `task.budget_refused` | `src/be/db.ts` | task-id keyed lifecycle payloads |
 | `approval.resolved` | `src/http/approval-requests.ts` (respond route) | `{ requestId, status, responses, workflowRunId?, workflowRunStepId?, sourceTaskId? }`; the run and step id are absent for a standalone request, so a `wait` node with `scope: "global"` and no filter also fires for those |
 | `workflow.child.finished` | `src/be/db.ts` (`updateWorkflowRun`, terminal status of a run with a `parentStepId`) | `{ childRunId, parentStepId }` |
+| `workflow.run.finished` | `src/be/db.ts` (`updateWorkflowRun`), `src/be/db/workflow-runs.ts` (`cancelLiveWorkflowTreeRuns`), `src/be/automation-preflight.ts` (preflight failure run) | `{ runId, workflowId, status }`; once per run turning `completed`, `failed`, `cancelled` or `skipped`, top-level and child runs alike. See "Waiting for another run to end" |
 | `agentmail.message.received` | `src/agentmail/handlers.ts:168` | inbox/message keyed payload |
 | `slack.message` | `src/slack/handlers.ts` | `{ channel, text, user, ts, threadTs }` |
 | `chat.message.received` | `src/integrations/chat-sdk/inbound.ts` | `{ adapter, channelId, threadId, userId, text, messageId }` |
@@ -1005,6 +1006,27 @@ The following events are already emitted on `workflowEventBus` today and are usa
 | `bitbucket.pull_request.declined` | `src/http/webhooks.ts` (Bitbucket dispatch, `pullrequest:rejected`) | `{ repo, number, title?, body?, action, user_login }` |
 
 For `task.completed` specifically, the canonical payload shape lives in `src/be/db.ts` next to the emit site. Because it includes `workflowRunId`, you can use a `scope: run` wait with a filter like `{ workflowRunId: "<the run id>" }` to correlate against a specific upstream task — see "Ordering caveat" below.
+
+### Waiting for another run to end
+
+Every run emits `workflow.run.finished` after the commit that makes it terminal: `completed`, `failed`, `cancelled` or `skipped`. It covers top-level runs, detached runs and child runs, including the descendants a cascade cancel closes. A later write to a run that is already terminal does not emit again; a retried run emits again when it ends again.
+
+The payload names the finished run `runId`, never `workflowRunId` or `_runId`, so the event is never in the waiting run's own `run` scope. Wait with `scope: global` and filter on `runId`:
+
+```yaml
+- id: wait-for-review
+  type: wait
+  config:
+    mode: event
+    eventName: workflow.run.finished
+    scope: global
+    filter:
+      runId: "<the run id you started>"
+    timeoutMs: 3600000
+  next: { event: read-result, timeout: give-up }
+```
+
+The ordering caveat below applies: the wait must register before the run ends. If the run may already be terminal, read its status before the wait, or set `timeoutMs` and re-read on `timeout`.
 
 ### What's NOT yet on the bus
 
