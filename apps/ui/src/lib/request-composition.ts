@@ -136,7 +136,7 @@ export interface CompositionAnchor {
 
 export interface DerivedCompositions {
   byCall: Map<string, CallComposition>;
-  /** Per manifest id: its first main call, before any compaction. */
+  /** Per manifest id: the anchor call its harness base is measured on. */
   anchors: Map<string, CompositionAnchor>;
 }
 
@@ -172,6 +172,8 @@ function groupManifest(manifest: CompositionManifest): Map<CompositionGroup, Com
  * - The harness base is measured on the session's first main call, the anchor.
  *   Sub-agent calls have their own prompt, so they are never an anchor and get
  *   no composition.
+ * - A later manifest (a harness hook's exact parts) re-splits the anchor's
+ *   static parts and harness base. History stays `P_k − P_anchor`.
  * - After a compaction, the first main call is a new anchor. Its harness base
  *   can shrink but never grow: the compaction summary is history, not harness.
  * - Nothing goes negative. When the static parts and harness base exceed a
@@ -199,8 +201,12 @@ export function deriveCallCompositions(
     compactionsBySession.set(c.sessionId, list);
   }
 
-  // Per session: the current anchor, keyed by manifest and compaction epoch.
-  const current = new Map<string, { key: string; residual: number; anchor: CompositionAnchor }>();
+  // Per session: the current compaction epoch's anchor. `base` is the anchor
+  // call's static parts plus harness base, the prompt with no history in it.
+  const current = new Map<
+    string,
+    { manifestId: string; epoch: number; base: number; residual: number; anchor: CompositionAnchor }
+  >();
   const ordered = calls
     .map((call, index) => ({ call, index }))
     .sort((a, b) => a.call.t - b.call.t || a.index - b.index);
@@ -212,26 +218,35 @@ export function deriveCallCompositions(
     if (!manifest) continue;
 
     const epoch = (compactionsBySession.get(sessionId) ?? []).filter((c) => c <= t).length;
-    const key = `${manifest.id}:${epoch}`;
     const stat = staticTokens(manifest);
     let state = current.get(sessionId);
-    if (!state || state.key !== key) {
+    if (!state || state.epoch !== epoch) {
       let residual = Math.max(0, usage.promptTokens - stat);
-      // Same manifest, new compaction epoch: keep the smaller harness base.
-      if (state?.key.startsWith(`${manifest.id}:`)) {
-        residual = Math.min(residual, state.residual);
-      }
+      // New compaction epoch: the harness base can shrink, never grow.
+      if (state) residual = Math.min(residual, Math.max(0, state.base - stat));
+      const anchor = {
+        callId: usage.callId,
+        promptTokens: usage.promptTokens,
+        residualTokens: residual,
+      };
       state = {
-        key,
+        manifestId: manifest.id,
+        epoch,
+        base: Math.min(stat + residual, usage.promptTokens),
         residual,
-        anchor: {
-          callId: usage.callId,
-          promptTokens: usage.promptTokens,
-          residualTokens: residual,
-        },
+        anchor,
       };
       current.set(sessionId, state);
-      if (!anchors.has(manifest.id)) anchors.set(manifest.id, state.anchor);
+      if (!anchors.has(manifest.id)) anchors.set(manifest.id, anchor);
+    } else if (state.manifestId !== manifest.id) {
+      // A later manifest in the same epoch re-splits the anchor's base. This
+      // call already carries history, so it never becomes the anchor.
+      const residual = Math.max(0, state.base - stat);
+      state = { ...state, manifestId: manifest.id, residual };
+      current.set(sessionId, state);
+      if (!anchors.has(manifest.id)) {
+        anchors.set(manifest.id, { ...state.anchor, residualTokens: residual });
+      }
     }
 
     const groups = groupManifest(manifest);

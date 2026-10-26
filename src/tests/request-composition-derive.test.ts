@@ -239,6 +239,48 @@ describe("deriveCallCompositions", () => {
       expect(sum(comp.segments)).toBeCloseTo(comp.promptTokens, 6);
   });
 
+  test("a hook manifest after the first call keeps later growth as history", () => {
+    // The worker manifest (15k static) anchors c1. The harness hook then posts
+    // exact parts worth 40k, the whole first prompt. c2's extra 12k is history.
+    const hook = manifest({
+      id: "m-hook",
+      seq: 1,
+      source: "harness-hook",
+      createdAt: new Date(T0 + 500).toISOString(),
+      parts: [{ ...manifest().parts[0]!, estTokens: 40_000, fidelity: "exact" }],
+    });
+    const { byCall, anchors } = deriveCallCompositions(
+      [call("c1", 40_000, 0), call("c2", 52_000, 1000)],
+      [manifest(), hook],
+    );
+    const second = byCall.get("c2")!;
+    expect(second.manifest.id).toBe("m-hook");
+    expect(tokensOf(second.segments, "harness")).toBe(0);
+    expect(tokensOf(second.segments, "history")).toBe(12_000);
+    expect(sum(second.segments)).toBeCloseTo(52_000, 6);
+    expect(anchors.get("m-hook")).toEqual({
+      callId: "c1",
+      promptTokens: 40_000,
+      residualTokens: 0,
+    });
+    // After a compaction the re-split base still caps the harness base: the
+    // 6k summary is history.
+    const compacted = deriveCallCompositions(
+      [call("c1", 40_000, 0), call("c2", 52_000, 1000), call("c3", 46_000, 2000)],
+      [manifest(), hook],
+      [{ sessionId: "s-1", t: T0 + 1500 }],
+    );
+    expect(tokensOf(compacted.byCall.get("c3")!.segments, "harness")).toBe(0);
+    expect(tokensOf(compacted.byCall.get("c3")!.segments, "history")).toBe(6_000);
+    // A hook manifest smaller than the first prompt leaves the rest as harness.
+    const partial = deriveCallCompositions(
+      [call("c1", 40_000, 0), call("c2", 52_000, 1000)],
+      [manifest(), { ...hook, parts: [{ ...hook.parts[0]!, estTokens: 30_000 }] }],
+    );
+    expect(tokensOf(partial.byCall.get("c2")!.segments, "harness")).toBe(10_000);
+    expect(tokensOf(partial.byCall.get("c2")!.segments, "history")).toBe(12_000);
+  });
+
   test("no manifests means no compositions", () => {
     expect(deriveCallCompositions([call("c1", 40_000, 0)], []).byCall.size).toBe(0);
   });

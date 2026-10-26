@@ -18,6 +18,10 @@ import type {
   SteerResult,
   TaskWithLogs,
 } from "../types";
+import {
+  type RequestCompositionQueryInput,
+  requestCompositionQuery,
+} from "./request-composition-query";
 
 export interface TaskFilters {
   status?: string;
@@ -156,28 +160,14 @@ export function useTaskContext(taskId: string, opts?: TaskLiveReadOptions) {
 }
 
 /**
- * The task's request composition manifests. A session writes its manifest
- * once, when it starts, so there is no steady poll: the read reruns when the
- * log shows a new session, and polls every 15 s only while a known session
- * still has no manifest on a running task.
+ * The task's request composition manifests: polled while a session has none
+ * or a harness hook may still post a later seq, and read once more when the
+ * task ends. Policy in `request-composition-query.ts`.
  */
-export function useRequestComposition(
-  taskId: string,
-  opts: { enabled: boolean; sessionIds: string[]; live: boolean },
-) {
-  const sessionKey = [...opts.sessionIds].sort().join(",");
-  return useQuery({
-    queryKey: ["task", taskId, "request-composition", sessionKey],
-    queryFn: () => api.fetchTaskRequestComposition(taskId),
-    enabled: !!taskId && opts.enabled,
-    staleTime: Number.POSITIVE_INFINITY,
-    placeholderData: keepPreviousData,
-    refetchInterval: (query) => {
-      if (!opts.live) return false;
-      const have = new Set((query.state.data ?? []).map((m) => m.sessionId));
-      return opts.sessionIds.some((s) => !have.has(s)) ? 15_000 : false;
-    },
-  });
+export function useRequestComposition(taskId: string, opts: RequestCompositionQueryInput) {
+  return useQuery(
+    requestCompositionQuery(taskId, opts, (id) => api.fetchTaskRequestComposition(id)),
+  );
 }
 
 interface CreateTaskInput {
