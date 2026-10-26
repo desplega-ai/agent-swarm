@@ -469,6 +469,33 @@ async function rawStatus(base: string, path: string): Promise<number> {
   });
 }
 
+/** A POST with the path sent byte for byte (fetch would resolve `.` and `\\`). */
+async function rawPostStatus(base: string, path: string, ip: string): Promise<number> {
+  const { port, hostname } = new URL(base);
+  const body = JSON.stringify({ email: "a@example.test" });
+  return new Promise<number>((resolve, reject) => {
+    const r = httpRequest(
+      {
+        host: hostname,
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          "X-Forwarded-For": ip,
+        },
+      },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      },
+    );
+    r.on("error", reject);
+    r.end(body);
+  });
+}
+
 describe("handleAgentFsProxy against a fake agent-fs", () => {
   let fake: FakeAgentFs;
   let server: Server;
@@ -674,6 +701,33 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
     expect(sixth.status).toBe(429);
   });
 
+  test("dot-segment and backslash register paths are rejected, not passed upstream", async () => {
+    const ip = "203.0.113.10";
+    for (const path of [
+      "/agentfs/./auth/register",
+      "/agentfs/auth/./register",
+      "/agentfs/%2e/auth/register",
+      "/agentfs/auth%2F.%2Fregister",
+      "/agentfs/auth\\register",
+      "/agentfs/auth%5Cregister",
+    ]) {
+      fake.last = null;
+      // Seven tries: on the old code each one reached upstream /auth/register unlimited.
+      for (let i = 0; i < 7; i++) {
+        expect({ path, status: await rawPostStatus(proxyUrl, path, ip) }).toEqual({
+          path,
+          status: 400,
+        });
+      }
+      expect(fake.last).toBeNull();
+    }
+    // The canonical path still has its full bucket of five.
+    for (let i = 0; i < 5; i++) {
+      expect(await rawPostStatus(proxyUrl, "/agentfs/auth/register", ip)).toBe(200);
+    }
+    expect(await rawPostStatus(proxyUrl, "/agentfs/auth/register", ip)).toBe(429);
+  });
+
   test("the sixth POST /agentfs/auth/register from one IP within a minute gets 429", async () => {
     const register = (ip: string) =>
       fetch(`${proxyUrl}/agentfs/auth/register`, {
@@ -702,6 +756,9 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
       "/agentfs/a/%2e%2E/etc",
       "/share/t/../../etc",
       "/site/t/%2E%2e/x",
+      "/agentfs/auth/%2e./register",
+      "/share/t/./raw",
+      "/site/t\\x",
     ]) {
       expect(await rawStatus(proxyUrl, path)).toBe(400);
     }

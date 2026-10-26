@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { generateCompose as generateTemplateCompose } from "../../apps/templates-ui/src/lib/compose-generator.ts";
 import { readAgentFsImageTag } from "../../scripts/agent-fs-version-utils.ts";
+import { applyPins, PINS } from "../../scripts/bump-agent-fs.ts";
 import { AGENT_FS_VERSION } from "../commands/onboard/agent-fs-version.ts";
 import { generateCompose } from "../commands/onboard/compose-generator.ts";
 import { getPresetById, PRESETS } from "../commands/onboard/presets.ts";
@@ -476,18 +480,24 @@ describe("generateCompose with the agent-fs bundle flag", () => {
   });
 
   test("bump-agent-fs rewrites the onboard pin and keeps the closing quote", async () => {
-    const source = await Bun.file(
-      new URL("../commands/onboard/agent-fs-version.ts", import.meta.url),
-    ).text();
-    const pattern = /^(export const AGENT_FS_VERSION = ")([^"]+)/m;
-    expect(source.match(pattern)?.[2]).toBe(AGENT_FS_VERSION);
-    expect(source.replace(pattern, "$19.9.9")).toContain(
-      'export const AGENT_FS_VERSION = "9.9.9";',
-    );
-    const script = await Bun.file(
-      new URL("../../scripts/bump-agent-fs.ts", import.meta.url),
-    ).text();
-    expect(script).toContain('path: "src/commands/onboard/agent-fs-version.ts"');
-    expect(script).toContain('pattern: /^(export const AGENT_FS_VERSION = ")([^"]+)/m');
+    const root = await mkdtemp(join(tmpdir(), "bump-agent-fs-"));
+    try {
+      const repo = new URL("../../", import.meta.url);
+      const onboardPath = "src/commands/onboard/agent-fs-version.ts";
+      // Copy the onboard file even if PINS drops it, so the failure is the stale version.
+      for (const path of new Set([onboardPath, ...PINS.map((pin) => pin.path)])) {
+        await Bun.write(join(root, path), Bun.file(new URL(path, repo)));
+      }
+      const onboard = join(root, onboardPath);
+      expect(await Bun.file(onboard).text()).toContain(
+        `export const AGENT_FS_VERSION = "${AGENT_FS_VERSION}";`,
+      );
+      await applyPins("9.9.9", root);
+      const bumped = await Bun.file(onboard).text();
+      expect(bumped).toContain('export const AGENT_FS_VERSION = "9.9.9";');
+      expect(bumped).not.toContain(`"${AGENT_FS_VERSION}"`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

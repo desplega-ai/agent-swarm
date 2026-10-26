@@ -135,8 +135,26 @@ function routedPath(pathOnly: string): string {
   return decoded.replace(/\/{2,}/g, "/").replace(/\/+$/, "");
 }
 
-function isTraversal(pathOnly: string): boolean {
-  return pathOnly.split("/").some((s) => s === ".." || s.toLowerCase() === "%2e%2e");
+/**
+ * A path fetch() or the upstream router would rewrite: dot segments (raw or
+ * percent-encoded, also behind an encoded `%2F`) and backslashes, which the
+ * URL parser treats as `/`. Rejecting them keeps the register limit and the
+ * upstream on the same path: `/./auth/register` and `/auth\register` both
+ * reach upstream `/auth/register`.
+ */
+function isNonCanonical(pathOnly: string): boolean {
+  let decoded = pathOnly;
+  try {
+    decoded = decodeURIComponent(pathOnly);
+  } catch {
+    // A malformed escape: check the raw bytes only.
+  }
+  for (const p of [pathOnly, decoded]) {
+    if (p.includes("\\")) return true;
+    if (p.split("/").some((s) => s === "." || s === "..")) return true;
+  }
+  // `.%2e` and the like, in case the decode above failed on a malformed escape.
+  return pathOnly.split("/").some((s) => /^(\.|%2e){1,2}$/i.test(s));
 }
 
 export async function handleAgentFsProxy(
@@ -157,7 +175,7 @@ export async function handleAgentFsProxy(
   const upstreamPath = isApi ? url.slice(API_PREFIX.length) : url;
   const queryStart = upstreamPath.indexOf("?");
   const pathOnly = queryStart === -1 ? upstreamPath : upstreamPath.slice(0, queryStart);
-  if (isTraversal(pathOnly)) {
+  if (isNonCanonical(pathOnly)) {
     jsonError(res, "Invalid path", 400);
     return true;
   }
