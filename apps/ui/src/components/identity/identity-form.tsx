@@ -566,6 +566,7 @@ export function IdentityForm({
                   cursor={-1}
                   showKeys={finePointer}
                   disabled={busy}
+                  layout="grid"
                 />
               </SettingsRow>
             </FadeIn>

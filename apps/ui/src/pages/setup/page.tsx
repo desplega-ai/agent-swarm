@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { useConfig } from "@/hooks/use-config";
 import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
+import { InstallPromptCard, OrDivider } from "./components/install-prompt-card";
 import { type SetupBusyAction, SetupFooter } from "./components/setup-footer";
 import { SETUP_COLUMN } from "./components/setup-layout";
 import { SetupStepper } from "./components/setup-stepper";
@@ -55,7 +56,7 @@ import { StepName } from "./steps/step-name";
 const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }> = {
   connect: {
     title: "Connect your swarm",
-    description: "Point this dashboard at your Agent Swarm API, then pick who you are.",
+    description: "You are connected. Continue to the next step.",
   },
   name: {
     title: "Name your swarm",
@@ -87,6 +88,13 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
     description: "Send your lead a goal. Setup is done when that task completes.",
   },
 };
+
+/** Step 1 says what to do next: get a swarm, pick who you are, or move on. */
+function connectDescription(configured: boolean, pickIdentity: boolean): string {
+  if (!configured) return "Start a swarm with your coding agent, or connect one that runs.";
+  if (pickIdentity) return "You are connected. Now tell the swarm who you are.";
+  return STEP_COPY.connect.description;
+}
 
 /** Skip tooltips that say what skipping costs. */
 const SKIP_HINT: Partial<Record<OnboardingStepId, string>> = {
@@ -258,7 +266,7 @@ export default function SetupPage() {
 }
 
 function SetupFlow() {
-  const { config, isConfigured } = useConfig();
+  const { config, isConfigured, setupLink } = useConfig();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -523,16 +531,30 @@ function SetupFlow() {
                 index={index}
                 total={total}
                 title={copy.title}
-                description={copy.description}
+                description={
+                  stepId === "connect"
+                    ? connectDescription(isConfigured, identityPick.needed)
+                    : copy.description
+                }
               />
               <div className="flex flex-1 flex-col">
                 {Body === null ? (
-                  <StepConnect
-                    onboarding={data ?? null}
-                    onConnected={() => void handleConnected()}
-                    act={data ? act : undefined}
-                    {...setters.connect}
-                  />
+                  <div className="flex flex-col gap-4">
+                    {/* No swarm yet: the landing's install prompt is the first way in.
+                        An install link already fills the form, so it skips the prompt. */}
+                    {!isConfigured && !setupLink ? (
+                      <>
+                        <InstallPromptCard />
+                        <OrDivider>Or connect a swarm that runs</OrDivider>
+                      </>
+                    ) : null}
+                    <StepConnect
+                      onboarding={data ?? null}
+                      onConnected={() => void handleConnected()}
+                      act={data ? act : undefined}
+                      {...setters.connect}
+                    />
+                  </div>
                 ) : data ? (
                   // A failing step must not take the shell (navigation, Minimize) down with it.
                   <ErrorBoundary key={stepId}>

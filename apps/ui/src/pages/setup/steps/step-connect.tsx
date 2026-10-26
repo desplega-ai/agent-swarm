@@ -49,7 +49,7 @@ export function StepConnect({
   const { isConfigured } = useConfig();
   if (!isConfigured) return <ConnectForm onConnected={onConnected} />;
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <ConnectedSummary onboarding={onboarding} act={act} />
       <WhoAreYou setContinueBlocker={setContinueBlocker} setContinueAction={setContinueAction} />
     </div>
@@ -79,19 +79,35 @@ function ConnectedSummary({
   // The API host until step 2 names the swarm. The stored connection keeps
   // its own name for the connection switcher.
   const swarmName = swarmDisplayName(status?.identity.name);
-  const name = swarmName === DEFAULT_SWARM_NAME ? connectionName(config.apiUrl) : swarmName;
+  const host = connectionName(config.apiUrl);
+  const name = swarmName === DEFAULT_SWARM_NAME ? host : swarmName;
+  // One light line, not a card: the connection is done, the form below is the work.
   return (
-    <SetupCard
-      icon={<Plug className="size-4" />}
-      title={name}
-      description={
-        <span className="block truncate font-mono text-[12px]" title={config.apiUrl}>
-          {config.apiUrl}
+    <div className="flex justify-center">
+      <div className="inline-flex h-9 max-w-full min-w-0 items-center gap-2 rounded-full border border-border bg-card pr-1.5 pl-3 text-sm shadow-xs">
+        <StatusIcon tone="done" label={`Connected to ${name}`} />
+        <span className="min-w-0 truncate">
+          <span className="text-muted-foreground">Connected to </span>
+          <span className="font-medium">{name}</span>
         </span>
-      }
-      actions={
-        connectionLocked ? null : (
-          <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+        {/* The address once the swarm has a name of its own. */}
+        {name !== host ? (
+          <span
+            className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground sm:inline"
+            title={config.apiUrl}
+          >
+            {config.apiUrl}
+          </span>
+        ) : null}
+        {connectionLocked ? (
+          <span className="w-1.5" />
+        ) : (
+          <Button
+            asChild
+            variant="ghost"
+            size="xs"
+            className="shrink-0 rounded-full text-muted-foreground"
+          >
             {/* A new tab keeps setup open in this one. */}
             <Link
               to={setupExitHref("/settings/connections")}
@@ -102,10 +118,9 @@ function ConnectedSummary({
               <ExternalLink />
             </Link>
           </Button>
-        )
-      }
-      status={<StatusIcon tone="done" label={`Connected to ${name}`} />}
-    />
+        )}
+      </div>
+    </div>
   );
 }
 
