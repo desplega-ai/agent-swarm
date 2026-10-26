@@ -14,6 +14,7 @@ export const OnboardingStepIdSchema = z.enum([
   "agents",
   "memory",
   "integrations",
+  "files",
   "first_task",
 ]);
 export type OnboardingStepId = z.infer<typeof OnboardingStepIdSchema>;
@@ -62,6 +63,8 @@ export const OnboardingIntegrationMethodSchema = z.enum([
   "linear_oauth",
   "jira_oauth",
 ]);
+/** `created`: the Files step registered a new agent-fs account. `connected`: it reused one. */
+export const OnboardingFilesMethodSchema = z.enum(["created", "connected"]);
 export const OnboardingFirstTaskMethodSchema = z.enum(["suggestion", "free_form"]);
 export const OnboardingStepMethodSchema = z.union([
   OnboardingConnectMethodSchema,
@@ -70,6 +73,7 @@ export const OnboardingStepMethodSchema = z.union([
   OnboardingAgentsMethodSchema,
   OnboardingMemoryPresetSchema,
   OnboardingIntegrationMethodSchema,
+  OnboardingFilesMethodSchema,
   OnboardingFirstTaskMethodSchema,
 ]);
 export type OnboardingStepMethod = z.infer<typeof OnboardingStepMethodSchema>;
@@ -98,6 +102,7 @@ const OnboardingMemoryStepStateSchema = onboardingStepStateSchema(OnboardingMemo
 const OnboardingIntegrationStepStateSchema = onboardingStepStateSchema(
   OnboardingIntegrationMethodSchema,
 );
+const OnboardingFilesStepStateSchema = onboardingStepStateSchema(OnboardingFilesMethodSchema);
 const OnboardingFirstTaskStepStateSchema = onboardingStepStateSchema(
   OnboardingFirstTaskMethodSchema,
 );
@@ -118,6 +123,7 @@ export const OnboardingStateSchema = z.object({
     agents: OnboardingAgentsStepStateSchema,
     memory: OnboardingMemoryStepStateSchema,
     integrations: OnboardingIntegrationStepStateSchema,
+    files: OnboardingFilesStepStateSchema,
     first_task: OnboardingFirstTaskStepStateSchema,
   }),
 });
@@ -153,6 +159,8 @@ export const OnboardingSignalsSchema = z.object({
     workersOnline: z.number().int().nonnegative(),
   }),
   firstTask: z.object({ id: z.string(), status: z.string() }).nullable(),
+  /** The Files step applies: Comb is on, so the browser can create an agent-fs account. */
+  files: z.object({ enabled: z.boolean() }),
 });
 export type OnboardingSignals = z.infer<typeof OnboardingSignalsSchema>;
 
@@ -200,8 +208,15 @@ export const OnboardingActionSchema = z.union([
     .strict(),
   z
     .object({
+      action: z.literal("complete"),
+      step: z.literal("files"),
+      method: OnboardingFilesMethodSchema,
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal("skip"),
-      step: z.enum(["name", "ai", "agents", "memory", "integrations", "first_task"]),
+      step: z.enum(["name", "ai", "agents", "memory", "integrations", "files", "first_task"]),
     })
     .strict(),
   z
@@ -320,6 +335,7 @@ function freshState(now: string, autoCompleted: boolean): OnboardingState {
       agents: emptyStep(),
       memory: emptyStep(),
       integrations: emptyStep(),
+      files: emptyStep(),
       first_task: emptyStep(),
     },
   };
@@ -535,6 +551,20 @@ function deriveState(
   return changed;
 }
 
+/**
+ * The response view of the state. Without Comb the Files step cannot run, so a
+ * stored `todo` reads as `skipped`. Response only: never persisted and never a
+ * `step_skipped` event, so installs without Comb send no funnel noise and the
+ * step comes back as `todo` once Comb is turned on.
+ */
+function presentState(state: OnboardingState, signals: OnboardingSignals): OnboardingState {
+  if (signals.files.enabled || state.steps.files.status !== "todo") return state;
+  return {
+    ...state,
+    steps: { ...state.steps, files: { ...state.steps.files, status: "skipped" } },
+  };
+}
+
 export class OnboardingTaskNotFoundError extends Error {}
 
 async function applyAction(
@@ -612,7 +642,8 @@ export async function readOrUpdateOnboarding(
     const read = await client.transaction(async () => await loadAndDerive(loadSignals, []), {
       readOnly: true,
     });
-    if (!read.dirty) return { state: read.state, signals: read.signals };
+    if (!read.dirty)
+      return { state: presentState(read.state, read.signals), signals: read.signals };
   }
 
   return await client.transaction(async () => {
@@ -627,7 +658,7 @@ export async function readOrUpdateOnboarding(
     }
     if (dirty) await persistState(state);
     queueTelemetry(events);
-    return { state, signals };
+    return { state: presentState(state, signals), signals };
   });
 }
 

@@ -47,6 +47,8 @@ Each person connects their own agent-fs identity in their own browser. The swarm
    - **Paste a key** uses an agent-fs key (`af_...`) that you already have. Use it for an account that you also use with the agent-fs CLI.
 3. Comb checks that you can read the swarm drive. If you cannot, the swarm API invites your agent-fs account as an editor.
 
+On a new install, the **Files** step of `/setup` does this for you. It creates your agent-fs account with the email you gave in step 1, invites it to the swarm drive, and saves the key in this browser. When the email already has an account, the step asks for its key. The step shows only while Comb is on.
+
 An existing drive member keeps their role. A viewer can read files and comments but cannot comment. When a viewer tries, Comb shows "You have view-only access". **Disconnect** in the page header removes the key from the browser.
 
 ## Browse

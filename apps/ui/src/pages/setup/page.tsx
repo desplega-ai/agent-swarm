@@ -17,9 +17,12 @@ import {
   isOnboardingFinished,
   ONBOARDING_QUERY_KEY,
   ONBOARDING_STEPS,
+  type OnboardingStepDef,
   onboardingResumeStep,
   useOnboarding,
   useOnboardingAction,
+  useVisibleOnboardingSteps,
+  visibleOnboardingSteps,
 } from "@/api/hooks/use-onboarding";
 import type { OnboardingResponse, OnboardingStepId, OnboardingStepStatus } from "@/api/types";
 import { ConnectionParamsCleanup } from "@/components/layout/root-layout";
@@ -41,6 +44,7 @@ import { PRESENCE_KEYS } from "./steps/ai/model";
 import { StepAgents } from "./steps/step-agents";
 import { StepAi } from "./steps/step-ai";
 import { StepConnect, useIdentityPick } from "./steps/step-connect";
+import { StepFiles } from "./steps/step-files";
 import { StepFirstTask } from "./steps/step-first-task";
 import { StepIntegrations } from "./steps/step-integrations";
 import { StepMemory } from "./steps/step-memory";
@@ -71,6 +75,11 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
     title: "Connect your tools",
     description: "All optional. Connect what your team already uses.",
   },
+  files: {
+    title: "Files",
+    description:
+      "Agents save their work in agent-fs, the shared drive of your swarm. You read it, comment on it and send it back to agents in Comb.",
+  },
   first_task: {
     title: "Run your first task",
     description: "Send your lead a first message. Setup is done when that task completes.",
@@ -88,17 +97,19 @@ const STEP_BODIES: Record<Exclude<OnboardingStepId, "connect">, ComponentType<St
   agents: StepAgents,
   memory: StepMemory,
   integrations: StepIntegrations,
+  files: StepFiles,
   first_task: StepFirstTask,
 };
 
-const TOTAL = ONBOARDING_STEPS.length;
-
-/** `?step=` accepts a number (1-7) or a step id. */
-function parseStepParam(value: string | null): OnboardingStepId | null {
+/** `?step=` accepts a number (1 to the visible step count) or the id of a visible step. */
+function parseStepParam(
+  value: string | null,
+  steps: ReadonlyArray<OnboardingStepDef>,
+): OnboardingStepId | null {
   if (!value) return null;
   const n = Number(value);
-  if (Number.isInteger(n) && n >= 1 && n <= TOTAL) return ONBOARDING_STEPS[n - 1].id;
-  return ONBOARDING_STEPS.find((step) => step.id === value)?.id ?? null;
+  if (Number.isInteger(n) && n >= 1 && n <= steps.length) return steps[n - 1].id;
+  return steps.find((step) => step.id === value)?.id ?? null;
 }
 
 /** Where to land after connecting: the page the layout sent us from, never `/setup` itself. */
@@ -261,19 +272,22 @@ function SetupFlow() {
   const [afterConnect, setAfterConnect] = useState(false);
   const identityPick = useIdentityPick();
 
+  const visibleSteps = useVisibleOnboardingSteps({ enabled: isConfigured });
   // Before a connection exists only step 1 renders, whatever the cache holds.
   const data = isConfigured ? query.data : undefined;
+  const steps = isConfigured ? visibleSteps : visibleOnboardingSteps(null, null);
+  const total = steps.length;
   const fresh = query.dataUpdatedAt >= mountedAt;
-  const paramStep = parseStepParam(searchParams.get("step"));
+  const paramStep = parseStepParam(searchParams.get("step"), steps);
   // Nobody picked a user yet (a fresh install): step 1 asks "Who are you?"
   // first, so step 2 can pre-fill the name from that email.
   const resumeStep: OnboardingStepId =
-    data && !identityPick.needed ? onboardingResumeStep(data.state) : "connect";
+    data && !identityPick.needed ? onboardingResumeStep(data.state, steps) : "connect";
   // Wait for the identity checks before a resume picks the step (and writes `?step=`).
   const choosingStep = isConfigured && !afterConnect && !paramStep && identityPick.resolving;
   const stepId: OnboardingStepId =
     !isConfigured || afterConnect ? "connect" : (paramStep ?? resumeStep);
-  const index = stepNumber(stepId);
+  const index = stepNumber(stepId, steps);
   const stepParam = String(index);
   const currentStep = data?.state.currentStep;
   const { blocker, action, setters } = useStepControls(stepId);
@@ -346,13 +360,13 @@ function SetupFlow() {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          next.set("step", String(stepNumber(step)));
+          next.set("step", String(stepNumber(step, steps)));
           return next;
         },
         { replace: true },
       );
     },
-    [setSearchParams],
+    [setSearchParams, steps],
   );
 
   // After a connect, stay on step 1 when the operator still has to pick who
@@ -381,7 +395,7 @@ function SetupFlow() {
   }
 
   function goNext() {
-    const next = ONBOARDING_STEPS[stepNumber(stepId)];
+    const next = steps[stepNumber(stepId, steps)];
     if (next) goTo(next.id);
     else void leave();
   }
@@ -479,6 +493,7 @@ function SetupFlow() {
         configured={isConfigured}
         stepper={
           <SetupStepper
+            steps={steps}
             statuses={statuses}
             current={stepId}
             // Right after a connect the shell picks the step; the stepper waits.
@@ -499,7 +514,7 @@ function SetupFlow() {
         <div className={cn(SETUP_COLUMN, "flex min-h-full flex-col pt-8 pb-12 sm:pt-10")}>
           <StepTransition stepKey={stepId} direction={direction} className="flex-1">
             <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-primary">
-              Step {index} <span className="text-muted-foreground">of {TOTAL}</span>
+              Step {index} <span className="text-muted-foreground">of {total}</span>
             </p>
             <h1
               data-step-heading={stepId}
@@ -541,7 +556,7 @@ function SetupFlow() {
         }
         busy={busy}
         busyAction={busyAction}
-        onBack={index > 1 && data ? () => goTo(ONBOARDING_STEPS[index - 2].id) : undefined}
+        onBack={index > 1 && data ? () => goTo(steps[index - 2].id) : undefined}
         skip={
           // A done step has nothing to skip, and neither has a sent first task.
           // The swarm name is required: no Skip.

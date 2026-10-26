@@ -2,7 +2,7 @@
 id: step-5
 name: Files step in /setup
 depends_on: []
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -78,24 +78,24 @@ Facts (accounts spike, `thoughts/taras/plans/2026-10-26-agent-fs-onboarding/spik
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Server: `bun run test:root -- src/tests/onboarding.test.ts` (new cases: fresh state has `files` todo; a stored row without `files` back-fills as todo, copy the case at line 241; Comb off derives `skipped`; complete with `created` and with `connected`; a bad method is rejected, copy line 583)
-- [ ] Seeder: `bun run test:root -- src/tests/agent-fs-provision-seeder.test.ts` (new: a 503 invite does not store the hash and the next run invites again; a 500 "not found" stores the hash; an unchanged second run is a no-op; the org and drive config rows persist when an invite fails; an RBAC Viewer is invited as `viewer`; an `invited` or `suspended` user is not invited)
-- [ ] Step render: `bun run test:root -- apps/ui/src/pages/setup/steps/step-files.test.tsx` (new file; happy-dom, copy `apps/ui/src/pages/setup/steps/agents/agent-models.test.tsx`; cases: no email, auto-run once across two renders, `email-taken`, `newKey`, a 403 from `act` still shows done)
-- [ ] Visibility: `bun run test:root -- apps/ui/src/api/hooks/visible-onboarding-steps.test.ts` (new; put the filter in a pure function `visibleOnboardingSteps(rawState, signals)` that the hook calls; cases: API without `files` hides it, Comb off hides it)
-- [ ] Comb flow regression: `bun run test:root -- apps/ui/src/components/comb/connect-flow.test.ts apps/ui/src/lib/agent-fs/credential-store.test.ts`
-- [ ] Telemetry contract: `bun run check:telemetry-contract`
-- [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun run docs:openapi`
-- [ ] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] Server: `bun run test:root -- src/tests/onboarding.test.ts` (new cases: fresh state has `files` todo; a stored row without `files` back-fills as todo, copy the case at line 241; Comb off derives `skipped`; complete with `created` and with `connected`; a bad method is rejected, copy line 583)
+- [x] Seeder: `bun run test:root -- src/tests/agent-fs-provision-seeder.test.ts` (new: a 503 invite does not store the hash and the next run invites again; a 500 "not found" stores the hash; an unchanged second run is a no-op; the org and drive config rows persist when an invite fails; an RBAC Viewer is invited as `viewer`; an `invited` or `suspended` user is not invited)
+- [x] Step render: `bun run test:root -- apps/ui/src/pages/setup/steps/step-files.test.tsx` (new file; happy-dom, copy `apps/ui/src/pages/setup/steps/agents/agent-models.test.tsx`; cases: no email, auto-run once across two renders, `email-taken`, `newKey`, a 403 from `act` still shows done)
+- [x] Visibility: `bun run test:root -- apps/ui/src/api/hooks/visible-onboarding-steps.test.ts` (new; put the filter in a pure function `visibleOnboardingSteps(rawState, signals)` that the hook calls; cases: API without `files` hides it, Comb off hides it)
+- [x] Comb flow regression: `bun run test:root -- apps/ui/src/components/comb/connect-flow.test.ts apps/ui/src/lib/agent-fs/credential-store.test.ts`
+- [x] Telemetry contract: `bun run check:telemetry-contract`
+- [x] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun run docs:openapi`
+- [x] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
 
 #### Automated QA:
-- [ ] Fresh-install walk on a local stack (`AGENT_BROWSER_SESSION=afo-step-5`), recorded per LOCAL_TESTING.md "When you need to verify a UI change":
+- [x] Fresh-install walk on a local stack (`AGENT_BROWSER_SESSION=afo-step-5`), recorded per LOCAL_TESTING.md "When you need to verify a UI change":
   - Start agent-fs as root Manual E2E part A does, but with `-e AGENT_FS_PUBLIC_URL=http://localhost:7433`.
   - Boot the API in the background from a fresh worktree (PID in `/tmp/afo-step-5/pid`, killed at the end) with a new `DATABASE_PATH`, `AGENT_FS_API_URL=http://localhost:7433`, `AGENT_FS_PUBLIC_URL=http://localhost:7433` and `COMB_ENABLED=true`, then start `cd apps/ui && bun run dev`.
   - Walk `/setup`. Step 1 takes `qa+files@example.com`. The Files step connects by itself and shows done.
   - `/file` opens Comb with no connect card.
   - Reload `/setup`: the Files step stays done, and agent-fs has exactly one account for that email (check with `GET /orgs/<org>/members` and the bootstrap key, run inside a script that never prints the key).
-- [ ] Same stack with `COMB_ENABLED` unset: the stepper shows no Files step.
-- [ ] Old-API check: point the new UI at an API built from `origin/main` before this step. The stepper shows no Files step and no console error.
+- [x] Same stack with `COMB_ENABLED` unset: the stepper shows no Files step.
+- [x] Old-API check: point the new UI at an API built from `origin/main` before this step. The stepper shows no Files step and no console error.
 
 #### Manual Verification:
 - [ ] Taras reads the step copy once.

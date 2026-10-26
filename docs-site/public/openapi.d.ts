@@ -12646,7 +12646,7 @@ export interface paths {
                                 /** Format: date-time */
                                 startedAt: string;
                                 /** @enum {string} */
-                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                                 /** Format: date-time */
                                 minimizedAt: string | null;
                                 /** Format: date-time */
@@ -12716,6 +12716,16 @@ export interface paths {
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
+                                    files: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "created" | "connected" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
                                     first_task: {
                                         /** @enum {string} */
                                         status: "todo" | "done" | "skipped" | "failed";
@@ -12759,6 +12769,9 @@ export interface paths {
                                     id: string;
                                     status: string;
                                 } | null;
+                                files: {
+                                    enabled: boolean;
+                                };
                             };
                         };
                     };
@@ -12779,7 +12792,7 @@ export interface paths {
                         /** @enum {string} */
                         action: "view";
                         /** @enum {string} */
-                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                     } | {
                         /** @enum {string} */
                         action: "complete";
@@ -12817,14 +12830,21 @@ export interface paths {
                         method: "slack" | "github" | "gitlab" | "bitbucket" | "linear_oauth" | "jira_oauth";
                     } | {
                         /** @enum {string} */
+                        action: "complete";
+                        /** @enum {string} */
+                        step: "files";
+                        /** @enum {string} */
+                        method: "created" | "connected";
+                    } | {
+                        /** @enum {string} */
                         action: "skip";
                         /** @enum {string} */
-                        step: "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                        step: "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                     } | {
                         /** @enum {string} */
                         action: "fail";
                         /** @enum {string} */
-                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                         /** @enum {string} */
                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                     } | {
@@ -12859,7 +12879,7 @@ export interface paths {
                                 /** Format: date-time */
                                 startedAt: string;
                                 /** @enum {string} */
-                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                                 /** Format: date-time */
                                 minimizedAt: string | null;
                                 /** Format: date-time */
@@ -12929,6 +12949,16 @@ export interface paths {
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
+                                    files: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "created" | "connected" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
                                     first_task: {
                                         /** @enum {string} */
                                         status: "todo" | "done" | "skipped" | "failed";
@@ -12972,6 +13002,9 @@ export interface paths {
                                     id: string;
                                     status: string;
                                 } | null;
+                                files: {
+                                    enabled: boolean;
+                                };
                             };
                         };
                     };

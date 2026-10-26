@@ -3951,6 +3951,7 @@ export type OnboardingStepId =
   | "agents"
   | "memory"
   | "integrations"
+  | "files"
   | "first_task";
 
 export type OnboardingStepStatus = "todo" | "done" | "skipped" | "failed";
@@ -4038,6 +4039,8 @@ export interface OnboardingSignals {
   };
   agents: { leadsOnline: number; workersOnline: number };
   firstTask: { id: string; status: string } | null;
+  /** The Files step applies (Comb is on). Absent on an API from before the step. */
+  files?: { enabled: boolean };
 }
 
 export interface OnboardingResponse {
@@ -4052,6 +4055,7 @@ export type OnboardingAction =
   | { action: "complete"; step: "ai"; method: OnboardingAiMethod }
   | { action: "complete"; step: "agents"; method: OnboardingAgentsMethod }
   | { action: "complete"; step: "integrations"; method: OnboardingIntegrationMethod }
+  | { action: "complete"; step: "files"; method: "created" | "connected" }
   | { action: "skip"; step: Exclude<OnboardingStepId, "connect"> }
   | { action: "fail"; step: OnboardingStepId; errorClass: OnboardingErrorClass }
   | { action: "first_task"; taskId: string; method: "suggestion" | "free_form" }

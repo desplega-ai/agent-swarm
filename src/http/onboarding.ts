@@ -21,6 +21,7 @@ import {
 } from "../be/onboarding";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { ProviderNameSchema } from "../types";
+import { isCombEnabled } from "../utils/constants";
 import { splitCredentialPool } from "../utils/credentials";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import { ensureConfigAdmin } from "./config";
@@ -71,6 +72,7 @@ async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> 
       workersOnline: agentCounts.workers,
     },
     firstTask: firstTask ? { id: firstTask.id, status: firstTask.status } : null,
+    files: { enabled: isCombEnabled() },
   };
 }
 

@@ -280,6 +280,16 @@ export class AppApiError extends Error {
   }
 }
 
+/** A failed onboarding write. `status` tells a 403 (a non-admin cannot write onboarding). */
+export class OnboardingApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "OnboardingApiError";
+    this.status = status;
+  }
+}
+
 /**
  * A refused answer to an approval request. `message` is the server's reason;
  * `status` tells a 403 (this credential may not answer) from a 409 (already
@@ -884,7 +894,10 @@ class ApiClient {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Failed to update onboarding" }));
-      throw new Error(err.error || `Failed to update onboarding: ${res.status}`);
+      throw new OnboardingApiError(
+        err.error || `Failed to update onboarding: ${res.status}`,
+        res.status,
+      );
     }
     return res.json();
   }

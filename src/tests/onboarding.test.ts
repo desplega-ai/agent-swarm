@@ -38,6 +38,8 @@ const ENV_KEYS = [
   "SLACK_BOT_TOKEN",
   "SLACK_APP_TOKEN",
   "SLACK_MODE",
+  "COMB_ENABLED",
+  "AGENT_FS_API_URL",
 ];
 
 let server: Server;
@@ -176,9 +178,22 @@ function embeddingResponse(dimensions: number): Response {
 
 describe("onboarding state", () => {
   test("fresh install creates active onboarding state", async () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
     const response = await request("/api/onboarding");
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { state: OnboardingState };
+    const body = (await response.json()) as {
+      state: OnboardingState;
+      signals: { files: { enabled: boolean } };
+    };
+
+    expect(body.signals.files).toEqual({ enabled: true });
+    expect(body.state.steps.files).toEqual({
+      status: "todo",
+      at: null,
+      method: null,
+      errorClass: null,
+    });
 
     expect(body.state.autoCompleted).toBe(false);
     expect(body.state.completedAt).toBeNull();
@@ -235,6 +250,7 @@ describe("onboarding state", () => {
       null,
       null,
       null,
+      null,
     ]);
   });
 
@@ -271,6 +287,39 @@ describe("onboarding state", () => {
     });
     await Bun.sleep(10);
     expect(capturedTelemetry.filter((entry) => entry.event === "started")).toHaveLength(0);
+  });
+
+  test("a row stored before the files step back-fills it as todo", async () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
+    const state = (await (await request("/api/onboarding")).json()) as {
+      state: OnboardingState;
+    };
+    const stored = structuredClone(state.state) as unknown as {
+      startedAt: string;
+      steps: Record<string, unknown>;
+    };
+    stored.steps.integrations = {
+      status: "skipped",
+      at: stored.startedAt,
+      method: null,
+      errorClass: null,
+    };
+    delete stored.steps.files;
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "onboarding_state",
+      value: JSON.stringify(stored),
+    });
+
+    const body = (await (await request("/api/onboarding")).json()) as { state: OnboardingState };
+    expect(body.state.steps.integrations.status).toBe("skipped");
+    expect(body.state.steps.files).toEqual({
+      status: "todo",
+      at: null,
+      method: null,
+      errorClass: null,
+    });
   });
 
   test("a user row marks the install as existing", async () => {
@@ -580,7 +629,67 @@ describe("onboarding state", () => {
     ).toBe(404);
   });
 
+  test("without Comb the files step reads as skipped, unpersisted and with no event", async () => {
+    const first = (await (await request("/api/onboarding")).json()) as {
+      state: OnboardingState;
+      signals: { files: { enabled: boolean } };
+    };
+    expect(first.signals.files).toEqual({ enabled: false });
+    expect(first.state.steps.files.status).toBe("skipped");
+    // A write for another step persists the row: files must stay todo in storage.
+    expect((await put({ action: "skip", step: "name" })).status).toBe(200);
+    expect((await getState()).steps.files.status).toBe("todo");
+    await Bun.sleep(10);
+    expect(
+      capturedTelemetry.filter(
+        (entry) => entry.event === "step_skipped" && entry.properties.step === "files",
+      ),
+    ).toHaveLength(0);
+
+    // Turning Comb on brings the step back.
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
+    const after = (await (await request("/api/onboarding")).json()) as { state: OnboardingState };
+    expect(after.state.steps.files.status).toBe("todo");
+  });
+
+  test("PUT completes the files step with created or connected", async () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
+    await request("/api/onboarding");
+    capturedTelemetry.length = 0;
+
+    const created = await put({ action: "complete", step: "files", method: "created" });
+    expect(created.status).toBe(200);
+    expect(((await created.json()) as { state: OnboardingState }).state.steps.files).toMatchObject({
+      status: "done",
+      method: "created",
+    });
+    await Bun.sleep(10);
+    expect(capturedTelemetry).toContainEqual(
+      expect.objectContaining({
+        event: "step_completed",
+        properties: expect.objectContaining({ step: "files", method: "created" }),
+      }),
+    );
+
+    const connected = await put({ action: "complete", step: "files", method: "connected" });
+    expect(connected.status).toBe(200);
+    expect((await getState()).steps.files).toMatchObject({ status: "done", method: "connected" });
+  });
+
+  test("a completed files step stays done when Comb is off", async () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
+    await put({ action: "complete", step: "files", method: "connected" });
+    delete process.env.COMB_ENABLED;
+    const body = (await (await request("/api/onboarding")).json()) as { state: OnboardingState };
+    expect(body.state.steps.files).toMatchObject({ status: "done", method: "connected" });
+  });
+
   test("PUT rejects a bad completion method and connect skip", async () => {
+    expect((await put({ action: "complete", step: "files", method: "pasted" })).status).toBe(400);
+    expect((await put({ action: "complete", step: "files", method: "api_key" })).status).toBe(400);
     expect((await put({ action: "complete", step: "ai", method: "not-a-provider" })).status).toBe(
       400,
     );

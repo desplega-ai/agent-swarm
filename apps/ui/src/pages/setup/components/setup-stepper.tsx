@@ -4,6 +4,7 @@ import {
   Brain,
   Check,
   Fingerprint,
+  FolderOpen,
   type LucideIcon,
   Plug,
   Send,
@@ -11,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { LayoutGroup, motion, type Transition } from "motion/react";
-import { ONBOARDING_STEPS } from "@/api/hooks/use-onboarding";
+import type { OnboardingStepDef } from "@/api/hooks/visible-onboarding-steps";
 import type { OnboardingStepId, OnboardingStepStatus } from "@/api/types";
 import {
   SKIPPED_HATCH,
@@ -34,10 +35,13 @@ const STEP_ICON: Record<OnboardingStepId, LucideIcon> = {
   agents: Bot,
   memory: Brain,
   integrations: Blocks,
+  files: FolderOpen,
   first_task: Send,
 };
 
 interface SetupStepperProps {
+  /** The visible steps, in order (`useVisibleOnboardingSteps`). */
+  steps: ReadonlyArray<OnboardingStepDef>;
   statuses: Record<OnboardingStepId, OnboardingStepStatus>;
   current: OnboardingStepId;
   /** Omit before a connection exists: the steps show but do not navigate. */
@@ -45,19 +49,19 @@ interface SetupStepperProps {
 }
 
 /**
- * The header stepper: seven round markers, each with its step icon, joined by
+ * The header stepper: one round marker per visible step, each with its step icon, joined by
  * connectors that fill amber as steps settle. Status reads at a glance: a
  * done step is amber with a check badge, a failed one red with an x badge, a
  * skipped one hatched. The current step is a solid amber pill with its label
  * (icon only below 640px); the pill slides between steps on a spring.
  */
-export function SetupStepper({ statuses, current, onSelect }: SetupStepperProps) {
+export function SetupStepper({ steps, statuses, current, onSelect }: SetupStepperProps) {
   return (
     <nav aria-label="Setup steps">
       <LayoutGroup id="setup-stepper">
         <ol className="flex items-center gap-0.5 sm:gap-1.5">
-          {ONBOARDING_STEPS.map(({ id, label }, index) => {
-            const previous = index > 0 ? statuses[ONBOARDING_STEPS[index - 1].id] : null;
+          {steps.map(({ id, label }, index) => {
+            const previous = index > 0 ? statuses[steps[index - 1].id] : null;
             return (
               <li key={id} className="flex items-center gap-0.5 sm:gap-1.5">
                 {previous ? <Connector status={previous} /> : null}

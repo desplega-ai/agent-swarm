@@ -31131,6 +31131,7 @@
                             "agents",
                             "memory",
                             "integrations",
+                            "files",
                             "first_task"
                           ]
                         },
@@ -31518,6 +31519,62 @@
                                 "errorClass"
                               ]
                             },
+                            "files": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "created",
+                                    "connected",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "endpoint",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
                             "first_task": {
                               "type": "object",
                               "properties": {
@@ -31582,6 +31639,7 @@
                             "agents",
                             "memory",
                             "integrations",
+                            "files",
                             "first_task"
                           ]
                         }
@@ -31742,6 +31800,17 @@
                             "id",
                             "status"
                           ]
+                        },
+                        "files": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled"
+                          ]
                         }
                       },
                       "required": [
@@ -31749,7 +31818,8 @@
                         "embeddings",
                         "integrations",
                         "agents",
-                        "firstTask"
+                        "firstTask",
+                        "files"
                       ]
                     }
                   },
@@ -31796,6 +31866,7 @@
                           "agents",
                           "memory",
                           "integrations",
+                          "files",
                           "first_task"
                         ]
                       }
@@ -31973,6 +32044,36 @@
                       "action": {
                         "type": "string",
                         "enum": [
+                          "complete"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "files"
+                        ]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "created",
+                          "connected"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
                           "skip"
                         ]
                       },
@@ -31984,6 +32085,7 @@
                           "agents",
                           "memory",
                           "integrations",
+                          "files",
                           "first_task"
                         ]
                       }
@@ -32012,6 +32114,7 @@
                           "agents",
                           "memory",
                           "integrations",
+                          "files",
                           "first_task"
                         ]
                       },
@@ -32145,6 +32248,7 @@
                             "agents",
                             "memory",
                             "integrations",
+                            "files",
                             "first_task"
                           ]
                         },
@@ -32532,6 +32636,62 @@
                                 "errorClass"
                               ]
                             },
+                            "files": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "created",
+                                    "connected",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "endpoint",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
                             "first_task": {
                               "type": "object",
                               "properties": {
@@ -32596,6 +32756,7 @@
                             "agents",
                             "memory",
                             "integrations",
+                            "files",
                             "first_task"
                           ]
                         }
@@ -32756,6 +32917,17 @@
                             "id",
                             "status"
                           ]
+                        },
+                        "files": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled"
+                          ]
                         }
                       },
                       "required": [
@@ -32763,7 +32935,8 @@
                         "embeddings",
                         "integrations",
                         "agents",
-                        "firstTask"
+                        "firstTask",
+                        "files"
                       ]
                     }
                   },
