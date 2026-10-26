@@ -5,6 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { allTasksTerminal } from "../../lib/task-activity";
 import { buildRetryInput } from "../../lib/task-retry";
@@ -165,6 +166,14 @@ export function useTaskContext(taskId: string, opts?: TaskLiveReadOptions) {
  * task ends. Policy in `request-composition-query.ts`.
  */
 export function useRequestComposition(taskId: string, opts: RequestCompositionQueryInput) {
+  const queryClient = useQueryClient();
+  const wasLive = useRef(opts.live);
+  useEffect(() => {
+    if (wasLive.current && !opts.live) {
+      void queryClient.invalidateQueries({ queryKey: ["task", taskId, "request-composition"] });
+    }
+    wasLive.current = opts.live;
+  }, [opts.live, queryClient, taskId]);
   return useQuery(
     requestCompositionQuery(taskId, opts, (id) => api.fetchTaskRequestComposition(id)),
   );

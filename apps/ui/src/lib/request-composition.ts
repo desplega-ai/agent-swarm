@@ -172,8 +172,9 @@ function groupManifest(manifest: CompositionManifest): Map<CompositionGroup, Com
  * - The harness base is measured on the session's first main call, the anchor.
  *   Sub-agent calls have their own prompt, so they are never an anchor and get
  *   no composition.
- * - A later manifest (a harness hook's exact parts) re-splits the anchor's
- *   static parts and harness base. History stays `P_k − P_anchor`.
+ * - A later harness-hook manifest (exact parts) re-splits the anchor's static
+ *   parts and harness base, so history stays `P_k − P_anchor`. A later worker
+ *   manifest keeps the harness base and swaps only the static parts.
  * - After a compaction, the first main call is a new anchor. Its harness base
  *   can shrink but never grow: the compaction summary is history, not harness.
  * - Nothing goes negative. When the static parts and harness base exceed a
@@ -239,10 +240,13 @@ export function deriveCallCompositions(
       current.set(sessionId, state);
       if (!anchors.has(manifest.id)) anchors.set(manifest.id, anchor);
     } else if (state.manifestId !== manifest.id) {
-      // A later manifest in the same epoch re-splits the anchor's base. This
-      // call already carries history, so it never becomes the anchor.
-      const residual = Math.max(0, state.base - stat);
-      state = { ...state, manifestId: manifest.id, residual };
+      // A later manifest in the same epoch. This call already carries
+      // history, so it never becomes the anchor. A harness hook measures the
+      // parts exactly, so it re-splits the anchor's base. A worker manifest
+      // only re-estimates its static parts, so the harness base stays.
+      const residual =
+        manifest.source === "harness-hook" ? Math.max(0, state.base - stat) : state.residual;
+      state = { ...state, manifestId: manifest.id, base: stat + residual, residual };
       current.set(sessionId, state);
       if (!anchors.has(manifest.id)) {
         anchors.set(manifest.id, { ...state.anchor, residualTokens: residual });

@@ -281,6 +281,34 @@ describe("deriveCallCompositions", () => {
     expect(tokensOf(partial.byCall.get("c2")!.segments, "history")).toBe(12_000);
   });
 
+  test("a later worker manifest keeps the harness base and swaps only the static parts", () => {
+    // m-0 has 15k static, so c1 (40k) measures a 25k harness base. A worker
+    // manifest then re-estimates the static parts as 16k. c2's history is
+    // 55k − 16k − 25k = 14k.
+    const part = manifest().parts[0]!;
+    const first = manifest({ parts: [{ ...part, estTokens: 15_000 }] });
+    const second = manifest({
+      id: "m-1",
+      seq: 1,
+      createdAt: new Date(T0 + 500).toISOString(),
+      parts: [{ ...part, estTokens: 16_000 }],
+    });
+    const { byCall, anchors } = deriveCallCompositions(
+      [call("c1", 40_000, 0), call("c2", 55_000, 1000)],
+      [first, second],
+    );
+    const c2 = byCall.get("c2")!;
+    expect(c2.manifest.id).toBe("m-1");
+    expect(tokensOf(c2.segments, "harness")).toBe(25_000);
+    expect(tokensOf(c2.segments, "history")).toBe(14_000);
+    expect(sum(c2.segments)).toBeCloseTo(55_000, 6);
+    expect(anchors.get("m-1")).toEqual({
+      callId: "c1",
+      promptTokens: 40_000,
+      residualTokens: 25_000,
+    });
+  });
+
   test("no manifests means no compositions", () => {
     expect(deriveCallCompositions([call("c1", 40_000, 0)], []).byCall.size).toBe(0);
   });

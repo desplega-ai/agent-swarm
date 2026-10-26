@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import type { CompositionManifest } from "../../lib/request-composition";
 import {
   COMPOSITION_LIVE_POLL_MS,
@@ -37,42 +37,27 @@ describe("compositionPollMs", () => {
 });
 
 describe("requestCompositionQuery", () => {
-  test("finds a seq1 posted after the seq0 read: by poll while live, by one read at the end", async () => {
+  test("polls a live task after seq0, stops once it ends, and keeps one key across both", async () => {
     const server: CompositionManifest[] = [manifest(0)];
-    let reads = 0;
-    const fetchManifests = async () => {
-      reads++;
-      return [...server];
-    };
+    const fetchManifests = async () => [...server];
     const client = new QueryClient();
     const live = requestCompositionQuery(
       "task-1",
       { enabled: true, sessionIds: ["s-1"], live: true },
       fetchManifests,
     );
-    const observer = new QueryObserver(client, live);
-    const unsubscribe = observer.subscribe(() => {});
     await client.fetchQuery(live);
-    expect(observer.getCurrentResult().data?.map((m) => m.seq)).toEqual([0]);
     const query = client.getQueryCache().find({ queryKey: live.queryKey })!;
     expect(live.refetchInterval(query)).toBe(COMPOSITION_LIVE_POLL_MS);
 
-    // The hook posts seq1; the task then ends before the next poll.
-    server.push(manifest(1));
+    // The end-of-task read invalidates this key, so the phase stays out of it.
     const done = requestCompositionQuery(
       "task-1",
       { enabled: true, sessionIds: ["s-1"], live: false },
       fetchManifests,
     );
-    const readsBefore = reads;
-    observer.setOptions(done);
-    await client.getQueryCache().find({ queryKey: done.queryKey })?.promise;
-    expect(reads).toBe(readsBefore + 1);
-    expect(observer.getCurrentResult().data?.map((m) => m.seq)).toEqual([0, 1]);
-    expect(done.refetchInterval(client.getQueryCache().find({ queryKey: done.queryKey })!)).toBe(
-      false,
-    );
-    unsubscribe();
+    expect(done.queryKey).toEqual(live.queryKey);
+    expect(done.refetchInterval(query)).toBe(false);
     client.clear();
   });
 });

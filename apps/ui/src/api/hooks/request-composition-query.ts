@@ -28,9 +28,9 @@ export function compositionPollMs(
 }
 
 /**
- * The read reruns when the log shows a new session, and once more when the
- * task ends (the phase is in the key), so a manifest posted after the last
- * poll still shows.
+ * The read reruns when the log shows a new session. `useRequestComposition`
+ * reads once more when the task ends, so a manifest posted after the last poll
+ * still shows.
  */
 export function requestCompositionQuery(
   taskId: string,
@@ -39,7 +39,7 @@ export function requestCompositionQuery(
 ) {
   const sessionKey = [...opts.sessionIds].sort().join(",");
   return {
-    queryKey: ["task", taskId, "request-composition", sessionKey, opts.live ? "live" : "done"],
+    queryKey: ["task", taskId, "request-composition", sessionKey],
     queryFn: () => fetchManifests(taskId),
     enabled: !!taskId && opts.enabled,
     staleTime: Number.POSITIVE_INFINITY,
