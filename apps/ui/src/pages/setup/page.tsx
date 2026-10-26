@@ -33,8 +33,10 @@ import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { useConfig } from "@/hooks/use-config";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
+import { CONNECTED_TIP, HexyGuide, type HexyMood, INSTALL_TIP } from "./components/hexy-guide";
 import { InstallPromptCard, OrDivider } from "./components/install-prompt-card";
 import { type SetupBusyAction, SetupFooter } from "./components/setup-footer";
 import { SETUP_COLUMN } from "./components/setup-layout";
@@ -307,6 +309,17 @@ function SetupFlow() {
   // Same query as step 3, so the Continue tooltip can say a key waits for its check.
   const { data: presence } = useEnvPresence(stepId === "ai" ? PRESENCE_KEYS : []);
   const aiKeySaved = AI_KEY_VARS.some((key) => presence?.[key]);
+  // A check runs: the step holds Continue with a busy reason, or step 3 waits
+  // for a worker to check a saved key. Shown only after half a second, so a
+  // quick autosave does not flash the crew member's "thinking" pose.
+  const shownStatus = data?.state.steps[stepId]?.status;
+  const aiChecking =
+    stepId === "ai" &&
+    shownStatus !== "done" &&
+    shownStatus !== "skipped" &&
+    (aiKeySaved || Boolean(data?.signals.providers.some((p) => p.state === "configured")));
+  const checking = Boolean(blocker?.busy) || aiChecking;
+  const checkingShown = useDebouncedValue(checking, 500) && checking;
 
   // Only the content region scrolls: a new step starts at its top.
   const mainRef = useRef<HTMLElement>(null);
@@ -482,6 +495,15 @@ function SetupFlow() {
   const copy = STEP_COPY[stepId];
   const Body = stepId === "connect" ? null : STEP_BODIES[stepId];
   const settled = status === "done" || status === "skipped";
+  // A check that runs wins over a pass: a step tests again (memory) before it cheers.
+  const hexyMood: HexyMood =
+    stepId === "connect" && !isConfigured
+      ? "welcome"
+      : checkingShown
+        ? "busy"
+        : status === "done"
+          ? "done"
+          : "idle";
   // Step 7 before its task is sent: Send in the composer is the primary
   // action, and Skip is the one exit in the footer.
   const firstTaskSent = Boolean(data?.state.firstTaskId);
@@ -523,7 +545,20 @@ function SetupFlow() {
         {/* Every step is top-aligned at the same offset, so the title and
             content do not jump between steps. A taller step grows the column
             and scrolls. */}
-        <div className={cn(SETUP_COLUMN, "flex min-h-full flex-col pt-8 pb-12 sm:pt-10")}>
+        <div className={cn(SETUP_COLUMN, "relative flex min-h-full flex-col pt-8 pb-12 sm:pt-10")}>
+          <HexyGuide
+            stepId={stepId}
+            mood={hexyMood}
+            tip={
+              stepId !== "connect"
+                ? undefined
+                : !isConfigured
+                  ? INSTALL_TIP
+                  : identityPick.needed
+                    ? undefined
+                    : CONNECTED_TIP
+            }
+          />
           <StepTransition stepKey={stepId} direction={direction} className="flex-1">
             <div data-step-root className="flex flex-1 flex-col">
               <StepHeader
