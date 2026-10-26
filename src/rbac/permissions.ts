@@ -314,6 +314,10 @@ export const PERMISSIONS = {
     description: "Use dashboard presence rooms for Comb drives.",
     namespace: "comb",
   },
+  "fs.join.own": {
+    description: "Join the swarm's shared agent-fs drive with your own account email.",
+    namespace: "fs",
+  },
   "page.delete.any": {
     description: "Delete a page the caller does not own.",
     namespace: "page",

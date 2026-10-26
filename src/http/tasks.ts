@@ -279,6 +279,7 @@ const createTask = route({
   path: "/api/tasks",
   pattern: ["api", "tasks"],
   session: bodyTask("parentTaskId"),
+  rbac: { permission: "task.create.own" },
   summary: "Create a new task",
   tags: ["Tasks"],
   body: z
@@ -411,6 +412,7 @@ const cancelTaskRoute = route({
   path: "/api/tasks/{id}/cancel",
   pattern: ["api", "tasks", null, "cancel"],
   session: { taskParam: "id" },
+  rbac: { permission: "task.cancel.own" },
   summary: "Cancel a pending or in-progress task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -687,6 +689,7 @@ const pauseTaskRoute = route({
   path: "/api/tasks/{id}/pause",
   pattern: ["api", "tasks", null, "pause"],
   session: { taskParam: "id" },
+  rbac: { permission: "task.action.own" },
   summary: "Pause an in-progress task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -703,6 +706,7 @@ const resumeTaskRoute = route({
   path: "/api/tasks/{id}/resume",
   pattern: ["api", "tasks", null, "resume"],
   session: { taskParam: "id" },
+  rbac: { permission: "task.action.own" },
   summary: "Resume a paused task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -777,9 +781,7 @@ const updateTaskTitleRoute = route({
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
-  rbac: {
-    ungated: "mirrors the pre-RBAC PATCH /api/tasks/{id}/vcs sibling route: bearer auth only",
-  },
+  rbac: { permission: "task.action.own" },
 });
 
 async function canSteerTask(

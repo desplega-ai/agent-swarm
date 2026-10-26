@@ -2,7 +2,7 @@
 id: step-6
 name: Requester and Viewer API access
 depends_on: []
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -53,20 +53,20 @@ Built-in roles re-sync at boot (`ensureRbacSeedsSynced`, `src/be/rbac-roles.ts:3
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] RBAC suites: `bun run test:root -- src/tests/rbac-admission.test.ts src/tests/rbac-roles.test.ts src/tests/rbac-admission-e2e.test.ts src/tests/rbac-wire-e2e.test.ts src/tests/user-roles-http.test.ts`
-- [ ] New cases, run with `bun run test:root -- src/tests/rbac-admission.test.ts`:
+- [x] RBAC suites: `bun run test:root -- src/tests/rbac-admission.test.ts src/tests/rbac-roles.test.ts src/tests/rbac-admission-e2e.test.ts src/tests/rbac-wire-e2e.test.ts src/tests/user-roles-http.test.ts`
+- [x] New cases, run with `bun run test:root -- src/tests/rbac-admission.test.ts`:
   - Requester creates, cancels, pauses, resumes, steers and renames its own task;
   - the same calls on another user's task return `403` from the session wall;
   - a Viewer cannot create;
   - a Requester `PATCH /api/inbox-state` for another `userId` returns 403;
   - a Requester `POST /api/fs/members/invite` with another email returns 403, and with its own email calls agent-fs with role `editor` (fetch stub, as in `src/tests/agent-fs-provision-seeder.test.ts`);
   - a Viewer with its own email gets role `viewer`.
-- [ ] Comb batch regression: `bun run test:root -- src/tests/comb-review-batch.test.ts`
-- [ ] Coverage and boundary: `bun run check:rbac-coverage && bash scripts/check-rbac-boundary.sh`
-- [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
+- [x] Comb batch regression: `bun run test:root -- src/tests/comb-review-batch.test.ts`
+- [x] Coverage and boundary: `bun run check:rbac-coverage && bash scripts/check-rbac-boundary.sh`
+- [x] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc`
 
 #### Automated QA:
-- [ ] Re-run the live matrix on the step's worktree: `bun thoughts/taras/plans/2026-10-26-agent-fs-onboarding/spikes/non-admin/build-matrix.ts <worktree> /tmp/afo-step-6/m.md /tmp/afo-step-6/m.json`. Diff `m.json` against `spikes/non-admin/matrix-after-fix.json`. Expected differences: the inbox-state cross-user rows now `403`, and `fs/members/invite` with the caller's own email passes admission. The operator and admin columns are identical to the baseline `matrix.json`. Delete `/tmp/afo-step-6` afterwards.
+- [x] Re-run the live matrix on the step's worktree: `bun thoughts/taras/plans/2026-10-26-agent-fs-onboarding/spikes/non-admin/build-matrix.ts <worktree> /tmp/afo-step-6/m.md /tmp/afo-step-6/m.json`. Diff `m.json` against `spikes/non-admin/matrix-after-fix.json`. Expected differences: the inbox-state cross-user rows now `403`, and `fs/members/invite` with the caller's own email passes admission. The operator and admin columns are identical to the baseline `matrix.json`. Delete `/tmp/afo-step-6` afterwards.
 
 #### Manual Verification:
 - [ ] None.

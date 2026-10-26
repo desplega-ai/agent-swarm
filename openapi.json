@@ -22496,6 +22496,16 @@
               }
             }
           },
+          "403": {
+            "description": "A non-admin user token named an email other than its own",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Provisioning or invite failed",
             "content": {
@@ -23228,6 +23238,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "A non-admin user token wrote another user's state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -23350,6 +23370,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A non-admin user token wrote another user's state",
             "content": {
               "application/json": {
                 "schema": {

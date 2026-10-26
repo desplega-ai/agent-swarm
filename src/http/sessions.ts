@@ -660,7 +660,7 @@ const triageSessionListRoute = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
-  rbac: { ungated: "per-user inbox UI state, same posture as PATCH /api/inbox-state" },
+  rbac: { permission: "favorite.write.own" },
 });
 
 const SESSION_MOVE_LIMIT = 200;
@@ -671,10 +671,7 @@ const SessionMoveResultSchema = z.object({
   moved: z.array(z.string()),
   skipped: z.array(z.object({ rootTaskId: z.string(), reason: z.string() })),
 });
-const sessionMoveRbac = {
-  ungated:
-    "per-session access, per-task task.fs.mutate, and asset-key write checks in the handler, as PATCH /api/assets/task/{id}/key",
-};
+const sessionMoveRbac = { permission: "task.fs.mutate" } as const;
 const sessionMoveResponses = {
   400: { description: "Invalid namespace or request" },
   403: { description: "Personal destination not authorized" },
