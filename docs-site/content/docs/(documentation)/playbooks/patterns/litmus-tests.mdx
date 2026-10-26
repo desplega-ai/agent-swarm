@@ -1,6 +1,8 @@
 ---
 title: 'Pattern: Litmus Tests (LLM-as-Judge Quality Gates)'
 description: A quality gate where one agent hard-rejects another agent's output against an explicit rubric — using a different model family so the judgment is genuinely independent and not rubber-stamping in disguise.
+agent:
+  when: "Someone wants one agent to check another agent's output against a rubric before it ships"
 ---
 
 A quality gate where one agent hard-rejects another agent's output against explicit criteria — using a *different model family* so the judgment is genuinely independent.

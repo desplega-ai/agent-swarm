@@ -2,6 +2,7 @@ import type { GraderFixture } from "../grader-validation-support.ts";
 import { fixture as capabilityRouting } from "./capability-routing.ts";
 import { fixture as delegationChain } from "./delegation-chain.ts";
 import { fixture as delegationProbe } from "./delegation-probe.ts";
+import { fixture as docsSuggestion } from "./docs-suggestion.ts";
 import { fixture as fanoutResearch, soloFixture as fanoutResearchSolo } from "./fanout-research.ts";
 import { fixture as humanInLoop, soloFixture as humanInLoopSolo } from "./human-in-loop.ts";
 import {
@@ -37,4 +38,5 @@ export const GRADER_FIXTURES: Readonly<Record<string, GraderFixture>> = {
   "human-in-loop": humanInLoop,
   "human-in-loop-solo": humanInLoopSolo,
   "real-diff-agent-fs": realDiffAgentFs,
+  "docs-suggestion": docsSuggestion,
 };

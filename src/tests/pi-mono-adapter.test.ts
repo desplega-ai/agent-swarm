@@ -1859,3 +1859,57 @@ describe("PiMonoSession context-bound note", () => {
     expect(await lateSteers([assistantTurn(usage(5000))])).toEqual([HELD_NOTE_TEXT]);
   });
 });
+
+describe("PiMonoSession — per-call usage line", () => {
+  function assistantEnd(content: unknown[], usage?: unknown): AgentSessionEvent {
+    return {
+      type: "message_end",
+      message: { role: "assistant", content, stopReason: "stop", ...(usage ? { usage } : {}) },
+    } as unknown as AgentSessionEvent;
+  }
+
+  test("one call_usage raw_log line per assistant message_end with usage", async () => {
+    const { events } = await runWithEvents([
+      assistantEnd([{ type: "toolCall", id: "call-1", name: "bash", arguments: {} }], {
+        input: 120,
+        cacheRead: 9_000,
+        cacheWrite: 400,
+        output: 60,
+        reasoning: 12,
+        totalTokens: 9_580,
+      }),
+      {
+        type: "message_end",
+        message: { role: "user", content: [{ type: "text", text: "tool output" }] },
+      } as unknown as AgentSessionEvent,
+      // No usage (some providers omit it): no line.
+      assistantEnd([{ type: "text", text: "thinking out loud" }]),
+      assistantEnd([{ type: "text", text: "Done" }], { input: 5, cacheRead: 9_500, output: 3 }),
+    ]);
+
+    const raw = events.flatMap((e) =>
+      e.type === "raw_log" ? [JSON.parse(e.content) as Record<string, unknown>] : [],
+    );
+    const usageLines = raw.filter((line) => line.type === "call_usage");
+    expect(usageLines).toEqual([
+      {
+        type: "call_usage",
+        harness: "pi",
+        usage: { input: 120, cacheRead: 9_000, cacheWrite: 400, output: 60, reasoning: 12 },
+      },
+      {
+        type: "call_usage",
+        harness: "pi",
+        usage: { input: 5, cacheRead: 9_500, cacheWrite: 0, output: 3, reasoning: 0 },
+      },
+    ]);
+    // The usage line precedes the call's own text line.
+    const done = raw.findIndex(
+      (line) => line.type === "assistant" && JSON.stringify(line).includes('"Done"'),
+    );
+    expect(done).toBeGreaterThan(0);
+    expect(raw[done - 1]).toEqual(usageLines[1]);
+    // Token counts only: no message content rides on the line.
+    expect(JSON.stringify(usageLines)).not.toContain("tool output");
+  });
+});

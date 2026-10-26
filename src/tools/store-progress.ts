@@ -14,6 +14,11 @@ import {
   updateTaskProgress,
 } from "@/be/db";
 import {
+  LEARNING_MAX_TAGS,
+  storeTaskLearning,
+  type TaskLearningResult,
+} from "@/be/memory/task-learning";
+import {
   CitationInputSchema,
   getTaskCitations,
   hasTaskCitationCheckRefusal,
@@ -114,7 +119,25 @@ export const storeProgressOutputSchema = swarmToolOutputSchema({
     .describe(
       "Present only when this progress text reads as blocked-waiting: milliseconds since the task's prior update. Drives the store-progress nudge toward defer-task.",
     ),
+  learning: z
+    .looseObject({
+      status: z.string().optional(),
+      key: z.string().optional(),
+      memoryId: z.string().optional(),
+      workstream: z.string().optional(),
+      error: z.string().optional(),
+    })
+    .optional()
+    .describe(
+      "Present when the call carried a learning: stored, replayed (same text already stored for this task), or failed with error.",
+    ),
 });
+
+function learningSentence(result: TaskLearningResult): string {
+  if (result.status === "stored") return `Learning stored at ${result.key}.`;
+  if (result.status === "replayed") return `Learning already stored at ${result.key}; skipped.`;
+  return `Learning not stored: ${result.error}.`;
+}
 
 export const registerStoreProgressTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -165,6 +188,19 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .describe(
             'Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each one in output with [citation:N], or set general: true for a source that backs the whole answer (it renders under "General sources"). ref per kind: task = task UUID; memory = memory UUID (optional quote must appear verbatim in it); github = owner/repo#N, owner/repo@<sha>, or a github.com pull, issues, or commit URL; slack = permalink or channel/ts; agent-fs = file path; page = page id; script-run = script run id; url = http(s) URL. The first completing call is refused, and the task stays in progress, if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; the response lists each problem. After one refusal, completion proceeds and those markers and sources are dropped from rendered output. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.',
           ),
+        learning: z
+          .union([
+            z.string(),
+            z.object({
+              text: z.string(),
+              workstream: z.string().optional(),
+              tags: z.array(z.string()).optional(),
+            }),
+          ])
+          .optional()
+          .describe(
+            `A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Not a progress line. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. The first line of text is the title. At most ~500 tokens and ${LEARNING_MAX_TAGS} kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update.`,
+          ),
         persistMemory: z
           .boolean()
           .optional()
@@ -193,6 +229,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         failureReason,
         attachments,
         citations,
+        learning,
         persistMemory,
         force,
       },
@@ -332,6 +369,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
       }
 
+      let learningWrite: Promise<TaskLearningResult> | undefined;
       const result = await getDbClient().transaction(async () => {
         const agent = await getAgentById(requestInfo.agentId ?? "");
 
@@ -433,6 +471,29 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // unauthorized batch so citations never block the task update itself.
         if (citations?.length && existingTask.agentId === agent.id) {
           await upsertTaskCitations(taskId, citations);
+        }
+
+        // A finished task takes no new writes, learnings included.
+        if (learning && isTerminal) {
+          learningWrite = Promise.resolve({
+            status: "failed",
+            error: "the task is already finished; use memory-store",
+          });
+        } else if (learning) {
+          // Post-commit, so a rolled-back progress write never leaves a learning
+          // behind, and a failed learning write never rolls back the progress.
+          learningWrite = new Promise((resolve) => {
+            getDbClient().afterCommit(() =>
+              storeTaskLearning({
+                agentId: agent.id,
+                isLead: agent.isLead === true,
+                task: existingTask,
+                learning,
+              }).then(resolve, (err) =>
+                resolve({ status: "failed", error: scrubSecrets(String(err)) }),
+              ),
+            );
+          });
         }
 
         // Idempotency guard: short-circuit terminal-status writes (completed/failed)
@@ -627,7 +688,11 @@ export const registerStoreProgressTool = (server: McpServer) => {
         });
       }
 
-      const { success, message } = result;
+      const learningResult = await learningWrite;
+      const { success } = result;
+      const message = learningResult
+        ? `${result.message} ${learningSentence(learningResult)}`
+        : result.message;
       const task = result.task
         ? {
             id: result.task.id,
@@ -646,6 +711,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         typeof result.blockedWaitingElapsedMs === "number"
           ? { blockedWaitingElapsedMs: result.blockedWaitingElapsedMs }
           : {}),
+        ...(learningResult ? { learning: learningResult } : {}),
       };
       const warnings =
         success && status === "completed"

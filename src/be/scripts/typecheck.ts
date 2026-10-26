@@ -33,6 +33,7 @@ export const SCRIPT_SDK_TYPES = `
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type ScriptScope = "agent" | "global";
 export type ScriptFsMode = "none" | "workspace-rw";
+export type ScriptExecutorName = "native" | "quickjs";
 export type ScriptApiRawOptions = { raw: true };
 export type ScriptApiDefaultOptions = { raw?: false };
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
@@ -224,7 +225,7 @@ export interface SwarmSdk {
   schedule_list(args?: { enabled?: boolean; name?: string; scheduleType?: "recurring" | "one_time"; targetType?: "agent-task" | "workflow" | "script"; workflowId?: string; scriptName?: string; hideCompleted?: boolean; consecutiveErrorsMin?: number; lastRunStatus?: "failed" | "succeeded"; includeFull?: boolean }): Promise<unknown>;
   // --- scripts ---
   script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
-  script_run(args: { name?: string; source?: string; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; idempotencyKey?: string }): Promise<unknown>;
+  script_run(args: { name?: string; source?: string; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; executor?: ScriptExecutorName | null; idempotencyKey?: string }): Promise<unknown>;
   // --- swarm / agent ---
   swarm_get(args?: { includeFull?: boolean }): Promise<unknown>;
   agent_info(args?: Record<string, unknown>): Promise<unknown>;
@@ -341,7 +342,12 @@ export interface SwarmSdk {
   workflow_patch(args: Record<string, unknown>): Promise<unknown>;
   workflow_patchNode(args: Record<string, unknown>): Promise<unknown>;
   workflow_delete(args: { id: string }): Promise<unknown>;
-  workflow_trigger(args: { id: string; triggerData?: Record<string, unknown> }): Promise<unknown>;
+  workflow_trigger(args: {
+    id: string;
+    triggerData?: Record<string, unknown>;
+    wait?: boolean;
+    idempotencyKey?: string;
+  }): Promise<unknown>;
   workflow_retryRun(args: { id: string }): Promise<unknown>;
   workflow_cancelRun(args: { id: string }): Promise<unknown>;
 
@@ -351,7 +357,7 @@ export interface SwarmSdk {
   prompt_preview(args: Record<string, unknown>): Promise<unknown>;
 
   // --- write: scripts ---
-  script_upsert(args: { name: string; source: string; description?: string; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode }): Promise<unknown>;
+  script_upsert(args: { name: string; source: string; description?: string; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; executor?: ScriptExecutorName | null }): Promise<unknown>;
   script_delete(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
   script_queryTypes(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
   script_launchRun(args: { source: string; args?: unknown; idempotencyKey?: string; scriptName?: string; requestedByUserId?: string }): Promise<unknown>;

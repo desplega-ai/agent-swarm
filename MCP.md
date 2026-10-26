@@ -272,6 +272,7 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 | `tags` | `array` | No | - | Filter by any matching tag. |
 | `search` | `string` | No | - | Search in task description. |
 | `scheduleId` | `string` | No | - | Filter by schedule ID to find tasks created by a specific schedule. |
+| `workflowRunId` | `string` | No | - | Filter by workflow run ID to find the tasks of a single run. |
 | `key` | `unknown` | No | - | Filter by exact logical namespace. |
 | `keyPrefix` | `unknown` | No | - | Filter by namespace subtree. |
 | `includeHeartbeat` | `boolean` | No | - | Include heartbeat/system tasks in results (excluded by default). |
@@ -1498,6 +1499,8 @@ Manually trigger a workflow execution, optionally passing trigger data as contex
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | Workflow ID to trigger |
 | `triggerData` | `object` | No | - | Optional data to pass as trigger context to the workflow |
+| `wait` | `boolean` | No | - | Default true: return after the run's instant steps ran, when it finishes or parks at its first async step. false: return as soon as the run is created and walk it in the background. Use false from a script or step that only needs the runId. |
+| `idempotencyKey` | `string` | No | - | Optional, 1-255 visible ASCII characters, scoped to the calling agent and this workflow. The first trigger accepted under a key starts one run; the key is recorded in the run's own transaction and never expires. A retry with the same key and triggerData starts nothing and returns that run (replayed: true), even if the earlier call was killed before it saw the answer. The same key with other triggerData is an error with idempotencyConflict: true. |
 
 ### list-workflow-runs
 

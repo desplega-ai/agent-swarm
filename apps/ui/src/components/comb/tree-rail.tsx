@@ -374,12 +374,15 @@ export function TreeRail({
                   )}
                   {row.isFolder ? null : <PresenceDots path={row.path} />}
                 </Link>
-                {/* From md up the button shows on hover, over the end of the name, so a
-                  hidden button takes no room. Touch screens have no hover: below md it
-                  stays visible in the row. */}
+                {/* From md up the button shows on hover or focus, over the end of the
+                  name, so a hidden button takes no room. Touch screens have no hover:
+                  below md it stays visible in the row. Roving, like the treeitem: only
+                  the focused row's button is a Tab stop, so Tab from a row reaches its
+                  menu and the tree stays two stops however long it is. */}
                 <FileMenuButton
                   target={target}
-                  className="md:absolute md:right-1 md:bg-accent md:opacity-0 md:group-hover/row:opacity-100 md:hover:bg-accent"
+                  tabIndex={row.path === tabStop ? 0 : -1}
+                  className="md:absolute md:right-1 md:bg-accent md:opacity-0 md:group-hover/row:opacity-100 md:hover:bg-accent md:focus-visible:opacity-100"
                 />
               </div>
             </FileContextMenu>

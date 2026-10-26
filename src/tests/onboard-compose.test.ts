@@ -136,6 +136,26 @@ describe("generateCompose", () => {
     expect(yaml).not.toContain("pull_policy: always");
   });
 
+  test.each([
+    "docker",
+    "podman",
+  ] as const)("%s agent services mount volumes where the worker reads and writes", (containerEngine) => {
+    const doc = Bun.YAML.parse(generateCompose({ ...devState, containerEngine })) as {
+      services: Record<string, { volumes?: string[] }>;
+    };
+    const agents = Object.entries(doc.services).filter(([name]) => name !== "swarm-api");
+
+    expect(agents.map(([name]) => name)).toEqual(["lead", "worker-coder-1", "worker-coder-2"]);
+    for (const [name, service] of agents) {
+      expect(service.volumes).toEqual([
+        "swarm_logs:/logs",
+        "swarm_shared:/workspace/shared",
+        `swarm_${name.replaceAll("-", "_")}:/workspace/personal`,
+      ]);
+    }
+    expect(doc.services["swarm-api"]?.volumes).toEqual(["swarm_data:/app/data"]);
+  });
+
   test("dev preset produces 3 agent services + 1 API service", () => {
     const yaml = generateCompose(devState);
     // Only count service definitions in the services section (before volumes:)

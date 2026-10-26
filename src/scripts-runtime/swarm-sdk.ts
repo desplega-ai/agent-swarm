@@ -8,6 +8,7 @@ type BridgeRequest = {
   method: string;
   path: string;
   body?: unknown;
+  headers?: Record<string, string>;
 };
 
 function headers(config: SwarmConfig): Record<string, string> {
@@ -362,10 +363,16 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     case "workflow_trigger": {
       const id = typeof body.id === "string" ? body.id : undefined;
       if (!id) throw new Error("workflow_trigger requires string `id`");
+      const path = `/api/workflows/${encodeURIComponent(id)}/trigger`;
       return {
         method: "POST",
-        path: `/api/workflows/${encodeURIComponent(id)}/trigger`,
+        path: body.wait === false ? `${path}?wait=false` : path,
         body: body.triggerData ?? {},
+        // The route's own Idempotency-Key: recorded in the run's transaction,
+        // so a retry after a kill replays the run instead of starting another.
+        ...(typeof body.idempotencyKey === "string"
+          ? { headers: { "Idempotency-Key": body.idempotencyKey } }
+          : {}),
       };
     }
     case "workflow_retryRun": {
@@ -491,7 +498,7 @@ async function callBridgeApi(
 
   const res = await fetch(`${baseUrl}${request.path}`, {
     method: request.method,
-    headers: headers(config),
+    headers: { ...headers(config), ...request.headers },
     body: request.body === undefined ? undefined : JSON.stringify(request.body),
   });
   const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);

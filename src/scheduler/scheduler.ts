@@ -75,7 +75,7 @@ function resolveExecutorRegistry(): ExecutorRegistry | null {
  * scripts-runtime — no agent/LLM in the loop. Reuses the same `runScriptWithRunCredential()`
  * path as the `swarm-script` workflow executor.
  */
-async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
+export async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
   if (!schedule.scriptName) {
     throw new Error(`Schedule "${schedule.name}" has no scriptName (targetType=script)`);
   }
@@ -106,6 +106,7 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
       source: script.source,
       args,
       fsMode: "none",
+      executor: script.executor,
       agentId,
       egressSecrets: credentials.egressSecrets,
       userConfig: credentials.userConfig,

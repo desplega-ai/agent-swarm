@@ -1,6 +1,8 @@
 ---
 title: Email Domain Health
 description: A daily monitor for the domains you send mail from. One saved script checks SPF, DKIM, DMARC, MX, provider records and blocklists on two DNS-over-HTTPS resolvers, sends one test email and captures its score, counts bounces, writes history to a Swarm App, and alerts only when something gets worse.
+agent:
+  when: "Someone wants the domains they send email from watched for SPF, DKIM, DMARC or blocklist problems"
 ---
 
 Use this playbook when a team sends mail from its own domains (founder outreach, product mail, support) and wants to know before recipients do that a record broke, a key was rotated, or a domain landed on a blocklist.

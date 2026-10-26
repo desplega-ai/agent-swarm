@@ -10,6 +10,7 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   closeDb,
+  countWorkflowRuns,
   createAgent,
   createTaskExtended,
   createUser,
@@ -20,10 +21,13 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
+  updateWorkflow,
 } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
+import { SwarmConfig } from "../scripts-runtime/swarm-config";
+import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 import { WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE } from "../tools/utils";
 import { registerCreateWorkflowTool } from "../tools/workflows/create-workflow";
 import { registerPatchWorkflowTool } from "../tools/workflows/patch-workflow";
@@ -56,6 +60,8 @@ type ToolResult = {
     versionCreated?: number;
     runId?: string;
     skipped?: boolean;
+    replayed?: boolean;
+    idempotencyConflict?: boolean;
     validationErrors?: string[];
     triggerSchema?: Record<string, unknown>;
   };
@@ -626,6 +632,209 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(step).toBeDefined();
     expect((await getTaskByWorkflowRunStepId(step!.id))?.requestedByUserId).toBe(requester.id);
   });
+
+  test("trigger-workflow wait:false returns the runId before the run's instant steps finish", async () => {
+    const workflow = await createWorkflow({
+      name: uniqueName("mcp-trigger-detach"),
+      definition: {
+        nodes: [
+          {
+            id: "slow",
+            type: "script",
+            config: { runtime: "bash", script: "sleep 0.6; echo done", timeout: 10_000 },
+          },
+        ],
+      },
+    });
+    createdWorkflowIds.push(workflow.id);
+
+    const started = performance.now();
+    const triggered = await tools.callTrigger({ id: workflow.id, triggerData: {}, wait: false });
+    const elapsedMs = performance.now() - started;
+
+    expect(triggered.structuredContent?.success).toBe(true);
+    expect(triggered.structuredContent?.skipped).toBe(false);
+    const runId = triggered.structuredContent?.runId;
+    expect(runId).toBeString();
+    expect(elapsedMs).toBeLessThan(500);
+    expect((await getWorkflowRun(runId!))?.status).toBe("running");
+
+    const deadline = Date.now() + 10_000;
+    while ((await getWorkflowRun(runId!))?.status === "running" && Date.now() < deadline) {
+      await Bun.sleep(50);
+    }
+    expect((await getWorkflowRun(runId!))?.status).toBe("completed");
+  }, 15_000);
+
+  // A caller killed after its trigger committed (or while its request was in
+  // flight) retries with the same key: the retry must return that run and
+  // start no second one. Before idempotencyKey, the only guard was a separate
+  // claim the caller wrote first, which a kill between the two left held.
+  test("trigger-workflow idempotencyKey: a retry replays the accepted run and starts no second one", async () => {
+    const workflow = await createWorkflow({
+      name: uniqueName("mcp-trigger-idempotent"),
+      definition: { nodes: [{ id: "n", type: "property-match", config: { conditions: [] } }] },
+    });
+    createdWorkflowIds.push(workflow.id);
+    const agentId = crypto.randomUUID();
+    const args = {
+      id: workflow.id,
+      triggerData: { pr: 7, sha: "a".repeat(40) },
+      wait: false,
+      idempotencyKey: "pr-review/repo/pr/7/aaaa",
+    };
+
+    const first = await tools.callTrigger(args, agentId);
+    expect(first.structuredContent?.success).toBe(true);
+    const runId = first.structuredContent?.runId;
+    expect(runId).toBeString();
+    expect(first.structuredContent?.replayed).toBeUndefined();
+
+    // The caller never saw `first` (killed): its retry replays it.
+    const retry = await tools.callTrigger(args, agentId);
+    expect(retry.structuredContent?.success).toBe(true);
+    expect(retry.structuredContent?.runId).toBe(runId);
+    expect(retry.structuredContent?.replayed).toBe(true);
+
+    // The same key with other data starts nothing either.
+    const conflict = await tools.callTrigger(
+      { ...args, triggerData: { pr: 7, sha: "b".repeat(40) } },
+      agentId,
+    );
+    expect(conflict.structuredContent?.success).toBe(false);
+    expect(conflict.structuredContent?.idempotencyConflict).toBe(true);
+
+    // The key is scoped to the caller: another agent's key does not collide.
+    const other = await tools.callTrigger(args, crypto.randomUUID());
+    expect(other.structuredContent?.runId).not.toBe(runId);
+
+    expect(await countWorkflowRuns(workflow.id)).toBe(2);
+  });
+
+  test("trigger-workflow idempotencyKey: concurrent triggers with one key start exactly one run", async () => {
+    const workflow = await createWorkflow({
+      name: uniqueName("mcp-trigger-idempotent-race"),
+      definition: { nodes: [{ id: "n", type: "property-match", config: { conditions: [] } }] },
+    });
+    createdWorkflowIds.push(workflow.id);
+    const agentId = crypto.randomUUID();
+    const args = { id: workflow.id, triggerData: { pr: 8 }, idempotencyKey: "race-key" };
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => tools.callTrigger(args, agentId)),
+    );
+    const runIds = new Set(results.map((r) => r.structuredContent?.runId));
+    expect(results.every((r) => r.structuredContent?.success === true)).toBe(true);
+    expect(runIds.size).toBe(1);
+    expect(results.filter((r) => r.structuredContent?.replayed !== true)).toHaveLength(1);
+    expect(await countWorkflowRuns(workflow.id)).toBe(1);
+  });
+
+  test("trigger-workflow idempotencyKey: a key rejected before acceptance is not used up", async () => {
+    const workflow = await createWorkflow({
+      name: uniqueName("mcp-trigger-idempotent-disabled"),
+      definition: { nodes: [{ id: "n", type: "property-match", config: { conditions: [] } }] },
+      enabled: false,
+    });
+    createdWorkflowIds.push(workflow.id);
+    const agentId = crypto.randomUUID();
+    const args = { id: workflow.id, triggerData: {}, idempotencyKey: "after-enable" };
+
+    expect((await tools.callTrigger(args, agentId)).structuredContent?.success).toBe(false);
+    expect(await countWorkflowRuns(workflow.id)).toBe(0);
+
+    await updateWorkflow(workflow.id, { enabled: true });
+    const accepted = await tools.callTrigger(args, agentId);
+    expect(accepted.structuredContent?.success).toBe(true);
+    expect(accepted.structuredContent?.replayed).toBeUndefined();
+    expect(await countWorkflowRuns(workflow.id)).toBe(1);
+  });
+
+  // `ctx.swarm.workflow_trigger` in a script calls the REST trigger route, not
+  // the MCP tool, so `wait` and `idempotencyKey` must reach that route too.
+  const scriptSdk = (agentId: string) =>
+    createSwarmSdk(
+      new SwarmConfig({
+        system: {
+          apiKey: { value: "sdk-test-key", isSecret: true },
+          agentId: { value: agentId, isSecret: false },
+          mcpBaseUrl: { value: `http://127.0.0.1:${TEST_PORT}`, isSecret: false },
+        },
+        user: {},
+      }),
+    );
+  type SdkTriggerResult = { success: boolean; status: number; data: { runId?: string } };
+
+  test("ctx.swarm.workflow_trigger idempotencyKey: a retry after a kill replays the run", async () => {
+    const workflow = await createWorkflow({
+      name: uniqueName("sdk-trigger-idempotent"),
+      definition: { nodes: [{ id: "n", type: "property-match", config: { conditions: [] } }] },
+    });
+    createdWorkflowIds.push(workflow.id);
+    const sdk = scriptSdk(crypto.randomUUID());
+    const args = {
+      id: workflow.id,
+      triggerData: { pr: 9 },
+      wait: false,
+      idempotencyKey: "pr-review/repo/pr/9/sha",
+    };
+
+    const first = (await sdk.workflow_trigger(args)) as SdkTriggerResult;
+    const retry = (await sdk.workflow_trigger(args)) as SdkTriggerResult;
+    expect(first.success).toBe(true);
+    expect(first.data.runId).toBeString();
+    expect(retry.success).toBe(true);
+    expect(retry.data.runId).toBe(first.data.runId);
+    expect(await countWorkflowRuns(workflow.id)).toBe(1);
+
+    // Two concurrent calls (a killed attempt's in-flight request and its retry).
+    const racing = await createWorkflow({
+      name: uniqueName("sdk-trigger-idempotent-race"),
+      definition: { nodes: [{ id: "n", type: "property-match", config: { conditions: [] } }] },
+    });
+    createdWorkflowIds.push(racing.id);
+    const raced = (await Promise.all(
+      Array.from({ length: 4 }, () => sdk.workflow_trigger({ ...args, id: racing.id })),
+    )) as SdkTriggerResult[];
+    expect(new Set(raced.map((r) => r.data.runId)).size).toBe(1);
+    expect(await countWorkflowRuns(racing.id)).toBe(1);
+  });
+
+  test("ctx.swarm.workflow_trigger wait:false returns before the run's instant steps finish", async () => {
+    const workflow = await createWorkflow({
+      name: uniqueName("sdk-trigger-detach"),
+      definition: {
+        nodes: [
+          {
+            id: "slow",
+            type: "script",
+            config: { runtime: "bash", script: "sleep 0.6; echo done", timeout: 10_000 },
+          },
+        ],
+      },
+    });
+    createdWorkflowIds.push(workflow.id);
+
+    const started = performance.now();
+    const triggered = (await scriptSdk(crypto.randomUUID()).workflow_trigger({
+      id: workflow.id,
+      triggerData: {},
+      wait: false,
+    })) as SdkTriggerResult;
+    const elapsedMs = performance.now() - started;
+
+    expect(triggered.success).toBe(true);
+    const runId = triggered.data.runId;
+    expect(runId).toBeString();
+    expect(elapsedMs).toBeLessThan(500);
+    expect((await getWorkflowRun(runId!))?.status).toBe("running");
+
+    const deadline = Date.now() + 10_000;
+    while ((await getWorkflowRun(runId!))?.status === "running" && Date.now() < deadline) {
+      await Bun.sleep(50);
+    }
+    expect((await getWorkflowRun(runId!))?.status).toBe("completed");
+  }, 15_000);
 
   test("trigger-workflow with missing required field → structured TriggerSchemaError", async () => {
     const triggerSchema: Record<string, unknown> = {

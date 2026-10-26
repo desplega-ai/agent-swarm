@@ -16,6 +16,7 @@ export const SCRIPT_TRANSPORT_ERROR =
 export const scriptNameSchema = z.string().min(1).max(200);
 export const scriptScopeSchema = z.enum(["agent", "global"]);
 export const scriptFsModeSchema = z.enum(["none", "workspace-rw"]);
+export const scriptExecutorSchema = z.enum(["native", "quickjs"]);
 
 export const scriptToolOutputSchema = swarmToolOutputSchema({
   status: z.number().optional(),

@@ -19,6 +19,7 @@ No `lint` script in this workspace. Root Biome linting does not cover `docs-site
 ## MDX authoring rules
 
 - **Frontmatter:** `title` + `description` (both required by convention). API-reference pages also set `full: true`.
+- **`agent` frontmatter (playbooks and opted-in guides):** feeds the docs index in the seeded `swarm-docs` skill, which the lead uses to offer a page. Every page under `playbooks/` needs `agent.when` unless it sets `agent.offer: false`; a guide opts in with `agent.offer: true` plus `when`. Write `when` as one sentence of the user's intent in their words ("Someone wants deploy frequency and lead time reported weekly"), not the feature name. Optional: `notWhen` (when not to offer) and `template` (a local template id such as `community/dora-metrics`). After any frontmatter change, run `bun run build:docs-index` from the repo root; CI fails on drift.
 - **Globally available components** (no import needed): `Callout`, `Mermaid`, `APIPage`. Registered by `fumadocs-ui/mdx` defaults + `mdx-components.tsx`.
 - **Must be imported explicitly at the top of the MDX file** — anything else from Fumadocs, notably `Tab` / `Tabs`:
   ```mdx

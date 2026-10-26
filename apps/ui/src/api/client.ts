@@ -1,5 +1,6 @@
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getActiveConnection, getConfig } from "@/lib/config";
+import type { CompositionManifest } from "@/lib/request-composition";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import { withAddressSpace } from "../lib/local-network";
@@ -816,6 +817,19 @@ class ApiClient {
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch task context: ${res.status}`);
     return res.json();
+  }
+
+  /**
+   * A task's request composition manifests, one or more per session. An API
+   * without the route (older than the manifest) answers 404: no manifests.
+   */
+  async fetchTaskRequestComposition(taskId: string): Promise<CompositionManifest[]> {
+    const url = `${this.getBaseUrl()}/api/tasks/${taskId}/request-composition`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (res.status === 404) return [];
+    if (!res.ok) throw new Error(`Failed to fetch request composition: ${res.status}`);
+    const data = (await res.json()) as { manifests: CompositionManifest[] };
+    return data.manifests;
   }
 
   async fetchLogs(limit = 100, agentId?: string): Promise<LogsResponse> {

@@ -102,6 +102,7 @@ Returns a list of tasks with various filters. Sorted by priority (desc) then las
 | `tags` | array | No | Filter by matching tags |
 | `search` | string | No | Search in task description |
 | `scheduleId` | uuid | No | Filter by schedule ID to find tasks created by a specific schedule |
+| `workflowRunId` | string | No | Filter by workflow run ID to find the tasks of a single run |
 | `key` | string | No | Filter by exact logical asset namespace |
 | `keyPrefix` | string | No | Filter by namespace subtree |
 | `includeHeartbeat` | boolean | No | Include heartbeat/system tasks in results (excluded by default) |
@@ -698,6 +699,7 @@ Get details of a specific workflow run including step statuses.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `id` | uuid | Yes | Run ID |
+| `fields` | `full` \| `slim` | No | `slim` omits `run.context` and each step's input (a context snapshot per step). Outputs, errors and retry fields stay. Default: `full` |
 
 ## Related
 

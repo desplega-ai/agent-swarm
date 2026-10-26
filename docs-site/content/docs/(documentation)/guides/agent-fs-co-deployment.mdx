@@ -1,6 +1,9 @@
 ---
 title: agent-fs Co-deployment
 description: Run agent-fs alongside Agent Swarm for persistent shared files, task attachments, previews, and semantic search
+agent:
+  offer: true
+  when: "Someone wants shared persistent files for agents on a self-hosted swarm"
 ---
 
 agent-swarm uses `local-fs` by default when no agent-fs endpoint is configured. That keeps fresh installs self-contained, but files stay local to the API process. Set `AGENT_FS_API_URL` and let the API boot seeder provision `API_AGENT_FS_API_KEY` plus per-agent `AGENT_FS_API_KEY` secrets to enable the richer provider.
@@ -81,7 +84,7 @@ Enable the co-deployed service with `agentFs.enabled=true`:
 agentFs:
   enabled: true
   image:
-    tag: 0.18.5
+    tag: 0.18.8
   bucket: agentfs
   s3:
     existingSecret: agent-fs-s3

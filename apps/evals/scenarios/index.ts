@@ -2,6 +2,7 @@ import type { Scenario } from "../src/types.ts";
 import { capabilityRouting } from "./capability-routing.ts";
 import { delegationChain } from "./delegation-chain.ts";
 import { delegationProbe } from "./delegation-probe.ts";
+import { docsSuggestion } from "./docs-suggestion.ts";
 import { fanoutResearch, fanoutResearchSolo } from "./fanout-research.ts";
 import { humanInLoop, humanInLoopSolo } from "./human-in-loop.ts";
 import { implementReview, implementReviewSolo } from "./implement-review.ts";
@@ -20,7 +21,8 @@ import { workflowAuthoring } from "./workflow-authoring.ts";
 // structured-output-adherence is folded into tool-routing as a gate.
 // Swarm scenarios (lead + workers) ship with their `-solo` single-agent baseline
 // next to them (plan Q6); src/baseline.ts compares the pair. capability-routing
-// has none: routing across teammates has no single-agent analogue.
+// has none: routing across teammates has no single-agent analogue. Neither has
+// docs-suggestion: it grades the lead prompt itself.
 export const scenarios: Scenario[] = [
   sqlAudit,
   delegationProbe,
@@ -38,6 +40,7 @@ export const scenarios: Scenario[] = [
   humanInLoop,
   humanInLoopSolo,
   realDiffAgentFs,
+  docsSuggestion,
 ];
 
 // Cheap smoke default for `--scenarios` when none are passed. sql-audit is the
