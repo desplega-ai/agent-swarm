@@ -1,0 +1,62 @@
+---
+title: "Release Notes — Week of October 19 to October 26, 2026"
+description: "Agent Swarm 2.5 turns Sessions into one inbox for every agent conversation, gives foreach workflows concurrency caps and failure policies, and lands in ten releases across 164 commits."
+---
+
+Ten releases shipped this week, v2.4.2 through v2.5.4, on 164 commits. The thread: one place to see every conversation your agents have, and workflow primitives that hold up when a fan-out runs thousands of items instead of ten.
+
+> **Heads up: no API break this week, but three defaults moved.** Sessions opens on your own sessions, and everyone else's sits behind the Mine / All toggle ([#2347](https://github.com/desplega-ai/agent-swarm/pull/2347)). Slack and chat sessions get their own source sections instead of mixing into the UI list ([#2379](https://github.com/desplega-ai/agent-swarm/pull/2379), [#2408](https://github.com/desplega-ai/agent-swarm/pull/2408)). Retention for finished script runs is opt-in, so nothing is deleted until you set it in the [environment reference](/docs/reference/environment-variables) ([#2404](https://github.com/desplega-ai/agent-swarm/pull/2404)).
+
+## Highlights
+
+### Sessions v2: one inbox for agent work
+
+[#2329](https://github.com/desplega-ai/agent-swarm/pull/2329) is the week's largest change at 186 files, and the reason 2.5.0 is a minor bump. Sessions becomes the inbox for agent work: thread groups, Inbox / Done / Later triage, tabs, and a phone layout. Five follow-up PRs landed within three days of it.
+
+- A filter menu with select all, plus a one-time Done backfill for existing sessions ([#2367](https://github.com/desplega-ai/agent-swarm/pull/2367)).
+- Slack and chat source sections with backfill, so a Telegram thread and a UI session stop competing for the same list ([#2408](https://github.com/desplega-ai/agent-swarm/pull/2408)).
+- Readable thread group labels and a filter button on the phone layout ([#2423](https://github.com/desplega-ai/agent-swarm/pull/2423)).
+- A Done session reopens itself when a person steers one of its tasks ([#2381](https://github.com/desplega-ai/agent-swarm/pull/2381)).
+
+Docs: [Sessions](/docs/ui/sessions).
+
+### Foreach that survives a large fan-out
+
+Any executor can now be a foreach body, not just script nodes ([#2314](https://github.com/desplega-ai/agent-swarm/pull/2314)). Set a concurrency cap and a failure policy, and retry a single item instead of the whole batch ([#2316](https://github.com/desplega-ai/agent-swarm/pull/2316)). The UI shows per-item outcomes, queue counts and retry history, so a stalled fan-out is visible early ([#2317](https://github.com/desplega-ai/agent-swarm/pull/2317)).
+
+Docs: [Workflows](/docs/concepts/workflows).
+
+### Bitbucket Cloud as a third git host
+
+[#2339](https://github.com/desplega-ai/agent-swarm/pull/2339) adds Bitbucket Cloud next to GitHub and GitLab, with webhooks and environment config, so an agent picks up a pull request on any of the three. Docs: [Bitbucket](/docs/integrations/bitbucket).
+
+### RBAC roles and agent-bound tokens
+
+Roles are assignable through the API, including a new read-only viewer role ([#2304](https://github.com/desplega-ai/agent-swarm/pull/2304)). Worker tokens can be bound to a single agent ([#2099](https://github.com/desplega-ai/agent-swarm/pull/2099)), so a leaked token reaches exactly one worker instead of the fleet. Docs: [team collaboration](/docs/features/team-collaboration), [users API](/docs/api-reference/users).
+
+### Telegram through the Chat SDK
+
+The Telegram adapter became a full conversation surface. Agents send files back to the thread ([#2202](https://github.com/desplega-ai/agent-swarm/pull/2202)) and transcribe voice notes ([#2206](https://github.com/desplega-ai/agent-swarm/pull/2206)), know who asked and where ([#2205](https://github.com/desplega-ai/agent-swarm/pull/2205)), reply to the exact message that asked with a task tag ([#2203](https://github.com/desplega-ai/agent-swarm/pull/2203)), and show progress with reactions instead of a stream of text acknowledgements ([#2366](https://github.com/desplega-ai/agent-swarm/pull/2366)). Docs: [chat-sdk](/docs/integrations/chat-sdk).
+
+## Improvements
+
+- **Workflows** — an `Idempotency-Key` header on create and trigger, so a retried call does not start a duplicate run ([#2380](https://github.com/desplega-ai/agent-swarm/pull/2380)); a run tree endpoint that returns a run and all its children ([#2419](https://github.com/desplega-ai/agent-swarm/pull/2419)); `fields=slim` for cheap polling ([#2418](https://github.com/desplega-ai/agent-swarm/pull/2418)); task filtering by `workflowRunId` ([#2417](https://github.com/desplega-ai/agent-swarm/pull/2417)); a `system-one-extraction` node on a shared provider registry, with a configurable default ([#2290](https://github.com/desplega-ai/agent-swarm/pull/2290), [#2301](https://github.com/desplega-ai/agent-swarm/pull/2301)).
+- **Access, credentials and integrations** — a HITL config question type: an agent asks a person for a value or secret, and it is stored without passing through the agent's context ([#2374](https://github.com/desplega-ai/agent-swarm/pull/2374)); credential pools accept single-key add and remove, with an instant key check and a re-test when a key changes ([#2430](https://github.com/desplega-ai/agent-swarm/pull/2430), [#2422](https://github.com/desplega-ai/agent-swarm/pull/2422)); Codex routes through a gateway via `CODEX_GATEWAY_BASE_URL` ([#2426](https://github.com/desplega-ai/agent-swarm/pull/2426)); each script run gets its own session token and can read its held secrets ([#2349](https://github.com/desplega-ai/agent-swarm/pull/2349), [#2393](https://github.com/desplega-ai/agent-swarm/pull/2393)); Codex OAuth pool slots refresh every five days by default ([#2296](https://github.com/desplega-ai/agent-swarm/pull/2296)).
+- **Agent capabilities** — audio on Slack and sessions-UI tasks is transcribed automatically ([#2309](https://github.com/desplega-ai/agent-swarm/pull/2309)); `skill-search` ranks with BM25 and puts name and description hits first ([#2361](https://github.com/desplega-ai/agent-swarm/pull/2361), [#2375](https://github.com/desplega-ai/agent-swarm/pull/2375)); long worker sessions get a one-time context-bound note ([#2401](https://github.com/desplega-ai/agent-swarm/pull/2401)); extensions gain Slack messages in task-creation hooks, a `post.task.blocked` event for rejected task creation, and a comms-adherence gate for agent Slack posts ([#2412](https://github.com/desplega-ai/agent-swarm/pull/2412), [#2402](https://github.com/desplega-ai/agent-swarm/pull/2402), [#2360](https://github.com/desplega-ai/agent-swarm/pull/2360)).
+- **UI, pages and comb** — comb adds search, share links, audio and HTML preview, uploads, bulk resolve, an In progress home, Recent and Favorites, a file menu, URL search and asset comments ([#2406](https://github.com/desplega-ai/agent-swarm/pull/2406), [#2420](https://github.com/desplega-ai/agent-swarm/pull/2420), [#2428](https://github.com/desplega-ai/agent-swarm/pull/2428)); the page catalog gains Tree, CardGrid, Table column formats, NumberInput, a json column kind, and `parentTaskId` with a `$chain` sentinel on app actions ([#2315](https://github.com/desplega-ai/agent-swarm/pull/2315), [#2319](https://github.com/desplega-ai/agent-swarm/pull/2319), [#2310](https://github.com/desplega-ai/agent-swarm/pull/2310), [#2184](https://github.com/desplega-ai/agent-swarm/pull/2184), [#2292](https://github.com/desplega-ai/agent-swarm/pull/2292)); JSON task output renders as a collapsible tree, prompts are pretty-printed, and an experimental lineage view traces a task chain ([#2277](https://github.com/desplega-ai/agent-swarm/pull/2277), [#2373](https://github.com/desplega-ai/agent-swarm/pull/2373), [#2274](https://github.com/desplega-ai/agent-swarm/pull/2274)).
+- **Performance and operations** — workers fetch a skills bundle at boot instead of N API calls ([#2306](https://github.com/desplega-ai/agent-swarm/pull/2306)); Slack render-v2 watcher queries no longer scan every task ([#2286](https://github.com/desplega-ai/agent-swarm/pull/2286)); finished script runs get opt-in retention ([#2404](https://github.com/desplega-ai/agent-swarm/pull/2404)); a clean install and `/setup` flow for new users ([#2405](https://github.com/desplega-ai/agent-swarm/pull/2405)).
+
+## Bug Fixes
+
+- Cancelling a workflow run now stops its whole child tree and keeps it stopped ([#2377](https://github.com/desplega-ai/agent-swarm/pull/2377)).
+- One child run per sub-workflow invocation, across crashes and retries, and no retry when that child run was deleted ([#2364](https://github.com/desplega-ai/agent-swarm/pull/2364), [#2433](https://github.com/desplega-ai/agent-swarm/pull/2433)).
+- A foreach agent-task item cut by a deploy drain is retried rather than lost ([#2370](https://github.com/desplega-ai/agent-swarm/pull/2370)).
+- The controller reconnects after a half-open socket, and workers stop claiming tasks during shutdown ([#2396](https://github.com/desplega-ai/agent-swarm/pull/2396), [#2395](https://github.com/desplega-ai/agent-swarm/pull/2395)).
+- Standalone approval requests post their Slack notifications again ([#2356](https://github.com/desplega-ai/agent-swarm/pull/2356)).
+- GitLab reads the bot name lazily, cancels every MR task on close, and sets up its credential helper idempotently ([#2343](https://github.com/desplega-ai/agent-swarm/pull/2343), [#2372](https://github.com/desplega-ai/agent-swarm/pull/2372)).
+- Telegram no longer reads a line that starts with a number sign as a heading, supergroup reply chains reach the gate, and an addressed ask is acknowledged right away ([#2323](https://github.com/desplega-ai/agent-swarm/pull/2323), [#2324](https://github.com/desplega-ai/agent-swarm/pull/2324), [#2368](https://github.com/desplega-ai/agent-swarm/pull/2368)).
+- Each page gets its own session cookie, so two tabs stop sharing a session ([#2311](https://github.com/desplega-ai/agent-swarm/pull/2311)).
+- Task completion memories are chunked and embedding inputs capped ([#2302](https://github.com/desplega-ai/agent-swarm/pull/2302)).
+- The Docker provider removes anonymous volumes on runtime delete, and ffmpeg comes from a digest-pinned image instead of a download ([#2390](https://github.com/desplega-ai/agent-swarm/pull/2390), [#2280](https://github.com/desplega-ai/agent-swarm/pull/2280)).
+
+Roughly 47 fixes merged this week. The rest are smaller correctness and rendering repairs across the harnesses and the dashboard: boolean config parsing in the GitHub integration, per-session Claude trust seeding, session log ordering, prompt envelope rendering, session header cost totals.
