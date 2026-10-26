@@ -10,7 +10,7 @@ import { InviteDialog } from "@/pages/people/invite-dialog";
 
 /**
  * The closing card of `/setup`: invite teammates. Shown to admins on an API
- * that serves invites, unless the company profile says "Just me".
+ * that serves invites, unless the company profile says "Solo".
  */
 export function InviteTeamCard() {
   // The raw config rows, not `useCompanyProfile`: `/setup` has no StatusProvider.

@@ -1,4 +1,3 @@
-import { Bot, House, ListTodo } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useStatus } from "@/api/hooks/use-status";
@@ -336,7 +335,9 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
 
   return (
     <AutosaveScopeContext.Provider value={scope}>
-      <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      {/* Two even columns of the same height, so the step fits a laptop
+          screen with no scroll: the identity on the left, the team on the right. */}
+      <div className="grid gap-3 sm:grid-cols-2">
         <SetupCard
           title="Identity"
           status={
@@ -580,7 +581,9 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
               </div>
             </AnimatedReveal>
           </div>
+        </SetupCard>
 
+        <SetupCard title="Your team" bodyClassName="flex flex-col gap-4">
           <SettingsRow
             label={
               <>
@@ -622,15 +625,6 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
             />
           </SettingsRow>
         </SetupCard>
-
-        {/* The Logo and color row shows the same on a phone. */}
-        <SetupCard
-          title="Sidebar preview"
-          className="sticky top-0 hidden sm:block"
-          bodyClassName="rounded-b-xl bg-surface"
-        >
-          <SidebarPreview name={name} logo={shownLogo} color={color && colorValid ? color : null} />
-        </SetupCard>
       </div>
     </AutosaveScopeContext.Provider>
   );
@@ -648,56 +642,5 @@ function LogoImage({ src, className }: { src: string | null; className?: string 
         if (img.src !== `${window.location.origin}/logo.png`) img.src = "/logo.png";
       }}
     />
-  );
-}
-
-const PREVIEW_NAV = [
-  { label: "Home", icon: House },
-  { label: "Tasks", icon: ListTodo },
-  { label: "Agents", icon: Bot },
-];
-
-/** The sidebar header as `app-sidebar.tsx` renders it: logo, name in the brand color. */
-function SidebarPreview({
-  name,
-  logo,
-  color,
-}: {
-  name: string;
-  logo: string | null;
-  color: string | null;
-}) {
-  return (
-    <div className="overflow-hidden rounded-lg border border-sidebar-border bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center gap-2.5 border-b border-sidebar-border px-3 py-2.5">
-        <LogoImage src={logo} className="size-7" />
-        <div className="min-w-0">
-          <p
-            className={cn(
-              "truncate text-sm font-semibold leading-tight",
-              !name && "text-muted-foreground",
-            )}
-            style={color && name ? { color } : undefined}
-          >
-            {name || "Name required"}
-          </p>
-          <p className="text-[11px] leading-tight text-muted-foreground">Mission control</p>
-        </div>
-      </div>
-      <ul className="flex flex-col gap-0.5 p-1.5">
-        {PREVIEW_NAV.map(({ label, icon: Icon }) => (
-          <li
-            key={label}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground",
-              label === "Home" && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
-            )}
-          >
-            <Icon className="size-3.5" aria-hidden="true" />
-            {label}
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }

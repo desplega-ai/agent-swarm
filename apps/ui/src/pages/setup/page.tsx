@@ -546,7 +546,12 @@ function SetupFlow() {
         {/* Every step is top-aligned at the same offset, so the title and
             content do not jump between steps. A taller step grows the column
             and scrolls. */}
-        <div className={cn(SETUP_COLUMN, "relative flex min-h-full flex-col pt-8 pb-12 sm:pt-10")}>
+        <div
+          className={cn(
+            SETUP_COLUMN,
+            "relative flex min-h-full flex-col pt-8 pb-12 sm:pt-10 short:pt-6 short:pb-6",
+          )}
+        >
           <HexyGuide
             stepId={stepId}
             mood={hexyMood}

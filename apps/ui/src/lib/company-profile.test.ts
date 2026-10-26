@@ -93,7 +93,7 @@ describe("option lists", () => {
 
   test("optionLabel reads the label", () => {
     expect(optionLabel(USE_CASES, "features")).toBe("Ship features");
-    expect(optionLabel(TEAM_SIZES, "1")).toBe("Just me");
+    expect(optionLabel(TEAM_SIZES, "1")).toBe("Solo");
     expect(optionLabel(USE_CASES, "nope")).toBeNull();
   });
 });
