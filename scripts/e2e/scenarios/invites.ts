@@ -30,14 +30,23 @@ export const invites: Scenario = {
     expect(Date.parse(invite.expiresAt) > Date.now(), "invite expires in the future");
     // The SUT runs on a loopback origin.
     expect(invite.apiReachable === "local", `apiReachable, got ${invite.apiReachable}`);
+    // The link is `<API>/invite/<code>`. The SUT reports its fallback origin
+    // (localhost on its own port), so compare the port, not the host spelling.
     const link = new URL(invite.inviteUrl);
-    expect(link.pathname === "/join", "invite link opens /join");
-    const code = link.searchParams.get("code") ?? "";
+    const [, prefix, code = ""] = link.pathname.split("/");
+    expect(prefix === "invite", `invite link opens /invite/<code>, got ${link.pathname}`);
     expect(CODE_PATTERN.test(code), "invite link carries a 43-char code");
-    // The SUT reports its fallback origin (localhost on its own port), so
-    // compare the port rather than the host spelling.
-    const swarm = new URL(link.searchParams.get("swarm") ?? "http://invalid");
-    expect(swarm.port === new URL(ctx.baseUrl).port, "invite link carries this swarm's API origin");
+    expect(link.port === new URL(ctx.baseUrl).port, "invite link points at this swarm's API");
+
+    // Opening the link redirects to the dashboard's /join with the code in the
+    // fragment. It does not spend the code: the exchange below still works.
+    const opened = await fetch(new URL(link.pathname, ctx.baseUrl), { redirect: "manual" });
+    expect(opened.status === 302, `opening the link redirects, got ${opened.status}`);
+    const target = new URL(opened.headers.get("location") ?? "http://invalid");
+    expect(target.pathname === "/join", `redirect opens /join, got ${target.pathname}`);
+    expect(target.hash === `#code=${code}`, "redirect carries the code in the fragment");
+    const swarm = new URL(target.searchParams.get("swarm") ?? "http://invalid");
+    expect(swarm.port === new URL(ctx.baseUrl).port, "redirect carries this swarm's API origin");
 
     const exchanged = await ctx.api("POST", "/api/invites/exchange", {
       apiKey: null,

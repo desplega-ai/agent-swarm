@@ -72,9 +72,9 @@ services:
       - "3201:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_lead:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_lead:/workspace/personal
 
     restart: unless-stopped
 
@@ -106,9 +106,9 @@ services:
       - "3202:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_content_writer:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_content_writer:/workspace/personal
 
     restart: unless-stopped
 
@@ -140,9 +140,9 @@ services:
       - "3203:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_content_reviewer:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_content_reviewer:/workspace/personal
 
     restart: unless-stopped
 
@@ -174,9 +174,9 @@ services:
       - "3204:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_content_strategist:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_content_strategist:/workspace/personal
 
     restart: unless-stopped
 

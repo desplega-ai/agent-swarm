@@ -72,9 +72,9 @@ services:
       - "3201:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_coder:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_coder:/workspace/personal
 
     restart: unless-stopped
 

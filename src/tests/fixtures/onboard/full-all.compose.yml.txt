@@ -88,9 +88,9 @@ services:
       - "3201:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_lead:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_lead:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -135,9 +135,9 @@ services:
       - "3202:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_coder:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_coder:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -182,9 +182,9 @@ services:
       - "3203:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_content_reviewer:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_content_reviewer:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -229,9 +229,9 @@ services:
       - "3204:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_content_strategist:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_content_strategist:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -276,9 +276,9 @@ services:
       - "3205:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_content_writer:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_content_writer:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -323,9 +323,9 @@ services:
       - "3206:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_discoverability_optimizer:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_discoverability_optimizer:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -370,9 +370,9 @@ services:
       - "3207:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_forward_deployed_engineer:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_forward_deployed_engineer:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -417,9 +417,9 @@ services:
       - "3208:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_researcher:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_researcher:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -464,9 +464,9 @@ services:
       - "3209:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_reviewer:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_reviewer:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -511,9 +511,9 @@ services:
       - "3210:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_tester:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_tester:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
@@ -558,9 +558,9 @@ services:
       - "3211:3000"
 
     volumes:
-      - swarm_logs:/app/logs
-      - swarm_shared:/app/shared
-      - swarm_worker_ux_principles:/app/agent
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_ux_principles:/workspace/personal
       - ${HOME}/.aws:/home/worker/.aws:ro,z
 
     restart: unless-stopped
