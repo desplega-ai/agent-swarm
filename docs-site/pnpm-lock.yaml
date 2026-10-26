@@ -53,6 +53,9 @@ importers:
       shiki:
         specifier: ^4.0.2
         version: 4.0.2
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.0.0
