@@ -8,7 +8,7 @@ import {
   TextCursorInput,
   TextSearch,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { type EnvPresenceMap, useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useTestOnboardingMemory } from "@/api/hooks/use-onboarding";
@@ -227,6 +227,11 @@ function isRetryable(outcome: Outcome): boolean {
   return !outcome.result.ok && errorClass !== undefined && RETRYABLE_CLASSES.has(errorClass);
 }
 
+/** The outcome is a pass of `candidate`. */
+function passed(outcome: Outcome | null, candidate: string): boolean {
+  return outcome?.candidate === candidate && outcome.kind === "result" && outcome.result.ok;
+}
+
 /** A preset, or no key at all (keyword search only). */
 type MemoryChoice = Preset["id"] | "keyword";
 
@@ -298,7 +303,9 @@ interface SetupOptions {
  * on view). The settings page leaves `setup` out.
  *
  * When the server names its model (newer APIs), a configured server shows
- * that setup first and keeps the form behind "Use another provider".
+ * that setup first and keeps the form behind "Use another provider". In
+ * `/setup` that setup tests itself once when the step opens (the step is not
+ * skipped), and Continue keeps a pass. A failed test opens the form.
  */
 export function EmbeddingsSetup({
   configured,
@@ -399,6 +406,8 @@ export function EmbeddingsSetup({
       };
     }
     setOutcome(next);
+    // The server's own setup failed: show the provider form under the error.
+    if (tested === EXISTING_CANDIDATE && !passed(next, tested)) setFormOpen(true);
     if (isRetryable(next)) {
       throw new Error(
         next.kind === "request-error"
@@ -408,6 +417,22 @@ export function EmbeddingsSetup({
     }
     return next;
   }
+
+  // `/setup` opens on the server's own setup: test it once, at once. A
+  // skipped step stays skipped until the person tests it.
+  const [autoTest] = useState(() => setup !== undefined && !setup.skipped && current !== null);
+  const autoTested = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tests once, when the step opens
+  useEffect(() => {
+    if (!autoTest || autoTested.current) return;
+    // A timer: Strict Mode cancels it on its first mount, so the test starts
+    // on the mount that stays. A mutation from the first one loses its observer.
+    const timer = setTimeout(() => {
+      autoTested.current = true;
+      void run({ preset: "existing" }).catch(() => undefined);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [autoTest]);
 
   const probe = useAutosave({
     value: candidate,
@@ -424,8 +449,10 @@ export function EmbeddingsSetup({
 
   // `/setup` Continue: keyword search only skips the step. An untouched
   // default tests first (the reused key, or the setup the server has). With
-  // the form closed, the server's setup is the one on screen: test it.
-  const continueRequest: OnboardingMemoryTestRequest | null = !showForm
+  // the form closed, the server's setup is the one on screen: test it. A
+  // pass of the server's setup in this visit stands while the form is untouched.
+  const existingOnScreen = !showForm || (untouched && passed(outcome, EXISTING_CANDIDATE));
+  const continueRequest: OnboardingMemoryTestRequest | null = existingOnScreen
     ? { preset: "existing" }
     : !untouched
       ? null
@@ -443,6 +470,8 @@ export function EmbeddingsSetup({
         ? setup.skip
         : continueRequest
           ? async () => {
+              // A pass of this same setup in this visit stands: no second test.
+              if (passed(outcome, JSON.stringify(continueRequest))) return;
               const next = await run(continueRequest);
               if (next.kind === "result" && !next.result.ok) {
                 throw new Error(errorHint(next.result.errorClass, dimensions));
@@ -460,7 +489,8 @@ export function EmbeddingsSetup({
     setApiKey("");
     setReuse(setup !== undefined);
     setKeyBlurred(false);
-    setOutcome(null);
+    // The result of the server's own setup stays under its card.
+    setOutcome((prev) => (prev?.candidate === EXISTING_CANDIDATE ? prev : null));
   }
 
   /** A chip pick commits like leaving a field: it tests at once when the key is ready. */
@@ -486,6 +516,15 @@ export function EmbeddingsSetup({
       ? outcome
       : null;
   const result = shown?.kind === "result" ? shown.result : null;
+  // With the server's setup on screen, its result shows under its card.
+  const existingShown = current && shown?.candidate === EXISTING_CANDIDATE ? shown : null;
+  const formShown = existingShown ? null : shown;
+
+  // Continue waits for a test of the server's setup, as it waits for a form probe.
+  const holdId = useId();
+  useEffect(() => {
+    scope.hold(holdId, testingExisting ? "Testing memory…" : null);
+  }, [scope, holdId, testingExisting]);
 
   function retry() {
     if (shown?.candidate === EXISTING_CANDIDATE)
@@ -569,13 +608,21 @@ export function EmbeddingsSetup({
         bodyClassName="space-y-4"
       >
         {current ? (
-          <CurrentSetup
-            model={current}
-            local={local}
-            testing={testingExisting}
-            busy={test.isPending}
-            onTest={() => void run({ preset: "existing" }).catch(() => undefined)}
-          />
+          <>
+            <CurrentSetup
+              model={current}
+              local={local}
+              testing={testingExisting}
+              busy={test.isPending}
+              testLabel={autoTest ? "Test again" : "Test current setup"}
+              onTest={() => void run({ preset: "existing" }).catch(() => undefined)}
+            />
+            <ProbeResult
+              probing={testingExisting}
+              outcome={existingShown}
+              dimensions={dimensions}
+            />
+          </>
         ) : configured ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2">
             <span className="text-sm">Memory is already set up on the server.</span>
@@ -712,7 +759,7 @@ export function EmbeddingsSetup({
                   helper={
                     keyProblem ? (
                       <span className="text-status-error-strong">{keyProblem}</span>
-                    ) : shown || probing ? undefined : setup && usingReuse ? (
+                    ) : formShown || probing ? undefined : setup && usingReuse ? (
                       untouched ? (
                         "Continue tests this key, then saves it."
                       ) : undefined
@@ -781,9 +828,9 @@ export function EmbeddingsSetup({
         {keywordOnly ? null : (
           <ProbeResult
             probing={probing}
-            outcome={shown}
+            outcome={formShown}
             dimensions={dimensions}
-            onRetry={shown && isRetryable(shown) && !test.isPending ? retry : undefined}
+            onRetry={formShown && isRetryable(formShown) && !test.isPending ? retry : undefined}
           />
         )}
       </SetupCard>
@@ -804,14 +851,17 @@ function CurrentSetup({
   local,
   testing,
   busy,
+  testLabel,
   onTest,
 }: {
   model: string;
   local: boolean;
-  /** "Test current setup" is running. */
+  /** The test of this setup is running. */
   testing: boolean;
   /** Any probe is running. */
   busy: boolean;
+  /** "Test again" once `/setup` tested it by itself. */
+  testLabel: string;
   onTest: () => void;
 }) {
   return (
@@ -844,7 +894,7 @@ function CurrentSetup({
       </div>
       <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onTest}>
         {testing ? <Spinner className="size-3.5" /> : null}
-        Test current setup
+        {testLabel}
       </Button>
     </div>
   );
