@@ -664,11 +664,7 @@ function SetupForAdminsOnly() {
 }
 
 function FullPageLoading() {
-  return (
-    <div className="flex min-h-svh bg-background">
-      <HiveLoadingScreen />
-    </div>
-  );
+  return <HiveLoadingScreen fullPage />;
 }
 
 function SetupError({ message, onRetry }: { message: string; onRetry: () => void }) {

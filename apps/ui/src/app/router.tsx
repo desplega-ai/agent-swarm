@@ -126,7 +126,7 @@ export const router = createBrowserRouter([
   {
     path: "/setup",
     element: (
-      <Suspense fallback={<HiveLoadingScreen />}>
+      <Suspense fallback={<HiveLoadingScreen fullPage />}>
         <SetupPage />
       </Suspense>
     ),
@@ -136,7 +136,7 @@ export const router = createBrowserRouter([
   {
     path: "/connect",
     element: (
-      <Suspense fallback={<HiveLoadingScreen />}>
+      <Suspense fallback={<HiveLoadingScreen fullPage />}>
         <ConnectPage />
       </Suspense>
     ),
@@ -146,7 +146,7 @@ export const router = createBrowserRouter([
   {
     path: "/join",
     element: (
-      <Suspense fallback={<HiveLoadingScreen />}>
+      <Suspense fallback={<HiveLoadingScreen fullPage />}>
         <JoinPage />
       </Suspense>
     ),
