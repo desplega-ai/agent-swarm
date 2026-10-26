@@ -74,6 +74,26 @@ function claudeMdSourcePath(provider: string): string {
 /** Providers that get the repo CLAUDE.md inlined until native loading is verified. */
 const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"]);
 
+/**
+ * Template event for the tool-discovery line. Amp, Codex and OpenCode run MCP
+ * tools inside their own code sandbox (`code_exec`, `exec`, `execute`), each
+ * with its own call shape, so the generic lines are wrong for them.
+ */
+function toolDiscoveryEvent(provider: string, hasToolSearch: boolean): string {
+  switch (provider) {
+    case "amp":
+      return "system.agent.tool_discovery.amp";
+    case "codex":
+      return "system.agent.tool_discovery.codex";
+    case "opencode":
+      return "system.agent.tool_discovery.opencode";
+    default:
+      return hasToolSearch
+        ? "system.agent.tool_discovery.search"
+        : "system.agent.tool_discovery.direct";
+  }
+}
+
 export function areSlackPromptToolsEnabled(
   env: NodeJS.ProcessEnv = process.env,
   serverCapabilities?: string[],
@@ -257,19 +277,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
   if (hasMcp) {
-    // Amp, Codex and OpenCode run MCP tools inside their own code sandbox
-    // (`code_exec`, `exec`, `execute`), each with its own call shape, so the
-    // generic lines are wrong for them.
-    const discoveryEvent =
-      provider === "amp"
-        ? "system.agent.tool_discovery.amp"
-        : provider === "codex"
-          ? "system.agent.tool_discovery.codex"
-          : provider === "opencode"
-            ? "system.agent.tool_discovery.opencode"
-            : hasToolSearch
-              ? "system.agent.tool_discovery.search"
-              : "system.agent.tool_discovery.direct";
+    const discoveryEvent = toolDiscoveryEvent(provider, hasToolSearch);
     const discoveryResult = await resolveTemplateAsync(discoveryEvent, {});
     const toolsResult = await resolveTemplateAsync(
       "system.agent.tools_skills",
