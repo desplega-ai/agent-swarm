@@ -28,16 +28,28 @@ test.describe("invites", () => {
     await expect(dialog).toContainText("one use.");
     const link = await dialog.getByLabel("Invite link", { exact: true }).inputValue();
     const url = new URL(link);
-    expect(url.pathname).toBe("/join");
-    expect(url.searchParams.get("code")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(url.pathname).toMatch(/^\/invite\/[A-Za-z0-9_-]{43}$/);
+    expect(url.search).toBe("");
+    await expect(dialog).toContainText(`Opens ${new URL(page.url()).host}`);
+    await expect(dialog.getByRole("button", { name: "Use this dashboard" })).toHaveCount(0);
 
     const teammate = await browser.newContext(FRESH_BROWSER);
     try {
       const ada = await teammate.newPage();
+      const dashboardRequests: URL[] = [];
+      ada.on("request", (request) => {
+        const requested = new URL(request.url());
+        if (requested.origin === new URL(page.url()).origin) dashboardRequests.push(requested);
+      });
       await ada.goto(link);
       await ada.waitForURL((current) => current.pathname === "/");
       // The code left the address bar.
       expect(new URL(ada.url()).searchParams.get("code")).toBeNull();
+      expect(new URL(ada.url()).hash).toBe("");
+      expect(dashboardRequests.some((requested) => requested.pathname === "/join")).toBe(true);
+      expect(dashboardRequests.every((requested) => !requested.searchParams.has("code"))).toBe(
+        true,
+      );
       await expect(ada.getByRole("link", { name: "Tasks", exact: true })).toBeVisible();
       await expect(ada.getByRole("link", { name: "People", exact: true })).toHaveCount(0);
       // The saved connection holds the teammate's own token.
@@ -73,5 +85,38 @@ test.describe("invites", () => {
     await dialog.getByLabel("Email").fill(EMAIL);
     await dialog.getByRole("button", { name: "Create invite link" }).click();
     await expect(dialog).toContainText(`${EMAIL} already has access.`);
+  });
+
+  test("an admin changes the destination for an existing link", async ({ page, api }) => {
+    await page.goto("/people");
+    const dashboard = new URL(page.url()).origin;
+    await api.put("/api/config", {
+      scope: "global",
+      key: "APP_URL",
+      value: "https://other.example.com",
+    });
+    try {
+      await page.goto("/people");
+      await page.getByRole("button", { name: "Invite", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("Email").fill("e2e-destination@example.com");
+      await dialog.getByRole("button", { name: "Create invite link" }).click();
+      await expect(dialog).toContainText("Opens other.example.com");
+      await expect(dialog).toContainText(
+        "Teammates land on https://other.example.com, not on this dashboard.",
+      );
+      const link = await dialog.getByLabel("Invite link", { exact: true }).inputValue();
+      await dialog.getByRole("button", { name: "Use this dashboard" }).click();
+      await expect(dialog.getByRole("status")).toHaveText(
+        "Saved. The link now opens this dashboard.",
+      );
+      await expect(dialog.getByLabel("Invite link", { exact: true })).toHaveValue(link);
+      await expect(dialog).toContainText(`Opens ${new URL(dashboard).host}`);
+      const response = await page.request.get(link, { maxRedirects: 0 });
+      expect(response.status()).toBe(302);
+      expect(new URL(response.headers().location).origin).toBe(dashboard);
+    } finally {
+      await api.put("/api/config", { scope: "global", key: "APP_URL", value: dashboard });
+    }
   });
 });

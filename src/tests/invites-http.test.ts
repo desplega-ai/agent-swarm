@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   createServer as createHttpServer,
@@ -7,7 +7,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createConnectorCode, INVITE_CODE_TTL_MS } from "../be/connector-codes";
-import { closeDb, createUser, getDbClient, initDb } from "../be/db";
+import { closeDb, createUser, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { ensureRbacSeedsSynced, listUserRoles, setUserRoles } from "../be/rbac-roles";
 import { type IdentityActor, mintToken } from "../be/users";
 import { handleCore } from "../http/core";
@@ -17,6 +17,7 @@ import {
   handleUsers,
 } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { DEFAULT_APP_URL } from "../utils/constants";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-invites-http.sqlite";
@@ -109,6 +110,7 @@ function post(path: string, body: unknown, bearer: string | null = API_KEY): Pro
 type InviteBody = {
   user: { id: string; email: string | null; name: string; status: string };
   inviteUrl: string;
+  appUrl: string;
   expiresAt: string;
   apiReachable: "public" | "local";
 };
@@ -120,7 +122,7 @@ async function invite(body: Record<string, unknown>, bearer = API_KEY): Promise<
 }
 
 function codeOf(inviteUrl: string): string {
-  const code = new URL(inviteUrl).searchParams.get("code");
+  const code = new URL(inviteUrl).pathname.split("/invite/")[1];
   if (!code) throw new Error("invite URL has no code");
   return code;
 }
@@ -151,11 +153,9 @@ describe("POST /api/invites", () => {
     expect(body.user.email).toBe("ada@example.com");
     expect(body.user.name).toBe("ada");
     expect(body.apiReachable).toBe("public");
-    const link = new URL(body.inviteUrl);
-    expect(`${link.origin}${link.pathname}`).toBe("https://app.example.com/join");
-    expect(link.searchParams.get("swarm")).toBe("https://swarm.example.com");
-    expect(body.inviteUrl).toContain(`swarm=${encodeURIComponent("https://swarm.example.com")}`);
     const code = codeOf(body.inviteUrl);
+    expect(body.inviteUrl).toBe(`https://swarm.example.com/invite/${code}`);
+    expect(body.appUrl).toBe("https://app.example.com");
     expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     const ttl = new Date(body.expiresAt).getTime() - before;
@@ -182,7 +182,7 @@ describe("POST /api/invites", () => {
     const body = await invite({ email: "grace@example.com", name: "Grace H", role: "viewer" });
     expect(body.user.name).toBe("Grace H");
     expect(await roleNames(body.user.id)).toEqual(["viewer"]);
-    expect(new URL(body.inviteUrl).origin).toBe("https://app.agent-swarm.dev");
+    expect(body.appUrl).toBe(DEFAULT_APP_URL);
   });
 
   test("reports a loopback, private or single-label API as local", async () => {
@@ -273,6 +273,71 @@ describe("POST /api/invites", () => {
     }
     expect(await getDbClient().query("SELECT id FROM users")).toHaveLength(0);
     expect(await getDbClient().query("SELECT code_hash FROM connector_codes")).toHaveLength(0);
+  });
+});
+
+describe("GET /invite/:code", () => {
+  test("redirects without authentication and leaves the code available for exchange", async () => {
+    const { inviteUrl } = await invite({ email: "preview@example.com" });
+    const code = codeOf(inviteUrl);
+    const response = await fetch(url(`/invite/${code}`), { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      `https://app.example.com/join?swarm=${encodeURIComponent("https://swarm.example.com")}#code=${code}`,
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect((await exchange(code)).status).toBe(200);
+  });
+
+  test("resolves global config again when an existing link opens", async () => {
+    const { inviteUrl } = await invite({ email: "config@example.com" });
+    const code = codeOf(inviteUrl);
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "APP_URL",
+      value: "https://custom.example.com/",
+    });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "PUBLIC_MCP_BASE_URL",
+      value: "https://public.example.com/",
+    });
+    const response = await fetch(url(`/invite/${code}`), { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      `https://custom.example.com/join?swarm=${encodeURIComponent("https://public.example.com")}#code=${code}`,
+    );
+  });
+
+  test("uses the hosted dashboard when no dashboard URL is configured", async () => {
+    delete process.env.APP_URL;
+    const code = "unknown_code_1234";
+    const response = await fetch(url(`/invite/${code}`), { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      `${DEFAULT_APP_URL}/join?swarm=${encodeURIComponent("https://swarm.example.com")}#code=${code}`,
+    );
+  });
+
+  test("rejects malformed codes without any database call", async () => {
+    const client = getDbClient();
+    const spies = [
+      spyOn(client, "query"),
+      spyOn(client, "get"),
+      spyOn(client, "run"),
+      spyOn(client, "transaction"),
+    ];
+    try {
+      for (const code of ["short", "x".repeat(257), "invalid.code_12345", "invalid%20code_12345"]) {
+        const response = await fetch(url(`/invite/${code}`), { redirect: "manual" });
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual({ error: "code_invalid" });
+      }
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 });
 

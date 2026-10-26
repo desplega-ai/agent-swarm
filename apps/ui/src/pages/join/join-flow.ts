@@ -1,6 +1,6 @@
 /**
  * Pure decision logic for the `/join` route: a teammate opens the invite link
- * `/join?swarm=<API URL>&code=<one-time code>`. The page trades the code for
+ * `/join?swarm=<API URL>#code=<one-time code>`. The page trades the code for
  * a personal token, saves it as a normal dashboard connection, and lands the
  * teammate on Home (or on Comb when Comb is on, so it connects their files
  * account). Kept free of React and `@/` imports so the rules are
@@ -16,11 +16,12 @@ export interface JoinParams {
 /** The URL params `/join` reads, and drops from history at once. */
 export const JOIN_URL_PARAMS = ["swarm", "code"] as const;
 
-/** `swarm` and `code` from a `/join` query string. Null when either is missing or `swarm` is not http(s). */
-export function parseJoinParams(search: string): JoinParams | null {
+/** Read the fragment code first. Older links can supply the code in the query. */
+export function parseJoinParams(search: string, hash = ""): JoinParams | null {
   const params = new URLSearchParams(search);
   const rawSwarm = params.get("swarm")?.trim();
-  const code = params.get("code")?.trim();
+  const code =
+    new URLSearchParams(hash.replace(/^#/, "")).get("code")?.trim() || params.get("code")?.trim();
   if (!rawSwarm || !code) return null;
   let url: URL;
   try {

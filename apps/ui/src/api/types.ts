@@ -639,6 +639,8 @@ export interface CreateInviteInput {
 export interface CreateInviteResponse {
   user: User | null;
   inviteUrl: string;
+  /** Absent on older APIs. */
+  appUrl?: string;
   expiresAt: string;
   /** `local` when teammates' browsers likely cannot reach the API URL. */
   apiReachable: "public" | "local";

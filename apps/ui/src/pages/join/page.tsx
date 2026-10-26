@@ -46,7 +46,7 @@ function JoinShell({
 }
 
 /**
- * `/join?swarm=&code=`: the teammate's side of an invite. Trades the one-time
+ * `/join?swarm=#code=`: the teammate's side of an invite. Trades the one-time
  * code for a personal token, saves it as a dashboard connection, then lands
  * on Home (or Comb, when Comb is on). The code leaves the URL and the history
  * entry before anything else happens.
@@ -55,7 +55,9 @@ export default function JoinPage() {
   const navigate = useNavigate();
   const { addConnection, switchConnection } = useConfig();
   // Read once: the effect below drops the params from the URL.
-  const [params] = useState<JoinParams | null>(() => parseJoinParams(window.location.search));
+  const [params] = useState<JoinParams | null>(() =>
+    parseJoinParams(window.location.search, window.location.hash),
+  );
   const [outcome, setOutcome] = useState<JoinOutcome | null>(null);
   const started = useRef(false);
 
@@ -85,8 +87,9 @@ export default function JoinPage() {
     // Drop the code from the address bar and the history entry at once.
     const url = new URL(window.location.href);
     const rest = withoutJoinParams(url.search);
-    if (rest !== url.search) {
+    if (rest !== url.search || url.hash) {
       url.search = rest;
+      url.hash = "";
       window.history.replaceState(window.history.state, "", url.toString());
     }
     // One exchange per page load, also under StrictMode's double effect.

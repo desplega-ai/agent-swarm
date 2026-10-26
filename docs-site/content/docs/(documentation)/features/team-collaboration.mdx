@@ -83,7 +83,10 @@ One deployment serves the whole team, and you run it on your own infrastructure.
 
 - The link is valid for 7 days and works once. The teammate's browser trades its code at `POST /api/invites/exchange` for a personal user token, and the user becomes `active`.
 - Inviting an invited user again sets the new role and replaces the old link, which then stops working. An email that belongs to an active or suspended user is refused with 409.
-- The teammate's browser must reach the API. The link carries the public API origin (`PUBLIC_MCP_BASE_URL`, else `MCP_BASE_URL`) and the dashboard origin (`APP_URL`, else the hosted dashboard). The response field `apiReachable` is `local` when that API origin is a loopback, private or single-label host, which teammates on other machines cannot open.
+- The link uses `<API URL>/invite/<code>`. The API URL comes from `PUBLIC_MCP_BASE_URL`, then `MCP_BASE_URL`.
+- The API redirects to the dashboard at `APP_URL`, or the hosted dashboard when unset. It resolves `APP_URL` each time the link opens. The code travels in the URL fragment, so the dashboard server never receives it.
+- For a self-hosted dashboard, set `APP_URL` to its origin or click **Use this dashboard** in the invite dialog. Existing links then open that dashboard.
+- The teammate's browser must reach the API. The response field `apiReachable` is `local` for loopback, private or single-label hosts, which teammates on other machines cannot open.
 - Suspending the user before they open the link makes the link fail.
 
 State plainly what does not exist today:

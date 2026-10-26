@@ -24935,8 +24935,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Invite a teammate with a one-time dashboard link
-         * @description Creates the user as invited with exactly the given role (requester by default) and returns a 7-day single-use link. The teammate's browser trades the link's code for a personal MCP token at POST /api/invites/exchange. Re-inviting an invited user sets the new role and replaces the old link. An email that belongs to an active or suspended user returns 409 user_exists. No email is sent.
+         * Invite a teammate with a one-time API link
+         * @description Creates an invited user with the given role (requester by default) and returns a 7-day single-use API link. The API redirects to the current APP_URL dashboard with the code in the URL fragment. The browser exchanges the code at POST /api/invites/exchange for a personal MCP token. Re-inviting an invited user replaces the role and link. Active or suspended users return 409 user_exists. No email is sent.
          */
         post: {
             parameters: {
@@ -24960,7 +24960,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description The invited user, the one-time link, its expiry and whether the API is public */
+                /** @description The invited user, API link, dashboard URL, expiry and API reachability */
                 201: {
                     headers: {
                         [name: string]: unknown;
@@ -24992,6 +24992,7 @@ export interface paths {
                                 }[];
                             }) | null;
                             inviteUrl: string;
+                            appUrl: string;
                             expiresAt: string;
                             /** @enum {string} */
                             apiReachable: "public" | "local";
@@ -25027,6 +25028,54 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invite/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open an invite in the configured dashboard
+         * @description Redirects to the current APP_URL dashboard with the code in the URL fragment. Does not validate or consume the invite.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Redirect to the dashboard */
+                302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Malformed code (code_invalid) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;

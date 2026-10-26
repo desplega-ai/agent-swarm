@@ -1,6 +1,7 @@
 import { AlertCircle, AlertTriangle, Check, Copy, Send } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { InviteApiError } from "@/api/client";
+import { useUpsertConfig } from "@/api/hooks/use-config-api";
 import { useCreateInvite, useRbacRoles } from "@/api/hooks/use-users";
 import type { CreateInviteResponse, InviteRole } from "@/api/types";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -17,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { inviteDestination } from "./invite-destination";
 
 /** The three primary roles `POST /api/invites` accepts, Requester first (the default). */
 const INVITE_ROLES: ReadonlyArray<{ value: InviteRole; label: string; help: string }> = [
@@ -29,10 +31,15 @@ function roleLabel(role: InviteRole): string {
   return INVITE_ROLES.find((r) => r.value === role)?.label ?? role;
 }
 
-/** The API URL the link sends teammates to (its `swarm` param). */
+/**
+ * The API URL teammates reach: the link without its `/invite/<code>` tail (an API
+ * under a path prefix keeps it), or the `swarm` param of an older link.
+ */
 function swarmOf(inviteUrl: string): string | null {
   try {
-    return new URL(inviteUrl).searchParams.get("swarm");
+    const url = new URL(inviteUrl);
+    const apiPath = url.pathname.replace(/\/invite\/[^/]+\/?$/, "");
+    return url.searchParams.get("swarm") ?? `${url.origin}${apiPath}`;
   } catch {
     return null;
   }
@@ -207,6 +214,12 @@ function InviteLink({ result }: { result: InviteResult }) {
   const { invite, role } = result;
   const { copied, copy } = useCopyToClipboard();
   const [copyFailed, setCopyFailed] = useState(false);
+  const saveConfig = useUpsertConfig();
+  const [saved, setSaved] = useState(false);
+  const destination = inviteDestination(
+    saved ? window.location.origin : invite.appUrl,
+    window.location.origin,
+  );
   const swarm = swarmOf(invite.inviteUrl);
 
   return (
@@ -233,6 +246,9 @@ function InviteLink({ result }: { result: InviteResult }) {
             {copied ? <Check /> : <Copy />}
           </Button>
         </div>
+        {destination ? (
+          <p className="text-xs text-muted-foreground">Opens {destination.host}</p>
+        ) : null}
         {copyFailed ? (
           <p className="text-xs text-status-error-strong">
             Could not copy. Select the link and copy it.
@@ -242,6 +258,36 @@ function InviteLink({ result }: { result: InviteResult }) {
           Valid until {formatExpiry(invite.expiresAt)}, one use.
         </p>
       </div>
+      {saved ? (
+        <output className="block text-xs text-status-success-strong">
+          Saved. The link now opens this dashboard.
+        </output>
+      ) : destination?.differentOrigin ? (
+        <AlertCallout tone="warning" icon={AlertTriangle}>
+          <p className="break-words">Teammates land on {invite.appUrl}, not on this dashboard.</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            disabled={saveConfig.isPending}
+            status={saveConfig.isPending ? "loading" : "idle"}
+            onClick={() =>
+              saveConfig.mutate(
+                { scope: "global", key: "APP_URL", value: window.location.origin },
+                { onSuccess: () => setSaved(true) },
+              )
+            }
+          >
+            Use this dashboard
+          </Button>
+        </AlertCallout>
+      ) : null}
+      {saveConfig.error ? (
+        <AlertCallout tone="error" icon={AlertCircle}>
+          {saveConfig.error.message}
+        </AlertCallout>
+      ) : null}
       <p className="text-sm">
         Anyone with this link joins as {roleLabel(role)}. Send it in a private message.
       </p>

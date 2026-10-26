@@ -61495,8 +61495,8 @@
     },
     "/api/invites": {
       "post": {
-        "summary": "Invite a teammate with a one-time dashboard link",
-        "description": "Creates the user as invited with exactly the given role (requester by default) and returns a 7-day single-use link. The teammate's browser trades the link's code for a personal MCP token at POST /api/invites/exchange. Re-inviting an invited user sets the new role and replaces the old link. An email that belongs to an active or suspended user returns 409 user_exists. No email is sent.",
+        "summary": "Invite a teammate with a one-time API link",
+        "description": "Creates an invited user with the given role (requester by default) and returns a 7-day single-use API link. The API redirects to the current APP_URL dashboard with the code in the URL fragment. The browser exchanges the code at POST /api/invites/exchange for a personal MCP token. Re-inviting an invited user replaces the role and link. Active or suspended users return 409 user_exists. No email is sent.",
         "tags": [
           "Users"
         ],
@@ -61539,7 +61539,7 @@
         },
         "responses": {
           "201": {
-            "description": "The invited user, the one-time link, its expiry and whether the API is public",
+            "description": "The invited user, API link, dashboard URL, expiry and API reachability",
             "content": {
               "application/json": {
                 "schema": {
@@ -61669,6 +61669,9 @@
                     "inviteUrl": {
                       "type": "string"
                     },
+                    "appUrl": {
+                      "type": "string"
+                    },
                     "expiresAt": {
                       "type": "string"
                     },
@@ -61683,6 +61686,7 @@
                   "required": [
                     "user",
                     "inviteUrl",
+                    "appUrl",
                     "expiresAt",
                     "apiReachable"
                   ]
@@ -61712,6 +61716,40 @@
           },
           "409": {
             "description": "The email belongs to an active or suspended user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/invite/{code}": {
+      "get": {
+        "summary": "Open an invite in the configured dashboard",
+        "description": "Redirects to the current APP_URL dashboard with the code in the URL fragment. Does not validate or consume the invite.",
+        "tags": [
+          "Users"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "code",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the dashboard"
+          },
+          "404": {
+            "description": "Malformed code (code_invalid)",
             "content": {
               "application/json": {
                 "schema": {

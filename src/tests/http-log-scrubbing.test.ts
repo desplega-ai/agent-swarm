@@ -1,7 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { safeRequestUrlForLog } from "../http/utils";
+import { redactShareTokenInPath, safeRequestUrlForLog } from "../http/utils";
 
 describe("safeRequestUrlForLog", () => {
+  test("redacts invite codes in request logs and the OTel path attribute", () => {
+    for (const suffix of ["", "/", "/extra"]) {
+      expect(safeRequestUrlForLog(`/invite/example_invite_code${suffix}?code=secret`)).toBe(
+        `/invite/[REDACTED]${suffix}?code=[REDACTED]`,
+      );
+      expect(redactShareTokenInPath(`/invite/example_invite_code${suffix}`)).toBe(
+        `/invite/[REDACTED]${suffix}`,
+      );
+    }
+    expect(safeRequestUrlForLog("/invite")).toBe("/invite");
+    expect(safeRequestUrlForLog("/api/invites")).toBe("/api/invites");
+  });
   test("redacts OAuth callback query values", () => {
     expect(
       safeRequestUrlForLog(

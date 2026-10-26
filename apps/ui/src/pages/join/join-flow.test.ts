@@ -41,7 +41,22 @@ function fakeDeps(overrides: Partial<JoinDeps> = {}): { deps: JoinDeps; rec: Rec
 }
 
 describe("parseJoinParams", () => {
-  test("reads swarm and code, and trims a trailing slash", () => {
+  test("reads a code supplied only in the fragment", () => {
+    expect(parseJoinParams(`?swarm=${encodeURIComponent(PARAMS.swarm)}`, `#code=${CODE}`)).toEqual(
+      PARAMS,
+    );
+  });
+
+  test("reads the fragment code before the query code", () => {
+    expect(
+      parseJoinParams(
+        `?swarm=${encodeURIComponent("https://swarm.example.com/")}&code=old`,
+        `#code=${CODE}`,
+      ),
+    ).toEqual(PARAMS);
+  });
+
+  test("reads the query code from older links and trims a trailing slash", () => {
     expect(
       parseJoinParams(`?swarm=${encodeURIComponent("https://swarm.example.com/")}&code=${CODE}`),
     ).toEqual(PARAMS);

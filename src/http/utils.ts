@@ -256,12 +256,15 @@ export function wireHttpSpanLifecycle(
 }
 
 /**
- * Redact the agent-fs share token in `/share/<token>/...` and `/site/<token>/...`
- * paths, with or without the `/agentfs` proxy prefix. The token is the credential
- * for a public share link, so it must not reach logs or traces.
+ * Redact invite codes and agent-fs share tokens from logs and traces.
+ * Share paths also accept the `/agentfs` proxy prefix.
  */
 export function redactShareTokenInPath(pathname: string): string {
   const segments = pathname.split("/");
+  if (segments[1] === "invite" && segments[2]) {
+    segments[2] = "[REDACTED]";
+    return segments.join("/");
+  }
   const at = segments[1] === "agentfs" ? 2 : 1;
   if ((segments[at] === "share" || segments[at] === "site") && segments[at + 1]) {
     segments[at + 1] = "[REDACTED]";

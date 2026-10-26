@@ -479,9 +479,9 @@ const createInviteRoute = route({
   method: "post",
   path: "/api/invites",
   pattern: ["api", "invites"],
-  summary: "Invite a teammate with a one-time dashboard link",
+  summary: "Invite a teammate with a one-time API link",
   description:
-    "Creates the user as invited with exactly the given role (requester by default) and returns a 7-day single-use link. The teammate's browser trades the link's code for a personal MCP token at POST /api/invites/exchange. Re-inviting an invited user sets the new role and replaces the old link. An email that belongs to an active or suspended user returns 409 user_exists. No email is sent.",
+    "Creates an invited user with the given role (requester by default) and returns a 7-day single-use API link. The API redirects to the current APP_URL dashboard with the code in the URL fragment. The browser exchanges the code at POST /api/invites/exchange for a personal MCP token. Re-inviting an invited user replaces the role and link. Active or suspended users return 409 user_exists. No email is sent.",
   tags: ["Users"],
   body: z.object({
     email: z.email(),
@@ -490,10 +490,11 @@ const createInviteRoute = route({
   }),
   responses: {
     201: {
-      description: "The invited user, the one-time link, its expiry and whether the API is public",
+      description: "The invited user, API link, dashboard URL, expiry and API reachability",
       schema: z.object({
         user: ComposedUserSchema.nullable(),
         inviteUrl: z.string(),
+        appUrl: z.string(),
         expiresAt: z.string(),
         apiReachable: z.enum(["public", "local"]),
       }),
@@ -504,6 +505,22 @@ const createInviteRoute = route({
   },
   auth: { apiKey: true },
   rbac: { permission: "user.role.manage" },
+});
+
+const openInviteRoute = route({
+  method: "get",
+  path: "/invite/{code}",
+  pattern: ["invite", null],
+  summary: "Open an invite in the configured dashboard",
+  description:
+    "Redirects to the current APP_URL dashboard with the code in the URL fragment. Does not validate or consume the invite.",
+  tags: ["Users"],
+  params: z.object({ code: z.string() }),
+  responses: {
+    302: { description: "Redirect to the dashboard", unstructured: "Dashboard redirect" },
+    404: { description: "Malformed code (code_invalid)" },
+  },
+  auth: { apiKey: false },
 });
 
 const exchangeInviteCodeRoute = route({
@@ -1126,13 +1143,34 @@ export async function handleUsers(
 
     const apiUrl = await resolveMcpBaseUrl();
     const appUrl = (await resolveAppUrl()) ?? DEFAULT_APP_URL;
-    const inviteUrl = `${appUrl}/join?swarm=${encodeURIComponent(apiUrl)}&code=${invited.code}`;
+    const inviteUrl = `${apiUrl}/invite/${invited.code}`;
     createInviteRoute.respond(res, 201, {
       user: await composeUser(invited.userId),
       inviteUrl,
+      appUrl,
       expiresAt: invited.expiresAt,
       apiReachable: apiReachability(apiUrl),
     });
+    return true;
+  }
+
+  // GET /invite/:code only redirects. Link previews must not consume invites.
+  if (openInviteRoute.match(req.method, pathSegments)) {
+    const parsed = await openInviteRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { code } = parsed.params;
+    if (!/^[A-Za-z0-9_-]{16,256}$/.test(code)) {
+      jsonError(res, "code_invalid", 404);
+      return true;
+    }
+    const apiUrl = await resolveMcpBaseUrl();
+    const appUrl = (await resolveAppUrl()) ?? DEFAULT_APP_URL;
+    res.writeHead(302, {
+      Location: `${appUrl}/join?swarm=${encodeURIComponent(apiUrl)}#code=${code}`,
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+    });
+    res.end();
     return true;
   }
 
