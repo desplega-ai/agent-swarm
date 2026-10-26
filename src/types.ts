@@ -2282,7 +2282,14 @@ export const ExecutorMetaSchema = z
     inputCtx: z.record(z.string(), z.unknown()).optional(),
   })
   .openapi("ExecutorMeta");
-export type ExecutorMeta = z.infer<typeof ExecutorMetaSchema>;
+export type ExecutorMeta = z.infer<typeof ExecutorMetaSchema> & {
+  /**
+   * Aborted when the step's watchdog budget runs out (`startStepDeadline`).
+   * Runtime-only, never serialized. An executor with a long or one-shot side
+   * effect should forward it so a timed-out step stops instead of finishing.
+   */
+  signal?: AbortSignal;
+};
 
 // --- Validation ---
 

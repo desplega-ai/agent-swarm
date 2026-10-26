@@ -627,6 +627,39 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect((await getTaskByWorkflowRunStepId(step!.id))?.requestedByUserId).toBe(requester.id);
   });
 
+  test("trigger-workflow wait:false returns the runId before the run's instant steps finish", async () => {
+    const workflow = await createWorkflow({
+      name: uniqueName("mcp-trigger-detach"),
+      definition: {
+        nodes: [
+          {
+            id: "slow",
+            type: "script",
+            config: { runtime: "bash", script: "sleep 0.6; echo done", timeout: 10_000 },
+          },
+        ],
+      },
+    });
+    createdWorkflowIds.push(workflow.id);
+
+    const started = performance.now();
+    const triggered = await tools.callTrigger({ id: workflow.id, triggerData: {}, wait: false });
+    const elapsedMs = performance.now() - started;
+
+    expect(triggered.structuredContent?.success).toBe(true);
+    expect(triggered.structuredContent?.skipped).toBe(false);
+    const runId = triggered.structuredContent?.runId;
+    expect(runId).toBeString();
+    expect(elapsedMs).toBeLessThan(500);
+    expect((await getWorkflowRun(runId!))?.status).toBe("running");
+
+    const deadline = Date.now() + 10_000;
+    while ((await getWorkflowRun(runId!))?.status === "running" && Date.now() < deadline) {
+      await Bun.sleep(50);
+    }
+    expect((await getWorkflowRun(runId!))?.status).toBe("completed");
+  }, 15_000);
+
   test("trigger-workflow with missing required field → structured TriggerSchemaError", async () => {
     const triggerSchema: Record<string, unknown> = {
       type: "object",

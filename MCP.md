@@ -1499,6 +1499,7 @@ Manually trigger a workflow execution, optionally passing trigger data as contex
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | Workflow ID to trigger |
 | `triggerData` | `object` | No | - | Optional data to pass as trigger context to the workflow |
+| `wait` | `boolean` | No | - | Default true: return after the run's instant steps ran, when it finishes or parks at its first async step. false: return as soon as the run is created and walk it in the background. Use false from a script or step that only needs the runId. |
 
 ### list-workflow-runs
 

@@ -21,6 +21,13 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
           .record(z.string(), z.unknown())
           .optional()
           .describe("Optional data to pass as trigger context to the workflow"),
+        wait: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default true: return after the run's instant steps ran, when it finishes or parks at its first async step. " +
+              "false: return as soon as the run is created and walk it in the background. Use false from a script or step that only needs the runId.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         runId: z.string().optional(),
@@ -29,7 +36,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         triggerSchema: z.record(z.string(), z.unknown()).optional(),
       }),
     },
-    async ({ id, triggerData }, requestInfo) => {
+    async ({ id, triggerData, wait }, requestInfo) => {
       try {
         const workflow = await getWorkflow(id);
         if (!workflow) {
@@ -47,6 +54,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
             requestedByUserId:
               (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
               undefined,
+            detach: wait === false,
           },
         );
 

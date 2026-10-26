@@ -430,7 +430,7 @@ Inline executable source may interpolate only `input`, `workflow`, `swarm`, and 
 - `pinHash`: optional script content hash. When set, execution uses the matching `script_versions` row instead of the latest live source.
 - `args`: optional JSON object passed to the script as its first argument. Values support normal workflow interpolation.
 - `fsMode`: optional, defaults to `none`. `workspace-rw` is reserved for v2 worker-side execution and fails in v1 with a clear workflow-node error.
-- `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `300000` (5m), and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget.
+- `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `300000` (5m), and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget. When the step watchdog fires first (for example because the API was slow to reach the spawn), it aborts the executor and the script process is killed, so a step reported as timed out does not go on to perform the script's side effects.
 
 Catalog script source is never workflow-interpolated. If it contains a token rooted at a built-in workflow value or a declared input alias, the node fails with guidance to pass that value through `config.args`; unrelated mustache text remains literal script data.
 
@@ -791,6 +791,10 @@ The provider registry (`SYSTEM_ONE_HOSTS` in `src/workflows/executors/system-one
 Each workflow run persists the trusted human requester in `workflow_runs.created_by` when one is available. MCP resolves the caller from the invoking agent's owned source or current task; authenticated HTTP uses its trusted request user or owned agent-task context; schedules use their creator; and Kapso routing uses the resolved canonical sender. Generic unsigned or HMAC webhooks and creatorless schedules stay unattributed, and an ownerless trigger never falls back to the workflow author.
 
 Retry, resume, and recovery reconstruct requester context from the workflow run. Agent-task nodes created after a restart therefore keep the original `requestedByUserId` instead of losing attribution at the checkpoint boundary. Historical runs with `created_by = NULL` are not backfilled because no trustworthy requester can be recovered.
+
+## Waiting on a trigger
+
+A top-level trigger (MCP `trigger-workflow`, `POST /api/workflows/{id}/trigger`, webhooks) resolves only after the new run walks its instant steps, up to the end of the run or its first async step (`agent-task`, `foreach`, `wait`, ...). A caller that needs only the `runId` waits for all of that. MCP `trigger-workflow` (and `ctx.swarm.workflow_trigger` in a script) takes `wait: false` to return once the run is committed and walk it in the background, as a `sub-workflow` child does. A script step that fires another workflow should pass it, or the step's timeout covers the other workflow's steps too.
 
 ## Idempotent create and trigger
 
