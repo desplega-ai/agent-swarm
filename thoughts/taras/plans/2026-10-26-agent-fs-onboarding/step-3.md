@@ -2,7 +2,7 @@
 id: step-3
 name: Swarm memory on a local TEI
 depends_on: []
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -48,12 +48,12 @@ Spike evidence (`thoughts/taras/plans/2026-10-26-agent-fs-onboarding/spikes/tei-
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Provider tests: `bun run test:root -- src/tests/openai-embedding-provider.test.ts` (new cases against the fake server: query prefix on `kind: "query"`, document prefix on `kind: "document"`, none when unset, none without `kind`)
-- [ ] Batch fallback: `bun run test:root -- src/tests/memory-embedding-input-cap.test.ts` (new fake server that answers 422 `batch size 70 > maximum allowed batch size 32` above 32 inputs: a 70-input batch embeds all 70; a 422 with another message is one logged failure and makes no per-input calls)
-- [ ] Probe: `bun run test:root -- src/tests/onboarding.test.ts` (new case with `NODE_ENV=production` set inside the test: preset `existing` with `EMBEDDING_API_BASE_URL=http://127.0.0.1:<fake>/v1` passes; preset `custom` with the same URL in the body is still blocked)
-- [ ] Memory suite, one at a time: `bun run test:root -- src/tests/memory-store.test.ts && bun run test:root -- src/tests/memory.test.ts && bun run test:root -- src/tests/memory-e2e.test.ts && bun run test:root -- src/tests/memory-reranker.test.ts && bun run test:root -- src/tests/memory-key-paths.test.ts`
-- [ ] Scripts embeddings: `bun run test:root -- src/tests/scripts-boot-reembed.test.ts && bun run test:root -- src/tests/scripts-embeddings.test.ts`
-- [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] Provider tests: `bun run test:root -- src/tests/openai-embedding-provider.test.ts` (new cases against the fake server: query prefix on `kind: "query"`, document prefix on `kind: "document"`, none when unset, none without `kind`)
+- [x] Batch fallback: `bun run test:root -- src/tests/memory-embedding-input-cap.test.ts` (new fake server that answers 422 `batch size 70 > maximum allowed batch size 32` above 32 inputs: a 70-input batch embeds all 70; a 422 with another message is one logged failure and makes no per-input calls)
+- [x] Probe: `bun run test:root -- src/tests/onboarding.test.ts` (new case with `NODE_ENV=production` set inside the test: preset `existing` with `EMBEDDING_API_BASE_URL=http://127.0.0.1:<fake>/v1` passes; preset `custom` with the same URL in the body is still blocked)
+- [x] Memory suite, one at a time: `bun run test:root -- src/tests/memory-store.test.ts && bun run test:root -- src/tests/memory.test.ts && bun run test:root -- src/tests/memory-e2e.test.ts && bun run test:root -- src/tests/memory-reranker.test.ts && bun run test:root -- src/tests/memory-key-paths.test.ts`
+- [x] Scripts embeddings: `bun run test:root -- src/tests/scripts-boot-reembed.test.ts && bun run test:root -- src/tests/scripts-embeddings.test.ts`
+- [x] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
 
 #### Automated QA:
 - [ ] Live TEI run (needs Docker). Start TEI exactly as root Manual E2E part A does (container `afo-step-3-tei`, port 8091; on x86 use the `cpu-1.9.4` tag, on arm64 `cpu-arm64-1.9.4`). Boot the API in the background from a fresh worktree (save the PID to `/tmp/afo-step-3/pid`) with `bun --expose-gc src/http.ts`. On macOS only, add the preload that loads Homebrew SQLite for sqlite-vec: `bun --expose-gc --preload thoughts/taras/plans/2026-10-26-agent-fs-onboarding/spikes/tei-local/scripts/preload.ts src/http.ts`. Keep `NODE_ENV` unset, `DATABASE_PATH=/tmp/afo-step-3/db.sqlite`, the four `EMBEDDING_*` envs plus both prefixes.

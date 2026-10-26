@@ -104,7 +104,7 @@ export async function indexMemoryContent(
         intent: "re-index memory source path",
         changedByAgentId: agentId,
       });
-      const embedding = await provider.embed(result.memory.content);
+      const embedding = await provider.embed(result.memory.content, { kind: "document" });
       if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
       try {
         // Re-index of an existing memory: prune stale content-derived links.
@@ -162,7 +162,10 @@ export async function indexMemoryContent(
   // Async batch embed (fire and forget)
   (async () => {
     try {
-      const embeddings = await provider.embedBatch(memories.map((m) => m.content));
+      const embeddings = await provider.embedBatch(
+        memories.map((m) => m.content),
+        { kind: "document" },
+      );
       for (let i = 0; i < embeddings.length; i++) {
         if (embeddings[i]) {
           await store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);

@@ -248,6 +248,26 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}architecture/memory`,
       },
       {
+        key: "EMBEDDING_QUERY_PREFIX",
+        label: "Embedding query prefix",
+        description:
+          "Text added before each search query. nomic-embed models need 'search_query: '. Changing it on an install with stored memories needs a re-embed.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "search_query: ",
+        docsUrl: `${DOCS}architecture/memory`,
+      },
+      {
+        key: "EMBEDDING_DOCUMENT_PREFIX",
+        label: "Embedding document prefix",
+        description:
+          "Text added before each stored document. nomic-embed models need 'search_document: '. Changing it on an install with stored memories needs a re-embed.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "search_document: ",
+        docsUrl: `${DOCS}architecture/memory`,
+      },
+      {
         key: "MEMORY_RATERS",
         label: "Active memory raters",
         description:

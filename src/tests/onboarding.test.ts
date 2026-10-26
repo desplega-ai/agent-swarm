@@ -1044,6 +1044,68 @@ describe("onboarding memory probe", () => {
     }
   });
 
+  test("existing preset probes a private configured endpoint outside local development", async () => {
+    let hits = 0;
+    const fake = startEmbeddingServer(() => {
+      hits += 1;
+      return embeddingResponse(512);
+    });
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    process.env.EMBEDDING_API_BASE_URL = fake.baseUrl;
+    process.env.EMBEDDING_MODEL = "test-embedding-model";
+    process.env.EMBEDDING_API_KEY = "local-tei";
+    try {
+      const existing = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing" },
+      });
+      expect(await existing.json()).toMatchObject({ ok: true, dimensions: 512 });
+      expect(hits).toBe(1);
+
+      // The same private URL from the request body is still blocked.
+      const custom = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: fake.baseUrl,
+          model: "test-embedding-model",
+          apiKey: "local-tei",
+        },
+      });
+      expect(await custom.json()).toMatchObject({
+        ok: false,
+        errorClass: "network",
+        error: "The endpoint URL is not allowed.",
+      });
+      expect(hits).toBe(1);
+    } finally {
+      fake.server.stop(true);
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  test("existing preset with no configured endpoint keeps the SSRF check", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    process.env.EMBEDDING_API_KEY = "local-tei";
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing", baseUrl: "http://127.0.0.1:9/v1" },
+      });
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        errorClass: "network",
+        error: "The endpoint URL is not allowed.",
+      });
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   test("successful memory retry records the successful preset after a failure", async () => {
     let dimensions = 512;
     const fake = startEmbeddingServer(() => embeddingResponse(dimensions));

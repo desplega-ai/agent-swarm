@@ -37,6 +37,8 @@ for (const key of Object.keys(process.env)) {
       "AGENT_FS_DEFAULT_DRIVE_ID",
       "SWARM_ORG_NAME",
       "SWARM_ORG_WEBSITE",
+      "EMBEDDING_QUERY_PREFIX",
+      "EMBEDDING_DOCUMENT_PREFIX",
     ].includes(key)
   ) {
     delete process.env[key];

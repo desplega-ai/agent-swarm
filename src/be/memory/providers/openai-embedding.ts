@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { selectCredential } from "../../../utils/credentials";
 import { getOpenRouterAttributionHeaders } from "../../../utils/openrouter-base-url";
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../constants";
-import type { EmbeddingProvider } from "../types";
+import type { EmbeddingInputKind, EmbeddingProvider, EmbedOptions } from "../types";
 
 // text-embedding-3-* reject any input over 8,192 tokens with a 400, and one
 // such input fails every input in its request. There is no tokenizer here, and
@@ -18,18 +18,37 @@ interface OpenAIEmbeddingConfig {
   apiKey?: string;
   model?: string;
   dimensions?: number;
+  queryPrefix?: string;
+  documentPrefix?: string;
 }
 
-function cleanInput(text: string): string {
-  return text
-    .replace(/[\n\r]/g, " ")
-    .trim()
-    .slice(0, MAX_EMBEDDING_INPUT_CHARS);
+/**
+ * Flatten and trim the input, then prepend the task prefix. The cleaned text
+ * is cut so that prefix plus text stays within MAX_EMBEDDING_INPUT_CHARS. An
+ * empty input stays empty, so it is skipped and never embeds a bare prefix.
+ */
+function cleanInput(text: string, prefix = ""): string {
+  const cleaned = text.replace(/[\n\r]/g, " ").trim();
+  if (!cleaned) return "";
+  return prefix + cleaned.slice(0, Math.max(0, MAX_EMBEDDING_INPUT_CHARS - prefix.length));
 }
 
 /** A 400 is about the request's inputs, so the other inputs can still embed. */
 function isInputRejection(err: unknown): boolean {
   return err instanceof OpenAI.APIError && err.status === 400;
+}
+
+/**
+ * The server rejected the request for its size, not for an input: a 413, or a
+ * 422 about the batch size (TEI: "batch size 70 > maximum allowed batch size
+ * 32"). One request per input then fits. Any other 422 (TEI also answers 422
+ * for a bad `dimensions` value) stays a plain failure, so it is not repeated
+ * once per input.
+ */
+function isBatchTooLarge(err: unknown): boolean {
+  if (!(err instanceof OpenAI.APIError)) return false;
+  if (err.status === 413) return true;
+  return err.status === 422 && /batch size/i.test(err.message ?? "");
 }
 
 function isInputTooLong(err: unknown): boolean {
@@ -45,6 +64,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private client: OpenAI | null = null;
   private readonly model: string;
   private readonly apiKey: string | undefined;
+  private readonly queryPrefix: string;
+  private readonly documentPrefix: string;
 
   constructor(config?: OpenAIEmbeddingConfig) {
     const apiKey = config?.apiKey ?? process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY;
@@ -59,6 +80,17 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.name = config?.model
       ? `openai/${config.model}`
       : (process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL);
+
+    // Read once here: a config reload builds a new provider. Used verbatim,
+    // so a trailing space (nomic: "search_query: ") is kept.
+    this.queryPrefix = config?.queryPrefix ?? process.env.EMBEDDING_QUERY_PREFIX ?? "";
+    this.documentPrefix = config?.documentPrefix ?? process.env.EMBEDDING_DOCUMENT_PREFIX ?? "";
+  }
+
+  private prefixFor(kind: EmbeddingInputKind | undefined): string {
+    if (kind === "query") return this.queryPrefix;
+    if (kind === "document") return this.documentPrefix;
+    return "";
   }
 
   isConfigured(): boolean {
@@ -124,21 +156,22 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     }
   }
 
-  async embed(text: string): Promise<Float32Array | null> {
+  async embed(text: string, opts?: EmbedOptions): Promise<Float32Array | null> {
     const client = this.getClient();
     if (!client) return null;
 
-    const cleaned = cleanInput(text);
+    const cleaned = cleanInput(text, this.prefixFor(opts?.kind));
     if (!cleaned) return null;
     return this.embedOne(client, cleaned);
   }
 
-  async embedBatch(texts: string[]): Promise<(Float32Array | null)[]> {
+  async embedBatch(texts: string[], opts?: EmbedOptions): Promise<(Float32Array | null)[]> {
     const results: (Float32Array | null)[] = texts.map(() => null);
     const client = this.getClient();
     if (!client) return results;
 
-    const cleaned = texts.map(cleanInput);
+    const prefix = this.prefixFor(opts?.kind);
+    const cleaned = texts.map((text) => cleanInput(text, prefix));
     const groups: number[][] = [];
     let group: number[] = [];
     let groupChars = 0;
@@ -167,12 +200,13 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
           results[originalIndex] = this.toVector(item.embedding, "Batch embedding");
         }
       } catch (err) {
-        if (!isInputRejection(err)) {
+        if (!isInputRejection(err) && !isBatchTooLarge(err)) {
           console.error("[memory] Batch embedding failed:", (err as Error).message);
           continue;
         }
-        // One rejected input fails the whole request: embed each input alone so
-        // only that input is cut down, and the rest embed as they are.
+        // One rejected input fails the whole request, and a server with a low
+        // batch cap rejects the request for its size: embed each input alone so
+        // only a bad input is cut down, and the rest embed as they are.
         console.warn(
           `[memory] Batch embedding rejected, embedding ${indices.length} inputs one by one: ${(err as Error).message}`,
         );
