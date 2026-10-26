@@ -794,13 +794,17 @@ Retry, resume, and recovery reconstruct requester context from the workflow run.
 
 ## Waiting on a trigger
 
-A top-level trigger (MCP `trigger-workflow`, `POST /api/workflows/{id}/trigger`, webhooks) resolves only after the new run walks its instant steps, up to the end of the run or its first async step (`agent-task`, `foreach`, `wait`, ...). A caller that needs only the `runId` waits for all of that. MCP `trigger-workflow` (and `ctx.swarm.workflow_trigger` in a script) takes `wait: false` to return once the run is committed and walk it in the background, as a `sub-workflow` child does. A script step that fires another workflow should pass it, or the step's timeout covers the other workflow's steps too.
+A top-level trigger (MCP `trigger-workflow`, `POST /api/workflows/{id}/trigger`, webhooks) resolves only after the new run walks its instant steps, up to the end of the run or its first async step (`agent-task`, `foreach`, `wait`, ...). A caller that needs only the `runId` waits for all of that. MCP `trigger-workflow` and `ctx.swarm.workflow_trigger` in a script take `wait: false` (the REST route takes `?wait=false`) to return once the run is committed and walk it in the background, as a `sub-workflow` child does. A script step that fires another workflow should pass it, or the step's timeout covers the other workflow's steps too.
 
 ## Idempotent create and trigger
 
 `POST /api/workflows` and `POST /api/workflows/{id}/trigger` take an optional `Idempotency-Key` header (1-255 visible ASCII characters). Without it, nothing changes. With it, the server accepts one operation per key and answers every retry with that operation's original status and body, plus `Idempotent-Replayed: true`.
 
+MCP `trigger-workflow` and `ctx.swarm.workflow_trigger` take the same key as `idempotencyKey`, with the same record, scope (`agent:<calling agent>`) and rules. The tool reports a replay as `replayed: true` and a different body as an error with `idempotencyConflict: true`; the script SDK sends the header to the REST route and returns its status and body.
+
 Guarantee boundary: the server accepts the request once. Node side effects inside the run are not made exactly-once by this.
+
+A script step that triggers another workflow at most once per business key (a PR head, an order id) should pass that key as `idempotencyKey` instead of claiming the key in KV first. A step timeout kills the script, and a kill between a KV claim and the trigger leaves the claim held with no run, so a retry skips the work. With the key, a kill before the run commits leaves nothing behind, and a retry after it commits gets the same run back. Give the node a `retry` policy so a timed-out attempt runs again.
 
 | Request | Result |
 |---|---|

@@ -539,6 +539,7 @@ declare module "swarm-sdk" {
       id: string;
       triggerData?: Record<string, unknown>;
       wait?: boolean;
+      idempotencyKey?: string;
     }): Promise<unknown>;
     workflow_retryRun(args: { id: string }): Promise<unknown>;
     workflow_cancelRun(args: { id: string }): Promise<unknown>;

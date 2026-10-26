@@ -146,6 +146,12 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
         `quickjs worker failed to start: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    // An abort while the worker booted fired before the listener below
+    // exists. From here to postMessage nothing awaits.
+    if (input.signal?.aborted) {
+      pool.release(slot);
+      return emptyOutput("killed");
+    }
 
     const id = ++requestSeq;
     const start = performance.now();
