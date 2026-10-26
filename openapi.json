@@ -60992,6 +60992,318 @@
         }
       }
     },
+    "/api/invites": {
+      "post": {
+        "summary": "Invite a teammate with a one-time dashboard link",
+        "description": "Creates the user as invited with exactly the given role (requester by default) and returns a 7-day single-use link. The teammate's browser trades the link's code for a personal MCP token at POST /api/invites/exchange. Re-inviting an invited user sets the new role and replaces the old link. An email that belongs to an active or suspended user returns 409 user_exists. No email is sent.",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "requester",
+                      "viewer",
+                      "admin"
+                    ],
+                    "default": "requester"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The invited user, the one-time link, its expiry and whether the API is public",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "anyOf": [
+                        {
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/User"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "identities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "externalId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "externalId"
+                                    ]
+                                  }
+                                },
+                                "tokens": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tokenPreview": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "revokedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "label",
+                                      "tokenPreview",
+                                      "createdAt",
+                                      "lastUsedAt",
+                                      "revokedAt"
+                                    ]
+                                  }
+                                },
+                                "recentEvents": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "eventType": {
+                                        "type": "string"
+                                      },
+                                      "actor": {
+                                        "type": "string"
+                                      },
+                                      "before": {},
+                                      "after": {},
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "eventType",
+                                      "actor",
+                                      "createdAt"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "identities",
+                                "tokens",
+                                "recentEvents"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "inviteUrl": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "apiReachable": {
+                      "type": "string",
+                      "enum": [
+                        "public",
+                        "local"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "user",
+                    "inviteUrl",
+                    "expiresAt",
+                    "apiReachable"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to manage roles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The email belongs to an active or suspended user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/invites/exchange": {
+      "post": {
+        "summary": "Exchange an invite code for the invited user's MCP token",
+        "description": "Unauthenticated: the single-use invite code is the credential. Rate limited per IP. Activates the invited user. Unknown, expired, used and connector codes, and codes for users who are no longer invited, all return 404 code_invalid.",
+        "tags": [
+          "Users"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Minted MCP token for the invited user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "userId"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Code unknown, malformed, expired, already used or not an invite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/connector/discovery": {
       "get": {
         "summary": "Public origins the agent-swarm.dev connector needs to find this swarm's dashboard",

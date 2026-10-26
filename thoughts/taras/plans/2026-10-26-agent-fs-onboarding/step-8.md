@@ -2,7 +2,7 @@
 id: step-8
 name: Invite API
 depends_on: []
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -61,7 +61,7 @@ Facts (invites research):
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Invite route tests: `bun run test:root -- src/tests/invites-http.test.ts` (new file; copy the harness and cases of `src/tests/user-token-routes.test.ts:213-510`). Cases:
+- [x] Invite route tests: `bun run test:root -- src/tests/invites-http.test.ts` (new file; copy the harness and cases of `src/tests/user-token-routes.test.ts:213-510`). Cases:
   - create stores only the hash and mints no token;
   - the user is `invited` with the role `requester` and is NOT admin;
   - an `active` or `suspended` email gets 409;
@@ -75,15 +75,16 @@ Facts (invites research):
   - 10/min limiter, 413 on a big body;
   - a Requester caller of `POST /api/invites` gets 403;
   - a failed role set leaves no user.
-- [ ] Regressions: `bun run test:root -- src/tests/user-token-routes.test.ts src/tests/user-roles-http.test.ts src/tests/http-users.test.ts`
-- [ ] Migration: `bash scripts/check-migration-conflicts.sh && bun scripts/check-text-columns.ts`
-- [ ] Fresh DB boot (repeat with a DB file first created by a main checkout, to prove the migration applies once on an existing DB): `mkdir -p /tmp/afo-step-8 && rm -f /tmp/afo-step-8/db.sqlite* && (DATABASE_PATH=/tmp/afo-step-8/db.sqlite DESPLEGA_TELEMETRY_ENV=test PORT=3913 bun src/http.ts > /tmp/afo-step-8/api.log 2>&1 & echo $! > /tmp/afo-step-8/pid) && until curl -sf http://localhost:3913/health; do sleep 1; done && kill "$(cat /tmp/afo-step-8/pid)" && sqlite3 /tmp/afo-step-8/db.sqlite "SELECT name FROM pragma_table_info('connector_codes') WHERE name = 'kind'"` (prints `kind`)
-- [ ] Routes: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && bun run test:root -- src/tests/docs-index-footprint.test.js`
-- [ ] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] Regressions: `bun run test:root -- src/tests/user-token-routes.test.ts src/tests/user-roles-http.test.ts src/tests/http-users.test.ts`
+- [x] Migration: `bash scripts/check-migration-conflicts.sh && bun scripts/check-text-columns.ts`
+- [x] Fresh DB boot (repeat with a DB file first created by a main checkout, to prove the migration applies once on an existing DB): `mkdir -p /tmp/afo-step-8 && rm -f /tmp/afo-step-8/db.sqlite* && (DATABASE_PATH=/tmp/afo-step-8/db.sqlite DESPLEGA_TELEMETRY_ENV=test PORT=3913 bun src/http.ts > /tmp/afo-step-8/api.log 2>&1 & echo $! > /tmp/afo-step-8/pid) && until curl -sf http://localhost:3913/health; do sleep 1; done && kill "$(cat /tmp/afo-step-8/pid)" && sqlite3 /tmp/afo-step-8/db.sqlite "SELECT name FROM pragma_table_info('connector_codes') WHERE name = 'kind'"` (prints `kind`)
+- [x] Routes: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && bun run test:root -- src/tests/docs-index-footprint.test.js`
+- [x] Gates: `bun run check:local && bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
 
 #### Automated QA:
-- [ ] Black-box contract: `scripts/e2e/scenarios/invites.ts` (new; copy `scripts/e2e/scenarios/config-roundtrip.ts`, pick a free `order`). It creates an invite, exchanges it, calls `GET /api/whoami` with the token, and checks that the second exchange is 404. Run: `bun run e2e --only invites`
-- [ ] curl walk on a booted API (temp DB, no `.env`): the whole flow, with the token kept in a shell variable and never echoed. `POST /api/tasks` with the Requester token returns 403 before step-6 and 201 after it. Record which one applies.
+- [x] Black-box contract: `scripts/e2e/scenarios/invites.ts` (new; copy `scripts/e2e/scenarios/config-roundtrip.ts`, pick a free `order`). It creates an invite, exchanges it, calls `GET /api/whoami` with the token, and checks that the second exchange is 404. Run: `bun run e2e --only invites`
+- [x] curl walk on a booted API (temp DB, no `.env`): the whole flow, with the token kept in a shell variable and never echoed. `POST /api/tasks` with the Requester token returns 403 before step-6 and 201 after it. Record which one applies.
+  - Result (2026-10-26, without step-6): 403 `admission: route has no permission verb (operator-only)`.
 
 #### Manual Verification:
 - [ ] None.

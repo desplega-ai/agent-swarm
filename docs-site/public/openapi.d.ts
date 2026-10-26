@@ -24515,6 +24515,189 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite a teammate with a one-time dashboard link
+         * @description Creates the user as invited with exactly the given role (requester by default) and returns a 7-day single-use link. The teammate's browser trades the link's code for a personal MCP token at POST /api/invites/exchange. Re-inviting an invited user sets the new role and replaces the old link. An email that belongs to an active or suspended user returns 409 user_exists. No email is sent.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** Format: email */
+                        email: string;
+                        name?: string;
+                        /**
+                         * @default requester
+                         * @enum {string}
+                         */
+                        role?: "requester" | "viewer" | "admin";
+                    };
+                };
+            };
+            responses: {
+                /** @description The invited user, the one-time link, its expiry and whether the API is public */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            user: (components["schemas"]["User"] & {
+                                identities: {
+                                    kind: string;
+                                    externalId: string;
+                                }[];
+                                tokens: {
+                                    id: string;
+                                    userId: string;
+                                    label: string | null;
+                                    tokenPreview: string;
+                                    createdAt: string;
+                                    lastUsedAt: string | null;
+                                    revokedAt: string | null;
+                                }[];
+                                recentEvents: {
+                                    id: string;
+                                    userId: string;
+                                    eventType: string;
+                                    actor: string;
+                                    before?: unknown;
+                                    after?: unknown;
+                                    createdAt: string;
+                                }[];
+                            }) | null;
+                            inviteUrl: string;
+                            expiresAt: string;
+                            /** @enum {string} */
+                            apiReachable: "public" | "local";
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not allowed to manage roles */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The email belongs to an active or suspended user */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/invites/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange an invite code for the invited user's MCP token
+         * @description Unauthenticated: the single-use invite code is the credential. Rate limited per IP. Activates the invited user. Unknown, expired, used and connector codes, and codes for users who are no longer invited, all return 404 code_invalid.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        code: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Minted MCP token for the invited user */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            token: string;
+                            userId: string;
+                        };
+                    };
+                };
+                /** @description Code unknown, malformed, expired, already used or not an invite */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Request body too large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/connector/discovery": {
         parameters: {
             query?: never;

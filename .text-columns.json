@@ -872,6 +872,9 @@
     },
     "used_at": {
       "exempt": "timestamp"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "context_versions": {
