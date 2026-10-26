@@ -196,6 +196,7 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
         job: {
           source: input.source,
           args: input.args,
+          ...(input.hostValidatedArgs ? { hostValidatedArgs: true } : {}),
           configPayload: input.configPayload,
           resources: input.resources,
           network: input.network,
