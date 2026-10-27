@@ -1,9 +1,11 @@
+import { resolve } from "node:path";
 import {
   openAICompatibleBaseUrlVars,
   openAICompatibleKeyVars,
   providerForModel,
   providerKeyVars,
 } from "@desplega/model-catalog";
+import { loadCodexAuthChain, saveCodexAuthChain } from "./codex-auth-chain";
 import type { ApiClient } from "./http";
 import { asRecord, expect, expectStatus, pollUntil } from "./http";
 import { knownSecrets, redactSecrets } from "./redact";
@@ -292,9 +294,9 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
   ]);
   if (provider === "codex" && process.env.CODEX_OAUTH) {
     const authPath = `${homeDir}/.codex/auth.json`;
-    // The CLI rotates its refresh token after access expiry. The rotated token stays in this temp HOME.
-    // A static CODEX_OAUTH therefore goes stale after its first refresh, about ten days after issue.
-    await Bun.write(authPath, codexOAuthAuthJson());
+    // The CLI rotates its refresh token after access expiry, and the seeded one is then dead.
+    // Start from the chain an earlier attempt or night persisted; the seed only starts a chain.
+    await Bun.write(authPath, await codexStartingAuth());
     await Bun.$`chmod 600 ${authPath}`.quiet();
   } else if (provider === "codex" && process.env.OPENAI_API_KEY) {
     const login = Bun.spawn(["codex", "login", "--with-api-key"], {
@@ -330,8 +332,34 @@ function workerCommand(homeDir: string): string[] {
     : command;
 }
 
-function codexCredentialExpiry(): string | undefined {
+/** E2E_CODEX_AUTH_STATE names the sealed chain file the nightly carries in the Actions cache. */
+function codexAuthStatePath(): string | undefined {
+  const path = process.env.E2E_CODEX_AUTH_STATE;
+  return path ? resolve(repoRoot, path) : undefined;
+}
+
+async function codexStartingAuth(): Promise<string> {
+  return (
+    (await loadCodexAuthChain(codexAuthStatePath(), process.env.CODEX_OAUTH)) ??
+    codexOAuthAuthJson()
+  );
+}
+
+async function persistCodexAuthChain(homeDir: string): Promise<void> {
+  if (!process.env.CODEX_OAUTH) return;
+  const outcome = await saveCodexAuthChain(
+    codexAuthStatePath(),
+    process.env.CODEX_OAUTH,
+    `${homeDir}/.codex/auth.json`,
+    await codexStartingAuth(),
+  );
+  if (outcome !== "skipped") console.log(`codex auth chain persisted (${outcome})`);
+}
+
+async function codexCredentialExpiry(): Promise<string | undefined> {
   if (!process.env.CODEX_OAUTH) return undefined;
+  // A carried chain refreshes itself, so only an unstarted seed has an expiry worth a warning.
+  if (await loadCodexAuthChain(codexAuthStatePath(), process.env.CODEX_OAUTH)) return undefined;
   try {
     const expires = (JSON.parse(process.env.CODEX_OAUTH) as { expires?: unknown }).expires;
     if (typeof expires === "number" && Number.isFinite(expires)) {
@@ -544,6 +572,7 @@ async function runHarnessAttempt(
     if (child) await stopChild(child);
     await drains?.catch(() => {});
     writer?.end();
+    if (provider === "codex") await persistCodexAuthChain(homeDir).catch(() => {});
     await Bun.$`rm -rf ${homeDir}`.quiet().catch(() => {});
   }
 }
@@ -590,7 +619,7 @@ export async function runHarnessLeg(
     attempts,
     cost: last.cost,
     totalCostUsd: attempts.reduce((total, attempt) => total + (attempt.cost?.totalUsd ?? 0), 0),
-    credentialExpiresAt: provider === "codex" ? codexCredentialExpiry() : undefined,
+    credentialExpiresAt: provider === "codex" ? await codexCredentialExpiry() : undefined,
     logTail: last.logTail,
   };
 }

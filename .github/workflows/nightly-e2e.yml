@@ -2,8 +2,11 @@
 # Seed E2E_CODEX_OAUTH from a dedicated login: `env HOME=/tmp/e2e-codex codex login`, then
 # `bun scripts/e2e/codex-oauth-blob.ts /tmp/e2e-codex/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
 # Never use a developer's main login. CI refresh rotates its refresh token and breaks that login.
-# The Codex blob goes stale after its first refresh, about ten days after issue. The report
-# warns three days before the seeded access token expires.
+# The CLI rotates the Codex refresh token on every refresh and OpenAI rejects a reused one, so
+# the seed only starts a chain. Each main run carries the rotated auth.json to the next night in
+# the Actions cache, sealed under a key derived from the secret (scripts/e2e/codex-auth-chain.ts).
+# Reseed only after the chain breaks, for example after 7 days without a main run. Reseeding
+# starts a new chain. Until a chain exists, the report warns three days before the seed expires.
 # E2E_OPENROUTER_API_KEY is a plain OpenRouter key.
 #
 # Shape: `contract` runs the deterministic scenarios once. Each `harness` leg runs one real
@@ -106,6 +109,16 @@ jobs:
           "$RUNNER_TEMP/dsh/bin/dsh" --version
           echo "DSH_BINARY=$RUNNER_TEMP/dsh/bin/dsh" >> "$GITHUB_ENV"
 
+      # Only main runs carry the chain. A run on another ref writes a cache that main never
+      # restores, so it would fork the chain and the next main run would hit a used token.
+      - name: Restore Codex auth chain
+        if: matrix.provider == 'codex' && github.ref == 'refs/heads/main'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .e2e-state/codex-auth.sealed
+          key: nightly-e2e-codex-auth-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: nightly-e2e-codex-auth-
+
       # `--only health` keeps the contract scenarios in the contract job. The retry lives in
       # the runner so both attempts land in the result file with their cost and log tail.
       # `--keep` leaves the SUT log on disk for the upload step below.
@@ -115,6 +128,7 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.provider == 'claude' && secrets.E2E_CLAUDE_CODE_OAUTH_TOKEN || '' }}
           CODEX_OAUTH: ${{ matrix.provider == 'codex' && secrets.E2E_CODEX_OAUTH || '' }}
+          E2E_CODEX_AUTH_STATE: ${{ matrix.provider == 'codex' && github.ref == 'refs/heads/main' && '.e2e-state/codex-auth.sealed' || '' }}
           OPENROUTER_API_KEY: ${{ (matrix.provider == 'pi' || matrix.provider == 'opencode' || matrix.provider == 'dsh') && secrets.E2E_OPENROUTER_API_KEY || '' }}
         run: >-
           bun run e2e --only health --harness "${{ matrix.provider }}" --harness-attempts 2
@@ -133,6 +147,14 @@ jobs:
           mkdir -p out/logs
           ls /tmp/e2e-*.log >/dev/null 2>&1 || exit 0
           bun scripts/e2e/redact.ts --out out/logs /tmp/e2e-*.log
+
+      # Save even when the leg failed: a refresh that rotated the token must still carry over.
+      - name: Save Codex auth chain
+        if: always() && matrix.provider == 'codex' && github.ref == 'refs/heads/main' && hashFiles('.e2e-state/codex-auth.sealed') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .e2e-state/codex-auth.sealed
+          key: nightly-e2e-codex-auth-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload harness results
         if: always()
