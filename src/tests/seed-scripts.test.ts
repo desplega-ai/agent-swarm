@@ -1329,6 +1329,20 @@ describe("gh-pr-snapshot grades CI against the base branch's required checks", (
     expect(out.checks.pending).toBe(1);
   });
 
+  test("a later status page that lowers total_count never reads green", async () => {
+    const page = Array.from({ length: 100 }, (_, i) => ({ context: `s${i}`, state: "success" }));
+    const { ctx, urls } = fakeGitHub({
+      rules: requires("ci"),
+      runs: [ok("ci")],
+      statusPage: (n) => ({ total_count: n === 1 ? 300 : 100, statuses: page }),
+    });
+    const out = await run(ctx);
+    expect(out.ciGreen).toBe(false);
+    expect(urls.filter((u) => u.includes("/status")).length).toBe(2);
+    expect(out.requiredChecksError).toContain("status page 2 changed total_count from 300 to 100");
+    expect(out.checks.pending).toBe(1);
+  });
+
   test("control: a branch with no required checks gates on every check", async () => {
     const green = await run(fakeGitHub({ rules: [], runs: [ok("lint")] }).ctx);
     expect(green.requiredChecks).toEqual([]);

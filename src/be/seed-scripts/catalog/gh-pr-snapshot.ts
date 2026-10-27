@@ -227,7 +227,8 @@ async function checkRunsOn(ctx: any, headers: any, api: string, sha: string) {
 
 /**
  * Every commit status on the head, paged. A required status past the first page must not read
- * absent, so a malformed page or a read that stops short of `total_count` throws instead.
+ * absent, so a malformed page, a later page whose `total_count` differs from page one's, or a read
+ * that stops short of `total_count` throws instead.
  */
 async function commitStatusesOn(ctx: any, headers: any, api: string, sha: string) {
   const out: any[] = [];
@@ -238,9 +239,12 @@ async function commitStatusesOn(ctx: any, headers: any, api: string, sha: string
     if (typeof res.total_count !== "number" || !Number.isFinite(res.total_count)) {
       throw new Error(`status page ${page} has no numeric total_count`);
     }
-    total = res.total_count;
+    if (page === 1) total = res.total_count;
+    else if (res.total_count !== total) {
+      throw new Error(`status page ${page} changed total_count from ${total} to ${res.total_count}`);
+    }
     out.push(...res.statuses);
-    if (out.length >= res.total_count || res.statuses.length < 100) break;
+    if (out.length >= total || res.statuses.length < 100) break;
   }
   if (out.length < total) {
     throw new Error(`read ${out.length} of ${total} statuses within 5 pages`);
