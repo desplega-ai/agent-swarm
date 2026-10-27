@@ -16,9 +16,15 @@ import {
 import { closeDb, createAgent, createUser, getDbClient, initDb } from "../be/db";
 import { flushAuditBuffer } from "../be/rbac-audit";
 import { attachRole, detachRole, ensureRbacSeedsSynced } from "../be/rbac-roles";
+import {
+  resetAgentFsProvisionFetchForTests,
+  setAgentFsProvisionFetchForTests,
+} from "../be/seed/agent-fs-provision";
 import { type IdentityActor, mintToken } from "../be/users";
 import { handleCore } from "../http/core";
+import { handleDbQuery } from "../http/db-query";
 import { handleFs } from "../http/fs";
+import { handleInboxState } from "../http/inbox-state";
 import { handleMcpOAuth } from "../http/mcp-oauth";
 import { handleRealtimeTicket } from "../http/realtime";
 import { handleTasks } from "../http/tasks";
@@ -61,6 +67,8 @@ function createTestServer(): Server {
     if (await handleCore(req, res, myAgentId, API_KEY)) return;
     if (await handleTasks(req, res, pathSegments, queryParams, myAgentId)) return;
     if (await handleFs(req, res, pathSegments, queryParams, myAgentId)) return;
+    if (await handleInboxState(req, res, pathSegments, queryParams)) return;
+    if (await handleDbQuery(req, res, pathSegments, queryParams)) return;
     if (await handleMcpOAuth(req, res, pathSegments, queryParams)) return;
     if (await handleRealtimeTicket(req, res, pathSegments, queryParams)) return;
 
@@ -426,14 +434,20 @@ describe("handleCore admission wiring", () => {
     expect(await admissionAuditRows()).toEqual([]);
   });
 
-  test("flag on requester grant denies verb-less writes, allows reads and declared verbs, and audits each decision", async () => {
+  test("flag on requester grant admits declared verbs and reads, denies verb-less writes, and audits each decision", async () => {
     process.env.RBAC_ENABLED = "true";
     const { userId, plaintext } = await createTokenForUser("Requester User");
     await narrowUserToRequester(userId);
 
-    const denied = await api(port, "POST", "/api/tasks", {
+    const created = await api(port, "POST", "/api/tasks", {
       bearer: plaintext,
-      body: { task: "requester should not create generic tasks" },
+      body: { task: "requester creates its own task" },
+    });
+    expect(created.status).toBe(201);
+
+    const denied = await api(port, "POST", "/api/db-query", {
+      bearer: plaintext,
+      body: { sql: "select 1" },
     });
     expect(denied.status).toBe(403);
     expect(denied.body).toEqual({
@@ -454,9 +468,17 @@ describe("handleCore admission wiring", () => {
 
     await flushAuditBuffer();
     const rows = await admissionAuditRows();
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
 
     expect(rows.find((row) => row.resourceId === "POST /api/tasks")).toMatchObject({
+      principalType: "user",
+      principalId: userId,
+      verb: "task.create.own",
+      decision: "allow",
+      reason: null,
+      source: "http",
+    });
+    expect(rows.find((row) => row.resourceId === "POST /api/db-query")).toMatchObject({
       principalType: "user",
       principalId: userId,
       verb: "(admission:no-verb)",
@@ -482,6 +504,322 @@ describe("handleCore admission wiring", () => {
       reason: null,
       source: "http",
     });
+  });
+});
+
+describe("requester and viewer task lifecycle", () => {
+  async function createTask(bearer: string, task: string): Promise<string> {
+    const res = await api(port, "POST", "/api/tasks", { bearer, body: { task } });
+    expect(res.status).toBe(201);
+    return (res.body as { id: string }).id;
+  }
+
+  async function setStatus(taskId: string, status: string): Promise<void> {
+    await getDbClient().run("UPDATE agent_tasks SET status = ? WHERE id = ?", [status, taskId]);
+  }
+
+  async function lifecycle(bearer: string, taskId: string): Promise<Record<string, number>> {
+    await setStatus(taskId, "in_progress");
+    const pause = await api(port, "POST", `/api/tasks/${taskId}/pause`, { bearer });
+    await setStatus(taskId, "paused");
+    const resume = await api(port, "POST", `/api/tasks/${taskId}/resume`, { bearer });
+    const steer = await api(port, "POST", `/api/tasks/${taskId}/steer`, {
+      bearer,
+      body: { message: "requester steer" },
+    });
+    const title = await api(port, "PATCH", `/api/tasks/${taskId}/title`, {
+      bearer,
+      body: { title: "requester title" },
+    });
+    const cancel = await api(port, "POST", `/api/tasks/${taskId}/cancel`, { bearer });
+    return {
+      pause: pause.status,
+      resume: resume.status,
+      steer: steer.status,
+      title: title.status,
+      cancel: cancel.status,
+    };
+  }
+
+  test("a requester creates, pauses, resumes, steers, renames and cancels its own task", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const { userId, plaintext } = await createTokenForUser("Lifecycle Requester");
+    await narrowUserToRequester(userId);
+
+    const taskId = await createTask(plaintext, "requester lifecycle");
+    const owner = await getDbClient().get<{ requestedByUserId: string | null }>(
+      "SELECT requestedByUserId FROM agent_tasks WHERE id = ?",
+      [taskId],
+    );
+    expect(owner?.requestedByUserId).toBe(userId);
+
+    expect(await lifecycle(plaintext, taskId)).toEqual({
+      pause: 200,
+      resume: 200,
+      steer: 200,
+      title: 200,
+      cancel: 200,
+    });
+  });
+
+  test("the same calls on another user's task hit the session wall, not admission", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const other = await createTokenForUser("Task Owner");
+    const foreignTaskId = await createTask(other.plaintext, "someone else's task");
+    const { userId, plaintext } = await createTokenForUser("Foreign Requester");
+    await narrowUserToRequester(userId);
+
+    const calls: [string, string, unknown][] = [
+      ["POST", `/api/tasks/${foreignTaskId}/pause`, undefined],
+      ["POST", `/api/tasks/${foreignTaskId}/resume`, undefined],
+      ["POST", `/api/tasks/${foreignTaskId}/steer`, { message: "not mine" }],
+      ["PATCH", `/api/tasks/${foreignTaskId}/title`, { title: "not mine" }],
+      ["POST", `/api/tasks/${foreignTaskId}/cancel`, undefined],
+    ];
+    for (const [method, path, body] of calls) {
+      const res = await api(port, method, path, { bearer: plaintext, body });
+      const error = (res.body as { error?: string }).error ?? "";
+      expect({ path, status: res.status, admission: error.includes("admission:") }).toEqual({
+        path,
+        status: 403,
+        admission: false,
+      });
+    }
+    const task = await getDbClient().get<{ status: string; title: string | null }>(
+      "SELECT status, title FROM agent_tasks WHERE id = ?",
+      [foreignTaskId],
+    );
+    expect(task?.status).not.toBe("cancelled");
+    expect(task?.title).not.toBe("not mine");
+  });
+
+  // Regression: the session wall reads an ownerless root (Slack, schedules,
+  // operator key) as everyone's, so without the handler ownership check a
+  // requester could cancel, pause, resume or rename any such task.
+  test("a requester cannot change an ownerless task, an admin user still can", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const { userId, plaintext } = await createTokenForUser("Ownerless Requester");
+    await narrowUserToRequester(userId);
+    const admin = await createTokenForUser("Ownerless Admin");
+
+    const taskId = await createTask(API_KEY, "operator task with no owner");
+    const owner = await getDbClient().get<{ requestedByUserId: string | null }>(
+      "SELECT requestedByUserId FROM agent_tasks WHERE id = ?",
+      [taskId],
+    );
+    expect(owner?.requestedByUserId).toBeNull();
+
+    await setStatus(taskId, "in_progress");
+    const pause = await api(port, "POST", `/api/tasks/${taskId}/pause`, { bearer: plaintext });
+    await setStatus(taskId, "paused");
+    const resume = await api(port, "POST", `/api/tasks/${taskId}/resume`, { bearer: plaintext });
+    const title = await api(port, "PATCH", `/api/tasks/${taskId}/title`, {
+      bearer: plaintext,
+      body: { title: "not mine" },
+    });
+    const cancel = await api(port, "POST", `/api/tasks/${taskId}/cancel`, { bearer: plaintext });
+    expect({
+      pause: pause.status,
+      resume: resume.status,
+      title: title.status,
+      cancel: cancel.status,
+    }).toEqual({ pause: 403, resume: 403, title: 403, cancel: 403 });
+    const task = await getDbClient().get<{ status: string; title: string | null }>(
+      "SELECT status, title FROM agent_tasks WHERE id = ?",
+      [taskId],
+    );
+    expect(task?.status).toBe("paused");
+    expect(task?.title).not.toBe("not mine");
+
+    const adminTitle = await api(port, "PATCH", `/api/tasks/${taskId}/title`, {
+      bearer: admin.plaintext,
+      body: { title: "admin title" },
+    });
+    const adminCancel = await api(port, "POST", `/api/tasks/${taskId}/cancel`, {
+      bearer: admin.plaintext,
+    });
+    expect({ title: adminTitle.status, cancel: adminCancel.status }).toEqual({
+      title: 200,
+      cancel: 200,
+    });
+  });
+
+  test("a viewer cannot create a task", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const { userId, plaintext } = await createTokenForUser("Viewer User");
+    await detachRole(userId, "admin");
+    await attachRole(userId, "viewer");
+
+    const res = await api(port, "POST", "/api/tasks", {
+      bearer: plaintext,
+      body: { task: "viewer should not create" },
+    });
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({
+      error: "Forbidden: admission: missing permission 'task.create.own'",
+    });
+  });
+});
+
+describe("per-user inbox state", () => {
+  const item = { itemType: "approval", itemId: "inbox-guard", status: "done" };
+
+  test("a requester writes its own inbox state but not another user's", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const other = await createUser({ name: "Inbox Other" });
+    const { userId, plaintext } = await createTokenForUser("Inbox Requester");
+    await narrowUserToRequester(userId);
+
+    const own = await api(port, "PATCH", "/api/inbox-state", {
+      bearer: plaintext,
+      body: { ...item, userId },
+    });
+    expect(own.status).toBe(200);
+
+    const foreign = await api(port, "PATCH", "/api/inbox-state", {
+      bearer: plaintext,
+      body: { ...item, userId: other.id },
+    });
+    expect(foreign.status).toBe(403);
+
+    const foreignBulk = await api(port, "PATCH", "/api/inbox-state/bulk", {
+      bearer: plaintext,
+      body: { userId: other.id, items: [item] },
+    });
+    expect(foreignBulk.status).toBe(403);
+
+    const rows = await getDbClient().query<{ userId: string }>(
+      "SELECT userId FROM inbox_item_state WHERE itemId = 'inbox-guard'",
+    );
+    expect(rows.map((row) => row.userId)).toEqual([userId]);
+  });
+
+  test("the operator key and an admin user still write any user's inbox state", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const other = await createUser({ name: "Inbox Target" });
+    const admin = await createTokenForUser("Inbox Admin");
+
+    const operator = await api(port, "PATCH", "/api/inbox-state", {
+      body: { ...item, userId: other.id },
+    });
+    expect(operator.status).toBe(200);
+
+    const adminCall = await api(port, "PATCH", "/api/inbox-state/bulk", {
+      bearer: admin.plaintext,
+      body: { userId: other.id, items: [{ ...item, itemId: "inbox-guard-2" }] },
+    });
+    expect(adminCall.status).toBe(200);
+  });
+});
+
+describe("join the shared agent-fs drive", () => {
+  const AGENT_FS_ENV_KEYS = [
+    "AGENT_FS_API_URL",
+    "API_AGENT_FS_API_KEY",
+    "AGENT_FS_API_KEY",
+    "AGENT_FS_DEFAULT_ORG_ID",
+    "AGENT_FS_SHARED_ORG_ID",
+    "AGENT_FS_DEFAULT_DRIVE_ID",
+    "AGENT_FS_REGISTER_EMAIL",
+  ];
+  let invites: { email: string; role: string }[] = [];
+
+  beforeEach(() => {
+    invites = [];
+    for (const key of AGENT_FS_ENV_KEYS) delete process.env[key];
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+    process.env.API_AGENT_FS_API_KEY = "example-afs-admin-key";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+    setAgentFsProvisionFetchForTests((async (input, init) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/auth/me") return Response.json({ userId: "admin-user" });
+      if (url.pathname === "/orgs" && method === "GET") {
+        return Response.json({ orgs: [{ id: "shared-org", name: "swarm" }] });
+      }
+      if (url.pathname === "/orgs/shared-org/drives" && method === "GET") {
+        return Response.json({ drives: [{ id: "shared-drive", name: "shared" }] });
+      }
+      if (url.pathname === "/orgs/shared-org/members" && method === "GET") {
+        return Response.json({ members: [] });
+      }
+      if (url.pathname === "/orgs/shared-org/members/invite" && method === "POST") {
+        invites.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true });
+      }
+      return Response.json({ error: "unexpected route" }, { status: 500 });
+    }) as typeof fetch);
+  });
+
+  afterEach(() => {
+    resetAgentFsProvisionFetchForTests();
+    for (const key of AGENT_FS_ENV_KEYS) delete process.env[key];
+  });
+
+  async function tokenWithRole(name: string, email: string, role: string) {
+    const user = await createUser({ name, email });
+    const { plaintext } = await mintToken(user.id, "admission", ACTOR);
+    if (role !== "admin") {
+      await detachRole(user.id, "admin");
+      await attachRole(user.id, role);
+    }
+    return plaintext;
+  }
+
+  test("a requester cannot invite another email", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const bearer = await tokenWithRole("Join Requester", "Req.User@example.test", "requester");
+
+    const res = await api(port, "POST", "/api/fs/members/invite", {
+      bearer,
+      body: { email: "someone-else@example.test", role: "admin" },
+    });
+    expect(res.status).toBe(403);
+    expect(invites).toEqual([]);
+  });
+
+  test("a requester joins with its own email as editor, whatever role it asks for", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const bearer = await tokenWithRole("Join Requester", "Req.User@example.test", "requester");
+
+    const res = await api(port, "POST", "/api/fs/members/invite", {
+      bearer,
+      body: { email: "req.user@EXAMPLE.test", role: "admin" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ orgId: "shared-org", invited: true, status: "added" });
+    expect(invites).toEqual([{ email: "Req.User@example.test", role: "editor" }]);
+  });
+
+  test("a viewer joins with its own email as viewer", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const bearer = await tokenWithRole("Join Viewer", "viewer@example.test", "viewer");
+
+    const res = await api(port, "POST", "/api/fs/members/invite", {
+      bearer,
+      body: { email: "viewer@example.test" },
+    });
+    expect(res.status).toBe(200);
+    expect(invites).toEqual([{ email: "viewer@example.test", role: "viewer" }]);
+  });
+
+  test("the operator key and an admin user invite any email at the requested role", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const bearer = await tokenWithRole("Join Admin", "admin-user@example.test", "admin");
+
+    const operator = await api(port, "POST", "/api/fs/members/invite", {
+      body: { email: "teammate@example.test", role: "admin" },
+    });
+    expect(operator.status).toBe(200);
+    const admin = await api(port, "POST", "/api/fs/members/invite", {
+      bearer,
+      body: { email: "another@example.test" },
+    });
+    expect(admin.status).toBe(200);
+    expect(invites).toEqual([
+      { email: "teammate@example.test", role: "admin" },
+      { email: "another@example.test", role: "editor" },
+    ]);
   });
 });
 

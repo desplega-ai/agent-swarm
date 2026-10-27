@@ -11,6 +11,7 @@ import {
   getAgentById,
   getAllTasks,
   getDbClient,
+  getInProgressTasksByContextKey,
   getLeadAgent,
   getLogsByTaskId,
   getPausedTasksForAgent,
@@ -39,6 +40,7 @@ import {
 } from "../be/db";
 import { modelProfileRefError, taskProfileError } from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { getUserGrant } from "../be/rbac-roles";
 import { hasSessionAccess, type SessionAccess } from "../be/session-shares";
 import {
   getTaskSteeringFields,
@@ -49,7 +51,7 @@ import {
 } from "../be/steering";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { findUserById } from "../be/users";
-import { can, type RbacPrincipal, type RbacResource } from "../rbac";
+import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -87,7 +89,9 @@ import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { bodyTask, route } from "./route-def";
 import {
   canReadSession,
+  deniesNonOwnerTaskWrite,
   denyParentAttach,
+  NOT_YOUR_TASK_DENIED,
   readableByFor,
   resolveSessionActor,
   SESSION_READ_DENIED,
@@ -279,6 +283,7 @@ const createTask = route({
   path: "/api/tasks",
   pattern: ["api", "tasks"],
   session: bodyTask("parentTaskId"),
+  rbac: { permission: "task.create.own" },
   summary: "Create a new task",
   tags: ["Tasks"],
   body: z
@@ -411,6 +416,7 @@ const cancelTaskRoute = route({
   path: "/api/tasks/{id}/cancel",
   pattern: ["api", "tasks", null, "cancel"],
   session: { taskParam: "id" },
+  rbac: { permission: "task.cancel.own" },
   summary: "Cancel a pending or in-progress task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -687,6 +693,7 @@ const pauseTaskRoute = route({
   path: "/api/tasks/{id}/pause",
   pattern: ["api", "tasks", null, "pause"],
   session: { taskParam: "id" },
+  rbac: { permission: "task.action.own" },
   summary: "Pause an in-progress task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -703,6 +710,7 @@ const resumeTaskRoute = route({
   path: "/api/tasks/{id}/resume",
   pattern: ["api", "tasks", null, "resume"],
   session: { taskParam: "id" },
+  rbac: { permission: "task.action.own" },
   summary: "Resume a paused task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
@@ -777,9 +785,7 @@ const updateTaskTitleRoute = route({
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
-  rbac: {
-    ungated: "mirrors the pre-RBAC PATCH /api/tasks/{id}/vcs sibling route: bearer auth only",
-  },
+  rbac: { permission: "task.action.own" },
 });
 
 async function canSteerTask(
@@ -877,6 +883,40 @@ async function resolveTaskWritePrincipal(
   if (!agentId) return { kind: "operator" };
   const agent = await getAgentById(agentId);
   return { kind: "agent", agentId, isLead: agent?.isLead === true };
+}
+
+/**
+ * May this caller bind a new task to a chat thread? The operator may. An agent needs the
+ * lead's chat post permission. A user needs admin, or a role with `integration.chat.post`.
+ */
+async function mayBindChatThread(principal: RbacPrincipal): Promise<boolean> {
+  if (principal.kind === "operator") return true;
+  if (principal.kind === "user") {
+    if (!isRbacEnabled()) return true;
+    const grant = await getUserGrant(principal.userId);
+    return grant.grantsAll || grant.verbs.has("integration.chat.post");
+  }
+  return can({
+    principal,
+    verb: "integration.chat.post",
+    resource: { kind: "none" },
+    source: "http",
+  }).allow;
+}
+
+/**
+ * Sibling awareness copies the open tasks under a contextKey into the new task, and may pick
+ * one as its parent. A non-admin user may name a context only when they may write each of
+ * its open tasks.
+ */
+async function deniesForeignContext(req: IncomingMessage, contextKey: string): Promise<boolean> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "user" || !isRbacEnabled()) return false;
+  if ((await getUserGrant(auth.userId)).grantsAll) return false;
+  for (const task of await getInProgressTasksByContextKey(contextKey)) {
+    if (await deniesNonOwnerTaskWrite(req, task)) return true;
+  }
+  return false;
 }
 
 /**
@@ -1070,17 +1110,27 @@ export async function handleTasks(
       return true;
     }
     // A chat-sdk contextKey binds the task to a chat thread that its assignee and creator
-    // may then read and post to. An agent may only name a thread other than the parent's
-    // with the lead's chat post permission.
+    // may then read and post to. Only a caller with chat post permission may name a thread
+    // other than the parent's.
     if (
-      principal.kind === "agent" &&
       parsed.body.contextKey &&
       parsed.body.contextKey !== parentTask?.contextKey &&
       chatThreadOfContextKey(parsed.body.contextKey) &&
-      !can({ principal, verb: "integration.chat.post", resource: { kind: "none" }, source: "http" })
-        .allow
+      !(await mayBindChatThread(principal))
     ) {
-      jsonError(res, "Permission denied: only a lead can bind a task to a chat thread.", 403);
+      jsonError(
+        res,
+        "Permission denied: only a lead or an admin can bind a task to a chat thread.",
+        403,
+      );
+      return true;
+    }
+    if (
+      parsed.body.contextKey &&
+      parsed.body.contextKey !== parentTask?.contextKey &&
+      (await deniesForeignContext(req, parsed.body.contextKey))
+    ) {
+      jsonError(res, "You don't have access to the tasks in this context.", 403);
       return true;
     }
     let assetKey: string | undefined;
@@ -1240,7 +1290,12 @@ export async function handleTasks(
       return true;
     }
 
-    // Humans may cancel any task. Agents get the MCP cancel-task policy:
+    if (await deniesNonOwnerTaskWrite(req, task)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
+      return true;
+    }
+
+    // Admins may cancel any task. Agents get the MCP cancel-task policy:
     // lead or task creator.
     const principal = await resolveTaskWritePrincipal(req, myAgentId);
     if (
@@ -1882,6 +1937,11 @@ export async function handleTasks(
       return true;
     }
 
+    if (await deniesNonOwnerTaskWrite(req, task)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
+      return true;
+    }
+
     if (myAgentId && task.agentId !== myAgentId) {
       jsonError(res, "Task belongs to another agent", 403);
       return true;
@@ -1945,6 +2005,15 @@ export async function handleTasks(
   if (updateTaskTitleRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskTitleRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const existing = await getTaskById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (await deniesNonOwnerTaskWrite(req, existing)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
+      return true;
+    }
     const task = await updateTaskTitle(parsed.params.id, parsed.body.title);
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -1961,6 +2030,11 @@ export async function handleTasks(
 
     if (!task) {
       jsonError(res, "Task not found", 404);
+      return true;
+    }
+
+    if (await deniesNonOwnerTaskWrite(req, task)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
       return true;
     }
 

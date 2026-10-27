@@ -79,6 +79,16 @@ One deployment serves the whole team, and you run it on your own infrastructure.
 
 **Users and roles.** Role-based access control ships with three built-in roles: `admin` (full access), `requester` (create, read, cancel and act on their own tasks, plus their own files and favorites) and `viewer` (read-only). Every new user is assigned `admin` by a database trigger. Enforcement is on by default via `RBAC_ENABLED` and gates only requests made with user tokens — operator-key and agent calls are not affected. A user acting on tasks is limited to tasks they requested. See [Environment variables](/docs/reference/environment-variables) and the [2026-07-13 release notes](/docs/releases/2026-07-13).
 
+**Invites.** An admin invites a teammate with `POST /api/invites`, passing an email and a role: `requester` (the default), `viewer` or `admin`. The operator key can invite too. A user whose role holds `user.role.manage` must also hold a grant-all role, as for `PUT /api/users/{id}/roles`. The swarm creates the user as `invited` with exactly that role and returns a one-time link to the dashboard's `/join` page. No email is sent: copy the link to the teammate yourself.
+
+- The link is valid for 7 days and works once. The `/join` page shows the swarm address and waits for the teammate to click **Join swarm**. Then the browser trades the code at `POST /api/invites/exchange` for a personal user token, and the user becomes `active`.
+- Inviting an invited user again sets the new role and replaces the old link, which then stops working. An email that belongs to an active or suspended user is refused with 409.
+- The link uses `<API URL>/invite/<code>`. The API URL comes from `PUBLIC_MCP_BASE_URL`, then `MCP_BASE_URL`.
+- The API redirects to the dashboard at `APP_URL`, or the hosted dashboard when unset. It resolves `APP_URL` each time the link opens. The code travels in the URL fragment, so the dashboard server never receives it.
+- For a self-hosted dashboard, set `APP_URL` to its origin or click **Use this dashboard** in the invite dialog. Existing links then open that dashboard.
+- The teammate's browser must reach the API. The response field `apiReachable` is `local` for loopback, private or single-label hosts, which teammates on other machines cannot open.
+- Suspending the user before they open the link makes the link fail.
+
 State plainly what does not exist today:
 
 - There is no UI to assign roles yet. An operator or admin sets them with `PUT /api/users/{id}/roles`; every user is an admin until then. A user below `admin` cannot answer approval requests, even when listed as an approver. The People page "Role" field is still a free-text label. Agents are governed by the fixed lead and owner rules, not roles.

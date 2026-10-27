@@ -33,7 +33,7 @@ export function useCombMutations(drive: Drive) {
   const { orgId, driveId } = drive;
 
   const client = useCallback((): AgentFsClient => {
-    if (!access.client) throw new Error("Comb is not connected to agent-fs.");
+    if (!access.client) throw new Error("This browser is not connected to agent-fs.");
     return access.client;
   }, [access.client]);
 
@@ -107,7 +107,7 @@ export function useCombMutations(drive: Drive) {
       createFile: async (folder: string, relative: string): Promise<string> => {
         const path = joinComb(folder, relative);
         await assertFoldersFree(folder, relative, false);
-        await writeCreateOnly(path, starterContent(path), "Created in Comb");
+        await writeCreateOnly(path, starterContent(path), "Created in Files");
         await refresh();
         return path;
       },
@@ -115,7 +115,7 @@ export function useCombMutations(drive: Drive) {
       createFolder: async (folder: string, relative: string): Promise<string> => {
         const created = `${joinComb(folder, relative)}/`;
         await assertFoldersFree(folder, relative, true);
-        await writeCreateOnly(`${created}${KEEP_FILE}`, "", "Created folder in Comb");
+        await writeCreateOnly(`${created}${KEEP_FILE}`, "", "Created folder in Files");
         await refresh();
         return created;
       },

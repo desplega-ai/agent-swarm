@@ -6,7 +6,6 @@ import { useDashboardCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useMetrics } from "@/api/hooks/use-metrics";
 import { useUsers } from "@/api/hooks/use-users";
-import type { UserRole } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { BookOpenIcon } from "@/components/icons/book-open";
 import { BrainIcon } from "@/components/icons/brain";
@@ -53,6 +52,7 @@ import { modKeyLabel } from "@/lib/approval-shortcuts";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
 import { SESSIONS_V2_MIN_VERSION } from "@/lib/sessions-v2";
+import { useIsAdmin } from "@/lib/use-can";
 import { cn, formatCompactNumber } from "@/lib/utils";
 import { CombSidebarPins } from "./comb-sidebar-pins";
 import { SwarmSwitcher } from "./swarm-switcher";
@@ -91,11 +91,11 @@ interface NavItem {
    */
   requires?: "comb";
   /**
-   * Declarative minimum role required to see this item. Purely a type-level
-   * annotation for future RBAC: render logic does NOT consult it today, so
-   * every item stays visible to everyone. See plan Phase 1 / Appendix.
+   * Hidden unless the caller holds a grants-all role (`useIsAdmin()`). The
+   * server still gates the routes; this only drops links a Requester or a
+   * Viewer could not use. Unknown grants (operator key, older API) show it.
    */
-  minRole?: UserRole;
+  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -111,6 +111,8 @@ interface FlyoutEntry {
   path: string;
   /** Match the path exactly (index routes) rather than by prefix. */
   end?: boolean;
+  /** Hidden unless `useIsAdmin()`; see `NavItem.adminOnly`. */
+  adminOnly?: boolean;
 }
 
 /** Footer destination: optionally carrying a hover flyout of sub-routes. */
@@ -141,12 +143,11 @@ const navGroups: NavGroup[] = [
         icon: GlobeIcon,
         gate: { minVersion: "1.79.0" },
       },
-      { title: "Apps", path: "/apps", icon: LayoutGridIcon },
+      { title: "Apps", path: "/apps", icon: LayoutGridIcon, adminOnly: true },
       {
-        title: "Comb",
+        title: "Files",
         path: "/file",
         icon: FolderOpenIcon,
-        beta: { tooltip: "Review agent-fs files with the swarm" },
         requires: "comb",
       },
       { title: "Approvals", path: "/approval-requests", icon: ClipboardCheckIcon },
@@ -157,21 +158,27 @@ const navGroups: NavGroup[] = [
     label: "SWARM",
     items: [
       { title: "Agents", path: "/agents", icon: UsersIcon },
-      { title: "People", path: "/people", icon: ContactIcon, gate: { minVersion: "1.80.0" } },
-      { title: "Workflows", path: "/workflows", icon: WorkflowIcon },
-      { title: "Scripts", path: "/scripts", icon: FileClockIcon },
-      { title: "Schedules", path: "/schedules", icon: ClockIcon },
+      {
+        title: "People",
+        path: "/people",
+        icon: ContactIcon,
+        gate: { minVersion: "1.80.0" },
+        adminOnly: true,
+      },
+      { title: "Workflows", path: "/workflows", icon: WorkflowIcon, adminOnly: true },
+      { title: "Scripts", path: "/scripts", icon: FileClockIcon, adminOnly: true },
+      { title: "Schedules", path: "/schedules", icon: ClockIcon, adminOnly: true },
     ],
   },
   {
     id: "resources",
     label: "RESOURCES",
     items: [
-      { title: "Skills", path: "/skills", icon: BookOpenIcon },
-      { title: "MCP Servers", path: "/mcp-servers", icon: CableIcon },
-      { title: "Connections", path: "/connections", icon: Link2Icon },
-      { title: "Memory", path: "/memory", icon: BrainIcon },
-      { title: "Templates", path: "/templates", icon: FileTextIcon },
+      { title: "Skills", path: "/skills", icon: BookOpenIcon, adminOnly: true },
+      { title: "MCP Servers", path: "/mcp-servers", icon: CableIcon, adminOnly: true },
+      { title: "Connections", path: "/connections", icon: Link2Icon, adminOnly: true },
+      { title: "Memory", path: "/memory", icon: BrainIcon, adminOnly: true },
+      { title: "Templates", path: "/templates", icon: FileTextIcon, adminOnly: true },
     ],
   },
 ];
@@ -191,19 +198,20 @@ const footerNav: FooterItem[] = [
     flyout: [
       { title: "Connections", path: "/settings/connections" },
       { title: "Appearance", path: "/settings/appearance" },
-      { title: "Secrets", path: "/settings/secrets" },
-      { title: "Provider keys", path: "/settings/api-keys" },
-      { title: "Integrations", path: "/settings/integrations" },
-      { title: "Configuration", path: "/settings/configuration" },
-      { title: "Extensions", path: "/settings/extensions" },
-      { title: "Repos", path: "/settings/repos" },
-      { title: "Debug", path: "/settings/debug" },
+      { title: "Secrets", path: "/settings/secrets", adminOnly: true },
+      { title: "Provider keys", path: "/settings/api-keys", adminOnly: true },
+      { title: "Integrations", path: "/settings/integrations", adminOnly: true },
+      { title: "Configuration", path: "/settings/configuration", adminOnly: true },
+      { title: "Extensions", path: "/settings/extensions", adminOnly: true },
+      { title: "Repos", path: "/settings/repos", adminOnly: true },
+      { title: "Debug", path: "/settings/debug", adminOnly: true },
     ],
   },
   {
     title: "Usage",
     path: "/usage",
     icon: ChartColumnIcon,
+    adminOnly: true,
     flyout: [
       { title: "Usage", path: "/usage", end: true },
       { title: "Budgets", path: "/usage/budgets" },
@@ -595,8 +603,10 @@ export function AppSidebar() {
     "1.82.0": useFeatureGate("1.82.0"), // Live nav-item counts
     [SESSIONS_V2_MIN_VERSION]: useFeatureGate(SESSIONS_V2_MIN_VERSION), // Sessions "NEW" tag
   };
+  const isAdmin = useIsAdmin();
   const isGated = (item: NavItem) =>
-    !!item.gate && gates[item.gate.minVersion]?.supported === false;
+    (!!item.gate && gates[item.gate.minVersion]?.supported === false) ||
+    (!!item.adminOnly && !isAdmin);
   const isHidden = (item: NavItem) =>
     isGated(item) || !navRequirementMet(item.requires, status?.agent_fs?.comb);
 
@@ -648,7 +658,8 @@ export function AppSidebar() {
 
       <SidebarContent>
         {navGroups.map((group) => {
-          const items = group.items;
+          // A Viewer has no RESOURCES items: drop the empty section header too.
+          const items = group.items.filter((item) => !isHidden(item));
           if (items.length === 0) return null;
           return (
             <SidebarGroup key={group.id}>
@@ -727,10 +738,11 @@ export function AppSidebar() {
         <SidebarMenu>
           {footerNav.map((item) => {
             if (isGated(item)) return null;
+            const flyout = item.flyout?.filter((entry) => isAdmin || !entry.adminOnly);
             return (
               <FooterNavItem
                 key={item.path}
-                item={item}
+                item={{ ...item, flyout }}
                 isActive={location.pathname.startsWith(item.path)}
                 badge={badges[item.path]}
               />

@@ -44,8 +44,11 @@ bunx @desplega.ai/agent-swarm onboard --container-engine=podman
 | `--max-concurrent-tasks <n>` | Tasks per generated agent, from 1 to 100 (defaults: lead 2, worker 1) |
 | `--pull-policy <policy>` | Docker Compose image pull policy: `always`, `missing`, or `never` (default: `always`) |
 | `--container-engine <engine>` | `auto`, `docker`, or `podman` (default: `AGENT_SWARM_CONTAINER_ENGINE` if set, else `auto`, which prefers Docker). See [Rootless Podman](/docs/guides/podman-rootless) |
+| `--no-agent-fs` | With `--yes`: do not bundle the `agent-fs` and `tei` services |
 
 With `--yes`, a missing Claude, OpenAI or OpenRouter credential is no longer fatal: workers wait in credential-wait until `/setup` supplies one. Bedrock settings stay required. `--yes` stops after the health check. The one-shot `install.sh` installer wraps `onboard --yes`; see [Getting Started](/docs/getting-started).
+
+`--yes` also generates an `agent-fs` service (files on local disk, no MinIO) and a `tei` service (nomic-embed-text-v1.5 embeddings for memory), and sets the API env that turns on the agent-fs proxy, [Comb](/docs/ui/comb), dashboard file links and local memory embeddings. On an arm64 host, `.env` gets `TEI_IMAGE` with the arm64 TEI tag. `--no-agent-fs` leaves both services out. The interactive wizard does not bundle them. See [agent-fs Co-deployment](/docs/guides/agent-fs-co-deployment#new-installs-onboard-bundle).
 
 ### connect
 

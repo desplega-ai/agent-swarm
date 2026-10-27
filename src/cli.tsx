@@ -41,6 +41,7 @@ interface ParsedArgs {
   maxConcurrentTasks: string | undefined;
   pullPolicy: string | undefined;
   containerEngine: string | undefined;
+  noAgentFs: boolean;
   open: boolean;
   showHelp: boolean;
   dbPath: string;
@@ -63,6 +64,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let maxConcurrentTasks: string | undefined;
   let pullPolicy: string | undefined;
   let containerEngine: string | undefined;
+  let noAgentFs = false;
   let open = false;
   let showHelp = false;
   let dbPath = "";
@@ -122,6 +124,8 @@ function parseArgs(args: string[]): ParsedArgs {
       if (value && !value.startsWith("-")) i++;
     } else if (arg?.startsWith("--container-engine=")) {
       containerEngine = arg.slice("--container-engine=".length);
+    } else if (arg === "--no-agent-fs") {
+      noAgentFs = true;
     } else if (arg === "--open") {
       open = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -149,6 +153,7 @@ function parseArgs(args: string[]): ParsedArgs {
     maxConcurrentTasks,
     pullPolicy,
     containerEngine,
+    noAgentFs,
     open,
     showHelp,
     dbPath,
@@ -185,6 +190,7 @@ const COMMAND_HELP: Record<
       "  --max-concurrent-tasks <n>  Tasks per agent (1-100; default: lead 2, worker 1)",
       "  --pull-policy <policy> Pull policy: always, missing, never (default: always)",
       "  --container-engine <engine>  auto, docker, podman (default: $AGENT_SWARM_CONTAINER_ENGINE, else auto; auto prefers Docker)",
+      "  --no-agent-fs          With --yes: skip the bundled agent-fs (files, Comb) and TEI (memory embeddings)",
       "  -h, --help             Show this help",
     ].join("\n"),
     examples: [
@@ -192,6 +198,7 @@ const COMMAND_HELP: Record<
       `  ${binName} onboard --dry-run`,
       `  ${binName} onboard --yes --preset=full`,
       `  ${binName} onboard --yes --preset=dev`,
+      `  ${binName} onboard --yes --preset=solo --no-agent-fs`,
       `  ${binName} onboard --container-engine=podman`,
       `  ANTHROPIC_API_KEY=sk-... ${binName} onboard --yes --preset=solo`,
     ].join("\n"),
@@ -693,6 +700,7 @@ function App({ args }: { args: ParsedArgs }) {
     maxConcurrentTasks,
     pullPolicy,
     containerEngine,
+    noAgentFs,
   } = args;
 
   switch (command) {
@@ -707,6 +715,7 @@ function App({ args }: { args: ParsedArgs }) {
             maxConcurrentTasks,
             pullPolicy,
             containerEngine,
+            noAgentFs,
           }}
         />
       );

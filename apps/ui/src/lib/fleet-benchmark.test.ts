@@ -88,7 +88,7 @@ test("peer group note", () => {
     "Compared with 34 organizations like yours (2-10 people, Ship features).",
   );
   expect(fleetPeerGroupNote({ teamSize: "1", useCase: null, orgs: 1 })).toBe(
-    "Compared with 1 organization like yours (Just me).",
+    "Compared with 1 organization like yours (Solo).",
   );
   expect(fleetPeerGroupNote(null)).toBe(
     "Not enough swarms like yours report yet, so these numbers compare with the whole fleet.",

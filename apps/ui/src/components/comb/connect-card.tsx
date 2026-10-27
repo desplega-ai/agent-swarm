@@ -1,8 +1,6 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Info } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
-import { api } from "@/api/client";
-import { invalidateStatusQuery } from "@/api/hooks/status-query";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -12,13 +10,8 @@ import { SettingsRow } from "@/components/ui/settings-row";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { AgentFsClient } from "@/lib/agent-fs/client";
-import {
-  type ConnectFlowDeps,
-  type ConnectOutcome,
-  connectWithKey,
-  createAndConnect,
-} from "./connect-flow";
+import { type ConnectOutcome, connectWithKey, createAndConnect } from "./connect-flow";
+import { useConnectFlowDeps } from "./use-connect-flow-deps";
 
 type ConnectTab = "create" | "paste";
 
@@ -29,9 +22,9 @@ type ConnectTab = "create" | "paste";
  * yet, and only then is it saved (in this browser only).
  */
 export function ConnectCard() {
-  const { state, endpoint, orgId, driveId, connect } = useAgentFs();
+  const { state, orgId, driveId } = useAgentFs();
+  const deps = useConnectFlowDeps();
   const { user } = useCurrentUser();
-  const queryClient = useQueryClient();
   // A rejected saved key means the account exists: start on the paste tab.
   const [tab, setTab] = useState<ConnectTab>(state === "invalid-key" ? "paste" : "create");
   const [email, setEmail] = useState(user?.email ?? "");
@@ -46,25 +39,31 @@ export function ConnectCard() {
     if (userEmail) setEmail((current) => current || userEmail);
   }, [userEmail]);
 
-  if (!endpoint) return null;
+  // `?connect=auto` (a teammate fresh from `/join`): run "Create with my email"
+  // once with the token-bound user's email, then drop the parameter.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoConnect = searchParams.get("connect") === "auto";
+  const autoRan = useRef(false);
   const driveReady = orgId !== null && driveId !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `run` is recreated each render; the ref guard makes this a one-shot
+  useEffect(() => {
+    if (!autoConnect || autoRan.current) return;
+    if (!deps || !driveReady || state !== "needs-connect" || !userEmail) return;
+    autoRan.current = true;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("connect");
+        return next;
+      },
+      { replace: true },
+    );
+    setTab("create");
+    void run(() => createAndConnect(deps, userEmail));
+  }, [autoConnect, deps, driveReady, state, userEmail, setSearchParams]);
 
-  const deps: ConnectFlowDeps = {
-    register: (address) => AgentFsClient.register({ endpoint, email: address }),
-    getMe: (key) => new AgentFsClient({ endpoint, apiKey: key }).getMe(),
-    ls: (key) =>
-      new AgentFsClient({ endpoint, apiKey: key }).callOp(
-        orgId as string,
-        "ls",
-        { path: "/" },
-        driveId as string,
-      ),
-    invite: async (address) => {
-      await api.inviteAgentFsMember({ email: address, role: "editor" });
-      void invalidateStatusQuery(queryClient);
-    },
-    connect,
-  };
+  if (!deps) return null;
+  const connectDeps = deps;
 
   async function run(action: () => Promise<ConnectOutcome>) {
     setBusy(true);
@@ -92,14 +91,14 @@ export function ConnectCard() {
     event.preventDefault();
     const address = email.trim();
     if (!address || !driveReady) return;
-    void run(() => createAndConnect(deps, address));
+    void run(() => createAndConnect(connectDeps, address));
   }
 
   function onPaste(event: FormEvent) {
     event.preventDefault();
     const key = apiKey.trim();
     if (!key || !driveReady) return;
-    void run(() => connectWithKey(deps, key));
+    void run(() => connectWithKey(connectDeps, key));
   }
 
   function onTabChange(next: string) {
@@ -113,7 +112,7 @@ export function ConnectCard() {
       <CardHeader>
         <CardTitle>Connect agent-fs</CardTitle>
         <CardDescription>
-          Comb reads the swarm drive with your own agent-fs identity.
+          Files reads the swarm drive with your own agent-fs identity.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -156,32 +155,14 @@ export function ConnectCard() {
             </form>
           </TabsContent>
           <TabsContent value="paste">
-            <form className="space-y-4 pt-2" onSubmit={onPaste}>
-              {notice && (
-                <AlertCallout tone="info" icon={Info}>
-                  {notice}
-                </AlertCallout>
-              )}
-              <SettingsRow label="agent-fs key" htmlFor="comb-connect-key">
-                <SecretInput
-                  id="comb-connect-key"
-                  value={apiKey}
-                  onChange={setApiKey}
-                  placeholder="af_..."
-                  autoComplete="new-password"
-                  disabled={busy}
-                  required
-                />
-              </SettingsRow>
-              <Button
-                type="submit"
-                className="w-full"
-                status={busy ? "loading" : "idle"}
-                disabled={!driveReady}
-              >
-                Connect
-              </Button>
-            </form>
+            <PasteKeyForm
+              notice={notice}
+              apiKey={apiKey}
+              onApiKeyChange={setApiKey}
+              busy={busy}
+              disabled={!driveReady}
+              onSubmit={onPaste}
+            />
           </TabsContent>
         </Tabs>
         {error && (
@@ -194,5 +175,51 @@ export function ConnectCard() {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+/** "Paste a key": the form of the connect card, also used by the `/setup` Files step. */
+export function PasteKeyForm({
+  notice,
+  apiKey,
+  onApiKeyChange,
+  busy,
+  disabled,
+  onSubmit,
+}: {
+  notice: string | null;
+  apiKey: string;
+  onApiKeyChange: (value: string) => void;
+  busy: boolean;
+  disabled: boolean;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <form className="space-y-4 pt-2" onSubmit={onSubmit}>
+      {notice && (
+        <AlertCallout tone="info" icon={Info}>
+          {notice}
+        </AlertCallout>
+      )}
+      <SettingsRow label="agent-fs key" htmlFor="comb-connect-key">
+        <SecretInput
+          id="comb-connect-key"
+          value={apiKey}
+          onChange={onApiKeyChange}
+          placeholder="af_..."
+          autoComplete="new-password"
+          disabled={busy}
+          required
+        />
+      </SettingsRow>
+      <Button
+        type="submit"
+        className="w-full"
+        status={busy ? "loading" : "idle"}
+        disabled={disabled}
+      >
+        Connect
+      </Button>
+    </form>
   );
 }

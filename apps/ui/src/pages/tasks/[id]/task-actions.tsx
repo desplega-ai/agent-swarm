@@ -46,6 +46,7 @@ import { useLeadCredentialIssue } from "@/hooks/use-lead-credential-issue";
 import { parseStructuredOutput } from "@/lib/structured-output";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { shouldShowTaskFailureHelp } from "@/lib/task-support";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import { NARROW_TARGET } from "./touch-targets";
 
@@ -82,6 +83,11 @@ interface TaskActionModel {
   getHelp: ((opener: HTMLElement | null) => void) | null;
   /** Opens the experimental lineage view. Null when the API predates it. */
   lineage: (() => void) | null;
+  /**
+   * What the caller's role allows (`useCan`). A hidden action would only
+   * return 403. Follow up and Retry create a task.
+   */
+  allowed: { create: boolean; cancel: boolean; action: boolean };
 }
 
 /** First API version that serves `GET /api/tasks/{id}/lineage`. */
@@ -100,6 +106,11 @@ export function useTaskActions(
   const { userId } = useCurrentUser();
   const { issue, resolved, apiVersion } = useLeadCredentialIssue();
   const lineageGate = useFeatureGate(TASK_LINEAGE_MIN_VERSION);
+  const allowed = {
+    create: useCan("task.create.own"),
+    cancel: useCan("task.cancel.own"),
+    action: useCan("task.action.own"),
+  };
   if (!task) return null;
   const failed = task.status === "failed";
   return {
@@ -126,6 +137,7 @@ export function useTaskActions(
     diagnostics: failed ? buildDiagnostics(task, apiVersion) : null,
     getHelp: shouldShowTaskFailureHelp(task.status, resolved, issue) ? handlers.onGetHelp : null,
     lineage: lineageGate.supported ? () => void navigate(`/tasks/${task.id}/lineage`) : null,
+    allowed,
   };
 }
 
@@ -202,6 +214,7 @@ function CancelTaskButton({ onConfirm }: { onConfirm: () => void }) {
 }
 
 function FollowUpButton({ model }: { model: TaskActionModel }) {
+  if (!model.allowed.create) return null;
   return (
     <Button size="sm" onClick={model.followUp}>
       <Reply />
@@ -211,6 +224,7 @@ function FollowUpButton({ model }: { model: TaskActionModel }) {
 }
 
 function RetryButton({ model, className }: { model: TaskActionModel; className?: string }) {
+  if (!model.allowed.create) return null;
   return (
     <Button size="sm" onClick={model.retry} disabled={model.retrying} className={className}>
       <RotateCcw />
@@ -220,6 +234,7 @@ function RetryButton({ model, className }: { model: TaskActionModel; className?:
 }
 
 function PauseButton({ model }: { model: TaskActionModel }) {
+  if (!model.allowed.action) return null;
   return (
     <Button variant="outline" size="sm" onClick={model.pause} disabled={model.pausing}>
       <Pause />
@@ -229,6 +244,7 @@ function PauseButton({ model }: { model: TaskActionModel }) {
 }
 
 function ResumeButton({ model }: { model: TaskActionModel }) {
+  if (!model.allowed.action) return null;
   return (
     <Button variant="outline" size="sm" onClick={model.resume} disabled={model.resuming}>
       <Play />
@@ -253,7 +269,7 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
   const { status } = model.task;
   // Failed tasks keep Retry in the menu too, next to Get help: the hero has
   // no Retry button, the error callout under it does.
-  const retryInMenu = status === "completed" || status === "failed";
+  const retryInMenu = model.allowed.create && (status === "completed" || status === "failed");
   // "Get help" closes the menu, so the help dialog gives focus back to the trigger.
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const getHelp = model.getHelp;
@@ -303,6 +319,9 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
 export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
   const { status } = model.task;
   const terminal = TERMINAL_STATUSES.has(status);
+  const { allowed } = model;
+  // Cancel needs a not-finished task and the role's cancel verb.
+  const cancellable = !terminal && allowed.cancel;
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   // The menu item that opens the confirm step (or the help dialog) is gone
   // when it closes, so focus goes back to the "..." trigger.
@@ -333,19 +352,19 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
               Copy answer
             </DropdownMenuItem>
           ) : null}
-          {terminal ? (
+          {terminal && allowed.create ? (
             <DropdownMenuItem className="min-h-11" onSelect={model.retry} disabled={model.retrying}>
               <RotateCcw />
               Retry
             </DropdownMenuItem>
           ) : null}
-          {status === "in_progress" ? (
+          {status === "in_progress" && allowed.action ? (
             <DropdownMenuItem className="min-h-11" onSelect={model.pause} disabled={model.pausing}>
               <Pause />
               Pause
             </DropdownMenuItem>
           ) : null}
-          {status === "paused" ? (
+          {status === "paused" && allowed.action ? (
             <DropdownMenuItem
               className="min-h-11"
               onSelect={model.resume}
@@ -355,7 +374,7 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
               Resume
             </DropdownMenuItem>
           ) : null}
-          {terminal ? null : (
+          {cancellable ? (
             <DropdownMenuItem
               variant="destructive"
               className="min-h-11"
@@ -364,7 +383,7 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
               <Ban />
               Cancel task
             </DropdownMenuItem>
-          )}
+          ) : null}
           <DropdownMenuItem
             className="min-h-11"
             onSelect={() => void copyWithToast(model.task.id, "Task id copied.")}
@@ -384,14 +403,14 @@ export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
-      {terminal ? null : (
+      {cancellable ? (
         <CancelTaskDialog
           open={confirmingCancel}
           onOpenChange={setConfirmingCancel}
           onConfirm={model.cancel}
           returnFocus={triggerRef}
         />
-      )}
+      ) : null}
     </>
   );
 }
@@ -417,7 +436,7 @@ export function TaskActions({ model, className }: { model: TaskActionModel; clas
       {status === "cancelled" || status === "superseded" ? <RetryButton model={model} /> : null}
       {status === "in_progress" ? <PauseButton model={model} /> : null}
       {status === "paused" ? <ResumeButton model={model} /> : null}
-      {terminal ? null : <CancelTaskButton onConfirm={model.cancel} />}
+      {terminal || !model.allowed.cancel ? null : <CancelTaskButton onConfirm={model.cancel} />}
       <MoreActionsMenu model={model} />
     </div>
   );
@@ -437,7 +456,7 @@ export function TaskPrimaryAction({ model }: { model: TaskActionModel }) {
     case "paused":
       return <ResumeButton model={model} />;
     default:
-      return <CancelTaskButton onConfirm={model.cancel} />;
+      return model.allowed.cancel ? <CancelTaskButton onConfirm={model.cancel} /> : null;
   }
 }
 

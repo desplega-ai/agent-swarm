@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, RotateCw } from "lucide-react";
+import { AlertTriangle, Lock, RotateCw } from "lucide-react";
 import {
   type ComponentType,
   useCallback,
@@ -17,12 +17,16 @@ import {
   isOnboardingFinished,
   ONBOARDING_QUERY_KEY,
   ONBOARDING_STEPS,
+  type OnboardingStepDef,
   onboardingResumeStep,
   useOnboarding,
   useOnboardingAction,
+  useVisibleOnboardingSteps,
+  visibleOnboardingSteps,
 } from "@/api/hooks/use-onboarding";
 import type { OnboardingResponse, OnboardingStepId, OnboardingStepStatus } from "@/api/types";
 import { ConnectionParamsCleanup } from "@/components/layout/root-layout";
+import { FirstTaskInvitePrompt } from "@/components/onboarding/first-task-invite-prompt";
 import { markSetupVisited, setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { stepNumber } from "@/components/onboarding/step-status";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
@@ -30,17 +34,23 @@ import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { useConfig } from "@/hooks/use-config";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
+import { CONNECTED_TIP, HexyGuide, type HexyMood, INSTALL_TIP } from "./components/hexy-guide";
+import { InstallPromptCard, OrDivider } from "./components/install-prompt-card";
 import { type SetupBusyAction, SetupFooter } from "./components/setup-footer";
 import { SETUP_COLUMN } from "./components/setup-layout";
 import { SetupStepper } from "./components/setup-stepper";
 import { SetupTopBar } from "./components/setup-top-bar";
+import { StepHeader } from "./components/step-header";
 import { StepTransition } from "./components/step-transition";
 import type { StepProps } from "./step-contract";
 import { PRESENCE_KEYS } from "./steps/ai/model";
 import { StepAgents } from "./steps/step-agents";
 import { StepAi } from "./steps/step-ai";
 import { StepConnect, useIdentityPick } from "./steps/step-connect";
+import { StepFiles } from "./steps/step-files";
 import { StepFirstTask } from "./steps/step-first-task";
 import { StepIntegrations } from "./steps/step-integrations";
 import { StepMemory } from "./steps/step-memory";
@@ -49,33 +59,45 @@ import { StepName } from "./steps/step-name";
 const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }> = {
   connect: {
     title: "Connect your swarm",
-    description: "Point this dashboard at your Agent Swarm API, then pick who you are.",
+    description: "You are connected. Continue to the next step.",
   },
   name: {
-    title: "Give your swarm an identity",
-    description: "The name, mark, and color your team sees in the sidebar, in Slack, and on pages.",
+    title: "Name your swarm",
+    description: "Your team sees it in the sidebar, in Slack, and on pages.",
   },
   ai: {
-    title: "Choose the AI providers you want to use",
+    title: "Choose your AI providers",
     description: "One verified provider is enough to start.",
   },
   agents: {
     title: "Pick a model for each agent",
-    description: "Each agent runs its harness at one of three levels. Optimal fits most swarms.",
+    description: "Each agent runs at one of three levels. Optimal fits most swarms.",
   },
   memory: {
     title: "Turn on memory",
-    description: "Let agents remember past work.",
+    description: "Agents remember past work and find it by meaning.",
   },
   integrations: {
     title: "Connect your tools",
     description: "All optional. Connect what your team already uses.",
   },
+  files: {
+    title: "Share files with agents",
+    description:
+      "Agents save their work in agent-fs, the shared drive of your swarm. You review it in Files.",
+  },
   first_task: {
     title: "Run your first task",
-    description: "Send your lead a first message. Setup is done when that task completes.",
+    description: "Send your lead a goal. Setup is done when that task completes.",
   },
 };
+
+/** Step 1 says what to do next: get a swarm, pick who you are, or move on. */
+function connectDescription(configured: boolean, pickIdentity: boolean): string {
+  if (!configured) return "Start a swarm with your coding agent, or connect one that runs.";
+  if (pickIdentity) return "You are connected. Now tell the swarm who you are.";
+  return STEP_COPY.connect.description;
+}
 
 /** Skip tooltips that say what skipping costs. */
 const SKIP_HINT: Partial<Record<OnboardingStepId, string>> = {
@@ -88,17 +110,19 @@ const STEP_BODIES: Record<Exclude<OnboardingStepId, "connect">, ComponentType<St
   agents: StepAgents,
   memory: StepMemory,
   integrations: StepIntegrations,
+  files: StepFiles,
   first_task: StepFirstTask,
 };
 
-const TOTAL = ONBOARDING_STEPS.length;
-
-/** `?step=` accepts a number (1-7) or a step id. */
-function parseStepParam(value: string | null): OnboardingStepId | null {
+/** `?step=` accepts a number (1 to the visible step count) or the id of a visible step. */
+function parseStepParam(
+  value: string | null,
+  steps: ReadonlyArray<OnboardingStepDef>,
+): OnboardingStepId | null {
   if (!value) return null;
   const n = Number(value);
-  if (Number.isInteger(n) && n >= 1 && n <= TOTAL) return ONBOARDING_STEPS[n - 1].id;
-  return ONBOARDING_STEPS.find((step) => step.id === value)?.id ?? null;
+  if (Number.isInteger(n) && n >= 1 && n <= steps.length) return steps[n - 1].id;
+  return steps.find((step) => step.id === value)?.id ?? null;
 }
 
 /** Where to land after connecting: the page the layout sent us from, never `/setup` itself. */
@@ -230,9 +254,11 @@ function useStepDirection(index: number): 1 | -1 {
 /** First-run onboarding: a full page outside the app shell (no sidebar, no header). */
 export default function SetupPage() {
   const { pendingConnection } = useConfig();
+  const canSetup = useCan("config.write.any");
   // A connection from URL params is not stored yet, and the API client only
   // reads stored connections. The shell's `NameConnectionModal` stores it.
   if (pendingConnection) return <Navigate to="/" replace />;
+  if (!canSetup) return <SetupForAdminsOnly />;
   return (
     <ErrorBoundary>
       {/* The `?step=` sync copies the router's search params: drop a setup link's key first. */}
@@ -243,7 +269,7 @@ export default function SetupPage() {
 }
 
 function SetupFlow() {
-  const { config, isConfigured } = useConfig();
+  const { config, isConfigured, setupLink } = useConfig();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -259,21 +285,27 @@ function SetupFlow() {
   // True from a successful connect until the shell knows whether step 1 must
   // still ask "Who are you?". Step 1 stays on screen the whole time.
   const [afterConnect, setAfterConnect] = useState(false);
+  // "Change" on step 1: the connect form again, over the connected swarm.
+  const [changingConnection, setChangingConnection] = useState(false);
+  const connecting = !isConfigured || changingConnection;
   const identityPick = useIdentityPick();
 
+  const visibleSteps = useVisibleOnboardingSteps({ enabled: isConfigured });
   // Before a connection exists only step 1 renders, whatever the cache holds.
   const data = isConfigured ? query.data : undefined;
+  const steps = isConfigured ? visibleSteps : visibleOnboardingSteps(null, null);
+  const total = steps.length;
   const fresh = query.dataUpdatedAt >= mountedAt;
-  const paramStep = parseStepParam(searchParams.get("step"));
+  const paramStep = parseStepParam(searchParams.get("step"), steps);
   // Nobody picked a user yet (a fresh install): step 1 asks "Who are you?"
   // first, so step 2 can pre-fill the name from that email.
   const resumeStep: OnboardingStepId =
-    data && !identityPick.needed ? onboardingResumeStep(data.state) : "connect";
+    data && !identityPick.needed ? onboardingResumeStep(data.state, steps) : "connect";
   // Wait for the identity checks before a resume picks the step (and writes `?step=`).
   const choosingStep = isConfigured && !afterConnect && !paramStep && identityPick.resolving;
   const stepId: OnboardingStepId =
-    !isConfigured || afterConnect ? "connect" : (paramStep ?? resumeStep);
-  const index = stepNumber(stepId);
+    connecting || afterConnect ? "connect" : (paramStep ?? resumeStep);
+  const index = stepNumber(stepId, steps);
   const stepParam = String(index);
   const currentStep = data?.state.currentStep;
   const { blocker, action, setters } = useStepControls(stepId);
@@ -281,6 +313,17 @@ function SetupFlow() {
   // Same query as step 3, so the Continue tooltip can say a key waits for its check.
   const { data: presence } = useEnvPresence(stepId === "ai" ? PRESENCE_KEYS : []);
   const aiKeySaved = AI_KEY_VARS.some((key) => presence?.[key]);
+  // A check runs: the step holds Continue with a busy reason, or step 3 waits
+  // for a worker to check a saved key. Shown only after half a second, so a
+  // quick autosave does not flash the crew member's "thinking" pose.
+  const shownStatus = data?.state.steps[stepId]?.status;
+  const aiChecking =
+    stepId === "ai" &&
+    shownStatus !== "done" &&
+    shownStatus !== "skipped" &&
+    (aiKeySaved || Boolean(data?.signals.providers.some((p) => p.state === "configured")));
+  const checking = Boolean(blocker?.busy) || aiChecking;
+  const checkingShown = useDebouncedValue(checking, 500) && checking;
 
   // Only the content region scrolls: a new step starts at its top.
   const mainRef = useRef<HTMLElement>(null);
@@ -297,7 +340,7 @@ function SetupFlow() {
     if (focusedStep.current === stepId) return;
     focusedStep.current = stepId;
     const heading = mainRef.current?.querySelector<HTMLElement>(`[data-step-heading="${stepId}"]`);
-    if (!heading || heading.parentElement?.contains(document.activeElement)) return;
+    if (!heading || heading.closest("[data-step-root]")?.contains(document.activeElement)) return;
     heading.focus({ preventScroll: true });
   }, [stepId]);
 
@@ -346,13 +389,13 @@ function SetupFlow() {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          next.set("step", String(stepNumber(step)));
+          next.set("step", String(stepNumber(step, steps)));
           return next;
         },
         { replace: true },
       );
     },
-    [setSearchParams],
+    [setSearchParams, steps],
   );
 
   // After a connect, stay on step 1 when the operator still has to pick who
@@ -381,7 +424,7 @@ function SetupFlow() {
   }
 
   function goNext() {
-    const next = ONBOARDING_STEPS[stepNumber(stepId)];
+    const next = steps[stepNumber(stepId, steps)];
     if (next) goTo(next.id);
     else void leave();
   }
@@ -456,6 +499,15 @@ function SetupFlow() {
   const copy = STEP_COPY[stepId];
   const Body = stepId === "connect" ? null : STEP_BODIES[stepId];
   const settled = status === "done" || status === "skipped";
+  // A check that runs wins over a pass: a step tests again (memory) before it cheers.
+  const hexyMood: HexyMood =
+    stepId === "connect" && connecting
+      ? "welcome"
+      : checkingShown
+        ? "busy"
+        : status === "done"
+          ? "done"
+          : "idle";
   // Step 7 before its task is sent: Send in the composer is the primary
   // action, and Skip is the one exit in the footer.
   const firstTaskSent = Boolean(data?.state.firstTaskId);
@@ -466,9 +518,12 @@ function SetupFlow() {
       ? { label: "Go to dashboard", blockedBy: null, onClick: () => void leave() }
       : {
           label: "Continue",
-          blockedBy:
-            blocker?.reason ??
-            (settled || action?.unlocks ? null : unsettledReason(stepId, status, data, aiKeySaved)),
+          blockedBy: changingConnection
+            ? unsettledReason("connect", status, data, aiKeySaved)
+            : (blocker?.reason ??
+              (settled || action?.unlocks
+                ? null
+                : unsettledReason(stepId, status, data, aiKeySaved))),
           onClick: () => void continueStep(),
           enterKey: true,
         };
@@ -479,10 +534,11 @@ function SetupFlow() {
         configured={isConfigured}
         stepper={
           <SetupStepper
+            steps={steps}
             statuses={statuses}
             current={stepId}
             // Right after a connect the shell picks the step; the stepper waits.
-            onSelect={data && !afterConnect ? goTo : undefined}
+            onSelect={data && !afterConnect && !changingConnection ? goTo : undefined}
           />
         }
         onMinimize={data ? () => void leave("minimize") : undefined}
@@ -496,37 +552,75 @@ function SetupFlow() {
         {/* Every step is top-aligned at the same offset, so the title and
             content do not jump between steps. A taller step grows the column
             and scrolls. */}
-        <div className={cn(SETUP_COLUMN, "flex min-h-full flex-col pt-8 pb-12 sm:pt-10")}>
+        <div
+          className={cn(
+            SETUP_COLUMN,
+            "relative flex min-h-full flex-col pt-8 pb-12 sm:pt-10 short:pt-6 short:pb-6",
+          )}
+        >
+          <HexyGuide
+            stepId={stepId}
+            mood={hexyMood}
+            tip={
+              stepId !== "connect"
+                ? undefined
+                : connecting
+                  ? INSTALL_TIP
+                  : identityPick.needed
+                    ? undefined
+                    : CONNECTED_TIP
+            }
+          />
           <StepTransition stepKey={stepId} direction={direction} className="flex-1">
-            <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-primary">
-              Step {index} <span className="text-muted-foreground">of {TOTAL}</span>
-            </p>
-            <h1
-              data-step-heading={stepId}
-              tabIndex={-1}
-              className="mb-1.5 text-xl font-semibold tracking-tight text-balance outline-none sm:text-2xl"
-            >
-              {copy.title}
-            </h1>
-            <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">{copy.description}</p>
-            <div className="flex flex-1 flex-col">
-              {Body === null ? (
-                <StepConnect
-                  onboarding={data ?? null}
-                  onConnected={() => void handleConnected()}
-                  act={data ? act : undefined}
-                  {...setters.connect}
-                />
-              ) : data ? (
-                // A failing step must not take the shell (navigation, Minimize) down with it.
-                <ErrorBoundary key={stepId}>
-                  <Body onboarding={data} act={act} {...setters[stepId]} />
-                </ErrorBoundary>
-              ) : null}
+            <div data-step-root className="flex flex-1 flex-col">
+              <StepHeader
+                stepId={stepId}
+                index={index}
+                total={total}
+                title={copy.title}
+                description={
+                  stepId === "connect"
+                    ? connectDescription(!connecting, identityPick.needed)
+                    : copy.description
+                }
+              />
+              <div className="flex flex-1 flex-col">
+                {Body === null ? (
+                  // Centered in the height under the header, like step 7.
+                  <div className="flex flex-1 flex-col justify-center gap-4 pt-2 pb-16 short:pb-2">
+                    {/* No swarm yet: the landing's install prompt is the first way in.
+                        An install link already fills the form, so it skips the prompt. */}
+                    {!isConfigured && !setupLink ? (
+                      <>
+                        <InstallPromptCard />
+                        <OrDivider>Or connect a swarm that runs</OrDivider>
+                      </>
+                    ) : null}
+                    <StepConnect
+                      onboarding={data ?? null}
+                      onConnected={() => {
+                        setChangingConnection(false);
+                        void handleConnected();
+                      }}
+                      act={data ? act : undefined}
+                      changing={changingConnection}
+                      onChanging={setChangingConnection}
+                      {...setters.connect}
+                    />
+                  </div>
+                ) : data ? (
+                  // A failing step must not take the shell (navigation, Minimize) down with it.
+                  <ErrorBoundary key={stepId}>
+                    <Body onboarding={data} act={act} {...setters[stepId]} />
+                  </ErrorBoundary>
+                ) : null}
+              </div>
             </div>
           </StepTransition>
         </div>
       </main>
+
+      {data ? <FirstTaskInvitePrompt key={config.apiUrl} /> : null}
 
       <SetupFooter
         pending={
@@ -541,7 +635,7 @@ function SetupFlow() {
         }
         busy={busy}
         busyAction={busyAction}
-        onBack={index > 1 && data ? () => goTo(ONBOARDING_STEPS[index - 2].id) : undefined}
+        onBack={index > 1 && data ? () => goTo(steps[index - 2].id) : undefined}
         skip={
           // A done step has nothing to skip, and neither has a sent first task.
           // The swarm name is required: no Skip.
@@ -570,12 +664,24 @@ function SetupFlow() {
   );
 }
 
-function FullPageLoading() {
+/** A Requester or Viewer opened `/setup` directly: setup writes swarm config. */
+function SetupForAdminsOnly() {
   return (
-    <div className="flex min-h-svh bg-background">
-      <HiveLoadingScreen />
+    <div className="flex min-h-svh items-center justify-center bg-background p-4">
+      <AlertCallout tone="info" icon={Lock} title="Setup is for admins" className="w-full max-w-md">
+        <p>Setup is for admins. Ask an admin of this swarm to finish it.</p>
+        <div className="mt-3">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/">Go to dashboard</Link>
+          </Button>
+        </div>
+      </AlertCallout>
     </div>
   );
+}
+
+function FullPageLoading() {
+  return <HiveLoadingScreen fullPage />;
 }
 
 function SetupError({ message, onRetry }: { message: string; onRetry: () => void }) {

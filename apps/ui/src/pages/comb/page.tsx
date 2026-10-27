@@ -1,6 +1,6 @@
 import { FolderOpen, HardDrive, Unplug } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { CombAccountMenu } from "@/components/comb/account-menu";
 import { CombBreadcrumbs } from "@/components/comb/breadcrumbs";
 import { CombLayoutProvider, useCombLayout } from "@/components/comb/comb-layout";
@@ -28,9 +28,11 @@ import { cn } from "@/lib/utils";
 export default function CombPage() {
   const agentFs = useAgentFs();
   const { orgId: routeOrgId } = useParams();
+  const { search } = useLocation();
 
   const redirect = fileRedirectPath(routeOrgId, agentFs);
-  if (redirect) return <Navigate to={redirect} replace />;
+  // Keep the query: `/join` sends teammates to `/file?connect=auto`.
+  if (redirect) return <Navigate to={`${redirect}${search}`} replace />;
 
   switch (agentFs.state) {
     case "loading":
@@ -39,8 +41,8 @@ export default function CombPage() {
       return (
         <EmptyState
           icon={FolderOpen}
-          title="Comb is off"
-          description="Comb shows the swarm's agent-fs drive here. Turn on COMB_ENABLED in Settings, Configuration. Comb needs agent-fs."
+          title="Files is off"
+          description="Files shows the swarm's agent-fs drive here. Turn on COMB_ENABLED in Settings, Configuration. Files needs agent-fs."
           action={
             <>
               <Button asChild size="sm">

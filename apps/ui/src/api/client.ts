@@ -4,6 +4,7 @@ import type { CompositionManifest } from "@/lib/request-composition";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import { withAddressSpace } from "../lib/local-network";
+import { type AccessConnection, noteUnauthorized } from "./access-rejection";
 import type {
   AcpRuntimeConfig,
   Agent,
@@ -42,6 +43,8 @@ import type {
   CombReviewBatchInput,
   CombReviewBatchResult,
   CombSkippedComment,
+  CreateInviteInput,
+  CreateInviteResponse,
   CreateUserInput,
   CredentialMissingAgent,
   CredentialMissingAgentsResponse,
@@ -101,6 +104,7 @@ import type {
   PricingTokenClass,
   PromptTemplate,
   PromptTemplateHistory,
+  RbacRolesResponse,
   ReasoningEffortLevel,
   ResolveUnmappedInput,
   RuntimeController,
@@ -199,12 +203,18 @@ import type {
  * With no stored connection it fails without a request: a request to the
  * default address would open the browser's local network prompt before the
  * `/setup` connect step explains it. A request to a local API gets the Local
- * Network Access hint (`lib/local-network.ts`).
+ * Network Access hint (`lib/local-network.ts`). A 401 from the swarm API goes
+ * to `noteUnauthorized`: the app shell then checks if the saved key still works.
  */
-const fetch = (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
-  if (!getActiveConnection()) return Promise.reject(new Error("Not connected to an API yet"));
+const fetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+  if (!getActiveConnection()) throw new Error("Not connected to an API yet");
   const url = input instanceof Request ? input.url : String(input);
-  return globalThis.fetch(input, withAddressSpace(url, init));
+  const res = await globalThis.fetch(input, withAddressSpace(url, init));
+  if (res.status === 401) {
+    const headers = init.headers ?? (input instanceof Request ? input.headers : undefined);
+    noteUnauthorized(url, headers, getConfig(), globalThis.location?.origin ?? "http://localhost");
+  }
+  return res;
 };
 
 /**
@@ -278,6 +288,31 @@ export class AppApiError extends Error {
     this.name = "AppApiError";
     this.status = status;
     this.issues = issues;
+  }
+}
+
+/** A failed onboarding write. `status` tells a 403 (a non-admin cannot write onboarding). */
+export class OnboardingApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "OnboardingApiError";
+    this.status = status;
+  }
+}
+
+/**
+ * A failed `POST /api/invites`. `code` is the server's error string, so the
+ * dialog can tell `user_exists` (409) from other failures.
+ */
+export class InviteApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  constructor(message: string, status: number, code: string | null) {
+    super(message);
+    this.name = "InviteApiError";
+    this.status = status;
+    this.code = code;
   }
 }
 
@@ -898,7 +933,10 @@ class ApiClient {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Failed to update onboarding" }));
-      throw new Error(err.error || `Failed to update onboarding: ${res.status}`);
+      throw new OnboardingApiError(
+        err.error || `Failed to update onboarding: ${res.status}`,
+        res.status,
+      );
     }
     return res.json();
   }
@@ -3240,6 +3278,24 @@ class ApiClient {
   }
 
   /**
+   * Does the API still accept `connection`'s key? `rejected` only on a 401.
+   * Any other answer is `accepted`: the server checks the key before it
+   * routes, so an older API without `/api/whoami` answers 404. Throws on a
+   * network failure. It bypasses this file's `fetch`, so the check never
+   * reports itself as a rejection.
+   */
+  async checkAccess(connection: AccessConnection): Promise<"accepted" | "rejected"> {
+    const base =
+      import.meta.env.DEV && connection.apiUrl === "http://localhost:3013" ? "" : connection.apiUrl;
+    const url = `${base.replace(/\/+$/, "")}/api/whoami`;
+    const res = await globalThis.fetch(
+      url,
+      withAddressSpace(url, { headers: { Authorization: `Bearer ${connection.apiKey}` } }),
+    );
+    return res.status === 401 ? "rejected" : "accepted";
+  }
+
+  /**
    * A one-shot ticket for the realtime socket (a browser WebSocket cannot send
    * `Authorization`). Single use, 60 s. The error carries the HTTP `status`.
    */
@@ -3328,6 +3384,29 @@ class ApiClient {
       throw new Error(err.error || `Failed to mint token: ${res.status}`);
     }
     return (await res.json()) as MintTokenResponse;
+  }
+
+  /** Invite a teammate. The response's `inviteUrl` carries a one-time code: never log it. */
+  async createInvite(data: CreateInviteInput): Promise<CreateInviteResponse> {
+    const url = `${this.getBaseUrl()}/api/invites`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      const code = typeof body?.error === "string" ? body.error : null;
+      throw new InviteApiError(code ?? `Failed to create invite: ${res.status}`, res.status, code);
+    }
+    return (await res.json()) as CreateInviteResponse;
+  }
+
+  async fetchRbacRoles(): Promise<RbacRolesResponse> {
+    const url = `${this.getBaseUrl()}/api/rbac/roles`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch roles: ${res.status}`);
+    return (await res.json()) as RbacRolesResponse;
   }
 
   async revokeUserToken(id: string, tokenId: string): Promise<User> {

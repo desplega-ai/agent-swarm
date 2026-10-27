@@ -17,7 +17,12 @@ import {
   OnboardingStateSchema,
   updateOnboardingAiFromCodexDevice,
 } from "../be/onboarding";
-import { _resetAutoReloadForTests, handleCore } from "../http/core";
+import {
+  __resetInjectedEnvTracking,
+  _resetAutoReloadForTests,
+  handleCore,
+  loadGlobalConfigsIntoEnv,
+} from "../http/core";
 import { handleOnboarding } from "../http/onboarding";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { telemetry } from "../telemetry";
@@ -32,12 +37,16 @@ const ENV_KEYS = [
   "EMBEDDING_API_KEY",
   "EMBEDDING_API_BASE_URL",
   "EMBEDDING_MODEL",
+  "EMBEDDING_QUERY_PREFIX",
+  "EMBEDDING_DOCUMENT_PREFIX",
   "GITHUB_TOKEN",
   "GITLAB_TOKEN",
   "BITBUCKET_TOKEN",
   "SLACK_BOT_TOKEN",
   "SLACK_APP_TOKEN",
   "SLACK_MODE",
+  "COMB_ENABLED",
+  "AGENT_FS_API_URL",
 ];
 
 let server: Server;
@@ -176,9 +185,22 @@ function embeddingResponse(dimensions: number): Response {
 
 describe("onboarding state", () => {
   test("fresh install creates active onboarding state", async () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
     const response = await request("/api/onboarding");
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { state: OnboardingState };
+    const body = (await response.json()) as {
+      state: OnboardingState;
+      signals: { files: { enabled: boolean } };
+    };
+
+    expect(body.signals.files).toEqual({ enabled: true });
+    expect(body.state.steps.files).toEqual({
+      status: "todo",
+      at: null,
+      method: null,
+      errorClass: null,
+    });
 
     expect(body.state.autoCompleted).toBe(false);
     expect(body.state.completedAt).toBeNull();
@@ -235,6 +257,7 @@ describe("onboarding state", () => {
       null,
       null,
       null,
+      null,
     ]);
   });
 
@@ -271,6 +294,39 @@ describe("onboarding state", () => {
     });
     await Bun.sleep(10);
     expect(capturedTelemetry.filter((entry) => entry.event === "started")).toHaveLength(0);
+  });
+
+  test("a row stored before the files step back-fills it as todo", async () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
+    const state = (await (await request("/api/onboarding")).json()) as {
+      state: OnboardingState;
+    };
+    const stored = structuredClone(state.state) as unknown as {
+      startedAt: string;
+      steps: Record<string, unknown>;
+    };
+    stored.steps.integrations = {
+      status: "skipped",
+      at: stored.startedAt,
+      method: null,
+      errorClass: null,
+    };
+    delete stored.steps.files;
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "onboarding_state",
+      value: JSON.stringify(stored),
+    });
+
+    const body = (await (await request("/api/onboarding")).json()) as { state: OnboardingState };
+    expect(body.state.steps.integrations.status).toBe("skipped");
+    expect(body.state.steps.files).toEqual({
+      status: "todo",
+      at: null,
+      method: null,
+      errorClass: null,
+    });
   });
 
   test("a user row marks the install as existing", async () => {
@@ -321,13 +377,67 @@ describe("onboarding state", () => {
   test("GET derives the authenticated connection", async () => {
     const body = (await (await request("/api/onboarding")).json()) as {
       state: OnboardingState;
-      signals: { providers: unknown[]; embeddings: { configured: boolean; dimensions: number } };
+      signals: { providers: unknown[]; embeddings: Record<string, unknown> };
     };
 
     expect(body.state.steps.connect).toMatchObject({ status: "done", method: "api_key" });
     expect(body.signals.providers).toEqual([]);
-    expect(body.signals.embeddings).toEqual({ configured: false, dimensions: 512 });
+    expect(body.signals.embeddings).toEqual({
+      configured: false,
+      dimensions: 512,
+      model: null,
+      local: false,
+      provider: null,
+      localDefault: null,
+    });
     expect((await getState()).steps.connect.status).toBe("done");
+  });
+
+  test("embedding signals name the model and say whether the endpoint is local", async () => {
+    const cases: Array<[string | undefined, boolean, string]> = [
+      ["http://tei:80/v1", true, "local"],
+      ["http://localhost:8080/v1", true, "local"],
+      ["http://127.0.0.1:8091/v1", true, "local"],
+      ["http://10.0.4.2/v1", true, "local"],
+      ["http://[::1]:8080/v1", true, "local"],
+      ["https://api.openai.com/v1", false, "openai"],
+      ["https://openrouter.ai/api/v1", false, "openrouter"],
+      ["https://ai-gateway.vercel.sh/v1", false, "vercel"],
+      ["https://my-resource.services.ai.azure.com/openai/v1", false, "azure"],
+      ["http://[2001:db8::1]/v1", false, "custom"],
+      [undefined, false, "openai"],
+    ];
+    process.env.EMBEDDING_API_KEY = "local-tei";
+    process.env.EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5";
+    for (const [baseUrl, local, provider] of cases) {
+      if (baseUrl === undefined) delete process.env.EMBEDDING_API_BASE_URL;
+      else process.env.EMBEDDING_API_BASE_URL = baseUrl;
+      const body = (await (await request("/api/onboarding")).json()) as {
+        signals: { embeddings: Record<string, unknown> };
+      };
+      expect({ baseUrl, embeddings: body.signals.embeddings }).toEqual({
+        baseUrl,
+        embeddings: {
+          configured: true,
+          dimensions: 512,
+          model: "nomic-ai/nomic-embed-text-v1.5",
+          local,
+          provider,
+          // The environment is the deployment's: a local endpoint is its local default.
+          localDefault: local ? { model: "nomic-ai/nomic-embed-text-v1.5" } : null,
+        },
+      });
+      // The signal never carries the key or the URL.
+      expect(JSON.stringify(body.signals.embeddings)).not.toContain("local-tei");
+      if (baseUrl) expect(JSON.stringify(body.signals.embeddings)).not.toContain(baseUrl);
+    }
+
+    // No model set: the provider's default model.
+    delete process.env.EMBEDDING_MODEL;
+    const fallback = (await (await request("/api/onboarding")).json()) as {
+      signals: { embeddings: { model: string | null } };
+    };
+    expect(fallback.signals.embeddings.model).toBe("text-embedding-3-small");
   });
 
   test("agent signals count idle or busy agents as ready", async () => {
@@ -580,7 +690,67 @@ describe("onboarding state", () => {
     ).toBe(404);
   });
 
+  test("without Comb the files step reads as skipped, unpersisted and with no event", async () => {
+    const first = (await (await request("/api/onboarding")).json()) as {
+      state: OnboardingState;
+      signals: { files: { enabled: boolean } };
+    };
+    expect(first.signals.files).toEqual({ enabled: false });
+    expect(first.state.steps.files.status).toBe("skipped");
+    // A write for another step persists the row: files must stay todo in storage.
+    expect((await put({ action: "skip", step: "name" })).status).toBe(200);
+    expect((await getState()).steps.files.status).toBe("todo");
+    await Bun.sleep(10);
+    expect(
+      capturedTelemetry.filter(
+        (entry) => entry.event === "step_skipped" && entry.properties.step === "files",
+      ),
+    ).toHaveLength(0);
+
+    // Turning Comb on brings the step back.
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
+    const after = (await (await request("/api/onboarding")).json()) as { state: OnboardingState };
+    expect(after.state.steps.files.status).toBe("todo");
+  });
+
+  test("PUT completes the files step with created or connected", async () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
+    await request("/api/onboarding");
+    capturedTelemetry.length = 0;
+
+    const created = await put({ action: "complete", step: "files", method: "created" });
+    expect(created.status).toBe(200);
+    expect(((await created.json()) as { state: OnboardingState }).state.steps.files).toMatchObject({
+      status: "done",
+      method: "created",
+    });
+    await Bun.sleep(10);
+    expect(capturedTelemetry).toContainEqual(
+      expect.objectContaining({
+        event: "step_completed",
+        properties: expect.objectContaining({ step: "files", method: "created" }),
+      }),
+    );
+
+    const connected = await put({ action: "complete", step: "files", method: "connected" });
+    expect(connected.status).toBe(200);
+    expect((await getState()).steps.files).toMatchObject({ status: "done", method: "connected" });
+  });
+
+  test("a completed files step stays done when Comb is off", async () => {
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.example.test";
+    await put({ action: "complete", step: "files", method: "connected" });
+    delete process.env.COMB_ENABLED;
+    const body = (await (await request("/api/onboarding")).json()) as { state: OnboardingState };
+    expect(body.state.steps.files).toMatchObject({ status: "done", method: "connected" });
+  });
+
   test("PUT rejects a bad completion method and connect skip", async () => {
+    expect((await put({ action: "complete", step: "files", method: "pasted" })).status).toBe(400);
+    expect((await put({ action: "complete", step: "files", method: "api_key" })).status).toBe(400);
     expect((await put({ action: "complete", step: "ai", method: "not-a-provider" })).status).toBe(
       400,
     );
@@ -1044,6 +1214,68 @@ describe("onboarding memory probe", () => {
     }
   });
 
+  test("existing preset probes a private configured endpoint outside local development", async () => {
+    let hits = 0;
+    const fake = startEmbeddingServer(() => {
+      hits += 1;
+      return embeddingResponse(512);
+    });
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    process.env.EMBEDDING_API_BASE_URL = fake.baseUrl;
+    process.env.EMBEDDING_MODEL = "test-embedding-model";
+    process.env.EMBEDDING_API_KEY = "local-tei";
+    try {
+      const existing = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing" },
+      });
+      expect(await existing.json()).toMatchObject({ ok: true, dimensions: 512 });
+      expect(hits).toBe(1);
+
+      // The same private URL from the request body is still blocked.
+      const custom = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: fake.baseUrl,
+          model: "test-embedding-model",
+          apiKey: "local-tei",
+        },
+      });
+      expect(await custom.json()).toMatchObject({
+        ok: false,
+        errorClass: "network",
+        error: "The endpoint URL is not allowed.",
+      });
+      expect(hits).toBe(1);
+    } finally {
+      fake.server.stop(true);
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  test("existing preset with no configured endpoint keeps the SSRF check", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    process.env.EMBEDDING_API_KEY = "local-tei";
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing", baseUrl: "http://127.0.0.1:9/v1" },
+      });
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        errorClass: "network",
+        error: "The endpoint URL is not allowed.",
+      });
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   test("successful memory retry records the successful preset after a failure", async () => {
     let dimensions = 512;
     const fake = startEmbeddingServer(() => embeddingResponse(dimensions));
@@ -1088,5 +1320,220 @@ describe("onboarding memory probe", () => {
       method: "existing",
       errorClass: null,
     });
+  });
+});
+
+describe("onboarding memory: the deployment's local setup", () => {
+  const NOMIC = "nomic-ai/nomic-embed-text-v1.5";
+
+  /** The bundled install: a local endpoint, its model, a key, and nomic's task prefixes. */
+  function setDeploymentEnv(localUrl: string) {
+    process.env.EMBEDDING_API_BASE_URL = localUrl;
+    process.env.EMBEDDING_MODEL = NOMIC;
+    process.env.EMBEDDING_API_KEY = "local-tei";
+    process.env.EMBEDDING_QUERY_PREFIX = "search_query: ";
+    process.env.EMBEDDING_DOCUMENT_PREFIX = "search_document: ";
+  }
+
+  async function storedEmbeddingRows(): Promise<Record<string, string>> {
+    const rows = await getSwarmConfigs({ scope: "global" });
+    return Object.fromEntries(
+      rows.filter((row) => row.key.startsWith("EMBEDDING_")).map((row) => [row.key, row.value]),
+    );
+  }
+
+  async function embeddingSignals(): Promise<Record<string, unknown>> {
+    const body = (await (await request("/api/onboarding")).json()) as {
+      signals: { embeddings: Record<string, unknown> };
+    };
+    return body.signals.embeddings;
+  }
+
+  test("a hosted save stores empty prefixes over the local model's prefixes", async () => {
+    const hosted = startEmbeddingServer(() => embeddingResponse(512));
+    setDeploymentEnv("http://tei:80/v1");
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: hosted.baseUrl,
+          model: "test-embedding-model",
+          apiKey: "example-hosted-key",
+        },
+      });
+      expect(await response.json()).toMatchObject({ ok: true });
+      expect(await storedEmbeddingRows()).toEqual({
+        EMBEDDING_API_BASE_URL: hosted.baseUrl,
+        EMBEDDING_MODEL: "test-embedding-model",
+        EMBEDDING_API_KEY: "example-hosted-key",
+        EMBEDDING_QUERY_PREFIX: "",
+        EMBEDDING_DOCUMENT_PREFIX: "",
+      });
+
+      // The deployment's own model keeps its prefixes: the empty rows go.
+      const same = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "custom", baseUrl: hosted.baseUrl, model: NOMIC, apiKey: "example-key" },
+      });
+      expect(await same.json()).toMatchObject({ ok: true });
+      const rows = await storedEmbeddingRows();
+      expect(rows.EMBEDDING_QUERY_PREFIX).toBeUndefined();
+      expect(rows.EMBEDDING_DOCUMENT_PREFIX).toBeUndefined();
+    } finally {
+      hosted.server.stop(true);
+    }
+  });
+
+  test("without deployment prefixes a hosted save stores none", async () => {
+    const hosted = startEmbeddingServer(() => embeddingResponse(512));
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: hosted.baseUrl,
+          model: "test-embedding-model",
+          apiKey: "example-hosted-key",
+        },
+      });
+      expect(await response.json()).toMatchObject({ ok: true });
+      expect(Object.keys(await storedEmbeddingRows()).sort()).toEqual([
+        "EMBEDDING_API_BASE_URL",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_MODEL",
+      ]);
+    } finally {
+      hosted.server.stop(true);
+    }
+  });
+
+  test("a stored hosted setup keeps the local default, and restore brings it back", async () => {
+    let localHits = 0;
+    const local = startEmbeddingServer(() => {
+      localHits += 1;
+      return embeddingResponse(512);
+    });
+    setDeploymentEnv(local.baseUrl);
+    try {
+      // A hosted setup stored earlier, applied as the boot or a reload does.
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "EMBEDDING_API_BASE_URL",
+        value: "https://openrouter.ai/api/v1",
+      });
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "EMBEDDING_MODEL",
+        value: "google/gemini-embedding-2",
+      });
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "EMBEDDING_API_KEY",
+        value: "example-openrouter-key",
+        isSecret: true,
+      });
+      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_QUERY_PREFIX", value: "" });
+      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_DOCUMENT_PREFIX", value: "" });
+      await loadGlobalConfigsIntoEnv(true);
+      resetEmbeddingProvider();
+
+      expect(await embeddingSignals()).toEqual({
+        configured: true,
+        dimensions: 512,
+        model: "google/gemini-embedding-2",
+        local: false,
+        provider: "openrouter",
+        localDefault: { model: NOMIC },
+      });
+
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing", restoreDefault: true },
+      });
+      expect(await response.json()).toMatchObject({ ok: true, dimensions: 512 });
+      // It tested the deployment's endpoint, not the stored one.
+      expect(localHits).toBe(1);
+      expect(await storedEmbeddingRows()).toEqual({});
+      expect(process.env.EMBEDDING_API_BASE_URL).toBe(local.baseUrl);
+      expect(process.env.EMBEDDING_QUERY_PREFIX).toBe("search_query: ");
+      expect(await embeddingSignals()).toMatchObject({
+        model: NOMIC,
+        local: true,
+        provider: "local",
+        localDefault: { model: NOMIC },
+      });
+      expect((await getState()).steps.memory).toMatchObject({ status: "done", method: "existing" });
+    } finally {
+      local.server.stop(true);
+      __resetInjectedEnvTracking();
+    }
+  });
+
+  test("a stored private endpoint keeps the SSRF check", async () => {
+    let hits = 0;
+    const stored = startEmbeddingServer(() => {
+      hits += 1;
+      return embeddingResponse(512);
+    });
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    setDeploymentEnv("https://embeddings.example.com/v1");
+    try {
+      // A config writer stores a loopback URL over the deployment's endpoint.
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "EMBEDDING_API_BASE_URL",
+        value: stored.baseUrl,
+      });
+      await loadGlobalConfigsIntoEnv(true);
+      expect(process.env.EMBEDDING_API_BASE_URL).toBe(stored.baseUrl);
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing" },
+      });
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        errorClass: "network",
+        error: "The endpoint URL is not allowed.",
+      });
+      expect(hits).toBe(0);
+    } finally {
+      stored.server.stop(true);
+      __resetInjectedEnvTracking();
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  test("a failed restore test keeps the stored setup", async () => {
+    const local = startEmbeddingServer(() => new Response("model loading", { status: 503 }));
+    setDeploymentEnv(local.baseUrl);
+    try {
+      await upsertSwarmConfig({ scope: "global", key: "EMBEDDING_MODEL", value: "stored-model" });
+      await loadGlobalConfigsIntoEnv(true);
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing", restoreDefault: true },
+      });
+      expect(await response.json()).toMatchObject({ ok: false });
+      expect(await storedEmbeddingRows()).toEqual({ EMBEDDING_MODEL: "stored-model" });
+      expect(process.env.EMBEDDING_MODEL).toBe("stored-model");
+    } finally {
+      local.server.stop(true);
+      __resetInjectedEnvTracking();
+    }
+  });
+
+  test("restoreDefault needs the existing preset", async () => {
+    const response = await request("/api/onboarding/memory", {
+      method: "POST",
+      body: {
+        preset: "custom",
+        baseUrl: "https://embeddings.example.com/v1",
+        restoreDefault: true,
+      },
+    });
+    expect(response.status).toBe(400);
   });
 });

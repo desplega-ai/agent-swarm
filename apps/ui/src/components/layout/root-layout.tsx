@@ -7,6 +7,7 @@ import { ContextPanelProvider } from "@/components/context-panel/context-panel-s
 import { ContextSessionPanel } from "@/components/context-panel/context-session-panel";
 import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { IdentityModal } from "@/components/identity/identity-modal";
+import { FirstTaskInvitePrompt } from "@/components/onboarding/first-task-invite-prompt";
 import { OnboardingRedirect } from "@/components/onboarding/onboarding-redirect";
 import { CommandMenu, CommandMenuProvider } from "@/components/shared/command-menu";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
@@ -22,9 +23,11 @@ import { useLaterNotifier } from "@/hooks/use-later-notifier";
 import { CREDENTIAL_URL_PARAMS, withoutConnectionParams } from "@/lib/connection-url-params";
 import { MAIN_GUTTER, MAIN_GUTTER_NO_TOP } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
+import { AccessEndedScreen } from "./access-ended-screen";
 import { AppFooter } from "./app-footer";
 import { AppHeader } from "./app-header";
 import { AppSidebar } from "./app-sidebar";
+import { useAccessCheck } from "./use-access-check";
 
 /**
  * Phase 3: auto-pop the identity modal whenever:
@@ -92,10 +95,17 @@ export function RootLayout() {
         ? MAIN_GUTTER_NO_TOP
         : MAIN_GUTTER;
 
+  const access = useAccessCheck();
+
   // No connection yet: the full-page `/setup` flow starts at step 1 (connect)
   // and returns here after connecting.
   if (!isConfigured) {
     return <Navigate to="/setup" replace state={{ from: `${pathname}${search}${hash}` }} />;
+  }
+
+  // The API rejects the saved key: no cached pages, no polling, only the way out.
+  if (access.ended) {
+    return <AccessEndedScreen checking={access.checking} onRetry={access.retry} />;
   }
 
   return (
@@ -154,6 +164,7 @@ export function RootLayout() {
         <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
         <LeadCredentialDialog key={config.apiUrl} />
         <FeedbackDialog key={`feedback:${config.apiUrl}`} />
+        <FirstTaskInvitePrompt key={`first-task-invite:${config.apiUrl}`} />
       </AgentFsProvider>
     </StatusProvider>
   );

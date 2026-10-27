@@ -32,7 +32,7 @@ const uiEvent = route({
     401: { description: "Unauthorized" },
     403: { description: "Guest page sessions cannot send events" },
   },
-  rbac: { ungated: "any authenticated dashboard user; event name allowlisted" },
+  rbac: { permission: "favorite.write.own" },
 });
 
 const enableTelemetry = route({

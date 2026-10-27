@@ -1,0 +1,7 @@
+chunk tokens [358, 292, 257, 300, 283, 287, 329, 286, 286, 269] n 40
+1 1 {'reqs': 64, 'texts': 64, 'secs': 32.45, 'texts_per_s': 1.97, 'req_p50': 0.44, 'mem_during': '677.8MiB / 15.66GiB|102.09%'}
+1 4 {'reqs': 64, 'texts': 64, 'secs': 35.23, 'texts_per_s': 1.82, 'req_p50': 1.76, 'mem_during': '678.3MiB / 15.66GiB|29.29%'}
+8 1 {'reqs': 8, 'texts': 64, 'secs': 34.37, 'texts_per_s': 1.86, 'req_p50': 3.68, 'mem_during': '677.9MiB / 15.66GiB|0.74%'}
+8 4 {'reqs': 8, 'texts': 64, 'secs': 27.67, 'texts_per_s': 2.31, 'req_p50': 13.37, 'mem_during': '677.2MiB / 15.66GiB|181.84%'}
+32 1 {'reqs': 4, 'texts': 128, 'secs': 57.41, 'texts_per_s': 2.23, 'req_p50': 14.31, 'mem_during': '676MiB / 15.66GiB|76.21%'}
+32 4 {'reqs': 8, 'texts': 256, 'secs': 111.61, 'texts_per_s': 2.29, 'req_p50': 53.25, 'mem_during': '676.1MiB / 15.66GiB|90.10%'}

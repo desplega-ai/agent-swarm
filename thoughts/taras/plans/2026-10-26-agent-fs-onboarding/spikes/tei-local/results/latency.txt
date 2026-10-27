@@ -1,0 +1,1 @@
+short query n=100 tokens~11 p50=41ms p95=48ms p99=54ms min=36

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { deleteTaskAttachment, getTaskAttachments, getTaskById } from "../be/db";
 import { appendDraftTaskText } from "../be/db/tasks/draft-text";
+import { getUserGrant } from "../be/rbac-roles";
 import {
   ensureAgentFsCredentialsForAgent,
   inviteEmailToSharedOrg,
@@ -14,10 +15,10 @@ import {
 } from "../be/task-attachment-store";
 import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
-import { can, type RbacResource } from "../rbac";
+import { can, isRbacEnabled, type RbacResource } from "../rbac";
 import { type TaskAttachment, TaskAttachmentSchema } from "../types";
 import { attachmentContentDisposition } from "../utils/content-disposition";
-import { getCurrentRequestAuth } from "../utils/request-auth-context";
+import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { transcribeAudioNotes } from "../utils/transcription";
 import { requestPrincipal } from "./request-principal";
@@ -137,13 +138,14 @@ const inviteMemberRoute = route({
       schema: agentFsInviteStateSchema,
     },
     400: { description: "Invalid body" },
+    403: { description: "A non-admin user token named an email other than its own" },
     500: { description: "Provisioning or invite failed" },
   },
   auth: { apiKey: true },
-  rbac: {
-    ungated:
-      "Tenant API key is the org-owner credential; the invite runs under the API server's own bootstrap identity, no per-agent principal applies.",
-  },
+  // The operator key and grant-all users invite any email at any role. Other
+  // users may only join with their own account email, at a role the handler
+  // derives from their grant.
+  rbac: { permission: "fs.join.own" },
 });
 
 const listTaskFilesRoute = route({
@@ -250,6 +252,37 @@ const deleteTaskFileRoute = route({
   rbac: { permission: "task.fs.mutate" },
 });
 
+type InviteRole = "viewer" | "editor" | "admin";
+
+/**
+ * The email and role an invite runs with. The operator key and grant-all users
+ * keep the body as sent. Any other user joins only as itself: the body email
+ * must match the account email (ignoring case), the stored spelling is used,
+ * and the role is `editor` when the user may change task files, else `viewer`.
+ */
+async function resolveInvite(
+  req: IncomingMessage,
+  body: { email: string; role: InviteRole },
+): Promise<{ email: string; role: InviteRole } | { denied: string }> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "user" || !isRbacEnabled()) return body;
+  const grant = await getUserGrant(auth.userId);
+  if (grant.grantsAll) return body;
+  const decision = can({
+    principal: { kind: "user", userId: auth.userId },
+    verb: "fs.join.own",
+    resource: { kind: "none" },
+    source: "http",
+  });
+  // Admission already required the role to hold `fs.join.own`.
+  if (!decision.allow) return { denied: decision.reason };
+  const ownEmail = auth.user.email?.trim();
+  if (!ownEmail || ownEmail.toLowerCase() !== body.email.trim().toLowerCase()) {
+    return { denied: "You can only join the shared drive with your own account email" };
+  }
+  return { email: ownEmail, role: grant.verbs.has("task.fs.mutate") ? "editor" : "viewer" };
+}
+
 export async function handleFs(
   req: IncomingMessage,
   res: ServerResponse,
@@ -280,8 +313,13 @@ export async function handleFs(
   if (inviteMemberRoute.match(req.method, pathSegments)) {
     const parsed = await inviteMemberRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const invite = await resolveInvite(req, parsed.body);
+    if ("denied" in invite) {
+      jsonError(res, invite.denied, 403);
+      return true;
+    }
     try {
-      const result = await inviteEmailToSharedOrg(parsed.body.email, parsed.body.role);
+      const result = await inviteEmailToSharedOrg(invite.email, invite.role);
       inviteMemberRoute.respond(res, 200, result);
     } catch (error) {
       const message = scrubSecrets(error instanceof Error ? error.message : String(error));

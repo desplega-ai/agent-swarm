@@ -247,12 +247,20 @@ describe("RBAC admission over real HTTP", () => {
 
     rewriteUserToRequester(dbPath, userId);
 
-    const deniedTaskCreate = await api(server.base, "POST", "/api/tasks", {
+    // A requester creates its own task (`task.create.own`); a verb-less write
+    // stays operator-only.
+    const requesterTaskCreate = await api(server.base, "POST", "/api/tasks", {
       bearer: userToken,
-      body: { task: "rbac admission denied task" },
+      body: { task: "rbac admission requester task" },
     });
-    expect(deniedTaskCreate.status).toBe(403);
-    expect(deniedTaskCreate.body.error).toContain("admission: route has no permission verb");
+    expect(requesterTaskCreate.status).toBe(201);
+
+    const deniedDbQuery = await api(server.base, "POST", "/api/db-query", {
+      bearer: userToken,
+      body: { sql: "select 1" },
+    });
+    expect(deniedDbQuery.status).toBe(403);
+    expect(deniedDbQuery.body.error).toContain("admission: route has no permission verb");
 
     // The ranking state carries the private claim: a requester cannot read it.
     const deniedRanking = await api(server.base, "GET", "/api/ranking", { bearer: userToken });
@@ -378,8 +386,8 @@ describe("RBAC admission over real HTTP", () => {
             "GET /api/ranking",
             "GET /api/scripts/{id}/apis/{endpointId}/secret",
             "PATCH /api/assets/app/{id}/key",
+            "POST /api/db-query",
             "POST /api/scripts/{id}/apis",
-            "POST /api/tasks",
           ].every((resourceId) =>
             userRows.some((row) => row.resourceId === resourceId && row.decision === "deny"),
           ) &&
@@ -410,9 +418,17 @@ describe("RBAC admission over real HTTP", () => {
       "GET /api/ranking",
       "GET /api/scripts/{id}/apis/{endpointId}/secret",
       "PATCH /api/assets/app/{id}/key",
+      "POST /api/db-query",
       "POST /api/scripts/{id}/apis",
-      "POST /api/tasks",
     ]);
+    expect(
+      userHttpRows.some(
+        (row) =>
+          row.resourceId === "POST /api/tasks" &&
+          row.verb === "task.create.own" &&
+          row.decision === "allow",
+      ),
+    ).toBe(true);
     expect(
       denyRows.some(
         (row) =>

@@ -14,8 +14,8 @@ import {
   Settings as SettingsIcon,
   SlidersHorizontal,
 } from "lucide-react";
-import { useCallback, useEffect } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { type ReactNode, useCallback, useEffect } from "react";
+import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { BetaTag } from "@/components/shared/beta-tag";
@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { useRuntimePoolsGate } from "@/lib/runtime-pools";
+import { useIsAdmin } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 
 interface SettingsNavItem {
@@ -32,6 +33,8 @@ interface SettingsNavItem {
   icon: LucideIcon;
   /** Experimental surface: renders a BETA chip after the label. */
   beta?: { tooltip: string };
+  /** Shown to everyone: browser-local or per-person. The rest is admin-only. */
+  everyone?: boolean;
 }
 
 // The first-run stepper lives outside the settings shell; the rail links to
@@ -41,9 +44,9 @@ const SETUP_PATH = "/setup";
 const RUNTIME_POOLS_NAV_PATH = "/settings/runtime-pools";
 
 const SETTINGS_NAV: SettingsNavItem[] = [
-  { title: "Connections", path: "/settings/connections", icon: Cable },
+  { title: "Connections", path: "/settings/connections", icon: Cable, everyone: true },
   { title: "Setup", path: SETUP_PATH, icon: ListChecks },
-  { title: "Appearance", path: "/settings/appearance", icon: Palette },
+  { title: "Appearance", path: "/settings/appearance", icon: Palette, everyone: true },
   { title: "Secrets", path: "/settings/secrets", icon: KeyRound },
   { title: "Provider keys", path: "/settings/api-keys", icon: Key },
   { title: "Integrations", path: "/settings/integrations", icon: Plug },
@@ -68,6 +71,13 @@ function readCollapsed(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Wraps an admin-only Settings route: a non-admin lands on Appearance. */
+export function AdminRoute({ children }: { children: ReactNode }) {
+  const isAdmin = useIsAdmin();
+  if (!isAdmin) return <Navigate to="/settings/appearance" replace />;
+  return children;
 }
 
 /**
@@ -98,8 +108,12 @@ export function SettingsLayout() {
 
   const onboarding = useOnboarding();
   const runtimePools = useRuntimePoolsGate();
+  // A Requester or Viewer keeps only the browser-local pages; `AdminRoute`
+  // sends a deep link to the rest back to Appearance.
+  const isAdmin = useIsAdmin();
   const navItems = SETTINGS_NAV.filter(
     (item) =>
+      (isAdmin || item.everyone) &&
       (item.path !== SETUP_PATH || onboarding.data) &&
       (item.path !== RUNTIME_POOLS_NAV_PATH || runtimePools.open),
   );

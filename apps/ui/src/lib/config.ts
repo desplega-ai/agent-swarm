@@ -48,8 +48,13 @@ function getDeploymentConnection(): Connection | null {
   };
 }
 
+/** True when a baked deployment connection manages this build: `addConnection` throws. */
+export function connectionsManagedByDeployment(): boolean {
+  return getDeploymentConnection() !== null;
+}
+
 function assertConnectionsMutable(): void {
-  if (getDeploymentConnection()) {
+  if (connectionsManagedByDeployment()) {
     throw new Error("Connections are managed by this UI deployment.");
   }
 }

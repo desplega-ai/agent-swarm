@@ -35,6 +35,7 @@ import { useSteerTask } from "@/api/hooks/use-tasks";
 import type { AgentTaskStatus, SteerMode, SteerResult } from "@/api/types";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useCan } from "@/lib/use-can";
 import { SteerModeToggle } from "./steer-mode-toggle";
 
 export interface SteerComposerProps {
@@ -104,6 +105,8 @@ export function SteerComposer({
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
+  // A Viewer's role cannot steer: no box that would only return 403.
+  const maySteer = useCan("task.steer.own");
   const navigate = useNavigate();
   const steerTask = useSteerTask();
   const [internalDraft, setInternalDraft] = useState("");
@@ -173,6 +176,7 @@ export function SteerComposer({
           ? "Lands at the next turn boundary"
           : `${harness} queues at the next turn boundary`;
 
+  if (!maySteer) return null;
   return (
     <ComposerDock
       fullWidth={fullWidth}

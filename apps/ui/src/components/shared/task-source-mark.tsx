@@ -19,7 +19,7 @@ const TASK_SOURCE_LABELS: Record<string, string> = {
   api: "API",
   bitbucket: "Bitbucket",
   chat: "Chat",
-  comb: "Comb",
+  comb: "Files",
   discord: "Discord",
   github: "GitHub",
   gitlab: "GitLab",

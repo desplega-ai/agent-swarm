@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { Button } from "@/components/ui/button";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 
 interface EmptyStateProps {
@@ -41,8 +42,10 @@ export function EmptyState({
   // CTA only appears once the connected API confirms support — otherwise it
   // would be a dead action on compatibility deployments.
   const sessionsGate = useFeatureGate("1.76.0");
+  // Asking starts a session: a Viewer's role cannot create one.
+  const mayCreate = useCan("task.create.own");
   const askHref =
-    entity && sessionsGate.supported
+    entity && mayCreate && sessionsGate.supported
       ? `/sessions?seed=${encodeURIComponent(`Hey, help me set up my first ${entity}`)}`
       : null;
 

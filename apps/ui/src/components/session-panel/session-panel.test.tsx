@@ -18,6 +18,8 @@ afterAll(async () => {
 // client, session hooks and the shared conversation are stubbed so the test
 // sees exactly which task the panel creates and which components it renders.
 mock.module("@/lib/utils", () => require("../../lib/utils"));
+// The real grants hooks: outside a provider they answer "operator tab", so every control shows.
+mock.module("@/lib/use-can", () => require("../../lib/use-can"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));

@@ -216,9 +216,15 @@ agent-fs is the shared drive between agents and people. Documents (reports, dige
 Pages: only for polished artifacts shared with a wider audience or explicitly requested; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
 Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API, \`AGENT_FS_LIVE_URL\` for files. Report missing variables.
-Give people the live app link \`\${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
+Give people the live app link \`{{fileLinkBase}}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
 `,
-  variables: [],
+  variables: [
+    {
+      name: "fileLinkBase",
+      description:
+        "Base URL of people-facing file links (AGENT_FS_LINK_TARGET); the literal AGENT_FS_LIVE_URL shell reference when unset",
+    },
+  ],
   category: "system",
 });
 

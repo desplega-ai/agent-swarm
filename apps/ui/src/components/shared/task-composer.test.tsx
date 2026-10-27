@@ -12,6 +12,8 @@ afterAll(async () => {
 });
 
 mock.module("@/lib/utils", () => require("../../lib/utils"));
+// The real grants hooks: outside a provider they answer "operator tab", so every control shows.
+mock.module("@/lib/use-can", () => require("../../lib/use-can"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
@@ -71,6 +73,7 @@ const { createRoot } = await import("react-dom/client");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../ui/tooltip");
 const { TaskComposer } = await import("./task-composer");
+const { GrantsContext } = await import("../../lib/use-can");
 
 const runningLeadTask = {
   id: "lead-1",
@@ -361,6 +364,21 @@ describe("TaskComposer on the task page", () => {
       />,
     );
     expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
+    await unmount();
+  });
+  test("a Viewer gets no composer: no create and no steer verb", async () => {
+    const viewer = {
+      operatorTab: false,
+      pending: false,
+      grants: { grantsAll: false, verbs: ["session.presence"], roles: ["viewer"] },
+    };
+    const { container, unmount } = await mount(
+      <GrantsContext.Provider value={viewer}>
+        <TaskComposer targetTask={runningLeadTask} canSteer followUpAgentId="worker-7" />
+      </GrantsContext.Provider>,
+    );
+    expect(container.querySelector('[data-testid="steer-composer"]')).toBeNull();
+    expect(container.querySelector("textarea")).toBeNull();
     await unmount();
   });
 });

@@ -1,0 +1,3 @@
+  swarm/api2.log:49:[memory] Batch embedding failed: 422 status code (no body)
+  swarm/api.log:445:[boot-reembed-scripts] 28 scripts missing embeddings
+  swarm/api.log:447:[boot-reembed-scripts] complete: embedded=28 failed=0 remaining_wrong_dim=0

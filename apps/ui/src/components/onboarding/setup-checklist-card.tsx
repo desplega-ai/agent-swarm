@@ -2,21 +2,24 @@ import { ArrowRight, Check, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import {
   isOnboardingOpen,
-  ONBOARDING_STEPS,
+  type OnboardingStepDef,
   onboardingDoneCount,
   onboardingResumeStep,
   useOnboarding,
   useOnboardingAction,
+  useVisibleOnboardingSteps,
 } from "@/api/hooks/use-onboarding";
 import type { OnboardingResponse, OnboardingStepId, OnboardingStepStatus } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { SetupCard } from "@/components/shared/setup-card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { useConfig } from "@/hooks/use-config";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { DIAL_LEVEL_LABEL, type DialLevel } from "@/lib/model-dial";
+import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import { SKIPPED_HATCH, STEP_TONE_CLASS, StepStatusChip, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
@@ -29,17 +32,25 @@ import { useResumeSetup } from "./use-resume-setup";
  */
 export function SetupChecklistCard() {
   const { data } = useOnboarding();
+  const steps = useVisibleOnboardingSteps();
   const { data: status } = useStatusContext();
+  const agentFs = useOptionalAgentFs();
   const { config } = useConfig();
   const { resume, isPending: resuming } = useResumeSetup();
   const dismiss = useOnboardingAction();
+  // Setup writes swarm config: only an admin can finish it.
+  const canSetup = useCan("config.write.any");
 
-  if (!data || !isOnboardingOpen(data)) return null;
+  if (!canSetup || !data || !isOnboardingOpen(data)) return null;
   const { state } = data;
-  const done = onboardingDoneCount(state);
-  const resumeStep = onboardingResumeStep(state);
+  const done = onboardingDoneCount(state, steps);
+  const resumeStep = onboardingResumeStep(state, steps);
   const busy = resuming || dismiss.isPending;
-  const context = { apiUrl: config.apiUrl, swarmName: status?.identity.name ?? "your swarm" };
+  const context = {
+    apiUrl: config.apiUrl,
+    swarmName: status?.identity.name ?? "your swarm",
+    filesEmail: agentFs?.state === "ready" ? (agentFs.credential?.email ?? null) : null,
+  };
 
   async function handleDismiss() {
     try {
@@ -53,12 +64,12 @@ export function SetupChecklistCard() {
   const progress = (
     <span className="flex items-center gap-2 pt-1">
       <Progress
-        value={(done / ONBOARDING_STEPS.length) * 100}
-        aria-label={`${done} of ${ONBOARDING_STEPS.length} steps done`}
+        value={(done / steps.length) * 100}
+        aria-label={`${done} of ${steps.length} steps done`}
         className="h-1 bg-muted"
       />
       <span className="shrink-0 tabular-nums">
-        {done} of {ONBOARDING_STEPS.length}
+        {done} of {steps.length}
       </span>
     </span>
   );
@@ -92,7 +103,7 @@ export function SetupChecklistCard() {
         bodyClassName="flex min-h-0 flex-1 flex-col p-0"
       >
         <ul className="min-h-0 flex-1 divide-y divide-border-subtle overflow-y-auto">
-          {ONBOARDING_STEPS.map(({ id, label }) => {
+          {steps.map(({ id, label }) => {
             const stepStatus = state.steps[id].status;
             return (
               <li key={id}>
@@ -102,7 +113,7 @@ export function SetupChecklistCard() {
                   onClick={() => void resume(id)}
                   className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
                 >
-                  <StepTile id={id} status={stepStatus} />
+                  <StepTile id={id} status={stepStatus} steps={steps} />
                   <span className="min-w-0 flex-1">
                     <span
                       className={cn(
@@ -128,7 +139,7 @@ export function SetupChecklistCard() {
         </ul>
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border-subtle bg-surface px-4 py-3">
           <p className="w-full text-xs text-muted-foreground">
-            Progress is kept per step. Resume opens step {stepNumber(resumeStep)}.
+            Progress is kept per step. Resume opens step {stepNumber(resumeStep, steps)}.
           </p>
           <Button
             variant="ghost"
@@ -152,7 +163,7 @@ export function SetupChecklistCard() {
 function stepSubtitle(
   id: OnboardingStepId,
   { state, signals }: OnboardingResponse,
-  context: { apiUrl: string; swarmName: string },
+  context: { apiUrl: string; swarmName: string; filesEmail: string | null },
 ): string {
   const stepStatus = state.steps[id].status;
   switch (id) {
@@ -184,6 +195,8 @@ function stepSubtitle(
         .map(([id]) => INTEGRATIONS.find((def) => def.id === id)?.name ?? id);
       return connected.length > 0 ? connected.join(", ") : "Nothing connected";
     }
+    case "files":
+      return context.filesEmail ? `Connected as ${context.filesEmail}` : "Not connected";
     case "first_task":
       if (stepStatus === "done" || signals.firstTask?.status === "completed") return "Completed";
       if (signals.firstTask) return "Sent";
@@ -192,7 +205,15 @@ function stepSubtitle(
 }
 
 /** Check tile for a verified step, the step number otherwise (same tones as the `/setup` stepper). */
-function StepTile({ id, status }: { id: OnboardingStepId; status: OnboardingStepStatus }) {
+function StepTile({
+  id,
+  status,
+  steps,
+}: {
+  id: OnboardingStepId;
+  status: OnboardingStepStatus;
+  steps: ReadonlyArray<OnboardingStepDef>;
+}) {
   return (
     <span
       aria-hidden="true"
@@ -202,7 +223,7 @@ function StepTile({ id, status }: { id: OnboardingStepId; status: OnboardingStep
         STEP_TONE_CLASS[status],
       )}
     >
-      {status === "done" ? <Check className="size-3" strokeWidth={3} /> : stepNumber(id)}
+      {status === "done" ? <Check className="size-3" strokeWidth={3} /> : stepNumber(id, steps)}
     </span>
   );
 }

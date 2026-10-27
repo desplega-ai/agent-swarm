@@ -914,7 +914,7 @@ export async function handleMemory(
     try {
       const provider = getEmbeddingProvider();
       const store = getMemoryStore();
-      const queryEmbedding = await provider.embed(query);
+      const queryEmbedding = await provider.embed(query, { kind: "query" });
 
       const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
       const candidates = await searchMemoryCandidates(
@@ -1039,7 +1039,7 @@ export async function handleMemory(
     try {
       if (query && query.trim().length > 0) {
         const provider = getEmbeddingProvider();
-        const queryEmbedding = await provider.embed(query.trim());
+        const queryEmbedding = await provider.embed(query.trim(), { kind: "query" });
 
         const candidateLimit = Math.min(
           4096,
@@ -1289,7 +1289,7 @@ export async function handleMemory(
       });
       if (result.changed) {
         const provider = getEmbeddingProvider();
-        const embedding = await provider.embed(result.memory.content);
+        const embedding = await provider.embed(result.memory.content, { kind: "document" });
         if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
           // Edit path: prune links derived from removed content (sequel links survive).
@@ -1378,7 +1378,10 @@ export async function handleMemory(
       for (let i = 0; i < memories.length; i += batchSize) {
         const batch = memories.slice(i, i + batchSize);
         try {
-          const embeddings = await provider.embedBatch(batch.map((m) => m.content));
+          const embeddings = await provider.embedBatch(
+            batch.map((m) => m.content),
+            { kind: "document" },
+          );
           for (let j = 0; j < embeddings.length; j++) {
             if (embeddings[j]) {
               await store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);

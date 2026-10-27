@@ -248,6 +248,26 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}architecture/memory`,
       },
       {
+        key: "EMBEDDING_QUERY_PREFIX",
+        label: "Embedding query prefix",
+        description:
+          "Text added before each search query. nomic-embed models need 'search_query: '. Changing it on an install with stored memories needs a re-embed.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "search_query: ",
+        docsUrl: `${DOCS}architecture/memory`,
+      },
+      {
+        key: "EMBEDDING_DOCUMENT_PREFIX",
+        label: "Embedding document prefix",
+        description:
+          "Text added before each stored document. nomic-embed models need 'search_document: '. Changing it on an install with stored memories needs a re-embed.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "search_document: ",
+        docsUrl: `${DOCS}architecture/memory`,
+      },
+      {
         key: "MEMORY_RATERS",
         label: "Active memory raters",
         description:
@@ -1362,11 +1382,20 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "COMB_ENABLED",
-        label: "Comb (beta)",
+        label: "Files",
         description: "Show the agent-fs review space in the dashboard. Needs agent-fs.",
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}ui/comb`,
+      },
+      {
+        key: "AGENT_FS_LINK_TARGET",
+        label: "File link target",
+        description:
+          "Where agents and task attachments link people for files. dashboard opens Files at APP_URL and needs Files on. Workers need APP_URL in their own environment (a saved APP_URL does not reach them). live opens the agent-fs live app. Unset keeps the automatic choice.",
+        kind: "enum",
+        options: ["live", "dashboard"],
+        docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
       },
       {
         key: "AGENT_FS_PUBLIC_URL",
@@ -1376,6 +1405,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "string",
         placeholder: "https://agent-fs.example.com",
         docsUrl: `${DOCS}ui/comb#turn-on-comb`,
+      },
+      {
+        key: "AGENT_FS_PROXY",
+        label: "Serve agent-fs through the API",
+        description:
+          "Serve agent-fs through the swarm API at /agentfs, so the browser reaches a bundled agent-fs with no public port. Files then uses <public API URL>/agentfs.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/agent-fs-co-deployment`,
       },
     ],
   },

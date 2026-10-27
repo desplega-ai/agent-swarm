@@ -127,6 +127,8 @@ function buildRow(
   remembered: DialLevel | undefined,
   context: DialContext,
   tiers: TiersState,
+  /** A save of this agent is in flight: the stored setting can be stale. */
+  writing: boolean,
 ): Row {
   const harness = dialHarness(agent.harnessProvider);
   const configs = query.data;
@@ -162,7 +164,9 @@ function buildRow(
     position,
     intent,
     target,
-    applied: target ? dialSettingApplied(target, model, effort) : false,
+    // While a write runs, the stored setting is the one from before it. A pick
+    // that matches it is not applied yet: the write can still change it.
+    applied: target ? !writing && dialSettingApplied(target, model, effort) : false,
     shown: intent?.level ?? stored ?? (notApplied ? RECOMMENDED : null),
     notApplied,
   };
@@ -227,6 +231,7 @@ function levelOptions(
  * Optimal for them, then completes the step with the level every agent got.
  * Continue waits until every dial row and the model tiers have loaded: a level
  * is the model of a Model Tier, so nothing shows or stores before they do.
+ * When every agent picks its own model, Continue skips the step.
  */
 export function AgentModels({
   agents,
@@ -235,6 +240,7 @@ export function AgentModels({
   presence,
   completed,
   onComplete,
+  onSkip,
   setContinueAction,
 }: {
   agents: AgentWithTasks[];
@@ -245,6 +251,8 @@ export function AgentModels({
   /** The method the step is done with, `null` while it is not done. */
   completed: OnboardingAgentsMethod | null;
   onComplete: (method: OnboardingAgentsMethod) => Promise<void>;
+  /** Skip the step. `null` while it is settled. */
+  onSkip: (() => Promise<void>) | null;
   setContinueAction: StepProps["setContinueAction"];
 }) {
   const queryClient = useQueryClient();
@@ -339,7 +347,15 @@ export function AgentModels({
   );
 
   const rows = listed.map((agent, index) =>
-    buildRow(agent, resolved[index], intents[agent.id], remembered[agent.id], context, tiersState),
+    buildRow(
+      agent,
+      resolved[index],
+      intents[agent.id],
+      remembered[agent.id],
+      context,
+      tiersState,
+      saves[agent.id]?.phase === "saving",
+    ),
   );
   const dialRows = rows.filter((row) => row.harness !== null);
   useContinueHold(
@@ -399,7 +415,10 @@ export function AgentModels({
           }
           if (completed !== method) await onComplete(method);
         }
-      : null,
+      : // Every agent picks its own model: nothing to set, so Continue does what Skip does.
+        listed.length > 0 && !agentsLoading
+        ? onSkip
+        : null,
   );
 
   if (agentsLoading) {
@@ -511,7 +530,7 @@ export function AgentModels({
         <SetupCard
           icon={<Gauge className="size-4" />}
           title="Per agent"
-          description="These agents pick their own models. Skip this step."
+          description="These agents pick their own models. Continue skips this step."
           bodyClassName="p-0"
         >
           {rowList}
@@ -520,6 +539,9 @@ export function AgentModels({
     </div>
   );
 }
+
+/** How long a level pick waits for another pick before it stores. */
+const PICK_DEBOUNCE_MS = 400;
 
 /**
  * The save of one agent's pick, with no markup. It stays mounted while the
@@ -544,11 +566,12 @@ function RowSave({
   }, [intent, row.applied, onSettle, agent.id]);
 
   // The value carries the pick nonce, so picking a level again retries a failed save.
+  // Quick picks in a row store only the last one.
   const save = useAutosave({
     value: target && intent ? JSON.stringify([intent.nonce, target]) : "",
     dirty: target !== null && !row.applied,
     ready: true,
-    delayMs: 150,
+    delayMs: PICK_DEBOUNCE_MS,
     save: async (value) => {
       const [, setting] = JSON.parse(value) as [unknown, DialSetting];
       await write(agent.id, setting);

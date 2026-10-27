@@ -11,6 +11,15 @@ describe("Comb config keys", () => {
     }
   });
 
+  test("AGENT_FS_PROXY accepts boolean literals only", () => {
+    for (const value of ["true", "false", "1", "0", " TRUE "]) {
+      expect(validateConfigValue("AGENT_FS_PROXY", value)).toBeNull();
+    }
+    for (const value of ["yes", "on", ""]) {
+      expect(validateConfigValue("AGENT_FS_PROXY", value)).toContain("Invalid AGENT_FS_PROXY");
+    }
+  });
+
   test("AGENT_FS_PUBLIC_URL accepts blank or an http(s) base URL", () => {
     for (const value of ["", "http://localhost:7433", "https://agent-fs.example.com/base"]) {
       expect(validateConfigValue("AGENT_FS_PUBLIC_URL", value)).toBeNull();
@@ -24,6 +33,17 @@ describe("Comb config keys", () => {
     ]) {
       expect(validateConfigValue("AGENT_FS_PUBLIC_URL", value)).toContain(
         "Invalid AGENT_FS_PUBLIC_URL",
+      );
+    }
+  });
+
+  test("AGENT_FS_LINK_TARGET accepts dashboard, live, or blank", () => {
+    for (const value of ["dashboard", "live", "", " live "]) {
+      expect(validateConfigValue("AGENT_FS_LINK_TARGET", value)).toBeNull();
+    }
+    for (const value of ["Dashboard2", "comb", true]) {
+      expect(validateConfigValue("AGENT_FS_LINK_TARGET", value)).toContain(
+        "Invalid AGENT_FS_LINK_TARGET",
       );
     }
   });

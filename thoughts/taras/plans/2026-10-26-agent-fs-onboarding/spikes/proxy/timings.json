@@ -1,0 +1,1 @@
+{"fixture200mbDirectPutMs":3509,"opsRoundTripsMs":8,"upload50mbMs":780,"get200mbHeadersMs":125,"get200mbFirstByteMs":126,"get200mbTotalMs":241,"directFirstByteMs":78,"apiRssBeforeMb":739,"apiRssPeakMb":744,"apiRssGrowthMb":5,"stalledClientRssGrowthMb":1,"sseFirstChunkMs":10,"ssePingsIn21s":4}

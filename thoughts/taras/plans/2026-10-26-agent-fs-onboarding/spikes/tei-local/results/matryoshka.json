@@ -1,0 +1,44 @@
+{
+ "v1_dims_768": {
+  "len": 768,
+  "norm": 1.0
+ },
+ "v1_dims_512": {
+  "len": 512,
+  "norm": 1.0
+ },
+ "v1_dims_256": {
+  "len": 256,
+  "norm": 1.0
+ },
+ "v1_nodims": {
+  "len": 768,
+  "norm": 1.0
+ },
+ "raw_embed_norm": 21.2111,
+ "tei512_equals_trunc_l2_of_768": 1e-08,
+ "embed_dimensions_param_len": 512,
+ "cos_tei512_vs_card512_20texts": {
+  "mean": 1.0,
+  "min": 1.0,
+  "max": 1.0
+ },
+ "cos_tei256_vs_card256": 1.0,
+ "retrieval": {
+  "queries": 10,
+  "docs": 50,
+  "relevant_per_query": 5,
+  "recall5_vs_topic_truth": {
+   "tei512_pref": 0.7,
+   "card512_pref": 0.7,
+   "tei768_pref": 0.74,
+   "tei768_nopref": 0.76,
+   "tei256_pref": 0.76,
+   "card256_pref": 0.76
+  },
+  "top5_overlap_tei512_vs_card512": 1.0,
+  "top5_overlap_pref768_vs_nopref768": 0.86,
+  "top5_overlap_tei256_vs_card256": 1.0,
+  "top5_overlap_tei512_vs_tei768": 0.92
+ }
+}

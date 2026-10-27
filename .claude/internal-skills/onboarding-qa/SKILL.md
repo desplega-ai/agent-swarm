@@ -118,6 +118,7 @@ export AGENT_BROWSER_SESSION=onboarding-qa-$RUN   # own browser; never the share
    - **agents**: are the defaults clear? Does the model dial explain cost?
    - **memory**: first try it as U1 with nothing (no embedding key). Record what happens. Then use `OPENROUTER_API_KEY` if the step offers it. Real users fail here with `endpoint`, `model`, `auth` errors.
    - **integrations**: U1 has none. Is skipping obvious?
+   - **files** (only while Comb is on, so `/setup` has 8 steps, else 7): it creates U1's agent-fs account with the step 1 email and connects with no click. Check that it shows done, that `/file` then opens with no connect card, and that a reload keeps the step done. Without a step 1 email it asks for one: record that as friction.
    - **first_task**: send the suggested task and wait for it to complete. Record the time and whether the result is visible. On 2026-10-21 the default `solo` preset had no lead, so this step waited for a lead forever. If it still does, wait two minutes as U1, then use "Ask the swarm" on home and check if that task completes the step.
    - After `/setup`: does the home page explain what to do next?
 5. **Collect evidence:** console errors (`agent-browser console`, if available in the loaded guide), failed requests, and the API log for the run (`ssh -F $D/ssh_config box 'cd ~/agent-swarm && docker compose logs --since 30m swarm-api' | tail -50`). Never paste lines that hold keys.

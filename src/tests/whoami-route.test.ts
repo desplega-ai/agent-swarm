@@ -17,6 +17,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { closeDb, createUser, initDb, updateUser } from "../be/db";
+import { ensureRbacSeedsSynced, setUserRoles } from "../be/rbac-roles";
 import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
@@ -30,6 +31,7 @@ const ACTOR: IdentityActor = { kind: "operator", id: "op:test" };
 interface WhoamiBody {
   kind: "operator" | "user";
   user: { id: string; name: string; status: string } | null;
+  grants?: { grantsAll: boolean; verbs: string[]; roles: string[] };
 }
 
 function createTestServer(): Server {
@@ -61,6 +63,7 @@ describe("GET /api/whoami", () => {
   beforeAll(async () => {
     cleanupDb();
     initDb(TEST_DB_PATH);
+    ensureRbacSeedsSynced({ quiet: true });
     server = createTestServer();
     port = await listenOnFreePort(server);
   });
@@ -82,6 +85,7 @@ describe("GET /api/whoami", () => {
     const body = (await res.json()) as WhoamiBody;
     expect(body.kind).toBe("operator");
     expect(body.user).toBeNull();
+    expect(body.grants?.grantsAll).toBe(true);
   });
 
   test("active user token resolves to its bound user", async () => {
@@ -94,6 +98,43 @@ describe("GET /api/whoami", () => {
     expect(body.kind).toBe("user");
     expect(body.user?.id).toBe(user.id);
     expect(body.user?.name).toBe("Whoami User");
+  });
+
+  test("requester token reports its role and verbs, without grantsAll", async () => {
+    const user = await createUser({ name: "Requester User", email: "req@example.com" });
+    await setUserRoles(user.id, ["requester"], null);
+    const { plaintext } = await mintToken(user.id, "rest", ACTOR);
+
+    const body = (await (await whoami(plaintext)).json()) as WhoamiBody;
+    expect(body.grants?.grantsAll).toBe(false);
+    expect(body.grants?.roles).toEqual(["requester"]);
+    expect(body.grants?.verbs).toContain("task.create.own");
+    expect(body.grants?.verbs).not.toContain("config.write.any");
+  });
+
+  test("a new user holds admin by default: grantsAll", async () => {
+    const user = await createUser({ name: "Default Admin" });
+    const { plaintext } = await mintToken(user.id, "rest", ACTOR);
+
+    const body = (await (await whoami(plaintext)).json()) as WhoamiBody;
+    expect(body.grants?.grantsAll).toBe(true);
+    expect(body.grants?.roles).toEqual(["admin"]);
+  });
+
+  test("RBAC_ENABLED=false reports grantsAll for a viewer", async () => {
+    const user = await createUser({ name: "Viewer User" });
+    await setUserRoles(user.id, ["viewer"], null);
+    const { plaintext } = await mintToken(user.id, "rest", ACTOR);
+    const previous = process.env.RBAC_ENABLED;
+    process.env.RBAC_ENABLED = "false";
+    try {
+      const body = (await (await whoami(plaintext)).json()) as WhoamiBody;
+      expect(body.grants?.grantsAll).toBe(true);
+      expect(body.grants?.roles).toEqual(["viewer"]);
+    } finally {
+      if (previous === undefined) delete process.env.RBAC_ENABLED;
+      else process.env.RBAC_ENABLED = previous;
+    }
   });
 
   test("revoked token is rejected at auth (401)", async () => {

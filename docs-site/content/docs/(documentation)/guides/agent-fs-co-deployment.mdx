@@ -61,6 +61,55 @@ EMBEDDING_PROVIDER=local
 
 Set `API_AGENT_FS_API_KEY` if you want to pre-provision a stable API-owned bootstrap key. Otherwise, the API seeder calls `/auth/register`, stores the generated key as an encrypted global swarm config secret, creates the shared org and drive, and persists `AGENT_FS_DEFAULT_ORG_ID` plus `AGENT_FS_DEFAULT_DRIVE_ID`. Workers do not receive this bootstrap key; the runner asks the API to create an agent-scoped `AGENT_FS_API_KEY` for each agent. If an agent's canonical registration already exists but its key was lost, provisioning registers a UUID-suffixed recovery identity, invites it to the shared organization as an editor, and stores the new agent-scoped key.
 
+## Bundled agent-fs behind the swarm API
+
+Set `AGENT_FS_PROXY=true` on the API to serve agent-fs through it. agent-fs then needs no public port and no second tunnel: the browser reaches it at `<public API URL>/agentfs`.
+
+| Path on the API | Goes to agent-fs | Auth |
+| --- | --- | --- |
+| `/agentfs/*` (GET, POST, PUT, PATCH, DELETE) | `/*` | agent-fs's own `af_` key |
+| `/share/*` (GET) | `/share/*` | none: public share links |
+| `/site/*` (GET) | `/site/*` | none: public site links |
+
+- Bodies stream both ways, including the events stream that Comb uses for live updates.
+- The API forwards only an `Authorization: Bearer af_...` header, never the swarm API key, an `aswt_` token, cookies or `X-Agent-ID`.
+- The swarm's CORS rules apply on `/agentfs/*`. On `/share/*` and `/site/*`, agent-fs's own CORS headers apply, because site pages run in a sandboxed, opaque origin.
+- Share tokens are redacted from the API access log.
+- [Comb](/docs/ui/comb) uses `<public API URL>/agentfs` (from `PUBLIC_MCP_BASE_URL`, else `MCP_BASE_URL`) when the swarm's `AGENT_FS_PUBLIC_URL` is blank. An explicit value still wins.
+
+agent-fs has its own `AGENT_FS_PUBLIC_URL`, with a different meaning: the base for the absolute share links that agent-fs builds. Set it to `<public API URL>/agentfs` on the agent-fs container, so share links point at the API. Share pages load their files from `/share/<token>/raw` and `/site/<token>/`, which the API serves too.
+
+```bash
+# swarm-api
+AGENT_FS_API_URL=http://agent-fs:7433
+AGENT_FS_PROXY=true
+COMB_ENABLED=true
+
+# agent-fs
+AGENT_FS_PUBLIC_URL=https://swarm.example.com/agentfs
+```
+
+<Callout type="warn">
+agent-fs `POST /auth/register` is public, and agent-fs does not check that the caller owns the email. The swarm invites its users' emails to the shared drive, so an account made first with a teammate's email would get that teammate's seat. The proxy therefore asks for a swarm credential on `POST /agentfs/auth/register`: the operator API key can register any email, and a user token (`aswt_`) can register only the user's own email or an alias. The API also limits that route to 5 requests per minute per client IP. An agent-fs that is reachable without the proxy keeps the public route, so keep it on a private network.
+</Callout>
+
+## New installs: onboard bundle
+
+`agent-swarm onboard --yes`, which the one-shot `install.sh` runs, writes a compose file with two more services. Pass `--no-agent-fs` to leave them out. The interactive wizard does not add them.
+
+| Service | What it runs | Host port |
+| --- | --- | --- |
+| `agent-fs` | agent-fs on local disk (`AGENT_FS_STORAGE_PROVIDER=local`, volume `agent_fs_data`), with its built-in `local` embeddings. No MinIO. | none: the browser goes through `/agentfs` on the API |
+| `tei` | [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) with `nomic-ai/nomic-embed-text-v1.5`, for swarm memory. `mem_limit: 2g`, `--max-batch-tokens 2048`, `--max-client-batch-size 256`. | none |
+
+The API gets `AGENT_FS_API_URL=http://agent-fs:7433`, `AGENT_FS_PROXY=true`, `COMB_ENABLED=true`, `AGENT_FS_LINK_TARGET=dashboard` and the `EMBEDDING_*` settings for TEI, including the nomic query and document prefixes. Each agent gets `AGENT_FS_API_URL`, `APP_URL` and `AGENT_FS_LINK_TARGET`. The API starts after agent-fs is healthy, so the boot seeder can provision it. It does not wait for TEI: the first boot downloads the model weights, and memory search uses keywords only until TEI is ready. TEI publishes one image tag per CPU architecture, so on an arm64 host `.env` sets `TEI_IMAGE` to the arm64 tag.
+
+The bundle adds about 1 GB of RAM at idle, 2.5 GB of images and 1.5 GB of volumes. The first boot downloads about 1.5 GB. Existing installs do not change: when `docker-compose.yml` exists, `install.sh` skips onboarding and only starts the stack. With `--tunnel`, the installer also recreates `agent-fs`, so its `AGENT_FS_PUBLIC_URL` uses the tunnel URL.
+
+<Callout type="info">
+Local storage cannot make public signed URLs. On a bundled install, `agent-fs signed-url` returns a link that needs a login: `kind: "app"`, `<AGENT_FS_APP_URL>/file/~/...`, which opens Comb. For a file URL that works with no login, agents use `agent-fs share-create`. The swarm API serves share links at `/share/*`. Comb is not affected: it loads files through the proxy with the person's own key.
+</Callout>
+
 ## Late Provisioning and Shared-Org Invitations
 
 If agent-fs is provisioned after the first filesystem request, provisioning now exports `AGENT_FS_API_URL` and clears the cached provider selection. `POST /api/config/reload` does the same after reloading global config. The next filesystem request can therefore switch from `local-fs` to `agent-fs` without restarting the API process.

@@ -7924,6 +7924,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description A non-admin user token named an email other than its own */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Provisioning or invite failed */
                 500: {
                     headers: {
@@ -8468,6 +8477,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description A non-admin user token wrote another user's state */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         trace?: never;
@@ -8539,6 +8557,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A non-admin user token wrote another user's state */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -12632,7 +12659,7 @@ export interface paths {
                                 /** Format: date-time */
                                 startedAt: string;
                                 /** @enum {string} */
-                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                                 /** Format: date-time */
                                 minimizedAt: string | null;
                                 /** Format: date-time */
@@ -12702,6 +12729,16 @@ export interface paths {
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
+                                    files: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "created" | "connected" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
                                     first_task: {
                                         /** @enum {string} */
                                         status: "todo" | "done" | "skipped" | "failed";
@@ -12728,6 +12765,13 @@ export interface paths {
                                 embeddings: {
                                     configured: boolean;
                                     dimensions: number;
+                                    model: string | null;
+                                    local: boolean;
+                                    /** @enum {string|null} */
+                                    provider: "local" | "openai" | "openrouter" | "vercel" | "azure" | "custom" | null;
+                                    localDefault: {
+                                        model: string;
+                                    } | null;
                                 };
                                 integrations: {
                                     slack: boolean;
@@ -12745,6 +12789,9 @@ export interface paths {
                                     id: string;
                                     status: string;
                                 } | null;
+                                files: {
+                                    enabled: boolean;
+                                };
                             };
                         };
                     };
@@ -12765,7 +12812,7 @@ export interface paths {
                         /** @enum {string} */
                         action: "view";
                         /** @enum {string} */
-                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                     } | {
                         /** @enum {string} */
                         action: "complete";
@@ -12803,14 +12850,21 @@ export interface paths {
                         method: "slack" | "github" | "gitlab" | "bitbucket" | "linear_oauth" | "jira_oauth";
                     } | {
                         /** @enum {string} */
+                        action: "complete";
+                        /** @enum {string} */
+                        step: "files";
+                        /** @enum {string} */
+                        method: "created" | "connected";
+                    } | {
+                        /** @enum {string} */
                         action: "skip";
                         /** @enum {string} */
-                        step: "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                        step: "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                     } | {
                         /** @enum {string} */
                         action: "fail";
                         /** @enum {string} */
-                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                         /** @enum {string} */
                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                     } | {
@@ -12845,7 +12899,7 @@ export interface paths {
                                 /** Format: date-time */
                                 startedAt: string;
                                 /** @enum {string} */
-                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "files" | "first_task";
                                 /** Format: date-time */
                                 minimizedAt: string | null;
                                 /** Format: date-time */
@@ -12915,6 +12969,16 @@ export interface paths {
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
+                                    files: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "created" | "connected" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
                                     first_task: {
                                         /** @enum {string} */
                                         status: "todo" | "done" | "skipped" | "failed";
@@ -12941,6 +13005,13 @@ export interface paths {
                                 embeddings: {
                                     configured: boolean;
                                     dimensions: number;
+                                    model: string | null;
+                                    local: boolean;
+                                    /** @enum {string|null} */
+                                    provider: "local" | "openai" | "openrouter" | "vercel" | "azure" | "custom" | null;
+                                    localDefault: {
+                                        model: string;
+                                    } | null;
                                 };
                                 integrations: {
                                     slack: boolean;
@@ -12958,6 +13029,9 @@ export interface paths {
                                     id: string;
                                     status: string;
                                 } | null;
+                                files: {
+                                    enabled: boolean;
+                                };
                             };
                         };
                     };
@@ -13017,6 +13091,7 @@ export interface paths {
                         apiKey?: string;
                         /** @enum {string} */
                         reuseKey?: "OPENAI_API_KEY" | "OPENROUTER_API_KEY";
+                        restoreDefault?: boolean;
                     };
                 };
             };
@@ -13212,6 +13287,441 @@ export interface paths {
                 };
             };
         };
+        trace?: never;
+    };
+    "/agentfs/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Upstream agent-fs response, streamed verbatim */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Too many registrations from this IP (POST /agentfs/auth/register) */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs is unreachable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        /** Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY) */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Upstream agent-fs response, streamed verbatim */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Too many registrations from this IP (POST /agentfs/auth/register) */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs is unreachable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        /** Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Upstream agent-fs response, streamed verbatim */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Too many registrations from this IP (POST /agentfs/auth/register) */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs is unreachable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        /** Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Upstream agent-fs response, streamed verbatim */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Too many registrations from this IP (POST /agentfs/auth/register) */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs is unreachable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Upstream agent-fs response, streamed verbatim */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register with a user token for an email that is not the user's */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description POST /agentfs/auth/register body over 16 KB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Too many registrations from this IP (POST /agentfs/auth/register) */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs is unreachable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/share/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public agent-fs share page, served through the API (enabled by AGENT_FS_PROXY) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description agent-fs /share response, streamed verbatim */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unknown or expired link (from agent-fs), or the proxy is off */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs is unreachable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/site/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public agent-fs site page, served through the API (enabled by AGENT_FS_PROXY) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description agent-fs /site response, streamed verbatim */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unknown or expired link (from agent-fs), or the proxy is off */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs is unreachable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/tasks": {
@@ -23667,6 +24177,11 @@ export interface paths {
                             /** @enum {string} */
                             kind: "operator" | "user";
                             user: components["schemas"]["User"] | null;
+                            grants?: {
+                                grantsAll: boolean;
+                                verbs: string[];
+                                roles: string[];
+                            };
                         };
                     };
                 };
@@ -24494,6 +25009,238 @@ export interface paths {
                     };
                 };
                 /** @description Code unknown, malformed, expired or already used */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Request body too large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite a teammate with a one-time API link
+         * @description Creates an invited user with the given role (requester by default) and returns a 7-day single-use API link. The API redirects to the current APP_URL dashboard with the code in the URL fragment. The browser exchanges the code at POST /api/invites/exchange for a personal MCP token. Re-inviting an invited user replaces the role and link. Active or suspended users return 409 user_exists. No email is sent.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** Format: email */
+                        email: string;
+                        name?: string;
+                        /**
+                         * @default requester
+                         * @enum {string}
+                         */
+                        role?: "requester" | "viewer" | "admin";
+                    };
+                };
+            };
+            responses: {
+                /** @description The invited user, API link, dashboard URL, expiry and API reachability */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            user: (components["schemas"]["User"] & {
+                                identities: {
+                                    kind: string;
+                                    externalId: string;
+                                }[];
+                                tokens: {
+                                    id: string;
+                                    userId: string;
+                                    label: string | null;
+                                    tokenPreview: string;
+                                    createdAt: string;
+                                    lastUsedAt: string | null;
+                                    revokedAt: string | null;
+                                }[];
+                                recentEvents: {
+                                    id: string;
+                                    userId: string;
+                                    eventType: string;
+                                    actor: string;
+                                    before?: unknown;
+                                    after?: unknown;
+                                    createdAt: string;
+                                }[];
+                            }) | null;
+                            inviteUrl: string;
+                            appUrl: string;
+                            expiresAt: string;
+                            /** @enum {string} */
+                            apiReachable: "public" | "local";
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not allowed to manage roles */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The email belongs to an active or suspended user */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invite/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open an invite in the configured dashboard
+         * @description Redirects to the current APP_URL dashboard with the code in the URL fragment. Does not validate or consume the invite.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Redirect to the dashboard */
+                302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Malformed code (code_invalid) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/invites/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange an invite code for the invited user's MCP token
+         * @description Unauthenticated: the single-use invite code is the credential. Rate limited per IP. Activates the invited user. Unknown, expired, used and connector codes, and codes for users who are no longer invited, all return 404 code_invalid.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        code: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Minted MCP token for the invited user */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            token: string;
+                            userId: string;
+                        };
+                    };
+                };
+                /** @description Code unknown, malformed, expired, already used or not an invite */
                 404: {
                     headers: {
                         [name: string]: unknown;

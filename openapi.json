@@ -22527,6 +22527,16 @@
               }
             }
           },
+          "403": {
+            "description": "A non-admin user token named an email other than its own",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Provisioning or invite failed",
             "content": {
@@ -23259,6 +23269,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "A non-admin user token wrote another user's state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -23381,6 +23401,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A non-admin user token wrote another user's state",
             "content": {
               "application/json": {
                 "schema": {
@@ -31132,6 +31162,7 @@
                             "agents",
                             "memory",
                             "integrations",
+                            "files",
                             "first_task"
                           ]
                         },
@@ -31519,6 +31550,62 @@
                                 "errorClass"
                               ]
                             },
+                            "files": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "created",
+                                    "connected",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "endpoint",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
                             "first_task": {
                               "type": "object",
                               "properties": {
@@ -31583,6 +31670,7 @@
                             "agents",
                             "memory",
                             "integrations",
+                            "files",
                             "first_task"
                           ]
                         }
@@ -31671,11 +31759,53 @@
                             "dimensions": {
                               "type": "integer",
                               "exclusiveMinimum": 0
+                            },
+                            "model": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "local": {
+                              "type": "boolean"
+                            },
+                            "provider": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "enum": [
+                                "local",
+                                "openai",
+                                "openrouter",
+                                "vercel",
+                                "azure",
+                                "custom",
+                                null
+                              ]
+                            },
+                            "localDefault": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "model": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "model"
+                              ]
                             }
                           },
                           "required": [
                             "configured",
-                            "dimensions"
+                            "dimensions",
+                            "model",
+                            "local",
+                            "provider",
+                            "localDefault"
                           ]
                         },
                         "integrations": {
@@ -31743,6 +31873,17 @@
                             "id",
                             "status"
                           ]
+                        },
+                        "files": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled"
+                          ]
                         }
                       },
                       "required": [
@@ -31750,7 +31891,8 @@
                         "embeddings",
                         "integrations",
                         "agents",
-                        "firstTask"
+                        "firstTask",
+                        "files"
                       ]
                     }
                   },
@@ -31797,6 +31939,7 @@
                           "agents",
                           "memory",
                           "integrations",
+                          "files",
                           "first_task"
                         ]
                       }
@@ -31974,6 +32117,36 @@
                       "action": {
                         "type": "string",
                         "enum": [
+                          "complete"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "files"
+                        ]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "created",
+                          "connected"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
                           "skip"
                         ]
                       },
@@ -31985,6 +32158,7 @@
                           "agents",
                           "memory",
                           "integrations",
+                          "files",
                           "first_task"
                         ]
                       }
@@ -32013,6 +32187,7 @@
                           "agents",
                           "memory",
                           "integrations",
+                          "files",
                           "first_task"
                         ]
                       },
@@ -32146,6 +32321,7 @@
                             "agents",
                             "memory",
                             "integrations",
+                            "files",
                             "first_task"
                           ]
                         },
@@ -32533,6 +32709,62 @@
                                 "errorClass"
                               ]
                             },
+                            "files": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "created",
+                                    "connected",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "endpoint",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
                             "first_task": {
                               "type": "object",
                               "properties": {
@@ -32597,6 +32829,7 @@
                             "agents",
                             "memory",
                             "integrations",
+                            "files",
                             "first_task"
                           ]
                         }
@@ -32685,11 +32918,53 @@
                             "dimensions": {
                               "type": "integer",
                               "exclusiveMinimum": 0
+                            },
+                            "model": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "local": {
+                              "type": "boolean"
+                            },
+                            "provider": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "enum": [
+                                "local",
+                                "openai",
+                                "openrouter",
+                                "vercel",
+                                "azure",
+                                "custom",
+                                null
+                              ]
+                            },
+                            "localDefault": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "model": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "model"
+                              ]
                             }
                           },
                           "required": [
                             "configured",
-                            "dimensions"
+                            "dimensions",
+                            "model",
+                            "local",
+                            "provider",
+                            "localDefault"
                           ]
                         },
                         "integrations": {
@@ -32757,6 +33032,17 @@
                             "id",
                             "status"
                           ]
+                        },
+                        "files": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled"
+                          ]
                         }
                       },
                       "required": [
@@ -32764,7 +33050,8 @@
                         "embeddings",
                         "integrations",
                         "agents",
-                        "firstTask"
+                        "firstTask",
+                        "files"
                       ]
                     }
                   },
@@ -32845,6 +33132,9 @@
                       "OPENAI_API_KEY",
                       "OPENROUTER_API_KEY"
                     ]
+                  },
+                  "restoreDefault": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -33019,6 +33309,379 @@
           },
           "401": {
             "description": "No or invalid page-session cookie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agentfs/{path}": {
+      "get": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Streaming pass-through proxy to agent-fs (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "Upstream agent-fs response, streamed verbatim"
+          },
+          "401": {
+            "description": "Returned by agent-fs when credentials are missing or invalid, or by the swarm when POST /agentfs/auth/register has no swarm credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "POST /agentfs/auth/register with a user token for an email that is not the user's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "POST /agentfs/auth/register body over 16 KB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many registrations from this IP (POST /agentfs/auth/register)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/share/{path}": {
+      "get": {
+        "summary": "Public agent-fs share page, served through the API (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "agent-fs /share response, streamed verbatim"
+          },
+          "404": {
+            "description": "Unknown or expired link (from agent-fs), or the proxy is off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/site/{path}": {
+      "get": {
+        "summary": "Public agent-fs site page, served through the API (enabled by AGENT_FS_PROXY)",
+        "tags": [
+          "Comb"
+        ],
+        "responses": {
+          "200": {
+            "description": "agent-fs /site response, streamed verbatim"
+          },
+          "404": {
+            "description": "Unknown or expired link (from agent-fs), or the proxy is off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -59189,6 +59852,31 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "grants": {
+                      "type": "object",
+                      "properties": {
+                        "grantsAll": {
+                          "type": "boolean"
+                        },
+                        "verbs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "roles": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "grantsAll",
+                        "verbs",
+                        "roles"
+                      ]
                     }
                   },
                   "required": [
@@ -61038,6 +61726,356 @@
           },
           "404": {
             "description": "Code unknown, malformed, expired or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/invites": {
+      "post": {
+        "summary": "Invite a teammate with a one-time API link",
+        "description": "Creates an invited user with the given role (requester by default) and returns a 7-day single-use API link. The API redirects to the current APP_URL dashboard with the code in the URL fragment. The browser exchanges the code at POST /api/invites/exchange for a personal MCP token. Re-inviting an invited user replaces the role and link. Active or suspended users return 409 user_exists. No email is sent.",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "requester",
+                      "viewer",
+                      "admin"
+                    ],
+                    "default": "requester"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The invited user, API link, dashboard URL, expiry and API reachability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "anyOf": [
+                        {
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/User"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "identities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "externalId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "externalId"
+                                    ]
+                                  }
+                                },
+                                "tokens": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tokenPreview": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "revokedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "label",
+                                      "tokenPreview",
+                                      "createdAt",
+                                      "lastUsedAt",
+                                      "revokedAt"
+                                    ]
+                                  }
+                                },
+                                "recentEvents": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "eventType": {
+                                        "type": "string"
+                                      },
+                                      "actor": {
+                                        "type": "string"
+                                      },
+                                      "before": {},
+                                      "after": {},
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "eventType",
+                                      "actor",
+                                      "createdAt"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "identities",
+                                "tokens",
+                                "recentEvents"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "inviteUrl": {
+                      "type": "string"
+                    },
+                    "appUrl": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "apiReachable": {
+                      "type": "string",
+                      "enum": [
+                        "public",
+                        "local"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "user",
+                    "inviteUrl",
+                    "appUrl",
+                    "expiresAt",
+                    "apiReachable"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to manage roles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The email belongs to an active or suspended user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/invite/{code}": {
+      "get": {
+        "summary": "Open an invite in the configured dashboard",
+        "description": "Redirects to the current APP_URL dashboard with the code in the URL fragment. Does not validate or consume the invite.",
+        "tags": [
+          "Users"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "code",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the dashboard"
+          },
+          "404": {
+            "description": "Malformed code (code_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/invites/exchange": {
+      "post": {
+        "summary": "Exchange an invite code for the invited user's MCP token",
+        "description": "Unauthenticated: the single-use invite code is the credential. Rate limited per IP. Activates the invited user. Unknown, expired, used and connector codes, and codes for users who are no longer invited, all return 404 code_invalid.",
+        "tags": [
+          "Users"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Minted MCP token for the invited user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "userId"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Code unknown, malformed, expired, already used or not an invite",
             "content": {
               "application/json": {
                 "schema": {

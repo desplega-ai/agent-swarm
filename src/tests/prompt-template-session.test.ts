@@ -248,6 +248,20 @@ describe("Session templates: MUST pointers", () => {
     expect(result.text).toContain("`implementing` skill");
     expect(result.text).not.toContain("/researching");
   });
+
+  test("the outputs block takes its file-link base from fileLinkBase", () => {
+    const definition = getAllTemplateDefinitions().find(
+      (d) => d.eventType === "system.agent.outputs",
+    );
+    expect(definition?.variables.map((v) => v.name)).toEqual(["fileLinkBase"]);
+    const result = resolveTemplate("system.agent.outputs", {
+      fileLinkBase: "http://localhost:5274",
+    });
+    expect(result.text).toContain(
+      "Give people the live app link `http://localhost:5274/file/~/<org>/<drive>/<path>`.",
+    );
+    expect(result.unresolved).toEqual([]);
+  });
 });
 
 // ============================================================================

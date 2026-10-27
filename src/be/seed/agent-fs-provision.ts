@@ -8,6 +8,7 @@ import {
   getSwarmConfigs,
   upsertSwarmConfig,
 } from "../db";
+import { getUserGrant } from "../rbac-roles";
 import type { Seeder, SeedItem } from "./types";
 
 const KIND = "agent-fs-provision";
@@ -16,6 +17,10 @@ const PROVISION_VERSION = 1;
 const ORG_NAME = "swarm";
 const DRIVE_NAME = "shared";
 const PROVISION_HASH_KEY = "AGENT_FS_PROVISION_HASH";
+// Stored in place of the hash when invites failed transiently. upstreamHash() maps it to
+// null, so the next boot re-applies even when the org, drive and key rows already exist
+// (otherwise the adopt-current-state fallback below would mark the failed run as in sync).
+const PROVISION_RETRY_MARKER = "retry-pending";
 const API_KEY_CONFIG = "API_AGENT_FS_API_KEY";
 const LEGACY_SHARED_KEY_CONFIG = "AGENT_FS_API_KEY";
 
@@ -80,6 +85,7 @@ export const agentFsProvisionSeeder: Seeder<AgentFsSeedItem> = {
 
   async upstreamHash(): Promise<string | null> {
     const existingHash = await getConfigValue(PROVISION_HASH_KEY);
+    if (existingHash === PROVISION_RETRY_MARKER) return null;
     if (existingHash) return existingHash;
 
     const hasOrg = !!(await getConfigValue("AGENT_FS_DEFAULT_ORG_ID"));
@@ -113,16 +119,33 @@ async function provisionAgentFs(item: AgentFsSeedItem): Promise<void> {
     shared.orgId,
   );
 
+  let transientFailures = 0;
   for (const invite of item.invites) {
     const currentRole = currentRoles.get(invite.email.toLowerCase());
     if (currentRole && roleRank(currentRole) >= roleRank(invite.role)) continue;
-    await inviteToSharedOrg(item.apiUrl, shared.authHeaders, shared.orgId, invite);
+    const outcome = await inviteToSharedOrg(item.apiUrl, shared.authHeaders, shared.orgId, invite);
+    if (outcome === "transient-failure") transientFailures++;
+  }
+  // "no-account" is not a failure to retry: agent-fs has no pending invites. The person's
+  // account is created later in the browser, by the /setup Files step or Comb's connect card,
+  // and both invite in the same flow. A transient failure (network, 5xx other than not-found,
+  // 401/403) must not store the hash, so the next boot re-runs the invites. The org and drive
+  // config rows were already written by ensureAgentFsSharedProvisioning above.
+  if (transientFailures > 0) {
+    await storeProvisionHash(PROVISION_RETRY_MARKER);
+    throw new Error(
+      `agent-fs invites failed for ${transientFailures} member(s); will retry on next boot`,
+    );
   }
 
+  await storeProvisionHash(item.contentHash);
+}
+
+async function storeProvisionHash(value: string): Promise<void> {
   await upsertSwarmConfig({
     scope: "global",
     key: PROVISION_HASH_KEY,
-    value: item.contentHash,
+    value,
     isSecret: false,
     description: "Internal hash for agent-fs provisioning reconciliation",
   });
@@ -426,7 +449,7 @@ async function inviteToSharedOrg(
   headers: Record<string, string>,
   orgId: string,
   invite: InviteTarget,
-): Promise<void> {
+): Promise<"invited" | "no-account" | "transient-failure"> {
   try {
     await agentFsRequest(apiUrl, `/orgs/${encodeURIComponent(orgId)}/members/invite`, {
       method: "POST",
@@ -434,6 +457,7 @@ async function inviteToSharedOrg(
       body: invite,
       allowConflict: true,
     });
+    return "invited";
   } catch (error) {
     console.warn(
       scrubSecrets(
@@ -442,6 +466,12 @@ async function inviteToSharedOrg(
         }`,
       ),
     );
+    // agent-fs answers an unregistered invitee with HTTP 500 "User with email ... not found".
+    const noAccount =
+      error instanceof AgentFsRequestError &&
+      error.status === 500 &&
+      /not found/i.test(error.message);
+    return noAccount ? "no-account" : "transient-failure";
   }
 }
 
@@ -529,16 +559,17 @@ async function resolveInviteTargets(): Promise<InviteTarget[]> {
   const targets = new Map<string, InviteTarget>();
 
   for (const user of await getAllUsers()) {
-    if (!user.email) continue;
-    const role = isExplicitViewerRole(user.role) ? "viewer" : "editor";
-    targets.set(user.email.toLowerCase(), { email: user.email, role });
+    const email = user.email?.trim();
+    if (!email) continue;
+    // Only active users get a seat: invited and suspended users cannot sign in yet.
+    if ((user.status ?? "active") !== "active") continue;
+    // Follow the RBAC grant, not the free-text profile role, so an RBAC Viewer stays a viewer.
+    const grant = await getUserGrant(user.id);
+    const role: Role = grant.grantsAll || grant.verbs.has("task.fs.mutate") ? "editor" : "viewer";
+    targets.set(email.toLowerCase(), { email, role });
   }
 
   return [...targets.values()].sort((a, b) => a.email.localeCompare(b.email));
-}
-
-function isExplicitViewerRole(role: string | undefined): boolean {
-  return /\b(viewer|read[-\s]?only|guest)\b/i.test(role ?? "");
 }
 
 async function provisionHashFromCurrentState(): Promise<string> {
