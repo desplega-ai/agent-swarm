@@ -165,6 +165,9 @@ if (process.env.NATIVE_BREAKDOWN === "1") {
     return { p50: percentile(samples, 0.5), p95: percentile(samples, 0.95) };
   }
 
+  const trivial = SCRIPTS.trivial;
+  if (!trivial) throw new Error("missing trivial script");
+
   const legacySetupTeardown = await sampleMs(async () => {
     const dir = `${baseTmp}/bench-legacy-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${dir}`;
@@ -179,7 +182,7 @@ if (process.env.NATIVE_BREAKDOWN === "1") {
       await Bun.write(`${mdir}/index.ts`, `export * from ${JSON.stringify(url.href)};\n`);
     }
     await Bun.write(`${dir}/args.json`, '{"a":1,"b":2}');
-    await Bun.write(`${dir}/source.ts`, SCRIPTS.trivial.source);
+    await Bun.write(`${dir}/source.ts`, trivial.source);
     const copied = await Bun.file(`${dir}/source.ts`).text();
     await Bun.write(`${dir}/user-module/user-script.ts`, copied);
     await Bun.$`rm -rf ${dir}`;
@@ -190,7 +193,7 @@ if (process.env.NATIVE_BREAKDOWN === "1") {
     await mkdir(`${dir}/user-module`, { recursive: true });
     await Promise.all([
       Bun.write(`${dir}/args.json`, '{"a":1,"b":2}'),
-      Bun.write(`${dir}/user-module/user-script.ts`, SCRIPTS.trivial.source),
+      Bun.write(`${dir}/user-module/user-script.ts`, trivial.source),
       symlink(`${sharedRoot}/node_modules`, `${dir}/node_modules`, "junction"),
     ]);
     await rm(dir, { recursive: true, force: true });
