@@ -112,6 +112,17 @@ Authorization stays at these entrypoints. Internal `indexMemoryContent()`
 re-indexing, boot and HTTP re-embedding, and link refresh retain their cross-agent
 store access.
 
+## Embedding space changes
+
+`src/be/memory/embedding-space.ts` stores a fingerprint of the embedding space
+(base URL, model, dimensions, document prefix; never the key or the query
+prefix) in `seed_state` (kind `maintenance`, key `embedding-space`). Boot, each
+config reload and a recovered embedding call run `runEmbeddingMaintenance`, one
+run at a time. When the fingerprint differs, it re-embeds every memory and
+non-scratch script in id order, saves an id cursor per batch, and records the new
+fingerprint only after both tables finish. No stored fingerprint means adopt and
+re-embed nothing. Then the NULL / wrong-length backfills run as before.
+
 ## Memory raters (v1.5)
 
 The v1.5 wedge adds a small framework that lets the swarm learn which memories
@@ -232,6 +243,7 @@ bun run test:root -- src/tests/memory-store.test.ts
 bun run test:root -- src/tests/memory.test.ts
 bun run test:root -- src/tests/memory-e2e.test.ts
 bun run test:root -- src/tests/memory-key-paths.test.ts   # key / newKey / keyPrefix / lead-only guard (MCP and POST /api/memory/index) / root allowlist / /longterm tier
+bun run test:root -- src/tests/memory-embedding-space.test.ts   # re-embed on an embedding space change: adopt, key rotation, resume, outage
 ```
 
 Plus the v1.5 rater suites:

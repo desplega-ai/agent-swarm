@@ -52,14 +52,14 @@ EMBEDDING_DOCUMENT_PREFIX="search_document: "
 ```
 
 - `EMBEDDING_API_KEY` must be non-empty. TEI ignores it, but the swarm turns memory embeddings off without a key.
-- nomic-embed models need a task prefix on every input. The two prefix variables are used verbatim, so keep the trailing space. Unset means no prefix. Changing a prefix on an install with stored memories needs a re-embed.
+- nomic-embed models need a task prefix on every input. The two prefix variables are used verbatim, so keep the trailing space. Unset means no prefix. A new query prefix applies from the next search. A new document prefix re-embeds stored vectors (see the last item).
 - TEI's default `--max-client-batch-size` is 32. The swarm falls back to one request per input when a server rejects a request for its batch size (HTTP 413, or 422 with "batch size" in the message), but `256` avoids the extra requests.
 - With default flags TEI can use enough memory to be killed on an 8 GB box. `--max-batch-tokens 2048` keeps its peak near 1 GiB.
 - The API does not wait for TEI. While TEI is down (first boot, a restart), new memories are saved with no vector and search finds them by keyword. When an embedding call works again after a failed one, the API embeds those memories in the background.
 - Keep the default 512 dimensions. TEI truncates nomic's Matryoshka output to 512 correctly. The `memory_vec` table keeps the size it had at first boot, so do not change `EMBEDDING_DIMENSIONS` on an existing install.
 - The `/setup` memory probe accepts a private URL (such as `http://tei:80/v1`) only for the **existing** preset, which tests the server's own `EMBEDDING_API_BASE_URL`. A URL typed into the custom preset must still be public.
 - When the deployment environment sets a local endpoint, `/setup` and Settings, Integrations, Memory show a **Local** provider beside the hosted presets. A hosted preset that passes its test stores its URL, model and key. When its model is not the deployment's model, it also stores empty prefixes, because the nomic prefixes apply to nomic only. A pick of Local tests the deployment's own setup, then deletes the stored embeddings rows (`POST /api/onboarding/memory` with `{"preset":"existing","restoreDefault":true}`). A failed test changes no config.
-- A switch of model does not embed stored memories again. Their vectors stay from the old model, so search by meaning matches them poorly after the switch.
+- A switch of endpoint, model, dimensions or document prefix re-embeds every stored memory and script in the background, in batches. Each row keeps its old vector until its new one lands, so search keeps working, with mixed ranking until the run ends. A restart or an outage pauses the run, and it resumes where it stopped. A new API key re-embeds nothing. The first boot of a version with this check records the current setup and re-embeds nothing.
 
 ### Memory Sources
 

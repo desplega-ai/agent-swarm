@@ -78,17 +78,18 @@ function rowToScript(row: ScriptEmbeddingCandidateRow): ScriptRecord {
   };
 }
 
-export async function embedScript(script: ScriptRecord): Promise<void> {
+/** Returns whether a vector was stored. */
+export async function embedScript(script: ScriptRecord): Promise<boolean> {
   const text = scriptEmbeddingText(script);
   const provider = embeddingProvider();
   const embedding = await provider.embed(text, { kind: "document" });
-  if (!embedding) return;
+  if (!embedding) return false;
 
   if (embedding.length !== provider.dimensions) {
     console.error(
       `[script-embed] dimension mismatch for "${script.name}": expected=${provider.dimensions} got=${embedding.length}, skipping`,
     );
-    return;
+    return false;
   }
 
   await getDbClient().run(
@@ -103,6 +104,7 @@ export async function embedScript(script: ScriptRecord): Promise<void> {
       embeddedAt = excluded.embeddedAt`,
     [script.id, serializeEmbedding(embedding), provider.name, text, new Date().toISOString()],
   );
+  return true;
 }
 
 async function candidateRows(
