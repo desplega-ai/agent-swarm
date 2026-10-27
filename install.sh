@@ -62,6 +62,8 @@ Environment:
   AGENT_SWARM_CLI_PACKAGE  Full package spec for the CLI instead of the npm release:
                            a tarball path or URL from \`bun pm pack\` (testing unreleased builds)
   AGENT_SWARM_LT_VERSION   @desplega.ai/localtunnel version for --tunnel (default: ${DEFAULT_LT_VERSION})
+  ANONYMIZED_TELEMETRY, DESPLEGA_TELEMETRY_ENV
+                           Written to .env: turn telemetry off, or set the cohort tag
   CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
   HARNESS_PROVIDER, GITHUB_TOKEN, SLACK_BOT_TOKEN, ...
                            Passed through to \`agent-swarm onboard --yes\`. All optional:

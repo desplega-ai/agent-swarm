@@ -256,3 +256,22 @@ describe("generateEnv with the agent-fs bundle flag", () => {
     }
   });
 });
+
+describe("generateEnv telemetry forwarding", () => {
+  test("writes ANONYMIZED_TELEMETRY and DESPLEGA_TELEMETRY_ENV when set", () => {
+    const env = generateEnv(makeState({}), {
+      ANONYMIZED_TELEMETRY: "false",
+      DESPLEGA_TELEMETRY_ENV: "onboarding-qa",
+    });
+    expect(env).toContain("\nANONYMIZED_TELEMETRY=false\n");
+    expect(env).toContain("\nDESPLEGA_TELEMETRY_ENV=onboarding-qa\n");
+  });
+
+  test("omits both when unset or blank", () => {
+    for (const source of [{}, { ANONYMIZED_TELEMETRY: " ", DESPLEGA_TELEMETRY_ENV: "" }]) {
+      const env = generateEnv(makeState({}), source);
+      expect(env).not.toContain("ANONYMIZED_TELEMETRY");
+      expect(env).not.toContain("DESPLEGA_TELEMETRY_ENV");
+    }
+  });
+});
